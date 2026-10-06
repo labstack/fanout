@@ -5,7 +5,7 @@ vi.mock("../auth", () => ({ authorizedFetch: fetchMock }));
 
 import type { DrillTarget } from "./drill-state";
 import type { DashboardSpec } from "../../../panels/types";
-import { ApiError, getTrace, queryExemplars, deleteDashboard, patchDashboard, replaceDashboard, restoreVersion } from "./api";
+import { ApiError, getTrace, queryExemplars, queryAnnotations, deleteDashboard, patchDashboard, replaceDashboard, restoreVersion } from "./api";
 
 const spec = { version: 1, name: "n", time: {}, panels: [] } as DashboardSpec;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -50,6 +50,17 @@ describe("dashboard api", () => {
     await restoreVersion("d1", 3);
     expect(lastCall()[0]).toBe("/api/dashboards/d1/versions/3/restore");
     expect(lastCall()[1].method).toBe("POST");
+  });
+  it("posts annotation windows as JSON and forwards the abort signal", async () => {
+    const annotations = { deploys: [], anomalies: [], truncated: true };
+    fetchMock.mockResolvedValue(json(200, annotations));
+    const body = { from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z" };
+    const signal = new AbortController().signal;
+    await expect(queryAnnotations(body, signal)).resolves.toEqual(annotations);
+    const [url, init] = lastCall();
+    expect(url).toBe("/api/annotations"); expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual(body); expect(init.signal).toBe(signal);
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
   });
 });
 

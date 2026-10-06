@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
-var ErrRequest = errors.New("annotations need a positive range of at most 30 days and at most 100 services")
+var ErrRequest = errors.New("annotations need a positive range of at most 430 days and at most 100 services")
 
 type Request struct {
 	From     time.Time `json:"from"`
@@ -43,7 +43,7 @@ type Service struct{ db queryrows.Queryer }
 func New(db queryrows.Queryer) *Service { return &Service{db: db} }
 func (s *Service) Read(ctx context.Context, req Request) (Response, error) {
 	out := Response{Deploys: []Deploy{}, Anomalies: []Anomaly{}}
-	if req.From.IsZero() || req.To.IsZero() || !req.From.Before(req.To) || req.To.Sub(req.From) > 30*24*time.Hour || len(req.Services) > 100 || len(req.Namespace) > 200 {
+	if req.From.IsZero() || req.To.IsZero() || !req.From.Before(req.To) || req.To.Sub(req.From) > 430*24*time.Hour || len(req.Services) > 100 || len(req.Namespace) > 200 {
 		return out, ErrRequest
 	}
 	if req.Namespace == "" {

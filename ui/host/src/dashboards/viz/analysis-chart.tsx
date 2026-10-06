@@ -1,16 +1,22 @@
 import { useMemo } from "react";
 import { analysisOption, analysisSummary } from "../../../../panels/analysis";
 import { chartThemeFor } from "../../../../panels/compile";
-import type { Panel, PanelResult, Selection } from "../../../../panels/types";
+import type { Panel, PanelResult, Selection, VarValue } from "../../../../panels/types";
+import { withAnnotations, type AnnotationsResponse } from "../../../../panels/annotations";
 import { EChartCanvas } from "../echart-canvas";
 
 export type AnalysisProps = {
   panel: Panel; title?: string; result: PanelResult; dark: boolean; height: number; group?: string;
+  annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
   onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
 };
 
-export function AnalysisChart({ panel, title, result, dark, height, group, onSelect, onPoint, onZoom }: AnalysisProps) {
-  const option = useMemo(() => analysisOption(panel, result, chartThemeFor(dark)), [panel, result.frame, result.interval, result.better, dark]);
+export function AnalysisChart({ panel, title, result, dark, height, group, annotations, vars, onSelect, onPoint, onZoom }: AnalysisProps) {
+  const option = useMemo(() => {
+    const theme = chartThemeFor(dark);
+    const compiled = analysisOption(panel, result, theme);
+    return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme) : compiled;
+  }, [panel, result.frame, result.interval, result.better, result.from_ms, result.to_ms, result.annotation_scope, result.annotation_error, dark, annotations]);
   const label = analysisSummary(title ? { ...panel, title } : panel, result);
   const time = panel.viz === "heatmap" || panel.viz === "state_timeline";
   return <EChartCanvas option={option} height={height} label={label} group={time ? group : undefined} onZoom={time ? onZoom : undefined} onClick={onPoint || onSelect ? event => {

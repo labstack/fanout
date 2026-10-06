@@ -1,12 +1,14 @@
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, MagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
-import type { Panel, PanelResult, Selection } from "../../../panels/types";
+import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
+import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { useEffect, useState } from "react";
 import { Viz } from "./viz";
 
-export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, onSelect, onPoint, onZoom, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
+export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onZoom, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
   panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
+  annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
   onSelect?: (value: string) => void; onView(): void; onInspect(): void; onCopyLink(): void; onExplain(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
 }) {
@@ -50,12 +52,15 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
-        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} onSelect={onSelect} onPoint={onPoint} onZoom={onZoom} />}
+        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onZoom={onZoom} />}
     </Box>
     {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status">
       {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}
       {(result?.frame?.truncated || result?.previous?.truncated) ? `${staleAt ? " · " : ""}Truncated: showing limited data` : ""}
     </Text>}
+    {result?.frame?.note && <Text size="xs" c="dimmed" role="status">{result.frame.note}</Text>}
+    {result?.annotation_error && <Text size="xs" c="warn" role="status">{result.annotation_error}</Text>}
+    {result?.annotation_scope?.limited && <Text size="xs" c="warn" role="status">Annotation service scope is limited.</Text>}
   </Paper>;
 }
 

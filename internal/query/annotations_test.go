@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -13,6 +14,27 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func TestM2AnnotationWidenedRangeAccepted(t *testing.T) {
+	d, _ := versionEngine(t)
+	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, days := range []int{31, 430} {
+		got, err := annotations.New(d).Read(t.Context(), annotations.Request{From: from, To: from.Add(time.Duration(days) * 24 * time.Hour)})
+		if err != nil || len(got.Deploys) != 0 || len(got.Anomalies) != 0 {
+			t.Fatalf("%d-day range: %+v %v", days, got, err)
+		}
+	}
+}
+
+func TestM2AnnotationWidenedRangeRejected(t *testing.T) {
+	d, _ := versionEngine(t)
+	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	_, err := annotations.New(d).Read(t.Context(), annotations.Request{From: from, To: from.Add(430*24*time.Hour + time.Nanosecond)})
+	const want = "annotations need a positive range of at most 430 days and at most 100 services"
+	if !errors.Is(err, annotations.ErrRequest) || err.Error() != want {
+		t.Fatalf("range just over 430 days: want ErrRequest %q, got %v", want, err)
+	}
+}
 
 func versionEngine(t *testing.T) (*Duck, *telemetrystore.Repository) {
 	t.Helper()

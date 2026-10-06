@@ -1,4 +1,5 @@
-import type { Panel, PanelResult, Selection } from "../../../../panels/types";
+import type { Panel, PanelResult, Selection, VarValue } from "../../../../panels/types";
+import type { AnnotationsResponse } from "../../../../panels/annotations";
 import { BarViz } from "./bar";
 import { GaugeViz } from "./gauge";
 import { StatViz } from "./stat";
@@ -15,7 +16,7 @@ import { LogsViz } from "./logs";
 import { LogPatternsViz } from "./log-patterns";
 import { TracesViz } from "./traces";
 
-export function Viz(props: { panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void }) {
+export function Viz(props: { panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void }) {
   const { panel, title, result, dark, height, group, onSelect, onPoint, onZoom } = props;
   if (panel.viz === "text") return <TextViz panel={panel} />;
   if (!result?.frame) return null;
@@ -23,7 +24,7 @@ export function Viz(props: { panel: Panel; title?: string; result?: PanelResult;
   switch (panel.viz) {
     case "stat": return <StatViz panel={panel} result={result} />;
     case "gauge": return <GaugeViz panel={panel} title={title} result={result} dark={dark} height={height} />;
-    case "timeseries": return <TimeseriesViz panel={panel} title={title} result={result} dark={dark} height={height} group={group} onSelect={onSelect} onPoint={onPoint} onZoom={onZoom} />;
+    case "timeseries": return <TimeseriesViz {...next} />;
     case "bar": return <BarViz panel={panel} title={title} result={result} dark={dark} height={height} onSelect={onSelect} onPoint={onPoint} />;
     case "table": return <TableViz panel={panel} result={result} height={height} onSelect={onSelect} onPoint={onPoint} />;
     case "heatmap": return <HeatmapViz {...next} />;

@@ -77,11 +77,15 @@ export function DrillDrawer({
       position="right"
       size="xl"
     >
+      {target?.trace_id && <Button variant="subtle" mb="sm" onClick={() => {
+        const { trace_id: _traceId, namespace: _namespace, ...next } = target;
+        onChange(next);
+      }}>Back to traces</Button>}
       {!panel && (
         <Alert color="bad">This panel is no longer in the dashboard.</Alert>
       )}
       {(exemplars.isFetching || trace.isFetching) && (
-        <Loader aria-label="Loading drill data" size="sm" />
+        <Loader role="status" aria-label="Loading drill data" size="sm" />
       )}
       {(exemplars.error || trace.error) && (
         <Alert color="bad">{(exemplars.error ?? trace.error)?.message}</Alert>
@@ -144,7 +148,6 @@ export function DrillDrawer({
             <Waterfall
               spans={trace.data.data.spans}
               dark={dark}
-              onSpan={() => undefined}
             />
           ) : (
             <Text c="dimmed">No spans were found for this trace.</Text>

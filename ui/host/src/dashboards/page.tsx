@@ -79,6 +79,11 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   const [visible, setVisible] = useState<string[]>(() => spec.panels.map((p) => p.id));
   const currentVisible = useMemo(() => visible.filter((panelId) => spec.panels.some((panel) => panel.id === panelId)), [visible, spec.panels]);
   const data = usePanelResults({ dashboardId: id, version, spec, time, vars: resolvedVars, compare, widths, visible: currentVisible, refresh, enabled: options.ready });
+  const annotations = useMemo(() => data.annotations ? {
+    ...data.annotations,
+    deploys: spec.annotations?.deploys === false ? [] : data.annotations.deploys,
+    anomalies: spec.annotations?.anomalies === false ? [] : data.annotations.anomalies,
+  } : undefined, [data.annotations, spec.annotations?.deploys, spec.annotations?.anomalies]);
   const loadError = options.error ?? data.error;
   const setVar = (name: string, value: VarValue | undefined) => {
     const next = { ...vars };
@@ -113,13 +118,15 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
         {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} size="compact-xs" variant="light" aria-label={`Remove filter ${name}`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
       </Group>}
+      {data.annotationError && <Alert color="warn" title="Annotations unavailable">{data.annotationError}</Alert>}
+      {data.annotations?.truncated && <Text size="xs" c="warn" role="status">Annotation history is limited.</Text>}
     </Stack>
     {loadError && <Alert color="bad" icon={<WarningCircle size={18} weight="fill" />} mb="md" title={options.error ? "Variables could not be loaded" : "Panels could not be loaded"}>
       {loadError.message}
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
-    <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
+    <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
       agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const result = data.results.get(panel.id); if (!result) return;

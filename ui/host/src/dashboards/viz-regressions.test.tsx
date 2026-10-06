@@ -3,12 +3,13 @@ import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
+import type { AnnotationsResponse } from "../../../panels/annotations";
 import { warn, bad, ok } from "../../../tokens";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
 vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
-vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 import { BarViz } from "./viz/bar";
 import { TimeseriesViz } from "./viz/timeseries";
@@ -123,6 +124,29 @@ describe("visualization regressions", () => {
     expect(instance.setOption).toHaveBeenCalledOnce();
     await rerender(<Viz panel={p} result={{ ...r, elapsed_ms: 99 }} dark={false} height={200} group="d" />);
     expect(instance.setOption).toHaveBeenCalledOnce();
+  });
+  it.each(["timeseries", "heatmap", "state_timeline"] as const)("threads annotations through the card and memoizes options on %s", async viz => {
+    const p: Panel = { ...panel, viz };
+    const r: PanelResult = { ...result, from_ms: 0, to_ms: 10000, frame: { ...frame, note: "Deploy split unavailable." }, annotation_scope: { services: [{ namespace: "shop", service: "checkout" }], limited: true } };
+    const annotations: AnnotationsResponse = {
+      deploys: [{ namespace: "shop", service: "checkout", version: "v2", at: new Date(1000).toISOString() }, { namespace: "shop", service: "frontend", version: "v3", at: new Date(2000).toISOString() }],
+      anomalies: [{ namespace: "shop", service: "checkout", kind: "latency", from: new Date(3000).toISOString(), to: new Date(5000).toISOString(), title: "Slow", severity: "bad" }],
+    };
+    const vars = { service: "frontend" };
+    const node = (next: PanelResult, history = annotations, values = vars) => <PanelCard panel={p} title="Time" result={next} annotations={history} vars={values} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />;
+    const { host, rerender } = await render(node(r));
+    const option = () => instance.setOption.mock.lastCall![0];
+    expect(option().series[0].markLine.data).toHaveLength(1); expect(option().series[0].markArea.data).toHaveLength(1);
+    expect([...host.querySelectorAll('[role="status"]')].map(element => element.textContent)).toEqual(["Deploy split unavailable.", "Annotation service scope is limited."]);
+    await rerender(node({ ...r, elapsed_ms: 99 })); expect(instance.setOption).toHaveBeenCalledOnce();
+    await rerender(node(r, annotations, { service: "checkout" })); expect(instance.setOption).toHaveBeenCalledOnce();
+    await rerender(node(r, { ...annotations, deploys: [] })); expect(option().series[0].markLine.data).toHaveLength(0);
+    await rerender(node({ ...r, annotation_scope: undefined })); expect(option().series[0].markLine.data).toHaveLength(2);
+    await rerender(node({ ...r, from_ms: 2000 })); expect(option().series[0].markLine.data).toHaveLength(0);
+    await rerender(node({ ...r, to_ms: 1000 })); expect(option().series[0].markLine.data).toHaveLength(0); expect(option().series[0].markArea.data).toHaveLength(0);
+    await rerender(node({ ...r, annotation_error: "Scope unavailable" }));
+    expect(option().series[0].markLine).toBeUndefined();
+    expect([...host.querySelectorAll('[role="status"]')].map(element => element.textContent)).toContain("Scope unavailable");
   });
   it("forwards point and dimension selections from the chart datum", async () => {
     const onPoint = vi.fn();

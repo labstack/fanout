@@ -1,5 +1,6 @@
 import type { Result, TraceDetail } from "../../../contracts";
 import type { DrillTarget } from "./drill-state";
+import type { AnnotationBody, AnnotationsResponse } from "../../../panels/annotations";
 import type { Frame, Selection, DashboardSpec, DashboardTime, Panel, PanelResult, Variable, VarValue } from "../../../panels/types";
 import { authorizedFetch } from "../auth";
 
@@ -54,6 +55,7 @@ export const deleteDashboard = (id: string) => request<void>(path(id), { method:
 export const listVersions = (id: string) => request<{ versions: VersionInfo[] }>(`${path(id)}/versions`).then((r) => r.versions);
 export const restoreVersion = (id: string, version: number) => request<DashboardRecord>(`${path(id)}/versions/${version}/restore`, { method: "POST" });
 export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/panels/query", { method: "POST", json: body, signal }).then((r) => r.results);
+export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
   request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
 

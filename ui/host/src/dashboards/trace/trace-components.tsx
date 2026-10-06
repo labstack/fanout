@@ -12,7 +12,7 @@ export function Waterfall({
 }: {
   spans: TraceSpan[];
   dark: boolean;
-  onSpan: (span: TraceSpan) => void;
+  onSpan?: (span: TraceSpan) => void;
 }) {
   const start = Math.min(
     ...spans.map((span) => new Date(span.start).valueOf()),
@@ -25,7 +25,7 @@ export function Waterfall({
   return (
     <>
       <Table.ScrollContainer minWidth={680}>
-        <Table highlightOnHover verticalSpacing="sm">
+        <Table highlightOnHover={Boolean(onSpan)} verticalSpacing="sm">
           <Table.Thead>
             <Table.Tr>
               <Table.Th w={230}>Operation</Table.Th>
@@ -44,13 +44,15 @@ export function Waterfall({
               return (
                 <Table.Tr
                   key={span.span_id}
-                  tabIndex={0}
-                  onClick={() => onSpan(span)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ")
+                  tabIndex={onSpan ? 0 : undefined}
+                  onClick={onSpan ? () => onSpan(span) : undefined}
+                  onKeyDown={onSpan ? (event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
                       onSpan(span);
-                  }}
-                  style={{ cursor: "pointer" }}
+                    }
+                  } : undefined}
+                  style={{ cursor: onSpan ? "pointer" : undefined }}
                 >
                   <Table.Td>
                     <Group gap="xs" wrap="nowrap">

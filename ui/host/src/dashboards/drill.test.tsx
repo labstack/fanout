@@ -240,9 +240,101 @@ it("renders the existing waterfall and correlated logs with visible truncation",
   expect(
     document.body.querySelector('[aria-label^="cart on checkout took"]'),
   ).not.toBeNull();
-  await act(async () => root.unmount());
-  client.clear();
-  node.remove();
+  const row = document.body.querySelector('[aria-label^="cart on checkout took"]')!.closest("tr")!;
+  try {
+    expect(row.hasAttribute("tabindex")).toBe(false);
+    expect(row.style.cursor).not.toBe("pointer");
+  } finally {
+    await act(async () => root.unmount()); client.clear(); node.remove();
+  }
+});
+
+async function mountDrawer(active: DrillTarget = target) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const node = document.createElement("div"); document.body.append(node);
+  const root = createRoot(node); const change = vi.fn();
+  const render = async (next?: DrillTarget) => act(async () => {
+    root.render(<MantineProvider><QueryClientProvider client={client}>
+      <DrillDrawer spec={spec} time={spec.time} vars={{}} target={next} onChange={change} />
+    </QueryClientProvider></MantineProvider>);
+  });
+  // The dashboard keeps the drawer mounted while closed before a selection opens it.
+  await render(undefined);
+  await render(active);
+  return { change, render, async cleanup() { await act(async () => root.unmount()); client.clear(); node.remove(); } };
+}
+
+it("announces loading drill data with a status role", async () => {
+  wire.exemplars.mockImplementation(() => new Promise(() => undefined));
+  const drawer = await mountDrawer();
+  try {
+    const loader = document.body.querySelector('[aria-label="Loading drill data"]');
+    expect(loader?.getAttribute("role")).toBe("status");
+  } finally { await drawer.cleanup(); }
+});
+
+it("focuses the drawer, closes on Escape, and returns focus to its trigger", async () => {
+  wire.exemplars.mockResolvedValue({ traces: [] });
+  const trigger = document.createElement("button"); trigger.textContent = "Open traces";
+  document.body.append(trigger); trigger.focus();
+  const drawer = await mountDrawer();
+  try {
+    const dialog = document.body.querySelector('[role="dialog"]')!;
+    expect(dialog).not.toBeNull();
+    await act(async () => { await vi.waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true), { interval: 5, timeout: 3000 }); });
+    await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(drawer.change).toHaveBeenCalledWith(undefined);
+    await drawer.render(undefined);
+    await act(async () => { await vi.waitFor(() => expect(document.activeElement).toBe(trigger), { interval: 5, timeout: 3000 }); });
+  } finally { await drawer.cleanup(); trigger.remove(); }
+});
+
+it("returns to exemplar traces by clearing only the trace identity", async () => {
+  wire.trace.mockImplementation(() => new Promise(() => undefined));
+  const drawer = await mountDrawer({ ...target, trace_id: "abc", namespace: "shop" });
+  try {
+    const back = [...document.body.querySelectorAll("button")].find(button => button.textContent === "Back to traces");
+    expect(back).toBeDefined();
+    await act(async () => back!.click());
+    expect(drawer.change).toHaveBeenCalledWith(target);
+    const next = drawer.change.mock.lastCall![0] as DrillTarget;
+    expect(next).not.toHaveProperty("trace_id"); expect(next).not.toHaveProperty("namespace");
+    wire.exemplars.mockResolvedValue({ traces: [] });
+    await drawer.render(next); await act(async () => { await tick(); });
+    expect(document.body.textContent).toContain("No exemplar traces match this selection.");
+  } finally { await drawer.cleanup(); }
+});
+
+it.each(["traces", "logs"] as const)("shows the empty %s selection", async kind => {
+  wire.exemplars.mockResolvedValue({ traces: [], logs: { columns: [], values: [], rows: 0 } });
+  const original = panel.query!.from; if (kind === "logs") panel.query!.from = "logs";
+  const drawer = await mountDrawer({ ...target, kind });
+  try {
+    await act(async () => { await tick(); });
+    expect(document.body.textContent).toContain(kind === "logs" ? "No logs match this selection." : "No exemplar traces match this selection.");
+  } finally { await drawer.cleanup(); panel.query!.from = original; }
+});
+
+it.each([false, true])("shows a drill request error (trace=%s)", async trace => {
+  const message = trace ? "Trace unavailable" : "Exemplars unavailable";
+  (trace ? wire.trace : wire.exemplars).mockRejectedValue(new Error(message));
+  const drawer = await mountDrawer(trace ? { ...target, trace_id: "abc", namespace: "shop" } : target);
+  try {
+    await act(async () => { await tick(); });
+    const alert = document.body.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain(message);
+    expect(document.body.textContent).not.toContain("No exemplar traces match");
+  } finally { await drawer.cleanup(); }
+});
+
+it("shows an empty trace and its empty correlated logs", async () => {
+  wire.trace.mockResolvedValue({ data: { trace_id: "empty", spans: [], logs: [], has_error: false } });
+  const drawer = await mountDrawer({ ...target, trace_id: "empty", namespace: "shop" });
+  try {
+    await act(async () => { await tick(); });
+    expect(document.body.textContent).toContain("No spans were found for this trace.");
+    expect(document.body.textContent).toContain("No correlated logs");
+  } finally { await drawer.cleanup(); }
 });
 
 import { TableViz } from "./viz/table";

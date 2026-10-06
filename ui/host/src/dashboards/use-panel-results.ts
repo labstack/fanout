@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardSpec, DashboardTime, PanelResult, VarValue } from "../../../panels/types";
 import { panelContent, retryPanelQuery } from "./query-policy";
-import { queryPanels } from "./api";
+import { refreshDashboard } from "./refresh";
 
 const refreshMs: Record<string, number | false> = { off: false, "10s": 10_000, "30s": 30_000, "1m": 60_000, "5m": 300_000 };
 
-/** One request per refresh for every visible panel (#232 item 30). Results
+/** One panel batch plus one annotation request per refresh for every visible panel. Results
  *  of panels scrolled out of view are kept from their last fetch. Widths are
  *  rounded for the next refresh. Layout and width changes do not refetch. */
 export function usePanelResults({ dashboardId, spec, time, vars, compare, widths, visible, refresh, enabled = true }: {
@@ -26,7 +26,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     queryFn: ({ signal }) => {
       // An empty list means all panels to the server. Track the same batch.
       inFlight.current = (ids.length ? [...ids] : spec.panels.map((panel) => panel.id)).sort();
-      return queryPanels({ dashboard: spec, panels: inFlight.current, time, vars, widths: rounded, compare }, signal);
+      return refreshDashboard({ dashboard: spec, panels: inFlight.current, time, vars, widths: rounded, compare }, signal);
     },
     retry: retryPanelQuery,
     enabled: canQuery,
@@ -34,21 +34,21 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     staleTime: 5_000,
     placeholderData: (previous) => previous,
   });
-  const snapshot = useMemo(() => merge(kept, key, query.isPlaceholderData ? undefined : query.data, query.dataUpdatedAt, query.error ? inFlight.current : []),
+  const snapshot = useMemo(() => merge(kept, key, query.isPlaceholderData ? undefined : query.data?.results, query.dataUpdatedAt, query.error ? inFlight.current : []),
     [kept, key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const results = snapshot.results;
   useEffect(() => {
     if (query.isPlaceholderData) return;
-    setKept((previous) => merge(previous, key, query.data, query.dataUpdatedAt, query.error ? inFlight.current : []));
+    setKept((previous) => merge(previous, key, query.data?.results, query.dataUpdatedAt, query.error ? inFlight.current : []));
   }, [key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const staleAt = new Map([...snapshot.stale].flatMap((id) => { const at = snapshot.updated.get(id); return at ? [[id, at] as const] : []; }));
-  const panelError = (query.data ?? []).find((r) => r.status === "error" && snapshot.stale.has(r.id));
+  const panelError = (query.data?.results ?? []).find((r) => r.status === "error" && snapshot.stale.has(r.id));
   // A panel scrolled into view that has never loaded under this key is
   // fetched now rather than at the next refresh.
   useEffect(() => {
     if (canQuery && !query.isFetching && ids.some((id) => !results.has(id) && spec.panels.find((p) => p.id === id)?.viz !== "text")) void query.refetch();
   }, [visible]);
-  return { results, staleAt, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (canQuery) void query.refetch(); } };
+  return { results, staleAt, annotations: query.isPlaceholderData ? undefined : query.data?.annotations, annotationError: query.isPlaceholderData ? undefined : query.data?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (canQuery) void query.refetch(); } };
 }
 
 type Snapshot = { key: string; results: Map<string, PanelResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number };
