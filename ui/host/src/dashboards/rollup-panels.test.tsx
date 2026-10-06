@@ -50,7 +50,9 @@ describe("Task 6 rollup panels", () => {
     expect(host.textContent).toContain("3 services");
     expect(host.querySelector('[aria-label="Service health distribution"]')).not.toBeNull();
     expect(host.querySelector('[aria-label="Error rate trend"]')).not.toBeNull();
-    for (const glyph of ["●", "■", "◆"]) expect(host.textContent).toContain(glyph);
+    expect(host.querySelector("svg circle")).not.toBeNull();
+    expect(host.querySelector("svg rect")).not.toBeNull();
+    expect(host.querySelector("svg polygon")).not.toBeNull();
     expect(host.querySelector("table")).toBeNull();
   });
   it("never reports healthy or operations for an unknown window", async () => {
@@ -62,6 +64,6 @@ describe("Task 6 rollup panels", () => {
   });
   it("renders the map through the common canvas panel", async () => {
     const host = await render({ id: "m", title: "Map", viz: "service_map" }, { id: "m", status: "ok", frame: mapFrame, elapsed_ms: 1 });
-    expect(host.querySelector('[aria-label="Map: service dependency graph"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label^="Map: service dependency graph"]')).not.toBeNull();
   });
 });

@@ -1,10 +1,10 @@
-import { BarChart, GaugeChart, GraphChart, LineChart } from "echarts/charts";
-import { AriaComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from "echarts/components";
+import { BarChart, CustomChart, GaugeChart, GraphChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
+import { AriaComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 
-use([CanvasRenderer, LineChart, BarChart, GaugeChart, GraphChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, AriaComponent]);
+use([CanvasRenderer, LineChart, BarChart, GaugeChart, GraphChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, VisualMapComponent, AriaComponent]);
 
 /* Dashboard panels draw on canvas: SVG stays smooth only to a few thousand
    points, and a dashboard of a dozen time series passes that. One instance
@@ -12,7 +12,7 @@ use([CanvasRenderer, LineChart, BarChart, GaugeChart, GraphChart, GridComponent,
 /* Charts per connected group, so the last one out disconnects it. */
 const groups = new Map<string, number>();
 
-export function EChartCanvas({ option, height, label, onClick, group }: { option: EChartsCoreOption; height: number | string; label: string; onClick?: (params: { name?: string; seriesName?: string; value?: unknown }) => void; group?: string }) {
+export function EChartCanvas({ option, height, label, onClick, group }: { option: EChartsCoreOption; height: number | string; label: string; onClick?: (params: { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }) => void; group?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const chart = useRef<EChartsType | null>(null);
   const selected = useRef<Record<string, boolean>>({});
@@ -23,7 +23,7 @@ export function EChartCanvas({ option, height, label, onClick, group }: { option
     if (!ref.current) return;
     const instance = init(ref.current, undefined, { renderer: "canvas" });
     chart.current = instance;
-    instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown }));
+    instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }));
     instance.on("legendselectchanged", (params) => {
       selected.current = { ...(params as { selected: Record<string, boolean> }).selected };
     });

@@ -37,7 +37,7 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
       </Menu>
     </Group>
     <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-      {!result && panel.viz !== "text" ? <Center h="100%"><Loader size="sm" /></Center>
+      {!result && panel.viz !== "text" ? <Center h="100%"><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Center h="100%"><Stack align="center" gap={4} maw={420}>
           <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
           <Text size="xs" c="dimmed" ta="center" style={{ overflowWrap: "anywhere" }}>{result.error}</Text>

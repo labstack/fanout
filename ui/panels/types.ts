@@ -4,11 +4,14 @@ export const ALL = "$__all";
 
 export type Unit = "ms" | "s" | "ns" | "percent" | "ratio" | "count" | "per_second" | "per_minute" | "bytes" | "none";
 export type Status = "ok" | "warn" | "bad";
-export type Viz = "stat" | "gauge" | "timeseries" | "bar" | "table" | "text" | "service_map" | "health";
+export const visualizations = ["stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces", "service_map", "health"] as const;
+export type Viz = typeof visualizations[number];
+export type Selection = { time?: number; dimensions: Record<string, string>; trace_id?: string; namespace?: string; bucket?: { lower: number; upper?: number } };
+export type ColumnFormat = { field: string; format: "unit"|"bar"|"status"|"sparkline"|"trace_link"|"service_link"|"log_template"; unit?: Unit; variable?: string };
 
 export type Threshold = { value: number; status: Status; label?: string };
 
-export type Query = { from: "spans" | "logs" | "metrics"; where?: string[]; measures?: string[]; by?: string[]; bucket?: string; sort?: string; limit?: number };
+export type Query = { from: "spans" | "logs" | "metrics"; where?: string[]; measures?: string[]; by?: string[]; bucket?: string; histogram?: { field: string; buckets: "log2" | "explicit"; temporality?: "cumulative" | "delta" }; sort?: string; limit?: number };
 
 export type Panel = {
   id: string;
@@ -20,12 +23,13 @@ export type Panel = {
   query?: Query;
   sql?: string;
   unit?: Unit;
+  x_unit?: Unit;
   reduce?: "window" | "last" | "mean" | "min" | "max" | "sum";
   thresholds?: Threshold[];
   better?: "lower" | "higher";
   min?: number;
   max?: number;
-  options?: { style?: "line" | "area" | "bars" | "stacked"; scale?: "linear" | "log"; top?: number; legend?: "auto" | "hidden" };
+  options?: { style?: "line" | "area" | "bars" | "stacked"; scale?: "linear" | "log"; top?: number; legend?: "auto" | "hidden"; x_scale?: "linear" | "log"; y_scale?: "linear" | "log"; highlight?: string; columns?: ColumnFormat[] };
   click?: { set_variable: string };
   drill?: "traces" | "logs";
   time?: { range?: string; shift?: string };
@@ -75,6 +79,8 @@ export type PanelResult = {
   sql?: string;
   interval?: string;
   elapsed_ms: number;
+  from_ms?: number;
+  to_ms?: number;
   better?: "lower" | "higher";
   shift_ms?: number;
 };

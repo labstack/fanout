@@ -1,8 +1,8 @@
 import { Box, Table, Text, UnstyledButton } from "@mantine/core";
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { createSortedRowModel, rowSortingFeature, sortFn_alphanumeric, sortFn_basic, tableFeatures, useTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
-import { useMemo, useState } from "react";
-import type { Cell, Panel, PanelResult } from "../../../../panels/types";
+import { useMemo, useState, type ReactNode } from "react";
+import type { Cell, Column, Panel, PanelResult } from "../../../../panels/types";
 import { statusFor } from "../../../../panels/thresholds";
 import { formatValue } from "../../../../panels/units";
 
@@ -10,17 +10,21 @@ const features = tableFeatures({ rowSortingFeature, sortedRowModel: createSorted
 
 type Row = Cell[];
 
-export function TableViz({ panel, result, onSelect }: { panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void }) {
+export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowIndex: number; columnIndex: number };
+
+export function TableViz({ panel, result, onSelect, renderCell }: { panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
   const frame = result.frame!;
-  const rows = useMemo<Row[]>(() => Array.from({ length: frame.rows }, (_, r) => frame.columns.map((_, c) => frame.values[c][r])), [frame]);
+  const rows = useMemo<Row[]>(() => Array.from({ length: frame.rows }, (_, r) => frame.columns.map((_, c) => (typeof frame.values[c]?.[r] === "number" && !Number.isFinite(frame.values[c][r]) ? null : frame.values[c]?.[r] ?? null))), [frame]);
   const firstMeasure = frame.columns.findIndex((c) => c.role === "measure");
-  const maxima = useMemo(() => frame.columns.map((c, i) => (c.role === "measure" ? Math.max(0, ...frame.values[i].filter((v): v is number => typeof v === "number")) : 0)), [frame]);
+  const maxima = useMemo(() => frame.columns.map((c, i) => (c.role === "measure" ? Math.max(0, ...frame.values[i].filter((v): v is number => typeof v === "number" && Number.isFinite(v))) : 0)), [frame]);
   const columns = useMemo<ColumnDef<typeof features, Row>[]>(() => frame.columns.map((column, index) => ({
     id: column.name,
     header: column.name,
     accessorFn: (row) => row[index],
     cell: (info) => {
       const value = info.getValue() as Cell;
+      const custom = renderCell?.({ column, value, row: info.row.original, rowIndex: info.row.index, columnIndex: index });
+      if (custom !== undefined) return custom;
       if (column.role === "measure" && typeof value === "number") {
         const unit = column.unit ?? panel.unit;
         const status = index === firstMeasure ? statusFor(value, panel.thresholds, panel.better ?? result.better) : null;
@@ -34,7 +38,7 @@ export function TableViz({ panel, result, onSelect }: { panel: Panel; result: Pa
       return <Text size="sm" className="dashboard-dimension-nowrap" title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
     },
     sortFn: column.role === "measure" ? "basic" : "alphanumeric",
-  })), [frame, panel, result.better, firstMeasure, maxima]);
+  })), [frame, panel, result.better, firstMeasure, maxima, renderCell]);
   const [sorting, setSorting] = useState<SortingState>([]);
   const table = useTable({ features, data: rows, columns, state: { sorting }, onSortingChange: setSorting });
   const firstDimension = frame.columns.findIndex((c) => c.role === "dimension");

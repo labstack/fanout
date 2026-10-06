@@ -7,8 +7,8 @@ import { warn, bad, ok } from "../../../tokens";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {} }));
-vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {} }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 import { BarViz } from "./viz/bar";
 import { TimeseriesViz } from "./viz/timeseries";
@@ -18,6 +18,7 @@ import { TextViz } from "./viz/text";
 import { TableViz } from "./viz/table";
 import { PanelCard } from "./panel-card";
 import { EChartCanvas } from "./echart-canvas";
+import { Viz } from "./viz";
 import { ApiError } from "./api";
 import { retryQuery } from "./query-policy";
 import { InspectDrawer } from "./inspect";
@@ -106,13 +107,31 @@ describe("visualization regressions", () => {
     const { host } = await render(<StatViz panel={panel} result={{ ...result, previous: { ...frame, totals: [null, 60] } }} />);
     expect(host.textContent).toContain("+100%");
   });
-  it.each(["bar", "timeseries", "gauge"] as const)("does not setOption again for an equal frame and new elapsed_ms (%s)", async (viz) => {
+  it.each(["bar", "timeseries", "gauge", "heatmap", "histogram", "scatter", "state_timeline", "service_map"] as const)("does not setOption again for an equal frame and new elapsed_ms (%s)", async (viz) => {
     const p = { ...panel, viz };
-    const node = (r: PanelResult) => viz === "bar" ? <BarViz panel={p} result={r} dark={false} height={200} /> : viz === "gauge" ? <GaugeViz panel={p} result={r} dark={false} height={200} /> : <TimeseriesViz panel={p} result={r} dark={false} height={200} group="d" />;
+    const node = (r: PanelResult) => viz === "bar" ? <BarViz panel={p} result={r} dark={false} height={200} /> : viz === "gauge" ? <GaugeViz panel={p} result={r} dark={false} height={200} /> : <Viz panel={p} result={r} dark={false} height={200} group="d" />;
     const { rerender } = await render(node(result));
     expect(instance.setOption).toHaveBeenCalledOnce();
     await rerender(node({ ...result, elapsed_ms: 99 }));
     expect(instance.setOption).toHaveBeenCalledOnce();
+  });
+  it("memoizes the health trend across unrelated result metadata changes", async () => {
+    const healthFrame: Frame = { ...frame, health: { health: "healthy", counts: { healthy: 1, degraded: 0, unhealthy: 0 }, total_spans: 10, error_rate: 0, service_count: 1, error_trend: [0, 1] } };
+    const p: Panel = { ...panel, viz: "health" };
+    const r = { ...result, frame: healthFrame };
+    const { rerender } = await render(<Viz panel={p} result={r} dark={false} height={200} group="d" />);
+    expect(instance.setOption).toHaveBeenCalledOnce();
+    await rerender(<Viz panel={p} result={{ ...r, elapsed_ms: 99 }} dark={false} height={200} group="d" />);
+    expect(instance.setOption).toHaveBeenCalledOnce();
+  });
+  it("forwards point and dimension selections from the chart datum", async () => {
+    const onPoint = vi.fn();
+    const onSelect = vi.fn();
+    await render(<Viz panel={{ ...panel, viz: "scatter" }} result={result} dark={false} height={200} group="d" onPoint={onPoint} onSelect={onSelect} />);
+    const selection = { dimensions: { service: "checkout" }, time: 1000, bucket: { lower: 2, upper: 10 } };
+    instance.on.mock.calls.find(([name]) => name === "click")![1]({ data: { selection } });
+    expect(onPoint).toHaveBeenCalledWith(selection);
+    expect(onSelect).toHaveBeenCalledWith("checkout");
   });
   it("retains legend selections across data changes only for surviving series", async () => {
     const { rerender } = await render(<EChartCanvas label="Services" height={100} option={{ legend: {}, series: [{ name: "cart" }, { name: "gone" }] }} />);

@@ -1,0 +1,225 @@
+import { init, use } from "echarts/core";
+import { BarChart, CustomChart, GraphChart, ScatterChart } from "echarts/charts";
+import { GridComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { SVGRenderer } from "echarts/renderers";
+import { MantineProvider } from "@mantine/core";
+import { act, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { analysisOption, analysisSummary } from "../../../panels/analysis";
+import { chartThemeFor } from "../../../panels/compile";
+import {visualizations,type Panel,type PanelResult,type Viz as VizType} from "../../../panels/types";
+import { PanelCard } from "./panel-card";
+import { InspectDrawer } from "./inspect";
+import { frameRows, rowModel } from "../../../panels/rows";
+import { healthSymbol } from "../../../chart";
+import { TableViz } from "./viz/table";
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
+vi.mock("./echart-canvas",()=>({EChartCanvas:({label}:{label:string})=><div role="img" aria-label={label}/> }));
+const types:VizType[]=["heatmap","histogram","scatter","state_timeline","service_map","health"];
+const col=(name:string,type:"time"|"number"|"string"|"json",role:"time"|"dimension"|"measure",unit?:string)=>({name,type,role,unit});
+const fixtures:Record<string,PanelResult["frame"]>={
+ heatmap:{columns:[col("time","time","time"),col("bucket_lower","number","dimension","ms"),col("bucket_upper","number","dimension","ms"),col("count","number","measure","count")],values:[[1000],[1],[2],[3]],rows:1},
+ histogram:{columns:[col("bucket_lower","number","dimension","ms"),col("bucket_upper","number","dimension","ms"),col("count","number","measure","count")],values:[[1],[2],[3]],rows:1},
+ scatter:{columns:[col("service","string","dimension"),col("count","number","measure","count"),col("p95","number","measure","ms")],values:[["checkout"],[2],[50]],rows:1},
+ state_timeline:{columns:[col("time","time","time"),col("service","string","dimension"),col("p95","number","measure","ms")],values:[[1000],["checkout"],[50]],rows:1},
+ logs:{columns:[col("time","time","time"),col("severity","string","dimension"),col("service","string","dimension"),col("body","string","dimension"),col("trace_id","string","dimension"),col("namespace","string","dimension")],values:[[1000],["ERROR"],["checkout"],["failed"],["abc"],["shop"]],rows:1},
+ log_patterns:{columns:[col("body_template","string","dimension"),col("count","number","measure","count"),col("trend","json","dimension","count")],values:[["failed <*>"],[2],["[1,1]"]],rows:1},
+ traces:{columns:[col("trace_id","string","dimension"),col("namespace","string","dimension"),col("service","string","dimension"),col("operation","string","dimension"),col("duration_ms","number","measure","ms"),col("status","string","dimension"),col("start","time","time")],values:[["abc"],["shop"],["checkout"],["cart"],[50],["STATUS_CODE_ERROR"],[1000]],rows:1},
+ service_map:{columns:[col("kind","string","dimension"),col("service","string","dimension"),col("caller","string","dimension"),col("callee","string","dimension"),col("edge_type","string","dimension"),col("calls","number","measure","count"),col("average_ms","number","measure","ms"),col("error_rate","number","measure","percent"),col("health","string","dimension"),col("p95_ms","number","measure","ms"),col("spans","number","measure","count")],values:[["node","edge"],["checkout",""],["","checkout"],["","payment"],["","call"],[null,3],[null,20],[10,1],["unhealthy",""],[50,null],[2,null]],rows:2},
+ health:{columns:[col("service","string","dimension"),col("health","string","dimension"),col("spans","number","measure","count"),col("error_rate","number","measure","percent"),col("p50_ms","number","measure","ms"),col("p95_ms","number","measure","ms"),col("log_count","number","measure","count"),col("metric_count","number","measure","count")],values:[["checkout"],["unhealthy"],[2],[10],[20],[50],[1],[1]],rows:1,health:{health:"unhealthy",counts:{healthy:0,degraded:0,unhealthy:1},service_count:1,total_spans:2,error_rate:10,error_trend:[1,10]}},
+};
+const resultFor=(viz:string):PanelResult=>({id:"p",status:"ok",elapsed_ms:1,interval:"1m",from_ms:0,to_ms:10000,frame:fixtures[viz]});
+const assertFinite=(value:unknown):void=>{if(typeof value==="number")expect(Number.isFinite(value)).toBe(true);else if(Array.isArray(value))value.forEach(assertFinite);else if(value&&typeof value==="object")Object.values(value).forEach(assertFinite);};
+
+describe("M2 visualizations",()=>{
+  it("has exactly fifteen registry entries",()=>{
+    expect(visualizations).toHaveLength(15);expect(new Set(visualizations).size).toBe(15);
+  });
+  it("compiles empty chart frames in both themes without nonfinite values",()=>{
+    for(const dark of [false,true])for(const viz of types){
+      const panel:Panel={id:"p",title:viz,viz,thresholds:[{value:1,status:"bad"}]};
+      const result=resultFor(viz);const empty={...result,frame:{...result.frame!,values:result.frame!.columns.map(()=>[]),rows:0,health:undefined}} as PanelResult;
+      assertFinite(analysisOption(panel,empty,chartThemeFor(dark)));
+      const nonfinite={...result,frame:{...result.frame!,values:result.frame!.values.map(values=>values.map(v=>typeof v==="number"?Infinity:v))}};assertFinite(analysisOption(panel,nonfinite,chartThemeFor(dark)));
+      expect(analysisSummary(panel,empty)).toContain("0");
+    }
+  });
+  it("renders loading, empty, error and partial states for all types",async()=>{
+    const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
+    const noop=()=>undefined;
+    for(const viz of types){
+      const result=resultFor(viz);
+      const panel:Panel={id:"p",title:viz,viz};
+      const props={panel,title:viz,height:300,group:"g",editing:false,agentAvailable:false,onView:noop,onInspect:noop,onCopyLink:noop,onExplain:noop};
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading result={undefined}/></MantineProvider>));
+      expect(container.querySelector('[aria-label="Loading panel"]')).not.toBeNull();
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"empty",diagnosis:"No matching events"}}/></MantineProvider>));
+      expect(container.textContent).toContain("No matching events");
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"error",error:"Query failed"}}/></MantineProvider>));
+      expect(container.textContent).toContain("Query failed");
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,frame:{...result.frame!,truncated:true}}}/></MantineProvider>));
+      expect(container.textContent).toContain("Truncated");
+      const zero={...result,frame:{...result.frame!,values:result.frame!.columns.map(()=>[]),rows:0,health:undefined}} as PanelResult;
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={zero}/></MantineProvider>));
+      expect(container.textContent).not.toMatch(/NaN|Infinity/);
+      const nonfinite={...result,frame:{...result.frame!,values:result.frame!.values.map(values=>values.map(value=>typeof value==="number"?Infinity:value)),health:result.frame!.health?{...result.frame!.health,error_rate:Infinity,total_spans:Infinity,error_trend:[Infinity,1]}:undefined}};
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={nonfinite}/></MantineProvider>));
+      expect(container.textContent).not.toMatch(/NaN|Infinity/);
+      await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={result}/></MantineProvider>));
+      expect(container.textContent).not.toMatch(/NaN|Infinity/);
+    }
+    await act(async()=>root.unmount());container.remove();
+  });
+});
+
+it("formats distinct scatter axis units and numeric bucket order",()=>{
+ const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
+ const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
+ expect(option.xAxis.name).toBe("count");expect(option.yAxis.name).toBe("ms");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
+ for(const viz of ["histogram","heatmap"] as const){
+  const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
+  const got=analysisOption({...panel,viz}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
+  expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["−∞–1","2–10","10–20"]);
+ }
+});
+
+
+it("keeps an aria summary and an Inspect data table reachable for every chart", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  function Harness({ panel, result }: { panel: Panel; result: PanelResult }) {
+    const [inspecting, setInspecting] = useState(false);
+    return <MantineProvider>
+      <PanelCard panel={panel} title="Window summary" result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false}
+        onView={() => undefined} onInspect={() => setInspecting(true)} onCopyLink={() => undefined} onExplain={() => undefined} />
+      <InspectDrawer panel={inspecting ? panel : undefined} result={result} onClose={() => setInspecting(false)} />
+    </MantineProvider>;
+  }
+  try {
+    for (const viz of types) {
+      const panel: Panel = { id: "p", title: viz, viz };
+      const result = resultFor(viz);
+      await act(async () => root.render(<Harness key={viz} panel={panel} result={result} />));
+      const summary = container.querySelector(viz === "health" ? '[role="region"]' : '[role="img"]');
+      expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "Service health" : "Window summary");
+      expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "services" : `${result.frame!.rows} rows`);
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Window summary menu"]')!.click());
+      const inspect = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent?.includes("Inspect"));
+      expect(inspect).toBeDefined();
+      await act(async () => inspect!.click());
+      const table = document.querySelector('[role="dialog"] table');
+      expect(table).not.toBeNull();
+      expect([...table!.querySelectorAll("th")].map(header => header.textContent)).toEqual(result.frame!.columns.map(column => column.name));
+      expect(table!.querySelectorAll("tbody tr")).toHaveLength(result.frame!.rows);
+    }
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it("preserves literal dimension keys and sanitizes rows without losing selections", () => {
+  const frame = { columns: [col("start", "time", "time"), col("http.route", "string", "dimension"), col("trace_id", "string", "dimension"), col("namespace", "string", "dimension"), col("count", "number", "measure")],
+    values: [[1000], ["/checkout"], ["trace-1"], ["shop"], [NaN]], rows: 1 };
+  const panel: Panel = { id: "p", title: "Rows", viz: "table", query: { from: "spans", by: ["attributes['http.route']"] } };
+  const model = rowModel(panel, { id: "p", status: "ok", elapsed_ms: 1, frame });
+  expect(frameRows(frame)[0].count).toBeNull();
+  expect(frame.values[4][0]).toBeNaN();
+  expect(model.selection(model.rows[0])).toEqual({ time: 1000, dimensions: { "attributes['http.route']": "/checkout" }, trace_id: "trace-1", namespace: "shop" });
+});
+
+it("aligns split histogram series and preserves numeric bucket selections", () => {
+  const frame = { columns: [col("service", "string", "dimension"), ...fixtures.histogram!.columns], values: [["cart", "checkout", "cart"], [10, null, 2], [20, 1, 10], [1, 2, 3]], rows: 3 };
+  const panel: Panel = { id: "p", title: "Buckets", viz: "histogram", query: { from: "spans", by: ["service"] } };
+  const option = analysisOption(panel, { id: "p", status: "ok", elapsed_ms: 1, frame }, chartThemeFor(false)) as { series: { name: string; data: { value: number; selection: unknown }[] }[] };
+  expect(option.series.map(series => series.data.map(point => point.value))).toEqual([[0, 3, 1], [2, 0, 0]]);
+  expect(option.series[0].data[1].selection).toEqual({ dimensions: { service: "cart" }, bucket: { lower: 2, upper: 10 } });
+});
+
+it("filters nonpositive scatter points on either logarithmic axis", () => {
+  const frame = { ...fixtures.scatter!, values: [["zero", "negative", "valid"], [0, -2, 2], [10, 0, 50]], rows: 3 };
+  const result = { ...resultFor("scatter"), frame };
+  for (const options of [{ x_scale: "log" as const }, { y_scale: "log" as const }, { scale: "log" as const }]) {
+    const option = analysisOption({ id: "p", title: "Points", viz: "scatter", options }, result, chartThemeFor(false)) as { series: { data: { value: number[] }[] }[] };
+    expect(option.series[0].data.every(point => (options.y_scale ? point.value[1] : point.value[0]) > 0)).toBe(true);
+    expect(option.series[0].data.some(point => point.value[0] === 2 && point.value[1] === 50)).toBe(true);
+  }
+});
+
+it("renders timeline states with health shapes and distinguishes unknown cells", () => {
+  const panel: Panel = { id: "p", title: "States", viz: "state_timeline", thresholds: [{ value: 10, status: "warn" }, { value: 20, status: "bad" }], query: { from: "spans", by: ["service"] } };
+  const frame = { ...fixtures.state_timeline!, values: [[1000, 2000, 3000, 4000], ["cart", "cart", "cart", "cart"], [null, 5, 15, 25]], rows: 4 };
+  type Shape = { type: string; style: { lineDash?: number[] }; shape: Record<string, unknown>; children?: Shape[] };
+  const option = analysisOption(panel, { ...resultFor("state_timeline"), interval: "1s", frame }, chartThemeFor(false)) as { series: { data: { value: number[] }[]; renderItem: (params: unknown, api: unknown) => Shape }[] };
+  const series = option.series[0];
+  const shapes = series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], style: () => ({}) }).children![1]);
+  expect(shapes.map(shape => shape.type)).toEqual(["circle", "circle", "rect", "polygon"]);
+  expect(shapes[0].style.lineDash).toEqual([2, 2]);
+  expect(shapes[1].style.lineDash).toBeUndefined();
+  expect(series.data.map(point => point.value[3])).toEqual([2000, 3000, 4000, 5000]);
+});
+
+it("grades timeline cells by the spec direction, then the result's inferred direction", () => {
+  const panel: Panel = { id: "p", title: "States", viz: "state_timeline", thresholds: [{ value: 10, status: "warn" }, { value: 20, status: "bad" }], query: { from: "spans", by: ["service"] } };
+  const frame = { ...fixtures.state_timeline!, values: [[1000, 2000, 3000], ["cart", "cart", "cart"], [5, 15, 25]], rows: 3 };
+  type Shape = { type: string; children?: Shape[] };
+  const shapes = (p: Panel, better?: "lower" | "higher") => {
+    const option = analysisOption(p, { ...resultFor("state_timeline"), interval: "1s", frame, better }, chartThemeFor(false)) as { series: { data: { value: number[] }[]; renderItem: (params: unknown, api: unknown) => Shape }[] };
+    const series = option.series[0];
+    return series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], style: () => ({}) }).children![1].type);
+  };
+  const lower = shapes(panel);
+  expect(shapes(panel, "higher")).not.toEqual(lower);
+  expect(shapes({ ...panel, better: "lower" }, "higher")).toEqual(lower);
+});
+
+it("reuses shaped service-map nodes, selects services and includes edge-only endpoints", () => {
+  for (const dark of [false, true]) {
+    const option = analysisOption({ id: "p", title: "Map", viz: "service_map" }, resultFor("service_map"), chartThemeFor(dark)) as { series: { data: { name: string; symbol: string; selection: unknown; itemStyle: { borderType: string } }[] }[] };
+    const nodes = option.series[0].data;
+    expect(nodes.map(node => node.name)).toEqual(["checkout", "payment"]);
+    expect(nodes[0].symbol).toBe(healthSymbol("unhealthy"));
+    expect(nodes[0].selection).toEqual({ dimensions: { service: "checkout" } });
+    expect(nodes[1].itemStyle.borderType).toBe("dashed");
+  }
+});
+
+it("keeps original table indexes after sorting and sanitizes fallback cells", async () => {
+  const frame = { columns: [col("service", "string", "dimension"), col("count", "number", "measure")], values: [["checkout", "cart"], [Infinity, 3]], rows: 2 };
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const renderCell = vi.fn(({ column, rowIndex }: { column: { name: string }; rowIndex: number }) => column.name === "service" ? <span data-original-row={rowIndex}>Link {rowIndex}</span> : undefined);
+  try {
+    await act(async () => root.render(<MantineProvider><TableViz panel={{ id: "p", title: "Rows", viz: "table" }} result={{ id: "p", status: "ok", elapsed_ms: 1, frame }} height={200} renderCell={renderCell} /></MantineProvider>));
+    expect(container.textContent).not.toMatch(/NaN|Infinity/);
+    expect(container.querySelector("tbody tr td:nth-child(2)")!.textContent).toBe("—");
+    await act(async () => container.querySelector<HTMLButtonElement>("th:nth-child(2) button")!.click());
+    expect(container.querySelector("tbody tr [data-original-row]")!.getAttribute("data-original-row")).toBe("1");
+    expect(renderCell.mock.calls.some(([cell]) => cell.rowIndex === 0)).toBe(true);
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
+});
+
+
+it("renders populated and empty analysis options with the real ECharts engine", () => {
+  use([SVGRenderer, BarChart, CustomChart, GraphChart, ScatterChart, GridComponent, TooltipComponent, VisualMapComponent]);
+  for (const dark of [false, true]) for (const viz of types.filter(viz => viz !== "health")) {
+    const panel: Panel = { id: "p", title: viz, viz, thresholds: [{ value: 1, status: "bad" }] };
+    const result = resultFor(viz);
+    for (const frame of [result.frame!, { ...result.frame!, values: result.frame!.columns.map(() => []), rows: 0 }]) {
+      const chart = init(null, undefined, { renderer: "svg", ssr: true, width: 640, height: 300 });
+      try {
+        chart.setOption(analysisOption(panel, { ...result, frame }, chartThemeFor(dark)), { notMerge: true });
+        const svg = chart.renderToSVGString();
+        expect(svg).toContain("<svg");
+        expect(svg).not.toMatch(/NaN|Infinity/);
+      } finally {
+        chart.dispose();
+      }
+    }
+  }
+});

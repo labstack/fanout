@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ init: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
 
 vi.mock("echarts/core", () => ({ init: mocks.init, use: () => undefined, connect: mocks.connect, disconnect: mocks.disconnect }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {} }));
-vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {} }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
 import { EChartCanvas } from "./echart-canvas";
@@ -34,6 +34,25 @@ describe("EChartCanvas", () => {
     expect(instance.dispose).not.toHaveBeenCalled();
     await act(async () => root.unmount());
     expect(instance.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards datum selections to the latest click handler without replacing the chart", async () => {
+    const instance = fresh();
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container);
+    const option = { series: [] };
+    const first = vi.fn(); const next = vi.fn();
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="Points" onClick={first} />));
+    const click = instance.on.mock.calls.find(([name]) => name === "click")![1];
+    const event = { data: { selection: { dimensions: { service: "cart" } } }, dataType: "node" };
+    click(event);
+    expect(first).toHaveBeenCalledWith(event);
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="Points" onClick={next} />));
+    click(event);
+    expect(next).toHaveBeenCalledWith(event);
+    expect(first).toHaveBeenCalledOnce();
+    expect(instance.setOption).toHaveBeenCalledOnce();
+    await act(async () => root.unmount());
   });
 
   it("disconnects a group only when its last chart leaves", async () => {
