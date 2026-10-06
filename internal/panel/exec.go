@@ -296,6 +296,9 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if interval > 0 && (reduces || p.Query == nil || p.Query.Bucket != "") {
 		res.Interval = formatInterval(interval)
 	}
+	if frame.Trend != nil {
+		res.Interval = formatInterval(time.Duration(frame.Trend.StepMS) * time.Millisecond)
+	}
 	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
 		if err != nil {
@@ -363,9 +366,18 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 				rowLimit = min(rowLimit, 1000)
 			}
 		}
+		if p.Viz == "logs" || p.Viz == "traces" {
+			rowLimit = rowLimitForPanel(p)
+		}
+		if p.Viz == "log_patterns" {
+			rowLimit = patternLimit(p)
+		}
 		frame, err := scanFrame(rows, compiled.Columns, rowLimit)
 		if frame != nil {
 			frame.bucketed = scope.Interval > 0 && len(compiled.Columns) > 0 && compiled.Columns[0].Role == "time"
+			if compiled.TrendInterval > 0 {
+				frame.Trend = &Trend{StartMS: compiled.TrendStart.UnixMilli(), StepMS: compiled.TrendInterval.Milliseconds()}
+			}
 		}
 		if err == nil && (p.Viz == "heatmap" || p.Viz == "state_timeline") {
 			boundAnalysisFrame(frame)

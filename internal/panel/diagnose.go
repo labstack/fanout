@@ -21,6 +21,12 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 	if p.Query == nil {
 		return "The query returned no rows for this time range."
 	}
+	if (p.Viz == "logs" || p.Viz == "log_patterns") && p.Options != nil && p.Options.Highlight != "" {
+		return fmt.Sprintf("No logs contain %q in this range", p.Options.Highlight)
+	}
+	if p.Viz == "traces" && p.Query.Sort == "errors" {
+		return "No erroring traces in this range"
+	}
 	sig, _ := lookupSignal(p.Query.From)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
 	active := make([]Filter, 0, len(filters))

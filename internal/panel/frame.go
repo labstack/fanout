@@ -17,9 +17,16 @@ type Frame struct {
 	Rows      int      `json:"rows"`
 	Totals    []any    `json:"totals,omitempty"`
 	Truncated bool     `json:"truncated,omitempty"`
+	Trend     *Trend   `json:"trend,omitempty"`
 	// Only structured time buckets are exempt from the row cap. A SQL time
 	// column is still subject to the SQL panel cap.
 	bucketed bool
+}
+
+// Trend locates each point in a row panel's dense trend array.
+type Trend struct {
+	StartMS int64 `json:"start_ms"`
+	StepMS  int64 `json:"step_ms"`
 }
 
 const (

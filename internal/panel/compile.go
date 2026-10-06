@@ -71,9 +71,11 @@ type Column struct {
 
 // Compiled is one statement ready to run.
 type Compiled struct {
-	SQL     string
-	Args    []any
-	Columns []Column
+	SQL           string
+	Args          []any
+	Columns       []Column
+	TrendInterval time.Duration
+	TrendStart    time.Time
 }
 
 // dropped reports whether a filter references a variable set to
@@ -136,6 +138,9 @@ func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, erro
 // selected as "_t" and named "time" in the frame, so it never collides with a
 // signal's own time column.
 func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
+	if p.Viz == "logs" || p.Viz == "log_patterns" || p.Viz == "traces" {
+		return compileRows(p, filters, scope)
+	}
 	if p.Viz == "heatmap" || p.Viz == "histogram" {
 		return compileDistribution(p, filters, scope)
 	}

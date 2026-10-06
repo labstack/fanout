@@ -21,6 +21,9 @@ type vizSpec struct {
 }
 
 var vizSpecs = map[string]vizSpec{
+	"logs":           {width: 12, height: "l", query: true},
+	"log_patterns":   {width: 12, height: "m", query: true, minBy: 1, maxBy: 1, bucket: true},
+	"traces":         {width: 12, height: "m", query: true},
 	"stat":           {width: 3, height: "s", query: true, reduces: true},
 	"gauge":          {width: 3, height: "s", query: true, reduces: true},
 	"timeseries":     {width: 6, height: "m", query: true, maxBy: 1, bucket: true},
@@ -33,7 +36,7 @@ var vizSpecs = map[string]vizSpec{
 	"state_timeline": {width: 6, height: "m", query: true, minBy: 1, maxBy: 1, bucket: true},
 }
 
-var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline"}
+var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces"}
 
 var (
 	idPattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -272,6 +275,7 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 	}
 	if p.Viz == "text" {
 		validateItems(p, path, problems)
+		validateRows(p, path, problems)
 		if p.Query != nil || p.SQL != "" {
 			problems.add(path, "text panels have content, not a query")
 		}
@@ -280,11 +284,15 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 		}
 		return
 	}
+	isRow := p.Viz == "logs" || p.Viz == "traces" || p.Viz == "log_patterns"
+	validateRows(p, path, problems)
 	if (p.Query == nil) == (strings.TrimSpace(p.SQL) == "") {
-		problems.add(path, "set exactly one of query or sql")
+		if !isRow {
+			problems.add(path, "set exactly one of query or sql")
+		}
 		return
 	}
-	if p.Unit != "" {
+	if p.Unit != "" && !isRow {
 		if _, ok := unitFamilies[p.Unit]; !ok {
 			problems.addHint(path+".unit", fmt.Sprintf("unknown unit %q", p.Unit), "use one of "+strings.Join(unitNames(), ", "))
 		}
@@ -299,10 +307,13 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 	if p.Viz == "gauge" && (p.Min == nil || p.Max == nil || *p.Min >= *p.Max) {
 		problems.add(path, "gauge panels need min and max, with min below max")
 	}
-	if len(p.Thresholds) > 4 {
+	if len(p.Thresholds) > 4 && !isRow {
 		problems.add(path+".thresholds", "at most 4 thresholds")
 	}
 	for i, t := range p.Thresholds {
+		if isRow {
+			break
+		}
 		if !slices.Contains([]string{"ok", "warn", "bad"}, t.Status) {
 			problems.add(fmt.Sprintf("%s.thresholds[%d].status", path, i), "status must be ok, warn or bad")
 		}
@@ -332,10 +343,10 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 		}
 	}
 	if p.Options != nil {
-		if p.Options.Style != "" && !slices.Contains([]string{"line", "area", "bars", "stacked"}, p.Options.Style) {
+		if !isRow && p.Options.Style != "" && !slices.Contains([]string{"line", "area", "bars", "stacked"}, p.Options.Style) {
 			problems.add(path+".options.style", "style must be line, area, bars or stacked")
 		}
-		if p.Options.Scale != "" && p.Options.Scale != "linear" && p.Options.Scale != "log" {
+		if !isRow && p.Options.Scale != "" && p.Options.Scale != "linear" && p.Options.Scale != "log" {
 			problems.add(path+".options.scale", "scale must be linear or log")
 		}
 		if p.Options.Legend != "" && p.Options.Legend != "auto" && p.Options.Legend != "hidden" {
@@ -382,6 +393,19 @@ func mapKeys(vars map[string]Variable) []string {
 
 func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 	q := p.Query
+	if p.Viz == "logs" || p.Viz == "traces" || p.Viz == "log_patterns" {
+		// Fixed projections are checked field by field in validateRows; avoid
+		// duplicate aggregate-query Problems for the same rejected field.
+		if len(q.Where) > 16 {
+			problems.addHint(path+".where", "at most 16 filters per query", "remove filters until at most 16 remain")
+		}
+		for i, w := range q.Where {
+			if strings.TrimSpace(w) == "" || len(w) > 500 {
+				problems.addHint(fmt.Sprintf("%s.where[%d]", path, i), "filters are 1 to 500 characters", "use a nonempty filter of at most 500 characters")
+			}
+		}
+		return
+	}
 	if len(q.Where) > 16 {
 		problems.add(path+".where", "at most 16 filters per query")
 	}
@@ -395,8 +419,8 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 			problems.add(fmt.Sprintf("%s.where[%d]", path, i), "filters are 1 to 500 characters")
 		}
 	}
-	if len(q.Measures) == 0 || len(q.Measures) > 6 {
-		problems.add(path+".measures", "a query has 1 to 6 measures")
+	if (len(q.Measures) == 0 && p.Viz != "logs" && p.Viz != "traces") || len(q.Measures) > 6 {
+		problems.add(path+".measures", "a query has 1 to 6 measures; fixed logs and traces take none")
 	}
 	measures := parseMeasures(sig, q.Measures, path+".measures", problems)
 	if len(q.By) < spec.minBy {
@@ -454,7 +478,7 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 	if q.Limit < 0 || q.Limit > 1000 {
 		problems.add(path+".limit", "limit must be 0 to 1000")
 	}
-	if q.Sort != "" {
+	if q.Sort != "" && p.Viz != "logs" && p.Viz != "traces" {
 		alias := strings.TrimPrefix(q.Sort, "+")
 		if !slices.ContainsFunc(measures, func(m Measure) bool { return m.Alias == alias }) {
 			problems.add(path+".sort", fmt.Sprintf("sort %q must name a measure alias", q.Sort))

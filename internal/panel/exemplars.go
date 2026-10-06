@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/labstack/fanout/internal/queryrows"
@@ -146,6 +147,10 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 	if err != nil {
 		return out, err
 	}
+	if p.Query.From == "logs" && p.Options != nil && p.Options.Highlight != "" {
+		where += " AND contains(lower(body),lower(?))"
+		args = append(args, p.Options.Highlight)
+	}
 	// Candidate membership is filtered; root metadata is selected within the full panel window.
 	candidateSource := structuredSource(p.Query.From)
 	text := checkedTraceSQL(candidateSource, where, 21, "duration_ms DESC,trace_id,namespace", "start_time::TIMESTAMP_NS")
@@ -179,6 +184,12 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 	// A 21st root or a 1,001st candidate proves truncation; exactly 20 does not.
 	return out, nil
 }
+func traceRootsSQL() string {
+	return `SELECT s.trace_id,s.namespace,s.service,s.operation,s.duration_ms,CASE WHEN max(CASE WHEN s.status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END) OVER(PARTITION BY s.namespace,s.trace_id)>0 THEN 'STATUS_CODE_ERROR' ELSE coalesce(s.status,'') END AS status,s.start_time,row_number() OVER(PARTITION BY s.namespace,s.trace_id ORDER BY (coalesce(s.parent_span_id,'')='') DESC,s.start_time,s.span_id) AS n
+FROM spans s JOIN candidates c ON s.namespace=c.namespace AND s.trace_id=c.trace_id
+WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS`
+}
+
 func checkedTraceSQL(source, where string, limit int, order, startProjection string) string {
 	// Span candidates prioritize the slowest matching span per trace. Logs are a
 	// deterministic sample by namespace and trace ID, not a global latency ranking.
@@ -187,14 +198,24 @@ func checkedTraceSQL(source, where string, limit int, order, startProjection str
 		candidateOrder = "max(duration_ms) DESC,namespace,trace_id"
 	}
 	return fmt.Sprintf(`WITH candidate_probe AS (SELECT namespace,trace_id,row_number() OVER (ORDER BY %s) AS candidate_rank FROM %s WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY candidate_rank LIMIT 1001),
-candidates AS (SELECT namespace,trace_id FROM candidate_probe WHERE candidate_rank<=1000), roots AS (
-SELECT s.trace_id,s.namespace,s.service,s.operation,s.duration_ms,CASE WHEN max(CASE WHEN s.status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END) OVER(PARTITION BY s.namespace,s.trace_id)>0 THEN 'STATUS_CODE_ERROR' ELSE coalesce(s.status,'') END AS status,s.start_time,row_number() OVER(PARTITION BY s.namespace,s.trace_id ORDER BY (coalesce(s.parent_span_id,'')='') DESC,s.start_time,s.span_id) AS n
-FROM spans s JOIN candidates c ON s.namespace=c.namespace AND s.trace_id=c.trace_id
-WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS)
+candidates AS (SELECT namespace,trace_id FROM candidate_probe WHERE candidate_rank<=1000), roots AS (%s)
 SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),coalesce(start_time,TIMESTAMP_NS '1970-01-01'),capped
 FROM (SELECT count(*)>1000 AS capped FROM candidate_probe) cap LEFT JOIN
 (SELECT trace_id,namespace,service,operation,duration_ms,status,%s AS start_time FROM roots WHERE n=1 ORDER BY %s LIMIT %d) selected ON TRUE
-ORDER BY %s`, candidateOrder, source, where, startProjection, order, limit, order)
+ORDER BY %s`, candidateOrder, source, where, traceRootsSQL(), startProjection, order, limit, order)
+}
+
+// Bound matching trace candidates before the root window functions. Like
+// exemplars, ranking is approximate when filters exclude the root span.
+func checkedTraceRowsSQL(where string, limit int, order string) string {
+	limit = min(limit, 1001)
+	candidateOrder := "max(duration_ms) DESC,namespace,trace_id"
+	if strings.HasPrefix(order, "start_time ASC") {
+		candidateOrder = "min(start_time) ASC,namespace,trace_id"
+	}
+	return fmt.Sprintf(`WITH candidates AS (SELECT namespace,trace_id FROM spans WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY %s LIMIT %d), roots AS (%s)
+SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),epoch_ms(start_time::TIMESTAMP_NS)::BIGINT AS start
+FROM roots WHERE n=1 ORDER BY %s LIMIT %d`, where, candidateOrder, limit, traceRootsSQL(), order, limit)
 }
 
 // The safe message preserves errors.Is without exposing paths in Error().

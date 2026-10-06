@@ -109,3 +109,22 @@ func TestM2ItemsSpecGuide(t *testing.T) {
 		}
 	}
 }
+
+func TestM2RowsFixSpecGuide(t *testing.T) {
+	for _, phrase := range []string{
+		"Row panel types are logs, log_patterns and traces.",
+		"Logs and traces take no measures, by or bucket.",
+		"Patterns use count() by body_template.",
+		"Redaction applies before filtering, grouping, display and drill-down.",
+		"Row panels cannot use SQL.",
+		`"erroring" means slowest erroring traces: filter to erroring traces, then rank by root duration.`,
+		"Trace candidate ranking is approximate when filters exclude the root span, as with exemplars.",
+	} {
+		if !strings.Contains(specGuide, phrase) {
+			t.Errorf("guide missing %q", phrase)
+		}
+	}
+	if strings.Contains(specGuide, "bucket auto or a supported interval") {
+		t.Error("row guide repeats bucket schema")
+	}
+}
