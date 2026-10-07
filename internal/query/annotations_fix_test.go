@@ -283,8 +283,9 @@ func TestM2FixSlowVersionPassCommits(t *testing.T) {
 
 func TestM2FixAnomalyMergePerformance(t *testing.T) {
 	d, _ := versionEngine(t)
-	now := time.Now().UTC()
-	if _, err := d.DB.Exec(`INSERT INTO anomaly_log SELECT 'shop','svc-'||i,'latency',(?::TIMESTAMP_NS-INTERVAL '5 minutes')::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS,'old','warn' FROM generate_series(1,10000) t(i)`, now, now); err != nil {
+	// A nanosecond component makes a microsecond clock (macOS) exercise what Linux sees.
+	now := time.Now().UTC().Truncate(time.Microsecond).Add(123 * time.Nanosecond)
+	if _, err := d.DB.Exec(`INSERT INTO anomaly_log SELECT 'shop','svc-'||i,'latency',?::TIMESTAMP_NS::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS,'old','warn' FROM generate_series(1,10000) t(i)`, now.Add(-5*time.Minute), now); err != nil {
 		t.Fatal(err)
 	}
 	findings := make([]annotations.Anomaly, 10000)
