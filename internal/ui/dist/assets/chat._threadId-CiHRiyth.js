@@ -1,0 +1,1 @@
+import{t as e}from"./chat-DNPRS_h9.js";var t=e;export{t as component};

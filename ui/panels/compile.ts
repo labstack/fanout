@@ -1,3 +1,4 @@
+import { htmlTooltip } from "./escape";
 import { chartTheme, seriesSlot, statusHex } from "../chart";
 import { fonts } from "../tokens";
 import { toCategories, toSeries } from "./frame";
@@ -29,6 +30,7 @@ function baseOption(theme: ChartTheme, unit?: string): Option {
     grid: { left: 8, right: 16, top: 28, bottom: 8, containLabel: true },
     tooltip: {
       trigger: "axis",
+      formatter: htmlTooltip(value => formatValue(unit, value)),
       confine: true,
       backgroundColor: theme.surface,
       borderColor: theme.border,
@@ -51,7 +53,7 @@ function thresholdMax(panel: Panel): ((range: { max: number }) => number) | unde
 function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
   return (panel.thresholds ?? []).map((t) => ({
     yAxis: t.value,
-    label: { formatter: t.label ?? `${t.status} ${formatValue(unit ?? panel.unit, t.value)}`, position: "insideStartTop", color: theme.muted, fontSize: 10 },
+    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideStartTop", color: theme.muted, fontSize: 12 },
     lineStyle: { color: theme.status[t.status], type: [4, 3], width: 1 },
   }));
 }
@@ -67,6 +69,8 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   const units = [...new Set([...current, ...previousSeries].map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
   const style = panel.options?.style ?? "line";
+  const direct = current.length <= 6 && visible.hidden === 0 && style !== "bars" && style !== "stacked";
+  const endWidth = direct ? Math.min(size.width * .3, 180, Math.max(40, ...current.map(s => (size.measureText?.(s.name, `12px ${theme.font}`) ?? Array.from(s.name).length * 7.2) + 8))) : 0;
   const period = result.shift_ms;
   const lines = current.map((s, i) => {
     const color = colorFor(s.name, i, theme);
@@ -76,6 +80,8 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
       type: style === "bars" || style === "stacked" ? "bar" : "line",
       data: s.points,
+      endLabel: direct ? { show: true, formatter: "{a}", color: theme.muted, fontFamily: theme.font, fontSize: 12, distance: 6, width: endWidth - 8, overflow: "truncate", ellipsis: "…" } : undefined,
+      labelLayout: { moveOverlap: "shiftY" },
       showSymbol: false,
       connectNulls: false,
       sampling: style === "bars" || style === "stacked" ? undefined : "lttb",
@@ -105,8 +111,9 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   const axes = units.map((axisUnit, i) => ({ type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(axisUnit) } }));
   return {
     ...baseOption(theme, unit),
+    tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
     legend: legendLayout.option,
-    grid: { left: 8, right: 16 + Math.max(0, units.length - 2) * 56, top: legendLayout.top, bottom: visible.hidden ? 24 : 8, containLabel: true },
+    grid: { left: 8, right: 16 + (direct ? endWidth : 0) + Math.max(0, units.length - 2) * 56, top: legendLayout.top, bottom: visible.hidden ? 24 : 8, containLabel: true },
     xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, hideOverlap: true, formatter: formatTimeAxis } },
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
@@ -140,7 +147,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
   const axes = units.map((axisUnit, i) => ({ type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(axisUnit), hideOverlap: true } }));
   return {
     ...baseOption(theme, unit),
-    tooltip: { ...(baseOption(theme, unit).tooltip as Option), axisPointer: { type: "shadow" } },
+    tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => s.name === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },
     legend: legendLayout.option,
     grid: { left: 8, right: 56, top: (multi ? legendLayout.top : 8) + Math.max(0, units.length - 1) * 36, bottom: hidden ? 24 : 8, containLabel: true },
     yAxis: { type: "category", inverse: true, data: categories, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.text, width: 180, overflow: "truncate" } },

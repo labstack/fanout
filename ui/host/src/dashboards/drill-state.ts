@@ -91,7 +91,7 @@ export function makeDrill(
   result: PanelResult,
   selection: Selection,
 ): DrillTarget | undefined {
-  if (!panel.drill && !selection.trace_id) return undefined;
+  if (!panel.drill && panel.viz !== "service_map" && !selection.trace_id) return undefined;
   if (result.from_ms === undefined || result.to_ms === undefined)
     return undefined;
   let from = result.from_ms,
@@ -114,7 +114,7 @@ export function makeDrill(
   return parseDrill(
     JSON.stringify({
       panel_id: panel.id,
-      kind: selection.trace_id ? "traces" : panel.drill,
+      kind: selection.trace_id || panel.viz === "service_map" ? "traces" : panel.drill,
       from: selection.from && Date.parse(selection.from) === from ? selection.from : new Date(from).toISOString(),
       to: selection.to && Date.parse(selection.to) === to ? selection.to : new Date(to).toISOString(),
       window_from: new Date(result.from_ms).toISOString(),

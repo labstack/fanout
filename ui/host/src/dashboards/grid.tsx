@@ -5,7 +5,6 @@ import { Responsive, type Layout } from "react-grid-layout/legacy";
 import type { DashboardSpec, DashboardTime, Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { ApiError, patchDashboard, replaceDashboard } from "./api";
-import { InspectDrawer } from "./inspect";
 import { PanelCard } from "./panel-card";
 
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
@@ -39,6 +38,9 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const client = useQueryClient();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 }))); }, [spec]);
+  // Presentation minimum fits preview stat chrome + value/delta + area trend.
+  // Keep saved coordinates intact; a layout is persisted only by an edit action.
+  const visibleLayout = useMemo(() => layout.map(l => spec.panels.find(p => p.id === l.i)?.viz === "stat" ? { ...l, h: Math.max(4, l.h), minH: 4 } : l), [layout, spec.panels]);
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
   const [copyFeedback, setCopyFeedback] = useState<string>();
   useEffect(() => {
@@ -46,7 +48,6 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
-  const [inspecting, setInspecting] = useState<string>();
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const gridReady = width > 0;
@@ -129,11 +130,11 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const group = `dashboard-${dashboardId}`;
 
   const card = (panel: Panel, height: number) => <PanelCard panel={panel} title={interpolate(panel.title, vars)} result={results.get(panel.id)} loading={fetching && fetchingIds.includes(panel.id)} height={height} group={group} editing={canEdit} agentAvailable={agentAvailable}
-    annotations={annotations} vars={vars} onVariable={onVariable}
-    onSelect={panel.click && !(panel.drill && onPoint) ? value => onVariable(panel.click!.set_variable, value) : undefined}
-    onPoint={onPoint && (panel.click || panel.drill || results.get(panel.id)?.frame?.columns.some((c, i) => c.name === "trace_id" && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")) || panel.options?.columns?.some(c => c.format === "trace_link" && results.get(panel.id)?.frame?.columns.some((column, i) => column.name === c.field && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")))) ? selection => onPoint(panel, selection) : undefined}
+    compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
+    onSelect={panel.click && (panel.viz === "service_map" || !(panel.drill && onPoint)) ? value => onVariable(panel.click!.set_variable, value) : undefined}
+    onPoint={onPoint && (panel.viz === "service_map" || panel.click || panel.drill || results.get(panel.id)?.frame?.columns.some((c, i) => c.name === "trace_id" && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")) || panel.options?.columns?.some(c => c.format === "trace_link" && results.get(panel.id)?.frame?.columns.some((column, i) => column.name === c.field && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")))) ? selection => onPoint(panel, selection) : undefined}
     onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
-    onView={() => onView(panel.id)} onInspect={() => setInspecting(panel.id)}
+    onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onExplain={() => onOpenChat(`Explain the panel "${interpolate(panel.title, vars)}" (panel id: ${panel.id}) on the dashboard "${spec.name}" (dashboard id: ${dashboardId}). Effective time range: ${JSON.stringify(panel.time ?? time)}. Resolved variables: ${JSON.stringify(vars)}. ${results.get(panel.id)?.status === "error" ? `It fails with: ${results.get(panel.id)?.error}. Please fix the panel.` : "What does it show right now, and is anything unusual?"}`)}
     staleAt={staleAt.get(panel.id)} onDuplicate={canEdit ? () => duplicate.mutate(panel) : undefined}
@@ -155,15 +156,14 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     {conflict && <Alert color="warn" mb="sm">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Alert>}
     {mutationError && !conflict && <Alert color="bad" mb="sm">{mutationError.message}</Alert>}
     {copyFeedback && <Alert role="status" mb="sm">{copyFeedback}</Alert>}
-    {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...layout.map(l => l.y + l.h))) }} />}
-    {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: layout, md: layout, sm: layout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
+    {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...visibleLayout.map(l => l.y + l.h))) }} />}
+    {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: visibleLayout, md: visibleLayout, sm: visibleLayout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
       rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactType="vertical" isDraggable={canEdit} isResizable={canEdit} draggableHandle=".panel-drag" draggableCancel="button"
       onDragStop={changeLayout} onResizeStop={changeLayout}>
-      {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
+      {spec.panels.map((panel) => { const g = visibleLayout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
     <Modal opened={Boolean(viewed)} onClose={() => onView(undefined)} fullScreen aria-label={viewed ? interpolate(viewed.title, vars) : undefined} closeButtonProps={{ "aria-label": "Close panel view" }}>
       {viewed && <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, windowHeight - 140)}</div>}
     </Modal>
-    <InspectDrawer panel={spec.panels.find((p) => p.id === inspecting)} result={inspecting ? results.get(inspecting) : undefined} onClose={() => setInspecting(undefined)} />
   </div>;
 }

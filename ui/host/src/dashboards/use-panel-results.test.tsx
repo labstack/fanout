@@ -65,7 +65,7 @@ async function mountVisibility(visible: string[], spec = visibilitySpec, renderP
   let current!: ReturnType<typeof usePanelResults>;
   function Host({ visible }: { visible: string[] }) {
     current = usePanelResults({ dashboardId: "d", version: 1, spec, time: spec.time, vars: {}, compare: false, widths: {}, visible, refresh: "off" });
-    return renderPanels ? <MantineProvider>{spec.panels.filter(p => visible.includes(p.id)).map(panel => <PanelCard key={panel.id} panel={panel} title={panel.title} result={current.results.get(panel.id)} loading={current.fetchingIds.includes(panel.id)} height={200} group="g" editing={false} agentAvailable={false} onView={()=>{}} onInspect={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}} />)}</MantineProvider> : null;
+    return renderPanels ? <MantineProvider>{spec.panels.filter(p => visible.includes(p.id)).map(panel => <PanelCard key={panel.id} panel={panel} title={panel.title} result={current.results.get(panel.id)} loading={current.fetchingIds.includes(panel.id)} height={200} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}} />)}</MantineProvider> : null;
   }
   const show = async (visible: string[]) => {
     await act(async () => root.render(<QueryClientProvider client={client}><Host visible={visible} /></QueryClientProvider>));

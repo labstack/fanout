@@ -62,6 +62,12 @@ async function render(editing = true, dashboardSpec = spec) {
 }
 
 describe("dashboard layout editing", () => {
+  it("gives short stat cards four visible rows for chrome, value, delta and 40px sparkline without changing the spec", async () => {
+    const dashboard: DashboardSpec = { ...spec, panels: [{ ...spec.panels[0], viz: "stat", grid: { x: 0, y: 0, w: 3, h: 3 } }] };
+    await render(false, dashboard);
+    expect(grid.current!.layouts.lg[0]).toMatchObject({ h: 4, minH: 4 });
+    expect(dashboard.panels[0].grid?.h).toBe(3); expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("waits for a visible container width and follows its resizing after a route transition", async () => {
     measuredWidth = 0;
     const { host } = await render(false);

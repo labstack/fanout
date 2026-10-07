@@ -24,6 +24,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const zoomEnabled = Boolean(onZoom);
   const description = zoomEnabled ? `${label} Brush across the chart to zoom to that range.` : label;
   const apply = useRef<() => void>(() => undefined);
+  const measureLabels = useRef<() => void>(() => undefined);
   const responsive = useRef(false);
   responsive.current = Boolean(optionForSize);
   apply.current = () => {
@@ -36,6 +37,35 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
     selected.current = retained;
     const legend = compiled.legend as { type?: string; show?: boolean; data?: string[]; formatter?: (name: string) => string; selected?: Record<string, boolean> } | undefined;
+    measureLabels.current = () => {
+      if (!ref.current || !chart.current) return;
+      // Instrument the pinned native renderer for collector evidence. Its grid
+      // rect includes axis-label containment, which option margins cannot measure.
+      type NativeGrid = { coordinateSystem?: { getRect(): { x: number; y: number; width: number; height: number }; getAxis(dim: string): { scale: { getExtent(): number[] } } } };
+      const native = chart.current as unknown as { getModel?(): { getComponent(name: string): NativeGrid | undefined } };
+      const grid = native.getModel?.().getComponent("grid");
+      const rect = grid?.coordinateSystem?.getRect();
+      if (rect) {
+        const extent = grid?.coordinateSystem?.getAxis("x")?.scale.getExtent();
+        ref.current.dataset.chartPlot = JSON.stringify({ left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, from: extent?.[0], to: extent?.[1] });
+      }
+      const lines = (compiled.series ?? []) as { name?: string; endLabel?: { show?: boolean }; markLine?: { data?: { xAxis?: number; label?: { formatter?: string } }[] }; markArea?: { data?: { label?: { formatter?: string } }[][] } }[];
+      const endNames = lines.filter(s => s.endLabel?.show).map(s => s.name!);
+      const deployNames = lines.flatMap(s => s.markLine?.data?.filter(m => m.xAxis !== undefined).map(m => m.label?.formatter) ?? []);
+      const anomalyNames = lines.flatMap(s => s.markArea?.data?.map(area => area[0]?.label?.formatter) ?? []);
+      const display = chart.current.getZr?.().storage.getDisplayList(true) ?? [];
+      const bounds = display.flatMap(el => {
+        if (!("style" in el) || typeof (el.style as { text?: unknown }).text !== "string") return [];
+        const style = el.style as { text: string; stroke?: string; lineWidth?: number };
+        const parent = el.parent as unknown as { style?: { text?: string }; __hostTarget?: { type?: string } } | undefined;
+        const rect = el.getBoundingRect().clone(), transform = el.getComputedTransform();
+        if (transform) rect.applyTransform(transform);
+        return [{ name: parent?.style?.text ?? style.text, end: parent?.__hostTarget?.type === "ec-polyline", left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, rotation: transform ? Math.atan2(transform[1], transform[0]) : 0, halo: Boolean(style.stroke && style.lineWidth) }];
+      });
+      ref.current.dataset.chartLabels = JSON.stringify({ width: size.width, height: size.height, end_names: endNames,
+        ends: bounds.filter(b => b.end && endNames.includes(b.name)),
+        deploys: bounds.filter(b => deployNames.includes(b.name)), anomalies: bounds.filter(b => anomalyNames.includes(b.name)) });
+    };
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { brush: { toolbox: [], xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
     // Record actual rendered text bounds, so the collector can check canvas
     // legends without inferring visibility from the configured options.
@@ -54,12 +84,14 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       ref.current.dataset.chartLegendBottom = String((compiled.grid as { top?: number } | undefined)?.top ?? 0);
     }
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
+    measureLabels.current();
   };
 
   useEffect(() => {
     if (!ref.current) return;
     const instance = init(ref.current, undefined, { renderer: "canvas" });
     chart.current = instance;
+    instance.on("finished", () => measureLabels.current());
     instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }));
     instance.on("brushEnd", (payload) => {
       const range = (payload as { areas?: { coordRange?: number[] }[] }).areas?.[0]?.coordRange;

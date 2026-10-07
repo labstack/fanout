@@ -32,12 +32,12 @@ function markers(data: PanelResult = result, viz: Panel["viz"] = "timeseries", a
 }
 
 describe("annotation scope and windows", () => {
-  it("keeps deploy labels in a separate lane above the plot in narrow panels", () => {
+  it("places deploy labels along the plot lines without moving the legend", () => {
     const option = {grid:{top:12,left:8,right:16,bottom:8},series:[{type:"line"}]};
     const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox?:unknown;series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
     expect(got.toolbox).toBeUndefined();
-    expect(got.grid.top).toBe(40);
-    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"end",distance:8,rotate:0,verticalAlign:"bottom",backgroundColor:theme.surface});
+    expect(got.grid.top).toBe(12);
+    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"insideEndTop",distance:8,rotate:90,textBorderColor:theme.surface});
     expect(option.grid.top).toBe(12);
   });
   it("preserves tooltip mode when no annotation markers match", () => {
@@ -52,8 +52,8 @@ describe("annotation scope and windows", () => {
     }
     expect(markers(result, "timeseries", { deploys: [], anomalies: [] }).tooltip).not.toHaveProperty("renderMode");
   });
-  it.each(["deploys", "anomalies"] as const)("uses rich text when only %s markers are drawn", kind => {
-    expect(markers(result, "timeseries", { deploys: kind === "deploys" ? history.deploys : [], anomalies: kind === "anomalies" ? history.anomalies : [] }).tooltip.renderMode).toBe("richText");
+  it.each(["deploys", "anomalies"] as const)("uses escaped HTML when only %s markers are drawn", kind => {
+    expect(markers(result, "timeseries", { deploys: kind === "deploys" ? history.deploys : [], anomalies: kind === "anomalies" ? history.anomalies : [] }).tooltip.renderMode).toBe("html");
   });
   it.each(["timeseries", "heatmap", "state_timeline"] as const)("draws all in-window records with nil scope on %s", viz => {
     const got = markers({ ...result, annotation_scope: undefined }, viz);
@@ -64,12 +64,12 @@ describe("annotation scope and windows", () => {
     const got = markers();
     expect(got.series[0].markLine.data.map(mark => mark.xAxis)).toEqual([1000, 4000]);
     expect(got.series[0].markLine.data[0].lineStyle.type).toBe("dashed");
-    expect(got.series[0].markLine.data[0].tooltip.formatter()).toBe(`checkout · v2 · ${at(1000)}\ncheckout · v5 · ${at(4000)}`);
+    expect(got.series[0].markLine.data[0].tooltip.formatter()).toBe(`checkout · v2 · ${at(1000)}`);
     const band = got.series[0].markArea.data[0];
     expect(band[0].xAxis).toBe(0); expect(band[1].xAxis).toBe(10000);
-    expect(band[0].itemStyle).toEqual({ color: theme.status.bad, opacity: .09 });
-    expect(band[0].tooltip.formatter()).toBe("checkout · Slow · bad");
-    expect(got.tooltip.renderMode).toBe("richText");
+    expect(band[0].itemStyle).toEqual({ color: theme.status.warn, opacity: .09 });
+    expect(band[0].tooltip.formatter()).toBe(`checkout · Slow · bad · ${at(-1000)} – ${at(11000)}`);
+    expect(got.tooltip.renderMode).toBe("html");
     expect(got.series[0].markLine.silent).toBe(false); expect(got.series[0].markArea.silent).toBe(false);
   });
   it("enforces namespaces and keeps an empty checked scope empty", () => {

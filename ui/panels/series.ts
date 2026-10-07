@@ -1,3 +1,4 @@
+import { escapeHTML } from "./escape";
 import type { Panel } from "./types";
 
 export const isOtherSeries = (name?: string) => /^Other(?: \(\d+\))?$/.test(name ?? "");
@@ -45,5 +46,5 @@ export function wrappingLegend(names: string[], width: number, show: boolean, co
   return { top: show ? (scroll ? 30 : rows * 26 + 4) : 12,
     option: { type: scroll ? "scroll" : "plain", show, top: 0, left: 0, right: 0, padding: 0, itemGap: 10,
       icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color, fontSize: 12, lineHeight: 16 },
-      data: names, formatter, tooltip: { show: true, renderMode: "richText", formatter: (params: { name: string }) => params.name } } };
+      data: names, formatter, tooltip: { show: true, renderMode: "html", formatter: (params: { name: string }) => escapeHTML(params.name) } } };
 }

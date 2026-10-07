@@ -3,8 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
-import { chartThemeFor } from "../../../panels/compile";
-import { serviceMapOption } from "../../../panels/rollups";
+import { serviceMapModel } from "../../../panels/rollups";
 import { ok, warn, bad } from "../../../tokens";
 
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }));
@@ -28,18 +27,12 @@ async function render(panel: Panel, result: PanelResult) {
 }
 
 describe("Task 6 rollup panels", () => {
-  it.each([false, true])("keeps stable node shapes, p95 and dominant error edges (dark=%s)", (dark) => {
-    const theme = chartThemeFor(dark);
-    const series = serviceMapOption(mapFrame, theme).series[0];
-    expect(series.data.map((n) => n.name)).toEqual(["checkout", "payment", "sink"]);
-    expect(series.data[0].symbol).toBe("diamond");
-    expect(series.data[1].symbol).toBe("circle");
-    expect(series.data[2].itemStyle.borderType).toBe("dashed");
-    expect(series.data[0].p95_ms).toBe(100);
-    expect(series.data[0]).not.toHaveProperty("average_ms");
-    expect(series.links[0].lineStyle.width).toBeGreaterThan(series.links[1].lineStyle.width);
-    expect(series.links[0].lineStyle.opacity).toBeGreaterThan(series.links[1].lineStyle.opacity);
-    expect(series.links[0].lineStyle.color).toBe(theme.status.bad);
+  it("retains node metrics and percentage edge health in the graph model", () => {
+    const graph = serviceMapModel(mapFrame);
+    expect(graph.nodes.map(n => n.id)).toEqual(["checkout", "payment", "sink"]);
+    expect(graph.nodes[0]).toMatchObject({ health: "unhealthy", p95_ms: 100 });
+    expect(graph.nodes[2].health).toBe("unknown");
+    expect(graph.edges[0].status).toBe("bad"); expect(graph.edges[1].status).toBeNull();
   });
   it("renders the overview tiles, percent trend, operations and shaped distribution from the frame", async () => {
     const frame: Frame = { columns: [], values: [], rows: 3, health: { health: "unhealthy", counts: { healthy: 1, degraded: 1, unhealthy: 1 }, total_spans: 1234, error_rate: 10, service_count: 3, error_trend: [0, 10] } };
@@ -62,7 +55,7 @@ describe("Task 6 rollup panels", () => {
     expect(host.textContent).not.toContain("Healthy");
     expect(host.textContent).not.toContain("operations");
   });
-  it("renders the map through the common canvas panel", async () => {
+  it("renders the map through its accessible dependency region", async () => {
     const host = await render({ id: "m", title: "Map", viz: "service_map" }, { id: "m", status: "ok", frame: mapFrame, elapsed_ms: 1 });
     expect(host.querySelector('[aria-label^="Map: service dependency graph"]')).not.toBeNull();
   });

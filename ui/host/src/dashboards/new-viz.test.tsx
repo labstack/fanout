@@ -10,9 +10,7 @@ import { analysisOption, analysisSummary } from "../../../panels/analysis";
 import { chartThemeFor, timeseriesOption } from "../../../panels/compile";
 import {visualizations,type Panel,type PanelResult,type Viz as VizType} from "../../../panels/types";
 import { PanelCard } from "./panel-card";
-import { InspectDrawer } from "./inspect";
 import { frameRows, rowModel } from "../../../panels/rows";
-import { healthSymbol } from "../../../chart";
 import { TableViz } from "./viz/table";
 import { Viz } from "./viz";
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
@@ -53,7 +51,7 @@ describe("M2 visualizations",()=>{
     for(const viz of types){
       const result=resultFor(viz);
       const panel:Panel={id:"p",title:viz,viz};
-      const props={panel,title:viz,height:300,group:"g",editing:false,agentAvailable:false,onView:noop,onInspect:noop,onCopyLink:noop,onExplain:noop};
+      const props={panel,title:viz,height:300,group:"g",editing:false,agentAvailable:false,onView:noop,onCopyLink:noop,onExplain:noop};
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading result={undefined}/></MantineProvider>));
       expect(container.querySelector('[aria-label="Loading panel"]')).not.toBeNull();
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={{...result,status:"empty",diagnosis:"No matching events"}}/></MantineProvider>));
@@ -158,39 +156,21 @@ it("formats midnight ticks as local month and day across time charts", () => {
 });
 
 
-it("keeps an aria summary and an Inspect data table reachable for every chart", async () => {
-  const container = document.createElement("div");
-  document.body.append(container);
-  const root = createRoot(container);
-  function Harness({ panel, result }: { panel: Panel; result: PanelResult }) {
-    const [inspecting, setInspecting] = useState(false);
-    return <MantineProvider>
-      <PanelCard panel={panel} title="Window summary" result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false}
-        onView={() => undefined} onInspect={() => setInspecting(true)} onCopyLink={() => undefined} onExplain={() => undefined} />
-      <InspectDrawer panel={inspecting ? panel : undefined} result={result} onClose={() => setInspecting(false)} />
-    </MantineProvider>;
-  }
+it("keeps an aria summary and Data table reachable for every chart", async () => {
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   try {
     for (const viz of types) {
-      const panel: Panel = { id: "p", title: viz, viz };
-      const result = resultFor(viz);
-      await act(async () => root.render(<Harness key={viz} panel={panel} result={result} />));
-      const summary = container.querySelector(viz === "health" || rowTypes.has(viz) ? '[role="region"]' : '[role="img"]');
+      const panel: Panel = { id: "p", title: viz, viz }, result = resultFor(viz);
+      await act(async () => root.render(<MantineProvider><PanelCard key={viz} panel={panel} title="Window summary" result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={() => undefined} onCopyLink={() => undefined} onExplain={() => undefined} /></MantineProvider>));
+      const summary = container.querySelector(viz === "health" || viz === "service_map" || rowTypes.has(viz) ? '[role="region"]' : '[role="img"]');
       expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "Service health" : "Window summary");
       expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "services" : `${result.frame!.rows} rows`);
-      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Window summary menu"]')!.click());
-      const inspect = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent?.includes("Inspect"));
-      expect(inspect).toBeDefined();
-      await act(async () => inspect!.click());
-      const table = document.querySelector('[role="dialog"] table');
-      expect(table).not.toBeNull();
-      expect([...table!.querySelectorAll("th")].map(header => header.textContent)).toEqual(result.frame!.columns.map(column => column.name));
-      expect(table!.querySelectorAll("tbody tr")).toHaveLength(result.frame!.rows);
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
+      const table = container.querySelector('table')!; expect(table).not.toBeNull();
+      expect([...table.querySelectorAll("th")].map(header => header.textContent)).toEqual(result.frame!.columns.map(column => column.name));
+      expect(table.querySelectorAll("tbody tr")).toHaveLength(result.frame!.rows);
     }
-  } finally {
-    await act(async () => root.unmount());
-    container.remove();
-  }
+  } finally { await act(async () => root.unmount()); container.remove(); }
 });
 
 it("preserves literal dimension keys and sanitizes rows without losing selections", () => {
@@ -317,15 +297,9 @@ it("grades timeline cells by the spec direction, then the result's inferred dire
   expect(states({ ...panel, better: "lower" }, "higher")).toEqual(lower);
 });
 
-it("reuses shaped service-map nodes, selects services and includes edge-only endpoints", () => {
-  for (const dark of [false, true]) {
-    const option = analysisOption({ id: "p", title: "Map", viz: "service_map" }, resultFor("service_map"), chartThemeFor(dark)) as { series: { data: { name: string; symbol: string; selection: unknown; itemStyle: { borderType: string } }[] }[] };
-    const nodes = option.series[0].data;
-    expect(nodes.map(node => node.name)).toEqual(["checkout", "payment"]);
-    expect(nodes[0].symbol).toBe(healthSymbol("unhealthy"));
-    expect(nodes[0].selection).toEqual({ dimensions: { service: "checkout" } });
-    expect(nodes[1].itemStyle.borderType).toBe("dashed");
-  }
+it("builds a package-free service graph including edge-only endpoints", () => {
+  const option = analysisOption({ id: "p", title: "Map", viz: "service_map" }, resultFor("service_map"), chartThemeFor(false)) as { model: { nodes: { id: string; health: string }[] } };
+  expect(option.model.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: "checkout", health: "unhealthy" }), expect.objectContaining({ id: "payment", health: "unknown" })]));
 });
 
 it("keeps original table indexes after sorting and sanitizes fallback cells", async () => {

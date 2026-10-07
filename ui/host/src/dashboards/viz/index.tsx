@@ -10,19 +10,19 @@ import { HeatmapViz } from "./heatmap";
 import { HistogramViz } from "./histogram";
 import { ScatterViz } from "./scatter";
 import { StateTimelineViz } from "./state-timeline";
-import { ServiceMapViz } from "./service-map";
+import { ServiceMapViz, type MapView } from "./service-map";
 import { HealthViz } from "./health";
 import { LogsViz } from "./logs";
 import { LogPatternsViz } from "./log-patterns";
 import { TracesViz } from "./traces";
 
-export function Viz(props: { panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void }) {
+export function Viz(props: { panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; onMapView?: (view: MapView) => void; compare?: boolean; range?: string; onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void }) {
   const { panel, title, result, dark, height, group, onSelect, onPoint, onVariable, onZoom } = props;
   if (panel.viz === "text") return <TextViz panel={panel} />;
   if (!result?.frame) return null;
   const next = { ...props, result };
   switch (panel.viz) {
-    case "stat": return <StatViz panel={panel} result={result} />;
+    case "stat": return <StatViz panel={panel} result={result} dark={dark} compare={props.compare} range={props.range} />;
     case "gauge": return <GaugeViz panel={panel} title={title} result={result} dark={dark} height={height} />;
     case "timeseries": return <TimeseriesViz {...next} />;
     case "bar": return <BarViz panel={panel} title={title} result={result} dark={dark} height={height} onSelect={onSelect} onPoint={onPoint} />;

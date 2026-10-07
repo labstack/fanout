@@ -22,7 +22,7 @@ import { EChartCanvas } from "./echart-canvas";
 import { Viz } from "./viz";
 import { ApiError } from "./api";
 import { retryQuery } from "./query-policy";
-import { InspectDrawer } from "./inspect";
+import { PanelData } from "./inspect";
 
 const frame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "count", type: "number", role: "measure" }], values: [[1, 2], [20, 40]], rows: 2, totals: [null, 120] };
 const panel: Panel = { id: "p", title: "For $service", viz: "stat", reduce: "window" };
@@ -50,8 +50,8 @@ async function render(node: ReactNode) {
 
 describe("visualization regressions", () => {
   it.each(["bar", "timeseries", "gauge", "heatmap", "histogram", "scatter", "state_timeline", "service_map"] as const)("fits %s into the flex body including the split note", async (viz) => {
-    const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Chart" result={{ ...result, frame: { ...frame, note: "Split at 2026-10-06T19:30:58.554969Z · cart 2.3.0" } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
-    const canvas = host.querySelector<HTMLElement>('[role="img"]')!;
+    const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Chart" result={{ ...result, frame: { ...frame, note: "Split at 2026-10-06T19:30:58.554969Z · cart 2.3.0" } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    const canvas = host.querySelector<HTMLElement>(viz === 'service_map' ? '[data-service-viewport]' : '[role="img"]')!;
     const body = host.querySelector<HTMLElement>('[data-panel="p"]')!.children[1] as HTMLElement;
     expect(body.style.overflow).toBe("hidden");
     expect(body.style.display).toBe("flex");
@@ -68,7 +68,7 @@ describe("visualization regressions", () => {
     });
     try {
       const note = "Split at 2026-10-06T19:30:58.554969Z · cart 2.3.0";
-      const { host } = await render(<PanelCard panel={{ ...panel, viz: "bar" }} title="Split" result={{ ...result, frame: { ...frame, note } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+      const { host } = await render(<PanelCard panel={{ ...panel, viz: "bar" }} title="Split" result={{ ...result, frame: { ...frame, note } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
       const status = host.querySelector('[role="status"]')!;
       expect(status.textContent).toBe("Split at Oct 6, 12:30 PM · cart 2.3.0");
       expect(status.getAttribute("title")).toBe(note);
@@ -102,7 +102,7 @@ describe("visualization regressions", () => {
   it("keeps dimension cells nowrap with full titles and only the panel scrollbar", async () => {
     const service = "checkout-service-with-a-long-unbroken-name";
     const tableFrame: Frame = { columns: [{ name: "service", type: "string", role: "dimension" }, frame.columns[1]], values: [[service], [1]], rows: 1 };
-    const { host } = await render(<PanelCard panel={{ ...panel, viz: "table" }} title="Services" result={{ ...result, frame: tableFrame }} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    const { host } = await render(<PanelCard panel={{ ...panel, viz: "table" }} title="Services" result={{ ...result, frame: tableFrame }} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
     const cell = host.querySelector("tbody td p")!;
     expect(cell.classList.contains("dashboard-dimension-nowrap")).toBe(true);
     expect(cell.getAttribute("title")).toBe(service);
@@ -118,11 +118,11 @@ describe("visualization regressions", () => {
     const countFrame: Frame = { columns: [{ name: "count_distinct", type: "number", role: "measure", unit: "count" }], values: [[1]], rows: 1, totals: [1] };
     const r = { ...result, frame: countFrame };
     const p = { ...panel, unit: "ms" as const };
-    const { host } = await render(<><StatViz panel={p} result={r} /><TableViz panel={{ ...p, viz: "table" }} result={r} height={200} /><GaugeViz panel={{ ...p, viz: "gauge" }} result={r} dark={false} height={200} /><InspectDrawer panel={p} result={r} onClose={vi.fn()} /></>);
+    const { host } = await render(<><StatViz panel={p} result={r} /><TableViz panel={{ ...p, viz: "table" }} result={r} height={200} /><GaugeViz panel={{ ...p, viz: "gauge" }} result={r} dark={false} height={200} /><PanelData panel={p} result={r} /></>);
     expect(host.querySelector("tbody td p")!.textContent).toBe("1");
     expect(host.querySelector("p")!.textContent).toBe("1");
     expect(instance.setOption.mock.lastCall?.[0].series[0].detail.formatter()).toBe("1");
-    expect(document.querySelector('[role="dialog"] tbody td')!.textContent).toBe("1");
+    expect(document.querySelector('[data-panel-data] tbody td')!.textContent).toBe("1");
   });
   it.each([undefined, { ...frame, totals: undefined }])("hides window delta without previous totals (%s)", async (previous) => {
     const { host } = await render(<StatViz panel={panel} result={{ ...result, previous }} />);
@@ -138,9 +138,9 @@ describe("visualization regressions", () => {
     const p = { ...panel, viz };
     const node = (r: PanelResult) => viz === "bar" ? <BarViz panel={p} result={r} dark={false} height={200} /> : viz === "gauge" ? <GaugeViz panel={p} result={r} dark={false} height={200} /> : <Viz panel={p} result={r} dark={false} height={200} group="d" />;
     const { rerender } = await render(node(result));
-    expect(instance.setOption).toHaveBeenCalledOnce();
+    expect(instance.setOption).toHaveBeenCalledTimes(viz === "service_map" ? 0 : 1);
     await rerender(node({ ...result, elapsed_ms: 99 }));
-    expect(instance.setOption).toHaveBeenCalledOnce();
+    expect(instance.setOption).toHaveBeenCalledTimes(viz === "service_map" ? 0 : 1);
   });
   it("memoizes the health trend across unrelated result metadata changes", async () => {
     const healthFrame: Frame = { ...frame, health: { health: "healthy", counts: { healthy: 1, degraded: 0, unhealthy: 0 }, total_spans: 10, error_rate: 0, service_count: 1, error_trend: [0, 1] } };
@@ -159,7 +159,7 @@ describe("visualization regressions", () => {
       anomalies: [{ namespace: "shop", service: "checkout", kind: "latency", from: new Date(3000).toISOString(), to: new Date(5000).toISOString(), title: "Slow", severity: "bad" }],
     };
     const vars = { service: "frontend" };
-    const node = (next: PanelResult, history = annotations, values = vars) => <PanelCard panel={p} title="Time" result={next} annotations={history} vars={values} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />;
+    const node = (next: PanelResult, history = annotations, values = vars) => <PanelCard panel={p} title="Time" result={next} annotations={history} vars={values} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />;
     const { host, rerender } = await render(node(r));
     const option = () => instance.setOption.mock.lastCall![0];
     expect(option().series[0].markLine.data).toHaveLength(1); expect(option().series[0].markArea.data).toHaveLength(1);
@@ -240,7 +240,7 @@ describe("visualization regressions", () => {
     expect(select.mock.calls).toEqual([["cart"], ["cart"]]);
   });
   it("uses interpolated chart labels, focusable descriptions, named loaders and non-scrolling chart bodies", async () => {
-    const { host } = await render(<PanelCard panel={{ ...panel, viz: "gauge", description: "Details" }} title="For cart" result={result} loading height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    const { host } = await render(<PanelCard panel={{ ...panel, viz: "gauge", description: "Details" }} title="For cart" result={result} loading height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
     expect(host.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe("For cart: gauge");
     expect(host.querySelector('[aria-label="For cart description"]')!.tagName).toBe("BUTTON");
     expect(host.querySelector('[aria-label="Refreshing"]')).not.toBeNull();

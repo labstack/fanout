@@ -1,6 +1,7 @@
+import { escapeHTML, htmlTooltip, tooltipLines, type TooltipPoint } from "./escape";
 import { seriesSlot } from "../chart";
 import type { ChartSize, ChartTheme } from "./compile";
-import { serviceMapOption } from "./rollups";
+import { serviceMapModel } from "./rollups";
 import { frameRows } from "./rows";
 import { isOtherSeries, seriesGroups, sumPresent, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
@@ -54,7 +55,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     aria: { enabled: true, description: analysisSummary(panel, result) },
     textStyle: { fontFamily: theme.font, color: theme.text },
     grid: { left: 70, right: 24, top: 30, bottom: 40, containLabel: true },
-    tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text }, renderMode: "richText" },
+    tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text }, renderMode: "html", formatter: htmlTooltip(value => formatValue(panel.unit, value)) },
     legend: { show: false, textStyle: { color: theme.muted } },
     xAxis: { type: "value" }, yAxis: { type: "value" }, series: [] as unknown[],
   };
@@ -77,6 +78,13 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     };
     return {
       ...base,
+      tooltip: { ...base.tooltip, formatter: (params: TooltipPoint | TooltipPoint[]) => {
+        const points = Array.isArray(params) ? params : [params];
+        return points.map(point => {
+          const value = Array.isArray(point.value) ? point.value : [];
+          return tooltipLines([`${point.seriesName ?? ""} · ${point.name ?? ""}`, `${measures[0]?.name ?? "x"}: ${formatValue(xUnit, Number(value[0]))}`, `${measures[1]?.name ?? "y"}: ${formatValue(yUnit, Number(value[1]))}`]);
+        }).join("<br/>");
+      } },
       legend: legendLayout.option,
       grid: { ...base.grid, top: legendLayout.option.show ? legendLayout.top : 8, left: 8, right: 16, bottom: 8 },
       xAxis: axis(xUnit, xScale, measures[0]?.name),
@@ -119,8 +127,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
   }
 
   if (panel.viz === "service_map") {
-    // Task 6 owns the topology compiler; use it for both entry points.
-    return { ...base, ...serviceMapOption(frame, theme), legend: undefined };
+    // The host lays out this package-free graph model with Dagre.
+    return { model: serviceMapModel(frame, result) };
   }
 
   if (panel.viz === "heatmap" || panel.viz === "state_timeline") {
@@ -141,13 +149,20 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         itemStyle: heat ? undefined : { color: status === null ? `${theme.text}26` : theme.status[status] },
       };
     });
-    const data = heat ? buckets : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${names[Number(run.value[1])]} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
+    const data = heat ? buckets : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
     const counts = rows.map(row => Number(row[measure])).filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
     const maxCount = Math.max(1, counts[Math.ceil(counts.length * .99) - 1] ?? 1);
     return {
       ...base,
       grid: { ...base.grid, left: 8, right: 16, top: 8, bottom: heat ? 48 : 8 },
-      tooltip: { ...base.tooltip, trigger: "axis" },
+      tooltip: { ...base.tooltip, trigger: "axis", formatter: (params: TooltipPoint | TooltipPoint[]) => {
+        const points = Array.isArray(params) ? params : [params];
+        return points.map(point => {
+          const v = Array.isArray(point.value) ? point.value : [];
+          return tooltipLines([`${point.seriesName ?? ""} · ${point.name ?? ""}`, heat ? labels.get(names[Number(v[1])]) ?? "" : names[Number(v[1])] ?? "",
+            `${formatTimestamp(Number(v[0]))} – ${formatTimestamp(Number(v[3]))}`, `${measure}: ${formatValue(heat ? "count" : panel.unit ?? measures[0]?.unit, typeof v[2] === "number" ? v[2] : null)}`]);
+        }).join("<br/>");
+      } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
       xAxis: { type: "time", axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
       yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: theme.muted, width: 140, overflow: "truncate" } },

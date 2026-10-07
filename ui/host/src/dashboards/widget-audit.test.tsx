@@ -6,7 +6,6 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chartThemeFor, gaugeOption, timeseriesOption } from "../../../panels/compile";
 import * as analysis from "../../../panels/analysis";
-import * as rollups from "../../../panels/rollups";
 import * as units from "../../../panels/units";
 import { withAnnotations } from "../../../panels/annotations";
 import type { Frame, Panel, PanelResult, Selection } from "../../../panels/types";
@@ -54,7 +53,7 @@ describe("widget audit W1–W9", () => {
     function Harness() {
       const [search, setSearch] = useState<DashboardSearch>({ range: "24h", vars: { service: "cart" } });
       const { zoom, resetZoom, zoomed } = useBrushZoom(search, setSearch);
-      return <><output>{JSON.stringify(search)}</output><button onClick={() => setSearch(s => ({ ...s, vars: { service: "payment" } }))}>Filter</button><PanelCard panel={panel} title="Requests" result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} /></>;
+      return <><output>{JSON.stringify(search)}</output><button onClick={() => setSearch(s => ({ ...s, vars: { service: "payment" } }))}>Filter</button><PanelCard panel={panel} title="Requests" result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} /></>;
     }
     const host = await render(<Harness />);
     expect(host.querySelector('[aria-label="Reset Requests zoom"]')).toBeNull();
@@ -67,16 +66,16 @@ describe("widget audit W1–W9", () => {
     expect(JSON.parse(host.querySelector("output")!.textContent!)).toEqual({ range: "24h", vars: { service: "payment" } });
     expect(host.querySelector('[aria-label="Reset Requests zoom"]')).toBeNull();
   });
-  it.each([false, true])("W3 reserves a surface-backed lane, truncates and collapses labels (dark=%s)", dark => {
+  it.each([false, true])("V3 supersedes the W3 lane with halo labels along clustered deploy lines (dark=%s)", dark => {
     const theme = chartThemeFor(dark);
     const deploys = [1000, 1001, 400000].map(at => ({ service: "cart", namespace: "", version: "a-very-long-version-name", at: new Date(at).toISOString() }));
     const got = withAnnotations(timeseriesOption(panel, result, theme), panel, result, { deploys, anomalies: [] }, {}, theme, { width: 270, height: 248 });
     const grid = got.grid as { top: number };
     const series = got.series as { markLine: { data: { label: { show: boolean; formatter: string; position: string; distance: number; height: number; backgroundColor: string; overflow: string } }[] } }[];
     const labels = series[0].markLine.data.filter(mark => mark.label.show).map(mark => mark.label);
-    expect(labels).toHaveLength(2); expect(grid.top).toBe(40);
-    for (const label of labels) { expect(label.position).toBe("end"); expect(grid.top - label.distance).toBeLessThan(grid.top); expect(label.backgroundColor).toBe(theme.surface); expect(label.overflow).toBe("truncate"); }
-    expect(labels[0].formatter).toContain("+1"); expect(labels[0].formatter).toContain("…");
+    expect(labels).toHaveLength(2); expect(grid.top).toBe(12);
+    for (const label of labels) { expect(label.position).toBe("insideEndTop"); expect(grid.top - label.distance).toBeLessThan(grid.top); expect(label).toHaveProperty("textBorderColor", theme.surface); expect(label.overflow).toBe("truncate"); }
+    expect(labels[0].formatter).toBe("2 deploys");
   });
   it("W4 merges adjacent same-state buckets, preserves gaps and unknown, and draws only rounded rects", () => {
     const got = analysis.analysisOption({ ...panel, viz: "state_timeline", thresholds: [{ value: 1, status: "warn" }] }, result, chartThemeFor(true));
@@ -103,17 +102,6 @@ describe("widget audit W1–W9", () => {
     expect(x.name).toBeUndefined(); expect(y.name).toBeUndefined(); expect(y.interval).toBe(120000);
     expect(y.axisLabel.formatter(y.interval)).toBe("2m");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
-  });
-  it.each([{ width: 270, height: 220 }, { width: 780, height: 220 }, { width: 1100, height: 248 }])("W6 fits every node and label in a 20-node canvas %o", size => {
-    const nodes = Array.from({ length: 20 }, (_, i) => ({ id: `service-with-long-name-${i}`, x: i % 5 * 100 - 250, y: Math.floor(i / 5) * 100 - 200, symbolSize: 30, priority: 20 - i }));
-    const placed = rollups.fitServiceMap(nodes, size);
-    expect(placed).toHaveLength(20);
-    for (const node of placed) for (const box of [node.nodeBox, node.labelBox].filter(Boolean)) {
-      expect(box!.x).toBeGreaterThanOrEqual(12); expect(box!.y).toBeGreaterThanOrEqual(12);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(size.width - 12 + .01); expect(box!.y + box!.height).toBeLessThanOrEqual(size.height - 12 + .01);
-    }
-    const labels = placed.flatMap(node => node.labelBox ? [node.labelBox] : []);
-    for (let a = 0; a < labels.length; a++) for (let b = a + 1; b < labels.length; b++) expect(labels[a].x < labels[b].x + labels[b].width && labels[a].x + labels[a].width > labels[b].x && labels[a].y < labels[b].y + labels[b].height && labels[a].y + labels[a].height > labels[b].y).toBe(false);
   });
   it("W7 fills the heatmap and anchors the scale beneath its right edge", () => {
     const got = analysis.analysisOption({ ...panel, viz: "heatmap" }, result, chartThemeFor(false));
@@ -173,17 +161,9 @@ it("W12 wraps six names plus Other into a plain legend and reserves both rows", 
  expect((options[0].grid as { top: number }).top).toBeGreaterThan((options[1].grid as { top: number }).top);
 });
 
-it.each([{ width: 1100, height: 350 }, { width: 270, height: 350 }, { width: 500, height: 300 }, { width: 500, height: 220, panelHeight: 300 }, { width: 270, height: 220, panelHeight: 300 }])("W6b spreads a connected 20-node core, preserves separation and all labels at full height %o", size => {
- const points = Array.from({ length: 20 }, (_, i) => ({ id: `service-${i}`, x: i % 5 * 8, y: Math.floor(i / 5) * 8, symbolSize: 30, priority: 20 - i }));
- const placed = rollups.fitServiceMap(points, size);
- for (const a of placed) for (const b of placed) if (a.id !== b.id) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(30);
- expect(Math.max(...placed.map(n => n.x)) - Math.min(...placed.map(n => n.x)) >= size.width * .6 || Math.max(...placed.map(n => n.y)) - Math.min(...placed.map(n => n.y)) >= size.height * .6).toBe(true);
- expect(placed.every(n => n.label.show)).toBe(true);
-});
-
 it("I3 lets long Markdown and long errors scroll to their final action", async () => {
  const explain = vi.fn();
- const props = { title: "Content", loading: false, height: 140, group: "g", editing: false, agentAvailable: true, onView: vi.fn(), onInspect: vi.fn(), onCopyLink: vi.fn(), onExplain: explain };
+ const props = { title: "Content", loading: false, height: 140, group: "g", editing: false, agentAvailable: true, onView: vi.fn(), onCopyLink: vi.fn(), onExplain: explain };
  const markdown = await render(<PanelCard {...props} panel={{ ...panel, viz: "text", content: "Long paragraph\n\n".repeat(100) }} />);
  expect(markdown.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
  const error = await render(<PanelCard {...props} panel={panel} result={{ ...result, status: "error", error: "Detailed failure ".repeat(100) }} />);
@@ -216,7 +196,7 @@ it("I4 preserves the server fold count and its muted legend slot", () => {
 });
 
 it("I3 keeps truncated chart results scrollable under the status-ok partial contract", async () => {
- const host = await render(<PanelCard panel={panel} title="Partial" result={{ ...result, frame: { ...frame, truncated: true, note: "Partial data" } }} loading={false} height={140} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+ const host = await render(<PanelCard panel={panel} title="Partial" result={{ ...result, frame: { ...frame, truncated: true, note: "Partial data" } }} loading={false} height={140} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
  expect(host.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
 });
 it("W12 measures legend labels with the chart font and uses safe full-name tooltips", () => {
@@ -225,5 +205,5 @@ it("W12 measures legend labels with the chart font and uses safe full-name toolt
  const measureText = vi.fn(() => 140);
  const got = timeseriesOption(panel, { ...result, frame: data }, chartThemeFor(false), { width: 700, height: 300, measureText });
  expect(measureText).toHaveBeenCalledTimes(7); expect((got.grid as { top: number }).top).toBe(56);
- expect((got.legend as { tooltip: { renderMode: string } }).tooltip.renderMode).toBe("richText");
+ expect((got.legend as { tooltip: { renderMode: string } }).tooltip.renderMode).toBe("html");
 });

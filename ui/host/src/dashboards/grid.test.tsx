@@ -69,7 +69,7 @@ describe("PanelGrid", () => {
     const { host } = await render();
     expect(host.textContent).toContain("140");
     expect(host.textContent).toContain("Degraded");
-    expect(host.textContent).toContain("+100%");
+    expect(host.textContent).not.toContain("+100%"); // Comparison is off.
     expect(host.textContent).toContain("/cart");
     expect(host.textContent).toContain("900ms");
     expect(host.textContent).toContain("Could not convert");
@@ -138,18 +138,12 @@ describe("PanelGrid", () => {
     expect(props.onVariable).toHaveBeenCalledWith("service", "/quote");
   });
 
-  it("opens inspect with Data, Query, Spec and Timing tabs from the panel menu", async () => {
-    const { host } = await render();
-    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Requests menu"]')!.click(); });
-    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === "Inspect")!.click(); });
-    expect(document.body.textContent).toContain("Inspect · Requests");
-    expect([...document.querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(["Data", "Query", "Spec", "Timing"]);
-    expect(document.body.querySelector('[role="tabpanel"]')!.textContent).toContain("1970-01-01T00:00:00.001Z");
-    for (const [tab, content] of [["Query", "SELECT 1"], ["Spec", '"id": "requests"'], ["Timing", "Ran in 4 ms, 2 rows."]]) {
-      await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === tab)!.click(); });
-      const selected = document.querySelector('[role="tab"][aria-selected="true"]')!;
-      expect(document.getElementById(selected.getAttribute("aria-controls")!)!.textContent).toContain(content);
-    }
+  it("opens Data and Spec within the card with query and timing", async () => {
+    const { host } = await render(); const card = host.querySelector('[data-panel="requests"]')!;
+    await act(async () => card.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
+    for (const value of ["1970-01-01T00:00:00.001Z", "SELECT 1", "Ran in 4 ms, 2 rows."]) expect(card.textContent).toContain(value);
+    await act(async () => card.querySelector<HTMLButtonElement>('[data-panel-view="Spec"]')!.click());
+    expect(card.querySelector('pre')!.textContent).toContain('"id": "requests"');
   });
 
   it("opens and closes the full-screen panel through URL view callbacks", async () => {
@@ -219,15 +213,15 @@ it("resizes the full-screen chart, renders its title once and names close button
   const { host, rerender } = await render({ view: "by_service" });
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.querySelector('.mantine-Modal-title')).toBeNull();
-  expect(dialog.querySelectorAll('.mantine-Text-root')).toHaveLength(1);
+  expect(dialog.querySelectorAll('[data-panel-title]')).toHaveLength(1);
   expect(dialog.querySelector('[aria-label="Close panel view"]')).not.toBeNull();
   const height = charts.calls.at(-1)!.height;
   vi.stubGlobal("innerHeight", window.innerHeight + 200);
   await act(async () => { window.dispatchEvent(new Event("resize")); });
   expect(charts.calls.at(-1)!.height).toBe(height + 200);
   await rerender({ view: undefined });
-  await menu(host, "Requests", "Inspect");
-  expect(document.querySelector('[aria-label="Close inspect"]')).not.toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-panel="requests"] [data-panel-view="Data"]')!.click());
+  expect(host.querySelector('[data-panel="requests"] table')).not.toBeNull();
 });
 
 

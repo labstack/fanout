@@ -175,21 +175,20 @@ it("uses accessible gap-preserving stat trends while retaining whole-window tota
  const {host}=await render(<StatViz panel={{...panel,viz:"stat"}} result={{...result,frame,previous:{...frame,totals:[null,21]}}}/>);
  expect(host.textContent).toContain("42");expect(host.textContent).toContain("+100%");
  expect(host.querySelector('svg[role="img"]')?.getAttribute("aria-label")).toBe("Value over this panel's time range");
- expect(host.querySelector("svg path")?.getAttribute("d")).toBe("M0.0,30.0M200.0,2.0");
+ expect(host.querySelector("svg path")?.getAttribute("d")).toBe("M0.0,38.0M200.0,2.0");
 });
 
-it("threads service and trace actions from the grid and keeps Inspect available",async()=>{
+it("threads service and trace actions from the grid and keeps Data available",async()=>{
  const onVariable=vi.fn(),onPoint=vi.fn();const client=new QueryClient();cleanups.push(()=>client.clear());
  const {host}=await render(<QueryClientProvider client={client}><PanelGrid dashboardId="d" version={1} spec={{version:1,name:"Formats",time:{range:"1h"},panels:[formattedPanel]}} vars={{}} results={new Map([["p",{...result,frame:formattedFrame}]])} fetching={false} editing={false} agentAvailable={false} onOpenChat={vi.fn()} onVariable={onVariable} onPoint={onPoint} onView={vi.fn()} onVisible={vi.fn()}/></QueryClientProvider>);
  await act(async()=>host.querySelector<HTMLButtonElement>("tbody tr button")!.click());
  expect(onVariable.mock.calls).toEqual([["service","checkout"]]);
  await act(async()=>host.querySelector<HTMLAnchorElement>("tbody tr a")!.click());
  expect(onPoint).toHaveBeenCalledWith(formattedPanel,expect.objectContaining({trace_id:"abc"}));
- await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Formats menu"]')!.click());
- await vi.waitFor(()=>expect(document.querySelector('[role="menuitem"]')).not.toBeNull());
- await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(node=>node.textContent==="Inspect")!.click());
- await vi.waitFor(()=>expect(document.querySelector('[role="dialog"] table')).not.toBeNull());
- expect(document.querySelectorAll('[role="dialog"] tbody tr')).toHaveLength(2);
+ await act(async()=>host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
+
+ await vi.waitFor(()=>expect(document.querySelector('[data-panel-data] table')).not.toBeNull());
+ expect(document.querySelectorAll('[data-panel-data] tbody tr')).toHaveLength(2);
 });
 
 it("keeps column definitions when grid callback identities change with the same data",async()=>{
