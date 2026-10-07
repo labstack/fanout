@@ -1,9 +1,9 @@
 # Agent dashboards Milestone 2 verification
 
-Build: 2c5a686c (collector run on this build, including the final-review fixes). Model: claude-sonnet-5-5. Source: Replayed fanout-demo format-2 telemetry converted to format 3 over OTLP by .superpowers/replay (newest input 2026-10-05T16:45:10.69Z, target 2026-10-06T22:40:35.61Z), served by a disposable local instance with no AI provider. Deploy markers use 7,201 synthetic cart spans with service.version 2.3.0 (attribute fanout.synthetic), 19:30:58Z-23:30:58Z. Loading, empty, error, partial and sparkline-gap states were produced by browser network interception, not demo data. Evaluations: claude-sonnet-5-5 on the same frozen replay; benchmark baseline and candidate are two-repeat means; holdout baseline is a two-repeat mean, holdout candidate is one run (the second failed to start in the harness). No judge pass..
+Build: 669bec26 (collector run on 2c37797e; 669bec26 changes only a manual-refresh queue and a test wait). Model: claude-sonnet-5-5. Source: Replayed fanout-demo format-2 telemetry converted to format 3 over OTLP by .superpowers/replay (newest input 2026-10-05T16:45:10.69Z, target 2026-10-06T22:40:35.61Z), served by a disposable local instance with no AI provider. Deploy markers use 7,201 synthetic cart spans with service.version 2.3.0 (attribute fanout.synthetic), 19:30:58Z-23:30:58Z. Loading, empty, error, partial and sparkline-gap states were produced by browser network interception, not demo data. Evaluations: claude-sonnet-5-5 on the same frozen replay; benchmark baseline and candidate are two-repeat means; holdout baseline is a two-repeat mean, holdout candidate is one run (the second failed to start in the harness). No judge pass..
 Status: PASS.
 
-This run was taken about 17 hours after the replay's newest point, so its 24-hour window holds about 7 hours of telemetry. An earlier run on the same data, inside a fresh window, returned about 20,500 cells per refresh in 1.6–2.1 s, also with exactly one panels request and one annotations request.
+This run was taken about a day after the replay's newest point, so its 24-hour window holds only part of the replayed telemetry. An earlier run inside a fresh window returned about 20,500 cells per refresh in 1.6–2.1 s, also with exactly one panels request and one annotations request.
 
 Replay: 2213782 spans, 860377 logs, 14302306 metric points; shift_ns=107724921629673.
 
@@ -46,12 +46,12 @@ Replay: 2213782 spans, 860377 logs, 14302306 metric points; shift_ns=10772492162
 
 | Theme | Panels | Panel requests | Annotation requests | Cells | ms |
 |---|---:|---:|---:|---:|---:|
-| light | 23 | 1 | 1 | 9399 | 1267 |
-| light | 23 | 1 | 1 | 9399 | 1286 |
-| light | 23 | 1 | 1 | 9399 | 1166 |
-| dark | 23 | 1 | 1 | 9378 | 1356 |
-| dark | 23 | 1 | 1 | 9378 | 1366 |
-| dark | 23 | 1 | 1 | 9378 | 1367 |
+| light | 23 | 1 | 1 | 6642 | 1219 |
+| light | 23 | 1 | 1 | 6642 | 1201 |
+| light | 23 | 1 | 1 | 6642 | 1268 |
+| dark | 23 | 1 | 1 | 6642 | 1269 |
+| dark | 23 | 1 | 1 | 6642 | 1240 |
+| dark | 23 | 1 | 1 | 6642 | 1169 |
 
 ## Interaction evidence
 
@@ -61,17 +61,17 @@ Replay: 2213782 spans, 860377 logs, 14302306 metric points; shift_ns=10772492162
 - error: PASS; error asserted on 1 types/panels (rate_ts); interception removed; observed real response and rendering recovered
 - partial: PASS; partial asserted on 1 types/panels (rate_ts); interception removed; observed real response and rendering recovered
 - filter_chip: PASS; Real bar selected frontend; removal restored All and 10 visible services; selection request, removal cache_hit
-- linked_crosshair: PASS; 4 required comparisons show exactly one ≤8px band within ±12px at relative x=.63; wide tooltip bands recorded and ignored; heatmap/timeline followers recorded; chart IDs ec_1791388807271→ec_1791388833853
+- linked_crosshair: PASS; 4 required comparisons show exactly one ≤8px band within ±12px at relative x=.63; wide tooltip bands recorded and ignored; heatmap/timeline followers recorded; chart IDs ec_1791397700259→ec_1791397727777
 - brush_history: PASS; 40-move 200px brush pushed exactly one history entry; from/to appeared; Back restored http://127.0.0.1:7520/dashboards/01a11382-f0df-708c-bade-71d3fa50fc21?range=24h
-- panel_time: PASS; Visible 1d badge; requested panel shift=1d; observed response windows differ exactly 86400000ms; all other windows match (1791302499616..1791388899616)
-- drill_url: PASS; slow_traces: click→drill URL→reload retained→Back closed; recent_logs: click→drill URL→reload retained→Back closed
+- panel_time: PASS; Visible 1d badge; requested panel shift=1d; observed response windows differ exactly 86400000ms; all other windows match (1791311395896..1791397795896)
+- drill_url: PASS; slow_traces: scrollY=3707 preserved on open/close; click→drill URL→reload retained→Back closed; recent_logs: scrollY=2979 preserved on open/close; click→drill URL→reload retained→Back closed
 - waterfall_logs: PASS; Selected trace 020a920f65fbf268508dab44747cdbf9; 2 waterfall spans; correlated logs empty with trace-ID/window reason
 - cancel_drill: PASS; Delayed first drill; closed before completion; second dialog matched its URL kind/panel; releasing first response never restored first drawer or target (MutationObserver + URL)
-- deploy_markers: PASS; Controller visual inspection of m2-screenshots/dark-deploy-cart-markers.png vs dark-deploy-cart-plain.png on build 2c5a686c: the markers dashboard draws a dashed "cart 2.3.0" line at the 19:30Z first-seen instant plus the 22:29-22:54Z anomaly band; the no-marker twin draws neither; service=checkout shows no deploy line and its two images are identical. The collector pixel heuristic was inconclusive because the marker label lane compresses the plot; the version is a labelled synthetic injection.
+- deploy_markers: PASS; Controller visual inspection in the scripted screenshots and in a real Chrome session on build 2c37797e: the cart-scoped charts draw a dashed "cart 2.3.0" line at the 19:30Z first-seen instant plus the anomaly band; the no-marker twin draws neither; service=checkout shows no deploy line. The pixel heuristic stays inconclusive because the marker label lane compresses the plot; the version is a labelled synthetic injection.
 - anomaly_areas: PASS; Cart error_rate_change 2026-10-06T22:29:00Z..2026-10-06T22:54:00Z produces 136px shaded band; checkout has no unrelated band; matched twin screenshots and saved diffs
 - deploy_split: PASS; Cart visible frame has Before deploy,Since deploy series and nonblank bar screenshot (request); All has a plain bar and note: Service is All; showing the unsplit whole-window frame. (cache_hit)
 - column_formats: PASS; service_link click sets picker/request; sparkline SVG, status text with non-colour cue, width bar, trace_link drill, normalized duration unit and log_template code/wildcards observed
-- stat_sparkline: PASS; Calls total=367197 unchanged after one simulated null; 2 SVG subpaths prove gap; route removed and real data recovered
+- stat_sparkline: PASS; Calls total=232282 unchanged after one simulated null; 2 SVG subpaths prove gap; route removed and real data recovered
 
 ## Agent evaluation
 
@@ -95,6 +95,7 @@ Holdout is never used for tuning. Matching repeats use the same frozen telemetry
 
 ## Screenshots
 
+- .superpowers/replay/m2-screenshots/light-six-series-legend.png
 - .superpowers/replay/m2-screenshots/light-full.png
 - .superpowers/replay/m2-screenshots/light-viewport-00.png
 - .superpowers/replay/m2-screenshots/light-viewport-01.png
@@ -102,6 +103,7 @@ Holdout is never used for tuning. Matching repeats use the same frozen telemetry
 - .superpowers/replay/m2-screenshots/light-viewport-03.png
 - .superpowers/replay/m2-screenshots/light-viewport-04.png
 - .superpowers/replay/m2-screenshots/light-viewport-05.png
+- .superpowers/replay/m2-screenshots/dark-six-series-legend.png
 - .superpowers/replay/m2-screenshots/dark-full.png
 - .superpowers/replay/m2-screenshots/dark-viewport-00.png
 - .superpowers/replay/m2-screenshots/dark-viewport-01.png
@@ -220,3 +222,23 @@ transaction, and SQL panel CTEs may not shadow telemetry relations.
 Deferred: an explicit empty multi-value selection does not survive a shared
 URL (rare; it shows no data either way), and schema-qualified log columns
 fail with an error rather than binding (they fail closed).
+
+## Hands-on testing
+
+The dashboards were then used by hand in a real Chrome session, with the agent on
+`claude-sonnet-5-5` and, separately, `gpt-6.1-sol`. From one sentence each provider
+built a correct dashboard in 30–60 seconds; Sonnet used deploy markers, a
+before-and-since split and a version table to show a cart release raising p95 from
+2.4 ms to 8.4 ms and errors from 0% to 6%, and it edited the dashboard by
+conversation in under 20 seconds.
+
+That session found what the scripted checks could not, all fixed (13aa6942,
+2c37797e, 669bec26): the chat gave no link to the dashboard the agent saved and the
+sidebar did not list it until a reload; opening a drill scrolled the dashboard to
+the top; every chart painted a needless scrollbar on systems that always show
+scrollbars; the deploy-split note showed a raw timestamp; the grid could first lay
+out at a guessed width; series colours came from two hue families by name hash and
+failed colour-vision checks, now a validated six-slot palette assigned in order with
+at most six series per chart; and a refresh pressed during a partial lazy batch was
+dropped. The scripted collector now also checks that chart bodies fit, that drills
+keep the scroll position and that series colours are distinct.
