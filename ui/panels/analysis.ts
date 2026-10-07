@@ -1,8 +1,8 @@
 import { seriesSlot } from "../chart";
-import type { ChartTheme } from "./compile";
+import type { ChartSize, ChartTheme } from "./compile";
 import { serviceMapOption } from "./rollups";
 import { frameRows } from "./rows";
-import { seriesGroups, sumPresent } from "./series";
+import { isOtherSeries, seriesGroups, sumPresent, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
 import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, niceDurationInterval } from "./units";
@@ -43,7 +43,7 @@ export function analysisSummary(panel: Panel, result: PanelResult): string {
 }
 
 /** Compile server frames without importing ECharts or browser dependencies. */
-export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTheme): Record<string, unknown> {
+export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTheme, size: ChartSize = { width: 500, height: 248 }): Record<string, unknown> {
   const frame = result.frame ?? { columns: [], values: [], rows: 0 };
   const rows = frameRows(frame);
   const dimensions = frame.columns.filter(column => column.role === "dimension").map(column => column.name);
@@ -63,6 +63,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const item = dimensions[0];
     const colour = dimensions[1];
     const groups = seriesGroups([...new Set(rows.map(row => colour ? String(row[colour] ?? "") : "Items"))].map(name => ({ name })), panel);
+    const legendLayout = wrappingLegend(groups.map(g => g.name), size.width, groups.length > 1 && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
     const xScale = panel.options?.x_scale ?? panel.options?.scale;
     const yScale = panel.options?.y_scale ?? panel.options?.scale;
     const xUnit = panel.x_unit ?? measures[0]?.unit;
@@ -76,12 +77,12 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     };
     return {
       ...base,
-      legend: { ...base.legend, show: groups.length > 1 && panel.options?.legend !== "hidden" },
-      grid: { ...base.grid, top: groups.length > 1 && panel.options?.legend !== "hidden" ? 30 : 8, left: 8, right: 16, bottom: 8 },
+      legend: legendLayout.option,
+      grid: { ...base.grid, top: legendLayout.option.show ? legendLayout.top : 8, left: 8, right: 16, bottom: 8 },
       xAxis: axis(xUnit, xScale, measures[0]?.name),
       yAxis: axis(yUnit, yScale, measures[1]?.name),
       series: groups.map(({ name, items }, index) => ({
-        type: "scatter", name, itemStyle: { color: name === "Other" ? theme.muted : seriesSlot(index, theme.dark) },
+        type: "scatter", name, itemStyle: { color: isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark) },
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
           .filter(row => typeof row[measures[0]?.name] === "number" && typeof row[measures[1]?.name] === "number")
           .filter(row => (xScale !== "log" || Number(row[measures[0].name]) > 0) && (yScale !== "log" || Number(row[measures[1].name]) > 0))
@@ -98,13 +99,15 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const buckets = [...new Map([...rows].sort(compareBuckets).map(row => [bucketKey(row), row])).values()];
     const labels = buckets.map(row => bucketLabel(row, bucketUnit));
     const names = seriesGroups([...new Set(rows.map(row => split ? String(row[split] ?? "") : "Count"))].map(name => ({ name })), panel);
+    const legendLayout = wrappingLegend(names.map(g => g.name), size.width, names.length > 1 && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
     return {
       ...base,
-      legend: { ...base.legend, show: names.length > 1 && panel.options?.legend !== "hidden" },
+      legend: legendLayout.option,
+      grid: { ...base.grid, top: legendLayout.top },
       xAxis: { type: "category", data: labels },
       yAxis: { type: "value", name: "count" },
       series: names.map(({ name, items }, index) => ({
-        type: "bar", name, itemStyle: { color: name === "Other" ? theme.muted : seriesSlot(index, theme.dark) },
+        type: "bar", name, itemStyle: { color: isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark) },
         data: buckets.map(bucket => {
           const matches = rows.filter(row => (!split || items.some(item => item.name === String(row[split] ?? ""))) && bucketKey(row) === bucketKey(bucket));
           return { value: sumPresent(matches.map(row => typeof row.count === "number" ? row.count : null)) ?? 0, selection: {

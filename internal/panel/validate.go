@@ -350,8 +350,12 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 		}
 	}
 	if p.Options != nil {
-		if !isRow && p.Options.Top > 6 {
-			problems.addHint(path+".options.top", "top must be at most 6", "set options.top to 6 or less; remaining series become Other")
+		maximum := 20
+		if p.categoricalSeries() {
+			maximum = 6
+		}
+		if !isRow && p.Options.Top > maximum {
+			problems.addHint(path+".options.top", fmt.Sprintf("top must be at most %d", maximum), fmt.Sprintf("set options.top to %d or less", maximum))
 		}
 		if !isRow && p.Options.Style != "" && !slices.Contains([]string{"line", "area", "bars", "stacked"}, p.Options.Style) {
 			problems.add(path+".options.style", "style must be line, area, bars or stacked")

@@ -8,12 +8,12 @@ import (
 
 func TestSeriesTopDefaultAndClamp(t *testing.T) {
 	for _, top := range []int{0, 6, 8, 20} {
-		p := Panel{Options: &Options{Top: top}}
+		p := Panel{Viz: "timeseries", Options: &Options{Top: top}}
 		if got := p.Top(); got != 6 {
 			t.Errorf("top=%d: got %d, want 6", top, got)
 		}
 	}
-	if got := (&Panel{}).Top(); got != 6 {
+	if got := (&Panel{Viz: "timeseries"}).Top(); got != 6 {
 		t.Errorf("omitted options: got %d, want 6", got)
 	}
 }
@@ -53,7 +53,7 @@ func TestSeriesSeventhFoldsIntoOther(t *testing.T) {
 	}
 	f := got[0].Frame
 	for row, name := range f.Values[1] {
-		if name == "Other" && f.Values[2][row] == float64(1) && f.Rows == 7 {
+		if name == "Other (1)" && f.Values[2][row] == float64(1) && f.Rows == 7 {
 			return
 		}
 	}
@@ -81,14 +81,14 @@ func TestGroupedBarOtherAggregatesBeforeErrorRate(t *testing.T) {
 	commit(t, repo, spans, nil)
 	e := NewExecutor(duck, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	d := Dashboard{Name: "Bars", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "bar", Query: &Query{From: "spans", Measures: []string{"error_rate()"}, By: []string{"http_route", "service"}}}}}
+	d := Dashboard{Name: "Bars", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "bar", Better: "higher", Query: &Query{From: "spans", Measures: []string{"error_rate()"}, By: []string{"http_route", "service"}}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil || got[0].Frame == nil {
 		t.Fatalf("run: %+v %v", got, err)
 	}
 	f := got[0].Frame
 	for row, name := range f.Values[1] {
-		if name == "Other" && f.Rows == 7 {
+		if name == "Other (2)" && f.Rows == 7 {
 			if value := f.Values[2][row].(float64); value < 33.33 || value > 33.34 {
 				t.Fatalf("Other error rate=%v, want weighted 100/3", value)
 			}
@@ -96,4 +96,117 @@ func TestGroupedBarOtherAggregatesBeforeErrorRate(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing grouped-bar Other: %+v", f)
+}
+
+func TestM3TimelineTwelveRows(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	spans := shopSpans()[:0]
+	for i := range 12 {
+		sp := shopSpans()[0]
+		sp.SpanID = fmt.Sprint(i)
+		sp.TraceID = sp.SpanID
+		sp.ServiceName = fmt.Sprintf("svc%02d", i)
+		spans = append(spans, sp)
+	}
+	commit(t, repo, spans, nil)
+	e := NewExecutor(duck, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := Dashboard{Name: "Rows", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "states", Title: "States", Viz: "state_timeline", Options: &Options{Top: 12}, Thresholds: []Threshold{{Value: 5, Status: "bad"}}, Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Bucket: "1m"}}}}
+	Normalize(&d)
+	if problems := Validate(&d); len(problems) != 0 {
+		t.Fatalf("timeline rejected: %+v", problems)
+	}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil || got[0].Frame == nil || got[0].Frame.Rows != 12 {
+		t.Fatalf("12 rows: %+v %v", got, err)
+	}
+	if (&Panel{Viz: "state_timeline"}).Top() != 8 || (&Panel{Viz: "state_timeline", Options: &Options{Top: 30}}).Top() != 20 {
+		t.Fatal("timeline defaults and cap")
+	}
+	d.Panels[0].Viz = "timeseries"
+	if problems := Validate(&d); len(problems) == 0 {
+		t.Fatal("categorical top 12 accepted")
+	}
+}
+
+func TestI4WorstFirstSeries(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	spans := shopSpans()[:0]
+	for service := range 6 {
+		volume := 100
+		if service == 5 {
+			volume = 5
+		}
+		for event := range volume {
+			sp := shopSpans()[0]
+			sp.SpanID = fmt.Sprintf("s%d_e%d", service, event)
+			sp.TraceID = sp.SpanID
+			sp.ServiceName = fmt.Sprintf("svc%d", service)
+			sp.StatusCode = "STATUS_CODE_OK"
+			if event == 0 || service == 5 && event == 1 {
+				sp.StatusCode = "STATUS_CODE_ERROR"
+			}
+			sp.DurationMS = float64(10 + service)
+			if service == 5 {
+				sp.DurationMS = 1000
+			}
+			sp.EndUnixNanos = sp.StartUnixNanos + int64(sp.DurationMS*1e6)
+			spans = append(spans, sp)
+		}
+	}
+	commit(t, repo, spans, nil)
+	e := NewExecutor(duck, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	for _, tc := range []struct {
+		measure, better string
+		wantSpike       bool
+	}{{"error_rate()", "", true}, {"count()", "", false}, {"p95(duration_ms)", "", true}, {"avg(duration_ms)", "higher", false}} {
+		t.Run(tc.measure+tc.better, func(t *testing.T) {
+			d := Dashboard{Name: "Ranking", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "timeseries", Better: tc.better, Options: &Options{Top: 3}, Query: &Query{From: "spans", Measures: []string{tc.measure}, By: []string{"service"}, Bucket: "1m"}}}}
+			got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+			if err != nil || got[0].Frame == nil {
+				t.Fatalf("run: %+v %v", got, err)
+			}
+			f := got[0].Frame
+			spike, folded := false, false
+			for row, name := range f.Values[1] {
+				if name == "svc5" {
+					spike = true
+					if tc.measure == "error_rate()" && f.Values[2][row] != float64(40) {
+						t.Fatalf("spike value %v", f.Values[2][row])
+					}
+				}
+				if name == "Other (3)" {
+					folded = true
+				}
+			}
+			if spike != tc.wantSpike || !folded || f.Rows != 4 {
+				t.Fatalf("spike=%v want=%v fold=%v frame=%+v", spike, tc.wantSpike, folded, f)
+			}
+			if tc.measure == "count()" {
+				for _, name := range []string{"svc0", "svc1", "svc2"} {
+					found := false
+					for _, v := range f.Values[1] {
+						found = found || v == name
+					}
+					if !found {
+						t.Fatalf("missing volume winner %s", name)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestM3NonCategoricalLimits(t *testing.T) {
+	for _, viz := range []string{"bar", "table", "state_timeline", "scatter", "heatmap"} {
+		p := Panel{Viz: viz}
+		if p.Top() != 8 {
+			t.Errorf("%s default %d, want 8", viz, p.Top())
+		}
+		p.Options = &Options{Top: 12}
+		if p.Top() != 12 {
+			t.Errorf("%s top12 clamped", viz)
+		}
+	}
 }

@@ -6,7 +6,7 @@ import type { Layout } from "react-grid-layout/legacy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSpec } from "../../../panels/types";
 
-type GridOptions = { children: ReactNode; width?: number; layouts: { lg: Layout; sm: Layout }; isDraggable: boolean; isResizable: boolean; rowHeight: number; onBreakpointChange(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
+type GridOptions = { children: ReactNode; className: string; width?: number; layouts: { lg: Layout; sm: Layout }; isDraggable: boolean; isResizable: boolean; rowHeight: number; onBreakpointChange?(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
 const grid = vi.hoisted(() => ({ current: undefined as GridOptions | undefined }));
 vi.mock("react-grid-layout/legacy", () => ({
   WidthProvider: (component: unknown) => component,
@@ -20,20 +20,20 @@ const spec: DashboardSpec = { version: 1, name: "Notes", time: { range: "1h" }, 
 const record = { id: "d1", name: "Notes", version: 3, spec, is_default: false, description: "", created_at: "t", updated_at: "t" };
 const cleanups: (() => void)[] = [];
 const fetchMock = vi.fn<typeof fetch>();
-let measuredWidth = 809;
+let measuredWidth = 1200;
 let reportWidth: ((width: number) => void) | undefined;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", fetchMock);
   grid.current = undefined;
-  measuredWidth = 809;
+  measuredWidth = 1200;
   reportWidth = undefined;
   vi.stubGlobal("ResizeObserver", class {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
       reportWidth = width => this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
-      reportWidth(measuredWidth);
+      if (measuredWidth > 0) reportWidth(measuredWidth);
     }
     unobserve() {}
     disconnect() {}
@@ -130,14 +130,14 @@ describe("dashboard layout editing", () => {
 
 
 it("ignores narrow breakpoint stop events and never dirties or saves the compact layout", async () => {
+  measuredWidth = 700;
   const { host, save } = await render();
-  await act(async () => { grid.current!.onBreakpointChange("sm"); });
   expect(grid.current!.isDraggable).toBe(false);
   expect(grid.current!.isResizable).toBe(false);
   expect(host.textContent).toContain("only on a wider screen");
   await act(async () => { grid.current!.onDragStop(grid.current!.layouts.sm); grid.current!.onResizeStop(grid.current!.layouts.sm); });
   expect(save().disabled).toBe(true);
-  await act(async () => { save().click(); grid.current!.onBreakpointChange("lg"); });
+  await act(async () => { save().click(); reportWidth!(1200); });
   expect(save().disabled).toBe(true);
   expect(grid.current!.layouts.lg[0]).toMatchObject({ x: 3, w: 6 });
   expect(fetchMock).not.toHaveBeenCalled();
@@ -218,4 +218,29 @@ it("duplicates with unsaved layout in one PUT on plain HTTP", async () => {
  expect(body.spec.panels[2].grid).toBeUndefined();
  expect(body.spec.panels[2].id).toMatch(/^[a-z][a-z0-9_]{0,39}$/);
  expect(two.panels.some(p => p.id === body.spec.panels[2].id)).toBe(false);
+});
+
+it("W10 enables grid motion only while editing", async () => {
+ const { rerender } = await render(false);
+ expect(grid.current!.className).toBe("dashboard-grid");
+ await rerender(true);
+ expect(grid.current!.className).toContain("dashboard-grid-editing");
+ await rerender(false);
+ expect(grid.current!.className).not.toContain("dashboard-grid-editing");
+});
+
+it("I2 preserves the complete layout height while the container is hidden", async () => {
+ measuredWidth = 0;
+ const tall = { ...spec, panels: [...spec.panels, { ...spec.panels[0], id: "bottom", grid: { x: 0, y: 18, w: 6, h: 6 } }] };
+ const { host } = await render(false, tall);
+ expect(host.querySelector<HTMLElement>("[data-grid-placeholder]")!.style.height).toBe(`${24 * 40 + 23 * 12}px`);
+ await act(async () => reportWidth!(1200));
+ expect(host.querySelector("[data-grid-placeholder]")).toBeNull();
+});
+it("I2 mounts from synchronous geometry before observer delivery", async () => {
+ measuredWidth = 0;
+ const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1200 } as DOMRect);
+ await render(false);
+ expect(grid.current!.width).toBe(1200);
+ rect.mockRestore();
 });

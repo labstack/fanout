@@ -228,3 +228,19 @@ it("runs a manual refresh pressed during a partial lazy batch once that batch se
     expect(wire.panels.mock.calls[2][0].panels).toEqual(["a", "loaded"]);
   } finally { await host.dispose(); }
 });
+
+it("M1 prioritizes a queued full refresh over a newly visible lazy batch", async () => {
+ const pending = deferred<PanelResult[]>();
+ wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockImplementationOnce(() => pending.promise).mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+ const host = await mountVisibility(["loaded"]);
+ try {
+  await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.has("loaded")).toBe(true); });
+  await host.show(["loaded", "a"]);
+  await waitForHook(() => { expect(host.current.fetching).toBe(true); expect(wire.panels).toHaveBeenCalledTimes(2); });
+  await act(async () => host.current.refetch());
+  await host.show(["loaded", "a", "b"]);
+  await act(async () => pending.resolve([resultFor("a")]));
+  await waitForHook(() => { expect(wire.panels.mock.calls[2][0].panels).toEqual(["a", "b", "loaded"]); expect(host.current.fetching).toBe(false); });
+  expect(wire.panels).toHaveBeenCalledTimes(3);
+ } finally { await host.dispose(); }
+});

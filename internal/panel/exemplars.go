@@ -60,7 +60,7 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 		if (!slices.Contains(p.Query.By, name) && !((p.Viz == "health" || p.Viz == "service_map") && name == "service")) || len(dimensions[name]) > 500 {
 			return "", nil, Problems{{Path: "dimensions", Message: "dimensions must name query.by fields and values at most 500 characters", Hint: "select one of the panel grouping fields"}}
 		}
-		if dimensions[name] == "Other" && p.Viz == "timeseries" && len(p.Query.By) == 1 && p.Top() > 0 {
+		if (dimensions[name] == "Other" || strings.HasPrefix(dimensions[name], "Other (") && strings.HasSuffix(dimensions[name], ")")) && p.Viz == "timeseries" && len(p.Query.By) == 1 && p.Top() > 0 {
 			return "", nil, Problems{{Path: "dimensions", Message: "Other groups several values; pick a named series"}}
 		}
 		ref, err := sig.field(name)

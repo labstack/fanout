@@ -1,7 +1,7 @@
 import { chartTheme, seriesSlot, statusHex } from "../chart";
 import { fonts } from "../tokens";
 import { toCategories, toSeries } from "./frame";
-import { hiddenSeriesNote, visibleSeries } from "./series";
+import { hiddenSeriesNote, isOtherSeries, visibleSeries, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
 import { formatAxis, formatTimeAxis, formatValue } from "./units";
@@ -16,7 +16,7 @@ export function chartThemeFor(dark: boolean): ChartTheme {
 
 type Option = Record<string, unknown>;
 
-const colorFor = (name: string, index: number, theme: ChartTheme) => (name === "Other" ? theme.muted : seriesSlot(index, theme.dark));
+const colorFor = (name: string, index: number, theme: ChartTheme) => (isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark));
 
 function chartSeries(frame: Frame, panel: Panel) {
   return visibleSeries(toSeries(frame), panel);
@@ -59,7 +59,7 @@ function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
 /** A time series: one line per series, the previous period dashed and
  *  recessive, thresholds as labelled lines, stacking only when asked (the
  *  server refuses to stack non-additive measures). */
-export function timeseriesOption(panel: Panel, result: PanelResult, theme: ChartTheme): Option {
+export function timeseriesOption(panel: Panel, result: PanelResult, theme: ChartTheme, size: ChartSize = { width: 500, height: 248 }): Option {
   const visible = result.frame ? chartSeries(result.frame, panel) : { shown: [], hidden: 0 };
   const current = visible.shown;
   const unit = current[0]?.unit ?? panel.unit;
@@ -101,11 +101,12 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     itemStyle: { color: theme.border },
   })) : [];
   const legend = (panel.options?.legend ?? "auto") !== "hidden" && current.length > 1;
+  const legendLayout = wrappingLegend(current.map(s => s.name), size.width, legend, theme.text, theme.font, size.measureText);
   const axes = units.map((axisUnit, i) => ({ type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(axisUnit) } }));
   return {
     ...baseOption(theme, unit),
-    legend: { type: "scroll", show: legend, top: 0, left: 0, right: 0, icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color: theme.text, fontSize: 12 }, data: current.map((s) => s.name) },
-    grid: { left: 8, right: 16 + Math.max(0, units.length - 2) * 56, top: legend ? 30 : 12, bottom: 8, containLabel: true },
+    legend: legendLayout.option,
+    grid: { left: 8, right: 16 + Math.max(0, units.length - 2) * 56, top: legendLayout.top, bottom: visible.hidden ? 24 : 8, containLabel: true },
     xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, hideOverlap: true, formatter: formatTimeAxis } },
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
@@ -114,7 +115,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
 }
 
 /** Horizontal bars sorted by the server, value labels at the bar end. */
-export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option {
+export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: ChartSize = { width: 500, height: 248 }): Option {
   const pivot = toCategories(frame);
   const categories = pivot.categories;
   const { shown: series, hidden } = visibleSeries(pivot.series, panel);
@@ -135,12 +136,13 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option
   const units = [...new Set(series.map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
   const multi = series.length > 1;
+  const legendLayout = wrappingLegend(series.map(s => s.name), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
   const axes = units.map((axisUnit, i) => ({ type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(axisUnit), hideOverlap: true } }));
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as Option), axisPointer: { type: "shadow" } },
-    legend: { type: "scroll", show: multi, top: 0, left: 0, right: 0, icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color: theme.text, fontSize: 12 } },
-    grid: { left: 8, right: 56, top: (multi ? 30 : 8) + Math.max(0, units.length - 1) * 36, bottom: 8, containLabel: true },
+    legend: legendLayout.option,
+    grid: { left: 8, right: 56, top: (multi ? legendLayout.top : 8) + Math.max(0, units.length - 1) * 36, bottom: hidden ? 24 : 8, containLabel: true },
     yAxis: { type: "category", inverse: true, data: categories, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.text, width: 180, overflow: "truncate" } },
     xAxis: axes.length === 1 ? axes[0] : axes,
     series: series.map((s, i) => ({
@@ -159,7 +161,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option
 }
 
 /** A gauge with its thresholds as coloured bands. */
-export type ChartSize = { width: number; height: number };
+export type ChartSize = { width: number; height: number; measureText?: (text: string, font: string) => number };
 
 export function gaugeOption(panel: Panel, value: number | null, theme: ChartTheme, unit = panel.unit as string | undefined, size: ChartSize = { width: 270, height: 140 }): Option {
   const min = panel.min ?? 0;

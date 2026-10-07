@@ -130,3 +130,14 @@ describe("EChartCanvas", () => {
     expect(mocks.disconnect).toHaveBeenCalledWith("g");
   });
 });
+
+it("W12 exposes rendered legend text bounds for collector measurements", async () => {
+ const instance = fresh();
+ Object.assign(instance, { getZr: () => ({ storage: { getDisplayList: () => [{ style: { text: "load-generator" }, getBoundingRect: () => ({ clone: () => ({ x: 10, y: 0, width: 100, height: 16, applyTransform: () => {} }) }), getComputedTransform: () => null }] } }) });
+ const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+ await act(async () => root.render(<EChartCanvas option={{ legend: { type: "plain", show: true, data: ["load-generator"] }, grid: { top: 30 } }} height={100} label="Legend" />));
+ const chart = container.querySelector<HTMLElement>("[role=img]")!;
+ expect(JSON.parse(chart.dataset.chartLegend!)).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
+ expect(chart.dataset.chartLegendBottom).toBe("30");
+ await act(async () => root.unmount()); container.remove();
+});

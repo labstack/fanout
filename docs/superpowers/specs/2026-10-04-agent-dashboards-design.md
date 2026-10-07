@@ -224,7 +224,7 @@ sees from them.
 | `reduce` | For `stat` and `gauge`: `last`, `mean`, `min`, `max`, `sum`, `window`. Default `window`, which computes the measure over the whole time range rather than reading the last bucket. |
 | `thresholds` | Up to 4 of `{ value, status, label? }` with `status` in `ok`, `warn`, `bad`. Direction comes from `better`. |
 | `better` | `lower` or `higher`. Inferred for known measures (latency and errors are `lower`). |
-| `options` | Viz-specific, closed per viz: `style` (`line`, `area`, `bars`, `stacked`), `scale` (`linear`, `log`), `top` (series limit, default 6, maximum 6, the rest become Other), `legend` (`auto`, `hidden`), `sort`. |
+| `options` | Viz-specific, closed per viz: `style` (`line`, `area`, `bars`, `stacked`), `scale` (`linear`, `log`), `top` (categorical series limit, default/max 6; structured series are chosen worst-first by the panel's measure; the rest fold into Other (N); SQL series past six are left out with a note; noncategorical rows default 8, maximum 20), `legend` (`auto`, `hidden`), `sort`. |
 | `click` | `{ "set_variable": "<name>" }`: clicking a bar, row or series sets that variable to the clicked value. |
 | `drill` | `traces` (exemplar traces for the clicked bucket or row) or `logs`. |
 | `time` | `{ "range": "30d" }` or `{ "shift": "1d" }`, overriding the dashboard range for this panel. |
@@ -342,7 +342,11 @@ research describes.
    pruning applies, then run with named parameters on one connection under the
    read gate. Each panel has a 10-second timeout. Tables, bars and SQL panels
    cap at 1000 rows; time series cap at 2000 points per series, and a series
-   beyond `top` folds into Other. One request holds at most 200,000 cells;
+   beyond `top` folds into server-computed Other (N) for structured queries.
+   Series are chosen worst-first by the panel's first measure over the full
+   window: additive volumes largest first, other measures use explicit/inferred
+   `better`, ties by row count then name. SQL series past six are left out with
+   a note. One request holds at most 200,000 cells;
    past that, time series drop their oldest buckets and say so. When the
    whole request runs out of time, finished panels still return and the rest
    report that they did not run.

@@ -1,3 +1,5 @@
+// @ts-expect-error Tests run in Node; the browser project intentionally omits Node typings.
+import { readFileSync } from "node:fs";
 import { MantineProvider } from "@mantine/core";
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -137,4 +139,91 @@ describe("widget audit W1–W9", () => {
     expect(host.querySelector<HTMLElement>('[data-health-tiles]')!.style.flex).toBe("1 1 auto");
     expect(host.querySelector<HTMLElement>('[data-health-trend]')!.style.flex).toBe("1 1 auto");
   });
+});
+
+it("W10 disables view-mode item and container transitions without changing resize handle opacity", () => {
+ const css = readFileSync("src/index.css", "utf8") as string;
+ expect(css).toMatch(/\.dashboard-grid:not\(\.dashboard-grid-editing\)\s*\{[^}]*transition:\s*none/s);
+ expect(css).toMatch(/\.dashboard-grid:not\(\.dashboard-grid-editing\) > \.react-grid-item\s*\{[^}]*transition:\s*none/s);
+ expect(css).toContain("transition: opacity 150ms ease");
+});
+
+it.each([false, true])("W11 merges touching anomalies per service with bounded alpha (dark=%s)", dark => {
+ const annotations = { deploys: [], anomalies: [[0, 1000], [500, 2000], [2000, 3000]].map(([from, to]) => ({ service: "cart", namespace: "", kind: "errors", severity: "bad", title: "Error spike", from: new Date(from).toISOString(), to: new Date(to).toISOString() })) };
+ const got = withAnnotations(timeseriesOption(panel, result, chartThemeFor(dark)), panel, result, annotations, {}, chartThemeFor(dark));
+ const areas = (got.series as { markArea: { data: { xAxis: number; itemStyle?: { opacity: number }; tooltip?: { formatter(): string } }[][] } }[])[0].markArea.data;
+ expect(areas).toHaveLength(1);
+ expect(areas[0].map(a => a.xAxis)).toEqual([0, 3000]);
+ expect(areas[0][0].itemStyle!.opacity).toBeGreaterThanOrEqual(dark ? .10 : .08);
+ expect(areas[0][0].itemStyle!.opacity).toBeLessThanOrEqual(dark ? .14 : .10);
+ expect(areas[0][0].tooltip!.formatter()).toContain("cart · Error spike · bad");
+});
+
+it("W12 wraps six names plus Other into a plain legend and reserves both rows", () => {
+ const names = ["cart", "flagd", "frontend", "frontend-proxy", "load-generator", "recommendationservice", "Other"];
+ const data = { columns: frame.columns, values: [names.map(() => 0), names, names.map(() => 1)], rows: names.length };
+ const options = [500, 1400].map(width => timeseriesOption(panel, { ...result, frame: data }, chartThemeFor(false), { width, height: 300 }));
+ for (const o of options) {
+  const legend = o.legend as { type: string; data: string[]; formatter(name: string): string; tooltip: { show: boolean } };
+  expect(legend.type).toBe("plain"); expect(legend.data).toEqual(names);
+  expect(legend.formatter("load-generator")).toBe("load-generator");
+  expect(legend.formatter("a".repeat(40))).toBe("a".repeat(23) + "…");
+  expect(legend.tooltip.show).toBe(true);
+ }
+ expect((options[0].grid as { top: number }).top).toBeGreaterThan((options[1].grid as { top: number }).top);
+});
+
+it.each([{ width: 1100, height: 350 }, { width: 270, height: 350 }, { width: 500, height: 300 }, { width: 500, height: 220, panelHeight: 300 }, { width: 270, height: 220, panelHeight: 300 }])("W6b spreads a connected 20-node core, preserves separation and all labels at full height %o", size => {
+ const points = Array.from({ length: 20 }, (_, i) => ({ id: `service-${i}`, x: i % 5 * 8, y: Math.floor(i / 5) * 8, symbolSize: 30, priority: 20 - i }));
+ const placed = rollups.fitServiceMap(points, size);
+ for (const a of placed) for (const b of placed) if (a.id !== b.id) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(30);
+ expect(Math.max(...placed.map(n => n.x)) - Math.min(...placed.map(n => n.x)) >= size.width * .6 || Math.max(...placed.map(n => n.y)) - Math.min(...placed.map(n => n.y)) >= size.height * .6).toBe(true);
+ expect(placed.every(n => n.label.show)).toBe(true);
+});
+
+it("I3 lets long Markdown and long errors scroll to their final action", async () => {
+ const explain = vi.fn();
+ const props = { title: "Content", loading: false, height: 140, group: "g", editing: false, agentAvailable: true, onView: vi.fn(), onInspect: vi.fn(), onCopyLink: vi.fn(), onExplain: explain };
+ const markdown = await render(<PanelCard {...props} panel={{ ...panel, viz: "text", content: "Long paragraph\n\n".repeat(100) }} />);
+ expect(markdown.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
+ const error = await render(<PanelCard {...props} panel={panel} result={{ ...result, status: "error", error: "Detailed failure ".repeat(100) }} />);
+ expect(error.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
+ const action = [...error.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Ask Fanout to fix it")!;
+ expect(action.closest<HTMLElement>(".mantine-Center-root")!.style.height).not.toBe("100%");
+ await act(async () => action.click()); expect(explain).toHaveBeenCalledOnce();
+});
+
+it("M2 reserves a separate bottom lane for SQL series omission notices", () => {
+ const names = Array.from({ length: 12 }, (_, i) => `service-${i}`);
+ const got = timeseriesOption(panel, { ...result, frame: { columns: frame.columns, values: [names.map(() => 0), names, names.map(() => 1)], rows: 12 } }, chartThemeFor(false));
+ expect((got.grid as { bottom: number }).bottom).toBeGreaterThanOrEqual(24);
+ expect((got.graphic as { bottom: number }[])[0].bottom).toBe(2);
+});
+
+it("M3 renders twelve independent status rows without a categorical cap", () => {
+ const names = Array.from({ length: 12 }, (_, i) => `svc${i}`);
+ const got = analysis.analysisOption({ ...panel, viz: "state_timeline", options: { top: 12 }, thresholds: [{ value: 5, status: "bad" }] }, { ...result, frame: { columns: frame.columns, values: [names.map(() => 0), names, names.map(() => 1)], rows: 12 } }, chartThemeFor(false));
+ expect((got.yAxis as { data: string[] }).data).toHaveLength(12);
+});
+
+it("I4 preserves the server fold count and its muted legend slot", () => {
+ const names = ["a", "b", "c", "d", "e", "f", "Other (3)"];
+ const theme = chartThemeFor(false);
+ const got = timeseriesOption(panel, { ...result, frame: { columns: frame.columns, values: [names.map(() => 0), names, names.map(() => 1)], rows: 7 } }, theme);
+ const series = got.series as { name: string; itemStyle: { color: string } }[];
+ expect(series).toHaveLength(7);
+ expect(series.at(-1)!.name).toBe("Other (3)"); expect(series.at(-1)!.itemStyle.color).toBe(theme.muted);
+});
+
+it("I3 keeps truncated chart results scrollable under the status-ok partial contract", async () => {
+ const host = await render(<PanelCard panel={panel} title="Partial" result={{ ...result, frame: { ...frame, truncated: true, note: "Partial data" } }} loading={false} height={140} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+ expect(host.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
+});
+it("W12 measures legend labels with the chart font and uses safe full-name tooltips", () => {
+ const names = ["cart", "flagd", "frontend", "frontend-proxy", "load-generator", "recommendationservice", "Other (3)"];
+ const data = { columns: frame.columns, values: [names.map(() => 0), names, names.map(() => 1)], rows: 7 };
+ const measureText = vi.fn(() => 140);
+ const got = timeseriesOption(panel, { ...result, frame: data }, chartThemeFor(false), { width: 700, height: 300, measureText });
+ expect(measureText).toHaveBeenCalledTimes(7); expect((got.grid as { top: number }).top).toBe(56);
+ expect((got.legend as { tooltip: { renderMode: string } }).tooltip.renderMode).toBe("richText");
 });

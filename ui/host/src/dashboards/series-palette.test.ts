@@ -55,12 +55,12 @@ describe("validated categorical series", () => {
     const histogram: Frame = { columns: [frame(1).columns[1], { name: "bucket_lower", type: "number", role: "dimension", unit: "ms" }, { name: "bucket_upper", type: "number", role: "dimension", unit: "ms" }, frame(1).columns[2]], values: [names, Array(8).fill(0), Array(8).fill(1), Array(8).fill(1)], rows: 8 };
     const hist = analysisOption({ ...panel, viz: "histogram" }, result(histogram), theme) as Chart;
     expect(hist.series.slice(0, 6).map(s => s.itemStyle.color)).toEqual(series.light);
-    expect(hist.series[6].name).toBe("Other");
+    expect(hist.series[6].name).toBe("Other (2)");
     expect(hist.series[6].data[0]).toMatchObject({ value: 2 });
     const scatter: Frame = { columns: [grouped.columns[0], grouped.columns[1], grouped.columns[2], { name: "p95", type: "number", role: "measure", unit: "ms" }], values: [...grouped.values, Array(8).fill(10)], rows: 8 };
     const points = analysisOption({ ...panel, viz: "scatter" }, result(scatter), theme) as Chart;
     expect(points.series.slice(0, 6).map(s => s.itemStyle.color)).toEqual(series.light);
-    expect(points.series[6].name).toBe("Other");
+    expect(points.series[6].name).toBe("Other (2)");
     expect(points.series[6].data).toHaveLength(2);
   });
   it("uses slot zero for single series, gauges and the heatmap ramp", () => {

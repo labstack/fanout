@@ -27,14 +27,32 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const responsive = useRef(false);
   responsive.current = Boolean(optionForSize);
   apply.current = () => {
-    const size = { width: ref.current?.clientWidth ?? 0, height: ref.current?.clientHeight ?? 0 };
+    const context = document.createElement("canvas").getContext("2d");
+    const measureText = context ? (text: string, font: string) => { context.font = font; return context.measureText(text).width; } : undefined;
+    const size = { measureText, width: ref.current?.clientWidth ?? 0, height: ref.current?.clientHeight ?? 0 };
     const compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize(size) : option;
     const series = (compiled.series ?? []) as { name?: string }[];
     const names = new Set(series.map(item => item.name));
     const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
     selected.current = retained;
-    const legend = compiled.legend as { selected?: Record<string, boolean> } | undefined;
+    const legend = compiled.legend as { type?: string; show?: boolean; data?: string[]; formatter?: (name: string) => string; selected?: Record<string, boolean> } | undefined;
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { brush: { toolbox: [], xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
+    // Record actual rendered text bounds, so the collector can check canvas
+    // legends without inferring visibility from the configured options.
+    if (ref.current) {
+      const names = legend?.show ? legend.data ?? [] : [];
+      const display = chart.current?.getZr?.().storage.getDisplayList(true) ?? [];
+      const entries = names.flatMap(name => {
+        const text = legend?.formatter?.(name) ?? name;
+        return display.filter(el => "style" in el && (el.style as { text?: string }).text === text).map(el => {
+          const rect = el.getBoundingRect().clone(), transform = el.getComputedTransform();
+          if (transform) rect.applyTransform(transform);
+          return { name, text, left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height };
+        });
+      });
+      ref.current.dataset.chartLegend = JSON.stringify({ type: legend?.type, names, entries });
+      ref.current.dataset.chartLegendBottom = String((compiled.grid as { top?: number } | undefined)?.top ?? 0);
+    }
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
   };
 

@@ -1,3 +1,4 @@
+import { isOtherSeries } from "./series";
 import type { Panel, PanelResult, Selection } from "./types";
 
 export type ChartEvent = { name?: string; seriesName?: string; value?: unknown; data?: unknown };
@@ -13,7 +14,7 @@ export function panelTimeLabel(panel: Panel): string | undefined {
 }
 
 export function pointSelection(panel: Panel, result: PanelResult, event: ChartEvent): Selection | undefined {
-  if (event.seriesName?.endsWith(" · previous") || event.seriesName === "Other" || event.name === "Other") return undefined;
+  if (event.seriesName?.endsWith(" · previous") || isOtherSeries(event.seriesName) || isOtherSeries(event.name)) return undefined;
   const embedded = (event.data as { selection?: Selection } | undefined)?.selection;
   if (embedded) return embedded;
   const dimension = panel.query?.by?.[0] ?? result.frame?.columns.find(column => column.role === "dimension")?.name;

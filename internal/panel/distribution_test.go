@@ -270,7 +270,7 @@ func TestM2DistributionSpanOther(t *testing.T) {
 		t.Fatalf("split histogram: %+v %v", got, err)
 	}
 	f := got[0].Frame
-	if f.Rows != 2 || f.Columns[0].Name != "service" || !slices.Equal(f.Values[0], []any{"Other", "a"}) || !slices.Equal(f.Values[3], []any{float64(3), float64(3)}) {
+	if f.Rows != 2 || f.Columns[0].Name != "service" || !slices.Equal(f.Values[0], []any{"Other (2)", "a"}) || !slices.Equal(f.Values[3], []any{float64(3), float64(3)}) {
 		t.Fatalf("folded histogram: %+v", f)
 	}
 }

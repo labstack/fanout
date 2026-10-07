@@ -61,7 +61,7 @@ CASE WHEN duration_ms<pow(2,32) THEN CASE WHEN duration_ms<1 THEN 1 ELSE pow(2,f
 	source := "raw"
 	cte := "WITH raw AS (" + raw + ")"
 	if len(p.Query.By) > 0 {
-		cte += fmt.Sprintf(",top AS (SELECT dim FROM raw GROUP BY dim ORDER BY sum(n) DESC,dim LIMIT %d),folded AS (SELECT * REPLACE (CASE WHEN dim IN (SELECT dim FROM top) THEN dim ELSE 'Other' END AS dim) FROM raw)", p.Top())
+		cte += fmt.Sprintf(",top AS (SELECT dim FROM raw GROUP BY dim ORDER BY sum(n) DESC,dim LIMIT %d),folded AS (SELECT * REPLACE (CASE WHEN dim IN (SELECT dim FROM top) THEN dim ELSE (SELECT 'Other (' || count(DISTINCT dim)::VARCHAR || ')' FROM raw WHERE dim NOT IN (SELECT dim FROM top)) END AS dim) FROM raw)", p.Top())
 		source = "folded"
 	}
 	text := cte + " SELECT " + strings.Join(prefix, ",") + " FROM " + source + " GROUP BY " + strings.Join(groups, ",")

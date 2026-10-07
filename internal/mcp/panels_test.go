@@ -130,3 +130,17 @@ func TestM2RowsFixSpecGuide(t *testing.T) {
 		t.Error("row guide repeats bucket schema")
 	}
 }
+
+func TestM4SeriesGuide(t *testing.T) {
+	for _, phrase := range []string{"Structured panels: the server computes Other", "SQL panels: series past six are left out, with a note", "state_timeline defaults to 8 rows, maximum 20"} {
+		if !strings.Contains(specGuide, phrase) {
+			t.Errorf("guide missing %q", phrase)
+		}
+	}
+}
+
+func TestI4RankingGuide(t *testing.T) {
+	if !strings.Contains(specGuide, "series are chosen worst-first by the panel's measure; the rest fold into Other (N)") {
+		t.Fatal("missing ranking semantics")
+	}
+}

@@ -22,7 +22,9 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
     return () => window.clearInterval(timer);
   }, [staleAt]);
   const bodyHeight = Math.max(80, height - 52);
-  const scrolls = ["table", "logs", "traces", "log_patterns"].includes(panel.viz);
+  const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
+  const scrolls = !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
+  const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
   return <Paper withBorder radius="md" h="100%" p="sm" style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id}>
     <Group justify="space-between" wrap="nowrap" gap="xs" mb={6} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
@@ -47,14 +49,14 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
       </Menu>
       </Group>
     </Group>
-    <Box data-panel-body style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: scrolls ? "auto" : "hidden", display: scrolls ? "block" : "flex", flexDirection: "column" }}>
-      {!result && panel.viz !== "text" ? <Center h="100%"><Loader size="sm" aria-label="Loading panel" /></Center>
-        : result?.status === "error" ? <Center h="100%"><Stack align="center" gap={4} maw={420}>
+    <Box data-panel-body style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: scrolls ? "auto" : "hidden", display: rows ? "block" : "flex", flexDirection: "column" }}>
+      {!result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
+        : result?.status === "error" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
           <Text size="xs" c="dimmed" ta="center" style={{ overflowWrap: "anywhere" }}>{result.error}</Text>
           {agentAvailable && <Button size="compact-xs" variant="light" onClick={onExplain}>Ask Fanout to fix it</Button>}
         </Stack></Center>
-        : result?.status === "empty" ? <Center h="100%"><Stack align="center" gap={4} maw={420}>
+        : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>

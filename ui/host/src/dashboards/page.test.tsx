@@ -442,6 +442,13 @@ it.each(["panels", "variables"])("retries server errors at most twice for %s", a
 
 it("marks older panels stale after a failed refresh and clears stale on recovery", async()=>{
  const {host,client}=await render();
+ // Network idle precedes React Query's scheduled render under CPU load.
+ // A disabled loading button cannot accept the test's manual refresh.
+ await vi.waitFor(async () => {
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
+  expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
+ }, { interval: 5, timeout: 3000 });
  panelResponse=async()=>json({message:"Refresh failed"},400);
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
  await vi.waitFor(() => expect(host.textContent).toContain("Panels could not be loaded"), { interval: 5, timeout: 3000 });await vi.waitFor(() => expect(host.textContent).toContain("120"), { interval: 5, timeout: 3000 });

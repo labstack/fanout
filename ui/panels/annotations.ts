@@ -18,11 +18,23 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
     lineStyle: { type: "dashed", color: theme.muted, width: 1 },
     tooltip: { formatter: () => `${a.service} · ${a.version} · ${a.at}` },
   }));
-  const anomalies = annotations.anomalies.filter(matches).filter(a => Date.parse(a.to) > from && Date.parse(a.from) < to).map(a => [{
-    xAxis: Math.max(from, Date.parse(a.from)), name: a.title,
-    itemStyle: { color: a.severity === "bad" ? theme.status.bad : theme.status.warn, opacity: .08 },
-    label: { show: false }, tooltip: { formatter: () => `${a.service} · ${a.title} · ${a.severity}` },
-  }, { xAxis: Math.min(to, Date.parse(a.to)) }]);
+  const episodes: { service: string; namespace: string; from: number; to: number; bad: boolean; titles: string[]; details: string[] }[] = [];
+  for (const a of annotations.anomalies.filter(matches).filter(a => Date.parse(a.to) > from && Date.parse(a.from) < to)
+    .sort((a, b) => a.namespace.localeCompare(b.namespace) || a.service.localeCompare(b.service) || Date.parse(a.from) - Date.parse(b.from))) {
+    const start = Math.max(from, Date.parse(a.from)), end = Math.min(to, Date.parse(a.to));
+    const detail = `${a.service} · ${a.title} · ${a.severity}`;
+    const last = episodes.at(-1);
+    if (last && last.service === a.service && last.namespace === a.namespace && start <= last.to) {
+      last.to = Math.max(last.to, end); last.bad ||= a.severity === "bad";
+      if (!last.titles.includes(a.title)) last.titles.push(a.title);
+      if (!last.details.includes(detail)) last.details.push(detail);
+    } else episodes.push({ service: a.service, namespace: a.namespace, from: start, to: end, bad: a.severity === "bad", titles: [a.title], details: [detail] });
+  }
+  const anomalies = episodes.map(a => [{
+    xAxis: a.from, name: a.titles.join(" · "),
+    itemStyle: { color: a.bad ? theme.status.bad : theme.status.warn, opacity: theme.dark ? .12 : .09 },
+    label: { show: false }, tooltip: { formatter: () => a.details.join("\n") },
+  }, { xAxis: a.to }]);
   const series = (option.series ?? []) as Record<string, unknown>[];
   if (!series.length) return option;
   const grid = (option.grid ?? {}) as Record<string, unknown>;

@@ -148,15 +148,15 @@ func TestM2TimelineShareBeforeTopN(t *testing.T) {
 		t.Fatalf("share: %+v %v", got, err)
 	}
 	f := got[0].Frame
-	if f.Rows != buckets*6 {
-		t.Fatalf("rows = %d, want %d", f.Rows, buckets*6)
+	if f.Rows != buckets*8 {
+		t.Fatalf("rows = %d, want %d", f.Rows, buckets*8)
 	}
 	sums := map[any]float64{}
 	counts := map[any]int{}
 	for i, bucket := range f.Values[0] {
 		sums[bucket] += f.Values[2][i].(float64)
 		counts[bucket]++
-		if service := f.Values[1][i].(string); service >= "svc06" {
+		if service := f.Values[1][i].(string); service >= "svc08" {
 			t.Errorf("non-top service returned: %s", service)
 		}
 	}
@@ -164,8 +164,8 @@ func TestM2TimelineShareBeforeTopN(t *testing.T) {
 		t.Fatalf("buckets = %d, want %d", len(sums), buckets)
 	}
 	for bucket, sum := range sums {
-		if counts[bucket] != 6 || sum >= 100 || math.Abs(sum-100.0*57/78) > 1e-9 {
-			t.Errorf("bucket %v: rows=%d share=%v, want 6 rows and %v", bucket, counts[bucket], sum, 100.0*57/78)
+		if counts[bucket] != 8 || sum >= 100 || math.Abs(sum-100.0*68/78) > 1e-9 {
+			t.Errorf("bucket %v: rows=%d share=%v, want 8 rows and %v", bucket, counts[bucket], sum, 100.0*68/78)
 		}
 	}
 }

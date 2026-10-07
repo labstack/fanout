@@ -8,7 +8,7 @@ import type { Selection } from "../../../../panels/types";
 import { EChartCanvas } from "../echart-canvas";
 
 export function ServiceMapViz({ panel, title = panel.title, result, dark, height, onSelect, onPoint }: AnalysisProps) {
-  const optionForSize = useMemo(() => (size: ChartSize) => serviceMapOption(result.frame!, chartThemeFor(dark), size), [result.frame, dark]);
+  const optionForSize = useMemo(() => (size: ChartSize) => serviceMapOption(result.frame!, chartThemeFor(dark), { ...size, panelHeight: height + 52 }), [result.frame, dark, height]);
   const option = useMemo(() => optionForSize({ width: 500, height: Math.max(60, height - 24) }), [optionForSize, height]);
   const graph = option.series[0];
   return <Stack gap={4} style={{ flex: "1 1 auto", minHeight: 0 }}>

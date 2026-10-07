@@ -5,26 +5,48 @@ import { formatValue } from "./units";
 
 export const healthGlyph: Record<string, string> = { healthy: "●", degraded: "■", unhealthy: "◆", unknown: "○" };
 
+type MapSize = ChartSize & { panelHeight?: number };
+
 type MapPoint = { id: string; x: number; y: number; symbolSize: number; priority: number };
 type MapBox = { x: number; y: number; width: number; height: number };
 const overlaps = (a: MapBox, b: MapBox) => a.x < b.x + b.width + 3 && a.x + a.width + 3 > b.x && a.y < b.y + b.height + 3 && a.y + a.height + 3 > b.y;
 
 /** Fit completed layout coordinates, retaining fixed-size symbols and labels.
  * High-priority labels get the first collision-free slot; all names stay in tooltips. */
-export function fitServiceMap<T extends MapPoint>(nodes: T[], size: ChartSize) {
+export function fitServiceMap<T extends MapPoint>(nodes: T[], size: MapSize) {
   if (!nodes.length) return [];
   const padding = 12;
+  const showAllLabels = (size.panelHeight ?? size.height) >= 300;
   const labelWidth = Math.max(1, Math.min(140, size.width - 2 * padding));
   const radius = Math.max(...nodes.map(n => n.symbolSize / 2));
   const minX = Math.min(...nodes.map(n => n.x)), maxX = Math.max(...nodes.map(n => n.x));
   const minY = Math.min(...nodes.map(n => n.y)), maxY = Math.max(...nodes.map(n => n.y));
-  const scale = Math.max(0, Math.min(1, (size.width - 2 * padding - Math.max(labelWidth, 2 * radius)) / Math.max(1, maxX - minX), (size.height - 2 * padding - 2 * radius - 38) / Math.max(1, maxY - minY)));
+  const spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+  const scaleX = Math.max(0, (size.width - 2 * padding - Math.max(labelWidth, 2 * radius)) / spanX);
+  const scaleY = Math.max(0, (size.height - 2 * padding - 2 * radius - 38) / spanY);
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
   const placed = nodes.map(node => {
-    const x = size.width / 2 + (node.x - cx) * scale, y = size.height / 2 + (node.y - cy) * scale;
+    const x = size.width / 2 + (node.x - cx) * scaleX, y = size.height / 2 + (node.y - cy) * scaleY;
     return { ...node, x, y, nodeBox: { x: x - node.symbolSize / 2, y: y - node.symbolSize / 2, width: node.symbolSize, height: node.symbolSize },
       labelBox: undefined as MapBox | undefined, label: { show: false, position: "bottom", distance: 5, width: Math.min(labelWidth, Math.max(14, Array.from(node.id).length * 11)), height: 14, lineHeight: 14, overflow: "truncate", ellipsis: "…", align: "center", verticalAlign: "top" } };
   });
+  // Force layouts may collapse highly connected cores. Resolve collisions in
+  // screen space, where symbol and label sizes are fixed, with a bounded grid
+  // fallback. This keeps the topology deterministic even for dense graphs.
+  const collision = placed.some((a, i) => placed.slice(i + 1).some(b => Math.hypot(a.x - b.x, a.y - b.y) < a.symbolSize / 2 + b.symbolSize / 2 + 24));
+  if (collision || showAllLabels) {
+    const diameter = radius * 2;
+    const labelRows = Math.max(1, Math.floor((size.height - 2 * padding) / (diameter + 27)));
+    const cols = Math.max(1, Math.min(nodes.length, Math.floor((size.width - 2 * padding) / (diameter + 1)), Math.max(showAllLabels ? Math.ceil(nodes.length / labelRows) : 1, Math.ceil(Math.sqrt(nodes.length * size.width / size.height / 2)))));
+    const rows = Math.ceil(nodes.length / cols);
+    const cellWidth = (size.width - 2 * padding) / cols, cellHeight = (size.height - 2 * padding) / rows;
+    placed.forEach((node, i) => {
+      node.x = padding + (i % cols + .5) * cellWidth;
+      node.y = padding + (Math.floor(i / cols) + .5) * cellHeight - (showAllLabels ? 9 : 0);
+      node.nodeBox = { ...node.nodeBox, x: node.x - node.symbolSize / 2, y: node.y - node.symbolSize / 2 };
+      node.label.width = Math.min(node.label.width, Math.max(1, cellWidth - 8));
+    });
+  }
   const labels: MapBox[] = [];
   for (const node of [...placed].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))) {
     const r = node.symbolSize / 2, width = node.label.width, height = 14;
@@ -53,7 +75,7 @@ function mapLayout(nodes: { id: string; symbolSize: number; spans: number | null
     const forces = points.map(() => ({ x: 0, y: 0 }));
     for (let a = 0; a < points.length; a++) for (let b = a + 1; b < points.length; b++) {
       const dx = points[a].x - points[b].x, dy = points[a].y - points[b].y;
-      const d = Math.max(1, Math.hypot(dx, dy)), force = 1500 / d;
+      const d = Math.max(1, Math.hypot(dx, dy)), force = 6000 / d;
       forces[a].x += dx / d * force; forces[a].y += dy / d * force;
       forces[b].x -= dx / d * force; forces[b].y -= dy / d * force;
     }
@@ -61,7 +83,7 @@ function mapLayout(nodes: { id: string; symbolSize: number; spans: number | null
       const a = index.get(link.source), b = index.get(link.target);
       if (a === undefined || b === undefined || a === b) continue;
       const dx = points[b].x - points[a].x, dy = points[b].y - points[a].y;
-      const d = Math.max(1, Math.hypot(dx, dy)), force = (d - 100) * .04;
+      const d = Math.max(1, Math.hypot(dx, dy)), force = (d - 160) * .02;
       forces[a].x += dx / d * force; forces[a].y += dy / d * force;
       forces[b].x -= dx / d * force; forces[b].y -= dy / d * force;
     }
@@ -72,7 +94,7 @@ function mapLayout(nodes: { id: string; symbolSize: number; spans: number | null
 
 /** The topology's health encodings, fed
  * by the panel frame. Edge-only endpoints remain visible as ungraded nodes. */
-export function serviceMapOption(frame: Frame, theme: ChartTheme, size: ChartSize = { width: 500, height: 220 }) {
+export function serviceMapOption(frame: Frame, theme: ChartTheme, size: MapSize = { width: 500, height: 220, panelHeight: 300 }) {
   const index = new Map(frame.columns.map((c, i) => [c.name, i]));
   const cell = (name: string, row: number) => frame.values[index.get(name) ?? -1]?.[row];
   const text = (name: string, row: number) => String(cell(name, row) ?? "");

@@ -101,7 +101,7 @@ type Options struct {
 	Highlight string `json:"highlight,omitempty" jsonschema:"logs and log_patterns: literal redacted-body search, at most 200 characters"`
 	Style     string `json:"style,omitempty" jsonschema:"timeseries: line, area, bars or stacked (additive measures only)"`
 	Scale     string `json:"scale,omitempty" jsonschema:"linear or log"`
-	Top       int    `json:"top,omitempty" jsonschema:"Series limit up to 6; the rest become Other; default 6"`
+	Top       int    `json:"top,omitempty" jsonschema:"Categorical series default/max 6; structured series are chosen worst-first by the panel's measure; the rest fold into Other (N); SQL series past six are left out with a note; noncategorical rows default 8 max 20"`
 	Legend    string `json:"legend,omitempty" jsonschema:"auto or hidden"`
 	XScale    string `json:"x_scale,omitempty" jsonschema:"scatter x axis: linear or log"`
 	YScale    string `json:"y_scale,omitempty" jsonschema:"scatter y axis: linear or log"`
@@ -130,10 +130,30 @@ type Grid struct {
 	H int `json:"h"`
 }
 
-// Top is the series limit for a grouped time series.
-func (p *Panel) Top() int {
-	if p.Options != nil && p.Options.Top > 0 {
-		return min(p.Options.Top, 6)
+// categoricalSeries reports whether top controls categorical colour slots.
+func (p *Panel) categoricalSeries() bool {
+	switch p.Viz {
+	case "timeseries":
+		return true
+	case "bar":
+		return p.Query != nil && (len(p.Query.By) == 2 || len(p.Query.Measures) > 1)
+	case "scatter":
+		return p.Query != nil && len(p.Query.By) == 2
+	case "histogram":
+		return p.Query != nil && len(p.Query.By) == 1
+	default:
+		return false
 	}
-	return 6
+}
+
+// Top limits categorical series or independently coloured item rows.
+func (p *Panel) Top() int {
+	maximum, fallback := 20, 8
+	if p.categoricalSeries() {
+		maximum, fallback = 6, 6
+	}
+	if p.Options != nil && p.Options.Top > 0 {
+		return min(p.Options.Top, maximum)
+	}
+	return fallback
 }

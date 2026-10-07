@@ -1,6 +1,6 @@
 import { Alert, Button, Group, Modal, Text } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Responsive, type Layout } from "react-grid-layout/legacy";
 import type { DashboardSpec, DashboardTime, Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
@@ -39,8 +39,6 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const client = useQueryClient();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 }))); }, [spec]);
-  const [breakpoint, setBreakpoint] = useState("lg");
-  const canEdit = editing && breakpoint === "lg";
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
   const [copyFeedback, setCopyFeedback] = useState<string>();
   useEffect(() => {
@@ -52,11 +50,14 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const gridReady = width > 0;
+  const breakpoint = width >= 1100 ? "lg" : width >= 800 ? "md" : "sm";
+  const canEdit = editing && breakpoint === "lg";
   // WidthProvider starts at 1280px and renders before its first observer
   // delivery (even with measureBeforeMount). Observe the stable container,
   // and never lay out panels at a guessed or hidden-container width.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!container.current) return;
+    setWidth(Math.max(0, Math.round(container.current.getBoundingClientRect().width)));
     const observer = new ResizeObserver(([entry]) => {
       if (entry) setWidth(Math.max(0, Math.round(entry.contentRect.width)));
     });
@@ -135,8 +136,8 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     onView={() => onView(panel.id)} onInspect={() => setInspecting(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onExplain={() => onOpenChat(`Explain the panel "${interpolate(panel.title, vars)}" (panel id: ${panel.id}) on the dashboard "${spec.name}" (dashboard id: ${dashboardId}). Effective time range: ${JSON.stringify(panel.time ?? time)}. Resolved variables: ${JSON.stringify(vars)}. ${results.get(panel.id)?.status === "error" ? `It fails with: ${results.get(panel.id)?.error}. Please fix the panel.` : "What does it show right now, and is anything unusual?"}`)}
-    staleAt={staleAt.get(panel.id)} onDuplicate={editing ? () => duplicate.mutate(panel) : undefined}
-    onRemove={editing ? () => remove.mutate(panel.id) : undefined} />;
+    staleAt={staleAt.get(panel.id)} onDuplicate={canEdit ? () => duplicate.mutate(panel) : undefined}
+    onRemove={canEdit ? () => remove.mutate(panel.id) : undefined} />;
 
   const viewed = spec.panels.find((p) => p.id === view);
   const mutationError = editing ? save.error ?? remove.error ?? duplicate.error : null;
@@ -154,8 +155,9 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     {conflict && <Alert color="warn" mb="sm">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Alert>}
     {mutationError && !conflict && <Alert color="bad" mb="sm">{mutationError.message}</Alert>}
     {copyFeedback && <Alert role="status" mb="sm">{copyFeedback}</Alert>}
-    {gridReady && <Responsive width={width} className="dashboard-grid" layouts={{ lg: layout, md: layout, sm: layout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
-      rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactType="vertical" isDraggable={canEdit} isResizable={canEdit} onBreakpointChange={setBreakpoint} draggableHandle=".panel-drag" draggableCancel="button"
+    {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...layout.map(l => l.y + l.h))) }} />}
+    {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: layout, md: layout, sm: layout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
+      rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactType="vertical" isDraggable={canEdit} isResizable={canEdit} draggableHandle=".panel-drag" draggableCancel="button"
       onDragStop={changeLayout} onResizeStop={changeLayout}>
       {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}

@@ -186,7 +186,7 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	for i, d := range dims {
 		expr := d.stringSQL()
 		if top > 0 && i == foldDimension {
-			expr = fmt.Sprintf("CASE WHEN %s IN (SELECT d FROM top) THEN %s ELSE 'Other' END", expr, expr)
+			expr = fmt.Sprintf("CASE WHEN coalesce(%s, '') IN (SELECT d FROM top) THEN %s ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END", expr, expr)
 		}
 		selects = append(selects, fmt.Sprintf("coalesce(%s, '') AS %s", expr, quoteIdent(d.alias())))
 		groups = append(groups, expr)
@@ -211,7 +211,21 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	var b strings.Builder
 	b.WriteString("WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")")
 	if top > 0 {
-		fmt.Fprintf(&b, ", top AS (SELECT %s AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT %d)", dims[foldDimension].stringSQL(), top)
+		// Rank over the complete panel window, before bucket aggregation. Volume
+		// measures retain largest-first semantics even when higher is better.
+		direction := "DESC"
+		first := measures[0]
+		rankPanel, rankQuery := *p, *p.Query
+		rankQuery.Measures = []string{first.Text}
+		rankPanel.Query = &rankQuery
+		better := p.Better
+		if better == "" {
+			better = inferBetter(&rankPanel)
+		}
+		if !first.Additive && better == "higher" {
+			direction = "ASC"
+		}
+		fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value %s NULLS LAST, n DESC, d LIMIT %d)", dims[foldDimension].stringSQL(), measureSQL(first, sig, scope.End.Sub(scope.Start).Seconds(), ""), direction, top)
 	}
 	b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM base")
 	if len(groups) > 0 {

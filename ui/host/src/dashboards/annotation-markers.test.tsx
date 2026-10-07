@@ -67,7 +67,7 @@ describe("annotation scope and windows", () => {
     expect(got.series[0].markLine.data[0].tooltip.formatter()).toBe(`checkout · v2 · ${at(1000)}\ncheckout · v5 · ${at(4000)}`);
     const band = got.series[0].markArea.data[0];
     expect(band[0].xAxis).toBe(0); expect(band[1].xAxis).toBe(10000);
-    expect(band[0].itemStyle).toEqual({ color: theme.status.bad, opacity: .08 });
+    expect(band[0].itemStyle).toEqual({ color: theme.status.bad, opacity: .09 });
     expect(band[0].tooltip.formatter()).toBe("checkout · Slow · bad");
     expect(got.tooltip.renderMode).toBe("richText");
     expect(got.series[0].markLine.silent).toBe(false); expect(got.series[0].markArea.silent).toBe(false);

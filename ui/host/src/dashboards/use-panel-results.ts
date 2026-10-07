@@ -72,7 +72,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   // fetched now, including when visibility changed during the previous batch.
   useEffect(() => {
     // Leave failed or incomplete batches to the retry policy or an explicit refresh.
-    if (!canQuery || query.isFetching || query.error || lazyBatch.current?.key === key) return;
+    if (!canQuery || query.isFetching || query.error || queuedRefresh.current || lazyBatch.current?.key === key) return;
     const attempted = requested.current.key === key ? requested.current.ids : new Set<string>();
     const missing = [...new Set(ids.filter((id) => !results.has(id) && !attempted.has(id) && spec.panels.find((p) => p.id === id)?.viz !== "text"))].sort();
     if (!missing.length) return;
@@ -85,6 +85,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   useEffect(() => {
     if (query.isFetching || !queuedRefresh.current) return;
     queuedRefresh.current = false;
+    lazyBatch.current = null;
     if (canQuery && !knownEmpty) void query.refetch({ cancelRefetch: false });
   }, [query.isFetching, canQuery, knownEmpty, query.refetch]);
   return { results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };

@@ -74,7 +74,7 @@ describe("compile", () => {
   const panel = { id: "latency", title: "Latency", viz: "timeseries", unit: "ms", thresholds: [{ value: 1500, status: "bad", label: "budget" }] } as Panel;
   const result: PanelResult = { id: "latency", status: "ok", frame: series, previous: series, elapsed_ms: 3, shift_ms: 1000 };
 
-  it("shows six of twelve series with a note in a scroll legend clear of the plot", () => {
+  it("shows six of twelve series with a note in a wrapping legend clear of the plot", () => {
     const measures: Frame["columns"] = Array.from({ length: 12 }, (_, i) => ({ name: `measure_${i}`, type: "number", role: "measure", unit: "count" }));
     const values = measures.map(() => [1]);
     const many: Frame = { columns: [series.columns[0], ...measures], values: [[1000], ...values], rows: 1 };
@@ -83,7 +83,7 @@ describe("compile", () => {
     for (const option of [time, bar] as { legend: { type: string; top: number; itemHeight: number }; grid: { top: number }; series: unknown[]; graphic: { style: { text: string } }[] }[]) {
       expect(option.series).toHaveLength(6);
       expect(option.graphic[0].style.text).toBe("6 more series not shown");
-      expect(option.legend.type).toBe("scroll");
+      expect(option.legend.type).toBe("plain");
       expect(option.grid.top).toBeGreaterThanOrEqual(option.legend.top + option.legend.itemHeight + 20);
     }
   });
