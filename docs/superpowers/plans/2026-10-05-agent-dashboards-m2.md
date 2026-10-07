@@ -18,7 +18,7 @@ Revision verification: throwaway probes on the pinned `v2.0.0-alpha43763` engine
 
 ## Global Constraints
 
-- Work only in `/Users/v/Projects/labstack/fanout-dashboards`, branch `feat/agent-dashboards-m2`. Never push, merge or deploy.
+- Work only in the dashboards worktree, branch `feat/agent-dashboards-m2`. Never push, merge or deploy.
 - **the controller commits; Codex leaves changes uncommitted**. Every task retains its commit step, executed by the controller after its review gate.
 - Codex execution is file edits only, no git writes and no network. Controller-owned test/build/replay/eval/browser commands below are explicit handoffs. Before any Go inspection or gate, the controller sets `GOCACHE` and `GOTMPDIR` under `.superpowers/`, `GOFLAGS=-mod=readonly`, and `GOPROXY=off`. Use `rtk` for every shell command.
 - Run Go tests through `just test` with real package paths. A `-run` expression containing `|` is single-quoted around the double-quoted expression, for example `-run '"TestM2A|TestM2B"'`, because Just's recipe evaluates it again.
@@ -6281,8 +6281,8 @@ The real input directory exists at the replay README's default path. The README 
 ```bash
 rtk proxy env GOWORK=off go -C .superpowers/replay vet ./...
 rtk proxy env GOWORK=off go -C .superpowers/replay build -o replay .
-rtk proxy .superpowers/replay/replay -dry-run -in /private/tmp/claude-501/-Users-v-Projects-labstack-fanout/d2138802-fe1e-498f-9f11-dc2d731f6191/scratchpad/demo-v2 -signals traces,logs,metrics
-rtk proxy .superpowers/replay/replay -in /private/tmp/claude-501/-Users-v-Projects-labstack-fanout/d2138802-fe1e-498f-9f11-dc2d731f6191/scratchpad/demo-v2 -endpoint http://127.0.0.1:7520 -signals traces,logs,metrics
+rtk proxy .superpowers/replay/replay -dry-run -in "$SCRATCH/demo-v2" -signals traces,logs,metrics
+rtk proxy .superpowers/replay/replay -in "$SCRATCH/demo-v2" -endpoint http://127.0.0.1:7520 -signals traces,logs,metrics
 ```
 
 Controller starts a disposable Fanout instance at its actual unified HTTP/OTLP address :7520 and injects FANOUT_REPLAY_TOKEN through the controller's secret store. Capture dry-run counts, successful replay counts, source maximum, target instant and signed shift; ensure counts agree and all three signals exist. A partial replay is a failed run: start another disposable data directory before retrying because the converter has no deduplication. Production still accepts only batch format 3; the independent tool converts format 2 into OTLP. Wait for the rollup cycle to publish service, edge and version contributions before the browser check; log the observed watermark/readiness, not a guessed sleep.
