@@ -69,10 +69,10 @@ func TestM2FixLogReadRedaction(t *testing.T) {
 		"SELECT body FROM logs WHERE $__window(time) AND body LIKE '%secret%'",
 		"SELECT l.body FROM main.logs l WHERE $__window(l.time)",
 		"WITH x AS (SELECT * FROM logs WHERE $__window(time)) SELECT body FROM x",
-		"WITH logs AS (SELECT body, time FROM main.logs) SELECT body FROM logs WHERE $__window(time)",
-		"WITH logs AS (SELECT service, time FROM main.logs) SELECT service FROM logs WHERE $__window(time)",
+		"WITH history AS (SELECT body, time FROM main.logs) SELECT body FROM history WHERE $__window(time)",
+		"WITH history AS (SELECT service, time FROM main.logs) SELECT service FROM history WHERE $__window(time)",
 		"SELECT logs.body FROM logs WHERE $__window(logs.time)",
-		"WITH logs AS (SELECT service FROM spans) SELECT l.body FROM main.logs l WHERE $__window(l.time)",
+		"WITH history AS (SELECT service FROM spans) SELECT l.body FROM main.logs l WHERE $__window(l.time)",
 		"SELECT body FROM telemetry.logs WHERE $__window(ingested_at)",
 		"WITH x AS (SELECT 1 AS one) SELECT body FROM logs, x WHERE $__window(time)",
 	} {

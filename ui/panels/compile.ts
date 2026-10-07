@@ -109,6 +109,19 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
 /** Horizontal bars sorted by the server, value labels at the bar end. */
 export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option {
   const { categories, series } = toCategories(frame);
+  const dims = frame.columns.flatMap((column, index) => column.role === "dimension" ? [index] : []);
+  const selections = new Map<string, { dimensions: Record<string, string>; from?: string; to?: string }>();
+  for (let row = 0; row < frame.rows; row++) {
+    const dimensions: Record<string, string> = {};
+    let window: {from: string; to: string} | undefined;
+    let groupIndex = 0;
+    for (const index of dims) {
+      const value = String(frame.values[index][row] ?? "");
+      if (frame.periods && frame.columns[index].name === "period") window = frame.periods[value];
+      else dimensions[panel.query?.by?.[groupIndex++] ?? frame.columns[index].name] = value;
+    }
+    selections.set(JSON.stringify(dims.map(index => String(frame.values[index][row] ?? ""))), { dimensions, ...window });
+  }
   const unit = series[0]?.unit ?? panel.unit;
   const units = [...new Set(series.map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
@@ -126,7 +139,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option
       xAxisIndex: units.indexOf(s.unit ?? panel.unit),
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
       type: "bar",
-      data: s.values,
+      data: s.values.map((value, row) => ({ value, selection: selections.get(JSON.stringify(dims.length > 1 ? [categories[row], s.name] : [categories[row]])) })),
       barMaxWidth: 16,
       barGap: "20%",
       itemStyle: { color: multi ? colorFor(s.name, theme) : seriesColor(panel.id, theme.dark), borderRadius: [0, 3, 3, 0] },

@@ -66,7 +66,21 @@ func (s *Service) Read(ctx context.Context, req Request) (Response, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	rows, err := s.db.QueryContext(ctx, `WITH versions AS (SELECT *,row_number() OVER(PARTITION BY namespace,service ORDER BY first_seen,service_version) AS n FROM version_rollup)
+	reader, ok := s.db.(queryrows.ReadTransactioner)
+	if !ok {
+		return out, errors.New("annotation reads require a read transaction")
+	}
+	err := reader.WithReadTransaction(ctx, func(db queryrows.Queryer) error {
+		var readErr error
+		out, readErr = readSnapshot(ctx, db, args, suffix)
+		return readErr
+	})
+	return out, err
+}
+
+func readSnapshot(ctx context.Context, db queryrows.Queryer, args []any, suffix string) (Response, error) {
+	out := Response{Deploys: []Deploy{}, Anomalies: []Anomaly{}}
+	rows, err := db.QueryContext(ctx, `WITH versions AS (SELECT *,row_number() OVER(PARTITION BY namespace,service ORDER BY first_seen,service_version) AS n FROM version_rollup)
 SELECT namespace,service,service_version,first_seen::TIMESTAMP_NS FROM versions
 WHERE first_seen>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND first_seen<?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (?='' OR namespace=?) AND n>1`+suffix+` ORDER BY first_seen DESC,namespace,service,service_version LIMIT 1001`, args...)
 	if err != nil {
@@ -90,7 +104,7 @@ WHERE first_seen>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND first_seen<?::TIMESTAMP_NS
 		out.Deploys = out.Deploys[:1000]
 		out.Truncated = true
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT namespace,service,kind,start_time::TIMESTAMP_NS,end_time::TIMESTAMP_NS,title,severity FROM anomaly_log
+	rows, err = db.QueryContext(ctx, `SELECT namespace,service,kind,start_time::TIMESTAMP_NS,end_time::TIMESTAMP_NS,title,severity FROM anomaly_log
 WHERE end_time>?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (?='' OR namespace=?)`+suffix+` ORDER BY end_time DESC,namespace,service,kind LIMIT 1001`, args...)
 	if err != nil {
 		return out, err
@@ -114,7 +128,7 @@ WHERE end_time>?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time<?::TIMESTAMP_NS::T
 		out.Anomalies = out.Anomalies[:1000]
 		out.Truncated = true
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key IN ('version_rollup_v1_limited','version_rollup_v1_history_limited')`)
+	rows, err = db.QueryContext(ctx, `SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key IN ('version_rollup_v1_limited','version_rollup_v1_history_limited')`)
 	if err != nil {
 		return out, err
 	}

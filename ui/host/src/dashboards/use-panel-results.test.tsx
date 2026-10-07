@@ -191,3 +191,23 @@ it("makes zero requests when scrolling between panels already loaded under the c
     }
   } finally { await host.dispose(); }
 });
+
+it("skips timed and manual refreshes after visibility becomes known empty", async () => {
+ vi.useFakeTimers();
+ wire.panels.mockResolvedValue([resultFor("loaded")]);
+ const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+ const node=document.createElement("div");document.body.append(node);const root=createRoot(node);
+ let current!: ReturnType<typeof usePanelResults>;
+ function Host({visible}:{visible:string[]}){current=usePanelResults({dashboardId:"empty",version:1,spec:visibilitySpec,time:visibilitySpec.time,vars:{},compare:false,widths:{},visible,refresh:"30s"});return null;}
+ const show=async(visible:string[])=>act(async()=>{root.render(<QueryClientProvider client={client}><Host visible={visible}/></QueryClientProvider>);});
+ try {
+  await show(["loaded"]);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(100);});
+  expect(current.results.has("loaded")).toBe(true);expect(wire.panels).toHaveBeenCalledTimes(1);
+  await show([]);
+  await act(async()=>{await vi.advanceTimersByTimeAsync(30100);});
+  expect(wire.panels).toHaveBeenCalledTimes(1);
+  await act(async()=>{current.refetch();await vi.advanceTimersByTimeAsync(100);});
+  expect(wire.panels).toHaveBeenCalledTimes(1);
+ }finally{await act(async()=>root.unmount());client.clear();node.remove();vi.useRealTimers();}
+});

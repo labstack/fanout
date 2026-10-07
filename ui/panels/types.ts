@@ -6,7 +6,7 @@ export type Unit = "ms" | "s" | "ns" | "percent" | "ratio" | "count" | "per_seco
 export type Status = "ok" | "warn" | "bad";
 export const visualizations = ["stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces", "service_map", "health"] as const;
 export type Viz = typeof visualizations[number];
-export type Selection = { time?: number; dimensions: Record<string, string>; trace_id?: string; namespace?: string; bucket?: { lower: number; upper?: number } };
+export type Selection = { from?: string; to?: string; time?: number; dimensions: Record<string, string>; trace_id?: string; namespace?: string; bucket?: { lower: number; upper?: number } };
 export type ColumnFormat = { field: string; format: "unit"|"bar"|"status"|"sparkline"|"trace_link"|"service_link"|"log_template"; unit?: Unit; variable?: string };
 
 export type Threshold = { value: number; status: Status; label?: string };
@@ -69,7 +69,7 @@ export type Column = { name: string; type: "time" | "number" | "string" | "json"
 export type HealthFrame = { health: string; counts: { healthy: number; degraded: number; unhealthy: number }; total_spans: number; error_rate: number; service_count: number; error_trend: number[] };
 export type AnnotationService = { namespace: string; service: string };
 export type AnnotationMatch = { services: AnnotationService[]; namespace_scoped?: boolean; limited?: boolean };
-export type Frame = { trends?: Record<string, (number | null)[][]>; note?: string; columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
+export type Frame = { periods?: Record<string, { from: string; to: string }>; trends?: Record<string, (number | null)[][]>; note?: string; columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
 
 export type PanelResult = {
   annotation_scope?: AnnotationMatch;

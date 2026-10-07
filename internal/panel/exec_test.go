@@ -2,6 +2,7 @@ package panel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -267,5 +268,23 @@ func TestRunWarmCacheCancelledContextIsError(t *testing.T) {
 	var problems Problems
 	if err == nil || errors.As(err, &problems) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestFinalFixEmptyVariableOptionsWire(t *testing.T) {
+	engine, _ := newTestEngine(t)
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := shopDashboard()
+	options, err := e.ResolveVariables(t.Context(), ResolveRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"route":[],"service":[]}` {
+		t.Fatalf("empty wire options: %s", raw)
 	}
 }

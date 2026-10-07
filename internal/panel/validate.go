@@ -430,6 +430,9 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 	if (len(q.Measures) == 0 && p.Viz != "logs" && p.Viz != "traces" && p.Viz != "health" && p.Viz != "service_map") || len(q.Measures) > 6 {
 		problems.add(path+".measures", "a query has 1 to 6 measures; fixed logs and traces take none")
 	}
+	if len(q.Measures) > 1 && ((p.Viz == "timeseries" && len(q.By) > 0) || (p.Viz == "bar" && len(q.By) == 2)) {
+		problems.addHint(path+".measures", "grouped panels show one measure", "use one panel per measure, or remove by")
+	}
 	measures := parseMeasures(sig, q.Measures, path+".measures", problems)
 	if len(q.By) < spec.minBy {
 		problems.add(path+".by", fmt.Sprintf("%s panels group by at least %d field", p.Viz, spec.minBy))

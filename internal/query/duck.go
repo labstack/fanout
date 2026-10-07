@@ -2025,3 +2025,9 @@ LIMIT %d;
 	}
 	return out, rows.Err()
 }
+
+// WithReadTransaction keeps derived annotation rows and completeness flags in
+// one read snapshot. Its callback only receives the query surface.
+func (d *Duck) WithReadTransaction(ctx context.Context, read func(queryrows.Queryer) error) error {
+	return (queryrows.SQLAdapter{DB: d.DB}).WithReadTransaction(ctx, read)
+}

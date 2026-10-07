@@ -34,6 +34,7 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 	if err != nil {
 		return err
 	}
+	originalWhere := where
 	dimensions := []FieldRef{}
 	dimensionSQL := []string{}
 	indices := []int{}
@@ -91,9 +92,15 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 		columns = append(columns, Column{Name: ref.alias(), Type: "string", Role: "dimension"})
 	}
 	names := []string{}
+	share := false
 	for _, m := range checked.Measures[p.ID] {
 		if wanted[m.Alias] {
-			selects = append(selects, measureSQL(m, sig, interval.Seconds(), "PARTITION BY "+bucket)+" AS "+quoteIdent(m.Alias))
+			expression := measureSQL(m, sig, interval.Seconds(), "PARTITION BY "+bucket)
+			if m.Func == "share" {
+				share = true
+				expression = "100.0*count(*)/nullif(max(_trend_total),0)"
+			}
+			selects = append(selects, expression+" AS "+quoteIdent(m.Alias))
 			columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: m.Unit})
 			names = append(names, m.Alias)
 		}
@@ -103,6 +110,14 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 	}
 	limit := analysisCellLimit / len(columns)
 	text := "SELECT " + strings.Join(selects, ",") + " FROM " + structuredSource(sig.name) + " WHERE " + where + " GROUP BY " + strings.Join(groups, ",") + fmt.Sprintf(" ORDER BY _t DESC LIMIT %d", limit+1)
+	if share {
+		// Totals cover the checked scope; only the displayed tuples are restricted.
+		tupleWhere := "TRUE"
+		if len(dimensionSQL) > 0 {
+			tupleWhere = "(" + strings.Join(dimensionSQL, ",") + ") IN (" + strings.Join(tuples, ",") + ")"
+		}
+		text = "WITH _trend_scope AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + originalWhere + "), _trend_totals AS (SELECT " + bucket + " AS _trend_bucket,count(*) AS _trend_total FROM _trend_scope GROUP BY 1) SELECT " + strings.Join(selects, ",") + " FROM _trend_scope JOIN _trend_totals ON " + bucket + "=_trend_bucket WHERE " + tupleWhere + " GROUP BY " + strings.Join(groups, ",") + fmt.Sprintf(" ORDER BY _t DESC LIMIT %d", limit+1)
+	}
 	rows, err := e.engine.QueryContext(queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End}), text, args...)
 	if err != nil {
 		return err

@@ -28,6 +28,7 @@ const createAnomalyLogTable = `CREATE TABLE anomaly_log (
 
 type versionRollupFailure struct {
 	failures    int
+	retrySingly bool
 	nextAttempt time.Time
 }
 
@@ -39,13 +40,40 @@ func nextVersionRollupFailure(previous versionRollupFailure, now time.Time) vers
 }
 
 func createAnnotationTables(db *sql.DB) error {
-	if err := ensureCacheTable(db, "version_rollup", createVersionRollupTable,
-		"namespace", "service", "service_version", "first_seen", "last_seen"); err != nil {
-		return err
+	// The rows and immutable-batch markers describe the same disposable cache.
+	// Rebuild both atomically if either schema is absent or incompatible.
+	rebuild := false
+	for table, required := range map[string][]string{
+		"version_rollup":         {"namespace", "service", "service_version", "first_seen", "last_seen"},
+		"version_rollup_batches": {"batch_id", "max_ingested"},
+	} {
+		columns, err := cacheTableColumns(db, table)
+		if err != nil {
+			return err
+		}
+		for _, column := range required {
+			if _, ok := columns[column]; !ok {
+				rebuild = true
+			}
+		}
 	}
-	if err := ensureCacheTable(db, "version_rollup_batches", createVersionBatchesTable,
-		"batch_id", "max_ingested"); err != nil {
-		return err
+	if rebuild {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		for _, statement := range []string{"DROP TABLE IF EXISTS version_rollup_batches", "DROP TABLE IF EXISTS version_rollup", createVersionRollupTable, createVersionBatchesTable} {
+			if _, err := tx.Exec(statement); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec("DELETE FROM rollup_state WHERE cache_key LIKE 'version_rollup%'"); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 	return ensureCacheTable(db, "anomaly_log", createAnomalyLogTable,
 		"namespace", "service", "kind", "start_time", "end_time", "title", "severity")
@@ -55,8 +83,6 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 	if d.repository == nil {
 		return 0, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 	start := time.Now()
 	var materialized int64
 	defer func() {
@@ -81,12 +107,9 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
-	tx, err := d.writer().BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `SELECT batch_id FROM version_rollup_batches`)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	rows, err := d.writer().QueryContext(ctx, `SELECT batch_id FROM version_rollup_batches`)
 	if err != nil {
 		return 0, err
 	}
@@ -128,8 +151,11 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 			continue
 		}
 		size := b.Spans + b.Logs + b.Metrics
-		if len(pending) == 0 && size > 64000 {
-			// Give the oldest oversized batch a pass of its own under the 10s deadline.
+		if d.versionRollupFailures[b.ID].retrySingly && len(pending) > 0 {
+			break
+		}
+		if len(pending) == 0 && (size > 64000 || d.versionRollupFailures[b.ID].retrySingly) {
+			// Oversized batches and failed groups retry alone under the 10s deadline.
 			pending = append(pending, b)
 			break
 		}
@@ -139,6 +165,7 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 		pending = append(pending, b)
 		count += size
 	}
+	attempted := false
 	// writeGate protects this disposable, per-process retry state. Failed batches
 	// remain unmarked, so a later committed pass still discloses limited history.
 	defer func() {
@@ -147,20 +174,54 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 				delete(d.versionRollupFailures, b.ID)
 				continue
 			}
+			if !attempted {
+				continue
+			}
 			if d.versionRollupFailures == nil {
 				d.versionRollupFailures = make(map[string]versionRollupFailure)
 			}
-			d.versionRollupFailures[b.ID] = nextVersionRollupFailure(d.versionRollupFailures[b.ID], time.Now())
+			failure := nextVersionRollupFailure(d.versionRollupFailures[b.ID], time.Now())
+			failure.retrySingly = failure.retrySingly || len(pending) > 1
+			d.versionRollupFailures[b.ID] = failure
 		}
 	}()
+	retired := []string{}
 	for id := range marked {
 		d.cachePublishMu.Lock()
 		publishing := d.cachePublishing[id]
 		d.cachePublishMu.Unlock()
 		if !active[id] && !publishing {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM version_rollup_batches WHERE batch_id=?`, id); err != nil {
-				return 0, err
-			}
+			retired = append(retired, id)
+		}
+	}
+	remaining := 0
+	for _, b := range batches {
+		if !marked[b.ID] {
+			remaining++
+		}
+	}
+	limited := int64(0)
+	if remaining > len(pending) {
+		limited = 1
+	}
+	retirementDue := d.versionRollupPasses%64 == 0
+	if len(pending) == 0 && len(retired) == 0 && !retirementDue {
+		var previous int64
+		if err := d.writer().QueryRowContext(ctx, `SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&previous); err != nil {
+			return 0, err
+		}
+		if previous == limited {
+			return 0, nil
+		}
+	}
+	tx, err := d.writer().BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, id := range retired {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM version_rollup_batches WHERE batch_id=?`, id); err != nil {
+			return 0, err
 		}
 	}
 	parts := []string{}
@@ -184,6 +245,7 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 	if len(parts) > 0 {
 		statement := `INSERT INTO version_rollup SELECT namespace,service,service_version,min(t),max(t) FROM (` + strings.Join(parts, " UNION ALL ") + `) WHERE service<>'' AND service_version IS NOT NULL AND service_version<>'' GROUP BY 1,2,3
 ON CONFLICT(namespace,service,service_version) DO UPDATE SET first_seen=least(version_rollup.first_seen,excluded.first_seen),last_seen=greatest(version_rollup.last_seen,excluded.last_seen)`
+		attempted = true
 		res, err := tx.ExecContext(ctx, statement)
 		if err != nil {
 			return 0, err
@@ -200,7 +262,7 @@ ON CONFLICT(namespace,service,service_version) DO UPDATE SET first_seen=least(ve
 		}
 	}
 	// Retire inactive services once every 64 committed passes, including startup.
-	if d.versionRollupPasses%64 == 0 {
+	if retirementDue {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM version_rollup WHERE (namespace,service) IN (SELECT namespace,service FROM version_rollup GROUP BY 1,2 HAVING max(last_seen)<?::TIMESTAMP_NS::TIMESTAMPTZ_NS)`, time.Now().UTC().Add(-30*24*time.Hour)); err != nil {
 			return 0, err
 		}
@@ -228,28 +290,7 @@ ON CONFLICT(namespace,service,service_version) DO UPDATE SET first_seen=least(ve
 			}
 		}
 	}
-	remaining := 0
-	for _, b := range batches {
-		if !marked[b.ID] {
-			remaining++
-		}
-	}
-	limited := int64(0)
-	if remaining > len(pending) {
-		limited = 1
-	}
 	if err := storeRollupWatermark(ctx, tx, "version_rollup_v1_limited", limited); err != nil {
-		return 0, err
-	}
-	var tip int64
-	if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(max_ingested),0) FROM version_rollup_batches`).Scan(&tip); err != nil {
-		return 0, err
-	}
-	var previous int64
-	if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key='version_rollup_v1'`).Scan(&previous); err != nil {
-		return 0, err
-	}
-	if err := storeRollupWatermark(ctx, tx, "version_rollup_v1", max(tip, previous)); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {

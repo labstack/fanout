@@ -30,14 +30,9 @@ func TestM2FixVersionHistoryDeletesOnlyWhenNeeded(t *testing.T) {
 	}
 	defer db.Close()
 	d := &Duck{DB: db, repository: repo, versionRollupPasses: 1}
-	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
-	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT coalesce\(max\(max_ingested\),0\) FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(0))
+
 	mock.ExpectQuery(`SELECT coalesce\(max\(last_ingested_unix_nano\),0\) FROM rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(0))
-	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1", int64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -58,24 +53,24 @@ func TestM2VersionFailureDoesNotStarveNewBatches(t *testing.T) {
 	}
 	defer db.Close()
 	d := &Duck{DB: db, repository: repo, versionRollupPasses: 1}
-	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*a-old`).WillReturnError(context.DeadlineExceeded)
 	mock.ExpectRollback()
 	if _, err := d.RefreshVersionRollup(t.Context()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("first failure=%v", err)
 	}
-	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*c-new.*b-new`).WillReturnResult(sqlmock.NewResult(0, 1))
 	for i, id := range []string{"b-new", "c-new"} {
 		mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs(id, at.Add(time.Duration(i+1)*time.Minute).UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT coalesce\(max\(max_ingested\),0\) FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(at.UnixNano()))
-	mock.ExpectQuery(`SELECT coalesce\(max\(last_ingested_unix_nano\),0\) FROM rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(0))
-	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+
 	mock.ExpectCommit()
 	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 2 {
 		t.Fatalf("new batches=%d %v", n, err)
@@ -87,15 +82,14 @@ func TestM2VersionFailureDoesNotStarveNewBatches(t *testing.T) {
 	// Expire the in-memory deadline without sleeping for a minute.
 	failure.nextAttempt = time.Now().Add(-time.Second)
 	d.versionRollupFailures["a-old"] = failure
-	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}).AddRow("b-new").AddRow("c-new"))
+
+	mock.ExpectBegin()
 	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*a-old`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs("a-old", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
 	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT coalesce\(max\(max_ingested\),0\) FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(at.UnixNano()))
-	mock.ExpectQuery(`SELECT coalesce\(max\(last_ingested_unix_nano\),0\) FROM rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(at.UnixNano()))
-	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+
 	mock.ExpectCommit()
 	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
 		t.Fatalf("expired retry=%d %v", n, err)
@@ -359,5 +353,114 @@ func TestM2FixVersionMarkerColdInput(t *testing.T) {
 	var count int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='output'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("cold output marked=%d %v", count, err)
+	}
+}
+
+func TestFinalFixOrdinaryFailedBatchRetriesSingly(t *testing.T) {
+	_, repo := versionEngine(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	commitVersionLogs(t, repo, "a-bad", at, 1)
+	commitVersionLogs(t, repo, "b-good", at.Add(time.Minute), 1)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	d := &Duck{DB: db, repository: repo, versionRollupPasses: 1}
+	failed := func(pattern string) {
+		mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+		mock.ExpectBegin()
+		mock.ExpectExec(pattern).WillReturnError(errors.New("unreadable A"))
+		mock.ExpectRollback()
+	}
+	failed(`(?s)INSERT INTO version_rollup SELECT.*b-good.*a-bad`)
+	if _, err := d.RefreshVersionRollup(t.Context()); err == nil {
+		t.Fatal("expected multi-pass failure")
+	}
+	for id, failure := range d.versionRollupFailures {
+		failure.nextAttempt = at
+		d.versionRollupFailures[id] = failure
+	}
+	failed(`(?s)INSERT INTO version_rollup SELECT.*read_parquet\(\[\x27[^\x27]*a-bad[^\x27]*\x27\]`)
+	if _, err := d.RefreshVersionRollup(t.Context()); err == nil {
+		t.Fatal("expected single A failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*b-good`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs("b-good", at.Add(time.Minute).UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	mock.ExpectCommit()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("healthy B withheld: %d %v", n, err)
+	}
+	if d.versionRollupFailures["a-bad"].failures != 2 || d.versionRollupFailures["b-good"].failures != 0 {
+		t.Fatalf("failures: %+v", d.versionRollupFailures)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestFinalFixVersionBudgetStartsAfterGate(t *testing.T) {
+	d, repo := versionEngine(t)
+	commitVersionLogs(t, repo, "healthy", time.Now().UTC().Add(-time.Hour), 1)
+	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	timer := time.AfterFunc(10100*time.Millisecond, unlock)
+	defer func() {
+		if timer.Stop() {
+			unlock()
+		}
+	}()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("gate wait consumed pass budget: %d %v", n, err)
+	}
+	if len(d.versionRollupFailures) != 0 {
+		t.Fatalf("gate wait backoff: %+v", d.versionRollupFailures)
+	}
+}
+func TestFinalFixGateTimeoutDoesNotBackOff(t *testing.T) {
+	d, repo := versionEngine(t)
+	commitVersionLogs(t, repo, "healthy", time.Now().UTC().Add(-time.Hour), 1)
+	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	defer unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := d.RefreshVersionRollup(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if len(d.versionRollupFailures) != 0 {
+		t.Fatalf("gate-wait failure penalized batch: %+v", d.versionRollupFailures)
+	}
+}
+
+func TestFinalFixIdleVersionPassDoesNotWrite(t *testing.T) {
+	d, _ := versionEngine(t)
+	if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	} // startup retirement is due
+	stamp := func() string {
+		var s string
+		if err := d.DB.QueryRow(`SELECT coalesce(string_agg(cache_key||'='||updated_at::VARCHAR,',' ORDER BY cache_key),'') FROM rollup_state WHERE cache_key LIKE 'version_rollup%'`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	before := stamp()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
+		t.Fatalf("idle: %d %v", n, err)
+	}
+	if after := stamp(); after != before {
+		t.Fatalf("idle wrote state: before=%s after=%s", before, after)
+	}
+	var unused int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM rollup_state WHERE cache_key='version_rollup_v1'`).Scan(&unused); err != nil || unused != 0 {
+		t.Fatalf("unused watermark: %d %v", unused, err)
 	}
 }

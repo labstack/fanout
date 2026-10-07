@@ -85,9 +85,9 @@ func TestM2VersionIncrementalLateBatch(t *testing.T) {
 	if len(got.Deploys) != 1 || got.Deploys[0].Version != "v2" || !got.Deploys[0].At.Equal(at.Add(10*time.Minute)) {
 		t.Fatalf("deploys: %+v", got)
 	}
-	var watermark int64
-	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1'`).Scan(&watermark); err != nil || watermark != at.UnixNano() {
-		t.Fatalf("watermark: %d %v", watermark, err)
+	var markers int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches`).Scan(&markers); err != nil || markers != 2 {
+		t.Fatalf("batch markers: %d %v", markers, err)
 	}
 }
 
@@ -180,6 +180,7 @@ func TestM2VersionPassAndHistoryCaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	d.versionRollupPasses = 64 // Make retirement due for the directly seeded cache rows.
 	if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -374,4 +375,55 @@ func TestM2AnomalyCoalescesOpenEpisode(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("separate episodes=%d %v", count, err)
 	}
+}
+
+func TestFinalFixVersionSchemaRebuildClearsPair(t *testing.T) {
+	for _, table := range []string{"version_rollup", "version_rollup_batches"} {
+		t.Run(table, func(t *testing.T) {
+			d, repo := versionEngine(t)
+			commitVersionLogs(t, repo, "rebuild", time.Now().UTC().Add(-time.Hour), 3)
+			if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			column := "last_seen"
+			if table == "version_rollup_batches" {
+				column = "max_ingested"
+			}
+			if _, err := d.DB.Exec("ALTER TABLE " + table + " DROP COLUMN " + column); err != nil {
+				t.Fatal(err)
+			}
+			if err := createAnnotationTables(d.DB); err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range []string{"SELECT count(*) FROM version_rollup", "SELECT count(*) FROM version_rollup_batches", "SELECT count(*) FROM rollup_state WHERE cache_key LIKE 'version_rollup%'"} {
+				var n int
+				if err := d.DB.QueryRow(q).Scan(&n); err != nil || n != 0 {
+					t.Fatalf("stale paired state: %s count=%d err=%v", q, n, err)
+				}
+			}
+			if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+				t.Fatalf("history not reread: %d %v", n, err)
+			}
+			var n int
+			if err := d.DB.QueryRow("SELECT count(*) FROM version_rollup").Scan(&n); err != nil || n == 0 {
+				t.Fatalf("missing rebuilt history: %d %v", n, err)
+			}
+		})
+	}
+}
+
+type annotationCountingReader struct {
+	queryrows.Queryer
+	engine *annotationCountingEngine
+}
+
+func (r annotationCountingReader) QueryContext(ctx context.Context, q string, args ...any) (queryrows.Rows, error) {
+	r.engine.calls++
+	if strings.Contains(q, "FROM spans") || strings.Contains(q, "FROM logs") || strings.Contains(q, "FROM metrics") {
+		r.engine.raw++
+	}
+	return r.Queryer.QueryContext(ctx, q, args...)
+}
+func (d *annotationCountingEngine) WithReadTransaction(ctx context.Context, read func(queryrows.Queryer) error) error {
+	return d.Duck.WithReadTransaction(ctx, func(db queryrows.Queryer) error { return read(annotationCountingReader{Queryer: db, engine: d}) })
 }

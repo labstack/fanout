@@ -268,3 +268,42 @@ func TestM2StructuredTableSparklineMeasure(t *testing.T) {
 		t.Fatalf("batch cells=%d", cells)
 	}
 }
+
+func TestFinalFixLimitedShareTrendUsesOriginalScope(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	spans := []telemetry.Span{}
+	for minute := range 2 {
+		for i := range 100 {
+			at := fixtureStart.Add(time.Duration(minute) * time.Minute).UnixNano()
+			service := "A"
+			if i >= 90 {
+				service = "B"
+			}
+			spans = append(spans, telemetry.Span{ServiceName: service, TraceID: fmt.Sprintf("%d-%d", minute, i), SpanID: fmt.Sprint(i), StartUnixNanos: at, EndUnixNanos: at + 1000000, IngestedAt: at})
+		}
+	}
+	commit(t, repo, spans, nil)
+	counter := &countingTableTrendEngine{Engine: engine}
+	e := NewExecutor(counter, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := Dashboard{Name: "Shares", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Query{From: "spans", By: []string{"service"}, Measures: []string{"share()"}, Limit: 1}, Options: &Options{Columns: []ColumnFormat{{Field: "share", Format: "sparkline"}}}}}}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil || got[0].Status != StatusOK {
+		t.Fatalf("run: %+v %v", got, err)
+	}
+	if counter.queries != 1 {
+		t.Fatalf("trend queries=%d", counter.queries)
+	}
+	f := got[0].Frame
+	if f.Rows != 1 || f.Values[0][0] != "A" || f.Values[1][0] != float64(90) {
+		t.Fatalf("main shares: %+v", f)
+	}
+	for _, v := range f.Trends["share"][0] {
+		if v != nil && v != float64(90) {
+			t.Fatalf("wrong denominator: %v", f.Trends)
+		}
+	}
+	if f.Trends["share"][0][0] != float64(90) {
+		t.Fatalf("missing share points: %+v", f)
+	}
+}

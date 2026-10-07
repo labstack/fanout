@@ -2,6 +2,7 @@ package annotations
 
 import (
 	"context"
+	"errors"
 	"github.com/labstack/fanout/internal/queryrows"
 	"testing"
 	"time"
@@ -46,4 +47,52 @@ func TestM2FixEmptyNamespaceUsesDefault(t *testing.T) {
 			}
 		})
 	}
+}
+
+type recordingAnnotationDB struct {
+	defaultAnnotationDB
+	inTransaction         bool
+	begins, ends, queries int
+	failAt                int
+}
+
+func (db *recordingAnnotationDB) QueryContext(ctx context.Context, q string, args ...any) (queryrows.Rows, error) {
+	if !db.inTransaction {
+		return nil, errors.New("annotation query outside transaction")
+	}
+	db.queries++
+	if db.queries == db.failAt {
+		return nil, errors.New("read failed")
+	}
+	return db.defaultAnnotationDB.QueryContext(ctx, q, args...)
+}
+func (db *recordingAnnotationDB) WithReadTransaction(ctx context.Context, read func(queryrows.Queryer) error) error {
+	db.begins++
+	db.inTransaction = true
+	defer func() { db.inTransaction = false; db.ends++ }()
+	return read(db)
+}
+func TestFinalFixAnnotationsReadOneTransaction(t *testing.T) {
+	now := time.Now().UTC()
+	for _, failAt := range []int{0, 1, 2, 3} {
+		db := &recordingAnnotationDB{failAt: failAt}
+		_, err := New(db).Read(t.Context(), Request{From: now.Add(-time.Hour), To: now})
+		if failAt == 0 && err != nil {
+			t.Fatal(err)
+		}
+		if failAt > 0 && err == nil {
+			t.Fatal("missing read error")
+		}
+		want := 3
+		if failAt > 0 {
+			want = failAt
+		}
+		if db.begins != 1 || db.ends != 1 || db.queries != want || db.inTransaction {
+			t.Fatalf("transaction lifecycle: %+v", db)
+		}
+	}
+}
+
+func (db *defaultAnnotationDB) WithReadTransaction(_ context.Context, read func(queryrows.Queryer) error) error {
+	return read(db)
 }

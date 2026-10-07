@@ -24,10 +24,15 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   const requested = useRef<{ key: string; ids: Set<string> }>({ key, ids: new Set() });
   const [keptAnnotations, setKeptAnnotations] = useState<{key:string;annotations?:AnnotationsResponse;annotation_error?:string}>({key});
   const [kept, setKept] = useState<Snapshot>({ key, results: new Map(), updated: new Map(), stale: new Set(), receivedAt: 0 });
+  const knownEmpty = ids.length === 0 && kept.key === key && kept.receivedAt > 0;
   const canQuery = enabled && spec.panels.some((p) => p.viz !== "text");
   const query = useQuery({
     queryKey: ["panels", key],
-    queryFn: ({ signal }) => {
+    queryFn: ({ signal }): Promise<Awaited<ReturnType<typeof refreshDashboard>> & {hasTimePanels: boolean}> => {
+      if (knownEmpty && lazyBatch.current?.key !== key) {
+        inFlight.current = [];
+        return Promise.resolve({ results: [], hasTimePanels: false });
+      }
       const batch = lazyBatch.current?.key === key ? lazyBatch.current.ids : ids;
       // An empty list means all panels to the server. Track the same batch.
       inFlight.current = (batch.length ? [...batch] : spec.panels.map((panel) => panel.id)).sort();
@@ -43,7 +48,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     },
     retry: retryPanelQuery,
     enabled: canQuery,
-    refetchInterval: refreshMs[refresh] ?? 30_000,
+    refetchInterval: knownEmpty ? false : refreshMs[refresh] ?? 30_000,
     staleTime: 5_000,
     placeholderData: (previous) => previous,
   });
@@ -74,7 +79,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
       if (lazyBatch.current === batch) lazyBatch.current = null;
     });
   }, [visible, canQuery, key, query.isFetching, query.error, query.refetch, results, spec.panels]);
-  return { results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (canQuery) void query.refetch({ cancelRefetch: false }); } };
+  return { results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (canQuery && !knownEmpty) void query.refetch({ cancelRefetch: false }); } };
 }
 
 type Snapshot = { key: string; results: Map<string, PanelResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number };

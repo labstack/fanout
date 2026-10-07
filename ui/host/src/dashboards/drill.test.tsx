@@ -427,3 +427,13 @@ it("drills configured trace-link rows with their namespace after sorting, withou
     node.remove();
   }
 });
+
+it("sends the narrowed deploy selection to the exemplar endpoint", async () => {
+ wire.exemplars.mockResolvedValue({traces:[]});
+ const before = {...target,to:"2026-10-01T12:30:00Z",dimensions:{service:"checkout",operation:"PlaceOrder"}};
+ const drawer=await mountDrawer(before);
+ try {
+  await act(async()=>{await tick();});
+  expect(wire.exemplars.mock.lastCall?.[0]).toMatchObject({from:before.from,to:before.to,dimensions:before.dimensions,time:{from:target.window_from,to:target.window_to}});
+ }finally{await drawer.cleanup();}
+});

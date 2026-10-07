@@ -109,7 +109,7 @@ func (e *Executor) optionsFor(ctx context.Context, v Variable, checked *Checked,
 			return nil, fmt.Errorf("list values for $%s: %w", v.Name, err)
 		}
 		defer rows.Close()
-		var out []Option
+		out := []Option{}
 		for rows.Next() {
 			var o Option
 			if err := rows.Scan(&o.Value, &o.Count); err != nil {

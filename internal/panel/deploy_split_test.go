@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -29,6 +30,29 @@ func TestM2DeploySplitUsesEffectiveWindowAndRates(t *testing.T) {
 	f := got[0].Frame
 	if got[0].Status != "ok" || f.Rows != 4 || f.Columns[1].Name != "period" {
 		t.Fatalf("split: %+v", got)
+	}
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Periods map[string]struct{ From, To time.Time }
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if before, since := wire.Periods["Before deploy"], wire.Periods["Since deploy"]; !before.From.Equal(at) || !before.To.Equal(at.Add(15*time.Minute)) || !since.From.Equal(before.To) || !since.To.Equal(at.Add(time.Hour)) {
+		t.Fatalf("missing period windows: %s", raw)
+	}
+	req := ExemplarRequest{Dashboard: d, PanelID: d.Panels[0].ID, From: at, To: at.Add(15 * time.Minute), Dimensions: map[string]string{"http_route": "/cart"}}
+	exemplars, err := e.Exemplars(t.Context(), req)
+	if err != nil || len(exemplars.Traces) != 15 {
+		t.Fatalf("before exemplars: %+v %v", exemplars, err)
+	}
+	for _, trace := range exemplars.Traces {
+		if !trace.Start.Before(req.To) {
+			t.Fatalf("since trace in before selection: %+v", trace)
+		}
 	}
 	for _, v := range f.Values[2] {
 		if v.(float64) != 1.0/60 {

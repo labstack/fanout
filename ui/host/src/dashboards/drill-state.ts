@@ -96,6 +96,10 @@ export function makeDrill(
     return undefined;
   let from = result.from_ms,
     to = result.to_ms;
+  if (selection.from !== undefined && selection.to !== undefined) {
+    from = Math.max(from, Date.parse(selection.from));
+    to = Math.min(to, Date.parse(selection.to));
+  }
   if (selection.time !== undefined && !selection.trace_id) {
     const m = /^(\d+)(s|m|h|d)$/.exec(result.interval ?? "");
     const width = m
@@ -111,8 +115,8 @@ export function makeDrill(
     JSON.stringify({
       panel_id: panel.id,
       kind: selection.trace_id ? "traces" : panel.drill,
-      from: new Date(from).toISOString(),
-      to: new Date(to).toISOString(),
+      from: selection.from && Date.parse(selection.from) === from ? selection.from : new Date(from).toISOString(),
+      to: selection.to && Date.parse(selection.to) === to ? selection.to : new Date(to).toISOString(),
       window_from: new Date(result.from_ms).toISOString(),
       window_to: new Date(result.to_ms).toISOString(),
       dimensions: selection.dimensions,

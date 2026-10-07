@@ -75,6 +75,7 @@ func (e *Executor) runDeploySplit(ctx context.Context, p *Panel, checked *Checke
 	}
 	columns := append([]Column{a.Columns[0], {Name: "period", Type: "string", Role: "dimension"}}, a.Columns[1:]...)
 	f := newFrame(columns)
+	f.Periods = map[string]Time{"Before deploy": {From: &before.Start, To: &before.End}, "Since deploy": {From: &after.Start, To: &after.End}}
 	f.Truncated = a.Truncated || b.Truncated || history.Truncated
 	for _, part := range []struct {
 		frame *Frame

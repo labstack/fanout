@@ -18,7 +18,7 @@ type countingTableTrendEngine struct {
 }
 
 func (e *countingTableTrendEngine) QueryContext(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
-	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") {
+	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") || strings.HasPrefix(text, "WITH _trend_scope AS") {
 		e.queries++
 	}
 	return e.Engine.QueryContext(ctx, text, args...)
@@ -60,7 +60,7 @@ func TestM2TableFixHealthBudgetNotesEveryFrame(t *testing.T) {
 type overflowingTableTrendEngine struct{ Engine }
 
 func (e overflowingTableTrendEngine) QueryContext(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
-	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") {
+	if strings.HasPrefix(text, "SELECT epoch_ms(time_bucket(") || strings.HasPrefix(text, "WITH _trend_scope AS") {
 		return e.Engine.QueryContext(ctx, "SELECT i::BIGINT, 'checkout', 1.0 FROM range(10002) t(i)")
 	}
 	return e.Engine.QueryContext(ctx, text, args...)

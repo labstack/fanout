@@ -153,3 +153,23 @@ func TestM2VizOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestFinalFixGroupedPanelsRequireOneMeasure(t *testing.T) {
+	for _, tc := range []struct {
+		viz string
+		by  []string
+	}{
+		{"timeseries", []string{"service"}}, {"bar", []string{"service", "operation"}},
+	} {
+		t.Run(tc.viz, func(t *testing.T) {
+			d := Dashboard{Name: "Grouped", Panels: []Panel{{ID: "p", Title: "P", Viz: tc.viz, Query: &Query{From: "spans", By: tc.by, Measures: []string{"p50(duration_ms)", "p95(duration_ms)"}}}}}
+			Normalize(&d)
+			for _, p := range Validate(&d) {
+				if p.Path == "panels[0].query.measures" && p.Message == "grouped panels show one measure" && p.Hint == "use one panel per measure, or remove by" {
+					return
+				}
+			}
+			t.Fatal("missing grouped measure problem")
+		})
+	}
+}

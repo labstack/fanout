@@ -229,3 +229,29 @@ describe("visualization regressions", () => {
     }
   });
 });
+
+import { makeDrill, parseDrill } from "./drill-state";
+it("grouped bar clicks carry both telemetry dimensions", async () => {
+ const p: Panel = {...panel,viz:"bar",drill:"traces",query:{from:"spans",by:["service","operation"],measures:["count()"]}};
+ const r: PanelResult = {...result,from_ms:100000,to_ms:500000,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"operation",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[["checkout"],["PlaceOrder"],[9]],rows:1}};
+ const onPoint = vi.fn();
+ await render(<BarViz panel={p} result={r} dark={false} height={200} onPoint={onPoint}/>);
+ const data = instance.setOption.mock.lastCall![0].series[0].data[0];
+ instance.on.mock.calls.find(([name])=>name==="click")![1]({name:"checkout",seriesName:"PlaceOrder",data});
+ expect(onPoint).toHaveBeenCalledWith({dimensions:{service:"checkout",operation:"PlaceOrder"}});
+ expect(makeDrill(p,r,onPoint.mock.lastCall![0])?.dimensions).toEqual({service:"checkout",operation:"PlaceOrder"});
+});
+it.each(["Before deploy","Since deploy"])("deploy bar clicks carry the %s window without a synthetic dimension",async period=>{
+ const p: Panel = {...panel,viz:"bar",drill:"traces",query:{from:"spans",by:["service"],measures:["count()"]},options:{split:"deploy"}};
+ const periods = JSON.parse('{"Before deploy":{"from":"1970-01-01T00:01:40Z","to":"1970-01-01T00:05:00.123456789Z"},"Since deploy":{"from":"1970-01-01T00:05:00.123456789Z","to":"1970-01-01T00:08:20Z"}}');
+ const r: PanelResult = {...result,from_ms:100000,to_ms:500000,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"period",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[["checkout"],[period],[9]],rows:1,...{periods}}};
+ const onPoint = vi.fn();
+ await render(<BarViz panel={p} result={r} dark={false} height={200} onPoint={onPoint}/>);
+ const data = instance.setOption.mock.lastCall![0].series[0].data[0];
+ instance.on.mock.calls.find(([name])=>name==="click")![1]({name:"checkout",seriesName:period,data});
+ const target = makeDrill(p,r,onPoint.mock.lastCall![0]);
+ expect(target?.from).toBe(periods[period].from);
+ expect(target?.to).toBe(periods[period].to);
+ expect(target?.dimensions).toEqual({service:"checkout"});
+ expect(parseDrill(JSON.stringify(target))).toEqual(target);
+});
