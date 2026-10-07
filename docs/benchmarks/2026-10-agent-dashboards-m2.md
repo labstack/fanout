@@ -1,7 +1,9 @@
 # Agent dashboards Milestone 2 verification
 
-Build: ef61ab1e (collector run on 93cd7556; ef61ab1e only hides overlapping heatmap time labels, re-screenshotted). Model: claude-sonnet-5-5. Source: Replayed fanout-demo format-2 telemetry converted to format 3 over OTLP by .superpowers/replay (newest input 2026-10-05T16:45:10.69Z, target 2026-10-06T22:40:35.61Z), served by a disposable local instance with no AI provider. Deploy markers use 7,201 synthetic cart spans with service.version 2.3.0 (attribute fanout.synthetic), 19:30:58Z-23:30:58Z. Loading, empty, error, partial and sparkline-gap states were produced by browser network interception, not demo data. Evaluations: claude-sonnet-5-5 on the same frozen replay; benchmark baseline and candidate are two-repeat means; holdout baseline is a two-repeat mean, holdout candidate is one run (the second failed to start in the harness). No judge pass..
+Build: 2c5a686c (collector run on this build, including the final-review fixes). Model: claude-sonnet-5-5. Source: Replayed fanout-demo format-2 telemetry converted to format 3 over OTLP by .superpowers/replay (newest input 2026-10-05T16:45:10.69Z, target 2026-10-06T22:40:35.61Z), served by a disposable local instance with no AI provider. Deploy markers use 7,201 synthetic cart spans with service.version 2.3.0 (attribute fanout.synthetic), 19:30:58Z-23:30:58Z. Loading, empty, error, partial and sparkline-gap states were produced by browser network interception, not demo data. Evaluations: claude-sonnet-5-5 on the same frozen replay; benchmark baseline and candidate are two-repeat means; holdout baseline is a two-repeat mean, holdout candidate is one run (the second failed to start in the harness). No judge pass..
 Status: PASS.
+
+This run was taken about 17 hours after the replay's newest point, so its 24-hour window holds about 7 hours of telemetry. An earlier run on the same data, inside a fresh window, returned about 20,500 cells per refresh in 1.6–2.1 s, also with exactly one panels request and one annotations request.
 
 Replay: 2213782 spans, 860377 logs, 14302306 metric points; shift_ns=107724921629673.
 
@@ -44,12 +46,12 @@ Replay: 2213782 spans, 860377 logs, 14302306 metric points; shift_ns=10772492162
 
 | Theme | Panels | Panel requests | Annotation requests | Cells | ms |
 |---|---:|---:|---:|---:|---:|
-| light | 23 | 1 | 1 | 20519 | 2018 |
-| light | 23 | 1 | 1 | 20519 | 1685 |
-| light | 23 | 1 | 1 | 20519 | 1751 |
-| dark | 23 | 1 | 1 | 20515 | 2085 |
-| dark | 23 | 1 | 1 | 20515 | 2086 |
-| dark | 23 | 1 | 1 | 20511 | 1669 |
+| light | 23 | 1 | 1 | 9399 | 1267 |
+| light | 23 | 1 | 1 | 9399 | 1286 |
+| light | 23 | 1 | 1 | 9399 | 1166 |
+| dark | 23 | 1 | 1 | 9378 | 1356 |
+| dark | 23 | 1 | 1 | 9378 | 1366 |
+| dark | 23 | 1 | 1 | 9378 | 1367 |
 
 ## Interaction evidence
 
@@ -59,17 +61,17 @@ Replay: 2213782 spans, 860377 logs, 14302306 metric points; shift_ns=10772492162
 - error: PASS; error asserted on 1 types/panels (rate_ts); interception removed; observed real response and rendering recovered
 - partial: PASS; partial asserted on 1 types/panels (rate_ts); interception removed; observed real response and rendering recovered
 - filter_chip: PASS; Real bar selected frontend; removal restored All and 10 visible services; selection request, removal cache_hit
-- linked_crosshair: PASS; 4 required comparisons show exactly one ≤8px band within ±12px at relative x=.63; wide tooltip bands recorded and ignored; heatmap/timeline followers recorded; chart IDs ec_1791344767728→ec_1791344796097
+- linked_crosshair: PASS; 4 required comparisons show exactly one ≤8px band within ±12px at relative x=.63; wide tooltip bands recorded and ignored; heatmap/timeline followers recorded; chart IDs ec_1791388807271→ec_1791388833853
 - brush_history: PASS; 40-move 200px brush pushed exactly one history entry; from/to appeared; Back restored http://127.0.0.1:7520/dashboards/01a11382-f0df-708c-bade-71d3fa50fc21?range=24h
-- panel_time: PASS; Visible 1d badge; requested panel shift=1d; observed response windows differ exactly 86400000ms; all other windows match (1791258478856..1791344878856)
+- panel_time: PASS; Visible 1d badge; requested panel shift=1d; observed response windows differ exactly 86400000ms; all other windows match (1791302499616..1791388899616)
 - drill_url: PASS; slow_traces: click→drill URL→reload retained→Back closed; recent_logs: click→drill URL→reload retained→Back closed
-- waterfall_logs: PASS; Selected trace 08d838bf31311ca03dacf6c71d6062e2; 2 waterfall spans; correlated logs empty with trace-ID/window reason
+- waterfall_logs: PASS; Selected trace 020a920f65fbf268508dab44747cdbf9; 2 waterfall spans; correlated logs empty with trace-ID/window reason
 - cancel_drill: PASS; Delayed first drill; closed before completion; second dialog matched its URL kind/panel; releasing first response never restored first drawer or target (MutationObserver + URL)
-- deploy_markers: PASS; Controller visual inspection of m2-screenshots/dark-deploy-cart-markers.png vs dark-deploy-cart-plain.png: the markers dashboard draws a dashed "cart 2.3.0" line at the 19:30Z first-seen instant plus the 22:29-22:54Z anomaly band; the no-marker twin draws neither; service=checkout shows no deploy line and its two images are identical. The collector pixel heuristic was inconclusive because the marker label lane compresses the plot; the version is a labelled synthetic injection.
+- deploy_markers: PASS; Controller visual inspection of m2-screenshots/dark-deploy-cart-markers.png vs dark-deploy-cart-plain.png on build 2c5a686c: the markers dashboard draws a dashed "cart 2.3.0" line at the 19:30Z first-seen instant plus the 22:29-22:54Z anomaly band; the no-marker twin draws neither; service=checkout shows no deploy line and its two images are identical. The collector pixel heuristic was inconclusive because the marker label lane compresses the plot; the version is a labelled synthetic injection.
 - anomaly_areas: PASS; Cart error_rate_change 2026-10-06T22:29:00Z..2026-10-06T22:54:00Z produces 136px shaded band; checkout has no unrelated band; matched twin screenshots and saved diffs
 - deploy_split: PASS; Cart visible frame has Before deploy,Since deploy series and nonblank bar screenshot (request); All has a plain bar and note: Service is All; showing the unsplit whole-window frame. (cache_hit)
 - column_formats: PASS; service_link click sets picker/request; sparkline SVG, status text with non-colour cue, width bar, trace_link drill, normalized duration unit and log_template code/wildcards observed
-- stat_sparkline: PASS; Calls total=1031094 unchanged after one simulated null; 2 SVG subpaths prove gap; route removed and real data recovered
+- stat_sparkline: PASS; Calls total=367197 unchanged after one simulated null; 2 SVG subpaths prove gap; route removed and real data recovered
 
 ## Agent evaluation
 
@@ -199,3 +201,22 @@ Synthetic data: the demo has a single `service.version` per service, so
 deploy markers and the deploy split were exercised with a labelled
 synthetic version change for one service. Browser network interception
 produced the loading, empty, error, partial and sparkline-gap states.
+
+## Final review
+
+A broad review and a focused security and concurrency review followed the
+browser check. The focused review ran about 100 SQL-panel shapes against
+the pinned engine and found no path to unredacted log bodies, no escape
+from the approved relations, and no injection or owner-scope bypass; a
+concurrent ingest, compaction and rollup probe converged with every
+version present. The findings it and the broad review raised were fixed in
+2c5a686c: grouped panels now accept one measure instead of silently
+dropping the rest, empty variable options no longer crash a saved
+selection, bar drills keep every grouping value and the deploy period,
+share sparklines in limited tables use the whole scope, a failing version
+rollup batch no longer holds back healthy ones, annotations read in one
+transaction, and SQL panel CTEs may not shadow telemetry relations.
+
+Deferred: an explicit empty multi-value selection does not survive a shared
+URL (rare; it shows no data either way), and schema-qualified log columns
+fail with an error rather than binding (they fail closed).
