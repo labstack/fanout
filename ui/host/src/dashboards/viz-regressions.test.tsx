@@ -49,6 +49,32 @@ async function render(node: ReactNode) {
 }
 
 describe("visualization regressions", () => {
+  it.each(["bar", "timeseries", "gauge", "heatmap", "histogram", "scatter", "state_timeline", "service_map"] as const)("fits %s into the flex body including the split note", async (viz) => {
+    const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Chart" result={{ ...result, frame: { ...frame, note: "Split at 2026-10-06T19:30:58.554969Z · cart 2.3.0" } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    const canvas = host.querySelector<HTMLElement>('[role="img"]')!;
+    const body = host.querySelector<HTMLElement>('[data-panel="p"]')!.children[1] as HTMLElement;
+    expect(body.style.overflow).toBe("hidden");
+    expect(body.style.display).toBe("flex");
+    expect(parseFloat(body.style.minHeight)).toBe(0);
+    expect(canvas.style.flex).toBe("1 1 auto");
+    expect(parseFloat(canvas.style.minHeight)).toBe(0);
+    if (viz === "service_map") expect(parseFloat(canvas.parentElement!.style.minHeight)).toBe(0);
+  });
+
+  it("formats the deploy split in the viewer locale and retains the exact timestamp in its title", async () => {
+    const NativeFormatter = Intl.DateTimeFormat;
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (_locale, options) {
+      return new NativeFormatter("en-US", { ...options, timeZone: "America/Los_Angeles" });
+    });
+    try {
+      const note = "Split at 2026-10-06T19:30:58.554969Z · cart 2.3.0";
+      const { host } = await render(<PanelCard panel={{ ...panel, viz: "bar" }} title="Split" result={{ ...result, frame: { ...frame, note } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+      const status = host.querySelector('[role="status"]')!;
+      expect(status.textContent).toBe("Split at Oct 6, 12:30 PM · cart 2.3.0");
+      expect(status.getAttribute("title")).toBe(note);
+    } finally { vi.restoreAllMocks(); }
+  });
+
   it("shows Error logs warn at 3 and ok at 0", async () => {
     const p: Panel = { ...panel, id: "error_logs", title: "Error logs", better: "lower", thresholds: [{ value: 1, status: "warn" }] };
     const r = (count: number): PanelResult => ({ ...result, frame: { ...frame, totals: [null, count] } });
@@ -213,12 +239,12 @@ describe("visualization regressions", () => {
     }
     expect(select.mock.calls).toEqual([["cart"], ["cart"]]);
   });
-  it("uses interpolated chart labels, focusable descriptions, named loaders and scrolling bodies", async () => {
+  it("uses interpolated chart labels, focusable descriptions, named loaders and non-scrolling chart bodies", async () => {
     const { host } = await render(<PanelCard panel={{ ...panel, viz: "gauge", description: "Details" }} title="For cart" result={result} loading height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
     expect(host.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe("For cart: gauge");
     expect(host.querySelector('[aria-label="For cart description"]')!.tagName).toBe("BUTTON");
     expect(host.querySelector('[aria-label="Refreshing"]')).not.toBeNull();
-    expect(host.querySelector('[role="img"]')!.parentElement!.style.overflow).toBe("auto");
+    expect(host.querySelector('[role="img"]')!.parentElement!.style.overflow).toBe("hidden");
   });
   it("limits retries to two and never retries client ApiErrors", () => {
     for (const status of [400, 401, 403, 404, 409, 422, 499]) expect(retryQuery(0, new ApiError("bad", status))).toBe(false);

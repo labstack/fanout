@@ -21,8 +21,10 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
     return () => window.clearInterval(timer);
   }, [staleAt]);
   const bodyHeight = Math.max(80, height - 52);
+  const scrolls = ["table", "logs", "traces", "log_patterns"].includes(panel.viz);
+  const note = formatPanelNote(result?.frame?.note);
   return <Paper withBorder radius="md" h="100%" p="sm" style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id}>
-    <Group justify="space-between" wrap="nowrap" gap="xs" mb={6} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined }}>
+    <Group justify="space-between" wrap="nowrap" gap="xs" mb={6} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0}>
         <Text fw={600} size="sm" truncate>{title}</Text>
         {panelTimeLabel(panel) && <Text size="xs" c="dimmed" role="status">{panelTimeLabel(panel)}</Text>}
@@ -41,7 +43,7 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
         </Menu.Dropdown>
       </Menu>
     </Group>
-    <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+    <Box data-panel-body style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: scrolls ? "auto" : "hidden", display: scrolls ? "block" : "flex", flexDirection: "column" }}>
       {!result && panel.viz !== "text" ? <Center h="100%"><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Center h="100%"><Stack align="center" gap={4} maw={420}>
           <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
@@ -54,14 +56,23 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
         </Stack></Center>
         : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} />}
     </Box>
-    {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status">
+    {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status" style={{ flexShrink: 0 }}>
       {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}
       {(result?.frame?.truncated || result?.previous?.truncated) ? `${staleAt ? " · " : ""}Truncated: showing limited data` : ""}
     </Text>}
-    {result?.frame?.note && <Text size="xs" c="dimmed" role="status">{result.frame.note}</Text>}
-    {result?.annotation_error && <Text size="xs" c="warn" role="status">{result.annotation_error}</Text>}
-    {result?.annotation_scope?.limited && <Text size="xs" c="warn" role="status">Annotation service scope is limited.</Text>}
+    {note && <Text size="xs" c="dimmed" role="status" title={result?.frame?.note} style={{ flexShrink: 0, overflowWrap: "anywhere" }}>{note}</Text>}
+    {result?.annotation_error && <Text size="xs" c="warn" role="status" style={{ flexShrink: 0 }}>{result.annotation_error}</Text>}
+    {result?.annotation_scope?.limited && <Text size="xs" c="warn" role="status" style={{ flexShrink: 0 }}>Annotation service scope is limited.</Text>}
   </Paper>;
+}
+
+function formatPanelNote(note?: string): string | undefined {
+  const split = note?.match(/^Split at (\S+)( · .+)$/);
+  if (!split) return note;
+  const at = new Date(split[1]);
+  if (!Number.isFinite(at.getTime())) return note;
+  const stamp = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(at);
+  return `Split at ${stamp}${split[2]}`;
 }
 
 function relativeTime(at: number, now: number): string {

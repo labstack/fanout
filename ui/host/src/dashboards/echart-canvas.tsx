@@ -73,5 +73,5 @@ export function EChartCanvas({ option, height, label, onClick, onZoom, group }: 
     };
   }, [group]);
 
-  return <div ref={ref} role="img" aria-label={description} style={{ height, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+  return <div ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
 }

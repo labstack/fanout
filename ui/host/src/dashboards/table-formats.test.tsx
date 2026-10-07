@@ -36,7 +36,11 @@ describe("annotations and formats",()=>{
 const cleanups: (() => void)[] = [];
 beforeEach(() => {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
- vi.stubGlobal("ResizeObserver",class {observe(){} unobserve(){} disconnect(){}});
+ vi.stubGlobal("ResizeObserver",class {
+  constructor(private callback:ResizeObserverCallback){}
+  observe(target:Element){this.callback([{target,contentRect:{width:1200}} as ResizeObserverEntry],this as unknown as ResizeObserver);}
+  unobserve(){} disconnect(){}
+ });
  vi.stubGlobal("IntersectionObserver",class {observe(){} unobserve(){} disconnect(){}});
 });
 afterEach(async () => {

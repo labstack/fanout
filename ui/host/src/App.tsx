@@ -6,6 +6,8 @@ import { threadHistoryQueryKey } from "./api";
 import { activityLabel, FanoutAppContext } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
 import { createID } from "./id";
+import { dashboardsKey } from "./dashboards/api";
+import { dashboardToolResult } from "./dashboard-tool-result";
 import Shell from "./shell";
 
 function Session() {
@@ -81,6 +83,12 @@ function Session() {
       onRunInitialized: () => { setRunning(true); setError(""); },
       onToolCallStartEvent: ({ event }: { event: { toolCallName: string } }) => { toolCallsRef.current += 1; setActivity(activityLabel(event.toolCallName)); },
       onToolCallEndEvent: () => { toolCallsRef.current = Math.max(0, toolCallsRef.current - 1); if (toolCallsRef.current === 0) setActivity(""); },
+      onToolCallResultEvent: ({ event, messages: next }) => {
+        const saved = dashboardToolResult(event.toolCallId, event.content, next);
+        if (!saved) return;
+        void queryClient.invalidateQueries({ queryKey: dashboardsKey });
+        void queryClient.invalidateQueries({ queryKey: ["dashboard", saved.id] });
+      },
       onRunFinalized: ({ messages: next }) => {
         const finished = [...next] as Message[];
         setMessages(finished);

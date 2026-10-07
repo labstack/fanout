@@ -10,6 +10,8 @@ import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
 import type { MCPAppContent } from "./mcp-app-frame";
+import { Link } from "@tanstack/react-router";
+import { dashboardToolResult } from "./dashboard-tool-result";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
@@ -28,7 +30,12 @@ export function ChatPage() {
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   useEffect(() => { if (lastSent) toBottom(); }, [lastSent, toBottom]);
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
-  const visibleMessages = messages.filter((message) => message.role !== "tool");
+  const dashboardResults = new Map(messages.flatMap(message => {
+    if (message.role !== "tool" || message.error) return [];
+    const saved = dashboardToolResult(message.toolCallId, message.content, messages);
+    return saved ? [[message.id, saved] as const] : [];
+  }));
+  const visibleMessages = messages.filter((message) => message.role !== "tool" || dashboardResults.has(message.id));
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
@@ -45,7 +52,15 @@ export function ChatPage() {
         {!threadMissing && ready && <>
           {visibleMessages.length === 0 && <Welcome onSelect={send} />}
           <Stack gap="lg" aria-live="polite">
-            {visibleMessages.map((message) => <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} send={send} />)}
+            {visibleMessages.map((message) => {
+              const saved = dashboardResults.get(message.id);
+              return saved ? <Paper key={message.id} withBorder radius="md" p="sm" data-dashboard-result={saved.id}>
+                <Group justify="space-between" gap="sm">
+                  <Box miw={0}><Text size="xs" c="dimmed">{saved.label}</Text><Text size="sm" fw={500} style={{ overflowWrap: "anywhere" }}>{saved.name}</Text></Box>
+                  <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{ dashboardId: saved.id }} search={{}} />} variant="subtle" size="compact-sm">Open dashboard</Button>
+                </Group>
+              </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} send={send} />;
+            })}
             {running && <Group gap="xs"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
             {error && <RunError message={error} onRetry={retry} />}
           </Stack>

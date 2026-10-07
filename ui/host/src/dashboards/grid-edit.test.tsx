@@ -6,7 +6,7 @@ import type { Layout } from "react-grid-layout/legacy";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSpec } from "../../../panels/types";
 
-type GridOptions = { children: ReactNode; layouts: { lg: Layout; sm: Layout }; isDraggable: boolean; isResizable: boolean; rowHeight: number; onBreakpointChange(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
+type GridOptions = { children: ReactNode; width?: number; layouts: { lg: Layout; sm: Layout }; isDraggable: boolean; isResizable: boolean; rowHeight: number; onBreakpointChange(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
 const grid = vi.hoisted(() => ({ current: undefined as GridOptions | undefined }));
 vi.mock("react-grid-layout/legacy", () => ({
   WidthProvider: (component: unknown) => component,
@@ -20,11 +20,24 @@ const spec: DashboardSpec = { version: 1, name: "Notes", time: { range: "1h" }, 
 const record = { id: "d1", name: "Notes", version: 3, spec, is_default: false, description: "", created_at: "t", updated_at: "t" };
 const cleanups: (() => void)[] = [];
 const fetchMock = vi.fn<typeof fetch>();
+let measuredWidth = 809;
+let reportWidth: ((width: number) => void) | undefined;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", fetchMock);
-  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  grid.current = undefined;
+  measuredWidth = 809;
+  reportWidth = undefined;
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: Element) {
+      reportWidth = width => this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      reportWidth(measuredWidth);
+    }
+    unobserve() {}
+    disconnect() {}
+  });
   fetchMock.mockReset();
   fetchMock.mockResolvedValue(new Response(JSON.stringify(record), { headers: { "content-type": "application/json" } }));
 });
@@ -49,6 +62,21 @@ async function render(editing = true, dashboardSpec = spec) {
 }
 
 describe("dashboard layout editing", () => {
+  it("waits for a visible container width and follows its resizing after a route transition", async () => {
+    measuredWidth = 0;
+    const { host } = await render(false);
+    expect(grid.current).toBeUndefined();
+    expect(host.querySelector('[data-panel="note"]')).toBeNull();
+    expect(reportWidth).toBeTypeOf("function");
+    await act(async () => reportWidth!(809));
+    expect(grid.current!.width).toBe(809);
+    expect(host.querySelector('[data-panel="note"]')).not.toBeNull();
+    await act(async () => reportWidth!(903));
+    expect(grid.current!.width).toBe(903);
+    await act(async () => reportWidth!(809));
+    expect(grid.current!.width).toBe(809);
+  });
+
   it("uses 40px rows and keeps drag and resize disabled in view mode", async () => {
     await render(false);
     expect(rowHeight).toBe(40);
