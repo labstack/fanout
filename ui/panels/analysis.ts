@@ -177,7 +177,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
       xAxis: { type: "time", axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
-      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate" } },
+      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate", ...(heat ? { interval: (size.height-60)/Math.max(1,names.length)<12 ? 1 : 0, hideOverlap: true } : {}) } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
         itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "1"], textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
@@ -189,9 +189,10 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);
           const height = Math.abs(api.size([0, 1])[1]) * (heat ? 1 : .65);
+          const gap = heat && Math.abs(right[0]-left[0]) >= 8 ? 1 : 0;
           if (heat && !(api.value(2) > 0)) return undefined;
           const fraction = logMax === logMin ? 0 : (Math.log1p(Math.min(api.value(2), maxCount)) - logMin) / (logMax - logMin);
-          return { type: "rect", shape: { x: left[0] + (heat ? .5 : 0), y: left[1] - height / 2 + (heat ? .5 : 0), width: Math.max(0, right[0] - left[0] - (heat ? 1 : 0)), height: Math.max(0, height - (heat ? 1 : 0)), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0, ...(heat ? { fill: heatColour(theme, Math.max(0, fraction)) } : {}) } };
+          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0, ...(heat ? { fill: heatColour(theme, Math.max(0, fraction)) } : {}) } };
         },
       }],
     };

@@ -339,6 +339,8 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	switch {
 	case reduces:
 		interval = AutoInterval(end.Sub(start), 240)
+	case p.Query != nil && p.Query.Bucket == "auto" && (p.Viz == "heatmap" || p.Viz == "state_timeline"):
+		interval = autoCellInterval(end.Sub(start), width)
 	case p.Query != nil:
 		interval = bucketInterval(p.Query.Bucket, end.Sub(start), width)
 	default:

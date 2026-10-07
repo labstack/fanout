@@ -66,6 +66,6 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
   const categories=texts.filter(t=>category.includes(t.text));
   const expected=option.series?.flatMap(s=>s.type==="bar"&&s.label?.show?s.data?.flatMap(d=>typeof d.value==="number"?[s.label!.formatter!({value:d.value})]:[])??[]:[])??[];
   return {texts,marks,
-    ...(scale?{heat:{cells,gaps,scale_width:scale.width,scale_height:scale.height,plot_fraction:(plot?.height??0)/size.height}}:{}),
+    ...(scale?{heat:{cells,gaps,gap:gaps.length ? (Math.abs(gaps[0])<.5?0:1) : undefined,scale_width:scale.width,scale_height:scale.height,plot_fraction:(plot?.height??0)/size.height}}:{}),
     ...(option.yAxis?.type==="category"&&option.series?.some(s=>s.type==="bar")?{bars:{category_fraction:Math.max(0,...categories.map(c=>c.right-c.left))/size.width,expected_labels:[...new Set(expected)],value_labels:texts.map(t=>t.text)}}:{})};
 }

@@ -12,6 +12,27 @@ var autoIntervals = []time.Duration{
 	30 * time.Minute, time.Hour, 3 * time.Hour, 6 * time.Hour, 12 * time.Hour, 24 * time.Hour,
 }
 
+// Cell plots need wider time buckets than lines. Widths are rounded outer panel
+// widths, so reserve 160px for body padding, axis labels and rounding error.
+// At normal widths target 60–90 columns; narrow panels use fewer to retain 8px
+// slots. The extra 20m step keeps a 24h window in that range (72–73 columns).
+func autoCellInterval(window time.Duration, widthPx int) time.Duration {
+	if widthPx <= 0 {
+		widthPx = 640
+	}
+	points := time.Duration(min(max((widthPx-160)/8, 2), 90))
+	intervals := []time.Duration{
+		10 * time.Second, 30 * time.Second, time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute,
+		20 * time.Minute, 30 * time.Minute, time.Hour, 3 * time.Hour, 6 * time.Hour, 12 * time.Hour, 24 * time.Hour,
+	}
+	for _, interval := range intervals {
+		if window/interval+1 <= points {
+			return interval
+		}
+	}
+	return intervals[len(intervals)-1]
+}
+
 // AutoInterval picks the finest standard interval, 10 seconds or longer,
 // that keeps a series at one point per four pixels or fewer, so a 24-hour
 // line stays legible instead of becoming a band.
