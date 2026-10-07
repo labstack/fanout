@@ -7,6 +7,7 @@ import { isOtherSeries, seriesGroups, sumPresent, wrappingLegend } from "./serie
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
 import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, niceDurationInterval } from "./units";
+import { markStyle } from "./style";
 
 function spanMs(interval?: string): number {
   const match = /^(\d+)(s|m|h|d)$/.exec(interval ?? "");
@@ -18,6 +19,13 @@ const bucketLabel = (row: Record<string, Cell>, unit?: string) => formatBucket(t
 const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.bucket_upper}`;
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
+
+/** Surface-tinted low counts, one hue through the bright identity slot. */
+function heatRamp(theme: ChartTheme): string[] {
+  const high = seriesSlot(0, theme.dark);
+  return [.08, .22, .4, .6, .8, 1].map(amount => "#" + [1,3,5].map(i =>
+    Math.round(parseInt(theme.surface.slice(i,i+2),16) * (1-amount) + parseInt(high.slice(i,i+2),16) * amount).toString(16).padStart(2,"0")).join(""));
+}
 
 /** State runs merge only touching buckets of the same row and status. */
 export function mergeStateRuns<T extends { value: (string | number | null | boolean)[]; selection: { from?: string; to?: string } }>(buckets: T[]): T[] {
@@ -55,9 +63,9 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     aria: { enabled: true, description: analysisSummary(panel, result) },
     textStyle: { fontFamily: theme.font, color: theme.text },
     grid: { left: 70, right: 24, top: 30, bottom: 40, containLabel: true },
-    tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text }, renderMode: "html", formatter: htmlTooltip(value => formatValue(panel.unit, value)) },
+    tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text,fontFamily:theme.font,fontSize:12 }, renderMode: "html", formatter: htmlTooltip(value => formatValue(panel.unit, value)) },
     legend: { show: false, textStyle: { color: theme.muted } },
-    xAxis: { type: "value" }, yAxis: { type: "value" }, series: [] as unknown[],
+    xAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, yAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, series: [] as unknown[],
   };
 
   if (panel.viz === "scatter") {
@@ -74,7 +82,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       const min = Math.min(0, ...values), max = Math.max(0, ...values);
       const interval = scale === "log" ? undefined : niceDurationInterval(min, max, unit);
       return { type: scale === "log" ? "log" : "value", ...(interval ? { interval, min: Math.floor(min / interval) * interval, max: Math.max(interval, Math.ceil(max / interval) * interval) } : {}),
-        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(unit), hideOverlap: true } };
+        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(unit), hideOverlap: true } };
     };
     return {
       ...base,
@@ -90,7 +98,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       xAxis: axis(xUnit, xScale, measures[0]?.name),
       yAxis: axis(yUnit, yScale, measures[1]?.name),
       series: groups.map(({ name, items }, index) => ({
-        type: "scatter", name, itemStyle: { color: isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark) },
+        type: "scatter", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
           .filter(row => typeof row[measures[0]?.name] === "number" && typeof row[measures[1]?.name] === "number")
           .filter(row => (xScale !== "log" || Number(row[measures[0].name]) > 0) && (yScale !== "log" || Number(row[measures[1].name]) > 0))
@@ -112,10 +120,10 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       ...base,
       legend: legendLayout.option,
       grid: { ...base.grid, top: legendLayout.top },
-      xAxis: { type: "category", data: labels },
-      yAxis: { type: "value", name: "count" },
+      xAxis: { ...base.xAxis, type: "category", data: labels, splitLine:{show:false} },
+      yAxis: { ...base.yAxis, type: "value", name: "count",nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11} },
       series: names.map(({ name, items }, index) => ({
-        type: "bar", name, itemStyle: { color: isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark) },
+        type: "bar", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: buckets.map(bucket => {
           const matches = rows.filter(row => (!split || items.some(item => item.name === String(row[split] ?? ""))) && bucketKey(row) === bucketKey(bucket));
           return { value: sumPresent(matches.map(row => typeof row.count === "number" ? row.count : null)) ?? 0, selection: {
@@ -154,7 +162,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const maxCount = Math.max(1, counts[Math.ceil(counts.length * .99) - 1] ?? 1);
     return {
       ...base,
-      grid: { ...base.grid, left: 8, right: 16, top: 8, bottom: heat ? 48 : 8 },
+      grid: { ...base.grid, left: 8, right: 8, top: 8, bottom: heat ? 32 : 8 },
       tooltip: { ...base.tooltip, trigger: "axis", formatter: (params: TooltipPoint | TooltipPoint[]) => {
         const points = Array.isArray(params) ? params : [params];
         return points.map(point => {
@@ -164,20 +172,23 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         }).join("<br/>");
       } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      xAxis: { type: "time", axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
-      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: theme.muted, width: 140, overflow: "truncate" } },
+      xAxis: { type: "time", axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
+      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate" } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
-        itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "0"], textStyle: { color: theme.muted },
-        min: 0, max: maxCount, dimension: 2, inRange: { color: [theme.surface, seriesSlot(0, theme.dark)] },
+        itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "0"], textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
+        min: 0, max: maxCount, dimension: 2, inRange: { color: heatRamp(theme) },
       } : undefined,
       series: [{
         type: "custom", name: panel.title, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; style: () => Record<string, unknown> }) => {
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);
-          const height = Math.abs(api.size([0, 1])[1]) * (heat ? .85 : .65);
-          return { type: "rect", shape: { x: left[0], y: left[1] - height / 2, width: Math.max(1, right[0] - left[0]), height, r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0 } };
+          const height = Math.abs(api.size([0, 1])[1]) * (heat ? 1 : .65);
+          // The stroke is centred on the inset shape: outer bounds still leave
+          // exactly one surface pixel between adjacent cells. Zero is absence.
+          const outlined = heat && api.value(2) > 0;
+          return { type: "rect", shape: { x: left[0] + (outlined ? 1 : heat ? .5 : 0), y: left[1] - height / 2 + (outlined ? 1 : heat ? .5 : 0), width: Math.max(0, right[0] - left[0] - (outlined ? 2 : heat ? 1 : 0)), height: Math.max(0, height - (outlined ? 2 : heat ? 1 : 0)), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: outlined ? seriesSlot(0,theme.dark) : undefined, lineWidth: outlined ? 1 : 0 } };
         },
       }],
     };

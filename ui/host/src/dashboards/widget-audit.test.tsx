@@ -105,7 +105,7 @@ describe("widget audit W1–W9", () => {
   });
   it("W7 fills the heatmap and anchors the scale beneath its right edge", () => {
     const got = analysis.analysisOption({ ...panel, viz: "heatmap" }, result, chartThemeFor(false));
-    expect(got.grid).toMatchObject({ top: 8, bottom: 48 });
+    expect(got.grid).toMatchObject({ top: 8, bottom: 32 });
     expect(got.visualMap).toMatchObject({ right: 16, bottom: 0, orient: "horizontal", padding: 0 });
     expect(got.visualMap).not.toHaveProperty("left");
   });

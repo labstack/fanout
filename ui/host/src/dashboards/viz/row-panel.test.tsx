@@ -41,7 +41,7 @@ it("clips trace IDs to a fixed width while retaining the full accessible ID", as
   const id = "0123456789abcdef0123456789abcdef";
   await render({...panel,viz:"traces"},resultFor("trace_id",id));
   const link = container.querySelector<HTMLElement>("[data-trace-id]")!;
-  expect(link.style.width).toBe("14ch");
+  expect(link.style.width).toBe("16ch");
   expect(link.style.overflow).toBe("hidden");
   expect(link.style.textOverflow).toBe("ellipsis");
   expect(link.style.whiteSpace).toBe("nowrap");
@@ -89,7 +89,7 @@ it.each([" failed ", " "])("preserves the entire highlight term %j including whi
 it.each(["FATAL", "CRITICAL"])("uses the bad colour for %s and retains visible severity text", async severity => {
   await render(panel, resultFor("severity", severity));
   const badge = container.querySelector<HTMLElement>(".mantine-Badge-root");
-  expect(badge?.textContent).toBe(severity);
+  expect(badge?.textContent).toBe(`◆ ${severity}`);
   expect(badge?.style.getPropertyValue("--badge-bg")).toContain("--mantine-color-bad-");
   expect(badge?.hidden).toBe(false);
 });
@@ -98,8 +98,8 @@ it("highlights log pattern body templates while preserving monospace text", asyn
   await render({ ...panel, viz: "log_patterns", options: { highlight: "failed" } }, resultFor("body_template", "FAILED <*> café"));
   expect(marks()).toEqual(["FAILED"]);
   expect(container.querySelector("tbody td")?.textContent).toBe("FAILED <*> café");
-  expect(container.querySelector<HTMLElement>(".mantine-Highlight-root")?.style.fontFamily).toBe("var(--mantine-font-family-monospace)");
-  expect(container.querySelector<HTMLElement>(".mantine-Highlight-root")?.style.getPropertyValue("--text-fz")).toBe("var(--mantine-font-size-sm)");
+  expect(container.querySelector<HTMLElement>("[data-row-text] span")?.style.fontFamily).toContain("monospace");
+  expect(container.querySelector<HTMLElement>("[data-row-text] span")?.style.fontSize).toBe("12px");
   await render({ ...panel, viz: "log_patterns", options: { highlight: "cafe" } }, resultFor("body_template", "FAILED <*> café"));
   expect(marks()).toEqual([]);
 });

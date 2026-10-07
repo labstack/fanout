@@ -45,6 +45,6 @@ export function wrappingLegend(names: string[], width: number, show: boolean, co
   const scroll = rows > 2;
   return { top: show ? (scroll ? 30 : rows * 26 + 4) : 12,
     option: { type: scroll ? "scroll" : "plain", show, top: 0, left: 0, right: 0, padding: 0, itemGap: 10,
-      icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color, fontSize: 12, lineHeight: 16 },
+      icon: "roundRect", itemWidth: 10, itemHeight: 10, itemStyle: {borderColor:color,borderWidth:1}, textStyle: { color, fontSize: 12, lineHeight: 16 },
       data: names, formatter, tooltip: { show: true, renderMode: "html", formatter: (params: { name: string }) => escapeHTML(params.name) } } };
 }

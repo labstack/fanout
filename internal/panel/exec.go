@@ -264,6 +264,29 @@ func limitBatchFrames(results []Result) {
 				f.Truncated = true
 			}
 			remaining -= rows * len(f.Columns)
+			// Pattern trends are JSON arrays in a fixed row projection. Count
+			// their points just like structured table trends, not as one cell.
+			if f.Trend != nil {
+				for column, c := range f.Columns {
+					if c.Name != "trend" || c.Type != "json" {
+						continue
+					}
+					for row, value := range f.Values[column] {
+						var points []float64
+						text, ok := value.(string)
+						if !ok || json.Unmarshal([]byte(text), &points) != nil {
+							continue
+						}
+						if len(points) > remaining {
+							f.Values[column][row] = "[]"
+							f.Truncated = true
+							f.addNote("Some pattern trends were omitted to stay within the response budget.")
+							continue
+						}
+						remaining -= len(points)
+					}
+				}
+			}
 			if f.Health != nil {
 				points := min(len(f.Health.ErrorTrend), remaining)
 				if points < len(f.Health.ErrorTrend) {

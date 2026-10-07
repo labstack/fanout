@@ -90,7 +90,7 @@ it("formats distinct scatter axis units and numeric bucket order",()=>{
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
   const got=analysisOption({...panel,viz}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
-  expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["−∞–1 ms","2–10 ms","10–20 ms"]);
+  expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["<1 ms","2–10 ms","10–20 ms"]);
  }
 });
 
@@ -98,7 +98,7 @@ it.each(["histogram","heatmap"] as const)("formats %s duration buckets in shared
  const frame = {columns:fixtures.histogram!.columns,values:[[128,16384,131072,262144],[256,32768,262144,null],[3,4,5,6]],rows:4};
  const f = viz === "heatmap" ? {columns:[col("time","time","time"),...frame.columns],values:[[1000,1000,1000,1000],...frame.values],rows:4} : frame;
  const option = analysisOption({id:"p",title:"Latency",viz},{...resultFor(viz),frame:f},chartThemeFor(false)) as {xAxis:{data?:string[];name?:string};yAxis:{data?:string[]}};
- expect(viz === "heatmap" ? option.yAxis.data : option.xAxis.data).toEqual(["128–256 ms","16–33 s","2.2–4.4 min","≥ 4.4 min"]);
+ expect(viz === "heatmap" ? option.yAxis.data : option.xAxis.data).toEqual(["128–256 ms","16–33 s","2.2–4.4 min","≥4.4 min"]);
  if (viz === "histogram") expect(option.xAxis.name).toBeUndefined();
 });
 
@@ -194,7 +194,7 @@ it("highlights log bodies and opens captured trace links without activating the 
     expect(container.querySelector('[data-trace-id="abc"]')?.closest("a")).not.toBeNull();
     expect(container.querySelector("tbody button")).toBeNull();
     expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBe("Trace ID abc");
-    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("ERROR");
+    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("◆ ERROR");
     expect(onPoint).not.toHaveBeenCalled();
     const link = container.querySelector<HTMLAnchorElement>('[data-trace-id="abc"]')!;
     const target = JSON.parse(new URL(link.href).searchParams.get("drill")!);

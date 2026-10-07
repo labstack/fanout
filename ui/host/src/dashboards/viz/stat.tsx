@@ -6,6 +6,7 @@ import type { Panel, PanelResult } from "../../../../panels/types";
 import { formatValue } from "../../../../panels/units";
 import { seriesSlot } from "../../../../chart";
 import { chartThemeFor } from "../../../../panels/compile";
+import { statusInk } from "../../../../panels/style";
 
 export function StatViz({ panel, result, dark = false, compare = true, range }: { panel: Panel; result: PanelResult; dark?: boolean; compare?: boolean; range?: string }) {
   const frame = result.frame!;
@@ -22,19 +23,19 @@ export function StatViz({ panel, result, dark = false, compare = true, range }: 
       <Text data-stat-value fz={32} fw={700} lh={1.1} lts="-0.02em" ff="var(--mantine-font-family-monospace)">{formatValue(unit, value)}</Text>
       {status && <Text data-stat-status fz={12} fw={500} style={{ borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap", background: `${theme.status[status]}22`, color: theme.text }}><span style={{ color: theme.status[status] }}>{status === "bad" ? "◆" : status === "warn" ? "■" : "●"}</span> {thresholdLabel ?? (status === "bad" ? "Unhealthy" : status === "warn" ? "Degraded" : "Healthy")}</Text>}
     </Group>
-    {compare && previous !== null && value !== null && <Delta value={value} previous={previous} better={better} unit={unit} period={previousPeriod(range, result)} />}
+    {compare && previous !== null && value !== null && <Delta dark={dark} value={value} previous={previous} better={better} unit={unit} period={previousPeriod(range, result)} />}
     <Sparkline points={points} area dark={dark} height={40} />
   </Box>;
 }
 
-function Delta({ value, previous, better, unit, period }: { value: number; previous: number; better?: "lower" | "higher"; unit?: string; period: string }) {
+function Delta({ value, previous, better, unit, period, dark }: { value: number; previous: number; better?: "lower" | "higher"; unit?: string; period: string; dark:boolean }) {
   const percentUnit = unit === "percent";
   const change = percentUnit ? value - previous : previous === 0 ? (value === 0 ? 0 : Infinity) : ((value - previous) / Math.abs(previous)) * 100;
   const up = change >= 0;
   const good = change === 0 || !better ? null : (up ? better === "higher" : better === "lower");
   const text = !Number.isFinite(change) ? "new" : percentUnit ? `${up ? "+" : "−"}${Math.abs(change).toFixed(1)} pts` : `${up ? "+" : "−"}${Math.abs(change).toFixed(0)}%`;
   return <Group gap={6}>
-    <Text data-stat-delta fz={12} fw={600} style={{ color: good === null ? "var(--mantine-color-dimmed)" : `var(--mantine-color-${good ? "ok" : "bad"}-text)` }}>{up ? "▲" : "▼"} {text}</Text>
+    <Text data-stat-delta fz={12} fw={600} style={{ color: good === null ? "var(--mantine-color-dimmed)" : statusInk(good ? "ok" : "bad",dark) }}>{up ? "▲" : "▼"} {text}</Text>
     <Text fz={12} c="dimmed">vs previous {period}</Text>
   </Group>;
 }

@@ -9,6 +9,16 @@ export function frameRows(frame: Frame): Record<string, Cell>[] {
   })));
 }
 
+/** Only context dimensions can be folded; messages, IDs and severity remain. */
+export function logConstants(panel: Panel, frame?: Frame): { name: string; value: string }[] {
+  if (panel.viz !== "logs" || !frame || frame.rows === 0) return [];
+  return frame.columns.flatMap((c,i) => {
+    if (c.role !== "dimension" || c.type !== "string" || ["body","body_template","severity","status"].includes(c.name) || /(^id$|_id$)/.test(c.name)) return [];
+    const value = frame.values[i][0];
+    return typeof value === "string" && value !== "" && frame.values[i].slice(0,frame.rows).every(v => v === value) ? [{name:c.name,value}] : [];
+  });
+}
+
 export function rowModel(panel: Panel, result: PanelResult): RowModel {
   const frame = result.frame ?? { columns: [], values: [], rows: 0 };
   return { columns: frame.columns.map(column => column.name), rows: frameRows(frame), selection: row => {

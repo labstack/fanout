@@ -1,3 +1,4 @@
+import { statusInk } from "../../../panels/style";
 import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -67,7 +68,7 @@ describe("preview V2", () => {
     expect(host.querySelector('[data-stat-status]')?.textContent).toBe("■ Degraded");
     expect((host.querySelector('[data-stat-status]') as HTMLElement).style.borderRadius).toBe("999px");
     expect(host.textContent).toContain("▲ +194%"); expect(host.textContent).toContain("vs previous hour");
-    expect((host.querySelector('[data-stat-delta]') as HTMLElement).style.color).toBe("var(--mantine-color-bad-text)");
+    expect((host.querySelector('[data-stat-delta]') as HTMLElement).style.color).toBe(statusInk("bad",dark));
     const svg = host.querySelector("svg")!; expect(svg.getAttribute("height")).toBe("40");
     expect(svg.querySelector('[data-sparkline-area]')?.getAttribute("fill")).toBe(seriesSlot(0, dark));
     expect(svg.querySelector('[data-sparkline-area]')?.getAttribute("opacity")).toBe("0.18");
@@ -79,6 +80,6 @@ describe("preview V2", () => {
     const f = { ...result.frame!, columns: [{ ...result.frame!.columns[0] }, { ...result.frame!.columns[1], unit: "percent" }], values: [[0], [4.1]], rows: 1 };
     await act(async () => root.render(<MantineProvider><StatViz panel={{ ...panel, viz: "stat", reduce: "last", better, thresholds: [{ value: 5, status: "bad" }] }} result={{ ...result, frame: f, previous: { ...f, values: [[0], [7.1]] }, from_ms: 0, to_ms: 86400000 }} /></MantineProvider>));
     expect(host.textContent).toContain(label); expect(host.textContent).toContain("▼ −3.0 pts"); expect(host.textContent).toContain("vs previous day");
-    expect((host.querySelector('[data-stat-delta]') as HTMLElement).style.color).toBe(`var(--mantine-color-${status}-text)`);
+    expect((host.querySelector('[data-stat-delta]') as HTMLElement).style.color).toBe(statusInk(status as "ok" | "bad",false));
   });
 });

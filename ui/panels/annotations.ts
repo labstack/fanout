@@ -34,7 +34,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const anomalies = episodes.map(a => [{
     xAxis: a.from, name: a.titles.join(" · "),
     itemStyle: { color: theme.status.warn, opacity: theme.dark ? .12 : .09 },
-    label: { show: true, formatter: "anomaly", position: "insideTopRight", color: theme.muted, fontFamily: theme.font, fontSize: 12 }, tooltip: { formatter: () => a.details.join("\n") },
+    label: { show: true, formatter: "anomaly", position: "insideTopRight", color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontFamily: theme.font, fontSize: 12 }, tooltip: { formatter: () => a.details.join("\n") },
   }, { xAxis: a.to }]);
   const series = (option.series ?? []) as Record<string, unknown>[];
   if (!series.length) return option;

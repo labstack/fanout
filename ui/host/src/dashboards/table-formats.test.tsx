@@ -124,7 +124,7 @@ it("renders all formats safely and keeps trends and current callbacks aligned af
  expect(host.querySelector("tbody tr td:nth-child(5)")?.textContent).toBe("◆ 12");
  expect(host.querySelector("tbody tr td:nth-child(6)")?.textContent).toBe("900ms");
  expect(host.querySelector("tbody tr:nth-child(2) td:nth-child(6)")?.textContent).toBe("—");
- expect([...host.querySelectorAll("mark")].map(mark=>mark.textContent)).toEqual(["<*>","<*>","<*>"]);
+ expect([...host.querySelectorAll("[data-template-chip]")].map(mark=>mark.textContent)).toEqual(["<*>","<*>","<*>"]);
  expect(host.querySelector("img,script")).toBeNull();
  expect(host.textContent).toContain("token=[REDACTED] failed <*> <img src=x> <*>");
  await act(async()=>host.querySelector<HTMLButtonElement>("th:nth-child(3) button")!.click());

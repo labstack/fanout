@@ -55,6 +55,11 @@ export function formatAxis(unit?: string): (value: number) => string {
   };
 }
 
+/** Readable chart/table labels use a space before duration units. */
+export function formatLabel(unit: string | undefined, value: number | null): string {
+  return formatAxis(unit)(value ?? NaN).replace(/(?<=\d)(ms|ns|s|m|h)\b/g, " $1");
+}
+
 /** Choose 1/2/5 duration steps in milliseconds, seconds, minutes or hours. */
 export function niceDurationInterval(min: number, max: number, unit?: string): number | undefined {
   const factor = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "ns" ? 1e-6 : undefined;
@@ -74,11 +79,12 @@ export function formatBucket(lower: number | null, upper: number | null, unit?: 
     const magnitude = Math.abs((lower ?? upper ?? 0) * ms);
     const scale = magnitude >= 60000 ? 60000 : magnitude >= 1000 ? 1000 : 1;
     suffix = scale === 60000 ? " min" : scale === 1000 ? " s" : " ms";
-    const digits = scale === 60000 ? 1 : scale === 1000 ? 0 : 2;
+    const digits = scale === 60000 ? 1 : scale === 1000 ? (magnitude < 10000 ? 1 : 0) : 2;
     const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: digits });
     bound = value => formatter.format(value * ms / scale);
   }
-  if (upper === null && lower !== null) return `≥ ${bound(lower)}${suffix}`;
+  if (upper === null && lower !== null) return `≥${bound(lower)}${suffix}`;
+  if ((lower === null || lower === 0) && upper !== null) return `<${bound(upper)}${suffix}`;
   return `${lower === null ? "−∞" : bound(lower)}–${upper === null ? "∞" : bound(upper)}${suffix}`;
 }
 

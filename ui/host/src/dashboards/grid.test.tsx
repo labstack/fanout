@@ -1,3 +1,4 @@
+import { statusInk } from "../../../panels/style";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
@@ -130,7 +131,7 @@ describe("PanelGrid", () => {
     const { host, props } = await render({ spec: table });
     const values = () => [...host.querySelectorAll("tbody tr")].map((row) => row.textContent);
     expect(values()).toEqual(["/cart900ms", "/quote40.0ms"]);
-    expect(host.querySelector("tbody tr:first-child td:nth-child(2) p")!.getAttribute("style")).toContain("warn");
+    expect(host.querySelector("tbody tr:first-child td:nth-child(2) p")!.getAttribute("style")).toContain(statusInk("warn",false));
     await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
     await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
     expect(values()).toEqual(["/quote40.0ms", "/cart900ms"]);

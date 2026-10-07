@@ -1,0 +1,1 @@
+import{t as e}from"./chat-Bs6IlHZw.js";var t=e;export{t as component};

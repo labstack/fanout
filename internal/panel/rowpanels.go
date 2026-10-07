@@ -70,12 +70,17 @@ func compileRowsWhere(p *Panel, where string, args []any, scope Scope) (Compiled
 	limit := patternLimit(p)
 	text := base + fmt.Sprintf(`,
 patterns AS (SELECT coalesce(body_template,'') AS pattern,count(*)::DOUBLE AS total FROM base GROUP BY 1 ORDER BY total DESC,pattern LIMIT %d),
+context AS (SELECT coalesce(base.body_template,'') AS pattern,coalesce(nullif(upper(severity),''),'UNSPECIFIED') AS severity,severity_number,coalesce(service,'') AS service FROM base SEMI JOIN patterns p ON coalesce(base.body_template,'')=p.pattern),
+severity_counts AS (SELECT pattern,severity,count(*) AS n,max(coalesce(nullif(severity_number,0),CASE WHEN severity IN ('FATAL','CRITICAL') THEN 21 WHEN severity='ERROR' THEN 17 WHEN severity IN ('WARN','WARNING') THEN 13 WHEN severity='INFO' THEN 9 WHEN severity='DEBUG' THEN 5 WHEN severity='TRACE' THEN 1 ELSE 0 END)) AS severity_rank FROM context GROUP BY pattern,severity),
+severities AS (SELECT pattern,arg_max(severity,struct_pack(n:=n,rank:=severity_rank,label:=severity)) AS severity FROM severity_counts GROUP BY pattern),
+service_counts AS (SELECT pattern,service,count(*) AS n FROM context GROUP BY pattern,service),
+services AS (SELECT pattern,first(service ORDER BY n DESC,service ASC) AS service FROM service_counts GROUP BY pattern),
 buckets AS (SELECT coalesce(body_template,'') AS pattern,epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS,'1970-01-01'::TIMESTAMP_NS))::BIGINT AS point,count(*)::DOUBLE AS n FROM base SEMI JOIN patterns p ON coalesce(base.body_template,'')=p.pattern GROUP BY 1,2),
 dense AS (SELECT p.pattern,p.total,%d+r.i*%d AS point FROM patterns p CROSS JOIN range(%d) r(i))
-SELECT d.pattern,d.total,CAST(to_json(list(coalesce(b.n,0) ORDER BY d.point)) AS VARCHAR) AS trend
-FROM dense d LEFT JOIN buckets b ON d.pattern=b.pattern AND d.point=b.point
-GROUP BY d.pattern,d.total ORDER BY d.total DESC,d.pattern`, limit+1, seconds, lo, interval.Milliseconds(), points)
-	return Compiled{SQL: text, Args: args, TrendInterval: interval, TrendStart: time.UnixMilli(lo).UTC(), Columns: []Column{{Name: "body_template", Type: "string", Role: "dimension"}, {Name: "count", Type: "number", Role: "measure", Unit: "count"}, {Name: "trend", Type: "json", Role: "dimension", Unit: "count"}}}, nil
+SELECT d.pattern,d.total,CAST(to_json(list(coalesce(b.n,0) ORDER BY d.point)) AS VARCHAR) AS trend,s.severity,v.service
+FROM dense d LEFT JOIN buckets b ON d.pattern=b.pattern AND d.point=b.point JOIN severities s ON s.pattern=d.pattern JOIN services v ON v.pattern=d.pattern
+GROUP BY d.pattern,d.total,s.severity,v.service ORDER BY d.total DESC,d.pattern`, limit+1, seconds, lo, interval.Milliseconds(), points)
+	return Compiled{SQL: text, Args: args, TrendInterval: interval, TrendStart: time.UnixMilli(lo).UTC(), Columns: []Column{{Name: "body_template", Type: "string", Role: "dimension"}, {Name: "count", Type: "number", Role: "measure", Unit: "count"}, {Name: "trend", Type: "json", Role: "dimension", Unit: "count"}, {Name: "severity", Type: "string", Role: "dimension"}, {Name: "service", Type: "string", Role: "dimension"}}}, nil
 }
 func alignedBucketMillis(t time.Time, interval time.Duration) int64 {
 	n, width := t.UnixMilli(), interval.Milliseconds()

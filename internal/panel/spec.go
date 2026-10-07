@@ -51,7 +51,7 @@ type Panel struct {
 	ID          string      `json:"id" jsonschema:"Stable identifier: lowercase letters, digits and underscores; edits address panels by id"`
 	Title       string      `json:"title" jsonschema:"Panel title, at most 80 characters; may reference $variables"`
 	Description string      `json:"description,omitempty" jsonschema:"Help text, at most 280 characters"`
-	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap, histogram, scatter, state_timeline, logs, log_patterns, traces, service_map or health"`
+	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap, histogram, scatter, state_timeline, logs, log_patterns, traces, service_map or health; log_patterns returns body_template, count, trend, dominant severity (frequency then higher severity) and top service"`
 	Width       int         `json:"width,omitempty" jsonschema:"Grid columns from 1 to 12; default depends on viz"`
 	Height      string      `json:"height,omitempty" jsonschema:"s, m or l; default depends on viz"`
 	Query       *Query      `json:"query,omitempty" jsonschema:"Structured query; exactly one of query or sql, except text panels"`

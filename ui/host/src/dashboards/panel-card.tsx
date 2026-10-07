@@ -3,6 +3,7 @@ import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info
 import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
+import { logConstants } from "../../../panels/rows";
 import { useCallback, useEffect, useState } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
@@ -31,7 +32,9 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     : panel.drill && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) ? "Click the chart for exemplar traces at that time."
     : (panel.drill === "traces" || result?.frame?.columns.some(c => c.name === "trace_id")) && ["table", "traces"].includes(panel.viz) ? "Click a row to open the trace." : undefined;
   const bodyHeight = Math.max(40, height - 88 - (hint ? 28 : 0));
-  const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${panel.sql ? "sql" : panel.query?.from ?? (panel.viz === "service_map" || panel.viz === "health" ? "spans" : panel.viz === "log_patterns" ? "logs" : "spec")}`;
+  const constants = logConstants(panel,result?.frame);
+  const source = constants.length ? [...new Set(constants.map(c => c.value))].join(" · ") : panel.sql ? "sql" : panel.query?.from ?? (panel.viz === "service_map" || panel.viz === "health" ? "spans" : panel.viz === "log_patterns" ? "logs" : "spec");
+  const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${source}`;
   const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
@@ -39,7 +42,9 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   return <Paper withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0}>
-        <Box miw={0}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle fz={12} ff={fonts.display} c="dimmed" truncate>{subtitle}</Text></Box>
+        <Box miw={0}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={subtitle} fz={12} ff={fonts.display} c="dimmed" truncate>{subtitle}</Text>
+          {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={11} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
+        </Box>
         {panelTimeLabel(panel) && <Text size="xs" c="dimmed" role="status">{panelTimeLabel(panel)}</Text>}
         {panel.description && <Tooltip label={panel.description} multiline w={260}><ActionIcon variant="transparent" color="gray" size="xs" aria-label={`${title} description`}><Info size={14} /></ActionIcon></Tooltip>}
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
@@ -76,13 +81,13 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         : <Viz onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} />}
     </Box>
     {view === "Chart" && hint && <Text data-panel-hint fz={12} c="dimmed" px={16} pb={12} style={{ flexShrink: 0 }}>{hint}</Text>}
-    {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status" style={{ flexShrink: 0 }}>
+    {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? dark ? "warn.5" : "warn.8" : "dimmed"} mt={6} role="status" style={{ flexShrink: 0 }}>
       {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}
       {(result?.frame?.truncated || result?.previous?.truncated) ? `${staleAt ? " · " : ""}Truncated: showing limited data` : ""}
     </Text>}
     {note && <Text size="xs" c="dimmed" role="status" title={result?.frame?.note} style={{ flexShrink: 0, overflowWrap: "anywhere" }}>{note}</Text>}
-    {result?.annotation_error && <Text size="xs" c="warn" role="status" style={{ flexShrink: 0 }}>{result.annotation_error}</Text>}
-    {result?.annotation_scope?.limited && <Text size="xs" c="warn" role="status" style={{ flexShrink: 0 }}>Annotation service scope is limited.</Text>}
+    {result?.annotation_error && <Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status" style={{ flexShrink: 0 }}>{result.annotation_error}</Text>}
+    {result?.annotation_scope?.limited && <Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status" style={{ flexShrink: 0 }}>Annotation service scope is limited.</Text>}
   </Paper>;
 }
 

@@ -4,6 +4,7 @@ import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsTyp
 import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 import type { ChartSize } from "../../../panels/compile";
+import { nativeAudit } from "./native-audit";
 
 use([CanvasRenderer, LineChart, BarChart, GaugeChart, GraphChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent]);
 
@@ -45,6 +46,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       const native = chart.current as unknown as { getModel?(): { getComponent(name: string): NativeGrid | undefined } };
       const grid = native.getModel?.().getComponent("grid");
       const rect = grid?.coordinateSystem?.getRect();
+      ref.current.dataset.chartAudit=JSON.stringify(nativeAudit(chart.current,compiled,size,rect));
       if (rect) {
         const extent = grid?.coordinateSystem?.getAxis("x")?.scale.getExtent();
         ref.current.dataset.chartPlot = JSON.stringify({ left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, from: extent?.[0], to: extent?.[1] });

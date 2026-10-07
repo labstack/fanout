@@ -20,6 +20,17 @@ function fresh() {
 describe("EChartCanvas", () => {
   afterEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
 
+  it("records native text sizes and colours for the part-2 measured collector",async()=>{
+    const instance=fresh();
+    const rect={x:10,y:10,width:40,height:12,clone(){return this;},applyTransform(){}};
+    Object.assign(instance,{getZr:()=>({storage:{getDisplayList:()=>[{type:"tspan",style:{text:"300 ms",font:"11px monospace",fill:"#6b7280"},getBoundingRect:()=>rect,getComputedTransform:()=>null}]}})});
+    const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
+    await act(async()=>root.render(<EChartCanvas option={{tooltip:{backgroundColor:"#fcfcfc"},xAxis:{axisLabel:{fontSize:11}},series:[]}} height={100} label="Native audit"/>));
+    const audit=JSON.parse(container.querySelector('[data-chart-audit]')!.getAttribute("data-chart-audit")!);
+    expect(audit.texts).toContainEqual(expect.objectContaining({text:"300 ms",size:11,color:"#6b7280",surface:"#fcfcfc",family:"11px monospace"}));
+    await act(async()=>root.unmount());
+  });
+
   it("activates the brush cursor on initial render and option update", async () => {
     expect(mocks.registered).toContainEqual({ id: "graphic" });
     const instance = fresh();

@@ -1,12 +1,14 @@
-import { Box, Paper, Text } from "@mantine/core";
+import { Box, Paper, Text, useComputedColorScheme } from "@mantine/core";
 import { useMemo, type ReactNode } from "react";
 import { healthColor, healthSymbol, healthBorderType } from "../../../../chart";
 import { EChartCanvas } from "../echart-canvas";
+import { statusInk } from "../../../../panels/style";
 
 export function Metric({ label, value, color, hint, children }: { label: string; value: ReactNode; color?: string; hint?: string; children?: ReactNode }) {
+  const dark=useComputedColorScheme("light")==="dark";
   return <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default)" miw={0} h="100%" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
     <Text c="dimmed" size="xs" truncate>{label}</Text>
-    <Box fw={600} fz="xl" c={color} mt={2} lh={1.2}>{value}</Box>
+    <Box fw={600} fz="xl" c={color} mt={2} lh={1.2} style={{color:color==="ok"||color==="warn"||color==="bad"?statusInk(color,dark):undefined}}>{value}</Box>
     {hint && <Text c="dimmed" size="xs" mt={2}>{hint}</Text>}
     {children && <Box mt={4} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>{children}</Box>}
   </Paper>;

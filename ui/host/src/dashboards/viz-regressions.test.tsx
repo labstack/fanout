@@ -1,3 +1,4 @@
+import { statusInk } from "../../../panels/style";
 import { MantineProvider } from "@mantine/core";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -217,7 +218,7 @@ describe("visualization regressions", () => {
     const { host } = await render(<TableViz panel={{ ...panel, viz: "table", better: "lower", unit: "count", thresholds: [{ value: 100, status: "warn" }] }} result={{ ...result, frame: tableFrame }} height={200} />);
     const cells = host.querySelectorAll("tbody tr:first-child td p");
     expect(cells[1].textContent).toBe("900ms");
-    expect(cells[1].getAttribute("style")).toContain("warn");
+    expect(cells[1].getAttribute("style")).toContain(statusInk("warn",false));
     expect(cells[2].textContent).toBe("2.0 KiB");
     expect(cells[2].getAttribute("style") ?? "").not.toMatch(/warn|bad|ok/);
     expect(host.querySelector("tbody tr:nth-child(2) td:nth-child(2) p")!.getAttribute("style") ?? "").not.toMatch(/warn|bad|ok/);

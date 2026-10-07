@@ -1,11 +1,12 @@
 import { htmlTooltip } from "./escape";
 import { chartTheme, seriesSlot, statusHex } from "../chart";
-import { fonts } from "../tokens";
+import { fonts, typeScale } from "../tokens";
 import { toCategories, toSeries } from "./frame";
 import { hiddenSeriesNote, isOtherSeries, visibleSeries, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
-import { formatAxis, formatTimeAxis, formatValue } from "./units";
+import { formatAxis, formatLabel, formatTimeAxis, formatValue } from "./units";
+import { lineStyle, markStyle } from "./style";
 
 export type ChartTheme = { dark: boolean; text: string; muted: string; grid: string; surface: string; border: string; status: { ok: string; warn: string; bad: string }; font: string };
 
@@ -53,7 +54,7 @@ function thresholdMax(panel: Panel): ((range: { max: number }) => number) | unde
 function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
   return (panel.thresholds ?? []).map((t) => ({
     yAxis: t.value,
-    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideStartTop", color: theme.muted, fontSize: 12 },
+    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideStartTop", color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontSize: 12 },
     lineStyle: { color: theme.status[t.status], type: [4, 3], width: 1 },
   }));
 }
@@ -87,8 +88,8 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
       sampling: style === "bars" || style === "stacked" ? undefined : "lttb",
       stack: style === "stacked" ? "total" : undefined,
       areaStyle: style === "area" ? { opacity: 0.12 } : undefined,
-      lineStyle: { width: 2, color },
-      itemStyle: { color, borderRadius: style === "bars" || style === "stacked" ? [2, 2, 0, 0] : undefined },
+      lineStyle: { width: 2, ...lineStyle(color,theme) },
+      itemStyle: { ...markStyle(color,theme), borderRadius: style === "bars" || style === "stacked" ? [2, 2, 0, 0] : undefined },
       barMaxWidth: 12,
       emphasis: { focus: "series" },
       markLine: i === 0 && (panel.thresholds?.length ?? 0) > 0 ? { symbol: ["none", "none"], silent: true, data: thresholdLines(panel, theme, unit) } : undefined,
@@ -103,18 +104,18 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     showSymbol: false,
     silent: true,
     z: 1,
-    lineStyle: { width: 1, type: "dashed", color: theme.border },
-    itemStyle: { color: theme.border },
+    lineStyle: { width: 1, type: "dashed", color: theme.muted },
+    itemStyle: { color: theme.muted },
   })) : [];
   const legend = (panel.options?.legend ?? "auto") !== "hidden" && current.length > 1;
   const legendLayout = wrappingLegend(current.map(s => s.name), size.width, legend, theme.text, theme.font, size.measureText);
-  const axes = units.map((axisUnit, i) => ({ type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(axisUnit) } }));
+  const axes = units.map((axisUnit, i) => ({ type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: formatAxis(axisUnit) } }));
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
     legend: legendLayout.option,
     grid: { left: 8, right: 16 + (direct ? endWidth : 0) + Math.max(0, units.length - 2) * 56, top: legendLayout.top, bottom: visible.hidden ? 24 : 8, containLabel: true },
-    xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, hideOverlap: true, formatter: formatTimeAxis } },
+    xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatTimeAxis } },
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
     graphic: hiddenSeriesNote(visible.hidden, theme.muted),
@@ -122,6 +123,17 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
 }
 
 /** Horizontal bars sorted by the server, value labels at the bar end. */
+function middleEllipsis(text: string, width: number, measure: (text: string) => number): string {
+  if (measure(text) <= width) return text;
+  const chars = Array.from(text);
+  for (let n = chars.length - 1; n > 0; n--) {
+    const prefix = Math.floor(n * .45), suffix = n - prefix;
+    const label = chars.slice(0, prefix).join("") + "…" + chars.slice(-suffix).join("");
+    if (measure(label) <= width) return label;
+  }
+  return "…";
+}
+
 export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: ChartSize = { width: 500, height: 248 }): Option {
   const pivot = toCategories(frame);
   const categories = pivot.categories;
@@ -143,14 +155,17 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
   const units = [...new Set(series.map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
   const multi = series.length > 1;
+  const split = Boolean(frame.periods?.["Before deploy"] || frame.periods?.["Since deploy"]);
+  const measure = (text: string) => size.measureText?.(text, `11px ${theme.font}`) ?? Array.from(text).length * 6.6;
+  const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(measure)));
   const legendLayout = wrappingLegend(series.map(s => s.name), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
-  const axes = units.map((axisUnit, i) => ({ type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(axisUnit), hideOverlap: true } }));
+  const axes = units.map((axisUnit, i) => ({ type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: (v: number) => formatLabel(axisUnit,v), hideOverlap: true } }));
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => s.name === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },
     legend: legendLayout.option,
     grid: { left: 8, right: 56, top: (multi ? legendLayout.top : 8) + Math.max(0, units.length - 1) * 36, bottom: hidden ? 24 : 8, containLabel: true },
-    yAxis: { type: "category", inverse: true, data: categories, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.text, width: 180, overflow: "truncate" } },
+    yAxis: { type: "category", inverse: true, data: categories, splitLine: {show:false}, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, width: categoryWidth, overflow: "truncate", formatter: (text: string) => middleEllipsis(text,categoryWidth,measure) } },
     xAxis: axes.length === 1 ? axes[0] : axes,
     series: series.map((s, i) => ({
       name: s.name,
@@ -158,10 +173,10 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
       type: "bar",
       data: s.values.map((value, row) => ({ value, selection: selections.get(JSON.stringify(dims.length > 1 ? [categories[row], s.name] : [categories[row]])) })),
-      barMaxWidth: 16,
+      barMaxWidth: split && s.name === "Before deploy" ? 7 : 14,
       barGap: "20%",
-      itemStyle: { color: colorFor(s.name, i, theme), borderRadius: [0, 3, 3, 0] },
-      label: { show: !multi || i === 0, position: "right", color: theme.muted, formatter: ({ value }: { value: number }) => formatValue(s.unit ?? panel.unit, value) },
+      itemStyle: { ...markStyle(split ? s.name === "Before deploy" ? theme.muted : seriesSlot(0,theme.dark) : colorFor(s.name, i, theme),theme), borderRadius: [0, 4, 4, 0] },
+      label: { show: split ? s.name === "Since deploy" : !multi || i === 0, position: "right", color: theme.text, fontFamily: theme.font, fontSize: 11, formatter: ({ value }: { value: number }) => formatLabel(s.unit ?? panel.unit, value) },
     })),
     graphic: hiddenSeriesNote(hidden, theme.muted),
   };
@@ -179,7 +194,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
   const center = [size.width / 2, (size.height + radius - 24) / 2];
   const bandWidth = Math.min(10, radius * .14);
   const text = formatValue(unit, value);
-  const fontSize = Math.max(1, Math.min(32, radius * .32, radius * 1.15 / Math.max(1, text.length * .65)));
+  const fontSize = Math.max(typeScale.micro, Math.min(32, radius * .32, radius * 1.15 / Math.max(1, text.length * .65)));
   const status = statusFor(value, panel.thresholds, panel.better);
   const cue = status === "bad" ? "◆ Bad" : status === "warn" ? "■ Warn" : status === "ok" ? "● OK" : value === null ? "○ Unknown" : undefined;
   const mute = (hex: string) => `${hex}40`;
@@ -189,7 +204,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
     graphic: [
       { type: "text", left: center[0] - radius, top: center[1] + 6, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
       { type: "text", right: size.width - center[0] - radius, top: center[1] + 6, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
-      ...(cue ? [{ type: "text", left: "center", top: center[1] - 7, style: { text: cue, fill: theme.text, fontSize: 10, fontFamily: theme.font } }] : []),
+      ...(cue ? [{ type: "text", left: "center", top: center[1] - 7, style: { text: cue, fill: theme.text, fontSize: typeScale.micro, fontFamily: theme.font } }] : []),
     ],
     series: [{
       type: "gauge",
