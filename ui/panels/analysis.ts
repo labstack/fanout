@@ -1,11 +1,11 @@
-import { seriesSlot, healthSymbol, healthBorderType } from "../chart";
+import { seriesSlot } from "../chart";
 import type { ChartTheme } from "./compile";
 import { serviceMapOption } from "./rollups";
 import { frameRows } from "./rows";
 import { seriesGroups, sumPresent } from "./series";
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
-import { formatAxis, formatBucket, formatTimeAxis, formatValue } from "./units";
+import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, niceDurationInterval } from "./units";
 
 function spanMs(interval?: string): number {
   const match = /^(\d+)(s|m|h|d)$/.exec(interval ?? "");
@@ -17,6 +17,19 @@ const bucketLabel = (row: Record<string, Cell>, unit?: string) => formatBucket(t
 const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.bucket_upper}`;
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
+
+/** State runs merge only touching buckets of the same row and status. */
+export function mergeStateRuns<T extends { value: (string | number | null | boolean)[]; selection: { from?: string; to?: string } }>(buckets: T[]): T[] {
+  const runs: T[] = [];
+  for (const bucket of [...buckets].sort((a, b) => Number(a.value[1]) - Number(b.value[1]) || Number(a.value[0]) - Number(b.value[0]))) {
+    const last = runs.at(-1);
+    if (last && last.value[1] === bucket.value[1] && last.value[4] === bucket.value[4] && last.value[3] === bucket.value[0]) {
+      last.value[3] = bucket.value[3];
+      last.selection.to = bucket.selection.to;
+    } else runs.push({ ...bucket, value: [...bucket.value], selection: { ...bucket.selection } });
+  }
+  return runs;
+}
 
 /** Numeric order for both distribution axes; open lower bounds sort first. */
 function compareBuckets(a: Record<string, Cell>, b: Record<string, Cell>): number {
@@ -54,11 +67,19 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const yScale = panel.options?.y_scale ?? panel.options?.scale;
     const xUnit = panel.x_unit ?? measures[0]?.unit;
     const yUnit = panel.unit ?? measures[1]?.unit;
+    const axis = (unit: string | undefined, scale: string | undefined, measure: string) => {
+      const values = rows.map(row => row[measure]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+      const min = Math.min(0, ...values), max = Math.max(0, ...values);
+      const interval = scale === "log" ? undefined : niceDurationInterval(min, max, unit);
+      return { type: scale === "log" ? "log" : "value", ...(interval ? { interval, min: Math.floor(min / interval) * interval, max: Math.max(interval, Math.ceil(max / interval) * interval) } : {}),
+        axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, formatter: formatAxis(unit), hideOverlap: true } };
+    };
     return {
       ...base,
       legend: { ...base.legend, show: groups.length > 1 && panel.options?.legend !== "hidden" },
-      xAxis: { type: xScale === "log" ? "log" : "value", name: xUnit, axisLabel: { formatter: formatAxis(xUnit) } },
-      yAxis: { type: yScale === "log" ? "log" : "value", name: yUnit, axisLabel: { formatter: formatAxis(yUnit) } },
+      grid: { ...base.grid, top: groups.length > 1 && panel.options?.legend !== "hidden" ? 30 : 8, left: 8, right: 16, bottom: 8 },
+      xAxis: axis(xUnit, xScale, measures[0]?.name),
+      yAxis: axis(yUnit, yScale, measures[1]?.name),
       series: groups.map(({ name, items }, index) => ({
         type: "scatter", name, itemStyle: { color: name === "Other" ? theme.muted : seriesSlot(index, theme.dark) },
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
@@ -96,7 +117,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
 
   if (panel.viz === "service_map") {
     // Task 6 owns the topology compiler; use it for both entry points.
-    return { ...base, ...serviceMapOption(frame, theme), xAxis: undefined, yAxis: undefined, legend: undefined };
+    return { ...base, ...serviceMapOption(frame, theme), legend: undefined };
   }
 
   if (panel.viz === "heatmap" || panel.viz === "state_timeline") {
@@ -107,26 +128,28 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const labels = new Map(rows.map(row => [bucketKey(row), bucketLabel(row, bucketUnit)]));
     const interval = spanMs(result.interval);
     const measure = measures[0]?.name ?? "count";
-    const data = rows.filter(row => typeof row.time === "number").map(row => {
+    const buckets = rows.filter(row => typeof row.time === "number").map(row => {
       const value = row[measure];
       const status = typeof value === "number" ? statusFor(value, panel.thresholds, panel.better ?? result.better) ?? "ok" : null;
       return {
         value: [row.time, names.indexOf(category(row)), value, Number(row.time) + interval, heat || status === null ? 0 : status === "bad" ? 3 : status === "warn" ? 2 : 1],
-        selection: { time: row.time, dimensions: heat ? {} : { [panel.query?.by?.[0] ?? item]: String(row[item] ?? "") }, bucket: heat ? bucketSelection(row) : undefined },
-        itemStyle: heat ? undefined : { color: status === null ? theme.muted : theme.status[status] },
+        selection: { ...(heat ? { time: row.time } : {}), dimensions: heat ? {} : { [panel.query?.by?.[0] ?? item]: String(row[item] ?? "") }, bucket: heat ? bucketSelection(row) : undefined,
+          ...(heat ? {} : { from: new Date(Number(row.time)).toISOString(), to: new Date(Number(row.time) + interval).toISOString() }) },
+        itemStyle: heat ? undefined : { color: status === null ? `${theme.text}26` : theme.status[status] },
       };
     });
+    const data = heat ? buckets : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${names[Number(run.value[1])]} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
     const counts = rows.map(row => Number(row[measure])).filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
     const maxCount = Math.max(1, counts[Math.ceil(counts.length * .99) - 1] ?? 1);
     return {
       ...base,
-      grid: { ...base.grid, bottom: heat ? 60 : base.grid.bottom },
+      grid: { ...base.grid, left: 8, right: 16, top: 8, bottom: heat ? 48 : 8 },
       tooltip: { ...base.tooltip, trigger: "axis" },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      xAxis: { type: "time", axisPointer: { show: true }, axisLabel: { formatter: formatTimeAxis, hideOverlap: true } },
-      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names },
+      xAxis: { type: "time", axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
+      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: theme.muted, width: 140, overflow: "truncate" } },
       visualMap: heat ? {
-        type: "continuous", show: true, orient: "horizontal", left: "center", bottom: 0,
+        type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
         itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "0"], textStyle: { color: theme.muted },
         min: 0, max: maxCount, dimension: 2, inRange: { color: [theme.surface, seriesSlot(0, theme.dark)] },
       } : undefined,
@@ -135,16 +158,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; style: () => Record<string, unknown> }) => {
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);
-          const height = Math.abs(api.size([0, 1])[1]) * .85;
-          const cell = { type: "rect", shape: { x: left[0], y: left[1] - height / 2, width: Math.max(1, right[0] - left[0]), height }, style: api.style() };
-          if (heat) return cell;
-          const health = ["unknown", "healthy", "degraded", "unhealthy"][api.value(4)] ?? "unknown";
-          const symbol = healthSymbol(health);
-          const x = left[0] + Math.min(8, Math.max(1, (right[0] - left[0]) / 2)), y = left[1], r = Math.min(4, height / 3);
-          const shape = symbol === "diamond" ? { type: "polygon", shape: { points: [[x, y - r], [x + r, y], [x, y + r], [x - r, y]] } }
-            : symbol === "roundRect" ? { type: "rect", shape: { x: x - r, y: y - r, width: 2 * r, height: 2 * r, r: 2 } }
-              : { type: "circle", shape: { cx: x, cy: y, r } };
-          return { type: "group", children: [cell, { ...shape, style: { fill: health === "unknown" ? theme.surface : theme.text, stroke: theme.text, lineDash: healthBorderType(health) === "dashed" ? [2, 2] : undefined } }] };
+          const height = Math.abs(api.size([0, 1])[1]) * (heat ? .85 : .65);
+          return { type: "rect", shape: { x: left[0], y: left[1] - height / 2, width: Math.max(1, right[0] - left[0]), height, r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0 } };
         },
       }],
     };

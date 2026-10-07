@@ -55,6 +55,16 @@ export function formatAxis(unit?: string): (value: number) => string {
   };
 }
 
+/** Choose 1/2/5 duration steps in milliseconds, seconds, minutes or hours. */
+export function niceDurationInterval(min: number, max: number, unit?: string): number | undefined {
+  const factor = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "ns" ? 1e-6 : undefined;
+  if (factor === undefined || !Number.isFinite(min) || !Number.isFinite(max)) return undefined;
+  const target = Math.max((max - min) * factor / 6, Number.EPSILON);
+  const steps = [1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 36000000].flatMap(base => [1, 2, 5].map(n => base * n)).sort((a, b) => a - b);
+  const step = steps.find(step => step >= target) ?? [1, 2, 5, 10].map(n => n * 10 ** Math.floor(Math.log10(target / 3600000)) * 3600000).find(step => step >= target)!;
+  return step / factor;
+}
+
 /** Use one duration scale for both ends of a bucket. */
 export function formatBucket(lower: number | null, upper: number | null, unit?: string): string {
   let bound = (value: number) => formatValue(unit, value);
@@ -78,4 +88,15 @@ export function formatTimeAxis(value: number): string {
   return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0
     ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
     : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
+/** Compact table timestamps in the viewer's locale and local time zone. */
+export function formatTimestamp(value: number, now = new Date(), locale?: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const parts = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" as const } : {}), hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
+  // Retain locale field order, but remove verbose punctuation between date/time.
+  const dateParts = parts.filter(p => ["month", "day", "year"].includes(p.type)).map(p => p.value);
+  const timeParts = parts.filter(p => ["hour", "minute", "second"].includes(p.type)).map(p => p.value);
+  return `${dateParts.join(" ")} ${timeParts.join(":")}`;
 }

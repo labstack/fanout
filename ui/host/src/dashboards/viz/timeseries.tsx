@@ -1,17 +1,18 @@
 import { useMemo } from "react";
-import { chartThemeFor, timeseriesOption } from "../../../../panels/compile";
+import { chartThemeFor, timeseriesOption, type ChartSize } from "../../../../panels/compile";
 import { pointSelection } from "../../../../panels/interaction";
 import { withAnnotations } from "../../../../panels/annotations";
 import { EChartCanvas } from "../echart-canvas";
 import type { AnalysisProps } from "./analysis-chart";
 
 export function TimeseriesViz({ panel, title = panel.title, result, dark, height, group, annotations, vars, onSelect, onPoint, onZoom }: AnalysisProps) {
-  const option = useMemo(() => {
+  const optionForSize = useMemo(() => (size: ChartSize) => {
     const theme = chartThemeFor(dark);
     const compiled = timeseriesOption(panel, result, theme);
-    return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme) : compiled;
+    return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme, size) : compiled;
   }, [panel, result.frame, result.previous, result.shift_ms, result.from_ms, result.to_ms, result.annotation_scope, result.annotation_error, dark, annotations]);
-  return <EChartCanvas option={option} height={height} label={`${title}: time series`} group={group} onZoom={onZoom} onClick={onPoint || onSelect ? event => {
+  const option = useMemo(() => optionForSize({ width: 500, height }), [optionForSize, height]);
+  return <EChartCanvas option={option} optionForSize={optionForSize} height={height} label={`${title}: time series`} group={group} onZoom={onZoom} onClick={onPoint || onSelect ? event => {
     const selection = pointSelection(panel, result, event);
     if (!selection) return;
     onPoint?.(selection);

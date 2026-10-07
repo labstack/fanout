@@ -16,8 +16,8 @@ export function HealthViz({ result, dark }: AnalysisProps) {
   const health = empty ? "unknown" : data.health;
   const total = Math.max(data?.service_count ?? 0, 1);
   const status = statusHex(dark);
-  return <Stack gap="sm" role="region" aria-label={`Service health: ${empty ? "No data" : health}; ${data?.service_count ?? 0} services`}>
-    <SimpleGrid cols={2} spacing="sm">
+  return <Stack gap="sm" style={{ flex: "1 1 auto", minHeight: 0 }} role="region" aria-label={`Service health: ${empty ? "No data" : health}; ${data?.service_count ?? 0} services`}>
+    <SimpleGrid cols={2} spacing="sm" data-health-tiles style={{ flex: "1 1 auto", minHeight: 0 }}>
       <Metric label="Health" value={<Group gap={6}><HealthShape health={health} />{empty ? "No data" : health.charAt(0).toUpperCase() + health.slice(1)}</Group>}
         color={healthColor(health)} hint={empty ? "No telemetry in this window" : `${integer.format(data.service_count)} services`} />
       <Metric label="Error rate" value={empty ? "—" : `${data.error_rate.toFixed(2)}%`} color={!empty && data.error_rate >= 1 ? "bad" : undefined}
@@ -25,7 +25,7 @@ export function HealthViz({ result, dark }: AnalysisProps) {
         {!empty && data.error_trend.length > 1 && <HealthTrend values={data.error_trend} color={status.bad} />}
       </Metric>
     </SimpleGrid>
-    {!empty && <Box>
+    {!empty && <Box style={{ flexShrink: 0 }}>
       <Progress.Root size="md" aria-label="Service health distribution">
         <Progress.Section value={data.counts.healthy / total * 100} color="ok" />
         <Progress.Section value={data.counts.degraded / total * 100} color="warn" />

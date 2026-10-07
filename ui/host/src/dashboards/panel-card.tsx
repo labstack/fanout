@@ -1,16 +1,17 @@
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, MagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, MagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { useEffect, useState } from "react";
 import { Viz } from "./viz";
 
-export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
+export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onZoomReset, zoomed, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
   panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
   onSelect?: (value: string) => void; onView(): void; onInspect(): void; onCopyLink(): void; onExplain(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
+  zoomed?: boolean; onZoomReset?: () => void;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
   const [now, setNow] = useState(Date.now);
@@ -31,6 +32,8 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
         {panel.description && <Tooltip label={panel.description} multiline w={260}><ActionIcon variant="transparent" color="gray" size="xs" aria-label={`${title} description`}><Info size={14} /></ActionIcon></Tooltip>}
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
       </Group>
+      <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
+      {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal>
         <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}><DotsThree size={18} weight="bold" /></ActionIcon></Menu.Target>
         <Menu.Dropdown>
@@ -42,6 +45,7 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
           {onRemove && <><Menu.Divider /><Menu.Item color="bad" leftSection={<Trash size={14} />} onClick={onRemove}>Remove panel</Menu.Item></>}
         </Menu.Dropdown>
       </Menu>
+      </Group>
     </Group>
     <Box data-panel-body style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: scrolls ? "auto" : "hidden", display: scrolls ? "block" : "flex", flexDirection: "column" }}>
       {!result && panel.viz !== "text" ? <Center h="100%"><Loader size="sm" aria-label="Loading panel" /></Center>

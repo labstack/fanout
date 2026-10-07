@@ -20,6 +20,7 @@ export type GridProps = {
   annotations?: AnnotationsResponse;
   agentAvailable: boolean; onOpenChat(prompt?: string): void; onVariable(name: string, value: VarValue): void; onView(view?: string): void; onVisible(ids: string[]): void;
   onPoint?(panel: Panel, selection: Selection): void; onZoom?(from: number, to: number): void;
+  zoomed?: boolean; onZoomReset?(): void;
 };
 
 export const interpolate = (text: string, vars: Record<string, VarValue>) =>
@@ -34,7 +35,7 @@ export function newPanelId(panels: Panel[]): string {
   return id;
 }
 
-export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, onOpenChat, onVariable, onPoint, onZoom, onView, onVisible }: GridProps) {
+export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, onOpenChat, onVariable, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible }: GridProps) {
   const client = useQueryClient();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 }))); }, [spec]);
@@ -130,7 +131,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     annotations={annotations} vars={vars} onVariable={onVariable}
     onSelect={panel.click && !(panel.drill && onPoint) ? value => onVariable(panel.click!.set_variable, value) : undefined}
     onPoint={onPoint && (panel.click || panel.drill || results.get(panel.id)?.frame?.columns.some((c, i) => c.name === "trace_id" && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")) || panel.options?.columns?.some(c => c.format === "trace_link" && results.get(panel.id)?.frame?.columns.some((column, i) => column.name === c.field && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")))) ? selection => onPoint(panel, selection) : undefined}
-    onZoom={onZoom}
+    onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
     onView={() => onView(panel.id)} onInspect={() => setInspecting(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onExplain={() => onOpenChat(`Explain the panel "${interpolate(panel.title, vars)}" (panel id: ${panel.id}) on the dashboard "${spec.name}" (dashboard id: ${dashboardId}). Effective time range: ${JSON.stringify(panel.time ?? time)}. Resolved variables: ${JSON.stringify(vars)}. ${results.get(panel.id)?.status === "error" ? `It fails with: ${results.get(panel.id)?.error}. Please fix the panel.` : "What does it show right now, and is anything unusual?"}`)}

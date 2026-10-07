@@ -159,29 +159,45 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option
 }
 
 /** A gauge with its thresholds as coloured bands. */
-export function gaugeOption(panel: Panel, value: number | null, theme: ChartTheme, unit = panel.unit as string | undefined): Option {
+export type ChartSize = { width: number; height: number };
+
+export function gaugeOption(panel: Panel, value: number | null, theme: ChartTheme, unit = panel.unit as string | undefined, size: ChartSize = { width: 270, height: 140 }): Option {
   const min = panel.min ?? 0;
   const max = panel.max ?? 100;
-  const span = max - min || 1;
   const sorted = [...(panel.thresholds ?? [])].sort((a, b) => a.value - b.value);
   const bands = gaugeBands(panel, min, max, theme);
+  const radius = Math.max(1, Math.min((size.width - 40) / 2, size.height - 30));
+  const center = [size.width / 2, (size.height + radius - 24) / 2];
+  const bandWidth = Math.min(10, radius * .14);
+  const text = formatValue(unit, value);
+  const fontSize = Math.max(1, Math.min(32, radius * .32, radius * 1.15 / Math.max(1, text.length * .65)));
+  const status = statusFor(value, panel.thresholds, panel.better);
+  const cue = status === "bad" ? "◆ Bad" : status === "warn" ? "■ Warn" : status === "ok" ? "● OK" : value === null ? "○ Unknown" : undefined;
+  const mute = (hex: string) => `${hex}40`;
   return {
+    animation: false,
+    textStyle: { fontFamily: theme.font, color: theme.text },
+    graphic: [
+      { type: "text", left: center[0] - radius, top: center[1] + 6, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
+      { type: "text", right: size.width - center[0] - radius, top: center[1] + 6, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
+      ...(cue ? [{ type: "text", left: "center", top: center[1] - 7, style: { text: cue, fill: theme.text, fontSize: 10, fontFamily: theme.font } }] : []),
+    ],
     series: [{
       type: "gauge",
       min,
       max,
-      startAngle: 210,
-      endAngle: -30,
-      radius: "95%",
-      center: ["50%", "60%"],
-      axisLine: { lineStyle: { width: 10, color: sorted.length ? bands : [[1, theme.grid]] } },
-      progress: { show: sorted.length === 0, width: 10, itemStyle: { color: seriesSlot(0, theme.dark) } },
-      pointer: { show: sorted.length > 0, length: "55%", width: 4, itemStyle: { color: theme.text } },
+      startAngle: 180,
+      endAngle: 0,
+      radius,
+      center,
+      axisLine: { lineStyle: { width: bandWidth, color: sorted.length ? bands.map(([end, color]) => [end, mute(color)]) : [[1, theme.grid]] } },
+      progress: { show: true, width: bandWidth, roundCap: true, itemStyle: { color: status ? theme.status[status] : seriesSlot(0, theme.dark) } },
+      pointer: { show: false },
       axisTick: { show: false },
       splitLine: { show: false },
       axisLabel: { show: false },
       anchor: { show: false },
-      detail: { valueAnimation: true, offsetCenter: [0, "35%"], color: theme.text, fontSize: 22, fontWeight: 600, fontFamily: theme.font, formatter: () => formatValue(unit, value) },
+      detail: { valueAnimation: true, offsetCenter: [0, -radius * .37], width: radius * 1.15, height: fontSize * 1.3, overflow: "truncate", color: theme.text, fontSize, fontWeight: 600, fontFamily: theme.font, formatter: () => text },
       data: [{ value: value ?? min }],
     }],
   };

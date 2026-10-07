@@ -32,12 +32,12 @@ function markers(data: PanelResult = result, viz: Panel["viz"] = "timeseries", a
 }
 
 describe("annotation scope and windows", () => {
-  it("keeps deploy labels below the toolbox lane in narrow panels", () => {
+  it("keeps deploy labels in a separate lane above the plot in narrow panels", () => {
     const option = {grid:{top:12,left:8,right:16,bottom:8},series:[{type:"line"}]};
-    const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox:{top:number;itemSize:number;padding:number};series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
-    expect(got.toolbox).toMatchObject({top:0,itemSize:12,padding:5});
-    expect(got.grid.top).toBeGreaterThanOrEqual(got.toolbox.top+got.toolbox.itemSize+2*got.toolbox.padding+8);
-    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"end",distance:-8,rotate:0,verticalAlign:"top"});
+    const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox?:unknown;series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
+    expect(got.toolbox).toBeUndefined();
+    expect(got.grid.top).toBe(40);
+    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"end",distance:8,rotate:0,verticalAlign:"bottom",backgroundColor:theme.surface});
     expect(option.grid.top).toBe(12);
   });
   it("preserves tooltip mode when no annotation markers match", () => {
@@ -64,7 +64,7 @@ describe("annotation scope and windows", () => {
     const got = markers();
     expect(got.series[0].markLine.data.map(mark => mark.xAxis)).toEqual([1000, 4000]);
     expect(got.series[0].markLine.data[0].lineStyle.type).toBe("dashed");
-    expect(got.series[0].markLine.data[0].tooltip.formatter()).toBe(`checkout · v2 · ${at(1000)}`);
+    expect(got.series[0].markLine.data[0].tooltip.formatter()).toBe(`checkout · v2 · ${at(1000)}\ncheckout · v5 · ${at(4000)}`);
     const band = got.series[0].markArea.data[0];
     expect(band[0].xAxis).toBe(0); expect(band[1].xAxis).toBe(10000);
     expect(band[0].itemStyle).toEqual({ color: theme.status.bad, opacity: .08 });

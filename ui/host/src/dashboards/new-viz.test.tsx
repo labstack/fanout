@@ -87,7 +87,7 @@ describe("M2 visualizations",()=>{
 it("formats distinct scatter axis units and numeric bucket order",()=>{
  const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
  const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
- expect(option.xAxis.name).toBe("count");expect(option.yAxis.name).toBe("ms");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ expect(option.xAxis.name).toBeUndefined();expect(option.yAxis.name).toBeUndefined();expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
  const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
@@ -291,31 +291,30 @@ it("filters nonpositive scatter points on either logarithmic axis", () => {
   }
 });
 
-it("renders timeline states with health shapes and distinguishes unknown cells", () => {
+it("renders timeline states as rounded segments and distinguishes unknown cells", () => {
   const panel: Panel = { id: "p", title: "States", viz: "state_timeline", thresholds: [{ value: 10, status: "warn" }, { value: 20, status: "bad" }], query: { from: "spans", by: ["service"] } };
   const frame = { ...fixtures.state_timeline!, values: [[1000, 2000, 3000, 4000], ["cart", "cart", "cart", "cart"], [null, 5, 15, 25]], rows: 4 };
   type Shape = { type: string; style: { lineDash?: number[] }; shape: Record<string, unknown>; children?: Shape[] };
   const option = analysisOption(panel, { ...resultFor("state_timeline"), interval: "1s", frame }, chartThemeFor(false)) as { series: { data: { value: number[] }[]; renderItem: (params: unknown, api: unknown) => Shape }[] };
   const series = option.series[0];
-  const shapes = series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], style: () => ({}) }).children![1]);
-  expect(shapes.map(shape => shape.type)).toEqual(["circle", "circle", "rect", "polygon"]);
-  expect(shapes[0].style.lineDash).toEqual([2, 2]);
-  expect(shapes[1].style.lineDash).toBeUndefined();
+  const shapes = series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], style: () => ({}) }));
+  expect(shapes.map(shape => shape.type)).toEqual(["rect", "rect", "rect", "rect"]);
+  expect(shapes.every(shape => !shape.children && !shape.style.lineDash && shape.shape.r === 3)).toBe(true);
+  expect(series.data.map(point => point.value[4])).toEqual([0, 1, 2, 3]);
   expect(series.data.map(point => point.value[3])).toEqual([2000, 3000, 4000, 5000]);
 });
 
 it("grades timeline cells by the spec direction, then the result's inferred direction", () => {
   const panel: Panel = { id: "p", title: "States", viz: "state_timeline", thresholds: [{ value: 10, status: "warn" }, { value: 20, status: "bad" }], query: { from: "spans", by: ["service"] } };
   const frame = { ...fixtures.state_timeline!, values: [[1000, 2000, 3000], ["cart", "cart", "cart"], [5, 15, 25]], rows: 3 };
-  type Shape = { type: string; children?: Shape[] };
-  const shapes = (p: Panel, better?: "lower" | "higher") => {
-    const option = analysisOption(p, { ...resultFor("state_timeline"), interval: "1s", frame, better }, chartThemeFor(false)) as { series: { data: { value: number[] }[]; renderItem: (params: unknown, api: unknown) => Shape }[] };
+  const states = (p: Panel, better?: "lower" | "higher") => {
+    const option = analysisOption(p, { ...resultFor("state_timeline"), interval: "1s", frame, better }, chartThemeFor(false)) as { series: { data: { value: number[] }[] }[] };
     const series = option.series[0];
-    return series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], style: () => ({}) }).children![1].type);
+    return series.data.map(point => point.value[4]);
   };
-  const lower = shapes(panel);
-  expect(shapes(panel, "higher")).not.toEqual(lower);
-  expect(shapes({ ...panel, better: "lower" }, "higher")).toEqual(lower);
+  const lower = states(panel);
+  expect(states(panel, "higher")).not.toEqual(lower);
+  expect(states({ ...panel, better: "lower" }, "higher")).toEqual(lower);
 });
 
 it("reuses shaped service-map nodes, selects services and includes edge-only endpoints", () => {

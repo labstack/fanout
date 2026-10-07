@@ -2,11 +2,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ init: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
+const mocks = vi.hoisted(() => ({ init: vi.fn(), registered: [] as unknown[], connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
 
-vi.mock("echarts/core", () => ({ init: mocks.init, use: () => undefined, connect: mocks.connect, disconnect: mocks.disconnect }));
+vi.mock("echarts/core", () => ({ init: mocks.init, use: (components: unknown[]) => { mocks.registered = components; }, connect: mocks.connect, disconnect: mocks.disconnect }));
 vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
-vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: { id: "graphic" }, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
 import { EChartCanvas } from "./echart-canvas";
@@ -21,11 +21,14 @@ describe("EChartCanvas", () => {
   afterEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
 
   it("activates the brush cursor on initial render and option update", async () => {
+    expect(mocks.registered).toContainEqual({ id: "graphic" });
     const instance = fresh();
     const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); const zoom = vi.fn(); const option = { series: [] };
     await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" onZoom={zoom} />));
     const cursorCalls = () => instance.dispatchAction.mock.calls.filter(([a]) => a.type === "takeGlobalCursor");
     expect(cursorCalls()).toHaveLength(1);
+    expect(instance.setOption.mock.lastCall?.[0].toolbox).toBeUndefined();
+    expect(instance.setOption.mock.lastCall?.[0].brush.toolbox).toEqual([]);
     expect(instance.dispatchAction).toHaveBeenCalledWith({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
     const nextOption = { series: [{ type: "line", data: [[1, 2]] }] };
     await act(async () => root.render(<EChartCanvas option={nextOption} height={100} label="P" onZoom={zoom} />));

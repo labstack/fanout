@@ -5,7 +5,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { rowModel } from "../../../../panels/rows";
 import type { Selection, Cell, Column, Panel, PanelResult, Unit } from "../../../../panels/types";
 import { statusFor } from "../../../../panels/thresholds";
-import { formatValue } from "../../../../panels/units";
+import { formatTimestamp, formatValue } from "../../../../panels/units";
 
 import { Sparkline } from "./stat";
 import { columnDisplay, type ColumnFormat } from "../../../../panels/column-formats";
@@ -54,7 +54,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           {index === firstMeasure && maxima[index] > 0 && <Box w={56} h={6} bg="var(--mantine-color-default-border)" style={{ borderRadius: 3, overflow: "hidden", flex: "none" }}><Box h="100%" w={`${(value / maxima[index]) * 100}%`} bg="var(--mantine-primary-color-filled)" /></Box>}
         </Box>;
       }
-      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace">{new Date(value).toLocaleString()}</Text>;
+      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
       const text = value === null ? "—" : String(value);
       return <Text size="sm" className="dashboard-dimension-nowrap" title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
     },

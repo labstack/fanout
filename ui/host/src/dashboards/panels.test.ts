@@ -212,9 +212,11 @@ describe("compile, more", () => {
     expect(gaugeBands(higher, 0, 100, theme)).toEqual([[0.25, theme.status.bad], [0.5, theme.status.warn], [1, theme.status.ok]]);
     const lower = { ...base, better: "lower" as const, max: 3000, thresholds: [{ value: 750, status: "warn" as const }, { value: 2000, status: "bad" as const }] };
     expect(gaugeBands(lower, 0, 3000, theme)).toEqual([[0.25, theme.status.ok], [2000 / 3000, theme.status.warn], [1, theme.status.bad]]);
-    // The value's own band matches the stat colour.
-    const option = gaugeOption(higher, 75, theme) as { series: { axisLine: { lineStyle: { color: [number, string][] } } }[] };
+    // The progress arc matches the stat; threshold bands stay muted beneath it.
+    const option = gaugeOption(higher, 75, theme) as { series: { progress: { itemStyle: { color: string } }; axisLine: { lineStyle: { color: [number, string][] } } }[] };
     const bands = option.series[0].axisLine.lineStyle.color;
-    expect(bands.find(([end]) => end >= 0.75)?.[1]).toBe(theme.status[statusFor(75, higher.thresholds, "higher")!]);
+    const color = theme.status[statusFor(75, higher.thresholds, "higher")!];
+    expect(bands.find(([end]) => end >= 0.75)?.[1]).toBe(`${color}40`);
+    expect(option.series[0].progress.itemStyle.color).toBe(color);
   });
 });

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { analysisOption, analysisSummary } from "../../../../panels/analysis";
-import { chartThemeFor } from "../../../../panels/compile";
+import { chartThemeFor, type ChartSize } from "../../../../panels/compile";
 import type { Panel, PanelResult, Selection, VarValue } from "../../../../panels/types";
 import { withAnnotations, type AnnotationsResponse } from "../../../../panels/annotations";
 import { EChartCanvas } from "../echart-canvas";
@@ -12,14 +12,15 @@ export type AnalysisProps = {
 };
 
 export function AnalysisChart({ panel, title, result, dark, height, group, annotations, vars, onSelect, onPoint, onZoom }: AnalysisProps) {
-  const option = useMemo(() => {
+  const optionForSize = useMemo(() => (size: ChartSize) => {
     const theme = chartThemeFor(dark);
     const compiled = analysisOption(panel, result, theme);
-    return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme) : compiled;
+    return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme, size) : compiled;
   }, [panel, result.frame, result.interval, result.better, result.from_ms, result.to_ms, result.annotation_scope, result.annotation_error, dark, annotations]);
   const label = analysisSummary(title ? { ...panel, title } : panel, result);
+  const option = useMemo(() => optionForSize({ width: 500, height }), [optionForSize, height]);
   const time = panel.viz === "heatmap" || panel.viz === "state_timeline";
-  return <EChartCanvas option={option} height={height} label={label} group={time ? group : undefined} onZoom={time ? onZoom : undefined} onClick={onPoint || onSelect ? event => {
+  return <EChartCanvas option={option} optionForSize={time ? optionForSize : undefined} height={height} label={label} group={time ? group : undefined} onZoom={time ? onZoom : undefined} onClick={onPoint || onSelect ? event => {
     const selection = (event.data as { selection?: Selection } | undefined)?.selection;
     if (selection) {
       onPoint?.(selection);

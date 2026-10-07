@@ -45,7 +45,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
 }
 
 function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string): void }) {
-  const { zoom, reset: resetBrush } = useBrushZoom(search, onSearch);
+  const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
   const time = effectiveTime(spec, search);
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
   const compare = search.compare ? search.compare === "1" : spec.time.compare === "previous_period";
@@ -127,7 +127,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
+      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const result = data.results.get(panel.id); if (!result) return;
         const target = makeDrill(panel, result, selection); if (!target) return;

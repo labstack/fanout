@@ -4,11 +4,11 @@ import { healthColor, healthSymbol, healthBorderType } from "../../../../chart";
 import { EChartCanvas } from "../echart-canvas";
 
 export function Metric({ label, value, color, hint, children }: { label: string; value: ReactNode; color?: string; hint?: string; children?: ReactNode }) {
-  return <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default)" miw={0} h="100%">
+  return <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default)" miw={0} h="100%" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
     <Text c="dimmed" size="xs" truncate>{label}</Text>
     <Box fw={600} fz="xl" c={color} mt={2} lh={1.2}>{value}</Box>
     {hint && <Text c="dimmed" size="xs" mt={2}>{hint}</Text>}
-    {children && <Box mt={4}>{children}</Box>}
+    {children && <Box mt={4} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>{children}</Box>}
   </Paper>;
 }
 
@@ -31,8 +31,8 @@ export function HealthTrend({ values, color }: { values: number[]; color: string
     tooltip: { show: false },
     series: [{ type: "line", data: finite, showSymbol: false, smooth: .3, lineStyle: { width: 1.5, color }, areaStyle: { opacity: .12, color } }],
   }), [finite, color]);
-  return <Box>
-    <EChartCanvas option={option} height={28} label="Error rate trend" />
-    {peak > 0 && <Text c="dimmed" size="xs" ta="right" mt={2}>peak {peak.toFixed(2)}%</Text>}
+  return <Box data-health-trend style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0 }}>
+    <EChartCanvas option={option} height="100%" label="Error rate trend" />
+    {peak > 0 && <Text c="dimmed" size="xs" ta="right" mt={2} style={{ flexShrink: 0 }}>peak {peak.toFixed(2)}%</Text>}
   </Box>;
 }
