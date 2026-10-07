@@ -24,7 +24,7 @@ describe("preview V10", () => {
   it("P3a keeps the default demo readable and uses vertical overflow for short bodies", () => {
     const normal = layoutServiceMap(model(), {width:1100,height:480});
     expect(normal.scale).toBeGreaterThanOrEqual(.85);
-    expect(Math.max(...normal.nodes.map(n=>n.x+n.width))-Math.min(...normal.nodes.map(n=>n.x))).toBeGreaterThanOrEqual(1075);
+    expect(Math.max(...normal.nodes.map(n=>n.x+n.width))-Math.min(...normal.nodes.map(n=>n.x))).toBeGreaterThanOrEqual(1050);
     for(const n of normal.nodes) expect(n.y+n.height).toBeLessThanOrEqual(468.01);
     const short = layoutServiceMap(model(), {width:1100,height:180});
     expect(short.scale).toBeGreaterThanOrEqual(.85);
@@ -32,11 +32,11 @@ describe("preview V10", () => {
     const defaultBody=layoutServiceMap(model(),{width:1100,height:396});
     expect(defaultBody.contentHeight).toBe(396);
   });
-  it.each([false,true])("P3a keeps rendered text at 11px and scrolls an overflowing map before zoom (%s)", async dark => {
+  it.each([false,true])("P3a keeps rendered text at 11px and scrolls vertically (%s)", async dark => {
     const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
     await act(async()=>root.render(<MantineProvider forceColorScheme={dark?"dark":"light"}><PanelCard panel={{id:"map",title:"Map",viz:"service_map"}} title="Map" result={{id:"map",status:"ok",elapsed_ms:1,frame:demoFrame}} height={300} group="g" editing={false} agentAvailable={false} loading={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()}/></MantineProvider>));
     const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
-    expect(viewport.style.overflow).toBe("auto");
+    expect(viewport.style.overflowY).toBe("auto");expect(viewport.style.overflowX).toBe("hidden");
     const scale=Number(viewport.dataset.layoutScale);
     const texts=host.querySelectorAll<HTMLElement>("[data-service-text]");expect(texts.length).toBe(viewport.dataset.cardMode === "compact" ? 20 : 40);
     for(const text of texts) expect(parseFloat(text.style.fontSize)*scale).toBeGreaterThanOrEqual(11);
@@ -56,14 +56,14 @@ describe("preview V10", () => {
       for (const b of got.nodes.filter(b => b.id !== n.id)) expect(n.x < b.x+b.width && n.x+n.width > b.x && n.y < b.y+b.height && n.y+n.height > b.y).toBe(false);
     }
     const entry = graph.nodes.filter(n => graph.edges.some(e => e.caller === n.id) && !graph.edges.some(e => e.callee === n.id));
-    for (const n of entry) for (const e of graph.edges.filter(e => e.caller === n.id)) expect(got.nodes.find(x => x.id === n.id)!.x).toBeLessThan(got.nodes.find(x => x.id === e.callee)!.x);
+    for (const n of entry) for (const e of graph.edges.filter(e => e.caller === n.id)) {const source=got.nodes.find(x=>x.id===n.id)!,target=got.nodes.find(x=>x.id===e.callee)!;expect(got.folded?source.y<target.y:source.x<target.x).toBe(true);}
     for (const edge of got.edges) expect(edge.path).toMatch(/^M.*C/);
     expect(got.nodes.filter(n => n.uncalled).map(n => n.id)).toEqual(["image-provider", "otelcol-contrib"]);
     expect(got.uncalledLabel).toBeDefined();
     expect(graph.edges.find(e => e.error_rate === 5)?.status).toBe("bad"); expect(graph.edges.find(e => e.error_rate === 1)?.status).toBe("warn");
     expect(graph.nodes[0].request_rate).toBeCloseTo(1000/3600);
   });
-  it.each([false, true])("dims non-neighbours, supports keyboard/filter and bounded zoom/fit (%s)", async dark => {
+  it.each([false, true])("dims non-neighbours, supports keyboard/filter and bounded vertical pan/fit (%s)", async dark => {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanups.push(() => root.unmount());
     const select = vi.fn(), point = vi.fn();
     await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><PanelCard panel={{ id: "map", title: "Map", viz: "service_map", click: { set_variable: "service" } }} title="Map" result={{ id: "map", elapsed_ms: 1, status: "ok", from_ms: 0, to_ms: 3600000, frame: demoFrame }} height={300} group="g" editing={false} agentAvailable={false} loading={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={select} onPoint={point} /></MantineProvider>));
@@ -89,14 +89,14 @@ describe("preview V10", () => {
     const wheel = new WheelEvent("wheel", { deltaY: -500, ctrlKey:true, bubbles: true, cancelable: true });
     Object.defineProperties(wheel, { clientX: { value: 250 }, clientY: { value: 94 }, ctrlKey:{value:true} });
     await act(async () => viewport.dispatchEvent(wheel));
-    expect(Number(viewport.getAttribute("data-zoom"))).toBeGreaterThan(1);
+    expect(Number(viewport.getAttribute("data-zoom"))).toBe(1);
     await act(async () => {
       viewport.dispatchEvent(new PointerEvent("pointerdown", { button: 0, clientX: 100, clientY: 80, bubbles: true }));
       viewport.dispatchEvent(new PointerEvent("pointermove", { clientX: -10000, clientY: -10000, bubbles: true }));
       viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     });
     const zoom = Number(viewport.getAttribute("data-zoom"));
-    expect(Number(viewport.getAttribute("data-pan-x"))).toBeCloseTo(500 - Number(viewport.getAttribute("data-content-width"))*zoom);
+    expect(Number(viewport.getAttribute("data-pan-x"))).toBe(0);
     expect(Number(viewport.getAttribute("data-pan-y"))).toBeCloseTo(188 - Number(viewport.getAttribute("data-content-height"))*zoom);
     const fit = host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!; expect(fit).not.toBeNull(); expect(viewport.contains(fit)).toBe(false);
     await act(async () => fit.click()); expect(viewport.getAttribute("data-zoom")).toBe("1");
@@ -118,7 +118,7 @@ describe("Part 5 R1",()=>{
   const graph=layoutServiceMap(model(),{width:1100,height:230});
   expect(graph).toMatchObject({compact:true,contentHeight:230,contentWidth:1100,initialScrollY:0});
   expect(graph.nodes).toHaveLength(20);expect(graph.edges).toHaveLength(23);
-  for(const node of graph.nodes){expect(node.height).toBeLessThanOrEqual(26);expect(node.height).toBeGreaterThanOrEqual(26*.85);expect(node.y+node.height).toBeLessThanOrEqual(230);}
+  for(const node of graph.nodes){expect(node.height).toBeLessThanOrEqual(24);expect(node.height).toBeGreaterThanOrEqual(24*.85);expect(node.y+node.height).toBeLessThanOrEqual(230);}
  });
  it.each([180,181,200,230,280,396,480])("keeps entry services initially visible at body height %s",height=>{
   const graph=layoutServiceMap(model(),{width:1100,height});
@@ -143,8 +143,8 @@ describe("Part 5 R1",()=>{
   const entry=host.querySelector<HTMLButtonElement>('[data-service-node="load-generator"]')!;
   expect(entry.dataset.serviceEntry).toBe("true");expect(entry.title).toContain("p95");expect(entry.title).toContain("err");
   expect(entry.querySelectorAll('[data-service-text]')).toHaveLength(1);
-  expect(host.querySelector('[data-service-node="checkout"] [data-service-metric]')?.textContent).toContain("% err");
-  expect(entry.querySelector('[data-service-metric]')?.textContent).toContain("/s");
+  expect(host.querySelector<HTMLButtonElement>('[data-service-node="checkout"]')!.title).toContain("err");
+  expect(entry.querySelector('[data-service-name]')?.textContent).toBe("load-generator");
   const initial=viewport.scrollTop;
   await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:1000,bubbles:true,cancelable:true})));
   await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!.click());
@@ -168,7 +168,7 @@ it("R1 keeps multiple widely separated entry services initially visible",()=>{
 describe("Part 5 R2",()=>{
  const measure=(text:string,font:string)=>text.length*parseFloat(font.match(/[\d.]+px/)![0])*.62;
  it("uses two significant digits and includes p95 only when measured text fits",()=>{
-  const n={...model().nodes[0],request_rate:.201,error_rate:.701,p95_ms:48};
+  const n={...model().nodes[0],id:"cart",request_rate:.201,error_rate:.701,p95_ms:48};
   const short=serviceCardLabels(n,{width:168,scale:1,compact:false,measureText:measure});
   expect(short.metric).toBe("0.2/s · 0.7% err");
   expect(serviceCardLabels(n,{width:300,scale:1,compact:false,measureText:measure}).metric).toBe("0.2/s · 0.7% err · p95 48ms");
@@ -177,8 +177,8 @@ describe("Part 5 R2",()=>{
   expect(serviceCardLabels({...n,error_rate:0},{width:140,scale:.85,compact:true,measureText:measure}).metric).toBe("0.2/s");
  });
  it.each([1100,1440])("uses wider full cards when panel width %s allows",width=>{
-  const graph=layoutServiceMap(model(),{width,height:480});expect(graph.compact).toBe(false);
-  for(const n of graph.nodes)expect(n.width/graph.scale).toBeCloseTo(168);
+  const graph=layoutServiceMap(model(),{width,height:480});expect(graph.contentWidth).toBe(width);
+  if(width===1440){expect(graph.compact).toBe(false);for(const n of graph.nodes)expect(n.width/graph.scale).toBeCloseTo(168);}else expect(graph.compact).toBe(true);
  });
  for(const width of [1100,1440])for(const height of [230,480])for(const dark of [false,true]){
   it(`measures every DOM card's name and metric budget at ${width}×${height}, dark=${dark}`,async()=>{
@@ -227,7 +227,7 @@ it("R1 keeps an entry in a distant Dagre rank inside the initial viewport",()=>{
  for(const n of got.nodes)for(const other of got.nodes.filter(o=>o.id!==n.id))expect(n.x<other.x+other.width&&n.x+n.width>other.x&&n.y<other.y+other.height&&n.y+n.height>other.y).toBe(false);
 });
 
-it("R1 viewport measurement does not reset zoom when scrollbars appear",async()=>{
+it("R1 viewport measurement retains horizontal fit when scrollbars appear",async()=>{
  let resize=()=>{},usableWidth=1100,usableHeight=230;
  const originalObserver=globalThis.ResizeObserver;cleanups.push(()=>vi.stubGlobal("ResizeObserver",originalObserver));
  vi.stubGlobal("ResizeObserver",class {constructor(callback:()=>void){resize=callback;}observe(){}disconnect(){}});
@@ -239,7 +239,70 @@ it("R1 viewport measurement does not reset zoom when scrollbars appear",async()=
  await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
  const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!,wheel=new WheelEvent("wheel",{deltaY:-100,ctrlKey:true,bubbles:true,cancelable:true});
  Object.defineProperties(wheel,{clientX:{value:200},clientY:{value:100},ctrlKey:{value:true}});
- await act(async()=>viewport.dispatchEvent(wheel));const zoom=Number(viewport.dataset.zoom);expect(zoom).toBeGreaterThan(1);
+ await act(async()=>viewport.dispatchEvent(wheel));const zoom=Number(viewport.dataset.zoom);expect(zoom).toBe(1);
  usableWidth=1085;usableHeight=215;await act(async()=>resize());
  expect(Number(viewport.dataset.zoom)).toBe(zoom);expect(Number(viewport.dataset.contentWidth)).toBeLessThanOrEqual(1085);
+});
+
+describe("Part 7 M7a",()=>{
+ it("drops the compact metric before a protected service name",()=>{
+  const n={...model().nodes[0],id:"recommendation",request_rate:1.2,error_rate:3.4};
+  const label=serviceCardLabels(n,{width:140,scale:.85,compact:true});
+  expect(label.name).toBe(n.id);expect(label.metric).toBe("");
+ });
+ for(const width of [744,1100,1440])for(const dark of [false,true])it(`renders every full demo service name at ${width}px, dark=${dark}`,async()=>{
+  const original=HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width,height:230}):original.call(this);});
+  const context={font:"",measureText(text:string){return {width:text.length*parseFloat(this.font.match(/[\d.]+px/)![0])*.62};}};
+  vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+  await act(async()=>root.render(<MantineProvider forceColorScheme={dark?"dark":"light"}><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame,from_ms:0,to_ms:3600000}} dark={dark} height={254}/></MantineProvider>));
+  const widths=new Set<string>();
+  for(const card of host.querySelectorAll<HTMLElement>("[data-service-node]")){
+   widths.add(card.style.width);expect(card.querySelector("[data-service-name]")!.textContent).toBe(card.dataset.serviceNode);
+   expect(card.querySelector("[data-service-name]")!.textContent).not.toContain("…");
+  }
+  expect(widths.size).toBeGreaterThan(1);
+ });
+ it("protects all 24 characters using per-node measurements",()=>{
+  const node={...model().nodes[0],id:"abcdefghijklmnopqrstuvwx"};
+  const got=layoutServiceMap({nodes:[node],edges:[]},{width:1100,height:180,measureText:(text,font)=>text.length*parseFloat(font.match(/[\d.]+px/)![0])*.62});
+  const n=got.nodes[0],label=serviceCardLabels(n,{width:n.width/got.scale,scale:got.scale,compact:got.compact,measureText:(text,font)=>text.length*parseFloat(font.match(/[\d.]+px/)![0])*.62});
+  expect(label.name).toBe("abcdefghijklmnopqrstuvwx");expect(Number(label.nameWidth)).toBeGreaterThanOrEqual(label.name.length*label.nameSize*.62);
+ });
+});
+
+describe("Part 7 M7b/M7c",()=>{
+ it.each([270,744,1100,1440])("fits node and routed edge bounds horizontally at width %s",width=>{
+  const graph=layoutServiceMap(model(),{width,height:230});expect(graph.contentWidth).toBe(width);expect(graph.scale).toBeGreaterThanOrEqual(.85);
+  for(const n of graph.nodes){expect(n.x).toBeGreaterThanOrEqual(0);expect(n.x+n.width).toBeLessThanOrEqual(width);}
+  for(const edge of graph.edges){const numbers=edge.path.match(/-?[\d.]+/g)!.map(Number);for(let i=0;i<numbers.length;i+=2){expect(numbers[i]).toBeGreaterThanOrEqual(0);expect(numbers[i]).toBeLessThanOrEqual(width);}}
+ });
+ it("fits the 24px compact demo at 1100×230 with no clipping or pan",()=>{
+  const graph=layoutServiceMap(model(),{width:1100,height:230});expect(graph).toMatchObject({compact:true,contentWidth:1100,contentHeight:230,initialScrollY:0});
+  for(const n of graph.nodes){expect(n.height/graph.scale).toBeCloseTo(24);expect(n.y).toBeGreaterThanOrEqual(0);expect(n.y+n.height).toBeLessThanOrEqual(230);}
+ });
+ it("uses compact nodesep of 6–8 logical pixels",()=>{
+  const base=model().nodes[0],nodes=[{...base,id:"entry"},...Array.from({length:8},(_,i)=>({...base,id:`callee-${i}`}))];
+  const edges=nodes.slice(1).map(n=>({...model().edges[0],id:n.id,caller:"entry",callee:n.id}));
+  const graph=layoutServiceMap({nodes,edges},{width:1100,height:230}),rank=graph.nodes.filter(n=>n.id!=="entry").sort((a,b)=>a.y-b.y);
+  expect(graph.compact).toBe(true);for(let i=1;i<rank.length;i++){const gap=(rank[i].y-rank[i-1].y-rank[i-1].height)/graph.scale;expect(gap).toBeGreaterThanOrEqual(6-.01);expect(gap).toBeLessThanOrEqual(8+.01);}
+ });
+ it("reports the number below the centred initial viewport and updates it on pan",async()=>{
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+  await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={true} height={180}/></MantineProvider>));
+  const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
+  const below=()=>[...host.querySelectorAll<HTMLElement>("[data-service-node]")].filter(n=>parseFloat(n.style.top)+parseFloat(n.style.height)>156+viewport.scrollTop+.5).length;
+  expect(below()).toBeGreaterThan(0);expect(host.querySelector("[data-service-below-hint]")!.textContent).toBe(`+${below()} below`);
+  await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:20,bubbles:true,cancelable:true})));
+  expect(host.querySelector("[data-service-below-hint]")?.textContent??"").toBe(below()?`+${below()} below`:"");
+ });
+ it("never pans or enlarges the map horizontally through wheel, drag or zoom gestures",async()=>{
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+  await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
+  const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
+  const wheel=new WheelEvent("wheel",{deltaX:999,deltaY:-100,ctrlKey:true,bubbles:true,cancelable:true});Object.defineProperties(wheel,{clientX:{value:100},clientY:{value:100},ctrlKey:{value:true}});
+  await act(async()=>{viewport.dispatchEvent(wheel);viewport.dispatchEvent(new PointerEvent("pointerdown",{button:0,clientX:100,clientY:100,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointermove",{clientX:-999,clientY:80,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointerup",{bubbles:true}));});
+  expect(viewport.scrollLeft).toBe(0);expect(viewport.dataset.panX).toBe("0");expect(viewport.dataset.zoom).toBe("1");expect(viewport.style.overflowX).toBe("hidden");
+ });
 });
