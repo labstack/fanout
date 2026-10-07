@@ -126,6 +126,13 @@ it("caps heatmap colour at p99 and shows a compact continuous count scale", () =
  expect(option.visualMap.itemWidth).toBeLessThanOrEqual(10);
 });
 
+it("keeps heatmap and timeline time labels from running together", () => {
+ for (const viz of ["heatmap","state_timeline"] as const) {
+  const option = analysisOption({id:"p",title:"t",viz},resultFor(viz),chartThemeFor(false)) as {xAxis:{axisLabel:{hideOverlap?:boolean}}};
+  expect(option.xAxis.axisLabel.hideOverlap).toBe(true);
+ }
+});
+
 it("hides single-series legends and retains legends for split series", () => {
  for (const viz of ["histogram","heatmap","scatter"] as const) {
   const option = analysisOption({id:"p",title:viz,viz},resultFor(viz),chartThemeFor(false)) as {legend?:{show:boolean}};

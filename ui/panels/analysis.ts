@@ -122,7 +122,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       grid: { ...base.grid, bottom: heat ? 60 : base.grid.bottom },
       tooltip: { ...base.tooltip, trigger: "axis" },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      xAxis: { type: "time", axisPointer: { show: true }, axisLabel: { formatter: formatTimeAxis } },
+      xAxis: { type: "time", axisPointer: { show: true }, axisLabel: { formatter: formatTimeAxis, hideOverlap: true } },
       yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", left: "center", bottom: 0,
