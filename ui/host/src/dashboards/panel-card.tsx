@@ -48,6 +48,13 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
+  const notes = [...new Set([
+    view === "Chart" ? hint : undefined,
+    staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : undefined,
+    result?.frame?.truncated || result?.previous?.truncated ? "Truncated: showing limited data" : undefined,
+    note, result?.annotation_error,
+    result?.annotation_scope?.limited ? "Annotation service scope is limited." : undefined,
+  ].filter((text): text is string => Boolean(text)))];
   return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id} data-compact-views={small}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
@@ -77,7 +84,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Menu>
       </Group>
     </Group>
-    <Box data-panel-body style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
+    <Box data-panel-body className="dashboard-panel-padding" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
       {view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
@@ -90,14 +97,9 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         </Stack></Center>
         : <Viz onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} />}
     </Box>
-    {view === "Chart" && hint && <Text data-panel-hint fz={12} c="dimmed" px={16} pb={12} style={{ flexShrink: 0 }}>{hint}</Text>}
-    {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? dark ? "warn.5" : "warn.8" : "dimmed"} mt={6} role="status" style={{ flexShrink: 0 }}>
-      {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}
-      {(result?.frame?.truncated || result?.previous?.truncated) ? `${staleAt ? " · " : ""}Truncated: showing limited data` : ""}
-    </Text>}
-    {note && <Text size="xs" c="dimmed" role="status" title={result?.frame?.note} style={{ flexShrink: 0, overflowWrap: "anywhere" }}>{note}</Text>}
-    {result?.annotation_error && <Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status" style={{ flexShrink: 0 }}>{result.annotation_error}</Text>}
-    {result?.annotation_scope?.limited && <Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status" style={{ flexShrink: 0 }}>Annotation service scope is limited.</Text>}
+    {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+      {notes.map(text => <Text key={text} data-panel-note data-panel-hint={text === hint || undefined} fz={12} c="dimmed" role={text === hint ? undefined : "status"} title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
+    </Box>}
   </Paper>;
 }
 

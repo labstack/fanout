@@ -210,3 +210,7 @@ body,
 .dashboard-grid:not(.dashboard-grid-editing) > .react-grid-item {
   transition: none;
 }
+
+.dashboard-panel-padding {
+  padding-inline: 16px;
+}

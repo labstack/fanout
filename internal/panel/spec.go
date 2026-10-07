@@ -101,7 +101,7 @@ type Options struct {
 	Highlight string `json:"highlight,omitempty" jsonschema:"logs and log_patterns: literal redacted-body search, at most 200 characters"`
 	Style     string `json:"style,omitempty" jsonschema:"timeseries: line, area, bars or stacked (additive measures only)"`
 	Scale     string `json:"scale,omitempty" jsonschema:"linear or log"`
-	Top       int    `json:"top,omitempty" jsonschema:"Categorical series default/max 6; structured series are chosen worst-first by the panel's measure; the rest fold into Other (N); SQL series past six are left out with a note; noncategorical rows default 8 max 20"`
+	Top       int    `json:"top,omitempty" jsonschema:"Categorical series default/max 6; structured series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N); error rates also require 20 requests for eligible ranking; SQL series past six are left out with a note; noncategorical rows default 8 max 20"`
 	Legend    string `json:"legend,omitempty" jsonschema:"auto or hidden"`
 	XScale    string `json:"x_scale,omitempty" jsonschema:"scatter x axis: linear or log"`
 	YScale    string `json:"y_scale,omitempty" jsonschema:"scatter y axis: linear or log"`

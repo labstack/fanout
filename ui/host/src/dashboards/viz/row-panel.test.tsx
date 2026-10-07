@@ -86,10 +86,11 @@ it.each([" failed ", " "])("preserves the entire highlight term %j including whi
   expect(marks()).toEqual(term === " " ? [" ", " ", " "] : [" FAILED "]);
 });
 
-it.each(["FATAL", "CRITICAL"])("uses the bad colour for %s and retains visible severity text", async severity => {
+it.each(["FATAL", "CRITICAL"])("uses the bad colour for %s and retains its full title with a short severity label", async severity => {
   await render(panel, resultFor("severity", severity));
   const badge = container.querySelector<HTMLElement>(".mantine-Badge-root");
-  expect(badge?.textContent).toBe(`◆ ${severity}`);
+  expect(badge?.textContent).toBe(`◆ ${severity === "CRITICAL" ? "FATAL" : severity}`);
+  expect(badge?.title).toBe(severity);
   expect(badge?.style.getPropertyValue("--badge-bg")).toContain("--mantine-color-bad-");
   expect(badge?.hidden).toBe(false);
 });

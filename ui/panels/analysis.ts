@@ -20,11 +20,14 @@ const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.buck
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
 
-/** Surface-tinted low counts, one hue through the bright identity slot. */
+/** Log density is deliberately faint at one sample; zero has no graphic. */
+function heatColour(theme: ChartTheme, fraction: number): string {
+  const high = seriesSlot(0, theme.dark), amount = .015 + .985 * fraction;
+  return "#" + [1, 3, 5].map(i => Math.round(parseInt(theme.surface.slice(i, i + 2), 16) * (1 - amount)
+    + parseInt(high.slice(i, i + 2), 16) * amount).toString(16).padStart(2, "0")).join("");
+}
 function heatRamp(theme: ChartTheme): string[] {
-  const high = seriesSlot(0, theme.dark);
-  return [.08, .22, .4, .6, .8, 1].map(amount => "#" + [1,3,5].map(i =>
-    Math.round(parseInt(theme.surface.slice(i,i+2),16) * (1-amount) + parseInt(high.slice(i,i+2),16) * amount).toString(16).padStart(2,"0")).join(""));
+  return [0, .2, .4, .6, .8, 1].map(fraction => heatColour(theme, fraction));
 }
 
 /** State runs merge only touching buckets of the same row and status. */
@@ -157,9 +160,10 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         itemStyle: heat ? undefined : { color: status === null ? `${theme.text}26` : theme.status[status] },
       };
     });
-    const data = heat ? buckets : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
+    const data = heat ? buckets.filter(bucket => Number.isFinite(Number(bucket.value[2])) && Number(bucket.value[2]) > 0).map(bucket => ({ ...bucket, value: [...bucket.value, Math.log1p(Number(bucket.value[2]))] })) : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
     const counts = rows.map(row => Number(row[measure])).filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
     const maxCount = Math.max(1, counts[Math.ceil(counts.length * .99) - 1] ?? 1);
+    const logMin = Math.log1p(1), logMax = Math.log1p(maxCount);
     return {
       ...base,
       grid: { ...base.grid, left: 8, right: 8, top: 8, bottom: heat ? 32 : 8 },
@@ -176,8 +180,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate" } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
-        itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "0"], textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
-        min: 0, max: maxCount, dimension: 2, inRange: { color: heatRamp(theme) },
+        itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "1"], textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
+        min: logMin, max: logMax, dimension: 5, inRange: { color: heatRamp(theme) },
       } : undefined,
       series: [{
         type: "custom", name: panel.title, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
@@ -185,10 +189,9 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);
           const height = Math.abs(api.size([0, 1])[1]) * (heat ? 1 : .65);
-          // The stroke is centred on the inset shape: outer bounds still leave
-          // exactly one surface pixel between adjacent cells. Zero is absence.
-          const outlined = heat && api.value(2) > 0;
-          return { type: "rect", shape: { x: left[0] + (outlined ? 1 : heat ? .5 : 0), y: left[1] - height / 2 + (outlined ? 1 : heat ? .5 : 0), width: Math.max(0, right[0] - left[0] - (outlined ? 2 : heat ? 1 : 0)), height: Math.max(0, height - (outlined ? 2 : heat ? 1 : 0)), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: outlined ? seriesSlot(0,theme.dark) : undefined, lineWidth: outlined ? 1 : 0 } };
+          if (heat && !(api.value(2) > 0)) return undefined;
+          const fraction = logMax === logMin ? 0 : (Math.log1p(Math.min(api.value(2), maxCount)) - logMin) / (logMax - logMin);
+          return { type: "rect", shape: { x: left[0] + (heat ? .5 : 0), y: left[1] - height / 2 + (heat ? .5 : 0), width: Math.max(0, right[0] - left[0] - (heat ? 1 : 0)), height: Math.max(0, height - (heat ? 1 : 0)), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0, ...(heat ? { fill: heatColour(theme, Math.max(0, fraction)) } : {}) } };
         },
       }],
     };

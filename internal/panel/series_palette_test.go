@@ -160,7 +160,7 @@ func TestI4WorstFirstSeries(t *testing.T) {
 	for _, tc := range []struct {
 		measure, better string
 		wantSpike       bool
-	}{{"error_rate()", "", true}, {"count()", "", false}, {"p95(duration_ms)", "", true}, {"avg(duration_ms)", "higher", false}} {
+	}{{"error_rate()", "", false}, {"count()", "", false}, {"p95(duration_ms)", "", false}, {"avg(duration_ms)", "higher", false}} {
 		t.Run(tc.measure+tc.better, func(t *testing.T) {
 			d := Dashboard{Name: "Ranking", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "timeseries", Better: tc.better, Options: &Options{Top: 3}, Query: &Query{From: "spans", Measures: []string{tc.measure}, By: []string{"service"}, Bucket: "1m"}}}}
 			got, err := e.Run(t.Context(), RunRequest{Dashboard: d})

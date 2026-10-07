@@ -17,8 +17,8 @@ it.each([false,true])("V4: discrete full-height heat cells and single-hue inline
   const theme = chartThemeFor(dark);
   const option = analysisOption({id:"h",title:"Heat",viz:"heatmap"},heat,theme) as any;
   const cell = option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:"#fff"})});
-  // The inset one-pixel stroke leaves a one-pixel surface gap at each neighbour.
-  expect(cell.shape).toMatchObject({x:1,y:11,width:58,height:18});
+  // Q1 uses a surface gap without a uniform identity-colour outline.
+  expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
   expect(option.visualMap.inRange.color).toHaveLength(6);
   expect(option.visualMap.inRange.color.at(-1)).toBe(seriesSlot(0,dark));
   expect(option.visualMap.itemWidth).toBe(8);
@@ -86,8 +86,8 @@ it.each([false,true])("V9: all categorical marks have 3:1 fill or outline withou
  }
  const heatOption=analysisOption({id:"h",title:"Heat",viz:"heatmap"},heat,theme) as any;
  const cell=heatOption.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:theme.surface})});
- expect(cell.style.lineWidth).toBe(1);expect(contrast(cell.style.stroke,theme.surface)).toBeGreaterThanOrEqual(3);
- expect(cell.shape).toMatchObject({x:1,y:11,width:58,height:18});
+ expect(cell.style.lineWidth).toBe(0);expect(cell.style.stroke).toBeUndefined();
+ expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
 });
 
 it.each([false,true])("V9: threshold/anomaly text stays readable over the warm tint, dark=%s",dark=>{

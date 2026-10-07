@@ -39,3 +39,14 @@ it.each([false,true])("measures actual SVG renderer heat gaps/scale and bar labe
   const bar=nativeAudit(chart,bars,{width:500,height:240});expect(bar.bars!.value_labels).toContain("1.45 s");expect(bar.bars!.value_labels).toContain("330 ms");expect(bar.bars!.category_fraction).toBeLessThanOrEqual(.4);
  } finally {chart.dispose();el.remove();}
 });
+
+it.each([false,true])("Q1 native renderer keeps five heat intensities and excludes empty cells (%s)",dark=>{
+ const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:600,height:248});
+ try {
+  const counts=[0,1,10,100,1000,3000];
+  const result={id:"h",status:"ok" as const,elapsed_ms:1,interval:"1m",frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"bucket_lower",type:"number" as const,role:"dimension" as const},{name:"bucket_upper",type:"number" as const,role:"dimension" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[counts.map((_,i)=>i*60000),counts.map(()=>0),counts.map(()=>25),counts],rows:6}};
+  const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},result,chartThemeFor(dark));chart.setOption(option,{notMerge:true});
+  const audit=nativeAudit(chart,option,{width:600,height:248});
+  expect(audit.marks).toHaveLength(5);expect(new Set(audit.marks.map(m=>m.fill)).size).toBe(5);
+ }finally{chart.dispose();el.remove();}
+});

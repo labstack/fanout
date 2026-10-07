@@ -140,7 +140,13 @@ func TestM4SeriesGuide(t *testing.T) {
 }
 
 func TestI4RankingGuide(t *testing.T) {
-	if !strings.Contains(specGuide, "series are chosen worst-first by the panel's measure; the rest fold into Other (N)") {
+	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N)") {
 		t.Fatal("missing ranking semantics")
+	}
+}
+
+func TestQ4ConfidenceGuide(t *testing.T) {
+	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
+		t.Fatal("missing confidence semantics")
 	}
 }

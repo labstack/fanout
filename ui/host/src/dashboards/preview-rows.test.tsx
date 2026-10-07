@@ -86,3 +86,42 @@ it.each([false,true])("V9: semantic table ink reaches 4.5:1, severity badge uses
  expect(badge.style.color).toBe(chartThemeFor(dark).text);
  expect(badge.style.background).toContain("0.14");
 });
+
+it.each([false,true])("Q2: short OTLP labels, full titles and isolated service/count columns (%s)",async dark=>{
+ const severities=["TRACE4","DEBUG2","INFO3","WARN4","ERROR2","FATAL3","UNSPECIFIED","surprise","SEVERITY_NUMBER_INFO2","17"];
+ const labels=["TRACE","DEBUG","INFO","WARN","ERROR","FATAL","—","—","INFO","ERROR"];
+ const services=severities.map((_,i)=>"product-catalog-with-a-very-long-service-name-"+i);
+ const p:Panel={id:"p",title:"Patterns",viz:"log_patterns",query:{from:"logs",by:["body_template"],measures:["count()"]}};
+ const f:Frame={columns:[{name:"severity",type:"string",role:"dimension"},{name:"body_template",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure",unit:"count"},{name:"trend",type:"json",role:"dimension"}],values:[severities,severities.map(()=>"failed <*>"),services,severities.map(()=>75900),severities.map(()=>"[1,3]")],rows:severities.length};
+ await mount(<RowPanel panel={p} result={{...result,frame:f}} height={350} dark={dark} onSelect={()=>{}}/>,dark);
+ const badges=[...host.querySelectorAll<HTMLElement>(".mantine-Badge-root")];
+ expect(badges.map(b=>b.textContent?.replace(/^[◆■●] /,""))).toEqual(labels);
+ expect(badges.map(b=>b.title)).toEqual(severities);
+ const service=host.querySelector<HTMLElement>('tbody td[data-field="service"]')!;
+ expect(parseFloat(service.style.minWidth)).toBeGreaterThanOrEqual(140);
+ const value=service.querySelector<HTMLElement>("[title]")!;
+ expect(value.title).toBe(services[0]);expect(value.style.textOverflow).toBe("ellipsis");expect(value.style.overflow).toBe("hidden");expect(value.style.whiteSpace).toBe("nowrap");
+ const count=host.querySelector<HTMLElement>('tbody td[data-field="count"]')!;
+ expect(count.style.textAlign).toBe("right");expect(parseFloat(count.style.paddingLeft)).toBeGreaterThanOrEqual(12);expect(count.style.overflow).toBe("hidden");
+ expect(host.querySelector<HTMLTableColElement>('col[data-field="count"]')?.style.width).toBe("140px");
+});
+
+it.each([false,true])("Q3: one padded muted footer stacks hint before distinct data notes (%s)",async dark=>{
+ const p:Panel={id:"t",title:"Traces",viz:"traces",drill:"traces"};
+ const note="Service is All; showing the unsplit whole-window frame.";
+ const r:PanelResult={...result,frame:{...frame,truncated:true,note},annotation_error:note,annotation_scope:{limited:true,services:[]}};
+ await mount(<PanelCard panel={p} title={p.title} result={r} loading={false} height={350} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}}/>,dark);
+ const body=host.querySelector<HTMLElement>("[data-panel-body]")!,footer=host.querySelector<HTMLElement>("[data-panel-notes]")!;
+ expect(footer).not.toBeNull();expect(body.classList.contains("dashboard-panel-padding")).toBe(true);expect(footer.classList.contains("dashboard-panel-padding")).toBe(true);
+ const notes=[...footer.querySelectorAll<HTMLElement>("[data-panel-note]")];
+ expect(notes[0].textContent).toBe("Click a row to open the trace.");
+ expect(notes.map(n=>n.textContent)).toEqual(["Click a row to open the trace.","Truncated: showing limited data",note,"Annotation service scope is limited."]);
+ for(const n of notes){expect(n.style.fontSize).toBe("calc(0.75rem * var(--mantine-scale))");expect(n.style.color).toBe("var(--mantine-color-dimmed)");}
+ expect(host.textContent).not.toContain("Showing 2 rows.");
+});
+
+it("Q3: SQL sparkline feedback does not repeat as a footer",async()=>{
+ const p:Panel={id:"t",title:"Table",viz:"table",sql:"SELECT 1 AS n",options:{columns:[{field:"n",format:"sparkline"}]}};
+ await mount(<PanelCard panel={p} title={p.title} result={{...result,frame:{columns:[{name:"n",type:"number",role:"measure"}],values:[[1]],rows:1}}} loading={false} height={350} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}}/>,false);
+ expect(host.textContent?.split("Sparkline requires an array column")).toHaveLength(2);
+});

@@ -27,20 +27,21 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
     const halo=typeof style.stroke==="string"&&(style.lineWidth??0)>=3?style.stroke:undefined;
     return [{text:style.text,size,family:style.font??style.fontFamily??"",color:typeof style.fill==="string"?style.fill:"",surface,halo,...bounds(el)}];
   });
-  const marks:{fill?:string;stroke?:string;shadow?:string;surface?:string}[]=[];
+  const marks:{fill?:string;stroke?:string;shadow?:string;surface?:string;density?:boolean}[]=[];
   const cells:{box:ReturnType<typeof bounds>;value:number[]}[]=[];
   const paints=new Set<string>();
-  const paint=(el:Element)=>{
+  const paint=(el:Element,density=false)=>{
     const s=el.style;if(!s||s.text||s.opacity!==undefined&&s.opacity<.5) return;
-    const mark={fill:typeof s.fill==="string"?s.fill:undefined,stroke:typeof s.stroke==="string"&&s.lineWidth?s.stroke:undefined,shadow:s.shadowColor,surface};
+    const mark={fill:typeof s.fill==="string"?s.fill:undefined,stroke:typeof s.stroke==="string"&&s.lineWidth?s.stroke:undefined,shadow:s.shadowColor,surface,density};
     if([mark.fill,mark.stroke].every(c=>!c||c==="none"))return;
     const key=JSON.stringify(mark);if(!paints.has(key)){paints.add(key);marks.push(mark);}
   };
   const model=chart.getModel?.();
   for(const series of model?.getSeries?.()??[]) {
+    const density=series.subType==="custom"&&Boolean(model?.getComponent("visualMap"));
     if(series.subType==="line") chart.getViewOfSeriesModel?.(series).group.traverse?.(el=>{if(el.type==="ec-polyline")paint(el);});
     series.getData().eachItemGraphicEl((element,index)=>{
-      visit(element,el=>{if(["rect","path","circle","sector"].includes(el.type)) paint(el);});
+      visit(element,el=>{if(["rect","path","circle","sector"].includes(el.type)) paint(el,density);});
       const raw=series.getData().getRawDataItem(index);
       const value=raw&&typeof raw==="object"&&"value" in raw ? raw.value : raw;
       if(series.subType==="custom"&&Array.isArray(value)&&value.length>=5&&option.yAxis?.type==="category"&&option.series?.[0]?.label===undefined&&element.type==="rect") cells.push({box:bounds(element),value:value as number[]});
@@ -65,6 +66,6 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
   const categories=texts.filter(t=>category.includes(t.text));
   const expected=option.series?.flatMap(s=>s.type==="bar"&&s.label?.show?s.data?.flatMap(d=>typeof d.value==="number"?[s.label!.formatter!({value:d.value})]:[])??[]:[])??[];
   return {texts,marks,
-    ...(scale?{heat:{gaps,scale_width:scale.width,scale_height:scale.height,plot_fraction:(plot?.height??0)/size.height}}:{}),
+    ...(scale?{heat:{cells,gaps,scale_width:scale.width,scale_height:scale.height,plot_fraction:(plot?.height??0)/size.height}}:{}),
     ...(option.yAxis?.type==="category"&&option.series?.some(s=>s.type==="bar")?{bars:{category_fraction:Math.max(0,...categories.map(c=>c.right-c.left))/size.width,expected_labels:[...new Set(expected)],value_labels:texts.map(t=>t.text)}}:{})};
 }

@@ -47,7 +47,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
       if (custom !== undefined) return custom;
       const format = panel.options?.columns?.find(c => c.field === column.name);
       if (format) {
-        if (format.format === "sparkline" && !panel.query && column.type !== "json") return <Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status">Sparkline requires an array column</Text>;
+        if (format.format === "sparkline" && !panel.query && column.type !== "json") return <Text fz={12} c="dimmed" role="status">Sparkline requires an array column</Text>;
         const selection = { ...model.selection(model.rows[info.row.index]), trace_id: value === null ? undefined : String(value) };
         const target = format.format === "trace_link" ? makeDrill(panel, result, selection) : undefined;
         const url = target ? new URL(window.location.href) : undefined;
@@ -96,10 +96,10 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   };
   const logWidths:Record<string,number>={time:146,severity:90,service:120,trace_id:150,namespace:100};
   const fixedWidths=columns.flatMap(c=>logWidths[c.id!]? [logWidths[c.id!]]:[]);
-  const minWidth=panel.viz === "logs" && columns.some(c=>c.id==="body") ? fixedWidths.reduce((sum,n)=>sum+n,0)+Math.max(180,...fixedWidths) : panel.viz === "log_patterns" ? 480 : undefined;
+  const minWidth=panel.viz === "logs" && columns.some(c=>c.id==="body") ? fixedWidths.reduce((sum,n)=>sum+n,0)+Math.max(180,...fixedWidths) : panel.viz === "log_patterns" ? 660 : undefined;
   return <Box>
     <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth}}>
-      <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "log_patterns" ? ({severity:"90px",service:"90px",count:"64px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
+      <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "log_patterns" ? ({severity:"100px",service:"140px",count:"140px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
       <Table.Thead>
         {table.getHeaderGroups().map((group) => <Table.Tr key={group.id}>
           {group.headers.map((header) => {
@@ -118,17 +118,14 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
             const column=frame.columns.find(c=>c.name===cell.column.id)!;
-            return <Table.Td key={cell.id} ta={column.type === "number" ? "right" : undefined}>
+            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : undefined}>
               {expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>}
             </Table.Td>;
           })}
         </Table.Tr>)}
       </Table.Tbody>
     </Table>
-    {!panel.query&&(panel.options?.columns??[]).some(c=>c.format==="sparkline"&&frame.columns.some((column,i)=>column.name===c.field&&(column.type!=="json"||frame.values[i].some(value=>Boolean(columnDisplay(c,value,0).unsupported)))))&&<Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status">Sparkline requires an array column</Text>}
-    {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>c.field).join(", ")}</Text>}
-
-    {frame.truncated && <Text size="xs" c="dimmed" mt={4}>Showing {frame.rows} rows.</Text>}
+    {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Text fz={12} c="dimmed" role="status">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>c.field).join(", ")}</Text>}
   </Box>;
 }
 
@@ -151,7 +148,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, on
       return <Badge variant="light" color={bad ? "bad" : warn ? "warn" : "gray"} style={{color:theme.text,background:tint(bad?theme.status.bad:warn?theme.status.warn:theme.muted,.14)}}><span style={{color:bad||warn?statusInk(bad?"bad":"warn",dark):theme.text}}>{bad ? "◆ " : warn ? "■ " : display.status === null || display.text === "—" || display.text === "unknown" ? "○ " : "● "}</span>{display.text}</Badge>;
     }
     case "sparkline": return display.unsupported
-      ? <Text size="xs" c={dark ? "warn.5" : "warn.8"} role="status">{display.unsupported}</Text>
+      ? <Text fz={12} c="dimmed" role="status">{display.unsupported}</Text>
       : <Box style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {(typeof value === "number" || value === null) && <Text size="sm" ff="monospace" style={{ flex: "none" }}>{display.text}</Text>}
         {display.points && display.points.filter(p => p !== null).length >= 2 ? <Sparkline points={display.points} /> : <Text c="dimmed">No trend</Text>}

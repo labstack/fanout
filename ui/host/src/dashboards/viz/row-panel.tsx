@@ -12,6 +12,16 @@ import { statusInk, tint } from "../../../../panels/style";
 const traceIdStyle: CSSProperties = { display: "block", width: "16ch", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const traceStatuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "OK", STATUS_CODE_UNSET: "Unset" };
 
+const serviceStyle: CSSProperties = { display: "block", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+function severityLabel(value: unknown): string {
+  const raw = String(value ?? "").trim().toUpperCase().replace(/^SEVERITY_NUMBER_/, "");
+  if (raw === "CRITICAL") return "FATAL";
+  if (raw === "WARNING") return "WARN";
+  const numeric = Number(raw);
+  if (/^\d+$/.test(raw) && numeric >= 1 && numeric <= 24) return ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"][Math.floor((numeric - 1) / 4)];
+  return raw.match(/^(TRACE|DEBUG|INFO|WARN|ERROR|FATAL)[2-4]?$/)?.[1] ?? "—";
+}
+
 export function RowPanel(props: AnalysisProps) {
   const model = useMemo(() => rowModel(props.panel, props.result), [props.panel, props.result]);
   const cell = useCallback(({ column, value, rowIndex }: TableCellProps) => {
@@ -27,13 +37,16 @@ export function RowPanel(props: AnalysisProps) {
         }
       }}>{String(value).slice(0,16)}</Anchor>;
     }
-    if (name === "service" && value && props.onSelect) return <Anchor component="button" type="button" onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>;
+    if (name === "service" && value) return props.onSelect
+      ? <Anchor component="button" type="button" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
+      : <Text fz={12} style={serviceStyle} title={String(value)}>{String(value)}</Text>;
     if (name === "health" || name === "severity" || name === "status") {
-      const bad = String(value).includes("ERROR") || value === "FATAL" || value === "CRITICAL" || value === "unhealthy";
-      const warn = value === "degraded" || String(value).startsWith("WARN");
-      const label = name === "status" ? traceStatuses[String(value)] ?? String(value ?? "Unknown") : String(value ?? "Unknown");
+      const severity = name === "severity" ? severityLabel(value) : undefined;
+      const bad = severity ? severity === "ERROR" || severity === "FATAL" : String(value).includes("ERROR") || value === "FATAL" || value === "CRITICAL" || value === "unhealthy";
+      const warn = severity ? severity === "WARN" : value === "degraded" || String(value).startsWith("WARN");
+      const label = severity ?? (name === "status" ? traceStatuses[String(value)] ?? String(value ?? "Unknown") : String(value ?? "Unknown"));
       const theme=chartThemeFor(props.dark);
-      return <Badge variant="light" color={bad ? "bad" : warn ? "warn" : "gray"} style={{color:theme.text,background:tint(bad?theme.status.bad:warn?theme.status.warn:theme.muted,.14)}}>{name === "severity" && <span style={{color:bad||warn?statusInk(bad?"bad":"warn",props.dark):theme.text}}>{bad ? "◆" : warn ? "■" : "●"} </span>}{label}</Badge>;
+      return <Badge title={String(value ?? "UNSPECIFIED")} variant="light" color={bad ? "bad" : warn ? "warn" : "gray"} style={{color:theme.text,background:tint(bad?theme.status.bad:warn?theme.status.warn:theme.muted,.14)}}>{name === "severity" && <span style={{color:bad||warn?statusInk(bad?"bad":"warn",props.dark):theme.text}}>{bad ? "◆" : warn ? "■" : "●"} </span>}{label}</Badge>;
     }
     if (name === "body" || name === "body_template") return <RowText text={String(value ?? "")} template={name === "body_template"} highlight={props.panel.options?.highlight} />;
     if (name === "trend") {
