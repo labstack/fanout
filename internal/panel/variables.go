@@ -23,6 +23,7 @@ type ResolveRequest struct {
 // variable, resolving them in order so a variable that filters on an earlier
 // one sees that variable's current value.
 func (e *Executor) ResolveVariables(ctx context.Context, req ResolveRequest) (map[string][]Option, error) {
+	now := e.now()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	d := req.Dashboard
@@ -35,7 +36,7 @@ func (e *Executor) ResolveVariables(ctx context.Context, req ResolveRequest) (ma
 	if req.Time != nil {
 		t = *req.Time
 	}
-	start, end, err := resolveWindow(t, nil, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, nil, now, e.maxWindow)
 	if err != nil {
 		return nil, Problems{{Path: "time", Message: err.Error()}}
 	}

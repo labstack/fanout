@@ -14,7 +14,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const from = result.from_ms ?? -Infinity, to = result.to_ms ?? Infinity;
   const deploys = annotations.deploys.filter(matches).filter(a => Date.parse(a.at) >= from && Date.parse(a.at) < to).map(a => ({
     xAxis: Date.parse(a.at), name: `${a.service} ${a.version}`,
-    label: { formatter: `${a.service} ${a.version}`, color: theme.muted },
+    label: { formatter: `${a.service} ${a.version}`, color: theme.muted, position: "end", distance: -8, rotate: 0, verticalAlign: "top" },
     lineStyle: { type: "dashed", color: theme.muted, width: 1 },
     tooltip: { formatter: () => `${a.service} · ${a.version} · ${a.at}` },
   }));
@@ -25,8 +25,14 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   }, { xAxis: Math.min(to, Date.parse(a.to)) }]);
   const series = (option.series ?? []) as Record<string, unknown>[];
   if (!series.length) return option;
+  const grid = (option.grid ?? {}) as Record<string, unknown>;
   return {
     ...option, ...(deploys.length || anomalies.length ? { tooltip: { ...((option.tooltip as Record<string, unknown>) ?? {}), renderMode: "richText" } } : {}),
+    // Brush tools occupy the top 22px; deploy labels start inside the plot below it.
+    ...(deploys.length ? {
+      toolbox: { ...((option.toolbox as Record<string, unknown>) ?? {}), top: 0, right: 8, itemSize: 12, padding: 5 },
+      grid: { ...grid, top: Math.max(typeof grid.top === "number" ? grid.top : 0, 48) },
+    } : {}),
     series: series.map((s, i) => {
       if (i !== 0) return s;
       const markLine = (s.markLine ?? {}) as { data?: unknown[] };

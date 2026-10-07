@@ -7,7 +7,7 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { analysisOption, analysisSummary } from "../../../panels/analysis";
-import { chartThemeFor } from "../../../panels/compile";
+import { chartThemeFor, timeseriesOption } from "../../../panels/compile";
 import {visualizations,type Panel,type PanelResult,type Viz as VizType} from "../../../panels/types";
 import { PanelCard } from "./panel-card";
 import { InspectDrawer } from "./inspect";
@@ -92,7 +92,61 @@ it("formats distinct scatter axis units and numeric bucket order",()=>{
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
   const got=analysisOption({...panel,viz}, {id:"p",status:"ok",elapsed_ms:1,frame:f},chartThemeFor(false)) as {xAxis?:{data?:string[]};yAxis?:{data?:string[]}};
-  expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["−∞–1","2–10","10–20"]);
+  expect(viz==="heatmap"?got.yAxis?.data:got.xAxis?.data).toEqual(["−∞–1 ms","2–10 ms","10–20 ms"]);
+ }
+});
+
+it.each(["histogram","heatmap"] as const)("formats %s duration buckets in shared scaled units", viz => {
+ const frame = {columns:fixtures.histogram!.columns,values:[[128,16384,131072,262144],[256,32768,262144,null],[3,4,5,6]],rows:4};
+ const f = viz === "heatmap" ? {columns:[col("time","time","time"),...frame.columns],values:[[1000,1000,1000,1000],...frame.values],rows:4} : frame;
+ const option = analysisOption({id:"p",title:"Latency",viz},{...resultFor(viz),frame:f},chartThemeFor(false)) as {xAxis:{data?:string[];name?:string};yAxis:{data?:string[]}};
+ expect(viz === "heatmap" ? option.yAxis.data : option.xAxis.data).toEqual(["128–256 ms","16–33 s","2.2–4.4 min","≥ 4.4 min"]);
+ if (viz === "histogram") expect(option.xAxis.name).toBeUndefined();
+});
+
+it.each(["histogram","heatmap"] as const)("preserves distinct %s buckets when rounded labels coincide", viz => {
+ const frame = {columns:fixtures.histogram!.columns,values:[[16384,16385],[16385,16386],[3,4]],rows:2};
+ const f = viz === "heatmap" ? {columns:[col("time","time","time"),...frame.columns],values:[[1000,1000],...frame.values],rows:2} : frame;
+ const option = analysisOption({id:"p",title:"Latency",viz},{...resultFor(viz),frame:f},chartThemeFor(false)) as {series:{data:{value:number|number[];selection:{bucket:{lower:number;upper:number}}}[]}[]};
+ const data = option.series[0].data;
+ expect(data).toHaveLength(2);
+ expect(data.map(point=>point.selection.bucket)).toEqual([{lower:16384,upper:16385},{lower:16385,upper:16386}]);
+ expect(data.map(point=>Array.isArray(point.value)?point.value[2]:point.value)).toEqual([3,4]);
+ if (viz === "heatmap") expect(data.map(point=>(point.value as number[])[1])).toEqual([0,1]);
+});
+
+it("caps heatmap colour at p99 and shows a compact continuous count scale", () => {
+ const counts = [...Array(99).fill(10),100000];
+ const frame = {columns:fixtures.heatmap!.columns,values:[counts.map((_,i)=>1000+i*60000),counts.map(()=>128),counts.map(()=>256),counts],rows:100};
+ const option = analysisOption({id:"p",title:"Latency heatmap",viz:"heatmap"},{...resultFor("heatmap"),frame},chartThemeFor(false)) as {visualMap:{show:boolean;type:string;max:number;orient:string;itemWidth:number};legend?:{show:boolean}};
+ expect(option.visualMap.max).toBeLessThanOrEqual(10);
+ expect(option.visualMap.show).toBe(true);
+ expect(option.visualMap.type).toBe("continuous");
+ expect(option.visualMap.orient).toBe("horizontal");
+ expect(option.visualMap.itemWidth).toBeLessThanOrEqual(10);
+});
+
+it("hides single-series legends and retains legends for split series", () => {
+ for (const viz of ["histogram","heatmap","scatter"] as const) {
+  const option = analysisOption({id:"p",title:viz,viz},resultFor(viz),chartThemeFor(false)) as {legend?:{show:boolean}};
+  expect(option.legend?.show ?? false).toBe(false);
+ }
+ const time = timeseriesOption({id:"p",title:"Rate",viz:"timeseries"},{...resultFor("heatmap"),frame:{columns:[col("time","time","time"),col("count","number","measure")],values:[[1000],[10]],rows:1}},chartThemeFor(false)) as {legend:{show:boolean}};
+ expect(time.legend.show).toBe(false);
+ const frame = {columns:[col("service","string","dimension"),...fixtures.histogram!.columns],values:[["cart","checkout"],[1,1],[2,2],[3,4]],rows:2};
+ const split = analysisOption({id:"p",title:"Buckets",viz:"histogram"},{...resultFor("histogram"),frame},chartThemeFor(false)) as {legend:{show:boolean}};
+ expect(split.legend.show).toBe(true);
+});
+
+it("formats midnight ticks as local month and day across time charts", () => {
+ const midnight = new Date(2026,9,6,0,0,0).getTime();
+ const daytime = new Date(2026,9,6,13,45,0).getTime();
+ const expected = new Date(midnight).toLocaleDateString(undefined,{month:"short",day:"numeric"});
+ const panel: Panel = {id:"p",title:"Time",viz:"timeseries"};
+ const options = [timeseriesOption(panel,resultFor("heatmap"),chartThemeFor(false)),...(["heatmap","state_timeline"] as const).map(viz=>analysisOption({...panel,viz},resultFor(viz),chartThemeFor(false)))];
+ for (const option of options as {xAxis:{axisLabel?:{formatter?:(n:number)=>string}}}[]) {
+  expect(option.xAxis.axisLabel?.formatter?.(midnight)).toBe(expected);
+  expect(option.xAxis.axisLabel?.formatter?.(daytime)).toBe("13:45");
  }
 });
 

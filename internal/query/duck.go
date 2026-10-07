@@ -56,7 +56,8 @@ type Duck struct {
 	writeGate writegate.WriteGate
 	cacheGate writegate.WriteGate
 	// Protected by writeGate; controls periodic version-history retirement.
-	versionRollupPasses uint64
+	versionRollupPasses   uint64
+	versionRollupFailures map[string]versionRollupFailure
 	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
 	// gate keeps a queued maintenance publish from stalling unrelated new reads.
 	parquetMu parquetReadGate

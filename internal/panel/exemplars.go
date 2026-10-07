@@ -88,6 +88,7 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 }
 
 func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (ExemplarResponse, error) {
+	now := e.now()
 	out := ExemplarResponse{Traces: []Exemplar{}}
 	if req.Kind != "" && req.Kind != "traces" && req.Kind != "logs" {
 		return out, Problems{{Path: "kind", Message: "kind must be traces or logs", Hint: "choose traces or logs"}}
@@ -124,7 +125,7 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 	if req.Time != nil && req.Time.From != nil && req.Time.To != nil {
 		override = nil
 	} // The browser captured the effective window.
-	start, end, err := resolveWindow(t, override, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, override, now, e.maxWindow)
 	if err != nil {
 		return out, Problems{{Path: "time", Message: err.Error()}}
 	}

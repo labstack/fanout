@@ -32,6 +32,14 @@ function markers(data: PanelResult = result, viz: Panel["viz"] = "timeseries", a
 }
 
 describe("annotation scope and windows", () => {
+  it("keeps deploy labels below the toolbox lane in narrow panels", () => {
+    const option = {grid:{top:12,left:8,right:16,bottom:8},series:[{type:"line"}]};
+    const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox:{top:number;itemSize:number;padding:number};series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
+    expect(got.toolbox).toMatchObject({top:0,itemSize:12,padding:5});
+    expect(got.grid.top).toBeGreaterThanOrEqual(got.toolbox.top+got.toolbox.itemSize+2*got.toolbox.padding+8);
+    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"end",distance:-8,rotate:0,verticalAlign:"top"});
+    expect(option.grid.top).toBe(12);
+  });
   it("preserves tooltip mode when no annotation markers match", () => {
     const option = { series: [{ type: "line", markLine: { data: [{ yAxis: 3 }] } }], tooltip: { trigger: "axis", renderMode: "html" } };
     const cases: [PanelResult, AnnotationsResponse][] = [

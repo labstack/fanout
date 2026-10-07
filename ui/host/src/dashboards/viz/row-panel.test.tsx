@@ -37,6 +37,25 @@ const render = async (panel: Panel, result: PanelResult) => {
 };
 const marks = () => [...container.querySelectorAll("tbody mark")].map(mark => mark.textContent);
 
+it("clips trace IDs to a fixed width while retaining the full accessible ID", async () => {
+  const id = "0123456789abcdef0123456789abcdef";
+  await render({...panel,viz:"traces"},resultFor("trace_id",id));
+  const link = container.querySelector<HTMLElement>("[data-trace-id]")!;
+  expect(link.style.width).toBe("14ch");
+  expect(link.style.overflow).toBe("hidden");
+  expect(link.style.textOverflow).toBe("ellipsis");
+  expect(link.style.whiteSpace).toBe("nowrap");
+  expect(link.getAttribute("aria-label")).toContain(id);
+  expect(link.title).toBe(id);
+});
+
+it.each([["STATUS_CODE_ERROR","Error"],["STATUS_CODE_OK","OK"],["STATUS_CODE_UNSET","Unset"]])("labels OTLP %s as %s", async (value,label) => {
+  await render({...panel,viz:"traces"},resultFor("status",value));
+  const badge = container.querySelector<HTMLElement>(".mantine-Badge-root")!;
+  expect(badge.textContent).toBe(label);
+  if (label === "Error") expect(badge.style.getPropertyValue("--badge-bg")).toContain("--mantine-color-bad-");
+});
+
 it.each([["a.c", "a.c"], ["(", "("], ["[y", "[y"], ["failed", "FAILED"]])(
   "highlights literal %s case-insensitively without interpreting regex syntax", async (term, expected) => {
     const body = "a.c (x) [y] FAILED abc";

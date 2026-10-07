@@ -84,6 +84,31 @@ it("grades numeric statuses with spec, result and threshold-derived direction in
  expect(columnDisplay({field:"x",format:"sparkline"},"[]",0,graded,undefined,Array(300).fill(1)).points).toHaveLength(240);
 });
 
+it("formats error-rate status badges with the measure unit and keeps the status icon", async () => {
+ const panel: Panel = { ...formattedPanel, options: { columns: [{ field: "error_rate", format: "status" }] }, thresholds: [{ value: 1, status: "bad" }] };
+ const frame: Frame = { columns: [{ name: "error_rate", type: "number", role: "measure", unit: "percent" }], values: [[1.2746]], rows: 1 };
+ const {host} = await render(<TableViz panel={panel} result={{...result,frame}} height={200}/>);
+ expect(host.querySelector("tbody td")?.textContent).toBe("◆ 1.27%");
+ expect(columnDisplay({field:"error_rate",format:"status",unit:"percent"},1.2746,0,panel).text).toBe("1.27%");
+});
+
+it("pairs a formatted row value with its sparkline", async () => {
+ const panel: Panel = { ...formattedPanel, options: { columns: [{field:"latency",format:"sparkline"}] } };
+ const frame: Frame = {columns:[{name:"latency",type:"number",role:"measure",unit:"ms"}],values:[[900]],rows:1,trends:{latency:[[1,2,3]]}};
+ const {host} = await render(<TableViz panel={panel} result={{...result,frame}} height={200}/>);
+ const cell = host.querySelector("tbody td");
+ expect(cell?.textContent).toContain("900ms");
+ expect(cell?.querySelector('svg[role="img"]')).not.toBeNull();
+});
+
+it.each([0, "0"])("formats zero error-rate status %j with its percent unit", async value => {
+ const panel: Panel = {...formattedPanel,options:{columns:[{field:"error_rate",format:"status"}]}};
+ const frame: Frame = {columns:[{name:"error_rate",type:typeof value === "number" ? "number" : "string",role:"measure",unit:"percent"}],values:[[value]],rows:1};
+ const {host} = await render(<TableViz panel={panel} result={{...result,frame}} height={200}/>);
+ expect(host.querySelector("tbody td")?.textContent).toMatch(/0(?:\.00)?%/);
+ expect(columnDisplay({field:"error_rate",format:"status",unit:"percent"},value,0,panel).text).toBe("0.00%");
+});
+
 it("renders all formats safely and keeps trends and current callbacks aligned after sorting",async()=>{
  const onPoint=vi.fn(),onVariable=vi.fn(),onSelect=vi.fn();
  const props={panel:formattedPanel,result:{...result,frame:formattedFrame},height:300,onPoint,onVariable,onSelect};

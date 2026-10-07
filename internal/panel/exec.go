@@ -128,6 +128,7 @@ func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
 // failure in its own result, so one broken panel cannot blank a dashboard.
 func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 	caller := ctx
+	now := e.now()
 	d := req.Dashboard
 	Normalize(&d)
 	if len(req.Panels) > len(d.Panels) {
@@ -183,7 +184,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			return nil, problems
 		}
 	}
-	start, end, err := resolveWindow(t, nil, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, nil, now, e.maxWindow)
 	if err != nil {
 		return nil, Problems{{Path: "time", Message: err.Error()}}
 	}
@@ -202,7 +203,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			if ctx.Err() != nil {
 				return nil
 			}
-			result := e.runPanel(ctx, p, checked, t, vars, req.Widths[p.ID], compare)
+			result := e.runPanel(ctx, p, checked, t, now, vars, req.Widths[p.ID], compare)
 			if ctx.Err() == context.DeadlineExceeded {
 				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, ElapsedMS: result.ElapsedMS}
 			}
@@ -292,7 +293,7 @@ func limitBatchFrames(results []Result) {
 	}
 }
 
-func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t Time, vars map[string]Value, width int, compare bool) (res Result) {
+func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t Time, now time.Time, vars map[string]Value, width int, compare bool) (res Result) {
 	parent := ctx
 	started := time.Now()
 	res = Result{ID: p.ID, Status: StatusOK}
@@ -303,7 +304,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if p.Viz == "text" {
 		return res
 	}
-	start, end, err := resolveWindow(t, p.Time, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, p.Time, now, e.maxWindow)
 	if err != nil {
 		return failed(res, err, parent.Err() == nil)
 	}

@@ -3,7 +3,7 @@ import { fonts } from "../tokens";
 import { toCategories, toSeries } from "./frame";
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
-import { formatAxis, formatValue } from "./units";
+import { formatAxis, formatTimeAxis, formatValue } from "./units";
 
 export type ChartTheme = { dark: boolean; text: string; muted: string; grid: string; surface: string; border: string; status: { ok: string; warn: string; bad: string }; font: string };
 
@@ -100,7 +100,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     ...baseOption(theme, unit),
     legend: { type: "scroll", show: legend, top: 0, left: 0, right: 0, icon: "roundRect", itemWidth: 10, itemHeight: 10, textStyle: { color: theme.text, fontSize: 12 }, data: current.map((s) => s.name) },
     grid: { left: 8, right: 16 + Math.max(0, units.length - 2) * 56, top: legend ? 30 : 12, bottom: 8, containLabel: true },
-    xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, hideOverlap: true } },
+    xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, hideOverlap: true, formatter: formatTimeAxis } },
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
   };

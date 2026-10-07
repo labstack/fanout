@@ -54,3 +54,28 @@ export function formatAxis(unit?: string): (value: number) => string {
     return formatValue(unit, value);
   };
 }
+
+/** Use one duration scale for both ends of a bucket. */
+export function formatBucket(lower: number | null, upper: number | null, unit?: string): string {
+  let bound = (value: number) => formatValue(unit, value);
+  let suffix = "";
+  if (unit === "ms" || unit === "s" || unit === "ns") {
+    const ms = unit === "s" ? 1000 : unit === "ns" ? 1e-6 : 1;
+    const magnitude = Math.abs((lower ?? upper ?? 0) * ms);
+    const scale = magnitude >= 60000 ? 60000 : magnitude >= 1000 ? 1000 : 1;
+    suffix = scale === 60000 ? " min" : scale === 1000 ? " s" : " ms";
+    const digits = scale === 60000 ? 1 : scale === 1000 ? 0 : 2;
+    const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: digits });
+    bound = value => formatter.format(value * ms / scale);
+  }
+  if (upper === null && lower !== null) return `≥ ${bound(lower)}${suffix}`;
+  return `${lower === null ? "−∞" : bound(lower)}–${upper === null ? "∞" : bound(upper)}${suffix}`;
+}
+
+/** ECharts otherwise abbreviates midnight to a bare day number. */
+export function formatTimeAxis(value: number): string {
+  const date = new Date(value);
+  return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0
+    ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}

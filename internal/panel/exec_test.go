@@ -4,9 +4,46 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestRunResolvesOneInstantForAllPanelWindows(t *testing.T) {
+	e := newFixtureExecutor(t)
+	var calls atomic.Int64
+	e.now = func() time.Time {
+		return fixtureStart.Add(time.Hour).Add(time.Duration(calls.Add(1)-1) * 27 * time.Millisecond)
+	}
+	d := Dashboard{Name: "Shared window", Time: Time{Range: "1h"}, Panels: []Panel{
+		{ID: "current", Title: "Current", Viz: "timeseries", Query: &Query{From: "spans", Measures: []string{"count()"}, Bucket: "5m"}},
+		{ID: "other", Title: "Other", Viz: "timeseries", Query: &Query{From: "spans", Measures: []string{"count()"}, Bucket: "5m"}},
+		{ID: "prior", Title: "Prior", Viz: "timeseries", Time: &PanelTime{Shift: "1d"}, Query: &Query{From: "spans", Measures: []string{"count()"}, Bucket: "5m"}},
+	}}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byID(results)
+	for _, r := range results {
+		if r.Status == StatusError {
+			t.Fatalf("panel failed: %+v", r)
+		}
+	}
+	current, other, prior := got["current"], got["other"], got["prior"]
+	if current.FromMS != other.FromMS || current.ToMS != other.ToMS {
+		t.Errorf("unshifted windows differ: current=%+v other=%+v", current, other)
+	}
+	if current.FromMS-prior.FromMS != 86400000 || current.ToMS-prior.ToMS != 86400000 {
+		t.Errorf("1d shift differs from 86400000ms: current=%+v prior=%+v", current, prior)
+	}
+	if current.FromMS != fixtureStart.UnixMilli() || current.ToMS != fixtureStart.Add(time.Hour).UnixMilli() {
+		t.Errorf("batch instant drifted: %+v", current)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("clock called %d times, want one batch instant", calls.Load())
+	}
+}
 
 func newFixtureExecutor(t *testing.T) *Executor {
 	t.Helper()

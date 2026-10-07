@@ -4,14 +4,16 @@ import { serviceMapOption } from "./rollups";
 import { frameRows } from "./rows";
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
-import { formatAxis } from "./units";
+import { formatAxis, formatBucket, formatTimeAxis, formatValue } from "./units";
 
 function spanMs(interval?: string): number {
   const match = /^(\d+)(s|m|h|d)$/.exec(interval ?? "");
   return match ? Number(match[1]) * ({ s: 1000, m: 60000, h: 3600000, d: 86400000 }[match[2] as "s" | "m" | "h" | "d"]) : 60000;
 }
 
-const bucketLabel = (row: Record<string, Cell>) => `${row.bucket_lower ?? "−∞"}–${row.bucket_upper ?? "∞"}`;
+const bucketLabel = (row: Record<string, Cell>, unit?: string) => formatBucket(typeof row.bucket_lower === "number" ? row.bucket_lower : null, typeof row.bucket_upper === "number" ? row.bucket_upper : null, unit);
+// Display labels can round alike; bucket identity and selection remain exact.
+const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.bucket_upper}`;
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
 
@@ -32,13 +34,14 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
   const rows = frameRows(frame);
   const dimensions = frame.columns.filter(column => column.role === "dimension").map(column => column.name);
   const measures = frame.columns.filter(column => column.role === "measure");
+  const bucketUnit = panel.unit ?? frame.columns.find(column => column.name === "bucket_lower")?.unit;
   const base = {
     animation: false,
     aria: { enabled: true, description: analysisSummary(panel, result) },
     textStyle: { fontFamily: theme.font, color: theme.text },
     grid: { left: 70, right: 24, top: 30, bottom: 40, containLabel: true },
     tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text }, renderMode: "richText" },
-    legend: { show: panel.options?.legend !== "hidden", textStyle: { color: theme.muted } },
+    legend: { show: false, textStyle: { color: theme.muted } },
     xAxis: { type: "value" }, yAxis: { type: "value" }, series: [] as unknown[],
   };
 
@@ -52,6 +55,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const yUnit = panel.unit ?? measures[1]?.unit;
     return {
       ...base,
+      legend: { ...base.legend, show: groups.length > 1 && panel.options?.legend !== "hidden" },
       xAxis: { type: xScale === "log" ? "log" : "value", name: xUnit, axisLabel: { formatter: formatAxis(xUnit) } },
       yAxis: { type: yScale === "log" ? "log" : "value", name: yUnit, axisLabel: { formatter: formatAxis(yUnit) } },
       series: groups.map(name => ({
@@ -69,16 +73,18 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
 
   if (panel.viz === "histogram") {
     const split = dimensions.find(name => name !== "bucket_lower" && name !== "bucket_upper");
-    const labels = [...new Set([...rows].sort(compareBuckets).map(bucketLabel))];
+    const buckets = [...new Map([...rows].sort(compareBuckets).map(row => [bucketKey(row), row])).values()];
+    const labels = buckets.map(row => bucketLabel(row, bucketUnit));
     const names = [...new Set(rows.map(row => split ? String(row[split] ?? "") : "Count"))];
     return {
       ...base,
-      xAxis: { type: "category", data: labels, name: panel.unit ?? frame.columns.find(column => column.name === "bucket_lower")?.unit },
+      legend: { ...base.legend, show: names.length > 1 && panel.options?.legend !== "hidden" },
+      xAxis: { type: "category", data: labels },
       yAxis: { type: "value", name: "count" },
       series: names.map(name => ({
         type: "bar", name, itemStyle: { color: seriesColor(name, theme.dark) },
-        data: labels.map(label => {
-          const row = rows.find(row => (!split || String(row[split] ?? "") === name) && bucketLabel(row) === label);
+        data: buckets.map(bucket => {
+          const row = rows.find(row => (!split || String(row[split] ?? "") === name) && bucketKey(row) === bucketKey(bucket));
           return { value: row?.count ?? 0, selection: {
             dimensions: split ? { [panel.query?.by?.[0] ?? split]: name } : {}, bucket: bucketSelection(row),
           } };
@@ -95,8 +101,9 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
   if (panel.viz === "heatmap" || panel.viz === "state_timeline") {
     const heat = panel.viz === "heatmap";
     const item = dimensions[0];
-    const category = (row: Record<string, Cell>) => heat ? bucketLabel(row) : String(row[item] ?? "");
+    const category = (row: Record<string, Cell>) => heat ? bucketKey(row) : String(row[item] ?? "");
     const names = [...new Set((heat ? [...rows].sort(compareBuckets) : rows).map(category))];
+    const labels = new Map(rows.map(row => [bucketKey(row), bucketLabel(row, bucketUnit)]));
     const interval = spanMs(result.interval);
     const measure = measures[0]?.name ?? "count";
     const data = rows.filter(row => typeof row.time === "number").map(row => {
@@ -108,13 +115,20 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         itemStyle: heat ? undefined : { color: status === null ? theme.muted : theme.status[status] },
       };
     });
-    const maxCount = Math.max(1, ...rows.map(row => Number(row[measure]) || 0));
+    const counts = rows.map(row => Number(row[measure])).filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+    const maxCount = Math.max(1, counts[Math.ceil(counts.length * .99) - 1] ?? 1);
     return {
       ...base,
+      grid: { ...base.grid, bottom: heat ? 60 : base.grid.bottom },
       tooltip: { ...base.tooltip, trigger: "axis" },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
-      xAxis: { type: "time", axisPointer: { show: true } }, yAxis: { type: "category", data: names },
-      visualMap: heat ? { show: false, min: 0, max: maxCount, dimension: 2, inRange: { color: [theme.surface, seriesColor("distribution", theme.dark)] } } : undefined,
+      xAxis: { type: "time", axisPointer: { show: true }, axisLabel: { formatter: formatTimeAxis } },
+      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names },
+      visualMap: heat ? {
+        type: "continuous", show: true, orient: "horizontal", left: "center", bottom: 0,
+        itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "0"], textStyle: { color: theme.muted },
+        min: 0, max: maxCount, dimension: 2, inRange: { color: [theme.surface, seriesColor("distribution", theme.dark)] },
+      } : undefined,
       series: [{
         type: "custom", name: panel.title, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; style: () => Record<string, unknown> }) => {

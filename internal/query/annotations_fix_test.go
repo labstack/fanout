@@ -46,6 +46,79 @@ func TestM2FixVersionHistoryDeletesOnlyWhenNeeded(t *testing.T) {
 	}
 }
 
+func TestM2VersionFailureDoesNotStarveNewBatches(t *testing.T) {
+	_, repo := versionEngine(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	commitVersionLogs(t, repo, "a-old", at, 64001)
+	commitVersionLogs(t, repo, "b-new", at.Add(time.Minute), 1)
+	commitVersionLogs(t, repo, "c-new", at.Add(2*time.Minute), 1)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	d := &Duck{DB: db, repository: repo, versionRollupPasses: 1}
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*a-old`).WillReturnError(context.DeadlineExceeded)
+	mock.ExpectRollback()
+	if _, err := d.RefreshVersionRollup(t.Context()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first failure=%v", err)
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*c-new.*b-new`).WillReturnResult(sqlmock.NewResult(0, 1))
+	for i, id := range []string{"b-new", "c-new"} {
+		mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs(id, at.Add(time.Duration(i+1)*time.Minute).UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT coalesce\(max\(max_ingested\),0\) FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(at.UnixNano()))
+	mock.ExpectQuery(`SELECT coalesce\(max\(last_ingested_unix_nano\),0\) FROM rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(0))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 2 {
+		t.Fatalf("new batches=%d %v", n, err)
+	}
+	failure := d.versionRollupFailures["a-old"]
+	if failure.failures != 1 || time.Until(failure.nextAttempt) < 59*time.Second || time.Until(failure.nextAttempt) > time.Minute {
+		t.Fatalf("initial backoff=%+v", failure)
+	}
+	// Expire the in-memory deadline without sleeping for a minute.
+	failure.nextAttempt = time.Now().Add(-time.Second)
+	d.versionRollupFailures["a-old"] = failure
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}).AddRow("b-new").AddRow("c-new"))
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*a-old`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs("a-old", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT coalesce\(max\(max_ingested\),0\) FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(at.UnixNano()))
+	mock.ExpectQuery(`SELECT coalesce\(max\(last_ingested_unix_nano\),0\) FROM rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(at.UnixNano()))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("expired retry=%d %v", n, err)
+	}
+	if len(d.versionRollupFailures) != 0 {
+		t.Fatalf("successful retry retained failures: %+v", d.versionRollupFailures)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestM2VersionFailureBackoffCapsAtThirtyMinutes(t *testing.T) {
+	at := time.Now()
+	failure := versionRollupFailure{}
+	for i, minutes := range []int{1, 2, 4, 8, 16, 30, 30, 30} {
+		failure = nextVersionRollupFailure(failure, at)
+		if failure.failures != i+1 || failure.nextAttempt.Sub(at) != time.Duration(minutes)*time.Minute {
+			t.Fatalf("attempt %d: %+v", i+1, failure)
+		}
+	}
+}
+
 func TestM2FixVersionPassTimeoutWarnAndMetric(t *testing.T) {
 	d, _ := versionEngine(t)
 	unlock := d.writeGate.Lock(writegate.WriteRollupService)
@@ -254,23 +327,23 @@ func TestM2FixOversizedVersionBatch(t *testing.T) {
 	logger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
 	defer slog.SetDefault(logger)
-	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
-		t.Fatalf("unbounded batch read: %d %v", n, err)
-	}
-	if output := log.String(); !strings.Contains(output, "level=WARN") || !strings.Contains(output, "version rollup batch exceeds row budget") || !strings.Contains(output, "batch_id=oversized") {
-		t.Fatalf("missing oversized warning: %s", output)
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("oversized pass: %d %v", n, err)
 	}
 	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
 		t.Fatalf("oversized retry: %d %v", n, err)
 	}
+	if output := log.String(); strings.Contains(output, "version rollup batch exceeds row budget") {
+		t.Fatalf("oversized warning spam: %s", output)
+	}
 	var count, limited int
-	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&count); err != nil || count != 0 {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("oversized scanned=%d %v", count, err)
 	}
-	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 1 {
+	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 0 {
 		t.Fatalf("limited=%d %v", limited, err)
 	}
-	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='oversized'`).Scan(&count); err != nil || count != 0 {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='oversized'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("oversized batch acknowledged=%d %v", count, err)
 	}
 }

@@ -219,6 +219,70 @@ func TestM2VersionDrainAndLimitedReset(t *testing.T) {
 		t.Fatalf("markers=%d %v", marked, err)
 	}
 }
+
+func commitVersionLogs(t *testing.T, repo *telemetrystore.Repository, id string, at time.Time, size int) {
+	t.Helper()
+	logs := make([]telemetry.Log, size)
+	for i := range logs {
+		n := at.UnixNano()
+		version := "v1"
+		if i == len(logs)-1 {
+			n = at.Add(time.Minute).UnixNano()
+			version = "v2"
+		}
+		logs[i] = telemetry.Log{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": version}, EventUnixNanos: n, IngestedAt: at.UnixNano()}
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Logs: logs}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestM2VersionOversizedBatchDrains(t *testing.T) {
+	d, repo := versionEngine(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	commitVersionLogs(t, repo, "oversized", at, 64001)
+	if n, err := d.DrainVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("oversized drain=%d %v", n, err)
+	}
+	var marked, limited int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='oversized'`).Scan(&marked); err != nil || marked != 1 {
+		t.Fatalf("oversized marker=%d %v", marked, err)
+	}
+	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 0 {
+		t.Fatalf("drained limited=%d %v", limited, err)
+	}
+	got, err := annotations.New(d).Read(t.Context(), annotations.Request{From: at, To: at.Add(time.Hour), Namespace: "shop"})
+	if err != nil || got.Truncated || len(got.Deploys) != 1 || got.Deploys[0].Version != "v2" {
+		t.Fatalf("oversized annotations=%+v %v", got, err)
+	}
+}
+
+func TestM2VersionMixedBatchPasses(t *testing.T) {
+	d, repo := versionEngine(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	for i, size := range []int{1, 64001, 2, 64002, 3} {
+		commitVersionLogs(t, repo, fmt.Sprintf("mixed-%d", i), at.Add(time.Duration(i)*time.Minute), size)
+	}
+	for pass := range 5 {
+		if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+			t.Fatalf("pass %d processed=%d %v", pass, n, err)
+		}
+		var marked, limited int
+		if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id=?`, fmt.Sprintf("mixed-%d", pass)).Scan(&marked); err != nil || marked != 1 {
+			t.Fatalf("oldest batch on pass %d marked=%d %v", pass, marked, err)
+		}
+		want := 1
+		if pass == 4 {
+			want = 0
+		}
+		if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != want {
+			t.Fatalf("pass %d limited=%d want=%d %v", pass, limited, want, err)
+		}
+	}
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
+		t.Fatalf("drained pass=%d %v", n, err)
+	}
+}
 func TestM2VersionResourceLogsAndMetrics(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)

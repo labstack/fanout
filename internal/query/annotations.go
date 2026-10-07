@@ -26,6 +26,18 @@ const createAnomalyLogTable = `CREATE TABLE anomaly_log (
  namespace VARCHAR,service VARCHAR,kind VARCHAR,start_time TIMESTAMPTZ_NS,end_time TIMESTAMPTZ_NS,
  title VARCHAR,severity VARCHAR,PRIMARY KEY(namespace,service,kind,start_time))`
 
+type versionRollupFailure struct {
+	failures    int
+	nextAttempt time.Time
+}
+
+func nextVersionRollupFailure(previous versionRollupFailure, now time.Time) versionRollupFailure {
+	previous.failures++
+	delay := min(time.Minute<<min(previous.failures-1, 5), 30*time.Minute)
+	previous.nextAttempt = now.Add(delay)
+	return previous
+}
+
 func createAnnotationTables(db *sql.DB) error {
 	if err := ensureCacheTable(db, "version_rollup", createVersionRollupTable,
 		"namespace", "service", "service_version", "first_seen", "last_seen"); err != nil {
@@ -93,22 +105,54 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 		return 0, err
 	}
 	batches := d.repository.Parquet.BatchMetadata()
+	// Compaction generations must not put old unprocessed outputs behind new ingest.
+	sort.Slice(batches, func(i, j int) bool {
+		if batches[i].MinIngestedNanos != batches[j].MinIngestedNanos {
+			return batches[i].MinIngestedNanos < batches[j].MinIngestedNanos
+		}
+		return batches[i].ID < batches[j].ID
+	})
 	active := map[string]bool{}
+	for _, b := range batches {
+		active[b.ID] = true
+	}
+	for id := range d.versionRollupFailures {
+		if !active[id] || marked[id] {
+			delete(d.versionRollupFailures, id)
+		}
+	}
 	pending := []telemetry.BatchMetadata{}
 	count := 0
 	for _, b := range batches {
-		active[b.ID] = true
-		size := b.Spans + b.Logs + b.Metrics
-		if !marked[b.ID] && size > 64000 {
-			slog.Warn("version rollup batch exceeds row budget", "batch_id", b.ID, "rows", size)
+		if marked[b.ID] || time.Now().Before(d.versionRollupFailures[b.ID].nextAttempt) {
 			continue
 		}
-		if marked[b.ID] || len(pending) >= 64 || count+size > 64000 {
-			continue
+		size := b.Spans + b.Logs + b.Metrics
+		if len(pending) == 0 && size > 64000 {
+			// Give the oldest oversized batch a pass of its own under the 10s deadline.
+			pending = append(pending, b)
+			break
+		}
+		if len(pending) >= 64 || count+size > 64000 {
+			break
 		}
 		pending = append(pending, b)
 		count += size
 	}
+	// writeGate protects this disposable, per-process retry state. Failed batches
+	// remain unmarked, so a later committed pass still discloses limited history.
+	defer func() {
+		for _, b := range pending {
+			if retErr == nil {
+				delete(d.versionRollupFailures, b.ID)
+				continue
+			}
+			if d.versionRollupFailures == nil {
+				d.versionRollupFailures = make(map[string]versionRollupFailure)
+			}
+			d.versionRollupFailures[b.ID] = nextVersionRollupFailure(d.versionRollupFailures[b.ID], time.Now())
+		}
+	}()
 	for id := range marked {
 		d.cachePublishMu.Lock()
 		publishing := d.cachePublishing[id]

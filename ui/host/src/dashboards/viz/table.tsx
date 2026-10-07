@@ -42,7 +42,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         const target = format.format === "trace_link" ? makeDrill(panel, result, selection) : undefined;
         const url = target ? new URL(window.location.href) : undefined;
         if (url && target) url.searchParams.set("drill", JSON.stringify(target));
-        return <FormattedCell format={{ ...format, unit: format.unit ?? column.unit as Unit | undefined }} value={value} max={maxima[index]} panel={panel} better={result.better}
+        return <FormattedCell format={{ ...format, unit: format.unit ?? (column.unit as Unit | undefined) ?? panel.unit }} value={value} max={maxima[index]} panel={panel} better={result.better}
           trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={url?.toString()}
           onTrace={() => pointCallback.current?.(selection)} onService={(name, value) => variableCallback.current?.(name, value)} />;
       }
@@ -126,7 +126,10 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, on
     }
     case "sparkline": return display.unsupported
       ? <Text size="xs" c="warn" role="status">{display.unsupported}</Text>
-      : display.points && display.points.filter(p => p !== null).length >= 2 ? <Sparkline points={display.points} /> : <Text c="dimmed">No trend</Text>;
+      : <Box style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {(typeof value === "number" || value === null) && <Text size="sm" ff="monospace" style={{ flex: "none" }}>{display.text}</Text>}
+        {display.points && display.points.filter(p => p !== null).length >= 2 ? <Sparkline points={display.points} /> : <Text c="dimmed">No trend</Text>}
+      </Box>;
     case "trace_link": return traceHref ? <Anchor href={traceHref} onClick={event => {
       if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
         event.preventDefault(); event.stopPropagation(); onTrace();

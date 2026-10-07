@@ -14,9 +14,11 @@ export type ColumnDisplay = {
 };
 
 export function columnDisplay(format: ColumnFormat, value: Cell, max: number, panel?: Panel, better?: "lower" | "higher", trend?: (number | null)[]): ColumnDisplay {
+  // SQL-backed status measures can arrive as numeric strings, including zero.
+  if (format.format === "status" && format.unit && typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) value = Number(value);
   const text = value === null ? "—" : String(value);
   const result: ColumnDisplay = { kind: format.format, text };
-  if (format.format === "unit" || format.format === "bar") result.text = typeof value === "number" ? formatValue(format.unit, value) : text;
+  if (["unit", "bar", "status", "sparkline"].includes(format.format)) result.text = typeof value === "number" ? formatValue(format.unit, value) : text;
   if (format.format === "bar") result.fraction = typeof value === "number" && max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
   if (format.format === "status" && typeof value === "number") result.status = statusFor(Number.isFinite(value) ? value : null, panel?.thresholds, panel?.better ?? better);
   if (format.format === "service_link") result.variable = format.variable;
