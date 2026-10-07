@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceMapModel } from "../../../panels/rollups";
 import type { Frame } from "../../../panels/types";
-import { ServiceMapViz, layoutServiceMap } from "./viz/service-map";
+import { ServiceMapViz, layoutServiceMap, serviceCardLabels } from "./viz/service-map";
 import { PanelCard } from "./panel-card";
 import { chartThemeFor } from "../../../panels/compile";
 import { makeDrill } from "./drill-state";
@@ -38,13 +38,13 @@ describe("preview V10", () => {
     const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
     expect(viewport.style.overflow).toBe("auto");
     const scale=Number(viewport.dataset.layoutScale);
-    const texts=host.querySelectorAll<HTMLElement>("[data-service-text]");expect(texts.length).toBe(40);
+    const texts=host.querySelectorAll<HTMLElement>("[data-service-text]");expect(texts.length).toBe(viewport.dataset.cardMode === "compact" ? 20 : 40);
     for(const text of texts) expect(parseFloat(text.style.fontSize)*scale).toBeGreaterThanOrEqual(11);
     await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:100,bubbles:true,cancelable:true})));
     expect(viewport.scrollTop).toBeGreaterThan(0);expect(viewport.dataset.zoom).toBe("1");
     expect(host.querySelector("[data-service-overflow-fade]")).not.toBeNull();
     const fit=host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!;expect(fit).not.toBeNull();
-    await act(async()=>fit.click());expect(viewport.scrollTop).toBe(0);
+    await act(async()=>fit.click());expect(viewport.scrollTop).toBe(Number(viewport.dataset.initialScrollY));
   });
   it.each([{ width: 1100, height: 280 }, { width: 780, height: 220 }, { width: 270, height: 180 }])("keeps twenty readable node boxes in scrollable bounds without overlap %o", size => {
     const graph = model(); const got = layoutServiceMap(graph, size);
@@ -111,4 +111,135 @@ describe("preview V10", () => {
     await act(async () => button.click()); expect(point).toHaveBeenCalledWith({ dimensions: { service: attack } });
     expect(makeDrill({ id: "m", title: "Map", viz: "service_map" }, { id: "m", status: "ok", elapsed_ms: 1, from_ms: 0, to_ms: 3600000 }, point.mock.lastCall![0])).toMatchObject({ kind: "traces", dimensions: { service: attack } });
   });
+});
+
+describe("Part 5 R1",()=>{
+ it("fits the twenty-service demo in compact cards at 1100×230 without pan",()=>{
+  const graph=layoutServiceMap(model(),{width:1100,height:230});
+  expect(graph).toMatchObject({compact:true,contentHeight:230,contentWidth:1100,initialScrollY:0});
+  expect(graph.nodes).toHaveLength(20);expect(graph.edges).toHaveLength(23);
+  for(const node of graph.nodes){expect(node.height).toBeLessThanOrEqual(26);expect(node.height).toBeGreaterThanOrEqual(26*.85);expect(node.y+node.height).toBeLessThanOrEqual(230);}
+ });
+ it.each([180,181,200,230,280,396,480])("keeps entry services initially visible at body height %s",height=>{
+  const graph=layoutServiceMap(model(),{width:1100,height});
+  const entries=model().nodes.filter(n=>model().edges.some(e=>e.caller===n.id)&&!model().edges.some(e=>e.callee===n.id));
+  for(const entry of entries){const n=graph.nodes.find(n=>n.id===entry.id)!;expect(n.y-graph.initialScrollY).toBeGreaterThanOrEqual(0);expect(n.y+n.height-graph.initialScrollY).toBeLessThanOrEqual(height);}
+ });
+ it("centres an overflowing fanout on the entry and main callee instead of the top",()=>{
+  const graph=model();
+  for(let i=0;i<35;i++){const id=`dependency-${i}`;graph.nodes.push({...graph.nodes[0],id});graph.edges.push({id,caller:"frontend",callee:id,edge_type:"call",calls:1,request_rate:1,error_rate:0,average_ms:1,status:null});}
+  const layout=layoutServiceMap(graph,{width:1100,height:180});
+  expect(layout.compact).toBe(true);expect(layout.scale).toBe(.85);expect(layout.contentHeight).toBeGreaterThan(180);expect(layout.initialScrollY).toBeGreaterThan(0);
+  const entry=layout.nodes.find(n=>n.id==="load-generator")!;
+  expect(entry.y-layout.initialScrollY).toBeGreaterThanOrEqual(0);expect(entry.y+entry.height-layout.initialScrollY).toBeLessThanOrEqual(180);
+  expect(Math.abs(entry.y+entry.height/2-layout.initialScrollY-90)).toBeLessThanOrEqual(80);
+ });
+ it.each([false,true])("compact DOM cards expose full metrics and Fit restores the entry-centred view (%s)",async dark=>{
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+  const select=vi.fn();
+  await act(async()=>root.render(<MantineProvider forceColorScheme={dark?"dark":"light"}><PanelCard panel={{id:"map",title:"Map",viz:"service_map",click:{set_variable:"service"}}} title="Map" result={{id:"map",status:"ok",elapsed_ms:1,frame:demoFrame,from_ms:0,to_ms:3600000}} height={300} group="g" editing={false} agentAvailable={false} loading={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={select}/></MantineProvider>));
+  const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
+  expect(viewport.dataset.cardMode).toBe("compact");
+  const entry=host.querySelector<HTMLButtonElement>('[data-service-node="load-generator"]')!;
+  expect(entry.dataset.serviceEntry).toBe("true");expect(entry.title).toContain("p95");expect(entry.title).toContain("err");
+  expect(entry.querySelectorAll('[data-service-text]')).toHaveLength(1);
+  expect(host.querySelector('[data-service-node="checkout"] [data-service-metric]')?.textContent).toContain("% err");
+  expect(entry.querySelector('[data-service-metric]')?.textContent).toContain("/s");
+  const initial=viewport.scrollTop;
+  await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:1000,bubbles:true,cancelable:true})));
+  await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!.click());
+  expect(viewport.scrollTop).toBe(initial);expect(viewport.dataset.zoom).toBe("1");
+  await act(async()=>entry.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true})));
+  expect(select).toHaveBeenCalledWith("load-generator");
+ });
+});
+
+it("R1 keeps multiple widely separated entry services initially visible",()=>{
+ const graph={nodes:[],edges:[]} as ReturnType<typeof model>;
+ for(let root=0;root<2;root++){
+  const id=`entry-${root}`;graph.nodes.push({...model().nodes[0],id});
+  for(let i=0;i<20;i++){const child=`${id}-callee-${i}`;graph.nodes.push({...model().nodes[0],id:child});graph.edges.push({id:child,caller:id,callee:child,edge_type:"call",calls:20-i,request_rate:20-i,error_rate:0,average_ms:1,status:null});}
+ }
+ const got=layoutServiceMap(graph,{width:1100,height:180});
+ for(const n of got.nodes.filter(n=>n.entry)){expect(n.y-got.initialScrollY).toBeGreaterThanOrEqual(0);expect(n.y+n.height-got.initialScrollY).toBeLessThanOrEqual(180);}
+ for(const n of got.nodes)for(const other of got.nodes.filter(o=>o.id!==n.id))expect(n.x<other.x+other.width&&n.x+n.width>other.x&&n.y<other.y+other.height&&n.y+n.height>other.y).toBe(false);
+});
+
+describe("Part 5 R2",()=>{
+ const measure=(text:string,font:string)=>text.length*parseFloat(font.match(/[\d.]+px/)![0])*.62;
+ it("uses two significant digits and includes p95 only when measured text fits",()=>{
+  const n={...model().nodes[0],request_rate:.201,error_rate:.701,p95_ms:48};
+  const short=serviceCardLabels(n,{width:168,scale:1,compact:false,measureText:measure});
+  expect(short.metric).toBe("0.2/s · 0.7% err");
+  expect(serviceCardLabels(n,{width:300,scale:1,compact:false,measureText:measure}).metric).toBe("0.2/s · 0.7% err · p95 48ms");
+  expect(serviceCardLabels({...n,error_rate:.715},{width:168,scale:1,compact:false,measureText:measure}).metric).toContain("0.72% err");
+  expect(serviceCardLabels(n,{width:140,scale:.85,compact:true,measureText:measure}).metric).toBe("0.7% err");
+  expect(serviceCardLabels({...n,error_rate:0},{width:140,scale:.85,compact:true,measureText:measure}).metric).toBe("0.2/s");
+ });
+ it.each([1100,1440])("uses wider full cards when panel width %s allows",width=>{
+  const graph=layoutServiceMap(model(),{width,height:480});expect(graph.compact).toBe(false);
+  for(const n of graph.nodes)expect(n.width/graph.scale).toBeCloseTo(168);
+ });
+ for(const width of [1100,1440])for(const height of [230,480])for(const dark of [false,true]){
+  it(`measures every DOM card's name and metric budget at ${width}×${height}, dark=${dark}`,async()=>{
+   const original=HTMLElement.prototype.getBoundingClientRect;
+   vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width,height}):original.call(this);});
+   const calls:{text:string;font:string}[]=[];
+   const context={font:"",measureText(text:string){calls.push({text,font:this.font});return {width:measure(text,this.font)};}};
+   vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+   await act(async()=>root.render(<MantineProvider forceColorScheme={dark?"dark":"light"}><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame,from_ms:0,to_ms:3600000}} dark={dark} height={height+24}/></MantineProvider>));
+   expect(calls.length).toBeGreaterThan(0);
+   const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!,scale=Number(viewport.dataset.layoutScale);
+   for(const card of host.querySelectorAll<HTMLElement>("[data-service-node]")){
+    const name=card.querySelector<HTMLElement>("[data-service-name]")!,metric=card.querySelector<HTMLElement>("[data-service-metric]")!;
+    expect(name).not.toBeNull();expect(metric).not.toBeNull();
+    const nameWidth=measure(name.textContent!,`600 ${name.style.fontSize} monospace`),metricWidth=measure(metric.textContent!,`${metric.style.fontSize} monospace`);
+    expect(nameWidth).toBeLessThanOrEqual(Number(name.dataset.textWidth)+.01);expect(metricWidth).toBeLessThanOrEqual(Number(metric.dataset.textWidth)+.01);
+    expect(nameWidth*scale).toBeLessThan(parseFloat(card.style.width));expect(metricWidth*scale).toBeLessThan(parseFloat(card.style.width));
+    expect(metric.style.textOverflow).not.toBe("ellipsis");expect(card.title).toContain("p95");
+    if(viewport.dataset.cardMode==="compact"){expect(card.querySelectorAll("[data-service-text]")).toHaveLength(1);expect(metric.textContent).not.toContain(" · ");}
+   }
+  });
+ }
+});
+
+it("R1 measures the usable viewport after classic scrollbars",async()=>{
+ const original=HTMLElement.prototype.getBoundingClientRect;
+ vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width:1100,height:230}):original.call(this);});
+ vi.spyOn(HTMLElement.prototype,"clientWidth","get").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?1085:0;});
+ vi.spyOn(HTMLElement.prototype,"clientHeight","get").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?215:0;});
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+ await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
+ const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
+ expect(Number(viewport.dataset.contentWidth)).toBeLessThanOrEqual(1085);
+ for(const entry of host.querySelectorAll<HTMLElement>('[data-service-entry="true"]')){expect(parseFloat(entry.style.top)-viewport.scrollTop).toBeGreaterThanOrEqual(0);expect(parseFloat(entry.style.top)+parseFloat(entry.style.height)-viewport.scrollTop).toBeLessThanOrEqual(215);}
+});
+
+it("R1 keeps an entry in a distant Dagre rank inside the initial viewport",()=>{
+ const base=model().nodes[0],graph={nodes:[],edges:[]} as ReturnType<typeof model>;
+ for(let i=0;i<12;i++)graph.nodes.push({...base,id:`chain-${i}`});
+ graph.nodes.push({...base,id:"late-entry"});
+ for(let i=1;i<12;i++)graph.edges.push({id:`hop-${i}`,caller:`chain-${i-1}`,callee:`chain-${i}`,edge_type:"call",calls:1,request_rate:1,error_rate:0,average_ms:1,status:null});
+ graph.edges.push({...graph.edges[0],id:"late-hop",caller:"late-entry",callee:"chain-11"});
+ const got=layoutServiceMap(graph,{width:1100,height:180});
+ for(const n of got.nodes.filter(n=>n.entry)){expect(n.x).toBeGreaterThanOrEqual(0);expect(n.x+n.width).toBeLessThanOrEqual(1100);expect(n.y-got.initialScrollY).toBeGreaterThanOrEqual(0);expect(n.y+n.height-got.initialScrollY).toBeLessThanOrEqual(180);}
+ for(const n of got.nodes)for(const other of got.nodes.filter(o=>o.id!==n.id))expect(n.x<other.x+other.width&&n.x+n.width>other.x&&n.y<other.y+other.height&&n.y+n.height>other.y).toBe(false);
+});
+
+it("R1 viewport measurement does not reset zoom when scrollbars appear",async()=>{
+ let resize=()=>{},usableWidth=1100,usableHeight=230;
+ const originalObserver=globalThis.ResizeObserver;cleanups.push(()=>vi.stubGlobal("ResizeObserver",originalObserver));
+ vi.stubGlobal("ResizeObserver",class {constructor(callback:()=>void){resize=callback;}observe(){}disconnect(){}});
+ const original=HTMLElement.prototype.getBoundingClientRect;
+ vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width:1100,height:230}):original.call(this);});
+ vi.spyOn(HTMLElement.prototype,"clientWidth","get").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?usableWidth:0;});
+ vi.spyOn(HTMLElement.prototype,"clientHeight","get").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?usableHeight:0;});
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+ await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
+ const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!,wheel=new WheelEvent("wheel",{deltaY:-100,ctrlKey:true,bubbles:true,cancelable:true});
+ Object.defineProperties(wheel,{clientX:{value:200},clientY:{value:100},ctrlKey:{value:true}});
+ await act(async()=>viewport.dispatchEvent(wheel));const zoom=Number(viewport.dataset.zoom);expect(zoom).toBeGreaterThan(1);
+ usableWidth=1085;usableHeight=215;await act(async()=>resize());
+ expect(Number(viewport.dataset.zoom)).toBe(zoom);expect(Number(viewport.dataset.contentWidth)).toBeLessThanOrEqual(1085);
 });
