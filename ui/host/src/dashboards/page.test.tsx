@@ -485,7 +485,9 @@ it("pushes drill and click variables atomically while preserving the captured pa
   panelResponse = async () => json({ results: [{ id: "latency", status: "ok", frame: { columns: [...frame.columns, { name: "service", type: "string", role: "dimension" }], values: [...frame.values, ["cart", "cart"]], rows: 2 }, elapsed_ms: 1, interval: "1m", from_ms: 0, to_ms: 10000 }] });
   const initial: DashboardSearch = { range: "1h", compare: "1", vars: { other: "kept" } };
   const { host, onSearch, rerender, client } = await render(initial);
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Select Services: time series"]')!.click());
+  // The grid renders once its container width is measured; wait for the chart's select control.
+  const select = await vi.waitFor(() => { const button = host.querySelector<HTMLButtonElement>('[aria-label="Select Services: time series"]'); expect(button).not.toBeNull(); return button!; }, { interval: 5, timeout: 3000 });
+  await act(async () => select.click());
   expect(onSearch).toHaveBeenCalledOnce();
   const next = onSearch.mock.calls[0][0] as DashboardSearch;
   expect(onSearch.mock.calls[0][1]).toBe(false);

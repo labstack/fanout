@@ -211,3 +211,20 @@ it("skips timed and manual refreshes after visibility becomes known empty", asyn
   expect(wire.panels).toHaveBeenCalledTimes(1);
  }finally{await act(async()=>root.unmount());client.clear();node.remove();vi.useRealTimers();}
 });
+
+it("runs a manual refresh pressed during a partial lazy batch once that batch settles", async () => {
+  const pending = deferred<PanelResult[]>();
+  wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockImplementationOnce(() => pending.promise).mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+  const host = await mountVisibility(["loaded"]);
+  try {
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.has("loaded")).toBe(true); });
+    await host.show(["loaded", "a"]);
+    await waitForHook(() => { expect(host.current.fetching).toBe(true); expect(wire.panels).toHaveBeenCalledTimes(2); });
+    expect(wire.panels.mock.calls[1][0].panels).toEqual(["a"]);
+    await act(async () => { host.current.refetch(); host.current.refetch(); });
+    expect(wire.panels).toHaveBeenCalledTimes(2);
+    await act(async () => pending.resolve([resultFor("a")]));
+    await waitForHook(() => { expect(wire.panels).toHaveBeenCalledTimes(3); expect(host.current.fetching).toBe(false); });
+    expect(wire.panels.mock.calls[2][0].panels).toEqual(["a", "loaded"]);
+  } finally { await host.dispose(); }
+});
