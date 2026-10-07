@@ -473,6 +473,11 @@ it("keeps explicit None selected in the URL and outgoing request",async()=>{
 
 it("keeps only the failed panel stale when the next partial refresh succeeds",async()=>{
  const {host,client}=await render();
+ await vi.waitFor(async()=>{
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+  expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
+  expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
+ },{interval:5,timeout:3000});
  panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"DuckDB failed",elapsed_ms:3},{id:"latency",status:"empty",diagnosis:"empty",elapsed_ms:2}]});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
  await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("Stale: last updated"), { interval: 5, timeout: 3000 });
@@ -481,6 +486,10 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
  const hidden=host.querySelector('.react-grid-item[data-panel="requests"]')!;
  await act(async()=>{visibility([{target:hidden,isIntersecting:false} as IntersectionObserverEntry],{} as IntersectionObserver);});
  panelResponse=async()=>json({results:[{id:"latency",status:"empty",diagnosis:"still empty",elapsed_ms:2}]});
+ await vi.waitFor(async()=>{
+  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+  expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
+ },{interval:5,timeout:3000});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
  await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("Stale: last updated"), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.querySelector('[data-panel="latency"]')!.textContent).not.toContain("Stale:"), { interval: 5, timeout: 3000 });

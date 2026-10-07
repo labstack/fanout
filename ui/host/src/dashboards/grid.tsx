@@ -12,6 +12,7 @@ import { PanelCard } from "./panel-card";
 export const rowHeight = 40;
 const margin = 12;
 const pixels = (h: number) => h * rowHeight + (h - 1) * margin;
+const defaultRows = (p: Panel) => ({s:3,m:6,l:10}[p.height ?? (p.viz === "service_map" ? "l" : "m")]);
 
 export type GridProps = {
   dashboardId: string; version: number; spec: DashboardSpec; vars: Record<string, VarValue>; results: Map<string, PanelResult>; fetching: boolean; editing: boolean; view?: string;
@@ -36,8 +37,8 @@ export function newPanelId(panels: Panel[]): string {
 
 export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, onOpenChat, onVariable, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible }: GridProps) {
   const client = useQueryClient();
-  const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 })));
-  useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? 6 }))); }, [spec]);
+  const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) })));
+  useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) }))); }, [spec]);
   // Presentation minimum fits preview stat chrome + value/delta + area trend.
   // Keep saved coordinates intact; a layout is persisted only by an edit action.
   const visibleLayout = useMemo(() => layout.map(l => spec.panels.find(p => p.id === l.i)?.viz === "stat" ? { ...l, h: Math.max(4, l.h), minH: 4 } : l), [layout, spec.panels]);

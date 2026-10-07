@@ -1,10 +1,10 @@
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Check, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { logConstants } from "../../../panels/rows";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
@@ -18,6 +18,15 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   zoomed?: boolean; onZoomReset?: () => void;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
+  const card = useRef<HTMLDivElement>(null);
+  const [width,setWidth] = useState(0);
+  useLayoutEffect(()=>{
+    const el=card.current;if(!el)return;
+    setWidth(el.getBoundingClientRect().width);
+    const observer=new ResizeObserver(([entry])=>{if(entry)setWidth(entry.contentRect.width);});observer.observe(el);
+    return ()=>observer.disconnect();
+  },[]);
+  const small = width > 0 && width < 360;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!staleAt) return;
@@ -39,10 +48,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
-  return <Paper withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id}>
+  return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id} data-compact-views={small}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
-      <Group gap={6} wrap="nowrap" miw={0}>
-        <Box miw={0}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={subtitle} fz={12} ff={fonts.display} c="dimmed" truncate>{subtitle}</Text>
+      <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
+        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={small ? {overflowWrap:"anywhere"} : undefined}>{subtitle}</Text>
           {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={11} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
         </Box>
         {panelTimeLabel(panel) && <Text size="xs" c="dimmed" role="status">{panelTimeLabel(panel)}</Text>}
@@ -50,14 +59,15 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
       </Group>
       <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-      <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
+      {!small && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
         {["Chart", "Data", "Spec"].map(mode => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: mode === "Chart" ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
-      </Group>
+      </Group>}
       {panel.viz === "service_map" && mapView?.zoomed && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal>
         <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}><DotsThree size={18} weight="bold" /></ActionIcon></Menu.Target>
         <Menu.Dropdown>
+          {small && <>{["Chart","Data","Spec"].map(mode=><Menu.Item key={mode} renderRoot={props=><button {...props} role="menuitemradio"/>} aria-checked={view===mode} data-panel-view={mode} rightSection={view===mode ? <Check size={14} aria-hidden/> : undefined} onClick={()=>setView(mode)}>{mode}</Menu.Item>)}<Menu.Divider/></>}
           <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>
           {agentAvailable && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
           <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>

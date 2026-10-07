@@ -21,6 +21,24 @@ async function render(p = panel, dark = false) {
   return host;
 }
 describe("preview V1", () => {
+  it.each([false,true])("P3b moves views to a checked menu at 300px without truncating the subtitle (%s)",async dark=>{
+    const observer=globalThis.ResizeObserver;
+    vi.stubGlobal("ResizeObserver",class {constructor(private callback:ResizeObserverCallback){}observe(target:Element){this.callback([{target,contentRect:{width:300}} as ResizeObserverEntry],this as unknown as ResizeObserver);}disconnect(){}unobserve(){}});
+    try {
+      const host=await render({...panel,viz:"stat"},dark);
+      expect(host.querySelector('[role="group"][aria-label="Latency view"]')).toBeNull();
+      const subtitle=host.querySelector<HTMLElement>('[data-panel-subtitle]')!;
+      expect(subtitle.textContent).toBe("stat · spans");expect(subtitle.dataset.truncate).toBeUndefined();
+      const menu=host.querySelector<HTMLButtonElement>('[aria-label="Latency menu"]')!;
+      await act(async()=>menu.click());
+      const items=()=>[...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+      expect(items().map(n=>n.textContent)).toEqual(["Chart","Data","Spec"]);
+      expect(items().find(n=>n.textContent==="Chart")?.getAttribute("aria-checked")).toBe("true");
+      await act(async()=>items().find(n=>n.textContent==="Data")!.click());expect(host.querySelector("table")).not.toBeNull();
+      await act(async()=>menu.click());expect(items().find(n=>n.textContent==="Data")?.getAttribute("aria-checked")).toBe("true");
+      await act(async()=>items().find(n=>n.textContent==="Spec")!.click());expect(host.querySelector("pre")).not.toBeNull();
+    } finally {vi.stubGlobal("ResizeObserver",observer);}
+  });
   it.each([false, true])("provides subtitle, accessible Chart/Data/Spec, syntax tokens and 16px body padding (%s)", async dark => {
     const host = await render(panel, dark);
     expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · spans");

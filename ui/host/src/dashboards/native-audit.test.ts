@@ -1,12 +1,28 @@
 import { init, use } from "echarts/core";
-import { BarChart, CustomChart } from "echarts/charts";
-import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { BarChart, CustomChart, LineChart } from "echarts/charts";
+import { GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import { expect,it } from "vitest";
 import { analysisOption } from "../../../panels/analysis";
-import { barOption,chartThemeFor } from "../../../panels/compile";
+import { barOption,chartThemeFor,timeseriesOption } from "../../../panels/compile";
+import { withAnnotations } from "../../../panels/annotations";
 import { nativeAudit } from "./native-audit";
-use([BarChart,CustomChart,GridComponent,LegendComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
+use([BarChart,CustomChart,LineChart,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
+it.each([false,true])("P3c/P3d native labels are horizontal and above the actual plot, away from x ticks (%s)",dark=>{
+ const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:500,height:248});
+ try {
+  const panel={id:"t",title:"Latency",viz:"timeseries" as const},theme=chartThemeFor(dark);
+  const result={id:"t",status:"ok" as const,elapsed_ms:1,from_ms:0,to_ms:3600000,frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"p95",type:"number" as const,role:"measure" as const}],values:[[0,3600000],[10,20]],rows:2}};
+  const option=withAnnotations(timeseriesOption(panel,result,theme),panel,result,{deploys:[{namespace:"shop",service:"cart",version:"2.3.0",at:new Date(1200000).toISOString()}],anomalies:[{namespace:"shop",service:"cart",from:new Date(1800000).toISOString(),to:new Date(3600000).toISOString(),kind:"latency",title:"Slow",severity:"bad"}]},{},theme,{width:500,height:248});
+  chart.setOption({...option,animation:false},{notMerge:true});
+  const rect=(chart as unknown as {getModel():{getComponent(name:string):{coordinateSystem:{getRect():{y:number;height:number}}}}}).getModel().getComponent("grid").coordinateSystem.getRect();
+  const audit=nativeAudit(chart,option,{width:500,height:248});
+  for(const name of ["cart 2.3.0","anomaly"]) {
+   const texts=audit.texts.filter(t=>t.text===name);expect(texts.length).toBeGreaterThan(0);
+   for(const text of texts){expect(text.bottom).toBeLessThan(rect.y);expect(text.top).toBeGreaterThanOrEqual(0);expect(text.right-text.left).toBeGreaterThan(text.bottom-text.top);expect(text.bottom).toBeLessThan(rect.y+rect.height);}
+  }
+ }finally{chart.dispose();el.remove();}
+});
 it.each([false,true])("measures actual SVG renderer heat gaps/scale and bar labels, dark=%s",dark=>{
  const el=document.createElement("div");document.body.append(el);
  const chart=init(el,undefined,{renderer:"svg",width:500,height:240});const theme=chartThemeFor(dark);

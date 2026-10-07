@@ -21,7 +21,7 @@ type vizSpec struct {
 }
 
 var vizSpecs = map[string]vizSpec{
-	"service_map":    {width: 12, height: "m", query: true},
+	"service_map":    {width: 12, height: "l", query: true},
 	"health":         {width: 12, height: "m", query: true},
 	"logs":           {width: 12, height: "l", query: true},
 	"log_patterns":   {width: 12, height: "m", query: true, minBy: 1, maxBy: 1, bucket: true},

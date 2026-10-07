@@ -32,12 +32,12 @@ function markers(data: PanelResult = result, viz: Panel["viz"] = "timeseries", a
 }
 
 describe("annotation scope and windows", () => {
-  it("places deploy labels along the plot lines without moving the legend", () => {
+  it("P3c/P3d reserve the top lane without mutating the base", () => {
     const option = {grid:{top:12,left:8,right:16,bottom:8},series:[{type:"line"}]};
     const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox?:unknown;series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
     expect(got.toolbox).toBeUndefined();
-    expect(got.grid.top).toBe(12);
-    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"insideEndTop",distance:8,rotate:90,textBorderColor:theme.surface});
+    expect(got.grid.top).toBe(64);
+    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"end",distance:0,rotate:0,textBorderColor:theme.surface,backgroundColor:theme.surface});
     expect(option.grid.top).toBe(12);
   });
   it("preserves tooltip mode when no annotation markers match", () => {

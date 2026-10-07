@@ -73,6 +73,14 @@ func TestNormalizeFillsDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceMapLargeDefault(t *testing.T) {
+	d := Dashboard{Name: "Map", Panels: []Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &Query{From: "spans"}}}}
+	Normalize(&d)
+	if d.Panels[0].Height != "l" {
+		t.Fatalf("service map height=%q", d.Panels[0].Height)
+	}
+}
+
 func TestValidateReportsPathsAndHints(t *testing.T) {
 	cases := []struct {
 		name, mutate, path, contains string

@@ -21,13 +21,38 @@ beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(fn => fn())); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 const model = () => serviceMapModel(demoFrame, { from_ms: 0, to_ms: 3600000 });
 describe("preview V10", () => {
-  it.each([{ width: 1100, height: 280 }, { width: 780, height: 220 }, { width: 270, height: 180 }])("fits twenty node boxes without overlap and preserves caller direction %o", size => {
+  it("P3a keeps the default demo readable and uses vertical overflow for short bodies", () => {
+    const normal = layoutServiceMap(model(), {width:1100,height:480});
+    expect(normal.scale).toBeGreaterThanOrEqual(.85);
+    expect(Math.max(...normal.nodes.map(n=>n.x+n.width))-Math.min(...normal.nodes.map(n=>n.x))).toBeGreaterThanOrEqual(1075);
+    for(const n of normal.nodes) expect(n.y+n.height).toBeLessThanOrEqual(468.01);
+    const short = layoutServiceMap(model(), {width:1100,height:180});
+    expect(short.scale).toBeGreaterThanOrEqual(.85);
+    expect(short.contentHeight).toBeGreaterThan(180);
+    const defaultBody=layoutServiceMap(model(),{width:1100,height:396});
+    expect(defaultBody.contentHeight).toBe(396);
+  });
+  it.each([false,true])("P3a keeps rendered text at 11px and scrolls an overflowing map before zoom (%s)", async dark => {
+    const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+    await act(async()=>root.render(<MantineProvider forceColorScheme={dark?"dark":"light"}><PanelCard panel={{id:"map",title:"Map",viz:"service_map"}} title="Map" result={{id:"map",status:"ok",elapsed_ms:1,frame:demoFrame}} height={300} group="g" editing={false} agentAvailable={false} loading={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()}/></MantineProvider>));
+    const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
+    expect(viewport.style.overflow).toBe("auto");
+    const scale=Number(viewport.dataset.layoutScale);
+    const texts=host.querySelectorAll<HTMLElement>("[data-service-text]");expect(texts.length).toBe(40);
+    for(const text of texts) expect(parseFloat(text.style.fontSize)*scale).toBeGreaterThanOrEqual(11);
+    await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:100,bubbles:true,cancelable:true})));
+    expect(viewport.scrollTop).toBeGreaterThan(0);expect(viewport.dataset.zoom).toBe("1");
+    expect(host.querySelector("[data-service-overflow-fade]")).not.toBeNull();
+    const fit=host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!;expect(fit).not.toBeNull();
+    await act(async()=>fit.click());expect(viewport.scrollTop).toBe(0);
+  });
+  it.each([{ width: 1100, height: 280 }, { width: 780, height: 220 }, { width: 270, height: 180 }])("keeps twenty readable node boxes in scrollable bounds without overlap %o", size => {
     const graph = model(); const got = layoutServiceMap(graph, size);
     expect(got.nodes).toHaveLength(20); expect(got.edges).toHaveLength(23);
     expect(layoutServiceMap({ nodes: [...graph.nodes].reverse(), edges: [...graph.edges].reverse() }, size)).toEqual(got);
     for (const n of got.nodes) {
       expect(n.x).toBeGreaterThanOrEqual(12); expect(n.y).toBeGreaterThanOrEqual(12);
-      expect(n.x+n.width).toBeLessThanOrEqual(size.width-12+.01); expect(n.y+n.height).toBeLessThanOrEqual(size.height-12+.01);
+      expect(n.x+n.width).toBeLessThanOrEqual(got.contentWidth-12+.01); expect(n.y+n.height).toBeLessThanOrEqual(got.contentHeight-12+.01);
       for (const b of got.nodes.filter(b => b.id !== n.id)) expect(n.x < b.x+b.width && n.x+n.width > b.x && n.y < b.y+b.height && n.y+n.height > b.y).toBe(false);
     }
     const entry = graph.nodes.filter(n => graph.edges.some(e => e.caller === n.id) && !graph.edges.some(e => e.callee === n.id));
@@ -61,8 +86,8 @@ describe("preview V10", () => {
     expect(select).toHaveBeenCalledWith("frontend"); expect(point).not.toHaveBeenCalled();
     const viewport = host.querySelector('[data-service-viewport]')!;
     // Happy DOM's WheelEvent extends UIEvent and omits the browser's MouseEvent coordinates.
-    const wheel = new WheelEvent("wheel", { deltaY: -500, bubbles: true, cancelable: true });
-    Object.defineProperties(wheel, { clientX: { value: 250 }, clientY: { value: 94 } });
+    const wheel = new WheelEvent("wheel", { deltaY: -500, ctrlKey:true, bubbles: true, cancelable: true });
+    Object.defineProperties(wheel, { clientX: { value: 250 }, clientY: { value: 94 }, ctrlKey:{value:true} });
     await act(async () => viewport.dispatchEvent(wheel));
     expect(Number(viewport.getAttribute("data-zoom"))).toBeGreaterThan(1);
     await act(async () => {
@@ -71,8 +96,8 @@ describe("preview V10", () => {
       viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     });
     const zoom = Number(viewport.getAttribute("data-zoom"));
-    expect(Number(viewport.getAttribute("data-pan-x"))).toBeCloseTo(500 * (1 - zoom));
-    expect(Number(viewport.getAttribute("data-pan-y"))).toBeCloseTo(188 * (1 - zoom));
+    expect(Number(viewport.getAttribute("data-pan-x"))).toBeCloseTo(500 - Number(viewport.getAttribute("data-content-width"))*zoom);
+    expect(Number(viewport.getAttribute("data-pan-y"))).toBeCloseTo(188 - Number(viewport.getAttribute("data-content-height"))*zoom);
     const fit = host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!; expect(fit).not.toBeNull(); expect(viewport.contains(fit)).toBe(false);
     await act(async () => fit.click()); expect(viewport.getAttribute("data-zoom")).toBe("1");
     expect(host.textContent).toContain("No traced calls in this window"); expect(host.textContent).toContain("20 services · 23 routes");

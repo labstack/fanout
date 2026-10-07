@@ -15,7 +15,8 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const from = result.from_ms ?? -Infinity, to = result.to_ms ?? Infinity;
   const deploys = annotations.deploys.filter(matches).filter(a => Date.parse(a.at) >= from && Date.parse(a.at) < to).map(a => ({
     xAxis: Date.parse(a.at), name: `${a.service} ${a.version}`,
-    label: { show: true, formatter: `deploy ${a.service} ${a.version}`, color: theme.muted, position: "insideEndTop", distance: 8, rotate: 90, textBorderColor: theme.surface, textBorderWidth: 3, fontFamily: theme.font, fontSize: 12, overflow: "truncate", ellipsis: "…", width: Math.max(24, size.height - 60) },
+    label: { show: true, formatter: `${a.service} ${a.version}`, color: theme.muted, position: "end", distance: 0, offset: [4,-8], align: "left", verticalAlign: "bottom", rotate: 0, backgroundColor: theme.surface, padding: [2,4], borderRadius: 3, textBorderColor: theme.surface, textBorderWidth: 3, fontFamily: theme.font, fontSize: 12, overflow: "truncate", ellipsis: "…", width: Math.max(24, size.width - 32) },
+    symbol: ["none", "path://M0,0 L0,-6"], symbolSize: [1,6],
     lineStyle: { type: "dashed", color: theme.muted, width: 1 },
     tooltip: { formatter: () => escapeHTML(`${a.service} · ${a.version} · ${a.at}`) },
   }));
@@ -34,7 +35,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const anomalies = episodes.map(a => [{
     xAxis: a.from, name: a.titles.join(" · "),
     itemStyle: { color: theme.status.warn, opacity: theme.dark ? .12 : .09 },
-    label: { show: true, formatter: "anomaly", position: "insideTopRight", color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontFamily: theme.font, fontSize: 12 }, tooltip: { formatter: () => a.details.join("\n") },
+    label: { show: false, formatter: "anomaly", position: [0,-8], align: "left", verticalAlign: "bottom", width: 0, overflow: "truncate", backgroundColor: theme.surface, padding: [2,4], borderRadius: 3, color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontFamily: theme.font, fontSize: 12 }, tooltip: { formatter: () => a.details.join("\n") },
   }, { xAxis: a.to }]);
   const series = (option.series ?? []) as Record<string, unknown>[];
   if (!series.length) return option;
@@ -47,8 +48,16 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const right = size.width - (typeof grid.right === "number" ? grid.right : 16);
   const laneWidth = Math.max(1, right - left);
   const times = deploys.map(d => d.xAxis);
-  const windowFrom = Number.isFinite(from) ? from : Math.min(...times);
-  const windowTo = Number.isFinite(to) ? to : Math.max(...times) + 1;
+  const windowFrom = Number.isFinite(from) ? from : Math.min(...times,...episodes.map(a=>a.from));
+  const windowTo = Number.isFinite(to) ? to : Math.max(...times.map(t=>t+1),...episodes.map(a=>a.to));
+  const measure = (text:string) => size.measureText?.(text,`12px ${theme.font}`) ?? text.length*7.2;
+  anomalies.forEach((area,i)=>{
+    const label=area[0].label!;
+    const width=(episodes[i].to-episodes[i].from)/Math.max(1,windowTo-windowFrom)*laneWidth;
+    label.width=Math.max(0,width-8);label.show=width>=measure("anomaly")+8;
+    label.position=[0,deploys.length ? -34 : -8];
+  });
+  const anomalyLane=anomalies.some(a=>a[0].label?.show);
   const clusters: { first: typeof deploys[number]; count: number; x: number; details: string[] }[] = [];
   for (const deploy of [...deploys].sort((a, b) => a.xAxis - b.xAxis)) {
     const x = left + (deploy.xAxis - windowFrom) / Math.max(1, windowTo - windowFrom) * laneWidth;
@@ -60,8 +69,15 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
     if (cluster.count > 1) cluster.first.label.formatter = `${cluster.count} deploys`;
     cluster.first.tooltip.formatter = () => cluster.details.join("<br/>");
   }
+  clusters.forEach((cluster,i)=>{
+    const label=cluster.first.label;
+    const available=(clusters[i+1]?.x??right)-cluster.x-12;
+    if(available<48 && i===clusters.length-1) {label.align="right";label.offset=[-4,-8];label.width=Math.max(24,cluster.x-left-12);}
+    else label.width=Math.max(16,available);
+  });
   return {
     ...option, ...(deploys.length || anomalies.length ? { tooltip: { ...((option.tooltip as Record<string, unknown>) ?? {}), renderMode: "html" } } : {}),
+    ...(deploys.length || anomalyLane ? {grid:{...grid,top:(typeof grid.top==="number"?grid.top:8)+(deploys.length?26:0)+(anomalyLane?26:0)}} : {}),
     series: series.map((s, i) => {
       if (i !== 0) return s;
       const markLine = (s.markLine ?? {}) as { data?: unknown[] };

@@ -32,6 +32,9 @@ func Pack(panels []panel.Panel) {
 		h := heightRows[panels[i].Height]
 		if h == 0 {
 			h = heightRows["m"]
+			if panels[i].Viz == "service_map" {
+				h = heightRows["l"]
+			}
 		}
 		x, y := firstFit(placed, w, h)
 		grid := panel.Grid{X: x, Y: y, W: w, H: h}
@@ -95,6 +98,9 @@ func PackMissing(panels []panel.Panel) {
 		h := heightRows[panels[i].Height]
 		if h == 0 {
 			h = heightRows["m"]
+			if panels[i].Viz == "service_map" {
+				h = heightRows["l"]
+			}
 		}
 		x, y := firstFit(placed, w, h)
 		g := panel.Grid{X: x, Y: y, W: w, H: h}

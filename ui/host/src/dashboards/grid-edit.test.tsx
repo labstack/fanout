@@ -32,8 +32,9 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
-      reportWidth = width => this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
-      if (measuredWidth > 0) reportWidth(measuredWidth);
+      const report = (width:number) => this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      if(!target.hasAttribute("data-panel")&&!target.hasAttribute("data-service-viewport"))reportWidth=report;
+      if (measuredWidth > 0) report(measuredWidth);
     }
     unobserve() {}
     disconnect() {}
@@ -62,6 +63,12 @@ async function render(editing = true, dashboardSpec = spec) {
 }
 
 describe("dashboard layout editing", () => {
+  it("P3a defaults service maps without a saved grid to large rows, preserving explicit sizes",async()=>{
+    await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map"}]});
+    expect(grid.current!.layouts.lg[0].h).toBe(10);
+    await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map",height:"s"}]});
+    expect(grid.current!.layouts.lg[0].h).toBe(3);
+  });
   it("gives short stat cards four visible rows for chrome, value, delta and 40px sparkline without changing the spec", async () => {
     const dashboard: DashboardSpec = { ...spec, panels: [{ ...spec.panels[0], viz: "stat", grid: { x: 0, y: 0, w: 3, h: 3 } }] };
     await render(false, dashboard);

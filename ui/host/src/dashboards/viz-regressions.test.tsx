@@ -57,7 +57,7 @@ describe("visualization regressions", () => {
     expect(body.style.overflow).toBe("hidden");
     expect(body.style.display).toBe("flex");
     expect(parseFloat(body.style.minHeight)).toBe(0);
-    expect(canvas.style.flex).toBe("1 1 auto");
+    expect((viz === "service_map" ? canvas.parentElement! : canvas).style.flex).toBe("1 1 auto");
     expect(parseFloat(canvas.style.minHeight)).toBe(0);
     if (viz === "service_map") expect(parseFloat(canvas.parentElement!.style.minHeight)).toBe(0);
   });

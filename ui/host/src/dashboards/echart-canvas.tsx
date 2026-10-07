@@ -51,10 +51,10 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
         const extent = grid?.coordinateSystem?.getAxis("x")?.scale.getExtent();
         ref.current.dataset.chartPlot = JSON.stringify({ left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, from: extent?.[0], to: extent?.[1] });
       }
-      const lines = (compiled.series ?? []) as { name?: string; endLabel?: { show?: boolean }; markLine?: { data?: { xAxis?: number; label?: { formatter?: string } }[] }; markArea?: { data?: { label?: { formatter?: string } }[][] } }[];
+      const lines = (compiled.series ?? []) as { name?: string; endLabel?: { show?: boolean }; markLine?: { data?: { xAxis?: number; label?: { formatter?: string } }[] }; markArea?: { data?: { label?: { formatter?: string; show?: boolean } }[][] } }[];
       const endNames = lines.filter(s => s.endLabel?.show).map(s => s.name!);
       const deployNames = lines.flatMap(s => s.markLine?.data?.filter(m => m.xAxis !== undefined).map(m => m.label?.formatter) ?? []);
-      const anomalyNames = lines.flatMap(s => s.markArea?.data?.map(area => area[0]?.label?.formatter) ?? []);
+      const anomalyNames = lines.flatMap(s => s.markArea?.data?.filter(area=>area[0]?.label?.show).map(area => area[0]?.label?.formatter) ?? []);
       const display = chart.current.getZr?.().storage.getDisplayList(true) ?? [];
       const bounds = display.flatMap(el => {
         if (!("style" in el) || typeof (el.style as { text?: unknown }).text !== "string") return [];
@@ -64,7 +64,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
         if (transform) rect.applyTransform(transform);
         return [{ name: parent?.style?.text ?? style.text, end: parent?.__hostTarget?.type === "ec-polyline", left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, rotation: transform ? Math.atan2(transform[1], transform[0]) : 0, halo: Boolean(style.stroke && style.lineWidth) }];
       });
-      ref.current.dataset.chartLabels = JSON.stringify({ width: size.width, height: size.height, end_names: endNames,
+      ref.current.dataset.chartLabels = JSON.stringify({ width: size.width, height: size.height, grid_top:rect?.y, end_names: endNames,
         ends: bounds.filter(b => b.end && endNames.includes(b.name)),
         deploys: bounds.filter(b => deployNames.includes(b.name)), anomalies: bounds.filter(b => anomalyNames.includes(b.name)) });
     };
