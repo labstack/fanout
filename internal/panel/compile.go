@@ -175,12 +175,17 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		columns = append(columns, Column{Name: "time", Type: "time", Role: "time"})
 	}
 	top := 0
+	foldDimension := -1
 	if bucket != "" && len(dims) == 1 {
 		top = p.Top()
+		foldDimension = 0
+	} else if p.Viz == "bar" && len(dims) == 2 {
+		top = p.Top()
+		foldDimension = 1
 	}
 	for i, d := range dims {
 		expr := d.stringSQL()
-		if top > 0 && i == 0 {
+		if top > 0 && i == foldDimension {
 			expr = fmt.Sprintf("CASE WHEN %s IN (SELECT d FROM top) THEN %s ELSE 'Other' END", expr, expr)
 		}
 		selects = append(selects, fmt.Sprintf("coalesce(%s, '') AS %s", expr, quoteIdent(d.alias())))
@@ -206,7 +211,7 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	var b strings.Builder
 	b.WriteString("WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")")
 	if top > 0 {
-		fmt.Fprintf(&b, ", top AS (SELECT %s AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT %d)", dims[0].stringSQL(), top)
+		fmt.Fprintf(&b, ", top AS (SELECT %s AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT %d)", dims[foldDimension].stringSQL(), top)
 	}
 	b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM base")
 	if len(groups) > 0 {

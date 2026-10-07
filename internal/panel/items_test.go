@@ -42,7 +42,7 @@ func TestM2TimelineBudget(t *testing.T) {
 	commit(t, repo, spans, nil)
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(24 * time.Hour) }
-	d := Dashboard{Name: "States", Time: Time{Range: "24h"}, Panels: []Panel{{ID: "states", Title: "States", Viz: "state_timeline", Options: &Options{Top: 20}, Thresholds: []Threshold{{Value: 5, Status: "bad"}}, Query: &Query{From: "spans", Measures: []string{"p95(duration_ms)"}, By: []string{"service"}, Bucket: "1m"}}}}
+	d := Dashboard{Name: "States", Time: Time{Range: "24h"}, Panels: []Panel{{ID: "states", Title: "States", Viz: "state_timeline", Options: &Options{Top: 6}, Thresholds: []Threshold{{Value: 5, Status: "bad"}}, Query: &Query{From: "spans", Measures: []string{"p95(duration_ms)"}, By: []string{"service"}, Bucket: "1m"}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
@@ -148,15 +148,15 @@ func TestM2TimelineShareBeforeTopN(t *testing.T) {
 		t.Fatalf("share: %+v %v", got, err)
 	}
 	f := got[0].Frame
-	if f.Rows != buckets*8 {
-		t.Fatalf("rows = %d, want %d", f.Rows, buckets*8)
+	if f.Rows != buckets*6 {
+		t.Fatalf("rows = %d, want %d", f.Rows, buckets*6)
 	}
 	sums := map[any]float64{}
 	counts := map[any]int{}
 	for i, bucket := range f.Values[0] {
 		sums[bucket] += f.Values[2][i].(float64)
 		counts[bucket]++
-		if service := f.Values[1][i].(string); service >= "svc08" {
+		if service := f.Values[1][i].(string); service >= "svc06" {
 			t.Errorf("non-top service returned: %s", service)
 		}
 	}
@@ -164,8 +164,8 @@ func TestM2TimelineShareBeforeTopN(t *testing.T) {
 		t.Fatalf("buckets = %d, want %d", len(sums), buckets)
 	}
 	for bucket, sum := range sums {
-		if counts[bucket] != 8 || sum >= 100 || math.Abs(sum-100.0*68/78) > 1e-9 {
-			t.Errorf("bucket %v: rows=%d share=%v, want 8 rows and %v", bucket, counts[bucket], sum, 100.0*68/78)
+		if counts[bucket] != 6 || sum >= 100 || math.Abs(sum-100.0*57/78) > 1e-9 {
+			t.Errorf("bucket %v: rows=%d share=%v, want 6 rows and %v", bucket, counts[bucket], sum, 100.0*57/78)
 		}
 	}
 }

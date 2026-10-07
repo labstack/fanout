@@ -224,7 +224,7 @@ sees from them.
 | `reduce` | For `stat` and `gauge`: `last`, `mean`, `min`, `max`, `sum`, `window`. Default `window`, which computes the measure over the whole time range rather than reading the last bucket. |
 | `thresholds` | Up to 4 of `{ value, status, label? }` with `status` in `ok`, `warn`, `bad`. Direction comes from `better`. |
 | `better` | `lower` or `higher`. Inferred for known measures (latency and errors are `lower`). |
-| `options` | Viz-specific, closed per viz: `style` (`line`, `area`, `bars`, `stacked`), `scale` (`linear`, `log`), `top` (series limit, default 8, the rest become Other), `legend` (`auto`, `hidden`), `sort`. |
+| `options` | Viz-specific, closed per viz: `style` (`line`, `area`, `bars`, `stacked`), `scale` (`linear`, `log`), `top` (series limit, default 6, maximum 6, the rest become Other), `legend` (`auto`, `hidden`), `sort`. |
 | `click` | `{ "set_variable": "<name>" }`: clicking a bar, row or series sets that variable to the clicked value. |
 | `drill` | `traces` (exemplar traces for the clicked bucket or row) or `logs`. |
 | `time` | `{ "range": "30d" }` or `{ "shift": "1d" }`, overriding the dashboard range for this panel. |

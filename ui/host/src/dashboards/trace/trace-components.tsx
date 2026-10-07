@@ -2,7 +2,7 @@ import { Badge, Box, Group, Table, Text, Tooltip } from "@mantine/core";
 import { ListBullets } from "@phosphor-icons/react";
 // Adapted copy of ui/apps/src/trace.tsx (M1 echart.tsx precedent). Consolidate in M3.
 import type { LogEntry, TraceSpan } from "../../../../contracts";
-import { seriesColor, severityColor } from "../../../../chart";
+import { seriesSlot, severityColor } from "../../../../chart";
 import { duration, exactTimestamp, timeZoneLabel } from "../../../../format";
 import { EmptyState, PageControls, usePagedItems } from "./components";
 export function Waterfall({
@@ -21,6 +21,7 @@ export function Waterfall({
     ...spans.map((span) => new Date(span.start).valueOf() + span.duration_ms),
   );
   const total = Math.max(end - start, 1);
+  const services = [...new Set(spans.map(span => span.service))];
   const visibleSpans = usePagedItems(spans, 8);
   return (
     <>
@@ -59,7 +60,7 @@ export function Waterfall({
                       <Box
                         w={8}
                         h={8}
-                        bg={seriesColor(span.service, dark)}
+                        bg={seriesSlot(services.indexOf(span.service), dark)}
                         style={{ borderRadius: "50%", flex: "0 0 auto" }}
                       />
                       <Box miw={0}>
@@ -90,7 +91,7 @@ export function Waterfall({
                           left={`${offset}%`}
                           w={`${Math.min(width, 100 - offset)}%`}
                           h="100%"
-                          bg={failed ? "bad" : seriesColor(span.service, dark)}
+                          bg={failed ? "bad" : seriesSlot(services.indexOf(span.service), dark)}
                           style={{
                             borderRadius: "var(--mantine-radius-sm)",
                             minWidth: 3,

@@ -1,7 +1,8 @@
-import { seriesColor, healthSymbol, healthBorderType } from "../chart";
+import { seriesSlot, healthSymbol, healthBorderType } from "../chart";
 import type { ChartTheme } from "./compile";
 import { serviceMapOption } from "./rollups";
 import { frameRows } from "./rows";
+import { seriesGroups, sumPresent } from "./series";
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
 import { formatAxis, formatBucket, formatTimeAxis, formatValue } from "./units";
@@ -48,7 +49,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
   if (panel.viz === "scatter") {
     const item = dimensions[0];
     const colour = dimensions[1];
-    const groups = [...new Set(rows.map(row => colour ? String(row[colour] ?? "") : "Items"))];
+    const groups = seriesGroups([...new Set(rows.map(row => colour ? String(row[colour] ?? "") : "Items"))].map(name => ({ name })), panel);
     const xScale = panel.options?.x_scale ?? panel.options?.scale;
     const yScale = panel.options?.y_scale ?? panel.options?.scale;
     const xUnit = panel.x_unit ?? measures[0]?.unit;
@@ -58,9 +59,9 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       legend: { ...base.legend, show: groups.length > 1 && panel.options?.legend !== "hidden" },
       xAxis: { type: xScale === "log" ? "log" : "value", name: xUnit, axisLabel: { formatter: formatAxis(xUnit) } },
       yAxis: { type: yScale === "log" ? "log" : "value", name: yUnit, axisLabel: { formatter: formatAxis(yUnit) } },
-      series: groups.map(name => ({
-        type: "scatter", name, itemStyle: { color: seriesColor(name, theme.dark) },
-        data: rows.filter(row => !colour || String(row[colour] ?? "") === name)
+      series: groups.map(({ name, items }, index) => ({
+        type: "scatter", name, itemStyle: { color: name === "Other" ? theme.muted : seriesSlot(index, theme.dark) },
+        data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
           .filter(row => typeof row[measures[0]?.name] === "number" && typeof row[measures[1]?.name] === "number")
           .filter(row => (xScale !== "log" || Number(row[measures[0].name]) > 0) && (yScale !== "log" || Number(row[measures[1].name]) > 0))
           .map(row => ({
@@ -75,18 +76,18 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const split = dimensions.find(name => name !== "bucket_lower" && name !== "bucket_upper");
     const buckets = [...new Map([...rows].sort(compareBuckets).map(row => [bucketKey(row), row])).values()];
     const labels = buckets.map(row => bucketLabel(row, bucketUnit));
-    const names = [...new Set(rows.map(row => split ? String(row[split] ?? "") : "Count"))];
+    const names = seriesGroups([...new Set(rows.map(row => split ? String(row[split] ?? "") : "Count"))].map(name => ({ name })), panel);
     return {
       ...base,
       legend: { ...base.legend, show: names.length > 1 && panel.options?.legend !== "hidden" },
       xAxis: { type: "category", data: labels },
       yAxis: { type: "value", name: "count" },
-      series: names.map(name => ({
-        type: "bar", name, itemStyle: { color: seriesColor(name, theme.dark) },
+      series: names.map(({ name, items }, index) => ({
+        type: "bar", name, itemStyle: { color: name === "Other" ? theme.muted : seriesSlot(index, theme.dark) },
         data: buckets.map(bucket => {
-          const row = rows.find(row => (!split || String(row[split] ?? "") === name) && bucketKey(row) === bucketKey(bucket));
-          return { value: row?.count ?? 0, selection: {
-            dimensions: split ? { [panel.query?.by?.[0] ?? split]: name } : {}, bucket: bucketSelection(row),
+          const matches = rows.filter(row => (!split || items.some(item => item.name === String(row[split] ?? ""))) && bucketKey(row) === bucketKey(bucket));
+          return { value: sumPresent(matches.map(row => typeof row.count === "number" ? row.count : null)) ?? 0, selection: {
+            dimensions: split ? { [panel.query?.by?.[0] ?? split]: name } : {}, bucket: bucketSelection(matches[0]),
           } };
         }),
       })),
@@ -127,7 +128,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", left: "center", bottom: 0,
         itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "0"], textStyle: { color: theme.muted },
-        min: 0, max: maxCount, dimension: 2, inRange: { color: [theme.surface, seriesColor("distribution", theme.dark)] },
+        min: 0, max: maxCount, dimension: 2, inRange: { color: [theme.surface, seriesSlot(0, theme.dark)] },
       } : undefined,
       series: [{
         type: "custom", name: panel.title, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,

@@ -4,7 +4,7 @@ import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
-import { chartTheme, healthColor, seriesColor, statusHex } from "../../chart";
+import { chartTheme, healthColor, seriesSlot, statusHex } from "../../chart";
 import { typeScale } from "../../tokens";
 import type { Endpoint, Performance, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
@@ -43,7 +43,7 @@ function ActivityView({ data, dark, window }: { data: Performance; dark: boolean
   const labels = data.points.map((point) => point.time);
   return <Stack px={{ base: "md", sm: "lg" }} pb="md">
     <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(totals.spans)} /><Metric label="P95 latency" value={duration(totals.p95_ms)} color={totals.p95_ms >= 750 ? "warn" : "ok"} /><Metric label="Error rate" value={percent(totals.error_rate)} color={totals.error_rate >= .01 ? "bad" : "ok"} /></SimpleGrid>
-    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesColor("operations", dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesColor("logs", dark) }]} />
+    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesSlot(0, dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesSlot(1, dark) }]} />
     <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" window={window} series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn, axis: "duration" }, { name: "Error rate", data: data.points.map((point) => point.error_rate), color: statusHex(dark).bad, axis: "percent" }]} />
   </Stack>;
 }

@@ -101,7 +101,7 @@ type Options struct {
 	Highlight string `json:"highlight,omitempty" jsonschema:"logs and log_patterns: literal redacted-body search, at most 200 characters"`
 	Style     string `json:"style,omitempty" jsonschema:"timeseries: line, area, bars or stacked (additive measures only)"`
 	Scale     string `json:"scale,omitempty" jsonschema:"linear or log"`
-	Top       int    `json:"top,omitempty" jsonschema:"Series limit; the rest become Other; default 8"`
+	Top       int    `json:"top,omitempty" jsonschema:"Series limit up to 6; the rest become Other; default 6"`
 	Legend    string `json:"legend,omitempty" jsonschema:"auto or hidden"`
 	XScale    string `json:"x_scale,omitempty" jsonschema:"scatter x axis: linear or log"`
 	YScale    string `json:"y_scale,omitempty" jsonschema:"scatter y axis: linear or log"`
@@ -133,7 +133,7 @@ type Grid struct {
 // Top is the series limit for a grouped time series.
 func (p *Panel) Top() int {
 	if p.Options != nil && p.Options.Top > 0 {
-		return min(p.Options.Top, 20)
+		return min(p.Options.Top, 6)
 	}
-	return 8
+	return 6
 }

@@ -1,6 +1,7 @@
-import { chartTheme, seriesColor, statusHex } from "../chart";
+import { chartTheme, seriesSlot, statusHex } from "../chart";
 import { fonts } from "../tokens";
 import { toCategories, toSeries } from "./frame";
+import { hiddenSeriesNote, visibleSeries } from "./series";
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
 import { formatAxis, formatTimeAxis, formatValue } from "./units";
@@ -15,7 +16,11 @@ export function chartThemeFor(dark: boolean): ChartTheme {
 
 type Option = Record<string, unknown>;
 
-const colorFor = (name: string, theme: ChartTheme) => (name === "Other" ? theme.muted : seriesColor(name, theme.dark));
+const colorFor = (name: string, index: number, theme: ChartTheme) => (name === "Other" ? theme.muted : seriesSlot(index, theme.dark));
+
+function chartSeries(frame: Frame, panel: Panel) {
+  return visibleSeries(toSeries(frame), panel);
+}
 
 function baseOption(theme: ChartTheme, unit?: string): Option {
   return {
@@ -55,15 +60,16 @@ function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
  *  recessive, thresholds as labelled lines, stacking only when asked (the
  *  server refuses to stack non-additive measures). */
 export function timeseriesOption(panel: Panel, result: PanelResult, theme: ChartTheme): Option {
-  const current = result.frame ? toSeries(result.frame) : [];
+  const visible = result.frame ? chartSeries(result.frame, panel) : { shown: [], hidden: 0 };
+  const current = visible.shown;
   const unit = current[0]?.unit ?? panel.unit;
-  const previousSeries = result.previous && result.shift_ms !== undefined ? toSeries(result.previous) : [];
+  const previousSeries = result.previous && result.shift_ms !== undefined ? chartSeries(result.previous, panel).shown : [];
   const units = [...new Set([...current, ...previousSeries].map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
   const style = panel.options?.style ?? "line";
   const period = result.shift_ms;
   const lines = current.map((s, i) => {
-    const color = colorFor(s.name, theme);
+    const color = colorFor(s.name, i, theme);
     return {
       name: s.name,
       yAxisIndex: units.indexOf(s.unit ?? panel.unit),
@@ -103,12 +109,15 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     xAxis: { type: "time", axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { color: theme.muted, hideOverlap: true, formatter: formatTimeAxis } },
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
+    graphic: hiddenSeriesNote(visible.hidden, theme.muted),
   };
 }
 
 /** Horizontal bars sorted by the server, value labels at the bar end. */
 export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option {
-  const { categories, series } = toCategories(frame);
+  const pivot = toCategories(frame);
+  const categories = pivot.categories;
+  const { shown: series, hidden } = visibleSeries(pivot.series, panel);
   const dims = frame.columns.flatMap((column, index) => column.role === "dimension" ? [index] : []);
   const selections = new Map<string, { dimensions: Record<string, string>; from?: string; to?: string }>();
   for (let row = 0; row < frame.rows; row++) {
@@ -142,9 +151,10 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme): Option
       data: s.values.map((value, row) => ({ value, selection: selections.get(JSON.stringify(dims.length > 1 ? [categories[row], s.name] : [categories[row]])) })),
       barMaxWidth: 16,
       barGap: "20%",
-      itemStyle: { color: multi ? colorFor(s.name, theme) : seriesColor(panel.id, theme.dark), borderRadius: [0, 3, 3, 0] },
+      itemStyle: { color: colorFor(s.name, i, theme), borderRadius: [0, 3, 3, 0] },
       label: { show: !multi || i === 0, position: "right", color: theme.muted, formatter: ({ value }: { value: number }) => formatValue(s.unit ?? panel.unit, value) },
     })),
+    graphic: hiddenSeriesNote(hidden, theme.muted),
   };
 }
 
@@ -165,7 +175,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
       radius: "95%",
       center: ["50%", "60%"],
       axisLine: { lineStyle: { width: 10, color: sorted.length ? bands : [[1, theme.grid]] } },
-      progress: { show: sorted.length === 0, width: 10, itemStyle: { color: seriesColor(panel.id, theme.dark) } },
+      progress: { show: sorted.length === 0, width: 10, itemStyle: { color: seriesSlot(0, theme.dark) } },
       pointer: { show: sorted.length > 0, length: "55%", width: 4, itemStyle: { color: theme.text } },
       axisTick: { show: false },
       splitLine: { show: false },
