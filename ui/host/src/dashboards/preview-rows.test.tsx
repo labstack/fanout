@@ -9,6 +9,8 @@ import type { Frame, Panel, PanelResult } from "../../../panels/types";
 import { PanelCard } from "./panel-card";
 import { TableViz } from "./viz/table";
 import { RowPanel } from "./viz/row-panel";
+import { StateTimelineViz } from "./viz/state-timeline";
+import { ok, warn, bad } from "../../../tokens";
 vi.mock("./echart-canvas",()=>({EChartCanvas:()=>null}));
 let host: HTMLDivElement, root: Root;
 beforeEach(()=>{vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);host=document.createElement("div");document.body.append(host);root=createRoot(host);});
@@ -19,6 +21,15 @@ const id="0123456789abcdef0123456789abcdef";
 const body="Connection ERROR <*> <str> <num> <ip> <time> token=[REDACTED] "+"very long message ".repeat(25);
 const frame:Frame={columns:[{name:"time",type:"time",role:"time"},{name:"severity",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"},{name:"body",type:"string",role:"dimension"},{name:"trace_id",type:"string",role:"dimension"},{name:"namespace",type:"string",role:"dimension"}],values:[[Date.now(),Date.now()],["ERROR","ERROR"],["checkout","payments"],[body,"short message"],[id,""],["otel-demo","otel-demo"]],rows:2};
 const result:PanelResult={id:"logs",status:"ok",elapsed_ms:1,frame};
+it.each([false,true])("collector sync: state legend labels reach 4.5:1 in both themes (%s)",async dark=>{
+ await mount(<StateTimelineViz panel={{id:"states",title:"States",viz:"state_timeline"}} result={result} height={200} dark={dark}/>,dark);
+ for(const label of host.querySelectorAll<HTMLElement>('[aria-label="State legend"] [role="listitem"]')) {
+  const color=label.style.color;
+  const token=label.textContent?.includes("OK")?ok:label.textContent?.includes("Warn")?warn:bad;
+  const hex=color.startsWith("rgb")?"#"+(color.match(/\d+/g)??[]).slice(0,3).map(n=>Number(n).toString(16).padStart(2,"0")).join(""):color.startsWith("#")?color:label.textContent?.includes("Unknown")?chartThemeFor(dark).muted:token[dark?5:7];
+  expect(contrastRatio(hex,chartThemeFor(dark).surface)).toBeGreaterThanOrEqual(4.5);
+ }
+});
 it.each([false,true])("V6: highlight chip explains soft marks and constant namespace in subtitle, dark=%s", async dark=>{
  await mount(<PanelCard panel={panel} title={panel.title} result={result} loading={false} height={350} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}}/>,dark);
  expect(host.querySelector("[data-highlight-term]")?.textContent).toBe("highlight: error");
