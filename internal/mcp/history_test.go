@@ -123,12 +123,15 @@ func TestDashboardHistoryToolsAppendRestoreVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.dashboards.Replace(t.Context(), "owner", created.Dashboard.ID, created.Dashboard.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
+		t.Fatal(err)
+	}
 	_, restored, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 1})
-	if err != nil || restored.Dashboard.Version != 2 {
+	if err != nil || restored.Dashboard.Version != 3 {
 		t.Fatalf("restored=%+v err=%v", restored, err)
 	}
 	_, history, err := s.dashboardVersions(t.Context(), ownerRequest(), DashboardIDInput{ID: created.Dashboard.ID})
-	if err != nil || len(history.Versions) != 2 || history.Versions[0].AuthorKind != "agent" || history.Versions[0].Message != "Restored version 1" {
+	if err != nil || len(history.Versions) != 3 || history.Versions[0].AuthorKind != "agent" || history.Versions[0].Message != "Restored version 1" {
 		t.Fatalf("history=%+v err=%v", history, err)
 	}
 	for _, name := range []string{"list_dashboard_versions", "restore_dashboard_version"} {
@@ -136,7 +139,7 @@ func TestDashboardHistoryToolsAppendRestoreVersion(t *testing.T) {
 			t.Fatalf("missing owner scope: %s", name)
 		}
 	}
-	if restored.Receipt == nil || restored.Receipt.BaseVersion != 1 || restored.Receipt.Version != 2 || len(restored.Receipt.Changes) != 0 || restored.Receipt.LayoutChanged || len(restored.Receipt.DashboardFields) != 0 || !restored.Receipt.SaveCheck.Checked || restored.Receipt.SaveCheck.Panels[0].Rows != 1 {
+	if restored.Receipt == nil || restored.Receipt.BaseVersion != 2 || restored.Receipt.Version != 3 || len(restored.Receipt.Changes) != 0 || restored.Receipt.LayoutChanged || len(restored.Receipt.DashboardFields) != 0 || !restored.Receipt.SaveCheck.Checked || restored.Receipt.SaveCheck.Panels[0].Rows != 1 {
 		t.Fatalf("no-op restore receipt=%+v", restored.Receipt)
 	}
 }
@@ -165,8 +168,14 @@ func TestDashboardRestoreReceiptUsesLatestCommittedBase(t *testing.T) {
 	if !strings.Contains(result.Content[0].(*mcp.TextContent).Text, `Restored "History", version 3`) {
 		t.Fatal(result.Content)
 	}
-	// Every success appends a version, including restore-to-latest and repeats.
-	for _, target := range []int{3, 1} {
+	// The current version is rejected. A historical version with identical
+	// contents still appends a version on each successful restore.
+	result, rejected, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 3})
+	if err != nil || !result.IsError || rejected.ErrorCode != "already_current" || rejected.Receipt != nil || rejected.Dashboard != nil {
+		t.Fatalf("current restore=%+v err=%v", rejected, err)
+	}
+	for range 2 {
+		target := 1
 		_, next, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: target})
 		if err != nil || next.Dashboard.Version != restored.Dashboard.Version+1 || next.Receipt.BaseVersion != restored.Dashboard.Version || len(next.Receipt.Changes) != 0 {
 			t.Fatalf("repeated restore=%+v err=%v", next, err)
@@ -183,6 +192,9 @@ func TestDashboardHistoryOAuthIdentityAndOwnerScope(t *testing.T) {
 	s := newToolServer(t, structural{}, nil)
 	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Private")})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dashboards.Replace(t.Context(), "owner", created.Dashboard.ID, created.Dashboard.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
@@ -216,7 +228,7 @@ func TestDashboardHistoryOAuthIdentityAndOwnerScope(t *testing.T) {
 		}
 	}
 	_, current, err := s.dashboardGet(t.Context(), ownerRequest(), DashboardIDInput{ID: created.Dashboard.ID})
-	if err != nil || current.Dashboard.Version != 2 {
+	if err != nil || current.Dashboard.Version != 3 {
 		t.Fatalf("unauthorized restore changed version: %+v %v", current, err)
 	}
 }
@@ -239,7 +251,10 @@ func TestDashboardHistoryRejectsInvalidMissingAndPrunedVersions(t *testing.T) {
 	if _, _, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: "missing", Version: 1}); err == nil || err.Error() != "dashboard not found" {
 		t.Fatalf("missing dashboard=%v", err)
 	}
-	for version := 1; version <= 100; version++ {
+	if _, err := s.dashboards.Replace(t.Context(), "owner", created.Dashboard.ID, created.Dashboard.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
+		t.Fatal(err)
+	}
+	for version := 1; version < 100; version++ {
 		if _, err := s.dashboards.Restore(t.Context(), "owner", created.Dashboard.ID, version, dashboard.Author{Kind: "user", ID: "owner"}); err != nil {
 			t.Fatal(err)
 		}
@@ -275,6 +290,28 @@ func TestMissingDashboardVersionHasDistinctErrorCode(t *testing.T) {
 	}
 }
 
+func TestCurrentDashboardVersionRestoreHasDistinctErrorCodeWithoutSave(t *testing.T) {
+	s := newToolServer(t, structural{}, nil)
+	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Current version")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := connectTestClient(t, s, nil)
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "restore_dashboard_version", Arguments: map[string]any{"id": created.Dashboard.ID, "version": 1}, Meta: mcp.Meta{dashboard.OwnerMetaKey: "owner"}})
+	if err != nil || !result.IsError {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	raw, _ := json.Marshal(result.StructuredContent)
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil || payload["error_code"] != "already_current" || payload["error"] != dashboard.ErrAlreadyCurrent.Error() || payload["receipt"] != nil || payload["dashboard"] != nil {
+		t.Fatalf("current version payload=%s", raw)
+	}
+	versions, err := s.dashboards.Versions(t.Context(), "owner", created.Dashboard.ID)
+	if err != nil || len(versions) != 1 || versions[0].Version != 1 {
+		t.Fatal(versions, err)
+	}
+}
+
 func TestDashboardHistoryToolsExposeOwnerScopedContracts(t *testing.T) {
 	s := newToolServer(t, structural{}, nil)
 	session := connectTestClient(t, s, nil)
@@ -307,6 +344,9 @@ func TestDashboardHistoryToolsExposeOwnerScopedContracts(t *testing.T) {
 	}
 	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Contract")})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dashboards.Replace(t.Context(), "owner", created.Dashboard.ID, created.Dashboard.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"list_dashboard_versions", "restore_dashboard_version"} {

@@ -157,7 +157,7 @@ func TestMutationBeforeDoesNotShareNestedFields(t *testing.T) {
 	if created.BaseVersion != 0 || !created.Record.IsDefault || len(created.Before.Panels) != 0 || spec.Panels[0].Grid != nil {
 		t.Fatalf("create=%+v input=%+v", created, spec)
 	}
-	m, err := s.update(t.Context(), "owner", created.Record.ID, 1, agent, "", func(d panel.Dashboard) (panel.Dashboard, bool, error) {
+	m, err := s.update(t.Context(), "owner", created.Record.ID, 1, 0, agent, "", func(d panel.Dashboard) (panel.Dashboard, bool, error) {
 		d.Panels[0].Title = "Updated"
 		d.Panels[0].Thresholds[0].Value = 20
 		d.Panels[0].Grid.X++

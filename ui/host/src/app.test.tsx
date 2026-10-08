@@ -119,6 +119,7 @@ describe("Session", () => {
       });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboards"] });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboard", "saved-1"] });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboard-versions", "saved-1"] });
       await vi.waitFor(() => expect(host.querySelector('nav a[href="/dashboards/saved-1"]')).not.toBeNull());
       const link = host.querySelector<HTMLAnchorElement>('.chat-scroll a[href="/dashboards/saved-1"]');
       expect(link?.textContent).toBe("Open dashboard");

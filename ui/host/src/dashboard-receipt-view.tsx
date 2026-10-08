@@ -1,7 +1,8 @@
-import { Badge, Button, Collapse, Group, Loader, Paper, Stack, Text } from "@mantine/core";
+import { Button, Collapse, Group, Loader, Paper, Stack, Text } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { changeLabel, type BuildReceipt } from "./dashboard-receipt";
+import { changeChips, type BuildReceipt } from "./dashboard-receipt";
+import { EditChips } from "./dashboard-change-chips";
 
 const stageNames = { schema: "Telemetry", context: "Context", draft: "Draft", validation: "Validation", preview: "Preview", save: "Save" };
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
@@ -16,9 +17,7 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
     saved ? `Saved v${saved.version}` : undefined,
   ].filter(Boolean).join(" · ") || "Building dashboard";
   const chips = [
-    ...(saved?.receipt.changes.map(changeLabel) ?? []),
-    ...(saved?.receipt.layout_changed ? ["Layout adjusted"] : []),
-    ...(saved?.receipt.dashboard_fields?.map(field => `Dashboard: ${field}`) ?? []),
+    ...(saved ? changeChips(saved.receipt) : []),
     ...receipt.corrections.map(c => `Fixed ${c.panel_id}.${c.path.replace(/^panels\[\d+\]\./, "")}`),
   ];
   return <Paper data-build-receipt={receipt.turn_id} data-dashboard-result={saved?.id} data-chat-anchor withBorder radius="md" p="sm">
@@ -28,7 +27,7 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
         <Button component="button" variant="subtle" color="gray" size="compact-xs" aria-expanded={expanded} aria-controls={detailsID} onClick={() => setExpanded(v => !v)}>Details{chips.length > 4 ? ` (+${chips.length - 4})` : ""}</Button>
       </Group>
       {running && awaitingAnswer && <Group gap="xs" data-build-running><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
-      {chips.length > 0 && <Group gap={4} data-edit-chips>{chips.slice(0,4).map((label,i) => <Badge key={i} color="gray" variant="light" size="sm" tt="none" maw="100%" title={label} style={{color:"var(--mantine-color-text)",height:"auto",whiteSpace:"normal",overflowWrap:"anywhere"}}>{label}</Badge>)}</Group>}
+      <EditChips labels={chips.slice(0,4)} />
       {receipt.explanations.map(text => running ? text.split(" · ").filter(part => !part.endsWith(": incomplete")).join(" · ") : text).filter(Boolean).map((text,i) => <Text key={i} size="xs" c="dimmed" data-receipt-attention>{text}</Text>)}
       {saved && <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{dashboardId:saved.id}} search={{}} />} variant="subtle" size="compact-sm" color="gray" style={{alignSelf:"flex-start"}}>Open dashboard</Button>}
       <Collapse expanded={expanded} id={detailsID}>

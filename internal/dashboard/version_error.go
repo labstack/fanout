@@ -6,8 +6,10 @@ import (
 )
 
 var ErrVersionNotFound = errors.New("dashboard version not found")
+var ErrAlreadyCurrent = errors.New("dashboard version is already current")
 
 const VersionNotFoundCode = "dashboard_version_not_found"
+const AlreadyCurrentCode = "already_current"
 
 type versionNotFoundError struct {
 	id      string

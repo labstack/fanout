@@ -19,7 +19,7 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [opened, setOpened] = useState(false);
-  return <Group gap="xs" wrap="wrap" role="group" aria-label="Dashboard time">
+  return <Group gap="xs" wrap="wrap" role="group" aria-label="Dashboard controls">
     <Menu position="bottom-end" withinPortal opened={opened} onChange={setOpened}>
       <Menu.Target>
         <Button variant="default" size="sm" leftSection={<Clock size={15} />} rightSection={<CaretDown size={12} weight="bold" />}>{timeLabel(time)}</Button>

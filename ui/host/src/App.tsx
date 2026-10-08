@@ -131,6 +131,7 @@ function Session() {
         if (!saved) return;
         void queryClient.invalidateQueries({ queryKey: dashboardsKey });
         void queryClient.invalidateQueries({ queryKey: ["dashboard", saved.id] });
+        void queryClient.invalidateQueries({ queryKey: ["dashboard-versions", saved.id] });
       },
       onRunErrorEvent: ({ event }) => {
         if (event.code === "abort" || stoppingRef.current) {setError("");setStopped(true);}

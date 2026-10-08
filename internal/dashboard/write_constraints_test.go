@@ -37,6 +37,11 @@ func TestWriteValidationDeadline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if op == "restore" {
+				if _, err := s.Replace(t.Context(), "owner", r.ID, textSpec("Changed"), 1, agent, "Edit before restore"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			v := &deadlineValidator{t: t}
 			s.validator = v
 			switch op {

@@ -2,7 +2,10 @@ import type { Message } from "@ag-ui/client";
 import { dashboardToolResult, jsonObject, mutationNames, object, panelCheck, type DashboardToolResult, type PanelCheck } from "./dashboard-tool-result";
 
 export type Change={panel_id:string;title:string;kind:'added'|'changed'|'removed';fields?:string[];position_changed?:boolean};
-export const changeLabel=(c:Change):string=>c.kind==='added'?`+ ${c.title}`:c.kind==='removed'?`− ${c.title}`:`~ ${c.panel_id}${c.fields?.length?'.'+c.fields.join(', '):''}${c.position_changed?' · order':''}`;
+const changeLabel=(c:Change):string=>c.kind==='added'?`+ ${c.title}`:c.kind==='removed'?`− ${c.title}`:`~ ${c.panel_id}${c.fields?.length?'.'+c.fields.join(', '):''}${c.position_changed?' · order':''}`;
+export function changeChips(receipt: { changes: Change[]; layout_changed: boolean; dashboard_fields?: string[] }): string[] {
+  return [...receipt.changes.map(changeLabel), ...(receipt.layout_changed ? ["Layout adjusted"] : []), ...(receipt.dashboard_fields?.map(field => `Dashboard: ${field}`) ?? [])];
+}
 export type Correction={panel_id:string;path:string;message:string};
 function resolvedProblems(before:Correction[],after:Correction[],retainedIDs:Set<string>):Correction[] {
   return before.filter(p=>retainedIDs.has(p.panel_id) && !after.some(q=>q.panel_id===p.panel_id && q.path===p.path));

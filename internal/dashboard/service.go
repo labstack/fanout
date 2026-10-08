@@ -95,7 +95,13 @@ func (s *Service) VersionRecord(ctx context.Context, owner, id string, version i
 	q := generated.New(tx)
 	r, err := q.GetDashboardVersionRecord(ctx, generated.GetDashboardVersionRecordParams{DashboardID: id, OwnerID: owner, Version: int64(version)})
 	if errors.Is(err, sql.ErrNoRows) {
-		return VersionRecord{}, ErrNotFound
+		if _, ownerErr := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: owner}); ownerErr != nil {
+			if errors.Is(ownerErr, sql.ErrNoRows) {
+				return VersionRecord{}, ErrNotFound
+			}
+			return VersionRecord{}, ownerErr
+		}
+		return VersionRecord{}, versionNotFoundError{id: id, version: version}
 	}
 	if err != nil {
 		return VersionRecord{}, err
@@ -280,7 +286,7 @@ func (s *Service) Replace(ctx context.Context, ownerID, id string, spec panel.Da
 }
 
 func (s *Service) ReplaceWithChanges(ctx context.Context, ownerID, id string, spec panel.Dashboard, baseVersion int, author Author, message string) (Mutation, error) {
-	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
+	return s.update(ctx, ownerID, id, baseVersion, 0, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
 		replacement, err := clone(spec)
 		if err != nil {
 			return panel.Dashboard{}, false, err
@@ -323,7 +329,7 @@ func (s *Service) Edit(ctx context.Context, ownerID, id string, ops []Operation,
 }
 
 func (s *Service) EditWithChanges(ctx context.Context, ownerID, id string, ops []Operation, baseVersion int, author Author, message string) (Mutation, error) {
-	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
+	return s.update(ctx, ownerID, id, baseVersion, 0, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
 		return Apply(current, ops)
 	})
 }
@@ -336,8 +342,12 @@ func (s *Service) Restore(ctx context.Context, ownerID, id string, version int, 
 // RestoreWithChanges appends a historical spec as a new save against the latest
 // optimistic base, retaining the committed snapshots for the shared diff.
 func (s *Service) RestoreWithChanges(ctx context.Context, ownerID, id string, version int, author Author) (Mutation, error) {
-	if _, err := s.get(ctx, ownerID, id); err != nil {
+	current, err := s.get(ctx, ownerID, id)
+	if err != nil {
 		return Mutation{}, err
+	}
+	if current.Version == version {
+		return Mutation{}, ErrAlreadyCurrent
 	}
 	raw, err := generated.New(s.db).GetDashboardVersion(ctx, generated.GetDashboardVersionParams{DashboardID: id, Version: int64(version)})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -350,7 +360,7 @@ func (s *Service) RestoreWithChanges(ctx context.Context, ownerID, id string, ve
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 		return Mutation{}, err
 	}
-	return s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
+	return s.update(ctx, ownerID, id, 0, version, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
 		return spec, false, nil
 	})
 }
@@ -359,11 +369,14 @@ func (s *Service) RestoreWithChanges(ctx context.Context, ownerID, id string, ve
 // check. With baseVersion 0 a concurrent write is retried once on the newer
 // version; with an explicit baseVersion it fails with ErrStale instead of
 // overwriting what someone else saved.
-func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Mutation, error) {
+func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion, restoreVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Mutation, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		current, err := s.get(ctx, ownerID, id)
 		if err != nil {
 			return Mutation{}, err
+		}
+		if restoreVersion > 0 && current.Version == restoreVersion {
+			return Mutation{}, ErrAlreadyCurrent
 		}
 		if baseVersion != 0 && current.Version != baseVersion {
 			return Mutation{}, ErrStale

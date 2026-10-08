@@ -3,9 +3,42 @@ package dashboard
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestCurrentVersionRestoreIsRejectedWithoutSaving(t *testing.T) {
+	s := newTestService(t)
+	first, err := s.Create(t.Context(), "owner", textSpec("Current"), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Restore(t.Context(), "owner", first.ID, first.Version, agent); err == nil || !strings.Contains(err.Error(), "already current") {
+		t.Fatalf("current restore = %v", err)
+	}
+	versions, err := s.Versions(t.Context(), "owner", first.ID)
+	if err != nil || len(versions) != 1 {
+		t.Fatalf("versions=%+v err=%v", versions, err)
+	}
+	if _, err := s.Restore(t.Context(), "other", first.ID, first.Version, agent); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+}
+
+func TestMissingHistoricVersionIdentifiesVersionOnlyForOwner(t *testing.T) {
+	s := newTestService(t)
+	first, err := s.Create(t.Context(), "owner", textSpec("Missing"), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.VersionRecord(t.Context(), "owner", first.ID, 99); !errors.Is(err, ErrVersionNotFound) {
+		t.Fatalf("owned missing version = %v", err)
+	}
+	if _, err := s.VersionRecord(t.Context(), "other", first.ID, 99); !errors.Is(err, ErrNotFound) || strings.Contains(err.Error(), first.ID) {
+		t.Fatalf("other missing version = %v", err)
+	}
+}
 
 func TestHistoricalSpecReadIsOwnerScopedAndImmutable(t *testing.T) {
 	s := newTestService(t)
@@ -33,7 +66,11 @@ func TestHistoricalSpecReadIsOwnerScopedAndImmutable(t *testing.T) {
 		t.Fatalf("ownership error=%v", err)
 	}
 	for _, version := range []int{-1, 0, 999} {
-		if _, err = s.VersionRecord(t.Context(), "owner", first.ID, version); !errors.Is(err, ErrNotFound) {
+		want := ErrNotFound
+		if version > 0 {
+			want = ErrVersionNotFound
+		}
+		if _, err = s.VersionRecord(t.Context(), "owner", first.ID, version); !errors.Is(err, want) {
 			t.Fatalf("version %d: %v", version, err)
 		}
 	}
@@ -81,7 +118,7 @@ func TestPrunedHistoryReportsUnavailableChangesAndRestoreAppendsUserVersion(t *t
 	if err != nil || len(versions) != 100 || versions[0].Version != 101 || versions[99].Version != 2 {
 		t.Fatalf("versions=%+v err=%v", versions, err)
 	}
-	if _, err := s.VersionRecord(t.Context(), "owner", first.ID, 1); !errors.Is(err, ErrNotFound) {
+	if _, err := s.VersionRecord(t.Context(), "owner", first.ID, 1); !errors.Is(err, ErrVersionNotFound) {
 		t.Fatal(err)
 	}
 	old, err := s.VersionRecord(t.Context(), "owner", first.ID, 2)

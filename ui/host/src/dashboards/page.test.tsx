@@ -123,6 +123,15 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
+  it("returns focus to History after Escape closes its drawer", async () => {
+    const { client } = await render();
+    const history = [...document.querySelectorAll("button")].find(button => button.textContent === "History")!;
+    history.focus(); await act(async () => history.click()); await settle(client);
+    const close = document.querySelector<HTMLElement>('[role="dialog"] button')!;
+    close.focus(); await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+    expect(document.activeElement).toBe(history);
+  });
   it.each([true, false])("restores through history preserving URL time and variables and drops only missing panel state: %s", async removed => {
     const existing = fetchMock.getMockImplementation()!;
     const restored = { ...record, version: 5, spec: { ...spec, panels: removed ? spec.panels.slice(0, 1) : spec.panels } };
@@ -137,6 +146,7 @@ describe("DashboardPage", () => {
     const search: DashboardSearch = { from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", vars: { service: "cart" }, compare: "1", view: "latency", drill: JSON.stringify({ panel_id: "latency", kind: "traces", from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", window_from: "2026-10-01T12:00:00Z", window_to: "2026-10-01T13:00:00Z", dimensions: {} }) };
     const { client, onSearch } = await render(search);
     const count = queryBodies.length;
+    const variableCount = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/variables/resolve").length;
     await act(async () => [...document.querySelectorAll("button")].find(button => button.textContent === "History")!.click());
     await settle(client);
     expect(queryBodies).toHaveLength(count);
@@ -148,6 +158,9 @@ describe("DashboardPage", () => {
     if (removed) expect(onSearch).toHaveBeenCalledWith({ ...search, view: undefined, drill: undefined }, true);
     else expect(onSearch).not.toHaveBeenCalled();
     expect(queryBodies.length).toBeGreaterThan(count);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/variables/resolve").length).toBeGreaterThan(variableCount);
+    const laterBatches = queryBodies.slice(count) as { dashboard: { panels: { id: string }[] } }[];
+    if (removed) expect(laterBatches.every(body => body.dashboard.panels.every(panel => panel.id !== "latency"))).toBe(true);
   });
   it.each([190,220])("collects every dashboard service name and rendered micro font in a 1100×%s body",async height=>{
     const width=1100,original=HTMLElement.prototype.getBoundingClientRect;

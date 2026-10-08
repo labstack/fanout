@@ -1,6 +1,6 @@
 import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { WarningCircle } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp } from "../app-context";
@@ -11,6 +11,7 @@ import { parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
 import { HistoryDrawer } from "./history";
+import { dashboardDataPredicate } from "./cache";
 import { useBrushZoom } from "./use-brush-zoom";
 import { usePanelResults } from "./use-panel-results";
 import { useVariableOptions } from "./use-variables";
@@ -53,6 +54,8 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
 
 function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string): void }) {
   const [historyOpen, setHistoryOpen] = useState(false);
+  const client = useQueryClient();
+  const [restoreRefresh, setRestoreRefresh] = useState<number>();
   const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
   const time = effectiveTime(spec, search);
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
@@ -77,6 +80,12 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   const [visible, setVisible] = useState<string[]>(() => spec.panels.map((p) => p.id));
   const currentVisible = useMemo(() => visible.filter((panelId) => spec.panels.some((panel) => panel.id === panelId)), [visible, spec.panels]);
   const data = usePanelResults({ dashboardId: id, version, spec, time, vars: resolvedVars, compare, widths, visible: currentVisible, refresh, enabled: options.ready });
+  useEffect(() => {
+    if (restoreRefresh !== version) return;
+    // Run after both hooks have committed their observers to the restored keys.
+    // Do not restart a new-spec request already in flight.
+    void client.refetchQueries({ predicate: dashboardDataPredicate(id), type: "active", stale: true }, { cancelRefetch: false });
+  }, [restoreRefresh, version, id, client]);
   const annotations = useMemo(() => data.annotations ? {
     ...data.annotations,
     deploys: spec.annotations?.deploys === false ? [] : data.annotations.deploys,
@@ -132,6 +141,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       }} />
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
     <HistoryDrawer id={id} currentVersion={version} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
+      setRestoreRefresh(record.version);
       const ids = new Set(record.spec.panels.map(panel => panel.id));
       const drill = parseDrill(search.drill);
       const view = search.view && !ids.has(search.view) ? undefined : search.view;

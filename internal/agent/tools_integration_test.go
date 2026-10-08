@@ -128,6 +128,9 @@ func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
+	if _, err := service.Replace(t.Context(), "owner", created.ID, created.Spec, 1, dashboard.Author{Kind: "user", ID: "owner"}, "Saved again"); err != nil {
+		t.Fatal(err)
+	}
 	registry, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)
@@ -164,12 +167,12 @@ func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
 				Version     int `json:"version"`
 			} `json:"receipt"`
 		}
-		if message.Error != "" || json.Unmarshal([]byte(messageText(message.Content)), &output) != nil || output.Dashboard.ID != created.ID || output.Dashboard.Version != 2 || output.Receipt.BaseVersion != 1 || output.Receipt.Version != 2 {
+		if message.Error != "" || json.Unmarshal([]byte(messageText(message.Content)), &output) != nil || output.Dashboard.ID != created.ID || output.Dashboard.Version != 3 || output.Receipt.BaseVersion != 2 || output.Receipt.Version != 3 {
 			t.Fatalf("restore result=%+v", message)
 		}
 	}
 	versions, err := service.Versions(t.Context(), "owner", created.ID)
-	if !found || err != nil || len(versions) != 2 || versions[0].AuthorKind != "agent" || versions[0].AuthorID != "owner" || versions[0].Message != "Restored version 1" || versions[1].AuthorKind != "user" {
+	if !found || err != nil || len(versions) != 3 || versions[0].AuthorKind != "agent" || versions[0].AuthorID != "owner" || versions[0].Message != "Restored version 1" || versions[2].AuthorKind != "user" {
 		t.Fatalf("runtime history=%+v err=%v", versions, err)
 	}
 }

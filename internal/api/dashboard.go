@@ -182,6 +182,8 @@ func dashboardError(c *echo.Context, err error) error {
 		return writeErr
 	}
 	switch {
+	case errors.Is(err, dashboard.ErrAlreadyCurrent):
+		return c.JSON(http.StatusConflict, map[string]any{"message": err.Error(), "error_code": dashboard.AlreadyCurrentCode})
 	case errors.Is(err, dashboard.ErrVersionNotFound):
 		return c.JSON(http.StatusNotFound, map[string]any{"message": err.Error(), "error_code": dashboard.VersionNotFoundCode})
 	case errors.Is(err, dashboard.ErrNotFound):

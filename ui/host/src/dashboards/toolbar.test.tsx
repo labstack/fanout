@@ -38,6 +38,7 @@ describe("dashboard range menu", () => {
     const history = [...document.querySelectorAll("button")].find(button => button.textContent === "History")!;
     await act(async () => history.click());
     expect(onHistory).toHaveBeenCalledTimes(1);
+    expect(history.closest('[role="group"]')?.getAttribute("aria-label")).toBe("Dashboard controls");
   });
   it("closes after choosing a relative range", async () => {
     const { trigger, onRange } = await render();

@@ -1,11 +1,12 @@
 import { MantineProvider } from "@mantine/core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError, type DashboardRecord, type VersionRecord } from "./api";
 import { HistoryDrawer } from "./history";
 import { fanoutTheme } from "../theme";
+import { panelResultsKey, variableOptionsKey } from "./query-keys";
 
 const api = vi.hoisted(() => ({ listVersions: vi.fn(), getVersion: vi.fn(), restoreVersion: vi.fn() }));
 vi.mock("./api", async (original) => ({ ...await original<typeof import("./api")>(), ...api }));
@@ -14,6 +15,7 @@ const historic = (version: number): VersionRecord => ({ dashboard: { ...record, 
 let root: Root, client: QueryClient;
 let render: (opened?: boolean) => Promise<void>;
 let scheme: "light" | "dark";
+let currentVersion: number;
 let onRestored: ReturnType<typeof vi.fn<(record: DashboardRecord) => void>>, onClose: ReturnType<typeof vi.fn<() => void>>;
 const button = (label: string) => [...document.querySelectorAll("button")].find(b => b.textContent === label)!;
 const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); };
@@ -21,6 +23,7 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: 
 
 beforeEach(() => {
   scheme = "light";
+  currentVersion = 3;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   api.listVersions.mockReset().mockResolvedValue([
@@ -33,7 +36,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   onRestored = vi.fn(); onClose = vi.fn();
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  render = async (opened = true) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={3} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); await settle(); };
+  render = async (opened = true) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); await settle(); };
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 
@@ -46,7 +49,7 @@ it.each(["light", "dark"] as const)("queries only while open and shows authors, 
   expect(document.querySelector("time")?.title).toBeTruthy();
   await act(async () => button("Version 2").click()); await settle();
   expect(document.body.textContent).toContain("Old 2"); expect(document.body.textContent).toContain("~ note.title");
-  expect(document.body.textContent?.match(/layout changed/g)).toHaveLength(1);
+  expect(document.body.textContent?.match(/Layout adjusted/g)).toHaveLength(1);
   expect(document.body.textContent).toContain("Dashboard: name");
   await act(async () => button("Spec").click());
   expect(document.body.textContent).toContain("Historical content 2");
@@ -73,8 +76,8 @@ it("aborts prior selection and closing requests and never displays a late histor
 it("submits one restore for a double click, retains the pending lock when reopened and refreshes all current caches", async () => {
   const pending = deferred<DashboardRecord>(); api.restoreVersion.mockReturnValue(pending.promise);
   client.setQueryData(["dashboard", "board"], record);
-  const panelKey = ["panels", JSON.stringify(["board", "content"])];
-  const variablesKey = ["variables", "dashboard-board", "content"];
+  const panelKey = panelResultsKey("board", record.spec, record.spec.time, {}, false);
+  const variablesKey = variableOptionsKey("dashboard-board", record.spec, record.spec.time, {});
   for (const key of [["dashboards"], panelKey, variablesKey]) client.setQueryData(key, ["stale"]);
   await render(); await act(async () => button("Version 1").click()); await settle();
   const restore = button("Restore version 1");
@@ -89,7 +92,7 @@ it("submits one restore for a double click, retains the pending lock when reopen
   expect(client.getQueryState(panelKey)?.isInvalidated).toBe(true);
   expect(client.getQueryState(variablesKey)?.isInvalidated).toBe(true);
   expect(api.listVersions.mock.calls.length).toBeGreaterThan(1);
-  expect(onRestored).toHaveBeenCalledWith(restored); expect(document.body.textContent).toContain("Restored v1 as v4");
+  expect(onRestored).toHaveBeenCalledWith(restored); expect(document.body.textContent).not.toContain("Restored v1 as v4");
 });
 
 it.each([404, 409, 500])("keeps the current view on restore failure %s and retries only after a new click", async status => {
@@ -123,4 +126,80 @@ it("uses Mantine Escape dismissal and native keyboard buttons", async () => {
   choice.focus(); expect(document.activeElement).toBe(choice);
   await act(async () => choice.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(onClose).toHaveBeenCalled();
+});
+
+it("offers a disabled Current version label and uses shared receipt layout chips", async () => {
+  await render();
+  expect(button("Current version")?.disabled).toBe(true);
+  expect(button("Restore version 3")).toBeUndefined();
+  expect([...document.querySelectorAll("[data-edit-chips] .mantine-Badge-label")].map(node => node.textContent)).toContain("Layout adjusted");
+});
+
+it("uses the receipt's Layout adjusted chip for the server layout flag", async () => {
+  await render();
+  expect([...document.querySelectorAll("[data-edit-chips] .mantine-Badge-label")].map(node => node.textContent)).toContain("Layout adjusted");
+});
+
+it("scopes escaped validation problems to the failed version and clears feedback on selection or close", async () => {
+  api.restoreVersion.mockRejectedValue(new ApiError("Invalid spec", 400, [{ path: "panels[0].query", message: "<img src=x onerror=alert(1)>", hint: "Use an available column" }]));
+  await render(); await act(async () => button("Version 1").click()); await settle();
+  await act(async () => button("Restore version 1").click()); await settle();
+  expect(document.body.textContent).toContain("Restore of version 1 failed");
+  expect(document.body.textContent).toContain("panels[0].query: <img src=x onerror=alert(1)>");
+  expect(document.body.textContent).toContain("Use an available column");
+  expect(document.querySelector("img")).toBeNull(); expect(document.body.textContent).not.toContain("Try again");
+  await act(async () => button("Version 2").click()); await settle();
+  expect(document.body.textContent).not.toContain("Invalid spec");
+  await act(async () => button("Restore version 2").click()); await settle();
+  await render(false); await render(); expect(document.body.textContent).not.toContain("Invalid spec");
+});
+
+it.each([404, 409, 500])("gives status-specific restore advice for %s and refreshes pruned history", async status => {
+  api.restoreVersion.mockRejectedValue(new ApiError("Rejected restore", status));
+  await render(); await act(async () => button("Version 1").click()); await settle();
+  const reads = api.listVersions.mock.calls.length;
+  await act(async () => button("Restore version 1").click()); await settle();
+  expect(document.body.textContent?.includes("Try again")).toBe(status === 500);
+  if (status < 500) expect(document.body.textContent).toContain("Reload history");
+  if (status === 404) expect(api.listVersions.mock.calls.length).toBeGreaterThan(reads);
+});
+
+it.each(["light", "dark"] as const)("uses the defined ok palette for success and clears it on close in %s", async theme => {
+  scheme = theme; api.restoreVersion.mockResolvedValue({ ...record, version: 4 });
+  await render(); await act(async () => button("Version 1").click()); await settle();
+  await act(async () => button("Restore version 1").click()); await settle();
+  const alert = [...document.querySelectorAll<HTMLElement>(".mantine-Alert-root")].find(node => node.textContent?.includes("Restored v1 as v4"))!;
+  expect(alert.style.getPropertyValue("--alert-bg")).toBe("var(--mantine-color-ok-light)");
+  expect(alert.style.getPropertyValue("--alert-color")).toBe("var(--mantine-color-ok-light-color)");
+  await render(false); await render(); expect(document.body.textContent).not.toContain("Restored v1 as v4");
+});
+
+it("releases restore pending when the POST responds without waiting for or refetching the old panel batch", async () => {
+  const refetch = vi.fn(() => new Promise<never>(() => {}));
+  const observer = new QueryObserver(client, { queryKey: panelResultsKey("board", record.spec, record.spec.time, {}, false), queryFn: refetch, staleTime: Infinity, initialData: [] });
+  const unsubscribe = observer.subscribe(() => {});
+  try {
+    api.restoreVersion.mockResolvedValue({ ...record, version: 4 });
+    await render(); await act(async () => button("Version 1").click()); await settle();
+    await act(async () => button("Restore version 1").click()); await settle();
+    expect(button("Restore version 1").disabled).toBe(false);
+    expect(client.isMutating()).toBe(0); expect(refetch).not.toHaveBeenCalled();
+  } finally { unsubscribe(); }
+});
+
+it("refreshes the list when the current board version changes elsewhere", async () => {
+  await render(); const reads = api.listVersions.mock.calls.length;
+  currentVersion = 4; api.listVersions.mockResolvedValue([{ version: 4, author_kind: "agent", message: "Chat restore", created_at: record.updated_at }]);
+  await render(); await settle();
+  expect(api.listVersions.mock.calls.length).toBeGreaterThan(reads);
+  expect(button("Version 4")).toBeDefined();
+});
+
+it("keeps content during the exit transition and exposes a named list with short live status", async () => {
+  await render();
+  expect(document.querySelector('[role="list"][aria-label="Saved versions"]')).not.toBeNull();
+  expect(document.querySelectorAll('[role="listitem"]')).toHaveLength(3);
+  const live = document.querySelector('[aria-live="polite"]');
+  expect(live?.textContent?.length).toBeLessThan(100);
+  await render(false); expect(document.querySelector("[data-version-history]")).not.toBeNull();
 });

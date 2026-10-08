@@ -275,10 +275,16 @@ func (s *Server) dashboardRestore(ctx context.Context, req *mcp.CallToolRequest,
 	}
 	mutation, err := s.dashboards.RestoreWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Version, agentAuthor(owner))
 	if err != nil {
+		code := ""
 		if errors.Is(err, dashboard.ErrVersionNotFound) {
+			code = dashboard.VersionNotFoundCode
+		} else if errors.Is(err, dashboard.ErrAlreadyCurrent) {
+			code = dashboard.AlreadyCurrentCode
+		}
+		if code != "" {
 			result := summary(err.Error())
 			result.IsError = true
-			return result, dashboardOutput{Error: err.Error(), ErrorCode: dashboard.VersionNotFoundCode}, nil
+			return result, dashboardOutput{Error: err.Error(), ErrorCode: code}, nil
 		}
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}

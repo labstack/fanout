@@ -39,6 +39,9 @@ func TestMCPPanicDistinguishesCommittedSave(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					if _, err := s.dashboards.Replace(t.Context(), "owner", record.ID, record.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
+						t.Fatal(err)
+					}
 					args = map[string]any{"id": record.ID, "version": 1}
 				}
 				panicValidation.armed.Store(true)
@@ -63,7 +66,7 @@ func TestMCPPanicDistinguishesCommittedSave(t *testing.T) {
 				}
 				want := 0
 				if tool == "restore_dashboard_version" {
-					want++
+					want += 2
 				}
 				if commit {
 					want++

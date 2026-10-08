@@ -2,11 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardSpec, DashboardTime, PanelResult, VarValue } from "../../../panels/types";
 import { retryPanelQuery } from "./query-policy";
-import { panelContent } from "../../../panels/content";
+import { panelResultsKey } from "./query-keys";
 import { refreshDashboard } from "./refresh";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 
 const refreshMs: Record<string, number | false> = { off: false, "10s": 10_000, "30s": 30_000, "1m": 60_000, "5m": 300_000 };
+
+export function panelResultsForDashboard(query: { queryKey: readonly unknown[] }, id: string): boolean {
+  const [kind, scope] = query.queryKey;
+  if (kind !== "panels" || typeof scope !== "string") return false;
+  try { return JSON.parse(scope)[0] === id; } catch { return false; }
+}
 
 /** One panel batch plus one annotation request per refresh for every visible panel. Results
  *  of panels scrolled out of view are kept from their last fetch. Widths are
@@ -18,7 +24,8 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   const rounded = useMemo(() => Object.fromEntries(Object.entries(widths).map(([id, w]) => [id, Math.max(100, Math.round(w / 100) * 100)])), [widths]);
   // Visibility decides which panels a refresh asks for, but is not part of
   // the key: scrolling must not refetch, and the first load asks for all.
-  const key = JSON.stringify([dashboardId, panelContent(spec), time, vars, compare]);
+  const queryKey = panelResultsKey(dashboardId, spec, time, vars, compare);
+  const key = queryKey[1];
   const ids = visible.filter((id) => spec.panels.some((panel) => panel.id === id));
   const inFlight = useRef<string[]>([]);
   const lazyBatch = useRef<{ key: string; ids: string[] } | null>(null);
@@ -31,7 +38,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   const knownEmpty = ids.length === 0 && kept.key === key && kept.receivedAt > 0;
   const canQuery = enabled && spec.panels.some((p) => p.viz !== "text");
   const query = useQuery({
-    queryKey: ["panels", key],
+    queryKey,
     queryFn: ({ signal }): Promise<Awaited<ReturnType<typeof refreshDashboard>> & {hasTimePanels: boolean}> => {
       if (knownEmpty && lazyBatch.current?.key !== key) {
         inFlight.current = [];

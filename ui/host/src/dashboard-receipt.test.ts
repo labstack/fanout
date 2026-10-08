@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
-import { changeLabel, receiptForTurn } from './dashboard-receipt';
+import { changeChips, receiptForTurn } from './dashboard-receipt';
 import { user, call, result, saved, build } from '../tests/dashboard-receipts';
 it('uses signed panel change chips',()=>{
- expect(changeLabel({panel_id:'pool',title:'Pool',kind:'added'})).toBe('+ Pool');
- expect(changeLabel({panel_id:'latency',title:'Latency',kind:'changed',fields:['thresholds']})).toBe('~ latency.thresholds');
+ expect(changeChips({changes:[{panel_id:'pool',title:'Pool',kind:'added'}],layout_changed:false})).toEqual(['+ Pool']);
+ expect(changeChips({changes:[{panel_id:'latency',title:'Latency',kind:'changed',fields:['thresholds']}],layout_changed:false})).toEqual(['~ latency.thresholds']);
 });
 it('reconstructs observed stages, corrections, timings and exact saved receipt on reload',()=>{
  const messages=build(); const receipt=receiptForTurn(messages,'u')!;
@@ -49,7 +49,7 @@ it('does not label a parallel pending or invalid panel checked when another prev
 it('keeps separate receipts across build turns and uses create chips only from the server',()=>{
  const messages=build();messages.push(user('second'),call('create','create_dashboard',{dashboard:{panels:[{id:'pool'}]}}),result('create',{dashboard:{id:'new',name:'New',version:1},receipt:{base_version:0,version:1,changes:[{panel_id:'pool',title:'<script>Pool</script>',kind:'added'}],layout_changed:false,save_check:{checked:true,elapsed_ms:20,panels:[{id:'pool',status:'ok',rows:1}]}}}));
  expect(receiptForTurn(messages,'u')?.saved?.id).toBe('board');expect(receiptForTurn(messages,'second')?.saved?.version).toBe(1);
- expect(changeLabel(receiptForTurn(messages,'second')!.saved!.receipt.changes[0])).toBe('+ <script>Pool</script>');
+ expect(changeChips(receiptForTurn(messages,'second')!.saved!.receipt)[0]).toBe('+ <script>Pool</script>');
 });
 it.each(['empty','error'])('records a correction when validation resolves into %s',status=>{
  const messages=build().slice(0,5);messages.push(call('fixed','preview_panels',{panels:[{id:'latency'}]}),result('fixed',{elapsed_ms:20,panels:[{id:'latency',status,diagnosis:'No matching events'}]}));
