@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import * as extraction from "../../../panels/keyboard";
 import { EChartCanvas } from "./echart-canvas";
+import { PanelCard } from "./panel-card";
 import { PanelFullscreen } from "./panel-fullscreen";
 import { ShortcutsHelp } from "./shortcuts-help";
 import { pointSelection } from "../../../panels/interaction";
@@ -121,7 +122,7 @@ it("keeps the plot height identical when unfocused, focused and range-pending",a
   const overlay=plot.querySelector<HTMLElement>('[data-chart-overlay]')!;
   expect(overlay).not.toBeNull();expect(getComputedStyle(overlay).position).toBe('absolute');
   for(const element of overlay.querySelectorAll<HTMLElement>('[data-chart-hint],[data-chart-readout],[data-chart-range-bar]'))expect(getComputedStyle(element).position).toBe('absolute');
-  expect(overlay.querySelector('[data-chart-hint]')).not.toBeNull();expect(overlay.querySelector('[data-chart-readout]')).not.toBeNull();expect(overlay.querySelector('[data-chart-range-bar]')).not.toBeNull();
+  expect(overlay.querySelector('[data-chart-hint]')).toBeNull();expect(overlay.querySelector('[data-chart-readout]')).toBeNull();expect(overlay.querySelector('[data-chart-range-bar]')).not.toBeNull();
 });
 it("draws and updates the pending range with the native mouse brush band without zooming",async()=>{
   const view=await mount(),plot=await view.focus();
@@ -153,4 +154,35 @@ it.each([['2026-10-08','18:46:00 – 18:48:30 UTC · 2m 30s'],['2026-10-07','202
   expect(range?.textContent).toBe(label);expect(range.title).toBe(new Date(from).toISOString()+' – '+new Date(from+150000).toISOString());
   expect(view.el.textContent).not.toContain('Paused while selecting');
   expect([...view.el.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['Zoom to range','Cancel']);
+});
+
+it("replaces the subtitle interaction hint without covering the legend and uses only the native point tooltip",async()=>{
+  const el=document.createElement("div");document.body.append(el);const root=createRoot(el);cleanups.push(()=>root.unmount());
+  const panel:Panel={id:"p",title:"Requests",viz:"timeseries",query:{from:"spans"},drill:"traces"};
+  const result={id:"p",status:"ok" as const,elapsed_ms:0,from_ms:1000,to_ms:5000,interval:"1s",frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[1000,2000],[1,2]],rows:2}};
+  await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title="Requests" result={result} loading={false} height={288} group="g" editing={false} agentAvailable={false} onZoom={vi.fn()}/></MantineProvider>));
+  const subtitle=el.querySelector<HTMLElement>('[data-panel-subtitle]')!;
+  expect(subtitle.textContent).toContain('click for exemplar traces');
+  const plot=el.querySelector<HTMLElement>('[data-chart-plot]')!;await act(async()=>plot.focus());
+  const hint=el.querySelector<HTMLElement>('[data-chart-hint]')!;
+  expect(subtitle.contains(hint)).toBe(true);expect(hint.textContent).toContain('←→ points · ↑↓ series · Enter drill · Shift+←→ range');
+  expect(plot.querySelector('[data-chart-hint]')).toBeNull();expect(plot.querySelector('[data-chart-readout]')).toBeNull();
+  await key(plot,'ArrowRight');expect(chart.dispatchAction).toHaveBeenCalledWith({type:'showTip',seriesIndex:0,dataIndex:1});
+  expect(plot.querySelector('[aria-live]')?.textContent).toContain('1970-01-01T00:00:02.000Z');
+  await act(async()=>plot.blur());expect(subtitle.textContent).toContain('click for exemplar traces');expect(el.querySelector('[data-chart-hint]')).toBeNull();
+});
+it("reserves the measured range bar height below axis labels only while pending, including wrapping and resize",async()=>{
+  const observers:{callback:ResizeObserverCallback;elements:Element[]}[]=[];
+  vi.stubGlobal('ResizeObserver',class{record:{callback:ResizeObserverCallback;elements:Element[]};constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);}observe(el:Element){this.record.elements.push(el);}disconnect(){}});
+  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){return {height:this.hasAttribute('data-chart-range-bar')?28:200,width:500,x:0,y:0,top:0,left:0,bottom:200,right:500,toJSON(){}};});
+  const next={...option,grid:{top:28,bottom:8,containLabel:true}};
+  const view=await mount(next),plot=await view.focus();
+  const grid=()=>chart.setOption.mock.calls.filter(([option])=>option.grid).at(-1)?.[0].grid;
+  expect(grid().bottom).toBe(8);await key(plot,'ArrowRight',{shiftKey:true});
+  const bar=view.el.querySelector<HTMLElement>('[data-chart-range-bar]')!;
+  expect(grid().bottom).toBe(36);expect(plot.style.height).toBe('200px');
+  const observer=observers.find(o=>o.elements.includes(bar))!;expect(observer).toBeDefined();
+  await act(async()=>observer.callback([{target:bar,contentRect:{height:56},borderBoxSize:[{blockSize:56}]} as unknown as ResizeObserverEntry],{} as ResizeObserver));
+  expect(grid().bottom).toBe(64);
+  await key(plot,'Escape');expect(grid().bottom).toBe(8);expect(plot.style.height).toBe('200px');
 });

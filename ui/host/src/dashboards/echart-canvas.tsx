@@ -5,7 +5,7 @@ import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, Gri
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChartSize } from "../../../panels/compile";
+import { layoutEndLabels, type ChartSize } from "../../../panels/compile";
 import { keyboardPoints, type KeyboardPoint, type PointEvent } from "../../../panels/keyboard";
 import { formatValue } from "../../../panels/units";
 import { ChartKeyboard } from "./chart-keyboard";
@@ -83,6 +83,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   zoom.current = onZoom;
   const zoomEnabled = Boolean(onZoom);
   const brushRange = useRef<{from: number; to: number} | undefined>(undefined);
+  const rangeBarHeight = useRef(0);
   const [rangeReset, setRangeReset] = useState(0);
   const paintRange = useCallback(() => {
     const range = brushRange.current;
@@ -96,6 +97,10 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   }, [paintRange]);
   const description = zoomEnabled ? `${label} Brush across the chart to zoom to that range.` : label;
   const apply = useRef<() => void>(() => undefined);
+  const reserveRangeBar = useCallback((height: number) => {
+    if (height === rangeBarHeight.current) return;
+    rangeBarHeight.current = height; apply.current();
+  }, []);
   const auditInput = useRef<{ compiled: EChartsCoreOption; size: ChartSize } | null>(null);
   const context = useRef<CanvasRenderingContext2D | null | undefined>(undefined);
   const responsive = useRef(false);
@@ -105,7 +110,11 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const ctx = context.current;
     const measureText = ctx ? (text: string, font: string) => { ctx.font = font; return ctx.measureText(text).width; } : undefined;
     const size = { measureText, width: ref.current?.clientWidth ?? 0, height: ref.current?.clientHeight ?? 0 };
-    let compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize(size) : option;
+    let compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize({...size, height: Math.max(1, size.height - rangeBarHeight.current)}) : option;
+    if (rangeBarHeight.current && compiled.grid && !Array.isArray(compiled.grid)) {
+      const grid = compiled.grid as {bottom?: number};
+      compiled = {...compiled, grid: {...grid, bottom: (typeof grid.bottom === "number" ? grid.bottom : 8) + rangeBarHeight.current}};
+    }
     const series = (compiled.series ?? []) as { name?: string }[];
     const names = new Set(series.map(item => item.name));
     const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
@@ -116,8 +125,9 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { toolbox: { show: false }, brush: { xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
     // ECharts containment can shrink the nominal plot. Recompute numeric tick
     // density once from the native rect, including any annotation/legend band.
-    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{height:number}}}}};
-    const plotHeight=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect().height;
+    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number}}}}};
+    const rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
+    const plotHeight=rect?.height;
     if(plotHeight && compiled.yAxis) {
       const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
       const updated=axes.map(axis=>adaptValueAxis(axis,plotHeight));
@@ -126,6 +136,14 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
         chart.current?.setOption({yAxis:compiled.yAxis});
       }
     }
+    if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
+      compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
+        const pixel = chart.current?.convertToPixel({seriesIndex}, value);
+        return Array.isArray(pixel) ? pixel[1] : NaN;
+      });
+      chart.current?.setOption({series: compiled.series});
+    }
+    if (highlighted.current) highlight(highlighted.current);
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
     if (zoom.current && brushRange.current) paintRange();
     displayedRef.current = compiled;
@@ -189,7 +207,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const canvas = <div ref={ref} role="img" aria-label={description} aria-hidden={keyboard ? true : undefined} style={{ height: keyboard ? "100%" : height, position: keyboard ? "absolute" : undefined, inset: keyboard ? 0 : undefined, zIndex: keyboard ? 0 : undefined, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
   const series = (Array.isArray(option.series) ? option.series : option.series ? [option.series] : []) as DisplaySeries[];
   const overview = label + ": " + series.length + " series" + (keyboard?.bounds ? "; " + new Date(keyboard.bounds.from).toISOString() + " – " + new Date(keyboard.bounds.to).toISOString() : "");
-  return keyboard ? <ChartKeyboard height={height} rangeReset={rangeReset} onRangeChange={previewRange} points={points} label={overview} summary={summary} onClick={onClick} canSelect={keyboard.canSelect} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow}
+  return keyboard ? <ChartKeyboard height={height} rangeReset={rangeReset} onRangeChange={previewRange} onRangeBarHeight={reserveRangeBar} points={points} label={overview} summary={summary} onClick={onClick} canSelect={keyboard.canSelect} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow}
     onRangePending={keyboard.onRangePending} onActiveChange={next => {
       activeRef.current = next; setActive(next); if (next) setDisplayed(displayedRef.current);
     }}>{canvas}</ChartKeyboard> : canvas;

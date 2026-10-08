@@ -41,15 +41,15 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
       </Menu.Dropdown>
     </Menu>
     <Tooltip label="Zoom out"><Button variant="default" size="sm" px={10} aria-label="Zoom out" onClick={onZoomOut}><MagnifyingGlassMinus size={15} /></Button></Tooltip>
-    <Group data-refresh-controls gap={4} wrap="nowrap" style={{position: "relative"}}>
+    <Group data-refresh-controls gap={4} wrap="nowrap">
       <Tooltip label={updatedAt ? `Updated ${exactTimestamp(updatedAt)}` : "Refresh now"}><Button variant="default" size="sm" px={10} aria-label="Refresh now" loading={fetching} onClick={onRefreshNow}><ArrowClockwise size={15} /></Button></Tooltip>
       <SegmentedControl size="xs" aria-label="Auto refresh" value={refresh} onChange={onRefresh} data={refreshes.map((r) => ({ value: r, label: r === "off" ? "Off" : r }))} />
-      {selecting && <Text data-range-paused size="xs" c="dimmed" role="status" style={{position: "absolute", top: "100%", left: 0, whiteSpace: "nowrap", zIndex: 1, pointerEvents: "none", background: "color-mix(in srgb, var(--mantine-color-body) 92%, transparent)"}}>Paused while selecting</Text>}
     </Group>
     <Switch size="sm" label="Compare with previous period" checked={compare} onChange={(e) => onCompare(e.currentTarget.checked)} />
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>
     <Button variant="default" size="sm" leftSection={<ClockCounterClockwise size={15} />} onClick={onHistory}>History</Button>
     {onShortcuts && <ShortcutButton onClick={onShortcuts}/>}
     {updatedAt && <Text size="xs" c="dimmed" visibleFrom="md">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(updatedAt)}</Text>}
+    {selecting && <Text data-range-paused size="xs" c="dimmed" role="status">Paused while selecting</Text>}
   </Group>;
 }

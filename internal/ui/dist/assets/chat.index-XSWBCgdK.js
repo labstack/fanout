@@ -1,0 +1,1 @@
+import{t as e}from"./chat-B0voALoE.js";var t=e;export{t as component};

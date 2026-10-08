@@ -1,5 +1,5 @@
 import { Box, Button, Group, Text, VisuallyHidden } from "@mantine/core";
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { duration } from "../../../format";
 import type { KeyboardPoint, PointEvent } from "../../../panels/keyboard";
 
@@ -23,12 +23,15 @@ function rangeLabel(range: Range): string {
 }
 const surface = {background: "color-mix(in srgb, var(--mantine-color-body) 92%, transparent)", border: "1px solid var(--mantine-color-default-border)", borderRadius: "var(--mantine-radius-sm)", padding: "2px 6px"};
 
+// Panel chrome owns the visual hint; standalone charts retain its accessible description.
+export const ChartHintContext = createContext<{id: string; setHint(hint?: string): void} | undefined>(undefined);
+
 /** A single plot tab stop; keyboard chrome never participates in plot layout. */
-export function ChartKeyboard({ points, label, summary, children, onClick, canSelect, onHighlight, onActiveChange, onRangePending, onRangeChange, rangeReset, height = "100%", onZoom, bounds, pointWindow }: {
+export function ChartKeyboard({ points, label, summary, children, onClick, canSelect, onHighlight, onActiveChange, onRangePending, onRangeChange, onRangeBarHeight, rangeReset, height = "100%", onZoom, bounds, pointWindow }: {
   points: readonly KeyboardPoint[]; label: string; summary(point: KeyboardPoint): string; children?: ReactNode;
   onClick?(event: PointEvent): void; canSelect?(event: PointEvent): boolean; onHighlight(point?: KeyboardPoint): void;
   onActiveChange?(active: boolean): void; onRangePending?(pending: boolean): void;
-  onRangeChange?(range?: Window): void; rangeReset?: number; height?: number | string;
+  onRangeChange?(range?: Window): void; onRangeBarHeight?(height: number): void; rangeReset?: number; height?: number | string;
   onZoom?(from: number, to: number): void; bounds?: {from: number; to: number};
   pointWindow?(point: KeyboardPoint): {from: number; to: number} | undefined;
 }) {
@@ -37,8 +40,10 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
   const [pending, setPending] = useState<Range | null>(null);
   const plot = useRef<HTMLDivElement>(null);
   const hintId = useId();
-  const callbacks = useRef({onHighlight, onActiveChange, onRangePending, onRangeChange});
-  callbacks.current = {onHighlight, onActiveChange, onRangePending, onRangeChange};
+  const chrome = useContext(ChartHintContext);
+  const rangeBar = useRef<HTMLDivElement>(null);
+  const callbacks = useRef({onHighlight, onActiveChange, onRangePending, onRangeChange, onRangeBarHeight});
+  callbacks.current = {onHighlight, onActiveChange, onRangePending, onRangeChange, onRangeBarHeight};
   const identities = useMemo(() => new Map(points.map(point => [pointIdentity(point), point])), [points]);
   const current = selectedKey ? identities.get(selectedKey) ?? points[0] : points[0];
   const rangeAvailable = Boolean(onZoom && bounds && Number.isFinite(bounds.from) && Number.isFinite(bounds.to) && bounds.from < bounds.to);
@@ -88,7 +93,24 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
   };
   const cancel = () => { setPending(null); plot.current?.focus(); };
   const hint = rangeAvailable ? "←→ points · ↑↓ series · Enter drill · Shift+←→ range" : "←→ points · ↑↓ series · Enter drill";
-  return <Box ref={plot} data-chart-plot tabIndex={0} role="group" aria-label={label} aria-describedby={focused ? hintId : undefined}
+  useLayoutEffect(() => {
+    chrome?.setHint(focused ? hint : undefined);
+    return () => chrome?.setHint(undefined);
+  }, [chrome, focused, hint]);
+  useLayoutEffect(() => {
+    const bar = rangeBar.current;
+    if (!bar) return;
+    callbacks.current.onRangeBarHeight?.(bar.getBoundingClientRect().height);
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const style = getComputedStyle(bar);
+      const extra = [style.paddingTop, style.paddingBottom, style.borderTopWidth, style.borderBottomWidth].reduce((sum, value) => sum + (parseFloat(value) || 0), 0);
+      callbacks.current.onRangeBarHeight?.(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height + extra);
+    });
+    observer.observe(bar);
+    return () => { observer.disconnect(); callbacks.current.onRangeBarHeight?.(0); };
+  }, [Boolean(pending && rangeAvailable)]);
+  return <Box ref={plot} data-chart-plot tabIndex={0} role="group" aria-label={label} aria-describedby={focused ? chrome?.id ?? hintId : undefined}
     data-mantine-stop-propagation={pending ? "true" : undefined} className="chart-keyboard-point"
     style={{position: "relative", height, width: "100%", flex: "1 1 auto", minHeight: 0, minWidth: 0}}
     onFocus={event => { callbacks.current.onActiveChange?.(true); setFocused(event.target === event.currentTarget); }}
@@ -117,11 +139,7 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     }}>
     {children}
     <Box data-chart-overlay style={{position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", overflow: "hidden"}}>
-      {focused && <>
-        <Text data-chart-hint id={hintId} aria-hidden="true" title={hint} truncate size="xs" c="dimmed" style={{...surface, position: "absolute", top: 4, left: 4, maxWidth: "calc(100% - 8px)"}}>{hint}</Text>
-        {current && <Text data-chart-readout aria-hidden="true" title={summary(current)} size="xs" truncate style={{...surface, position: "absolute", top: 30, right: 4, maxWidth: "calc(100% - 8px)"}}>{summary(current)}</Text>}
-      </>}
-      {pending && rangeAvailable && <Group data-chart-range-bar gap={6} style={{...surface, position: "absolute", bottom: 4, left: 4, right: 4, maxHeight: "100%", overflow: "auto", pointerEvents: "auto"}}>
+      {pending && rangeAvailable && <Group ref={rangeBar} data-chart-range-bar gap={6} style={{...surface, position: "absolute", bottom: 4, left: 4, right: 4, maxHeight: "100%", overflow: "auto", pointerEvents: "auto"}}>
         <Text data-chart-range-label size="xs" title={pending.from + " – " + pending.to} truncate style={{flex: "1 1 140px", minWidth: 0}}>{rangeLabel(pending)}</Text>
         <Button size="compact-xs" data-mantine-stop-propagation="true" onClick={() => {
           onZoom!(Date.parse(pending.from), Date.parse(pending.to)); cancel();
@@ -129,6 +147,7 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
         <Button size="compact-xs" variant="subtle" data-mantine-stop-propagation="true" onClick={cancel}>Cancel</Button>
       </Group>}
     </Box>
+    {!chrome && focused && <VisuallyHidden id={hintId}>{hint}</VisuallyHidden>}
     <VisuallyHidden aria-live="polite" aria-atomic="true">{focused && current ? summary(current) : ""}</VisuallyHidden>
   </Box>;
 }

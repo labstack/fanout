@@ -1,6 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { timeseriesOption, chartThemeFor } from "../../../panels/compile";
 import { EChartCanvas } from "./echart-canvas";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn(), registered: [] as unknown[], connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
@@ -179,4 +180,21 @@ it("keeps nice duration intervals when adapting to native plot height",async()=>
  try {await act(async()=>root.render(<EChartCanvas option={{yAxis:{type:"value",fanout_unit:"ms",min:0,max:90000,interval:50000,splitNumber:2,axisLabel:{formatter:(v:number)=>v+"ms"}}}} height={800} label="Latency"/>));
  const axis=instance.setOption.mock.lastCall![0].yAxis;expect(axis.interval).toBe(10000);expect(axis.splitNumber).toBe(9);
  }finally {await act(async()=>root.unmount());container.remove();}
+});
+
+it.each([120,170,400,16])("bounds native end labels by priority in a %ipx grid after containment",async(height)=>{
+ const instance=fresh();const top=40;
+ const pixel=(index:number)=>top+height*(.5+index*.01);
+ Object.assign(instance,{getModel:()=>({getComponent:()=>({coordinateSystem:{getRect:()=>({y:top,height})}})}),convertToPixel:({seriesIndex}:{seriesIndex:number})=>[500,pixel(seriesIndex)]});
+ const option=timeseriesOption({id:"p",title:"Latency",viz:"timeseries"},{id:"p",status:"ok",elapsed_ms:0,frame:{columns:[{name:"time",type:"time",role:"time"},...["p50","p90","p99"].map(name=>({name,type:"number" as const,role:"measure" as const}))],values:[[0,1000],[900,900],[901,901],[902,902]],rows:2}},chartThemeFor(false),{width:500,height:800});
+ const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+ try {
+  await act(async()=>root.render(<EChartCanvas option={option} height={height+80} label="Latency"/>));
+  const lines=instance.setOption.mock.calls.filter(([o])=>o.series).at(-1)![0].series;
+  const labels=lines.flatMap((line:any,index:number)=>line.endLabel.show?[pixel(index)+line.labelLayout.dy]:[]);
+  expect(labels.length).toBe(height===16?1:3);expect(lines[0].endLabel.show).toBe(true);
+  for(const y of labels){expect(y-8).toBeGreaterThanOrEqual(top);expect(y+8).toBeLessThanOrEqual(top+height);}
+  for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++)expect(Math.abs(labels[i]-labels[j])).toBeGreaterThanOrEqual(16);
+  expect(option.legend).toMatchObject({show:true});
+ } finally {await act(async()=>root.unmount());container.remove();}
 });

@@ -13,7 +13,7 @@ describe("timeseries end labels", () => {
     for (const series of option.series as Series[]) {
       expect(series.lineStyle.width).toBe(2); expect(series.showSymbol).toBe(false);
       expect(series.endLabel).toMatchObject({ show: true, color: theme.muted, fontSize: 12, formatter: "{a}" });
-      expect(series.labelLayout).toEqual({ moveOverlap: "shiftY", hideOverlap: true });
+      expect(series.labelLayout).toEqual({ dy: expect.any(Number), hideOverlap: true });
       expect(series.endLabel).toMatchObject({ lineHeight: 14, padding: [1, 0] });
     }
     expect((option.series as Series[])[0].markLine.data[0].label).toMatchObject({ formatter: "p99 budget 1.5 s", position: "insideStartTop", fontSize: 12 });
@@ -41,7 +41,7 @@ it("reserves the measured longest label lane for three endpoints within two perc
  const clustered={...result,frame:{...result.frame!,values:[[0,3599999],[900,900],[901,901],[902,902]]}};
  const o=timeseriesOption(panel,clustered,chartThemeFor(false),{width:1400,height:800,measureText:()=>120}) as any;
  expect(o.grid.right).toBe(156);
- for(const line of o.series){expect(line.endLabel.width).toBe(132);expect(line.endLabel.lineHeight).toBe(14);expect(line.labelLayout).toEqual({moveOverlap:"shiftY",hideOverlap:true});}
+ for(const line of o.series){expect(line.endLabel.width).toBe(132);expect(line.endLabel.lineHeight).toBe(14);expect(line.labelLayout).toEqual({dy:expect.any(Number),hideOverlap:true});}
  expect(o.legend.show).toBe(true);
 });
 
@@ -63,4 +63,20 @@ it.each(["p50 latency", "a".repeat(24), "a".repeat(30)])("keeps end-label metric
 it("drops lower-priority end labels when one padded line fits and retains the legend",()=>{
  const o=timeseriesOption(panel,result,chartThemeFor(false),{width:1400,height:68}) as any;
  expect(o.series.map((s:any)=>s.endLabel.show)).toEqual([true,false,false]);expect(o.legend.show).toBe(true);
+});
+
+it.each([120,170,400])("bounds clustered end labels inside a %ipx plot without collisions",height=>{
+ const clustered={...result,frame:{...result.frame!,values:[[0,3599999],[900,900],[901,901],[902,902]]}};
+ // At this width the legend consumes 22px, axis labels and bottom another 30px.
+ const o=timeseriesOption({...panel,thresholds:[]},clustered,chartThemeFor(false),{width:1400,height:height+52}) as any;
+ const labels=o.series.filter((s:any)=>s.endLabel.show).map((s:any)=>({y:o.grid.top+height*(1-s.data.at(-1)[1]/o.yAxis.max)+s.labelLayout.dy,height:s.endLabel.lineHeight+2}));
+ expect(labels.length).toBeGreaterThan(0);expect(o.legend.show).toBe(true);
+ for(const label of labels){expect(label.y-label.height/2).toBeGreaterThanOrEqual(o.grid.top);expect(label.y+label.height/2).toBeLessThanOrEqual(o.grid.top+height);}
+ for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++)expect(Math.abs(labels[i].y-labels[j].y)).toBeGreaterThanOrEqual(16);
+});
+
+it("retains bounded direct labels on logarithmic axes without explicit extents",()=>{
+ const o=timeseriesOption({...panel,options:{scale:"log"}},result,chartThemeFor(false),{width:500,height:248}) as any;
+ expect(o.series[0].endLabel.show).toBe(true);expect(Number.isFinite(o.series[0].labelLayout.dy)).toBe(true);
+ expect(o.legend.show).toBe(true);
 });

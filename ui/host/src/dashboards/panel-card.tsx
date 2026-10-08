@@ -4,10 +4,11 @@ import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/ty
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { logConstants } from "../../../panels/rows";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState, type Ref } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
+import { ChartHintContext } from "./chart-keyboard";
 import { Viz } from "./viz";
 
 export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRemove, onDuplicate, staleAt, traceLinks, suspended = false, menuRef }: {
@@ -18,6 +19,9 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
   zoomed?: boolean; onZoomReset?: () => void; onRangePending?(pending: boolean): void;
 }) {
+  const hintId = useId();
+  const [keyboardHint, setKeyboardHint] = useState<string>();
+  const chartHint = useMemo(() => ({id: hintId, setHint: setKeyboardHint}), [hintId]);
   const dark = useComputedColorScheme("light") === "dark";
   const card = useRef<HTMLDivElement>(null);
   const [width,setWidth] = useState(0);
@@ -46,6 +50,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const constants = logConstants(panel,result?.frame);
   const source = constants.length ? [...new Set(constants.map(c => c.value))].join(" · ") : panel.sql ? "sql" : panel.query?.from ?? (panel.viz === "service_map" || panel.viz === "health" ? "spans" : panel.viz === "log_patterns" ? "logs" : "spec");
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${source}${hint ? ` · ${hint}` : ""}`;
+  const focusedSubtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${source} · ${keyboardHint}`;
   const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
@@ -74,7 +79,11 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={small}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
-        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={small ? {overflowWrap:"anywhere"} : undefined}>{subtitle}</Text>
+        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={keyboardHint ? focusedSubtitle : subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
+            {/* Preserve the subtitle's measured line box, including narrow cards. */}
+            <span aria-hidden={keyboardHint ? true : undefined} style={{visibility: keyboardHint ? "hidden" : undefined}}>{subtitle}</span>
+            {keyboardHint && <span data-chart-hint id={hintId} style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{focusedSubtitle}</span>}
+          </Text>
           {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={11} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
         </Box>
         {panelTimeLabel(panel) && <Text size="xs" c="dimmed" role="status">{panelTimeLabel(panel)}</Text>}
@@ -118,7 +127,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
-        : <Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} />}
+        : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, background: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}

@@ -18,6 +18,51 @@ export function chartThemeFor(dark: boolean): ChartTheme {
 
 type Option = Record<string, unknown>;
 
+/** Place padded end labels by authored priority in the plot, never the canvas.
+ * A fixed dy survives native line animations; unrestricted shiftY does not
+ * constrain its labels to the grid. Labels without a free slot use the legend. */
+export function layoutEndLabels<T extends Option>(option: T, rect: {y: number; height: number}, project?: (seriesIndex: number, value: number[]) => number): T {
+  if (!Array.isArray(option.series)) return option;
+  const sourceSeries = option.series;
+  const axes = (Array.isArray(option.yAxis) ? option.yAxis : [option.yAxis]) as {min?: number; max?: number; type?: string}[];
+  const occupied: {y: number; half: number}[] = [];
+  const series = sourceSeries.map((line: Record<string, unknown>, index: number) => {
+    const endLabel = line.endLabel as {show?: boolean; lineHeight?: number} | undefined;
+    if (!endLabel?.show || !Array.isArray(line.data)) return line;
+    let last: number[] | undefined;
+    for (let i = line.data.length - 1; i >= 0; i--) {
+      const point = line.data[i];
+      if (Array.isArray(point) && typeof point[1] === "number" && Number.isFinite(point[1])) { last = point; break; }
+    }
+    const axis = axes[Number(line.yAxisIndex ?? 0)];
+    if (!last || !axis) return {...line, endLabel: {...endLabel, show: false}};
+    const transform = axis.type === "log" ? Math.log : (value: number) => value;
+    // Log axes infer their extents in ECharts; use positive data before the
+    // native projection is available, rather than taking log(0).
+    let lower = axis.min ?? Infinity, upper = axis.max ?? 0;
+    if (axis.type === "log" && (axis.min === undefined || axis.max === undefined)) {
+      for (const item of sourceSeries) if (Number(item.yAxisIndex ?? 0) === Number(line.yAxisIndex ?? 0) && Array.isArray(item.data)) {
+        for (const point of item.data) if (Array.isArray(point) && typeof point[1] === "number" && Number.isFinite(point[1]) && point[1] > 0) {
+          if (axis.min === undefined) lower = Math.min(lower, point[1]);
+          if (axis.max === undefined) upper = Math.max(upper, point[1]);
+        }
+      }
+    }
+    if (!Number.isFinite(lower)) lower = 1;
+    const min = transform(axis.type === "log" ? lower : axis.min ?? 0);
+    const max = transform(axis.type === "log" ? Math.max(upper, lower * 1.01) : axis.max ?? 1);
+    const native = project?.(index, last);
+    const desired = Number.isFinite(native) ? native! : rect.y + rect.height * (1 - (transform(last[1]) - min) / (max - min));
+    const half = ((endLabel.lineHeight ?? 14) + 2) / 2;
+    const candidates = [Math.max(rect.y + half, Math.min(rect.y + rect.height - half, desired)), ...occupied.flatMap(label => [label.y - label.half - half, label.y + label.half + half])];
+    const y = candidates.filter(y => Number.isFinite(y) && y - half >= rect.y && y + half <= rect.y + rect.height && occupied.every(label => Math.abs(label.y - y) >= label.half + half)).sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired))[0];
+    if (y === undefined) return {...line, endLabel: {...endLabel, show: false}};
+    occupied.push({y, half});
+    return {...line, labelLayout: {dy: y - desired, hideOverlap: true}};
+  });
+  return {...option, series};
+}
+
 const colorFor = (name: string, index: number, theme: ChartTheme) => (isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark));
 
 function chartSeries(frame: Frame, panel: Panel) {
@@ -141,7 +186,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     return valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, plotHeight);
   });
   const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
-  return {
+  return layoutEndLabels({
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
     legend: legendLayout.option,
@@ -150,7 +195,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     yAxis: axes.length === 1 ? axes[0] : axes,
     series: [...lines, ...previous],
     graphic: hiddenSeriesNote(visible.hidden, theme.muted),
-  };
+  }, {y: legendLayout.top, height: plotHeight});
 }
 
 /** Horizontal bars sorted by the server, value labels at the bar end. */
