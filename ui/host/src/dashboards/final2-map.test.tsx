@@ -180,3 +180,44 @@ it("removes service-map collector instrumentation in production", async () => {
     }
   } finally { vi.unstubAllEnvs(); }
 });
+
+const demoNames = ["frontend-proxy", "frontend", "load-generator", "cart", "checkout", "payment", "shipping", "quote", "currency", "product-catalog", "recommendation", "ad", "email", "accounting", "fraud-detection", "kafka", "cart-cache", "checkout-db", "image-provider", "otelcol-contrib"];
+function namedFanout(n: number, metric = 3600, error = 0): Frame {
+  const f = fanout(n, metric, error);
+  const names = Array.from({length:n}, (_, i) => i === 0 ? "frontend-proxy" : `${demoNames[i % demoNames.length]}-${i}`);
+  for (const column of ["service", "caller", "callee"]) {
+    const index = f.columns.findIndex(c => c.name === column);
+    f.values[index] = f.values[index].map(value => typeof value === "string" && value.startsWith("svc-") ? names[Number(value.slice(4))] : value);
+  }
+  return f;
+}
+it.each([[30, 21], [12, 9]])("final4 keeps realistic-name metrics on %s-service fan-out above baseline %s", async (n, minimum) => {
+  const {host, viewport, render, resize} = await mount(n, namedFanout(n));
+  await resize(1440, 300);
+  expect(viewport.dataset.cardMode).toBe("compact");
+  const shown = () => [...host.querySelectorAll<HTMLElement>("[data-service-metric]")].filter(el => el.style.display !== "none" && el.textContent).length;
+  const count = calls.layout.mock.calls.length;
+  const positions = [...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width]);
+  for (const [metric, error] of [[3600, 0], [360000, 12.3], [360000000, .0004], [3600000000000, 100]] as const) {
+    await render(namedFanout(n, metric, error));
+    console.log(`final4 realistic fan-out n=${n}: ${shown()}/${n} metrics`);
+    expect(shown()).toBeGreaterThanOrEqual(minimum);
+    expect(calls.layout).toHaveBeenCalledTimes(count);
+    expect([...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width])).toEqual(positions);
+  }
+});
+it.each([
+  [0, 0, "0/s"], [-1, 0, "0/s"], [1e-300, 0, "<0.01/s"], [999999, 0, "999K/s"], [1e300, 0, "999K/s"],
+  [1, .0004, "0.1% err"], [1, 99.9, "99.9% err"], [1, 100, "100% err"], [1, 1e300, "100% err"],
+])("final4 bounds card formats rate=%s error=%s", (rate, error, expected) => {
+  const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
+  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:300,scale:1,compact:true});
+  expect(labels.metric).toBe(expected);
+  expect(labels.metric.length).toBeLessThanOrEqual(9);
+});
+
+it("final4 preserves zero error in the full-card metric pair", () => {
+  const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
+  const labels = mapLayout.serviceCardLabels({...node, error_rate:0}, {width:400,scale:1,compact:false});
+  expect(labels.metric).toContain("0% err");
+});

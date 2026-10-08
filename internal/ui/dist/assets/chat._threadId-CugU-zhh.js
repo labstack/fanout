@@ -1,0 +1,1 @@
+import{t as e}from"./chat-ERtVmu3Z.js";var t=e;export{t as component};

@@ -195,12 +195,14 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
 }
 
 export const nodeMetrics = (n: ServiceNode) => `${formatValue("per_second", n.request_rate)} · ${formatValue("percent", n.error_rate)} err · ${formatValue("ms", n.p95_ms)} p95`;
-const shortFormat = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 2, notation: "compact", useGrouping: false });
 const shortNumber = (value: number | null): string => {
   if (value === null || !Number.isFinite(value)) return "—";
-  const plain = shortFormat.format(value), scientific = value.toExponential(1).replace(/\.0e/, "e").replace("e+", "e");
-  return scientific.length < plain.length ? scientific : plain;
+  const bounded = clamp(value, 0, 999000);
+  if (bounded > 0 && bounded < .01) return "<0.01";
+  if (bounded >= 1000) return `${Math.min(999, Math.round(bounded / 1000))}K`;
+  return String(Number(bounded.toFixed(bounded < 1 ? 2 : bounded < 10 ? 1 : 0)));
 };
+const shortError = (value: number | null): string => value === null || !Number.isFinite(value) ? "— err" : `${Number((value > 0 ? clamp(value, .1, 100) : 0).toFixed(1))}% err`;
 const shortDuration = (value: number | null) => value === null ? "—" : Number(value.toPrecision(2)) >= 1000 ? `${shortNumber(value / 1000)}s` : `${shortNumber(value)}ms`;
 
 const textMeasure: NonNullable<ChartSize["measureText"]> = (text,font)=>Array.from(text).length*Number(font.match(/([\d.]+)px/)?.[1]??11)*.6;
@@ -211,17 +213,17 @@ export function serviceCardLabels(n: ServiceNode, {width,scale,compact,measureTe
   const nameSize=Math.max(12,Math.ceil(1100/scale)/100),metricSize=Math.ceil(1100/scale)/100;
   const measure=measureText??textMeasure,nameFont=`600 ${nameSize}px ${fonts.display}`,metricFont=`${metricSize}px ${fonts.display}`;
   const name=protectedName(n.id),available=Math.max(0,width-14),glyph=measure(healthGlyph[n.health]??"○",nameFont);
-  const rate=`${shortNumber(n.request_rate)}/s`,error=`${shortNumber(n.error_rate)}${n.error_rate===null?"":"%"} err`;
-  const key=n.error_rate?error:rate,pair=`${rate} · ${error}`,all=`${pair} · p95 ${shortDuration(n.p95_ms)}`;
+  const rate=`${shortNumber(n.request_rate)}/s`,error=shortError(n.error_rate);
+  const key=n.error_rate !== null && n.error_rate > 0 ? error : rate,pair=`${rate} · ${error}`,all=`${pair} · p95 ${shortDuration(n.p95_ms)}`;
   const metric=compact?(measure(name,nameFont)+glyph+8+measure(key,metricFont)<=available?key:""):measure(all,metricFont)<=available?all:measure(pair,metricFont)<=available?pair:key;
   const metricWidth=compact?measure(metric,metricFont):available;
   const nameWidth=Math.max(0,available-glyph-4-(compact&&metric?metricWidth+4:0));
-  return {name,metric,nameSize,metricSize,nameWidth,metricWidth};
+  return {name,metric,nameSize,metricSize,nameWidth};
 }
 
 // Per measurement context (and thus font load generation), reserve the widest
-// short-number form instead of measuring a live value. IEEE doubles need at
-// most three exponent digits; shortNumber uses two significant digits.
+// bounded card format instead of measuring a live value. The widest error
+// label is nine monospace characters; rates are capped at 999K/s.
 const slotWidths = new WeakMap<NonNullable<ChartSize["measureText"]>, Map<string, number>>();
 function fixedSlotWidth(measure: NonNullable<ChartSize["measureText"]>, font: string, metric: boolean) {
   let cache = slotWidths.get(measure);
@@ -230,9 +232,7 @@ function fixedSlotWidth(measure: NonNullable<ChartSize["measureText"]>, font: st
   let width = cache.get(key);
   if (width === undefined) {
     const templates = metric ? Array.from({length:10}, (_, digit) => [
-      `${digit}${digit}${digit}/s`, `${digit}${digit}.${digit}% err`,
-      `-${digit}.${digit}e-${digit}${digit}${digit}/s`, `-${digit}.${digit}e-${digit}${digit}${digit}% err`,
-      ...["K", "M", "B", "T"].map(suffix => `-${digit}${digit}${digit}${suffix}% err`),
+      `${digit}${digit}${digit}K/s`, `<0.0${digit}/s`, `${digit}${digit}.${digit}% err`, "100% err",
     ]).flat() : Object.values(healthGlyph);
     width = Math.max(...templates.map(text => measure(text, font)));
     cache.set(key, width);
@@ -246,5 +246,6 @@ function serviceCardWidth(n:ServiceNode,compact:boolean,measureText?:ChartSize["
   const measure=measureText??textMeasure, font=`600 ${nameSize}px ${fonts.display}`;
   const name=measure(protectedName(n.id),font)+fixedSlotWidth(measure,font,false)+18;
   const withMetric=name+4+fixedSlotWidth(measure,`${metricSize}px ${fonts.display}`,true);
-  return compact?(metrics&&withMetric<=200?Math.ceil(withMetric):Math.ceil(name)):Math.ceil(Math.max(168,name));
+  // Allow a fourteen-character identity beside the fixed nine-character slot.
+  return compact?(metrics&&withMetric<=240?Math.ceil(withMetric):Math.ceil(name)):Math.ceil(Math.max(168,name));
 }
