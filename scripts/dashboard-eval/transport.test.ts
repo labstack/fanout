@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, findSaved, type Ledger } from './transport';
+import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, type Ledger } from './transport';
 const servers: ReturnType<typeof Bun.serve>[]=[];
 const roots:string[]=[];
 afterEach(()=>{servers.splice(0).forEach(s=>s.stop(true));roots.splice(0).forEach(r=>rmSync(r,{recursive:true,force:true}));});
@@ -73,12 +73,34 @@ it('uses the exact $0.60 prior before any measured prompt',()=>{
   const l=ledger();
   expect(canStartPrompt(l,0.60)).toBe(true);expect(canStartPrompt(l,0.599999)).toBe(false);
   expect(canStartPrompt(l,0)).toBe(false);
+  for(const cap of [NaN,Infinity,-1])expect(canStartPrompt(l,cap)).toBe(false);
+});
+it('validates manual settlement inputs and permits reconciled missing usage',()=>{
+  for(const [cost,reason] of [[NaN,'reason'],[Infinity,'reason'],[-1,'reason'],[0,' '],[0,'x'.repeat(1001)]] as const){
+    const l=ledger();beginPrompt(l,'run');expect(()=>manualSettlement(l,'run',cost,reason)).toThrow();expect(l.prompts[0].settled).toBe(false);
+  }
+  const l=ledger();beginPrompt(l,'run');recordUsage(l,{...call('run'),usage:null});
+  expect(()=>manualSettlement(l,'unknown',1,'reconciled')).toThrow();
+  manualSettlement(l,'run',1,'Controller reconciled usage');expect(canStartPrompt(l,1.60)).toBe(true);
+  expect(()=>manualSettlement(l,'run',1,'already settled')).toThrow();
+  const known=ledger();beginPrompt(known,'run');recordUsage(known,call('run'));
+  expect(()=>manualSettlement(known,'run',0,'cannot erase spend')).toThrow();
+  const ambiguous=ledger();ambiguous.prompts=['a','b'].map(run_id=>({run_id,prompt_id:'shared',settled:false,completed:false,cost_usd:null}));
+  expect(()=>manualSettlement(ambiguous,'shared',0,'ambiguous')).toThrow();
 });
 it('debits each provider call once including failure and does not charge reasoning twice',()=>{
   const l=ledger();beginPrompt(l,'run');recordUsage(l,call('run'));expect(l.calls[0].cost_usd).toBeCloseTo(0.111);
   recordUsage(l,call('run'));expect(l.calls).toHaveLength(1);
   recordUsage(l,{...call('run',2),status:'error'});expect(l.calls).toHaveLength(2);expect(l.calls[1].cost_usd).toBeCloseTo(0.111);
   expect(canStartPrompt(l,100)).toBe(false);expect(settlePrompt(l,'run',false)).toBe(true);expect(canStartPrompt(l,100)).toBe(true);
+});
+it('keeps measured usage after a socket drop unsettled until reconciliation',async()=>{
+  const l=ledger();beginPrompt(l,'run');let sent=false;
+  const stream=new ReadableStream<Uint8Array>({pull(c){if(!sent){sent=true;c.enqueue(new TextEncoder().encode(frame({type:'CUSTOM',name:'model_call_usage',value:call('run')})));}else c.error(new Error('socket dropped'));}});
+  const state=await readSSE(new Response(stream,{headers:{'Content-Type':'text/event-stream'}}),new AbortController().signal,u=>recordUsage(l,u));
+  expect(state.usage).toHaveLength(1);expect(state.terminal).toBeNull();expect(state.incomplete).toBe(true);
+  expect(settlePrompt(l,'run',false,Boolean(state.terminal||state.truncated))).toBe(false);
+  expect(l.prompts[0].cost_usd).toBeCloseTo(0.111);expect(canStartPrompt(l,100)).toBe(false);
 });
 it('uses nearest-rank p95, equality at cap and accumulated ledger across invocations',()=>{
   const l=ledger();for(let i=1;i<=20;i++){beginPrompt(l,String(i));recordUsage(l,{...call(String(i)),usage:{...call('x').usage,input_tokens:i*100000,output_tokens:0,cache_read_tokens:0,reasoning_tokens:0}});expect(settlePrompt(l,String(i),true)).toBe(true);}

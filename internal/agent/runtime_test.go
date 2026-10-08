@@ -164,7 +164,7 @@ func TestRuntimeToolCallLoop(t *testing.T) {
 
 func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	provider := &scriptedProvider{steps: [][]StreamEvent{
-		{{Type: EventError, Error: "upstream 529: {\"secret\":\"provider body\"}"}},
+		{{Type: EventText, Delta: "Unfinished provider text"}, {Type: EventError, Error: "upstream 529: {\"secret\":\"provider body\"}"}},
 	}}
 	runtime := NewRuntime(provider, &fakeTools{}, nil)
 	emitter, output := newTestEmitter()
@@ -180,6 +180,9 @@ func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	}
 	if strings.Contains(stream, "secret") {
 		t.Errorf("RUN_ERROR leaks provider body: %s", stream)
+	}
+	if strings.Contains(stream, "Unfinished provider text") || strings.Contains(stream, "TEXT_MESSAGE_") || len(messages) != 1 {
+		t.Fatalf("failed step leaked text: stream=%s messages=%#v", stream, messages)
 	}
 
 	// The raw error must still be persisted on the run for operators.

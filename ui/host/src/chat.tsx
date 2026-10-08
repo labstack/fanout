@@ -123,6 +123,10 @@ export function ChatPage() {
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
   const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || failures.has(message.id) || dashboardResults.has(message.id)));
+  // Tool receipts can finish before the buffered final answer. Only text in
+  // the current user turn replaces its running status.
+  const turnStart = messages.findIndex(message => message.id === lastSent);
+  const hasFinalText = messages.slice(turnStart + 1).some(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.length > 0);
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
@@ -148,7 +152,7 @@ export function ChatPage() {
                 </Group>
               </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />;
             })}
-            {running && <Group gap="xs"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+            {running && !hasFinalText && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
             {error && <RunError message={error} onRetry={retry} />}
           </Stack>
         </>}

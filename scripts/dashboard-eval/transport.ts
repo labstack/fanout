@@ -167,7 +167,7 @@ export function spentUSD(l:Ledger):number {
 }
 export function canStartPrompt(ledger:Ledger,capUSD:number):boolean {
   try {validateLedger(ledger)}catch {return false}
-  if(!Number.isFinite(capUSD)||capUSD<0||ledger.prompts.some(p=>!p.settled)||ledger.calls.some(c=>c.cost_usd===null&&!ledger.prompts.find(p=>p.run_id===c.run_id)?.manual_settlement))return false;
+  if(!Number.isFinite(capUSD)||capUSD<0||ledger.prompts.some(p=>!p.settled))return false;
   const measured=ledger.prompts.filter(p=>p.completed&&p.settled).map(p=>p.cost_usd!).sort((a,b)=>a-b);
   const estimate=measured.length?measured[Math.ceil(measured.length*0.95)-1]:0.60;
   return spentUSD(ledger)+estimate<=capUSD;
@@ -194,7 +194,7 @@ export function settlePrompt(l:Ledger,run_id:string,complete:boolean,definitive=
 export function manualSettlement(l:Ledger,prompt_id:string,cost_usd:number,reason:string):void {
  validateLedger(l);
  const matches=l.prompts.filter(p=>!p.settled&&(p.run_id===prompt_id||p.prompt_id===prompt_id));
- if(matches.length!==1||!Number.isFinite(cost_usd)||cost_usd<0||!reason.trim()||reason.length>1000)throw new Error('Invalid manual settlement');
+ if(matches.length!==1||!Number.isFinite(cost_usd)||!reason.trim()||reason.length>1000)throw new Error('Invalid manual settlement');
  const p=matches[0],known=l.calls.filter(c=>c.run_id===p.run_id).reduce((n,c)=>n+(c.cost_usd??0),0);
  if(cost_usd<known)throw new Error('Settlement cannot remove spend');
  p.manual_settlement={cost_usd,reason,settled_at:new Date().toISOString()};p.cost_usd=cost_usd;p.completed=false;p.settled=true;p.status='failed';validateLedger(l);

@@ -95,7 +95,7 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
       const expected=config.model_label?.includes(':')?config.model_label:config.model_label&&state.configuration?`${state.configuration.provider}:${config.model_label}`:default_model;
       result.configured_model=configured;result.expected_model=expected;
       for(const call of state.usage){const observed=`${call.provider}:${call.model}`;if(!expected||observed!==expected||call.provider==='unknown'||call.model==='unknown')model_mismatch.push({run_id,step:call.step,expected:expected??null,observed});}
-      if(!config.model_label&&configured!==default_model)model_mismatch.push({run_id,expected:default_model??null,observed:configured??null});
+      if(!configured||configured!==expected)model_mismatch.push({run_id,expected:expected??null,observed:configured??null});
       let messages:ObjectValue[]=[];
       try {const thread=await json('/api/agent/threads/'+encodeURIComponent(thread_id),{signal:AbortSignal.timeout(5000)});messages=thread.messages??[];}catch {result.thread_read_failed=true;}
       const save=findSaved(state,messages);
@@ -108,14 +108,14 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
         result.version_evidence=matches[0];
         Object.assign(result,await executePanels(json,save.record.spec,AbortSignal.timeout(30_000)));
       }
-      result.incomplete=state.incomplete||(result.saved&&!result.checked);result.error_code=state.error_code??(result.incomplete?'checks_incomplete':null);
+      result.incomplete=model_mismatch.length>0||state.incomplete||(result.saved&&!result.checked);result.error_code=model_mismatch.length?'model_mismatch':state.error_code??(result.incomplete?'checks_incomplete':null);
     }catch {result.incomplete=true;result.error_code='request_or_evidence_incomplete';}
     const settled=settlePrompt(config.ledger,run_id,state?.terminal==='RUN_FINISHED'&&!state.incomplete,Boolean(state?.terminal||state?.truncated));
     const promptSettlement=config.ledger.prompts.find(p=>p.run_id===run_id)!;
     result.complete=promptSettlement.completed && state?.terminal==='RUN_FINISHED' && !state.incomplete;
     result.settlement_status=promptSettlement.status??'unknown';
     // Authoritative failed/incomplete usage is a measured failure, not unknown spend.
-    if(settled && !promptSettlement.completed && (state?.truncated||state?.terminal==='RUN_ERROR'))result.incomplete=Boolean(result.saved&&!result.checked);
+    if(settled && !promptSettlement.completed && (state?.truncated||state?.terminal==='RUN_ERROR'))result.incomplete=model_mismatch.length>0||Boolean(result.saved&&!result.checked);
     config.persist_ledger?.();result.cost_usd=config.ledger.prompts.find(p=>p.run_id===run_id)?.cost_usd??null;
     if(!settled){result.incomplete=true;result.error_code??='usage_incomplete';}
     if(result.incomplete) {

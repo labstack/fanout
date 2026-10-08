@@ -266,20 +266,6 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		var providerItems []json.RawMessage
 		var usage *TokenUsage
 		var servedModel string
-		textStarted := false
-		appendText := func(delta string) error {
-			if delta == "" {
-				return nil
-			}
-			if !textStarted {
-				if err := emitter.emit(events.NewTextMessageStartEvent(messageID, events.WithRole("assistant"))); err != nil {
-					return err
-				}
-				textStarted = true
-			}
-			text.WriteString(delta)
-			return emitter.emit(events.NewTextMessageContentEvent(messageID, delta))
-		}
 		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
 			if event.Model != "" {
 				servedModel = event.Model
@@ -294,7 +280,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			case EventError:
 				return fmt.Errorf("%w: %s", errProvider, event.Error)
 			case EventText:
-				return appendText(event.Delta)
+				text.WriteString(event.Delta)
 			case EventToolUse:
 				if event.ToolCall != nil {
 					toolCalls = append(toolCalls, *event.ToolCall)
@@ -346,44 +332,47 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				toolCalls = nil
 				slog.Warn("agent response truncated", logFields...)
 				notice := "The response was cut off before it finished."
-				if textStarted {
+				if text.Len() > 0 {
 					if stoppedAtTokenLimit(stopReason) {
 						notice = "\n\n[Response truncated: output limit reached.]"
 					} else {
 						notice = "\n\n" + notice
 					}
 				}
-				streamErr = appendText(notice)
+				text.WriteString(notice)
 			} else {
 				slog.Info("llm stream complete", logFields...)
-				if stopReason == "refusal" && !textStarted {
-					streamErr = appendText("The model refused to answer this request.")
+				if stopReason == "refusal" && text.Len() == 0 {
+					text.WriteString("The model refused to answer this request.")
 				}
 			}
 		}
 		if streamErr != nil {
 			slog.Info("llm stream failed", "thread_id", threadID, "run_id", runID, "step", step+1, "provider", provider, "model", model, "status", status, "usage", reported)
 		}
-		if textStarted {
-			if err := emitter.emit(events.NewTextMessageEndEvent(messageID)); err != nil && streamErr == nil {
-				streamErr = err
-			}
-		}
 		if streamErr != nil {
 			return truncated, r.fail(threadID, runID, deadlineError(streamErr), emitter)
+		}
+		providerText := text.String()
+		transcriptText := ""
+		if len(toolCalls) == 0 {
+			transcriptText = providerText
+			if err := emitFinalText(emitter, messageID, transcriptText); err != nil {
+				return truncated, r.fail(threadID, runID, err, emitter)
+			}
 		}
 
 		agCalls := make([]agtypes.ToolCall, len(toolCalls))
 		for i, call := range toolCalls {
 			agCalls[i] = agtypes.ToolCall{ID: call.ID, Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: call.Name, Arguments: call.Input}}
 		}
-		if text.Len() > 0 || len(agCalls) > 0 {
-			*messages = append(*messages, agtypes.Message{ID: messageID, Role: agtypes.RoleAssistant, Content: text.String(), ToolCalls: agCalls})
+		if transcriptText != "" || len(agCalls) > 0 {
+			*messages = append(*messages, agtypes.Message{ID: messageID, Role: agtypes.RoleAssistant, Content: transcriptText, ToolCalls: agCalls})
 		}
-		// Opaque reasoning belongs to this run's provider conversation, not
-		// the persisted AG-UI history or client events.
-		if text.Len() > 0 || len(toolCalls) > 0 || len(providerItems) > 0 {
-			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: text.String(), ToolCalls: toolCalls, ProviderItems: providerItems})
+		// Tool narration and opaque reasoning belong to this run's provider
+		// conversation, not the persisted AG-UI history or client events.
+		if providerText != "" || len(toolCalls) > 0 || len(providerItems) > 0 {
+			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: providerText, ToolCalls: toolCalls, ProviderItems: providerItems})
 		}
 		if len(toolCalls) == 0 {
 			if err := emitter.emit(events.NewRunFinishedEventWithOptions(threadID, runID, events.WithSuccessOutcome())); err != nil {
@@ -457,6 +446,19 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		}
 	}
 	return truncated, r.fail(threadID, runID, fmt.Errorf("%w: exceeded %d tool steps", errStepLimit, r.maxSteps), emitter)
+}
+
+func emitFinalText(emitter *eventEmitter, messageID, text string) error {
+	if text == "" {
+		return nil
+	}
+	if err := emitter.emit(events.NewTextMessageStartEvent(messageID, events.WithRole("assistant"))); err != nil {
+		return err
+	}
+	if err := emitter.emit(events.NewTextMessageContentEvent(messageID, text)); err != nil {
+		return err
+	}
+	return emitter.emit(events.NewTextMessageEndEvent(messageID))
 }
 
 func runtimeUsageIdentity(provider Provider) (string, string) {

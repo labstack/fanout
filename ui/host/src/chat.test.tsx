@@ -3,10 +3,90 @@ import type { Message } from "@ag-ui/client";
 import { act, createRef, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FanoutAppContext, type FanoutAppContextValue } from "./app-context";
+import { FanoutAppContext, useFanoutApp, type FanoutAppContextValue } from "./app-context";
+import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import App from "./App";
 import { ChatPage } from "./chat";
 import { fixture } from "../tests/fixtures";
 vi.mock("./mcp-app-frame", () => ({ default: () => <div data-app-frame>Panel frame</div> }));
+vi.mock("./auth", () => ({
+  default: ({ children }: { children: React.ReactNode }) => children,
+  useRuntimeStatus: () => ({ agent_available: true, setup_required: false, auth_mode: "local" }),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: "admin" }),
+  authorizedFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+  logout: vi.fn(), clearSession: vi.fn(),
+}));
+
+function StreamChat() {
+  const { send } = useFanoutApp();
+  return <><ChatPage /><button onClick={() => void send("Sort latency")}>Begin stream</button></>;
+}
+
+async function mountStreamChat() {
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input), "https://fanout.example.test").pathname;
+    if (path === "/api/agent/runs") return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
+    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { threads: [], nextCursor: "" } : { messages: [{ id: "old-answer", role: "assistant", content: "Earlier answer" }] };
+    return Response.json(body);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL("https://fanout.example.test/chat/thread-stream");
+  const rootRoute = createRootRoute({ component: App });
+  const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat/$threadId", component: StreamChat });
+  const dashboard = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards/$dashboardId", component: () => <div>Dashboard</div> });
+  const router = createRouter({ routeTree: rootRoute.addChildren([chat, dashboard]) });
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+  await vi.waitFor(() => expect(document.querySelector("textarea")?.disabled).toBe(false));
+  await act(async () => button("Begin stream")!.click());
+  await vi.waitFor(() => expect(controller).toBeDefined());
+  const emit = async (event: Record<string, unknown>) => { await act(async () => controller!.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))); };
+  const close = async () => { await act(async () => controller!.close()); };
+  return { root, emit, close };
+}
+
+describe("buffered answer stream", () => {
+  afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+  it("keeps running after the last tool receipt until final text arrives", async () => {
+    const { root, emit, close } = await mountStreamChat();
+    try {
+      await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
+      await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
+      await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });
+      await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
+      await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: JSON.stringify({ dashboard: { id: "board", name: "Latency", version: 2, spec: { name: "Latency", panels: [] } } }) });
+      await emit({ type: "CUSTOM", name: "model_call_usage", value: { step: 2 } });
+      await vi.waitFor(() => expect(document.querySelector("[data-dashboard-result]")).not.toBeNull());
+      expect(document.body.textContent).toContain("Analyzing your system");
+      expect(document.querySelector('button[aria-label="Stop"]')).not.toBeNull();
+      await emit({ type: "TEXT_MESSAGE_START", messageId: "final", role: "assistant" });
+      expect(document.body.textContent).toContain("Analyzing your system");
+      await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Updated the latency panel." });
+      await emit({ type: "TEXT_MESSAGE_END", messageId: "final" });
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Updated the latency panel."));
+      expect(document.body.textContent).not.toContain("Analyzing your system");
+      await emit({ type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" }); await close();
+      await vi.waitFor(() => expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
+    } finally { await act(async () => root.unmount()); }
+  });
+  it.each(["empty", "error", "cancel"])("settles the running indicator for %s without final text", async outcome => {
+    const { root, emit, close } = await mountStreamChat();
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
+      expect(document.body.textContent).toContain("Analyzing your system");
+      if (outcome === "cancel") await act(async () => (document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement).click());
+      else {
+        await emit(outcome === "error" ? { type: "RUN_ERROR", message: "model provider unavailable", runId: "run" } : { type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });
+        await close();
+      }
+      await vi.waitFor(() => expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
+      expect(document.body.textContent).not.toContain("Analyzing your system");
+      if (outcome === "error") expect(document.querySelector('[role="alert"]')?.textContent).toContain("model provider unavailable");
+    } finally { log.mockRestore(); await act(async () => root.unmount()); }
+  });
+});
 
 function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContextValue {
   return {

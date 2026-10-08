@@ -7,7 +7,7 @@ import { type Ledger } from './transport';
 import { type Spec, normalizeAddedPanel, score } from './score';
 
 export const failures=['unsaved','invalid','unchecked','empty','duplicate_check','missing_terminal','truncated','duplicate_tool','error_mutation','usage_missing','usage_failure','wrong_title','neighbor_grid','metadata','field_array','slow','model_mismatch','mixed_models','record_metadata','version_jump','different_dashboard','unauthorized','rate_limited'] as const;
-export type Failure=typeof failures[number]|'configuration_missing'|'configuration_changed'|'last_truncated'|'multiple_saves';
+export type Failure=typeof failures[number]|'configuration_missing'|'configuration_changed'|'last_truncated'|'multiple_saves'|'edit_model_mismatch';
 const golden=()=>JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
 const spec=():Spec=>structuredClone(golden().saved_spec);
 const wireEvents=(wire:string):any[]=>wire.split('\n').filter(s=>s.startsWith('data: ')).map(s=>JSON.parse(s.slice(6)));
@@ -73,7 +73,7 @@ export function startMock(failure?:Failure) {
     emitCall(input.runId+'-read','get_dashboard',{dashboard:{...record,id:'unrelated',version:999}});
     if(failure!=='usage_missing'){
       const metered=structuredClone(templates.filter(e=>e.name==='model_call_usage').at(-1));
-      metered.value={...metered.value,run_id:input.runId,step:1,provider:'mock',model:failure==='model_mismatch'||failure==='mixed_models'&&stats.posts===10?'different-model':'mock-no-provider',status:failure==='truncated'||failure==='last_truncated'&&stats.posts===10?'incomplete':failure==='usage_failure'?'error':'completed'};
+      metered.value={...metered.value,run_id:input.runId,step:1,provider:'mock',model:failure==='model_mismatch'||failure==='mixed_models'&&stats.posts===10||failure==='edit_model_mismatch'&&stats.edits===2?'different-model':'mock-no-provider',status:failure==='truncated'||failure==='last_truncated'&&stats.posts===10?'incomplete':failure==='usage_failure'?'error':'completed'};
       events.push(metered);
     }
     if(failure!=='missing_terminal')events.push({...structuredClone(failure==='usage_failure'?errorEvents.find(e=>e.type==='RUN_ERROR'):templates.find(e=>e.type==='RUN_FINISHED')),runId:input.runId,threadId:input.threadId});

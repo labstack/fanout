@@ -12,6 +12,7 @@ import (
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
@@ -48,14 +49,36 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := dashboard.New(db.DB, executor)
+	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
+	tools, err := NewToolRegistry(t.Context(), server.MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tools.Close()
+	ctx := dashboard.WithOwner(t.Context(), "owner")
 	authored := panel.Dashboard{Name: "Eval fixture", Time: panel.Time{From: &from, To: &to}, Panels: []panel.Panel{
 		{ID: "actual_latency", Title: "Latency", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"p95(duration_ms)"}, Where: []string{"service = 'checkout'", "namespace = 'shop'"}}, Unit: "ms", Thresholds: []panel.Threshold{{Value: 100, Status: "warn"}}},
 		{ID: "actual_text", Title: "Explanation", Viz: "text", Content: "Seeded checkout request.", Description: "Fixture context."},
 	}}
 	authoredJSON := evalObject(t, authored)
-	created, err := service.Create(t.Context(), "owner", authored, dashboard.Author{Kind: "agent", ID: "owner"})
+	createInput, err := json.Marshal(map[string]any{"dashboard": authored})
 	if err != nil {
 		t.Fatal(err)
+	}
+	createCall := ToolCall{ID: "save", Name: "create_dashboard", Input: string(createInput)}
+	execution, err := tools.Execute(ctx, createCall)
+	if err != nil || execution.IsError {
+		t.Fatalf("create_dashboard: %+v %v", execution, err)
+	}
+	var saved struct {
+		Dashboard dashboard.Record `json:"dashboard"`
+	}
+	if err := json.Unmarshal([]byte(execution.Content), &saved); err != nil {
+		t.Fatal(err)
+	}
+	created := saved.Dashboard
+	if created.ID == "" || created.Version != 1 {
+		t.Fatalf("missing tool save: %+v", saved)
 	}
 	added := panel.Panel{ID: "added_panel", Title: "Added fixture panel", Viz: "timeseries", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}
 	addedJSON := evalObject(t, added)
@@ -90,14 +113,40 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	record["id"] = "golden_board"
 	record["created_at"] = "2026-10-01T12:00:00Z"
 	record["updated_at"] = "2026-10-01T12:00:00Z"
-	content, _ := json.Marshal(map[string]any{"dashboard": record})
 	wire := func(terminal StreamEvent) string {
 		terminal.Usage = &TokenUsage{InputTokens: 2, OutputTokens: 1}
-		p := &meteredProvider{scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "save", Name: "create_dashboard", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls", Usage: &TokenUsage{InputTokens: 2, OutputTokens: 1}}}, {terminal}}}}
-		runtime := NewRuntime(p, &fakeTools{execution: ToolExecution{Content: string(content)}}, nil)
+		wireSpec := authored
+		if terminal.Type == EventError {
+			wireSpec.Name += " error"
+		} else {
+			wireSpec.Name += " incomplete"
+		}
+		wireInput, err := json.Marshal(map[string]any{"dashboard": wireSpec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wireCall := ToolCall{ID: "save", Name: "create_dashboard", Input: string(wireInput)}
+		p := &meteredProvider{scriptedProvider{steps: [][]StreamEvent{{{Type: EventText, Delta: "Saving the fixture."}, {Type: EventToolUse, ToolCall: &wireCall}, {Type: EventStop, StopReason: "tool_calls", Usage: &TokenUsage{InputTokens: 2, OutputTokens: 1}}}, {terminal}}}}
+		runtime := NewRuntime(p, tools, nil)
 		emitter, out := newTestEmitter()
 		messages := []agtypes.Message{}
-		_, _ = runtime.execute(t.Context(), "thread", "run", &messages, emitter)
+		_, _ = runtime.execute(ctx, "thread", "run", &messages, emitter)
+		var result struct {
+			Dashboard dashboard.Record `json:"dashboard"`
+		}
+		for _, message := range messages {
+			if message.Role == agtypes.RoleTool {
+				if err := json.Unmarshal([]byte(messageText(message.Content)), &result); err != nil {
+					t.Fatalf("tool response: %s: %v", messageText(message.Content), err)
+				}
+			}
+		}
+		if result.Dashboard.ID == "" {
+			t.Fatal("SSE fixture did not execute create_dashboard")
+		}
+		if strings.Contains(out.String(), "Saving the fixture.") {
+			t.Fatal("tool narration in golden SSE")
+		}
 		return evalStableSSE(t, out.String())
 	}
 	incomplete := wire(StreamEvent{Type: EventStop, StopReason: "length"})
@@ -170,6 +219,22 @@ func evalStableSSE(t *testing.T, wire string) string {
 					e[key] = ids[s]
 				}
 			}
+		}
+		if e["type"] == "TOOL_CALL_RESULT" {
+			var content map[string]any
+			if err := json.Unmarshal([]byte(e["content"].(string)), &content); err != nil {
+				t.Fatal(err)
+			}
+			if record, ok := content["dashboard"].(map[string]any); ok {
+				record["id"] = "golden_board"
+				record["created_at"] = "2026-10-01T12:00:00Z"
+				record["updated_at"] = "2026-10-01T12:00:00Z"
+			}
+			raw, err := json.Marshal(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e["content"] = string(raw)
 		}
 		raw, err := json.Marshal(e)
 		if err != nil {

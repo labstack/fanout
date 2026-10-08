@@ -22,6 +22,29 @@ it('runs ten creates and five consecutive edits through loopback HTTP and the sc
   expect(result.evidence.edits.map((e:any)=>e.saved.version)).toEqual([2,3,4,5,6]);
 });
 it('gives every injected scoring and transport failure a nonzero exit',async()=>{expect(await verifyMock()).toBeGreaterThanOrEqual(10)});
+it.each(['model_mismatch','mixed_models','configuration_changed'] as const)('stops spending immediately on %s',async failure=>{
+  const result=await mockEvaluation(failure,{model_label:undefined});
+  expect(result.exit_code).toBe(2);
+  expect(result.stats.posts).toBe(failure==='model_mismatch'?1:10);
+  expect(result.stats.edits).toBe(0);
+  expect(result.evidence.model_mismatch.length).toBeGreaterThan(0);
+});
+it('leaves a disconnect after usage unsettled without posting another prompt',async()=>{
+  const result=await mockEvaluation('missing_terminal');
+  expect(result.stats.posts).toBe(1);
+  expect(result.evidence.runs[0].calls).toHaveLength(1);
+  expect(result.evidence.runs[0].calls[0].usage).not.toBeNull();
+  expect(result.evidence.runs[0].settlement_status).toBe('unknown');
+  expect(result.evidence.cost_complete).toBe(false);
+  expect(result.evidence.actual_cost_usd).toBeNull();
+  expect(result.evidence.metered_cost_usd).toBe(0);
+});
+it('stops subsequent edits on a mismatching call and checks an explicit configured model',async()=>{
+  const edit=await mockEvaluation('edit_model_mismatch');
+  expect(edit.stats.posts).toBe(12);expect(edit.stats.edits).toBe(2);expect(edit.exit_code).toBe(2);
+  const config=await mockEvaluation('configuration_changed');
+  expect(config.stats.posts).toBe(10);expect(config.stats.edits).toBe(0);expect(config.exit_code).toBe(2);
+});
 it('exports only aggregate results and prompt IDs/hashes for the sealed set',()=>{
   const raw={schema:3,set:'holdout',runs:[{prompt_id:'id',prompt_sha:'hash',prompt:'private prompt',saved:{spec:'private'},error:'private failure'}],edits:[{prompt:'private edit'}],score:{passed:false},model_label:'label',observed_configuration:[],actual_cost_usd:0};
   const result=publicEvidence(raw);expect(result.runs).toEqual([{prompt_id:'id',prompt_sha:'hash'}]);expect(result.edits).toBeUndefined();expect(JSON.stringify(result)).not.toContain('private');

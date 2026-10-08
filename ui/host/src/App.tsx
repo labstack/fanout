@@ -89,6 +89,11 @@ function Session() {
         void queryClient.invalidateQueries({ queryKey: dashboardsKey });
         void queryClient.invalidateQueries({ queryKey: ["dashboard", saved.id] });
       },
+      onRunErrorEvent: ({ event }) => {
+        setError(event.message);
+        setRunning(false);
+        clearActivity();
+      },
       onRunFinalized: ({ messages: next }) => {
         const finished = [...next] as Message[];
         setMessages(finished);
