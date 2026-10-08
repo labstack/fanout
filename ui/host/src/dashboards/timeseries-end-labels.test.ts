@@ -40,9 +40,24 @@ describe("timeseries end labels", () => {
 it("reserves the measured longest label lane for three endpoints within two percent",()=>{
  const clustered={...result,frame:{...result.frame!,values:[[0,3599999],[900,900],[901,901],[902,902]]}};
  const o=timeseriesOption(panel,clustered,chartThemeFor(false),{width:1400,height:800,measureText:()=>120}) as any;
- expect(o.grid.right).toBe(144);
- for(const line of o.series){expect(line.endLabel.width).toBe(120);expect(line.endLabel.lineHeight).toBe(14);expect(line.labelLayout).toEqual({moveOverlap:"shiftY",hideOverlap:true});}
+ expect(o.grid.right).toBe(156);
+ for(const line of o.series){expect(line.endLabel.width).toBe(132);expect(line.endLabel.lineHeight).toBe(14);expect(line.labelLayout).toEqual({moveOverlap:"shiftY",hideOverlap:true});}
  expect(o.legend.show).toBe(true);
+});
+
+it.each(["p50 latency", "a".repeat(24), "a".repeat(30)])("keeps end-label metric slack up to the 24-character cap (%s)", name => {
+ const names=[name,"p95 latency"];
+ const frame={columns:[result.frame!.columns[0],...names.map(name=>({name,type:"number" as const,role:"measure" as const,unit:"ms"}))],values:[[0,3599999],[900,900],[901,901]],rows:2};
+ const measureText=(text:string)=>Array.from(text).length*7;
+ const o=timeseriesOption(panel,{...result,frame},chartThemeFor(false),{width:1400,height:800,measureText}) as any;
+ const measured=Math.max(...names.map(n=>measureText(Array.from(n).slice(0,24).join(""))));
+ const label=o.series[0].endLabel;
+ expect(label.width).toBe(measured+12);
+ expect(o.grid.right).toBe(label.width+24);
+ expect(label).toMatchObject({overflow:"truncate",ellipsis:"…"});
+ // Allow a metric discrepancy without truncating names through the cap;
+ // longer names exceed the ECharts truncate box even with the same slack.
+ expect(measureText(name)+2<=label.width).toBe(name.length<=24);
 });
 
 it("drops lower-priority end labels when one padded line fits and retains the legend",()=>{

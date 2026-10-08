@@ -50,6 +50,26 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const focusedPanel = useRef<string | undefined>(undefined);
   if (view) focusedPanel.current = view;
+  const hostFocused = hostDisplayMode === "fullscreen" && Boolean(view);
+  const focusedRegion = useRef<HTMLDivElement>(null);
+  const wasHostFocused = useRef(false);
+  useEffect(() => {
+    const closing = wasHostFocused.current && !hostFocused;
+    wasHostFocused.current = hostFocused;
+    if (hostFocused) focusedRegion.current?.focus();
+    if (!closing) return;
+    const frame = requestAnimationFrame(() => menus.current.get(focusedPanel.current ?? "")?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [hostFocused]);
+  useEffect(() => {
+    if (!hostFocused) return;
+    // Keyboard events in a sandboxed iframe cannot reach the host's listener.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); closeView(); }
+    };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [hostFocused, onDisplayMode]);
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
   useEffect(() => {
     const resize = () => setWindowHeight(window.innerHeight);
@@ -98,15 +118,20 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={hostDisplayMode === undefined || onDisplayMode ? () => void openView(panel.id) : undefined} traceLinks="button" />;
   const viewed = spec.panels.find(p => p.id === view);
   return <Stack gap="md" p="md">
+    <Box hidden={hostFocused} style={hostFocused ? { display: "none" } : undefined}><Stack gap="md">
     {spec.panels.length > 1 && <Text data-fragment-header fw={600}>{fragmentTitle(shown)}</Text>}
     <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVariable} />
     {options.error && <Alert color="bad">Variable options could not be loaded.</Alert>}
     {error && <Alert color="bad">{error}</Alert>}
     {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
-    <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} returnFocusTo={() => menus.current.get(focusedPanel.current ?? "")}>
+    </Stack></Box>
+    {hostFocused && viewed && <Box data-fragment-fullscreen role="region" aria-label={interpolate(viewed.title, resolvedVars)} tabIndex={-1} ref={focusedRegion} h="calc(100vh - 32px)">
+      {card(viewed, Math.max(40, windowHeight - 32), true)}
+    </Box>}
+    {hostDisplayMode !== "fullscreen" && <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} returnFocusTo={() => menus.current.get(focusedPanel.current ?? "")}>
       {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140), true)}</Box>}
-    </PanelFullscreen>
+    </PanelFullscreen>}
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={target} onChange={setTarget} />
   </Stack>;
 }
