@@ -517,8 +517,7 @@ func (r *Runtime) fail(threadID, runID string, err error, emitter *eventEmitter)
 	return err
 }
 
-// clientErrorMessage maps a run error to a short message safe for the wire.
-// Provider API responses can contain internal details and never leave the server.
+// clientErrorCode classifies a run error into the stable code sent with RUN_ERROR.
 func clientErrorCode(err error) string {
 	var apiErr *APIError
 	switch {
@@ -536,6 +535,8 @@ func clientErrorCode(err error) string {
 	}
 }
 
+// clientErrorMessage maps a run error to a short message safe for the wire.
+// Provider API responses can contain internal details and never leave the server.
 func clientErrorMessage(err error) string {
 	switch clientErrorCode(err) {
 	case "provider_unavailable":
