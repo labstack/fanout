@@ -24,6 +24,8 @@ function rangeLabel(range: Range): string {
 const surface = {background: "color-mix(in srgb, var(--mantine-color-body) 92%, transparent)", border: "1px solid var(--mantine-color-default-border)", borderRadius: "var(--mantine-radius-sm)", padding: "2px 6px"};
 
 // Panel chrome owns the visual hint; standalone charts retain its accessible description.
+/** Glyph form for the one-line panel subtitle; screen readers get the spelled-out hint. */
+export function compactHint(hint: string): string { return hint.replace("Enter drill", "↵ drill").replace("Shift+←→", "⇧←→"); }
 export const ChartHintContext = createContext<{id: string; setHint(hint?: string): void} | undefined>(undefined);
 
 /** A single plot tab stop; keyboard chrome never participates in plot layout. */
