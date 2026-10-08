@@ -77,6 +77,7 @@ type StreamEvent struct {
 	Delta         string            // text token (EventText)
 	ToolCall      *ToolCall         // completed tool call (EventToolUse)
 	StopReason    string            // e.g. "end_turn", "tool_calls", "length", "max_tokens" (EventStop)
+	ToolStep      bool              // a tool call was begun, including an unfinished call (EventStop)
 	Error         string            // error message (EventError)
 	Model         string            // model reported by the provider response
 	Usage         *TokenUsage       // provider-reported token snapshot, including failed calls

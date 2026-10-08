@@ -22,12 +22,12 @@ function StreamChat() {
   return <><ChatPage /><button onClick={() => void send("Sort latency")}>Begin stream</button></>;
 }
 
-async function mountStreamChat() {
+async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "assistant", content: "Earlier answer" }], start = true) {
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "https://fanout.example.test").pathname;
     if (path === "/api/agent/runs") return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
-    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { threads: [], nextCursor: "" } : { messages: [{ id: "old-answer", role: "assistant", content: "Earlier answer" }] };
+    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { threads: [], nextCursor: "" } : { messages: stored };
     return Response.json(body);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -39,14 +39,16 @@ async function mountStreamChat() {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
   await vi.waitFor(() => expect(document.querySelector("textarea")?.disabled).toBe(false));
-  await act(async () => button("Begin stream")!.click());
-  await vi.waitFor(() => expect(controller).toBeDefined());
+  if (start) {
+    await act(async () => button("Begin stream")!.click());
+    await vi.waitFor(() => expect(controller).toBeDefined());
+  }
   const emit = async (event: Record<string, unknown>) => { await act(async () => controller!.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))); };
   const close = async () => { await act(async () => controller!.close()); };
   return { root, emit, close };
 }
 
-describe("buffered answer stream", () => {
+describe("provisional answer stream", () => {
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
   it("keeps running after the last tool receipt until final text arrives", async () => {
     const { root, emit, close } = await mountStreamChat();
@@ -55,6 +57,7 @@ describe("buffered answer stream", () => {
       await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });
       await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
+      expect(document.body.textContent).toContain("Updating your dashboard…");
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: JSON.stringify({ dashboard: { id: "board", name: "Latency", version: 2, spec: { name: "Latency", panels: [] } } }) });
       await emit({ type: "CUSTOM", name: "model_call_usage", value: { step: 2 } });
       await vi.waitFor(() => expect(document.querySelector("[data-dashboard-result]")).not.toBeNull());
@@ -76,21 +79,74 @@ describe("buffered answer stream", () => {
     try {
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
       expect(document.body.textContent).toContain("Analyzing your system");
+      await emit({ type: "THINKING_START" });
+      await emit({ type: "THINKING_TEXT_MESSAGE_START" });
+      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "Unfinished narration" });
+      expect(document.querySelector('[data-provisional]')?.textContent).toBe("Unfinished narration");
       if (outcome === "cancel") await act(async () => (document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement).click());
       else {
-        await emit(outcome === "error" ? { type: "RUN_ERROR", message: "model provider unavailable", runId: "run" } : { type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });
+        await emit(outcome === "error" ? { type: "RUN_ERROR", code: "provider_unavailable", message: "model provider unavailable" } : { type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });
         await close();
       }
       await vi.waitFor(() => expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
       expect(document.body.textContent).not.toContain("Analyzing your system");
-      if (outcome === "error") expect(document.querySelector('[role="alert"]')?.textContent).toContain("model provider unavailable");
+      expect(document.querySelector('[data-provisional]')).toBeNull();
+      expect(document.body.textContent).not.toContain("Unfinished narration");
+      if (outcome === "error") expect(document.querySelector('[role="alert"]')?.textContent).toContain("Fanout could not reach the model provider. Please try again.");
+      if (outcome === "cancel") {expect(document.querySelector('[role="alert"]')).toBeNull();expect(document.body.textContent).toContain("Stopped");}
     } finally { log.mockRestore(); await act(async () => root.unmount()); }
+  });
+  it("types provisional text live, collapses it on tools, and replaces the final block in place", async () => {
+    const { root, emit, close } = await mountStreamChat();
+    try {
+      await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
+      await emit({ type: "THINKING_START" });await emit({ type: "THINKING_TEXT_MESSAGE_START" });
+      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "Fixing the sort. Checking another thing." });
+      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Fixing the sort."));
+      expect(document.querySelector('[data-provisional]')?.getAttribute('style')).toContain('--mantine-color-dimmed');
+      expect(document.querySelector('[data-answer-position] .mantine-Loader-root')).not.toBeNull();
+      await emit({ type: "THINKING_TEXT_MESSAGE_END" });await emit({ type: "THINKING_END" });
+      await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
+      await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
+      expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).toContain("Updating your dashboard…");
+      await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: "{}" });
+      expect(document.querySelector('[role="status"]')?.textContent).toContain("Fixing the sort…");
+      expect(document.body.textContent).not.toContain("Checking another thing.");
+      await emit({ type: "THINKING_START" });await emit({ type: "THINKING_TEXT_MESSAGE_START" });
+      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "Updated " });
+      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Updated "));
+      const position = document.querySelector('[data-answer-position]');
+      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "the latency panel." });
+      await emit({ type: "THINKING_TEXT_MESSAGE_END" });await emit({ type: "THINKING_END" });
+      await emit({ type: "TEXT_MESSAGE_START", messageId: "final", role: "assistant" });
+      await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Updated the latency panel." });
+      await emit({ type: "TEXT_MESSAGE_END", messageId: "final" });
+      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')).toBeNull());
+      expect(document.querySelector('[data-answer-position]')).toBe(position);
+      expect(position?.querySelector('.chat-markdown')?.textContent).toBe("Updated the latency panel.");
+      await emit({ type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });await close();
+      expect(document.querySelector('[role="log"]')?.textContent).not.toContain("Fixing");
+    } finally {await act(async () => root.unmount());}
+    const reloaded = await mountStreamChat([{id:"user",role:"user",content:"Sort"},{id:"final",role:"assistant",content:"Updated the latency panel."}], false);
+    try {expect(document.querySelector('[role="log"]')?.textContent).toContain("Updated the latency panel.");expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).not.toContain("Fixing");}finally{await act(async()=>reloaded.root.unmount());}
+  });
+  it.each([
+    ['provider_unavailable','Fanout could not reach the model provider. Please try again.'],
+    ['step_limit','Fanout reached its step limit before finishing. Try a narrower question.'],
+    ['time_limit','Fanout reached its 5-minute time limit. Try a smaller request.'],
+    ['run_failed','Fanout could not complete this analysis. Please try again.'],
+    ['unknown_secret_code','Fanout could not complete this analysis. Please try again.'],
+  ])("maps %s to a plain error and shows the same outcome on reload", async (code, message) => {
+    const {root,emit,close}=await mountStreamChat();
+    try {await emit({type:'RUN_STARTED',threadId:'thread-stream',runId:'run'});await emit({type:'RUN_ERROR',code,message:'raw_server_code'});await close();await vi.waitFor(()=>expect(document.querySelector('[role="alert"]')?.textContent).toContain(message));expect(document.body.textContent).not.toContain('raw_server_code');expect(document.body.textContent).not.toContain(code);}finally{await act(async()=>root.unmount());}
+    const loaded=await mountStreamChat([{id:'user',role:'user',content:'Show'},{id:'run-outcome',role:'activity',activityType:'agent-outcome',content:{status:'failed',message}}],false);
+    try {expect(document.querySelector('[role="alert"]')?.textContent).toContain(message);}finally{await act(async()=>loaded.root.unmount());}
   });
 });
 
 function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContextValue {
   return {
-    agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "",
+    agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "", provisional: null, stopped: false,
     input: "", setInput: vi.fn(), error: "", inputRef: createRef<HTMLTextAreaElement>(),
     send: vi.fn(async () => undefined), submit: vi.fn((event: FormEvent) => event.preventDefault()), stop: vi.fn(), retry: vi.fn(), reloadThread: vi.fn(),
     openChat: vi.fn(), newThread: vi.fn(), selectThread: vi.fn(),

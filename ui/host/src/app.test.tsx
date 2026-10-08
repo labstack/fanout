@@ -101,14 +101,14 @@ describe("Session", () => {
       });
       const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, warnings: ["One panel is empty"] });
       const messages = [
-        { id: "before", role: "assistant", content: "Saving it now", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
+        { id: "before", role: "assistant", content: "", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
         { id: "result", role: "tool", toolCallId: "call-1", content },
         { id: "after", role: "assistant", content: "All done" },
       ] as Message[];
       const subscriber = agentMocks.instances.at(-1)!.subscriber!;
       await act(async () => {
         await subscriber.onToolCallResultEvent?.({ event: { type: "TOOL_CALL_RESULT", messageId: "result", toolCallId: "call-1", content }, messages } as unknown as Parameters<NonNullable<AgentSubscriber["onToolCallResultEvent"]>>[0]);
-        await subscriber.onEvent?.({ messages } as unknown as Parameters<NonNullable<AgentSubscriber["onEvent"]>>[0]);
+        await subscriber.onMessagesChanged?.({ messages } as unknown as Parameters<NonNullable<AgentSubscriber["onMessagesChanged"]>>[0]);
       });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboards"] });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboard", "saved-1"] });
@@ -117,7 +117,7 @@ describe("Session", () => {
       expect(link?.textContent).toBe("Open dashboard");
       expect(link?.closest("[data-dashboard-result]")?.textContent).toContain(`${name === "create_dashboard" ? "Created" : "Updated"}Cart errors`);
       const transcript = host.querySelector('[role="log"]')!.textContent!;
-      expect(transcript.indexOf("Saving it now")).toBeLessThan(transcript.indexOf("Open dashboard"));
+      expect(transcript).not.toContain("Saving it now");
       expect(transcript.indexOf("Open dashboard")).toBeLessThan(transcript.indexOf("All done"));
       await act(async () => link!.click());
       await vi.waitFor(() => expect(router.state.location.pathname).toBe("/dashboards/saved-1"));
@@ -144,7 +144,7 @@ describe("Session", () => {
       const subscriber = agentMocks.instances.at(-1)!.subscriber!;
       await act(async () => {
         await subscriber.onToolCallResultEvent?.({ event: { type: "TOOL_CALL_RESULT", messageId: "result", toolCallId: "call-1", content }, messages } as unknown as Parameters<NonNullable<AgentSubscriber["onToolCallResultEvent"]>>[0]);
-        await subscriber.onEvent?.({ messages } as unknown as Parameters<NonNullable<AgentSubscriber["onEvent"]>>[0]);
+        await subscriber.onMessagesChanged?.({ messages } as unknown as Parameters<NonNullable<AgentSubscriber["onMessagesChanged"]>>[0]);
       });
       expect(invalidate).not.toHaveBeenCalled();
       expect(host.querySelector("[data-dashboard-result]")).toBeNull();

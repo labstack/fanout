@@ -345,6 +345,13 @@ func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
 // events and outcome. truncated marks a run whose answer was cut off at the
 // provider's token limit; it only applies when runErr is nil.
 func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, messages []agtypes.Message, eventJSON [][]byte, truncated bool, runErr error) error {
+	if runErr != nil {
+		status := "failed"
+		if errors.Is(runErr, context.Canceled) {
+			status = "stopped"
+		}
+		messages = append(append([]agtypes.Message(nil), messages...), agtypes.Message{ID: runID + "-outcome", Role: agtypes.RoleActivity, ActivityType: "agent-outcome", Content: map[string]any{"status": status, "message": clientErrorMessage(runErr)}})
+	}
 	messagesJSON, err := json.Marshal(messages)
 	if err != nil {
 		return fmt.Errorf("encode final messages: %w", err)

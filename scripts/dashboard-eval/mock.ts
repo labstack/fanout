@@ -7,7 +7,7 @@ import { type Ledger } from './transport';
 import { type Spec, normalizeAddedPanel, score } from './score';
 
 export const failures=['unsaved','invalid','unchecked','empty','duplicate_check','missing_terminal','truncated','duplicate_tool','error_mutation','usage_missing','usage_failure','wrong_title','neighbor_grid','metadata','field_array','slow','model_mismatch','mixed_models','record_metadata','version_jump','different_dashboard','unauthorized','rate_limited'] as const;
-export type Failure=typeof failures[number]|'configuration_missing'|'configuration_changed'|'last_truncated'|'multiple_saves'|'edit_model_mismatch';
+export type Failure=typeof failures[number]|'configuration_missing'|'configuration_changed'|'last_truncated'|'multiple_saves'|'edit_model_mismatch'|'dated_model'|'iso_dated_model'|'wrong_suffix'|'invalid_date';
 const golden=()=>JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
 const spec=():Spec=>structuredClone(golden().saved_spec);
 const wireEvents=(wire:string):any[]=>wire.split('\n').filter(s=>s.startsWith('data: ')).map(s=>JSON.parse(s.slice(6)));
@@ -74,6 +74,10 @@ export function startMock(failure?:Failure) {
     if(failure!=='usage_missing'){
       const metered=structuredClone(templates.filter(e=>e.name==='model_call_usage').at(-1));
       metered.value={...metered.value,run_id:input.runId,step:1,provider:'mock',model:failure==='model_mismatch'||failure==='mixed_models'&&stats.posts===10||failure==='edit_model_mismatch'&&stats.edits===2?'different-model':'mock-no-provider',status:failure==='truncated'||failure==='last_truncated'&&stats.posts===10?'incomplete':failure==='usage_failure'?'error':'completed'};
+      if(failure==='dated_model')metered.value.model+='-20261008';
+      if(failure==='iso_dated_model')metered.value.model+='-2026-10-08';
+      if(failure==='wrong_suffix')metered.value.model+='-latest';
+      if(failure==='invalid_date')metered.value.model+='-20261399';
       events.push(metered);
     }
     if(failure!=='missing_terminal')events.push({...structuredClone(failure==='usage_failure'?errorEvents.find(e=>e.type==='RUN_ERROR'):templates.find(e=>e.type==='RUN_FINISHED')),runId:input.runId,threadId:input.threadId});
@@ -86,6 +90,7 @@ export function startMock(failure?:Failure) {
 export async function mockEvaluation(failure?:Failure,options:Partial<Pick<EvaluationConfig,'model_label'|'ledger'|'mock'|'cap_usd'>>={}) {
   const mock=startMock(failure);
   const ledger:Ledger={schema:1,rates:[{provider:'mock',model:'mock-no-provider',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:0,output:0,cache_read:0,cache_write:0},{provider:'mock',model:'different-model',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:0,output:0,cache_read:0,cache_write:0}],calls:[],prompts:[]};
+  for(const suffix of ['20261008','2026-10-08','latest','20261399'])ledger.rates.push({...ledger.rates[0],model:'mock-no-provider-'+suffix});
   const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
   const end=BigInt(Date.now())*1_000_000n;
   const snapshot={source_hash:hash(JSON.stringify(spec())),start_ns:String(end-3_600_000_000_000n),end_ns:String(end),shift_ns:'0',replayed_at:new Date().toISOString()};

@@ -10,6 +10,8 @@ export type FanoutAppContextValue = {
   ready: boolean;
   running: boolean;
   activity: string;
+  provisional: { id: string; text: string; collapsed: boolean } | null;
+  stopped: boolean;
   input: string;
   setInput: (value: string) => void;
   error: string;
@@ -57,4 +59,13 @@ const toolLabels: Record<string, { activity: string; title: string }> = {
 
 export function activityLabel(toolName: string): string {
   return toolLabels[toolName]?.activity ?? "Working on it…";
+}
+
+export function runErrorMessage(code?: string): string {
+  switch (code) {
+    case "provider_unavailable": return "Fanout could not reach the model provider. Please try again.";
+    case "step_limit": return "Fanout reached its step limit before finishing. Try a narrower question.";
+    case "time_limit": return "Fanout reached its 5-minute time limit. Try a smaller request.";
+    default: return "Fanout could not complete this analysis. Please try again.";
+  }
 }

@@ -175,13 +175,13 @@ func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	}
 	stream := output.String()
 	assertEventOrder(t, stream, "RUN_STARTED", "RUN_ERROR")
-	if !strings.Contains(stream, "model provider unavailable") {
+	if !strings.Contains(stream, "Fanout could not reach the model provider. Please try again.") {
 		t.Errorf("RUN_ERROR missing generic message: %s", stream)
 	}
 	if strings.Contains(stream, "secret") {
 		t.Errorf("RUN_ERROR leaks provider body: %s", stream)
 	}
-	if strings.Contains(stream, "Unfinished provider text") || strings.Contains(stream, "TEXT_MESSAGE_") || len(messages) != 1 {
+	if strings.Contains(answerSSE(stream), "Unfinished provider text") || strings.Contains(answerSSE(stream), "TEXT_MESSAGE_") || len(messages) != 1 {
 		t.Fatalf("failed step leaked text: stream=%s messages=%#v", stream, messages)
 	}
 
@@ -259,7 +259,7 @@ func TestRuntimeStepLimitExceeded(t *testing.T) {
 	}
 	stream := output.String()
 	assertEventOrder(t, stream, "RUN_STARTED", "RUN_ERROR")
-	if !strings.Contains(stream, "step limit exceeded") {
+	if !strings.Contains(stream, "Fanout reached its step limit before finishing. Try a narrower question.") {
 		t.Errorf("RUN_ERROR missing step limit message: %s", stream)
 	}
 }

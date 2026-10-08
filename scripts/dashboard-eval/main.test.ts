@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { parseOptions, buildEdit, exitCode, publicEvidence, main } from './main';
+import { parseOptions, buildEdit, exitCode, publicEvidence, main, modelIdentityMatches } from './main';
 import { mockEvaluation, verifyMock, startMock, mockEdits } from './mock';
 const dirs:string[]=[];afterEach(()=>dirs.splice(0).forEach(p=>rmSync(p,{recursive:true,force:true})));
 it('accepts only documented options and rejects unsafe labels, origins and budgets',()=>{
@@ -44,6 +44,24 @@ it('stops subsequent edits on a mismatching call and checks an explicit configur
   expect(edit.stats.posts).toBe(12);expect(edit.stats.edits).toBe(2);expect(edit.exit_code).toBe(2);
   const config=await mockEvaluation('configuration_changed');
   expect(config.stats.posts).toBe(10);expect(config.stats.edits).toBe(0);expect(config.exit_code).toBe(2);
+});
+it.each(['dated_model','iso_dated_model'] as const)('accepts only a dated snapshot of the model label and records both identities (%s)',async failure=>{
+  const result=await mockEvaluation(failure);expect(result.exit_code).toBe(0);expect(result.stats.posts).toBe(15);
+  expect(result.evidence.model_label).toBe('mock:mock-no-provider');
+  expect(result.evidence.runs[0].expected_model).toBe('mock:mock-no-provider');
+  expect(result.evidence.runs[0].calls[0].model).toBe('mock-no-provider-'+(failure==='dated_model'?'20261008':'2026-10-08'));
+  expect(result.evidence.observed_configuration[0].model).toBe(result.evidence.runs[0].calls[0].model);
+});
+it.each(['wrong_suffix','invalid_date','model_mismatch'] as const)('rejects %s without further spend',async failure=>{
+  const result=await mockEvaluation(failure);expect(result.exit_code).toBe(2);expect(result.stats.posts).toBe(1);expect(result.evidence.model_mismatch.length).toBeGreaterThan(0);
+});
+it('matches exact provider identities and valid dated snapshots of the same label',()=>{
+  expect(modelIdentityMatches('anthropic:claude-sonnet-5-5','anthropic:claude-sonnet-5-5-20261008')).toBe(true);
+  expect(modelIdentityMatches('openai:gpt-6.1-sol','openai:gpt-6.1-sol-2026-10-08')).toBe(true);
+  expect(modelIdentityMatches('openai:gpt-6.1-sol-2026-10-08','openai:gpt-6.1-sol-2026-10-08')).toBe(true);
+  for(const observed of ['anthropic:gpt-6.1-sol-2026-10-08','openai:gpt-6.1-sol-mini-2026-10-08','openai:gpt-6.1-sol-2026-02-30','openai:gpt-6.1-sol-20261301','openai:gpt-6.1-sol-latest'])expect(modelIdentityMatches('openai:gpt-6.1-sol',observed)).toBe(false);
+  expect(modelIdentityMatches(undefined,'openai:gpt-6.1-sol')).toBe(false);
+  expect(modelIdentityMatches('openai:gpt-6.1-sol',undefined)).toBe(false);
 });
 it('exports only aggregate results and prompt IDs/hashes for the sealed set',()=>{
   const raw={schema:3,set:'holdout',runs:[{prompt_id:'id',prompt_sha:'hash',prompt:'private prompt',saved:{spec:'private'},error:'private failure'}],edits:[{prompt:'private edit'}],score:{passed:false},model_label:'label',observed_configuration:[],actual_cost_usd:0};

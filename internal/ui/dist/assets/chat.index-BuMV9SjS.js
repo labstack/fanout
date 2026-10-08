@@ -1,0 +1,1 @@
+import{t as e}from"./chat-DUg0P_bb.js";var t=e;export{t as component};

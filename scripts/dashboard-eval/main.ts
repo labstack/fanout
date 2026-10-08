@@ -69,6 +69,17 @@ export type EvaluationConfig={base:string;cookies:string;model_label?:string;pro
 export function exitCode(result:{passed:boolean},incomplete:boolean):number{return incomplete?2:result.passed?0:1}
 const blankRun=():Run=>({complete:false,saved:false,elapsed_ms:null,valid:false,checked:false,panels:[],checks:[]});
 const sha=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
+// A provider may resolve a label to its dated snapshot, but never to another model.
+export function modelIdentityMatches(label:string|undefined,observed:string|undefined):boolean {
+  if(!label||!observed)return false;
+  if(label===observed)return true;
+  if(!observed.startsWith(label+'-'))return false;
+  const suffix=observed.slice(label.length+1);
+  if(!/^(?:\d{8}|\d{4}-\d{2}-\d{2})$/.test(suffix))return false;
+  const date=suffix.length===8?`${suffix.slice(0,4)}-${suffix.slice(4,6)}-${suffix.slice(6)}`:suffix;
+  const parsed=new Date(date+'T00:00:00Z');
+  return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===date;
+}
 export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:number;evidence:ObjectValue}> {
   const started_at=new Date().toISOString(),runs:ObjectValue[]=[],edits:ObjectValue[]=[];
   let incomplete=false;
@@ -94,8 +105,8 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
       default_model??=configured;
       const expected=config.model_label?.includes(':')?config.model_label:config.model_label&&state.configuration?`${state.configuration.provider}:${config.model_label}`:default_model;
       result.configured_model=configured;result.expected_model=expected;
-      for(const call of state.usage){const observed=`${call.provider}:${call.model}`;if(!expected||observed!==expected||call.provider==='unknown'||call.model==='unknown')model_mismatch.push({run_id,step:call.step,expected:expected??null,observed});}
-      if(!configured||configured!==expected)model_mismatch.push({run_id,expected:expected??null,observed:configured??null});
+      for(const call of state.usage){const observed=`${call.provider}:${call.model}`;if(!modelIdentityMatches(expected,observed)||call.provider==='unknown'||call.model==='unknown')model_mismatch.push({run_id,step:call.step,expected:expected??null,observed});}
+      if(!modelIdentityMatches(expected,configured))model_mismatch.push({run_id,expected:expected??null,observed:configured??null});
       let messages:ObjectValue[]=[];
       try {const thread=await json('/api/agent/threads/'+encodeURIComponent(thread_id),{signal:AbortSignal.timeout(5000)});messages=thread.messages??[];}catch {result.thread_read_failed=true;}
       const save=findSaved(state,messages);

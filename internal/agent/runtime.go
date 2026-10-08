@@ -266,6 +266,8 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		var providerItems []json.RawMessage
 		var usage *TokenUsage
 		var servedModel string
+		thinkingStarted := false
+		toolStep := false
 		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
 			if event.Model != "" {
 				servedModel = event.Model
@@ -281,11 +283,26 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				return fmt.Errorf("%w: %s", errProvider, event.Error)
 			case EventText:
 				text.WriteString(event.Delta)
+				if event.Delta == "" {
+					return nil
+				}
+				if !thinkingStarted {
+					if err := emitter.emitProvisional(events.NewThinkingStartEvent()); err != nil {
+						return err
+					}
+					if err := emitter.emitProvisional(events.NewThinkingTextMessageStartEvent()); err != nil {
+						return err
+					}
+					thinkingStarted = true
+				}
+				return emitter.emitProvisional(events.NewThinkingTextMessageContentEvent(event.Delta))
 			case EventToolUse:
 				if event.ToolCall != nil {
+					toolStep = true
 					toolCalls = append(toolCalls, *event.ToolCall)
 				}
 			case EventStop:
+				toolStep = toolStep || event.ToolStep
 				stopReason = event.StopReason
 				providerItems = event.ProviderItems
 			}
@@ -293,6 +310,13 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		})
 		if ctx.Err() != nil {
 			streamErr = ctx.Err()
+		}
+		var deliveryErr error
+		if thinkingStarted {
+			deliveryErr = emitter.emitProvisional(events.NewThinkingTextMessageEndEvent())
+			if err := emitter.emitProvisional(events.NewThinkingEndEvent()); deliveryErr == nil {
+				deliveryErr = err
+			}
 		}
 		provider, model := runtimeUsageIdentity(r.provider)
 		if servedModel != "" {
@@ -318,8 +342,8 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if raw, marshalErr := usageEvent.ToJSON(); marshalErr == nil {
 				emitter.events = append(emitter.events, raw)
 			}
-			if streamErr == nil {
-				streamErr = err
+			if deliveryErr == nil {
+				deliveryErr = err
 			}
 		}
 		if streamErr == nil {
@@ -330,6 +354,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if stoppedAtTokenLimit(stopReason) || stopReason == "incomplete" || stopReason == "content_filter" {
 				truncated = true
 				toolCalls = nil
+				if toolStep {
+					text.Reset()
+				}
 				slog.Warn("agent response truncated", logFields...)
 				notice := "The response was cut off before it finished."
 				if text.Len() > 0 {
@@ -353,13 +380,13 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		if streamErr != nil {
 			return truncated, r.fail(threadID, runID, deadlineError(streamErr), emitter)
 		}
+		if len(toolCalls) > 0 && deliveryErr != nil {
+			return truncated, r.fail(threadID, runID, deliveryErr, emitter)
+		}
 		providerText := text.String()
 		transcriptText := ""
 		if len(toolCalls) == 0 {
 			transcriptText = providerText
-			if err := emitFinalText(emitter, messageID, transcriptText); err != nil {
-				return truncated, r.fail(threadID, runID, err, emitter)
-			}
 		}
 
 		agCalls := make([]agtypes.ToolCall, len(toolCalls))
@@ -370,13 +397,20 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			*messages = append(*messages, agtypes.Message{ID: messageID, Role: agtypes.RoleAssistant, Content: transcriptText, ToolCalls: agCalls})
 		}
 		// Tool narration and opaque reasoning belong to this run's provider
-		// conversation, not the persisted AG-UI history or client events.
+		// conversation, not persisted AG-UI history or committed answer events.
 		if providerText != "" || len(toolCalls) > 0 || len(providerItems) > 0 {
 			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: providerText, ToolCalls: toolCalls, ProviderItems: providerItems})
 		}
 		if len(toolCalls) == 0 {
+			// The server owns the completed answer even if the client disconnects.
+			if deliveryErr != nil {
+				return truncated, r.fail(threadID, runID, deliveryErr, emitter)
+			}
+			if err := emitFinalText(emitter, messageID, transcriptText); err != nil {
+				return truncated, r.fail(threadID, runID, err, emitter)
+			}
 			if err := emitter.emit(events.NewRunFinishedEventWithOptions(threadID, runID, events.WithSuccessOutcome())); err != nil {
-				return truncated, err
+				return truncated, r.fail(threadID, runID, err, emitter)
 			}
 			return truncated, nil
 		}
@@ -477,7 +511,7 @@ func runtimeUsageIdentity(provider Provider) (string, string) {
 // fail reports the failure to the client with a sanitized message and returns
 // the raw error for server-side logging and persistence.
 func (r *Runtime) fail(threadID, runID string, err error, emitter *eventEmitter) error {
-	if emitErr := emitter.emit(events.NewRunErrorEvent(clientErrorMessage(err), events.WithRunID(runID))); emitErr != nil {
+	if emitErr := emitter.emit(events.NewRunErrorEvent(clientErrorMessage(err), events.WithErrorCode(clientErrorCode(err)), events.WithRunID(runID))); emitErr != nil {
 		slog.Error("agent RUN_ERROR emit failed", "thread_id", threadID, "run_id", runID, "err", emitErr)
 	}
 	return err
@@ -485,18 +519,35 @@ func (r *Runtime) fail(threadID, runID string, err error, emitter *eventEmitter)
 
 // clientErrorMessage maps a run error to a short message safe for the wire.
 // Provider API responses can contain internal details and never leave the server.
-func clientErrorMessage(err error) string {
+func clientErrorCode(err error) string {
 	var apiErr *APIError
 	switch {
 	case errors.As(err, &apiErr), errors.Is(err, errProvider):
-		return "model provider unavailable"
+		return "provider_unavailable"
 	case errors.Is(err, errStepLimit):
 		if strings.Contains(err.Error(), "5-minute") {
-			return "The agent reached its 5-minute time limit. Try a smaller request."
+			return "time_limit"
 		}
-		return "step limit exceeded"
+		return "step_limit"
+	case errors.Is(err, context.Canceled):
+		return "abort"
 	default:
-		return "agent run failed"
+		return "run_failed"
+	}
+}
+
+func clientErrorMessage(err error) string {
+	switch clientErrorCode(err) {
+	case "provider_unavailable":
+		return "Fanout could not reach the model provider. Please try again."
+	case "step_limit":
+		return "Fanout reached its step limit before finishing. Try a narrower question."
+	case "time_limit":
+		return "Fanout reached its 5-minute time limit. Try a smaller request."
+	case "abort":
+		return "Stopped"
+	default:
+		return "Fanout could not complete this analysis. Please try again."
 	}
 }
 
@@ -551,6 +602,11 @@ type eventEmitter struct {
 	writer io.Writer
 	sse    *sse.SSEWriter
 	events [][]byte
+}
+
+// Provisional text is live-only; neither run events nor thread history retain it.
+func (e *eventEmitter) emitProvisional(event events.Event) error {
+	return e.sse.WriteEvent(e.ctx, e.writer, event)
 }
 
 func (e *eventEmitter) emit(event events.Event) error {

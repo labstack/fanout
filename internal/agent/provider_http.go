@@ -250,6 +250,7 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 				}
 			}
 			indices := make([]int, 0, len(calls))
+			stop.ToolStep = len(calls) > 0
 			for index, call := range calls {
 				if event.Type == "response.completed" && !call.unfinished && call.call.ID != "" && call.call.Name != "" {
 					indices = append(indices, index)
@@ -378,6 +379,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, params StreamParams, cb 
 
 func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 	var currentID, currentName string
+	toolStep := false
 	var args strings.Builder
 	type anthropicUsage struct {
 		InputTokens      *int `json:"input_tokens"`
@@ -462,6 +464,7 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			}
 		case "content_block_start":
 			if event.ContentBlock.Type == "tool_use" {
+				toolStep = true
 				currentID, currentName = event.ContentBlock.ID, event.ContentBlock.Name
 				args.Reset()
 			}
@@ -487,7 +490,7 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			}
 		case "message_delta":
 			mergeUsage(event.Usage)
-			return cb(StreamEvent{Type: EventStop, StopReason: event.Delta.StopReason, Usage: usage})
+			return cb(StreamEvent{Type: EventStop, StopReason: event.Delta.StopReason, Usage: usage, ToolStep: toolStep})
 		case "error":
 			message := "Anthropic stream error"
 			if event.Error != nil && event.Error.Message != "" {

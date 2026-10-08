@@ -143,7 +143,7 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "ai.model") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Errorf("configuration error = %v", err)
 	}
-	if got := clientErrorMessage(err); got != "model provider unavailable" {
+	if got := clientErrorMessage(err); got != "Fanout could not reach the model provider. Please try again." {
 		t.Errorf("client error = %q", got)
 	}
 }

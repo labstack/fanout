@@ -144,7 +144,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		if result.Dashboard.ID == "" {
 			t.Fatal("SSE fixture did not execute create_dashboard")
 		}
-		if strings.Contains(out.String(), "Saving the fixture.") {
+		if strings.Contains(answerSSE(out.String()), "Saving the fixture.") {
 			t.Fatal("tool narration in golden SSE")
 		}
 		return evalStableSSE(t, out.String())

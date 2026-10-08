@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -46,6 +47,53 @@ func TestStorePersistsOwnerScopedThread(t *testing.T) {
 	}
 	if _, err := store.Thread(context.Background(), "owner-2", input.ThreadID); !errors.Is(err, ErrThreadNotFound) {
 		t.Fatalf("other owner error = %v", err)
+	}
+}
+
+func TestStoreReloadsSanitizedRunOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"provider", fmt.Errorf("%w: private provider body", errProvider), "Fanout could not reach the model provider. Please try again."},
+		{"step limit", errStepLimit, "Fanout reached its step limit before finishing. Try a narrower question."},
+		{"stopped", context.Canceled, "Stopped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := controlstore.NewSQLite(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			store := NewStore(db.DB)
+			input := agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Show"}}}
+			messages, err := store.StartRun(t.Context(), "owner", input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.FinishRun(t.Context(), "owner", "thread", "run", messages, nil, false, tc.err); err != nil {
+				t.Fatal(err)
+			}
+			thread, err := store.Thread(t.Context(), "owner", "thread")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outcome string
+			for _, m := range thread.Messages {
+				if m.Role == agtypes.RoleActivity && m.ActivityType == "agent-outcome" {
+					outcome = messageText(m.Content)
+				}
+			}
+			if !strings.Contains(outcome, tc.want) || strings.Contains(outcome, "private") {
+				t.Fatalf("reload outcome=%q", outcome)
+			}
+			for _, m := range providerMessages(thread.Messages) {
+				if strings.Contains(m.Content, tc.want) {
+					t.Fatal("outcome entered provider conversation")
+				}
+			}
+		})
 	}
 }
 
@@ -585,8 +633,8 @@ func TestStoreStartRunRepairsUnansweredToolCalls(t *testing.T) {
 			t.Fatalf("seed still carries the unanswered tool call %q, which the provider rejects", call.ID)
 		}
 	}
-	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,user-2" {
-		t.Fatalf("seed = %v, want the turn kept with its unanswered call dropped", got)
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,run-1-outcome,user-2" {
+		t.Fatalf("seed = %v, want the turn and stopped outcome kept with its unanswered call dropped", got)
 	}
 	if seed[1].Content != "checking" {
 		t.Fatalf("assistant text = %q, want the spoken part kept", seed[1].Content)
@@ -619,7 +667,7 @@ func TestStoreStartRunDropsAnEmptyInterruptedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,user-2" {
-		t.Fatalf("seed = %v, want the empty interrupted turn dropped entirely", got)
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,run-1-outcome,user-2" {
+		t.Fatalf("seed = %v, want the empty interrupted turn dropped and stopped outcome kept", got)
 	}
 }

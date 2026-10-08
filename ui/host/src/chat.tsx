@@ -108,7 +108,7 @@ const suggestions = [
 ];
 
 export function ChatPage() {
-  const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
+  const { agentAvailable, messages, messageTimes, ready, running, activity, provisional, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
   const { scrollRef, contentRef, toBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
   // Sending is a request to see the answer, so it returns a reader who had
   // scrolled back through the thread to the bottom of it.
@@ -127,6 +127,8 @@ export function ChatPage() {
   // the current user turn replaces its running status.
   const turnStart = messages.findIndex(message => message.id === lastSent);
   const hasFinalText = messages.slice(turnStart + 1).some(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.length > 0);
+  const answer = messages.slice(turnStart + 1).filter(message => message.role === "assistant" && !message.toolCalls?.length).at(-1);
+  const liveText = running && provisional && !provisional.collapsed && provisional.text && !hasFinalText;
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
@@ -143,7 +145,7 @@ export function ChatPage() {
         {!threadMissing && ready && <>
           {visibleMessages.length === 0 && <Welcome onSelect={send} />}
           <Stack gap="lg" aria-live="polite">
-            {visibleMessages.map((message) => {
+            {visibleMessages.filter(message => message.id !== answer?.id).map((message) => {
               const saved = dashboardResults.get(message.id);
               return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : saved ? <Paper key={message.id} withBorder radius="md" p="sm" data-dashboard-result={saved.id}>
                 <Group justify="space-between" gap="sm">
@@ -152,7 +154,11 @@ export function ChatPage() {
                 </Group>
               </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />;
             })}
-            {running && !hasFinalText && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+            {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
+              {liveText ? <Box className="chat-message" data-chat-anchor><Text data-provisional c="dimmed" style={{ whiteSpace: "pre-wrap" }}>{provisional.text}</Text><Loader type="dots" size="sm" /></Box> : answer && <ChatMessage message={answer} time={messageTimes[answer.id]} />}
+            </Box>}
+            {running && !hasFinalText && !liveText && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+            {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
             {error && <RunError message={error} onRetry={retry} />}
           </Stack>
         </>}
@@ -204,6 +210,9 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
 function ChatMessage({ message, time, appView }: { message: Message; time?: number; appView?: AppView }) {
 
   if (message.role === "activity") {
+    if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
+      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Alert color="bad" title="Something went wrong" data-chat-anchor>{message.content.message}</Alert>;
+    }
     if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
     return null;
   }
