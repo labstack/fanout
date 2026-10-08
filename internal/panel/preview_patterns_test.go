@@ -39,7 +39,7 @@ func TestPreviewPatternContextEngine(t *testing.T) {
 	add("tie <*> ", "WARN", "zeta", 2)
 	add("tie <*> ", "ERROR", "alpha", 2)
 	add("fatal <*> ", "ERROR", "payments", 1)
-	add("fatal <*> ", "FATAL", "checkout", 1)
+	add("fatal <*> ", "fatal", "checkout", 1)
 	add("numbered <*> ", "INFO", "zeta", 1)
 	logs[len(logs)-1].SeverityNumber = 9
 	add("numbered <*> ", "INFO2", "alpha", 1)
@@ -99,6 +99,26 @@ func TestPreviewPatternContextEngine(t *testing.T) {
 	}
 	if f.Rows != len(want) {
 		t.Fatalf("rows=%d", f.Rows)
+	}
+}
+
+func TestFinal2PatternContextIsAggregated(t *testing.T) {
+	p := &Panel{ID: "p", Viz: "log_patterns", Query: &Query{From: "logs", Measures: []string{"count()"}, By: []string{"body_template"}}}
+	c, err := compileRows(p, nil, Scope{Start: compileStart, End: compileEnd, Interval: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(c.SQL, "context AS (")
+	if start < 0 {
+		t.Fatalf("missing context aggregate: %s", c.SQL)
+	}
+	end := strings.Index(c.SQL[start:], "),\nseverity_counts")
+	if end < 0 {
+		t.Fatalf("missing context aggregate: %s", c.SQL)
+	}
+	contextSQL := c.SQL[start : start+end]
+	if !strings.Contains(contextSQL, "GROUP BY") || !strings.Contains(contextSQL, "count(*)") {
+		t.Fatalf("row-level materialized context: %s", contextSQL)
 	}
 }
 

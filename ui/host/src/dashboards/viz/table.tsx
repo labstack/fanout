@@ -92,7 +92,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
     if (!rowInteractive(index)) return;
     onPoint?.(selectionFor(index));
     const value = firstDimension >= 0 ? String(original[firstDimension] ?? "") : undefined;
-    if (value !== undefined && value !== "Other") onSelect?.(value);
+    if (value !== undefined) onSelect?.(value);
   };
   const logWidths:Record<string,number>={time:146,severity:90,service:120,trace_id:150,namespace:100};
   const fixedWidths=columns.flatMap(c=>logWidths[c.id!]? [logWidths[c.id!]]:[]);

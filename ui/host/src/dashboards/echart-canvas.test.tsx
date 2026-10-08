@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ init: vi.fn(), registered: [] as unknown[], connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
 
 vi.mock("echarts/core", () => ({ init: mocks.init, use: (components: unknown[]) => { mocks.registered = components; }, connect: mocks.connect, disconnect: mocks.disconnect }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
 vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: { id: "graphic" }, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
@@ -20,15 +20,31 @@ function fresh() {
 describe("EChartCanvas", () => {
   afterEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
 
-  it("records native text sizes and colours for the part-2 measured collector",async()=>{
+  it("I2 has no production audit hook, large data attributes or per-frame audit", async () => {
+    vi.stubEnv("DEV", false);
+    const instance=fresh(), getDisplayList=vi.fn(() => []);
+    Object.assign(instance,{getZr:()=>({storage:{getDisplayList}})});
+    const container=document.createElement("div"),root=createRoot(container); document.body.append(container);
+    try {
+      await act(async()=>root.render(<EChartCanvas option={{series:[]}} height={100} label="Production"/>));
+      expect(instance.on.mock.calls.some(([event])=>event==="finished")).toBe(false);
+      expect(getDisplayList).not.toHaveBeenCalled();
+      expect(container.querySelector("[data-chart-audit],[data-chart-labels],[data-chart-legend],[data-chart-plot]")).toBeNull();
+      expect((window as any).__fanoutAudit).toBeUndefined();
+      for(const node of container.querySelectorAll("*")) for(const attr of node.attributes) if(attr.name.startsWith("data-")) expect(attr.value.length).toBeLessThanOrEqual(1024);
+    } finally { await act(async()=>root.unmount()); vi.unstubAllEnvs(); }
+  });
+
+  it("inspects native text only on demand in development",async()=>{
+    vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__fanout_audit=1");
     const instance=fresh();
     const rect={x:10,y:10,width:40,height:12,clone(){return this;},applyTransform(){}};
     Object.assign(instance,{getZr:()=>({storage:{getDisplayList:()=>[{type:"tspan",style:{text:"300 ms",font:"11px monospace",fill:"#6b7280"},getBoundingRect:()=>rect,getComputedTransform:()=>null}]}})});
     const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
     await act(async()=>root.render(<EChartCanvas option={{tooltip:{backgroundColor:"#fcfcfc"},xAxis:{axisLabel:{fontSize:11}},series:[]}} height={100} label="Native audit"/>));
-    const audit=JSON.parse(container.querySelector('[data-chart-audit]')!.getAttribute("data-chart-audit")!);
+    const audit=window.__fanoutAudit!(container.querySelector<HTMLElement>("[role=img]")!.id)!.audit;
     expect(audit.texts).toContainEqual(expect.objectContaining({text:"300 ms",size:11,color:"#6b7280",surface:"#fcfcfc",family:"11px monospace"}));
-    await act(async()=>root.unmount());
+    await act(async()=>root.unmount()); window.history.replaceState({},"","/"); vi.unstubAllEnvs();
   });
 
   it("activates the brush cursor on initial render and option update", async () => {
@@ -142,13 +158,14 @@ describe("EChartCanvas", () => {
   });
 });
 
-it("W12 exposes rendered legend text bounds for collector measurements", async () => {
+it("W12 inspects rendered legend text bounds on demand", async () => {
+ vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__fanout_audit=1");
  const instance = fresh();
  Object.assign(instance, { getZr: () => ({ storage: { getDisplayList: () => [{ style: { text: "load-generator" }, getBoundingRect: () => ({ clone: () => ({ x: 10, y: 0, width: 100, height: 16, applyTransform: () => {} }) }), getComputedTransform: () => null }] } }) });
  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
  await act(async () => root.render(<EChartCanvas option={{ legend: { type: "plain", show: true, data: ["load-generator"] }, grid: { top: 30 } }} height={100} label="Legend" />));
  const chart = container.querySelector<HTMLElement>("[role=img]")!;
- expect(JSON.parse(chart.dataset.chartLegend!)).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
- expect(chart.dataset.chartLegendBottom).toBe("30");
- await act(async () => root.unmount()); container.remove();
+ expect(window.__fanoutAudit!(chart.id)!.legend).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
+ expect(window.__fanoutAudit!(chart.id)!.legendBottom).toBe(30);
+ await act(async () => root.unmount()); container.remove(); window.history.replaceState({},"","/"); vi.unstubAllEnvs();
 });

@@ -29,7 +29,6 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
   });
   const marks:{fill?:string;stroke?:string;shadow?:string;surface?:string;density?:boolean}[]=[];
   const cells:{box:ReturnType<typeof bounds>;value:number[];fill?:string}[]=[];
-  let gaugeDiameter=0;
   const paints=new Set<string>();
   const paint=(el:Element,density=false)=>{
     const s=el.style;if(!s||s.text||s.opacity!==undefined&&s.opacity<.5) return;
@@ -39,7 +38,7 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
   };
   const model=chart.getModel?.();
   for(const series of model?.getSeries?.()??[]) {
-    if(series.subType==="gauge") chart.getViewOfSeriesModel?.(series).group.traverse?.(el=>{if(el.shape?.r)gaugeDiameter=Math.max(gaugeDiameter,el.shape.r*2);});
+
     const density=series.subType==="custom"&&Boolean(model?.getComponent("visualMap"));
     if(series.subType==="line") chart.getViewOfSeriesModel?.(series).group.traverse?.(el=>{if(el.type==="ec-polyline")paint(el);});
     series.getData().eachItemGraphicEl((element,index)=>{
@@ -78,10 +77,9 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
   });
   const xAxis=(option as {xAxis?:{name?:string}}).xAxis;
   const axisTitles=[xAxis?.name,axes[0]?.name].filter((n):n is string=>Boolean(n));
-  const gauge=(option.series as {type?:string;detail?:{formatter?:()=>string}}[]|undefined)?.find(s=>s.type==="gauge");
   const linear=(option as {graphic?:{id?:string;style?:{text?:string}}[]}).graphic?.find(g=>g.id==="gauge-value");
   return {texts,marks,
-    ...(gauge||linear?{gauge:{mode:linear?"linear":"arc",width:size.width,height:size.height,diameter:gaugeDiameter,texts,value:linear?.style?.text??gauge?.detail?.formatter?.()}}:{}),
+    ...(linear?{gauge:{mode:"linear",width:size.width,height:size.height,texts,value:linear.style?.text}}:{}),
     ...(plot?{plot:{fraction:plot.height/size.height,height:plot.height,y_ticks:ticks,...(axisTitles.length?{titles:axisTitles.map(name=>({name,boxes:texts.filter(t=>t.text===name)})),body:{left:0,top:0,right:size.width,bottom:size.height},rect:{left:plot.x??0,top:plot.y??0,right:(plot.x??0)+plot.width,bottom:(plot.y??0)+plot.height}}:{}),split_number:axes[0]?.splitNumber,...(axes[0]?.type==="category"&&option.series?.[0]?.type==="custom"&&!scale?{rows:axes[0].data,labelled}: {})}}:{}),
     ...(scale?{heat:{cells,gaps,gap:gaps.length ? (Math.abs(gaps[0])<.5?0:1) : undefined,scale_width:scale.width,scale_height:scale.height,plot_fraction:(plot?.height??0)/size.height}}:{}),
     ...(option.yAxis?.type==="category"&&option.series?.some(s=>s.type==="bar")?{bars:{category_fraction:Math.max(0,...categories.map(c=>c.right-c.left))/size.width,expected_labels:[...new Set(expected)],value_labels:texts.map(t=>t.text)}}:{})};

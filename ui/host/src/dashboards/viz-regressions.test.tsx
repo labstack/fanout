@@ -134,9 +134,9 @@ describe("visualization regressions", () => {
   it("uses threshold-derived gauge bands and result direction", async () => {
     const p: Panel = { ...panel, viz: "gauge", min: 0, max: 200, thresholds: [{ value: 50, status: "warn" }, { value: 100, status: "bad" }] };
     const { rerender } = await render(<GaugeViz panel={p} result={result} dark={false} height={200} />);
-    expect(instance.setOption.mock.lastCall?.[0].series[0].axisLine.lineStyle.color).toHaveLength(3);
+    expect(instance.setOption.mock.lastCall?.[0].graphic.filter((g: any) => g.type === "rect" && !g.id)).toHaveLength(3);
     await rerender(<GaugeViz panel={p} result={{ ...result, better: "higher" }} dark={false} height={200} />);
-    expect(instance.setOption.mock.lastCall?.[0].series[0].axisLine.lineStyle.color).toHaveLength(2);
+    expect(instance.setOption.mock.lastCall?.[0].graphic.filter((g: any) => g.type === "rect" && !g.id)).toHaveLength(2);
   });
   it("keeps dimension cells nowrap with full titles and only the panel scrollbar", async () => {
     const service = "checkout-service-with-a-long-unbroken-name";
@@ -160,7 +160,7 @@ describe("visualization regressions", () => {
     const { host } = await render(<><StatViz panel={p} result={r} /><TableViz panel={{ ...p, viz: "table" }} result={r} height={200} /><GaugeViz panel={{ ...p, viz: "gauge" }} result={r} dark={false} height={200} /><PanelData panel={p} result={r} /></>);
     expect(host.querySelector("tbody td p")!.textContent).toBe("1");
     expect(host.querySelector("p")!.textContent).toBe("1");
-    expect(instance.setOption.mock.lastCall?.[0].series[0].detail.formatter()).toBe("1");
+    expect(instance.setOption.mock.lastCall?.[0].graphic.find((g: any) => g.id === "gauge-value").style.text).toBe("1");
     expect(document.querySelector('[data-panel-data] tbody td')!.textContent).toBe("1");
   });
   it.each([undefined, { ...frame, totals: undefined }])("hides window delta without previous totals (%s)", async (previous) => {

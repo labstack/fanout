@@ -27,9 +27,10 @@ describe("preview V3", () => {
     const got = withAnnotations(base, panel, result, { deploys: [600000, 610000, 1800000].map(at => ({ namespace: "shop", service: "payments", version: "v2.14.0", at: new Date(at).toISOString() })), anomalies: [{ namespace: "shop", service: "payments", title: "Slow", severity: "bad", kind: "latency", from: new Date(800000).toISOString(), to: new Date(2000000).toISOString() }] }, {}, theme, { width: 500, height: 248 });
     expect((got.grid as {top:number}).top-(base.grid as {top:number}).top).toBeLessThanOrEqual(18);
     const first = (got.series as Series[])[0]; const deploys = first.markLine.data.filter(mark => mark.xAxis !== undefined);
-    expect(deploys).toHaveLength(2); expect(deploys[0].label.formatter).toBe("2 deploys"); expect(deploys[1].label.formatter).toBe("payments v2.14.0");
-    for (const deploy of deploys) expect(deploy.label).toMatchObject({ rotate: 0, position: "end", textBorderColor: theme.surface, fontSize: 12 });
-    const area = first.markArea.data[0][0]; expect(area.label).toMatchObject({ show: false, formatter: "anomaly" });
+    expect(deploys).toHaveLength(2);
+    expect((got.graphic as {annotation?:boolean;style:{text:string}}[]).filter(g=>g.annotation).map(g=>g.style.text)).toEqual(["2 deploys","payments v2.14.0","anomaly"]);
+    for (const deploy of deploys) expect(deploy.label).toEqual({show:false});
+    const area = first.markArea.data[0][0]; expect(area.label).toEqual({show:false});
     expect(area.tooltip.formatter()).toContain("Slow · bad"); expect(area.tooltip.formatter()).toContain(new Date(800000).toISOString()); expect(area.tooltip.formatter()).toContain(new Date(2000000).toISOString());
     expect(area.itemStyle.opacity).toBeLessThanOrEqual(.12);
   });

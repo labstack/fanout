@@ -67,8 +67,8 @@ describe("validated categorical series", () => {
     const theme = chartThemeFor(true);
     const single: Frame = { columns: [{ name: "route", type: "string", role: "dimension" }, frame(1).columns[2]], values: [["/cart"], [5]], rows: 1 };
     expect((barOption({ ...panel, viz: "bar" }, single, theme) as Chart).series[0].itemStyle.color).toBe(series.dark[0]);
-    const gauge = gaugeOption({ ...panel, viz: "gauge" }, 5, theme) as { series: { progress: { itemStyle: { color: string } } }[] };
-    expect(gauge.series[0].progress.itemStyle.color).toBe(series.dark[0]);
+    const gauge = gaugeOption({ ...panel, viz: "gauge" }, 5, theme) as { graphic: {id?:string;style:{fill:string}}[] };
+    expect(gauge.graphic.find(g=>g.id === "gauge-fill")!.style.fill).toBe(series.dark[0]);
     const heat = analysisOption({ ...panel, viz: "heatmap" }, result(frame(1)), theme) as { visualMap: { inRange: { color: string[] } } };
     expect(heat.visualMap.inRange.color.at(-1)).toBe("#7dd3fc"); expect(heat.visualMap.inRange.color).toHaveLength(7);
   });

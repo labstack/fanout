@@ -66,7 +66,12 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   const visible = result.frame ? chartSeries(result.frame, panel) : { shown: [], hidden: 0 };
   const current = visible.shown;
   const unit = current[0]?.unit ?? panel.unit;
-  const previousSeries = result.previous && result.shift_ms !== undefined ? chartSeries(result.previous, panel).shown : [];
+  const currentNames = new Set(current.map(s => s.name));
+  const other = current.find(s => isOtherSeries(s.name));
+  const previousSeries = result.previous && result.shift_ms !== undefined ? chartSeries(result.previous, panel).shown.flatMap(s => {
+    if (isOtherSeries(s.name)) return other ? [{ ...s, name: other.name }] : [];
+    return currentNames.has(s.name) ? [s] : [];
+  }) : [];
   const units = [...new Set([...current, ...previousSeries].map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
   const style = panel.options?.style ?? "line";
@@ -189,62 +194,31 @@ export type ChartSize = { width: number; height: number; measureText?: (text: st
 export function gaugeOption(panel: Panel, value: number | null, theme: ChartTheme, unit = panel.unit as string | undefined, size: ChartSize = { width: 270, height: 140 }): Option {
   const min = panel.min ?? 0;
   const max = panel.max ?? 100;
-  const sorted = [...(panel.thresholds ?? [])].sort((a, b) => a.value - b.value);
   const bands = gaugeBands(panel, min, max, theme);
-  const endpointWidth = (value:number) => size.measureText?.(formatValue(unit,value),`11px ${theme.font}`) ?? formatValue(unit,value).length*11;
-  const radius = Math.min(.4 * Math.min(size.width, 1.6 * size.height), (size.width - Math.max(endpointWidth(min), endpointWidth(max))) / 2 - 4);
-  const center = [size.width / 2, Math.max(radius + 1, size.height - 20)];
-  const bandWidth = Math.min(10, radius * .14);
   const text = formatValue(unit, value);
-  const fontSize = Math.max(24, Math.min(32, radius * .3));
   const status = statusFor(value, panel.thresholds, panel.better);
   const cue = status === "bad" ? "◆ Bad" : status === "warn" ? "■ Warn" : status === "ok" ? "● OK" : value === null ? "○ Unknown" : undefined;
   const mute = (hex: string) => `${hex}40`;
-  if (size.height < 140 || size.width < 220) {
-    const stacked = size.width < text.length * 24 + (cue?.length ?? 0) * 11 + 16;
-    const top = Math.max(0, (size.height - 56) / 2), trackY = top + (stacked ? 36 : 32);
-    const trackWidth = Math.max(1, size.width - 8), fraction = Math.max(0, Math.min(1, ((value ?? min) - min) / (max - min || 1)));
-    let start = 0;
-    return {
-      animation: false, textStyle: { fontFamily: theme.font, color: theme.text }, series: [],
-      graphic: [
-        { id: "gauge-value", type: "text", left: 4, top, style: { text, fill: theme.text, fontSize: 24, fontWeight: 600, fontFamily: theme.font } },
-        ...(cue ? [{ type: "text", right: 4, top: top + (stacked ? 24 : 8), style: { text: cue, fill: theme.text, fontSize: 11, fontFamily: theme.font } }] : []),
-        { id: "gauge-track", type: "rect", shape: { x: 4, y: trackY, width: trackWidth, height: 6, r: 3 }, style: { fill: theme.grid } },
-        ...bands.map(([end, color]) => { const x = start; start = end; return { type: "rect", shape: { x: 4 + x * trackWidth, y: trackY, width: (end - x) * trackWidth, height: 6 }, style: { fill: mute(color) } }; }),
-        { id: "gauge-fill", type: "rect", shape: { x: 4, y: trackY, width: fraction * trackWidth, height: 6, r: 3 }, style: { fill: status ? theme.status[status] : seriesSlot(0, theme.dark) } },
-        { type: "text", left: 4, top: trackY + 8, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
-        { type: "text", right: 4, top: trackY + 8, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
-      ],
-    };
-  }
+  const valueWidth = size.measureText?.(text,`600 28px ${theme.font}`) ?? text.length * 28 * .6;
+  const cueWidth = size.measureText?.(cue ?? "",`11px ${theme.font}`) ?? (cue?.length ?? 0) * 11 * .6;
+  const stacked = size.width < valueWidth + cueWidth + 16;
+  const top = Math.max(0, (size.height - (stacked ? 78 : 62)) / 2), trackY = top + (stacked ? 50 : size.height < 62 ? 32 : 34);
+  const trackWidth = Math.max(1, size.width - 8), fraction = Math.max(0, Math.min(1, ((value ?? min) - min) / (max - min || 1)));
+  let start = 0;
   return {
-    animation: false,
-    textStyle: { fontFamily: theme.font, color: theme.text },
+    animation: false, textStyle: { fontFamily: theme.font, color: theme.text }, series: [],
     graphic: [
-      ...(size.width >= 160 ? [{ type: "text", left: center[0] - radius - endpointWidth(min)/2, top: center[1] + 8, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
-      { type: "text", left: center[0] + radius - endpointWidth(max)/2, top: center[1] + 8, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } }] : []),
-      ...(cue ? [{ type: "text", left: "center", top: center[1] - 8, style: { text: cue, fill: theme.text, fontSize: 11, fontFamily: theme.font } }] : []),
+      { id: "gauge-value", type: "text", left: 4, top, style: { text, fill: theme.text, fontSize: 28, fontWeight: 600, fontFamily: theme.font } },
+      ...(cue ? [{ type: "text", right: 4, top: top + (stacked ? 30 : 10), style: { text: cue, fill: theme.text, fontSize: 11, fontFamily: theme.font } }] : []),
+      { id: "gauge-track", type: "rect", shape: { x: 4, y: trackY, width: trackWidth, height: 10, r: 5 }, style: { fill: theme.grid } },
+      ...bands.map(([end, color],i) => { const x = start; start = end; return { type: "rect", shape: { x: 4 + x * trackWidth, y: trackY, width: (end - x) * trackWidth, height: 10, r: [i===0?5:0,i===bands.length-1?5:0,i===bands.length-1?5:0,i===0?5:0] }, style: { fill: mute(color) } }; }),
+      { id: "gauge-fill", type: "rect", shape: { x: 4, y: trackY, width: fraction * trackWidth, height: 10, r: 5 }, style: { fill: status ? theme.status[status] : seriesSlot(0, theme.dark) } },
+      { id: "gauge-marker", type: "rect", shape: { x: 3 + fraction * trackWidth, y: trackY - 2, width: 2, height: 14, r: 1 }, style: { fill: theme.text } },
+      { type: "text", left: 4, top: trackY + 12, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
+      { type: "text", right: 4, top: trackY + 12, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
     ],
-    series: [{
-      type: "gauge",
-      min,
-      max,
-      startAngle: 180,
-      endAngle: 0,
-      radius,
-      center,
-      axisLine: { lineStyle: { width: bandWidth, color: sorted.length ? bands.map(([end, color]) => [end, mute(color)]) : [[1, theme.grid]] } },
-      progress: { show: true, width: bandWidth, roundCap: true, itemStyle: { color: status ? theme.status[status] : seriesSlot(0, theme.dark) } },
-      pointer: { show: false },
-      axisTick: { show: false },
-      splitLine: { show: false },
-      axisLabel: { show: false },
-      anchor: { show: false },
-      detail: { valueAnimation: true, offsetCenter: [0, -fontSize / 2 - 12], height: fontSize * 1.3, color: theme.text, fontSize, fontWeight: 600, fontFamily: theme.font, formatter: () => text },
-      data: [{ value: value ?? min }],
-    }],
   };
+
 }
 
 /** Gauge bands coloured by statusFor at each band's midpoint, so the gauge and

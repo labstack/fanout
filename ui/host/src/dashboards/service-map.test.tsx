@@ -73,7 +73,7 @@ describe("Part 9 C1 scroll event lifetime and feedback", () => {
     });
     expect(viewport.dataset.panY).toBe("-90");
     expect(viewport.scrollTop).toBe(90);
-    expect(viewport.dataset.panX).toBe("0");
+    expect(viewport.scrollLeft).toBe(0);
   });
   it("ignores programmatic scroll echoes and repeated equal positions", async () => {
     const { viewport, commits } = await renderTall();
@@ -120,8 +120,8 @@ describe("preview V10", () => {
     const scale=Number(viewport.dataset.layoutScale);
     const texts=host.querySelectorAll<HTMLElement>("[data-service-text]");expect(texts.length).toBe(viewport.dataset.cardMode === "compact" ? 20 : 40);
     for(const text of texts) expect(parseFloat(text.style.fontSize)*scale).toBeGreaterThanOrEqual(11);
-    await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:100,bubbles:true,cancelable:true})));
-    expect(viewport.scrollTop).toBeGreaterThan(0);expect(viewport.dataset.zoom).toBe("1");
+    await act(async()=>{ viewport.scrollTop=50; viewport.dispatchEvent(new Event("scroll",{bubbles:true})); });
+    expect(viewport.scrollTop).toBeGreaterThan(0);expect(viewport.hasAttribute("data-zoom")).toBe(false);
     expect(host.querySelector("[data-service-overflow-fade]")).not.toBeNull();
     const fit=host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!;expect(fit).not.toBeNull();
     await act(async()=>fit.click());expect(viewport.scrollTop).toBe(Number(viewport.dataset.initialScrollY));
@@ -169,17 +169,17 @@ describe("preview V10", () => {
     const wheel = new WheelEvent("wheel", { deltaY: -500, ctrlKey:true, bubbles: true, cancelable: true });
     Object.defineProperties(wheel, { clientX: { value: 250 }, clientY: { value: 94 }, ctrlKey:{value:true} });
     await act(async () => viewport.dispatchEvent(wheel));
-    expect(Number(viewport.getAttribute("data-zoom"))).toBe(1);
+    expect(viewport.hasAttribute("data-zoom")).toBe(false);
     await act(async () => {
       viewport.dispatchEvent(new PointerEvent("pointerdown", { button: 0, clientX: 100, clientY: 80, bubbles: true }));
       viewport.dispatchEvent(new PointerEvent("pointermove", { clientX: -10000, clientY: -10000, bubbles: true }));
       viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     });
-    const zoom = Number(viewport.getAttribute("data-zoom"));
-    expect(Number(viewport.getAttribute("data-pan-x"))).toBe(0);
+    const zoom = 1;
+    expect((viewport as HTMLElement).scrollLeft).toBe(0);
     expect(Number(viewport.getAttribute("data-pan-y"))).toBeCloseTo(188 - Number(viewport.getAttribute("data-content-height"))*zoom);
     const fit = host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!; expect(fit).not.toBeNull(); expect(viewport.contains(fit)).toBe(false);
-    await act(async () => fit.click()); expect(viewport.getAttribute("data-zoom")).toBe("1");
+    await act(async () => fit.click()); expect(viewport.hasAttribute("data-zoom")).toBe(false);
     expect(host.textContent).toContain("No traced calls in this window"); expect(host.textContent).toContain("20 services · 23 routes");
   });
   it("drills without a variable and renders untrusted service names as text", async () => {
@@ -228,7 +228,7 @@ describe("Part 5 R1",()=>{
   const initial=viewport.scrollTop;
   await act(async()=>viewport.dispatchEvent(new WheelEvent("wheel",{deltaY:1000,bubbles:true,cancelable:true})));
   await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!.click());
-  expect(viewport.scrollTop).toBe(initial);expect(viewport.dataset.zoom).toBe("1");
+  expect(viewport.scrollTop).toBe(initial);expect(viewport.hasAttribute("data-zoom")).toBe(false);
   await act(async()=>entry.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true})));
   expect(select).toHaveBeenCalledWith("load-generator");
  });
@@ -319,9 +319,9 @@ it("R1 viewport measurement retains horizontal fit when scrollbars appear",async
  await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
  const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!,wheel=new WheelEvent("wheel",{deltaY:-100,ctrlKey:true,bubbles:true,cancelable:true});
  Object.defineProperties(wheel,{clientX:{value:200},clientY:{value:100},ctrlKey:{value:true}});
- await act(async()=>viewport.dispatchEvent(wheel));const zoom=Number(viewport.dataset.zoom);expect(zoom).toBe(1);
+ await act(async()=>viewport.dispatchEvent(wheel));expect(viewport.hasAttribute("data-zoom")).toBe(false);
  usableWidth=1085;usableHeight=215;await act(async()=>resize());
- expect(Number(viewport.dataset.zoom)).toBe(zoom);expect(Number(viewport.dataset.contentWidth)).toBeLessThanOrEqual(1085);
+ expect(viewport.hasAttribute("data-zoom")).toBe(false);expect(Number(viewport.dataset.contentWidth)).toBeLessThanOrEqual(1085);
 });
 
 describe("Part 7 M7a",()=>{
@@ -383,6 +383,6 @@ describe("Part 7 M7b/M7c",()=>{
   const viewport=host.querySelector<HTMLElement>("[data-service-viewport]")!;
   const wheel=new WheelEvent("wheel",{deltaX:999,deltaY:-100,ctrlKey:true,bubbles:true,cancelable:true});Object.defineProperties(wheel,{clientX:{value:100},clientY:{value:100},ctrlKey:{value:true}});
   await act(async()=>{viewport.dispatchEvent(wheel);viewport.dispatchEvent(new PointerEvent("pointerdown",{button:0,clientX:100,clientY:100,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointermove",{clientX:-999,clientY:80,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointerup",{bubbles:true}));});
-  expect(viewport.scrollLeft).toBe(0);expect(viewport.dataset.panX).toBe("0");expect(viewport.dataset.zoom).toBe("1");expect(viewport.style.overflowX).toBe("hidden");
+  expect(viewport.scrollLeft).toBe(0);expect(viewport.scrollLeft).toBe(0);expect(viewport.hasAttribute("data-zoom")).toBe(false);expect(viewport.style.overflowX).toBe("hidden");
  });
 });

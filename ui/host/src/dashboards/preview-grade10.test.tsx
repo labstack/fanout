@@ -17,16 +17,12 @@ async function render(panel:Panel, r:PanelResult=result, onSelect?: (value:strin
  return host;
 }
 
-it.each([{width:219,height:180},{width:300,height:139},{width:238,height:56}])("G1 chooses a linear gauge below either body threshold (%j)", size => {
+it.each([{width:219,height:180},{width:300,height:139},{width:238,height:56}])("G1 renders a meter in short and narrow bodies (%j)", size => {
   const option = gaugeOption({id:"g",title:"Gauge",viz:"gauge",min:0,max:10,thresholds:[{value:1,status:"warn"}]},1.76,chartThemeFor(false),"percent",size) as any;
   expect(option.series).toEqual([]);
-  expect(option.graphic.find((g:any)=>g.id==="gauge-value").style).toMatchObject({text:"1.76%",fontSize:24});
-  expect(option.graphic.find((g:any)=>g.id==="gauge-track").shape.height).toBe(6);
+  expect(option.graphic.find((g:any)=>g.id==="gauge-value").style).toMatchObject({text:"1.76%",fontSize:28});
+  expect(option.graphic.find((g:any)=>g.id==="gauge-track").shape.height).toBe(10);
   expect(option.graphic.filter((g:any)=>g.type==="text").map((g:any)=>g.style.text)).toEqual(expect.arrayContaining(["0.00%","10.0%","■ Warn"]));
-});
-it("G1 retains the arc at both inclusive thresholds",()=>{
-  const option=gaugeOption({id:"g",title:"Gauge",viz:"gauge"},1,chartThemeFor(false),undefined,{width:220,height:140}) as any;
-  expect(option.series[0].type).toBe("gauge");
 });
 it.each([
  {viz:"timeseries",drill:"logs",hint:"click for matching logs"},

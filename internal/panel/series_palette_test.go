@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -135,7 +136,7 @@ func TestI4WorstFirstSeries(t *testing.T) {
 	for service := range 6 {
 		volume := 100
 		if service == 5 {
-			volume = 5
+			volume = 25
 		}
 		for event := range volume {
 			sp := shopSpans()[0]
@@ -143,10 +144,13 @@ func TestI4WorstFirstSeries(t *testing.T) {
 			sp.TraceID = sp.SpanID
 			sp.ServiceName = fmt.Sprintf("svc%d", service)
 			sp.StatusCode = "STATUS_CODE_OK"
-			if event == 0 || service == 5 && event == 1 {
+			if event == 0 || service == 5 && event < 10 {
 				sp.StatusCode = "STATUS_CODE_ERROR"
 			}
 			sp.DurationMS = float64(10 + service)
+			if service == 0 {
+				sp.DurationMS = 2000
+			}
 			if service == 5 {
 				sp.DurationMS = 1000
 			}
@@ -159,8 +163,13 @@ func TestI4WorstFirstSeries(t *testing.T) {
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	for _, tc := range []struct {
 		measure, better string
-		wantSpike       bool
-	}{{"error_rate()", "", false}, {"count()", "", false}, {"p95(duration_ms)", "", false}, {"avg(duration_ms)", "higher", false}} {
+		kept            []string
+	}{
+		{"error_rate()", "", []string{"svc0", "svc1", "svc5"}},
+		{"count()", "", []string{"svc0", "svc1", "svc2"}},
+		{"p95(duration_ms)", "", []string{"svc0", "svc4", "svc5"}},
+		{"avg(duration_ms)", "higher", []string{"svc1", "svc2", "svc3"}},
+	} {
 		t.Run(tc.measure+tc.better, func(t *testing.T) {
 			d := Dashboard{Name: "Ranking", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "timeseries", Better: tc.better, Options: &Options{Top: 3}, Query: &Query{From: "spans", Measures: []string{tc.measure}, By: []string{"service"}, Bucket: "1m"}}}}
 			got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
@@ -168,31 +177,21 @@ func TestI4WorstFirstSeries(t *testing.T) {
 				t.Fatalf("run: %+v %v", got, err)
 			}
 			f := got[0].Frame
-			spike, folded := false, false
+			var kept []string
+			folded := false
 			for row, name := range f.Values[1] {
-				if name == "svc5" {
-					spike = true
-					if tc.measure == "error_rate()" && f.Values[2][row] != float64(40) {
-						t.Fatalf("spike value %v", f.Values[2][row])
-					}
-				}
 				if name == "Other (3)" {
 					folded = true
+					continue
+				}
+				kept = append(kept, name.(string))
+				if tc.measure == "error_rate()" && name == "svc5" && f.Values[2][row] != float64(40) {
+					t.Fatalf("display error rate %v", f.Values[2][row])
 				}
 			}
-			if spike != tc.wantSpike || !folded || f.Rows != 4 {
-				t.Fatalf("spike=%v want=%v fold=%v frame=%+v", spike, tc.wantSpike, folded, f)
-			}
-			if tc.measure == "count()" {
-				for _, name := range []string{"svc0", "svc1", "svc2"} {
-					found := false
-					for _, v := range f.Values[1] {
-						found = found || v == name
-					}
-					if !found {
-						t.Fatalf("missing volume winner %s", name)
-					}
-				}
+			slices.Sort(kept)
+			if !slices.Equal(kept, tc.kept) || !folded || f.Rows != 4 {
+				t.Fatalf("kept=%v want=%v fold=%v frame=%+v", kept, tc.kept, folded, f)
 			}
 		})
 	}

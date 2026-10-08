@@ -122,8 +122,8 @@ describe("compile", () => {
     const bar = barOption({ id: "b", title: "b", viz: "bar" } as Panel, frame, theme) as { yAxis: { data: string[]; inverse: boolean } };
     expect(bar.yAxis.data).toEqual(["/a", "/b"]);
     expect(bar.yAxis.inverse).toBe(true);
-    const gauge = gaugeOption({ id: "g", title: "g", viz: "gauge", min: 0, max: 50, unit: "count" } as Panel, 42, theme) as { series: { min: number; max: number }[] };
-    expect(gauge.series[0].max).toBe(50);
+    const gauge = gaugeOption({ id: "g", title: "g", viz: "gauge", min: 0, max: 50, unit: "count" } as Panel, 42, theme) as { graphic: {type:string;style?:{text:string}}[] };
+    expect(gauge.graphic.filter(g=>g.type === "text").map(g=>g.style?.text)).toContain("50");
   });
 });
 
@@ -212,11 +212,8 @@ describe("compile, more", () => {
     expect(gaugeBands(higher, 0, 100, theme)).toEqual([[0.25, theme.status.bad], [0.5, theme.status.warn], [1, theme.status.ok]]);
     const lower = { ...base, better: "lower" as const, max: 3000, thresholds: [{ value: 750, status: "warn" as const }, { value: 2000, status: "bad" as const }] };
     expect(gaugeBands(lower, 0, 3000, theme)).toEqual([[0.25, theme.status.ok], [2000 / 3000, theme.status.warn], [1, theme.status.bad]]);
-    // The progress arc matches the stat; threshold bands stay muted beneath it.
-    const option = gaugeOption(higher, 75, theme) as { series: { progress: { itemStyle: { color: string } }; axisLine: { lineStyle: { color: [number, string][] } } }[] };
-    const bands = option.series[0].axisLine.lineStyle.color;
+    const option = gaugeOption(higher, 75, theme) as { graphic: {id?:string;style:{fill:string}}[] };
     const color = theme.status[statusFor(75, higher.thresholds, "higher")!];
-    expect(bands.find(([end]) => end >= 0.75)?.[1]).toBe(`${color}40`);
-    expect(option.series[0].progress.itemStyle.color).toBe(color);
+    expect(option.graphic.find(g => g.id === "gauge-fill")!.style.fill).toBe(color);
   });
 });

@@ -111,7 +111,7 @@ describe("PanelGrid", () => {
     ] };
     const extraResults = new Map(results);
     extraResults.set("gauge", { ...time, id: "gauge" });
-    extraResults.set("series", { ...time, frame: { ...time.frame!, columns: [...time.frame!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.frame!.values, ["cart", "cart"]] }, id: "series", shift_ms: 1234 });
+    extraResults.set("series", { ...time, previous: { ...time.previous!, columns: [...time.previous!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.previous!.values, ["cart", "cart"]] }, frame: { ...time.frame!, columns: [...time.frame!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.frame!.values, ["cart", "cart"]] }, id: "series", shift_ms: 1234 });
     const { host, props, rerender } = await render({ spec: extraSpec, results: extraResults });
     expect(host.querySelector('[data-chart="Gauge: gauge"]')).not.toBeNull();
     expect(host.querySelector('[data-chart="Series: time series"]')).not.toBeNull();

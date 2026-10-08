@@ -70,10 +70,10 @@ func compileRowsWhere(p *Panel, where string, args []any, scope Scope) (Compiled
 	limit := patternLimit(p)
 	text := base + fmt.Sprintf(`,
 patterns AS (SELECT coalesce(body_template,'') AS pattern,count(*)::DOUBLE AS total FROM base GROUP BY 1 ORDER BY total DESC,pattern LIMIT %d),
-context AS (SELECT coalesce(base.body_template,'') AS pattern,coalesce(nullif(upper(severity),''),'UNSPECIFIED') AS severity,severity_number,coalesce(service,'') AS service FROM base SEMI JOIN patterns p ON coalesce(base.body_template,'')=p.pattern),
-severity_counts AS (SELECT pattern,severity,count(*) AS n,max(coalesce(nullif(severity_number,0),CASE WHEN severity IN ('FATAL','CRITICAL') THEN 21 WHEN severity='ERROR' THEN 17 WHEN severity IN ('WARN','WARNING') THEN 13 WHEN severity='INFO' THEN 9 WHEN severity='DEBUG' THEN 5 WHEN severity='TRACE' THEN 1 ELSE 0 END)) AS severity_rank FROM context GROUP BY pattern,severity),
+context AS (SELECT coalesce(base.body_template,'') AS pattern,coalesce(nullif(upper(severity),''),'UNSPECIFIED') AS severity,coalesce(service,'') AS service,count(*) AS n,max(coalesce(nullif(severity_number,0),CASE WHEN upper(severity) IN ('FATAL','CRITICAL') THEN 21 WHEN upper(severity)='ERROR' THEN 17 WHEN upper(severity) IN ('WARN','WARNING') THEN 13 WHEN upper(severity)='INFO' THEN 9 WHEN upper(severity)='DEBUG' THEN 5 WHEN upper(severity)='TRACE' THEN 1 ELSE 0 END)) AS severity_rank FROM base SEMI JOIN patterns p ON coalesce(base.body_template,'')=p.pattern GROUP BY 1,2,3),
+severity_counts AS (SELECT pattern,severity,sum(n) AS n,max(severity_rank) AS severity_rank FROM context GROUP BY pattern,severity),
 severities AS (SELECT pattern,arg_max(severity,struct_pack(n:=n,rank:=severity_rank,label:=severity)) AS severity FROM severity_counts GROUP BY pattern),
-service_counts AS (SELECT pattern,service,count(*) AS n FROM context GROUP BY pattern,service),
+service_counts AS (SELECT pattern,service,sum(n) AS n FROM context GROUP BY pattern,service),
 services AS (SELECT pattern,first(service ORDER BY n DESC,service ASC) AS service FROM service_counts GROUP BY pattern),
 buckets AS (SELECT coalesce(body_template,'') AS pattern,epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS,'1970-01-01'::TIMESTAMP_NS))::BIGINT AS point,count(*)::DOUBLE AS n FROM base SEMI JOIN patterns p ON coalesce(base.body_template,'')=p.pattern GROUP BY 1,2),
 dense AS (SELECT p.pattern,p.total,%d+r.i*%d AS point FROM patterns p CROSS JOIN range(%d) r(i))

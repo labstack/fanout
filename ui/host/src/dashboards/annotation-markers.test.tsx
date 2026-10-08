@@ -37,7 +37,7 @@ describe("annotation scope and windows", () => {
     const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox?:unknown;series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
     expect(got.toolbox).toBeUndefined();
     expect(got.grid.top).toBe(30);
-    expect(got.series[0].markLine.data[0].label).toMatchObject({position:"end",distance:0,rotate:0,textBorderColor:theme.surface,backgroundColor:theme.surface});
+    expect(got.series[0].markLine.data[0].label).toEqual({show:false});
     expect(option.grid.top).toBe(12);
   });
   it("preserves tooltip mode when no annotation markers match", () => {

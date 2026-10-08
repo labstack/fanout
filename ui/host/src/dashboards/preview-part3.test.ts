@@ -10,8 +10,9 @@ it.each([false,true])("P3c puts merged horizontal surface chips above the plot a
  const got=withAnnotations(base,panel,result,{deploys,anomalies:[]},{},theme,{width:500,height:248}) as any;
  expect(got.grid.top).toBeGreaterThan(base.grid.top);expect(base.grid.top).toBe(12);
  const marks=got.series[0].markLine.data;expect(marks).toHaveLength(2);
- expect(marks[0].label.formatter).toBe("2 deploys");expect(marks[1].label.formatter).toBe("cart 2.3.0");
- for(const mark of marks){expect(mark.label).toMatchObject({rotate:0,position:"end",backgroundColor:theme.surface,verticalAlign:"bottom"});expect(mark.label.offset[1]).toBeLessThan(0);expect(mark.lineStyle.type).toBe("dashed");}
+ expect(got.graphic.filter((g:any)=>g.annotation).map((g:any)=>g.style.text)).toEqual(["2 deploys","cart 2.3.0"]);
+ for(const mark of marks){expect(mark.label).toEqual({show:false});expect(mark.lineStyle.type).toBe("dashed");}
+ for(const chip of got.graphic.filter((g:any)=>g.annotation)){expect(chip.style.backgroundColor).toBe(theme.surface);expect(chip.top).toBeLessThan(got.grid.top);}
 });
 it.each([false,true])("P3d puts anomaly text above the grid and omits text in narrow windows (%s)",dark=>{
  const theme=chartThemeFor(dark),base=timeseriesOption(panel,result,theme) as any;
@@ -19,7 +20,7 @@ it.each([false,true])("P3d puts anomaly text above the grid and omits text in na
  const size={width:500,height:248,measureText:(text:string)=>text.length*7};
  const got=withAnnotations(base,panel,result,{deploys:[],anomalies:[anomaly]},{},theme,size) as any;
  expect(got.grid.top).toBeGreaterThan(base.grid.top);
- const area=got.series[0].markArea.data[0][0];expect(got.graphic.some((g:any)=>g.annotation && g.style.text==="anomaly")).toBe(true);expect(area.label.show).toBe(false);expect(area.label.position[0]).toBe(0);expect(area.label.position[1]).toBeLessThan(0);expect(area.label.verticalAlign).toBe("bottom");expect(area.label.width).toBeLessThan(125);expect(area.tooltip.formatter()).toContain("Slow · bad");
+ const area=got.series[0].markArea.data[0][0];expect(got.graphic.some((g:any)=>g.annotation && g.style.text==="anomaly")).toBe(true);expect(area.label.show).toBe(false);expect(area.tooltip.formatter()).toContain("Slow · bad");
  const narrow=withAnnotations(base,panel,result,{deploys:[],anomalies:[{...anomaly,to:new Date(901000).toISOString()}]},{},theme,size) as any;
- expect(narrow.series[0].markArea.data[0][0].label.show).toBe(false);expect(narrow.series[0].markArea.data[0][0].tooltip.formatter()).toContain("Slow");
+ expect(narrow.series[0].markArea.data[0][0].label).toEqual({show:false});expect(narrow.graphic.filter((g:any)=>g.annotation)).toHaveLength(0);expect(narrow.series[0].markArea.data[0][0].tooltip.formatter()).toContain("Slow");
 });

@@ -1,12 +1,12 @@
-import { BarChart, CustomChart, GaugeChart, GraphChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
+import { BarChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
 import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { ChartSize } from "../../../panels/compile";
-import { nativeAudit } from "./native-audit";
+import { registerAudit, chartAuditSnapshot } from "./chart-audit-dev";
 
-use([CanvasRenderer, LineChart, BarChart, GaugeChart, GraphChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent]);
+use([CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent]);
 
 /* Dashboard panels draw on canvas: SVG stays smooth only to a few thousand
    points, and a dashboard of a dozen time series passes that. One instance
@@ -25,12 +25,15 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const zoomEnabled = Boolean(onZoom);
   const description = zoomEnabled ? `${label} Brush across the chart to zoom to that range.` : label;
   const apply = useRef<() => void>(() => undefined);
-  const measureLabels = useRef<() => void>(() => undefined);
+  const auditID = useId();
+  const auditInput = useRef<{ compiled: EChartsCoreOption; size: ChartSize } | null>(null);
+  const context = useRef<CanvasRenderingContext2D | null | undefined>(undefined);
   const responsive = useRef(false);
   responsive.current = Boolean(optionForSize);
   apply.current = () => {
-    const context = document.createElement("canvas").getContext("2d");
-    const measureText = context ? (text: string, font: string) => { context.font = font; return context.measureText(text).width; } : undefined;
+    if (context.current === undefined) context.current = document.createElement("canvas").getContext("2d");
+    const ctx = context.current;
+    const measureText = ctx ? (text: string, font: string) => { ctx.font = font; return ctx.measureText(text).width; } : undefined;
     const size = { measureText, width: ref.current?.clientWidth ?? 0, height: ref.current?.clientHeight ?? 0 };
     let compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize(size) : option;
     const series = (compiled.series ?? []) as { name?: string }[];
@@ -38,37 +41,6 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
     selected.current = retained;
     const legend = compiled.legend as { type?: string; show?: boolean; data?: string[]; formatter?: (name: string) => string; selected?: Record<string, boolean> } | undefined;
-    measureLabels.current = () => {
-      if (!ref.current || !chart.current) return;
-      // Instrument the pinned native renderer for collector evidence. Its grid
-      // rect includes axis-label containment, which option margins cannot measure.
-      type NativeGrid = { coordinateSystem?: { getRect(): { x: number; y: number; width: number; height: number }; getAxis(dim: string): { scale: { getExtent(): number[] } } } };
-      const native = chart.current as unknown as { getModel?(): { getComponent(name: string): NativeGrid | undefined } };
-      const grid = native.getModel?.().getComponent("grid");
-      const rect = grid?.coordinateSystem?.getRect();
-      ref.current.dataset.chartAudit=JSON.stringify(nativeAudit(chart.current,compiled,size,rect));
-      if (rect) {
-        const extent = grid?.coordinateSystem?.getAxis("x")?.scale.getExtent();
-        ref.current.dataset.chartPlot = JSON.stringify({ left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, from: extent?.[0], to: extent?.[1] });
-      }
-      const lines = (compiled.series ?? []) as { name?: string; endLabel?: { show?: boolean }; markLine?: { data?: { xAxis?: number; label?: { formatter?: string } }[] }; markArea?: { data?: { label?: { formatter?: string; show?: boolean } }[][] } }[];
-      const endNames = lines.filter(s => s.endLabel?.show).map(s => s.name!);
-      const deployNames = lines.flatMap(s => s.markLine?.data?.filter(m => m.xAxis !== undefined).map(m => m.label?.formatter) ?? []);
-      const bandNames = (compiled.graphic as {annotation?:boolean;style?:{text?:string}}[] ?? []).filter(g=>g.annotation).map(g=>g.style?.text);
-      const anomalyNames = lines.flatMap(s => s.markArea?.data?.filter(area=>area[0]?.label?.show).map(area => area[0]?.label?.formatter) ?? []);
-      const display = chart.current.getZr?.().storage.getDisplayList(true) ?? [];
-      const bounds = display.flatMap(el => {
-        if (!("style" in el) || typeof (el.style as { text?: unknown }).text !== "string") return [];
-        const style = el.style as { text: string; stroke?: string; lineWidth?: number };
-        const parent = el.parent as unknown as { style?: { text?: string }; __hostTarget?: { type?: string } } | undefined;
-        const rect = el.getBoundingRect().clone(), transform = el.getComputedTransform();
-        if (transform) rect.applyTransform(transform);
-        return [{ name: parent?.style?.text ?? style.text, end: parent?.__hostTarget?.type === "ec-polyline", left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height, rotation: transform ? Math.atan2(transform[1], transform[0]) : 0, halo: Boolean(style.stroke && style.lineWidth) }];
-      });
-      ref.current.dataset.chartLabels = JSON.stringify({ width: size.width, height: size.height, grid_top:rect?.y, end_names: endNames,
-        ends: bounds.filter(b => b.end && endNames.includes(b.name)),
-        deploys: bounds.filter(b => deployNames.includes(b.name) || bandNames.includes(b.name) && b.name !== "anomaly"), anomalies: bounds.filter(b => anomalyNames.includes(b.name) || bandNames.includes(b.name) && b.name === "anomaly") });
-    };
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { brush: { toolbox: [], xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
     // ECharts containment can shrink the nominal plot. Recompute numeric tick
     // density once from the native rect, including any annotation/legend band.
@@ -83,31 +55,17 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
         chart.current?.setOption({yAxis:compiled.yAxis});
       }
     }
-    // Record actual rendered text bounds, so the collector can check canvas
-    // legends without inferring visibility from the configured options.
-    if (ref.current) {
-      const names = legend?.show ? legend.data ?? [] : [];
-      const display = chart.current?.getZr?.().storage.getDisplayList(true) ?? [];
-      const entries = names.flatMap(name => {
-        const text = legend?.formatter?.(name) ?? name;
-        return display.filter(el => "style" in el && (el.style as { text?: string }).text === text).map(el => {
-          const rect = el.getBoundingRect().clone(), transform = el.getComputedTransform();
-          if (transform) rect.applyTransform(transform);
-          return { name, text, left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height };
-        });
-      });
-      ref.current.dataset.chartLegend = JSON.stringify({ type: legend?.type, names, entries });
-      ref.current.dataset.chartLegendBottom = String((compiled.grid as { top?: number } | undefined)?.top ?? 0);
-    }
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
-    measureLabels.current();
+    if (import.meta.env.DEV) auditInput.current = { compiled, size };
   };
 
   useEffect(() => {
     if (!ref.current) return;
     const instance = init(ref.current, undefined, { renderer: "canvas" });
     chart.current = instance;
-    instance.on("finished", () => measureLabels.current());
+    const removeAudit = import.meta.env.DEV && new URLSearchParams(location.search).get("__fanout_audit") === "1"
+      ? registerAudit(auditID, () => auditInput.current ? chartAuditSnapshot(instance, auditInput.current.compiled, auditInput.current.size) : undefined)
+      : undefined;
     instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }));
     instance.on("brushEnd", (payload) => {
       const range = (payload as { areas?: { coordRange?: number[] }[] }).areas?.[0]?.coordRange;
@@ -122,7 +80,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     });
     const observer = new ResizeObserver(() => { instance.resize(); if (responsive.current) apply.current(); });
     observer.observe(ref.current);
-    return () => { observer.disconnect(); instance.dispose(); chart.current = null; };
+    return () => { observer.disconnect(); removeAudit?.(); instance.dispose(); chart.current = null; };
   }, []);
 
   useEffect(() => {
@@ -148,5 +106,5 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     };
   }, [group]);
 
-  return <div ref={ref} role="img" aria-label={description} data-chart-series-count={Array.isArray(option.series) ? option.series.length : option.series ? 1 : 0} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+  return <div id={auditID} ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
 }

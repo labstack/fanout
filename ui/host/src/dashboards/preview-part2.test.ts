@@ -95,6 +95,7 @@ it.each([false,true])("V9: threshold/anomaly text stays readable over the warm t
  const result={...heat,from_ms:0,to_ms:120000};
  const base=timeseriesOption(panel,result,theme) as any;
  const option=withAnnotations(base,panel,result,{deploys:[],anomalies:[{namespace:"",service:"s",kind:"latency",from:new Date(0).toISOString(),to:new Date(120000).toISOString(),title:"Slow",severity:"warn"}]},{},theme) as any;
- const threshold=base.series[0].markLine.data[0].label,anomaly=option.series[0].markArea.data[0][0].label;
- for(const label of [threshold,anomaly]) {expect(label.textBorderColor).toBe(theme.surface);expect(label.textBorderWidth).toBeGreaterThanOrEqual(3);expect(contrast(label.color,label.textBorderColor)).toBeGreaterThanOrEqual(4.5);}
+ const threshold=base.series[0].markLine.data[0].label,anomaly=option.graphic.find((g:any)=>g.annotation).style;
+ expect(anomaly.stroke).toBe(theme.surface);expect(anomaly.lineWidth).toBeGreaterThanOrEqual(3);expect(contrast(anomaly.fill,anomaly.stroke)).toBeGreaterThanOrEqual(4.5);
+ for(const label of [threshold]) {expect(label.textBorderColor).toBe(theme.surface);expect(label.textBorderWidth).toBeGreaterThanOrEqual(3);expect(contrast(label.color,label.textBorderColor)).toBeGreaterThanOrEqual(4.5);}
 });

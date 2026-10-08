@@ -30,23 +30,14 @@ async function render(node: React.ReactNode) {
 }
 
 describe("widget audit W1–W9", () => {
-  it.each([false, true])("W1 fits the detail box inside the band and labels both endpoints (dark=%s)", dark => {
+  it.each([false, true])("W1 renders a meter with a large value and formatted endpoints (dark=%s)", dark => {
     const theme = chartThemeFor(dark);
     for (const size of [{ width: 270, height: 90 }, { width: 780, height: 90 }, { width: 500, height: 248 }]) {
       const option = gaugeOption({ ...panel, viz: "gauge", unit: "percent", min: 0, max: 10, thresholds: [{ value: 1, status: "warn" }, { value: 5, status: "bad" }] }, 1.72, theme, "percent", size);
-      if(size.height<140){
-        expect(option.series).toEqual([]);
-        const texts=(option.graphic as {type:string;style:{text:string;fontSize:number}}[]).filter(g=>g.type==="text");
-        expect(texts.map(g=>g.style.text)).toEqual(expect.arrayContaining(["1.72%","0.00%","10.0%","■ Warn"]));
-        expect(texts.find(g=>g.style.text==="1.72%")!.style.fontSize).toBeGreaterThanOrEqual(24);continue;
-      }
-      const gauge = (option.series as { radius: number; center: number[]; axisLine: { lineStyle: { width: number } }; pointer: { show: boolean }; progress: { show: boolean }; detail: { offsetCenter: number[]; width: number; height: number } }[])[0];
-      const box = gauge.detail;
-      expect((gauge.detail as unknown as {fontSize:number;overflow?:string}).fontSize).toBeGreaterThanOrEqual(24);expect((box as unknown as {overflow?:string}).overflow).not.toBe("truncate");
-      expect(gauge.radius).toBeGreaterThan(size.height < 100 ? 50 : 90);
-      expect(gauge.pointer.show).toBe(false); expect(gauge.progress.show).toBe(true);
-      const graphics = option.graphic as { style: { text: string } }[];
-      expect(graphics.map(g => g.style.text)).toEqual(expect.arrayContaining(["0.00%", "10.0%", "■ Warn"]));
+      expect(option.series).toEqual([]);
+      const texts=(option.graphic as {type:string;style:{text:string;fontSize:number}}[]).filter(g=>g.type==="text");
+      expect(texts.map(g=>g.style.text)).toEqual(expect.arrayContaining(["1.72%","0.00%","10.0%","■ Warn"]));
+      expect(texts.find(g=>g.style.text==="1.72%")!.style.fontSize).toBeGreaterThanOrEqual(28);
     }
   });
   it("W2 keeps toolbox out of time chart options", () => {

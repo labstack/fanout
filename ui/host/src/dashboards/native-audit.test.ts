@@ -1,5 +1,5 @@
-import { init, use } from "echarts/core";
-import { BarChart, CustomChart, GaugeChart, ScatterChart, LineChart } from "echarts/charts";
+import { init, use, setPlatformAPI } from "echarts/core";
+import { BarChart, CustomChart, ScatterChart, LineChart } from "echarts/charts";
 import { GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import { expect,it } from "vitest";
@@ -7,14 +7,18 @@ import { analysisOption } from "../../../panels/analysis";
 import { gaugeOption,barOption,chartThemeFor,timeseriesOption } from "../../../panels/compile";
 import { withAnnotations } from "../../../panels/annotations";
 import { nativeAudit } from "./native-audit";
-use([BarChart,CustomChart,GaugeChart,ScatterChart,LineChart,GraphicComponent,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
-it.each([false,true])("G1 native gauge text never overlaps in linear or arc modes at 1100/1440 layouts (%s)",dark=>{
+// SVG in happy-dom has no canvas/font engine. Give the native renderer a
+// deterministic monospace metric rather than zrender's one-em-per-character fallback.
+setPlatformAPI({measureText: (text, font) => ({width: Array.from(text ?? "").length * Number(font?.match(/([\d.]+)px/)?.[1] ?? 12) * .62})});
+use([BarChart,CustomChart,ScatterChart,LineChart,GraphicComponent,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
+it.each([false,true])("G1 native gauge text never overlaps in meter layouts at 1100/1440 layouts (%s)",dark=>{
  for(const size of [{width:159,height:56},{width:238,height:56},{width:159,height:180},{width:220,height:140},{width:238,height:180},{width:320,height:180}]) {
   const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",...size});
   try {
    const option=gaugeOption({id:"g",title:"Gauge",viz:"gauge",min:0,max:10,thresholds:[{value:1,status:"warn"}]},1.76,chartThemeFor(dark),"percent",size);
    chart.setOption(option,{notMerge:true});const audit=nativeAudit(chart,option,size);
-   expect(audit.gauge?.mode).toBe(size.width<220||size.height<140?"linear":"arc");
+   expect(audit.gauge?.mode).toBe("linear");
+   expect(audit.texts.find(t=>t.text==="1.76%")!.size).toBeGreaterThanOrEqual(28);
    for(const [i,t] of audit.texts.entries()) {
     expect(t.left).toBeGreaterThanOrEqual(0);expect(t.right).toBeLessThanOrEqual(size.width);expect(t.top).toBeGreaterThanOrEqual(0);expect(t.bottom).toBeLessThanOrEqual(size.height);
     for(const other of audit.texts.slice(i+1))expect(t.left<other.right&&t.right>other.left&&t.top<other.bottom&&t.bottom>other.top,JSON.stringify([t,other])).toBe(false);
