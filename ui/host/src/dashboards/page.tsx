@@ -10,6 +10,7 @@ import { DrillDrawer } from "./drill";
 import { parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
+import { HistoryDrawer } from "./history";
 import { useBrushZoom } from "./use-brush-zoom";
 import { usePanelResults } from "./use-panel-results";
 import { useVariableOptions } from "./use-variables";
@@ -30,7 +31,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     if (dashboardId || !list.data?.length) return;
     onOpen((list.data.find((d) => d.is_default) ?? list.data[0]).id, true);
   }, [dashboardId, list.data]);
-  const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: () => getDashboard(dashboardId!), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2 });
+  const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: ({ signal }) => getDashboard(dashboardId!, signal), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2 });
 
   if (!dashboardId && list.error) return <Center mih="50vh"><Alert color="bad" title="Dashboards could not be loaded">{list.error.message}</Alert></Center>;
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
@@ -51,6 +52,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
 }
 
 function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string): void }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
   const time = effectiveTime(spec, search);
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
@@ -108,7 +110,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
           }}
           onRefresh={setRefresh} onRefreshNow={data.refetch}
           onCompare={(on) => onSearch({ ...search, compare: on ? "1" : "0" }, true)}
-          onEdit={() => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" })} />
+          onEdit={() => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" })} onHistory={() => setHistoryOpen(true)} />
       </Group>
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
@@ -129,5 +131,12 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);
       }} />
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
+    <HistoryDrawer id={id} currentVersion={version} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
+      const ids = new Set(record.spec.panels.map(panel => panel.id));
+      const drill = parseDrill(search.drill);
+      const view = search.view && !ids.has(search.view) ? undefined : search.view;
+      const nextDrill = drill && !ids.has(drill.panel_id) ? undefined : search.drill;
+      if (view !== search.view || nextDrill !== search.drill) onSearch({ ...search, view, drill: nextDrill }, true);
+    }} />
   </Box>;
 }

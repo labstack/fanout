@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DrillTarget } from "./drill-state";
 import type { DashboardSpec } from "../../../panels/types";
-import { ApiError, getTrace, queryExemplars, queryAnnotations, getDashboard, queryPanels, patchDashboard, replaceDashboard } from "./api";
+import { ApiError, getTrace, queryExemplars, queryAnnotations, getDashboard, getVersion, listVersions, restoreVersion, queryPanels, patchDashboard, replaceDashboard } from "./api";
 
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock("../auth", () => ({ authorizedFetch: fetchMock }));
@@ -13,6 +13,21 @@ const lastCall = () => fetchMock.mock.calls[fetchMock.mock.calls.length - 1] as 
 
 describe("dashboard api", () => {
   beforeEach(() => fetchMock.mockReset());
+
+  it("reads historical records and lists with cancellation and restores using the existing POST route", async () => {
+    const signal = new AbortController().signal;
+    fetchMock.mockResolvedValue(json(200, { versions: [{ version: 1 }] }));
+    await expect(listVersions("a b", signal)).resolves.toEqual([{ version: 1 }]);
+    expect(lastCall()[0]).toBe("/api/dashboards/a%20b/versions");
+    expect(lastCall()[1].signal).toBe(signal);
+    fetchMock.mockResolvedValue(json(200, { dashboard: { version: 1 }, changes_available: false }));
+    await expect(getVersion("a b", 1, signal)).resolves.toEqual({ dashboard: { version: 1 }, changes_available: false });
+    expect(lastCall()[0]).toBe("/api/dashboards/a%20b/versions/1");
+    expect(lastCall()[1].signal).toBe(signal);
+    await restoreVersion("a b", 1);
+    expect(lastCall()[0]).toBe("/api/dashboards/a%20b/versions/1/restore");
+    expect(lastCall()[1].method).toBe("POST");
+  });
 
   it("encodes dashboard ids when reading the active record",async()=>{
     fetchMock.mockResolvedValue(json(200,{id:"a b"}));await expect(getDashboard("a b")).resolves.toEqual({id:"a b"});expect(lastCall()[0]).toBe("/api/dashboards/a%20b");

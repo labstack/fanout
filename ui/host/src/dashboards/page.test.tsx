@@ -123,6 +123,32 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
+  it.each([true, false])("restores through history preserving URL time and variables and drops only missing panel state: %s", async removed => {
+    const existing = fetchMock.getMockImplementation()!;
+    const restored = { ...record, version: 5, spec: { ...spec, panels: removed ? spec.panels.slice(0, 1) : spec.panels } };
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = new URL(String(input), "http://localhost").pathname;
+      if (path === "/api/dashboards/d1/versions") return json({ versions: [{ version: 2, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z" }] });
+      if (path === "/api/dashboards/d1/versions/2") return json({ dashboard: { ...restored, version: 2, name: "Historical" }, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z", changes: [], layout_changed: false, dashboard_fields: [], changes_available: true });
+      if (path === "/api/dashboards/d1/versions/2/restore") { servedRecord = restored; return json(restored); }
+      if (path === "/api/panels/exemplars") return json({ traces: [] });
+      return existing(input, init);
+    });
+    const search: DashboardSearch = { from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", vars: { service: "cart" }, compare: "1", view: "latency", drill: JSON.stringify({ panel_id: "latency", kind: "traces", from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", window_from: "2026-10-01T12:00:00Z", window_to: "2026-10-01T13:00:00Z", dimensions: {} }) };
+    const { client, onSearch } = await render(search);
+    const count = queryBodies.length;
+    await act(async () => [...document.querySelectorAll("button")].find(button => button.textContent === "History")!.click());
+    await settle(client);
+    expect(queryBodies).toHaveLength(count);
+    expect(client.getQueryData(["dashboard", "d1"])).toEqual(record);
+    await act(async () => [...document.querySelectorAll("button")].find(button => button.textContent === "Restore version 2")!.click());
+    await settle(client);
+    expect(client.getQueryData(["dashboard", "d1"])).toEqual(restored);
+    expect(document.body.textContent).toContain("Restored v2 as v5");
+    if (removed) expect(onSearch).toHaveBeenCalledWith({ ...search, view: undefined, drill: undefined }, true);
+    else expect(onSearch).not.toHaveBeenCalled();
+    expect(queryBodies.length).toBeGreaterThan(count);
+  });
   it.each([190,220])("collects every dashboard service name and rendered micro font in a 1100×%s body",async height=>{
     const width=1100,original=HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width,height}):original.call(this);});

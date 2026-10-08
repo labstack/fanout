@@ -1,5 +1,5 @@
 import { Button, Group, Menu, SegmentedControl, Switch, Text, TextInput, Tooltip } from "@mantine/core";
-import { ArrowClockwise, CaretDown, Clock, MagnifyingGlassMinus, PencilSimple } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretDown, Clock, ClockCounterClockwise, MagnifyingGlassMinus, PencilSimple } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { DashboardTime } from "../../../panels/types";
 import { exactTimestamp } from "../../../format";
@@ -12,9 +12,9 @@ function timeLabel(time: DashboardTime): string {
   return rangeLabel[time.range ?? "1h"] ?? time.range ?? "Last hour";
 }
 
-export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit }: {
+export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory }: {
   time: DashboardTime; refresh: string; compare: boolean; editing: boolean; fetching: boolean; updatedAt: number | null;
-  onRange(range: string): void; onAbsolute(from: string, to: string): void; onZoomOut(): void; onRefresh(refresh: string): void; onRefreshNow(): void; onCompare(on: boolean): void; onEdit(): void;
+  onRange(range: string): void; onAbsolute(from: string, to: string): void; onZoomOut(): void; onRefresh(refresh: string): void; onRefreshNow(): void; onCompare(on: boolean): void; onEdit(): void; onHistory(): void;
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -45,6 +45,7 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
     </Group>
     <Switch size="sm" label="Compare with previous period" checked={compare} onChange={(e) => onCompare(e.currentTarget.checked)} />
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>
+    <Button variant="default" size="sm" leftSection={<ClockCounterClockwise size={15} />} onClick={onHistory}>History</Button>
     {updatedAt && <Text size="xs" c="dimmed" visibleFrom="md">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(updatedAt)}</Text>}
   </Group>;
 }

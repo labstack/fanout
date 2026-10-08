@@ -81,6 +81,51 @@ func (q *Queries) GetDashboardVersion(ctx context.Context, arg GetDashboardVersi
 	return spec_json, err
 }
 
+const getDashboardVersionRecord = `-- name: GetDashboardVersionRecord :one
+SELECT d.id, d.is_default, d.created_at AS dashboard_created_at,
+       v.version, v.spec_json, v.author_kind, v.author_id, v.message,
+       v.created_at AS version_created_at
+FROM dashboard_versions v JOIN dashboards d ON d.id = v.dashboard_id
+WHERE d.id = ?1
+  AND d.owner_id = ?2
+  AND v.version = ?3
+`
+
+type GetDashboardVersionRecordParams struct {
+	DashboardID string `json:"dashboard_id"`
+	OwnerID     string `json:"owner_id"`
+	Version     int64  `json:"version"`
+}
+
+type GetDashboardVersionRecordRow struct {
+	ID                 string `json:"id"`
+	IsDefault          int64  `json:"is_default"`
+	DashboardCreatedAt string `json:"dashboard_created_at"`
+	Version            int64  `json:"version"`
+	SpecJson           string `json:"spec_json"`
+	AuthorKind         string `json:"author_kind"`
+	AuthorID           string `json:"author_id"`
+	Message            string `json:"message"`
+	VersionCreatedAt   string `json:"version_created_at"`
+}
+
+func (q *Queries) GetDashboardVersionRecord(ctx context.Context, arg GetDashboardVersionRecordParams) (GetDashboardVersionRecordRow, error) {
+	row := q.db.QueryRowContext(ctx, getDashboardVersionRecord, arg.DashboardID, arg.OwnerID, arg.Version)
+	var i GetDashboardVersionRecordRow
+	err := row.Scan(
+		&i.ID,
+		&i.IsDefault,
+		&i.DashboardCreatedAt,
+		&i.Version,
+		&i.SpecJson,
+		&i.AuthorKind,
+		&i.AuthorID,
+		&i.Message,
+		&i.VersionCreatedAt,
+	)
+	return i, err
+}
+
 const insertDashboardBelowOwnerLimit = `-- name: InsertDashboardBelowOwnerLimit :execrows
 INSERT INTO dashboards (id, owner_id, name, description, is_default, version, spec_json, panel_count, created_at, updated_at)
 SELECT

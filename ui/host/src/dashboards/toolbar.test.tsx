@@ -21,17 +21,24 @@ async function render() {
   root = createRoot(host);
   const onRange = vi.fn();
   const onAbsolute = vi.fn();
+  const onHistory = vi.fn();
   await act(async () => {
     root.render(<MantineProvider><Toolbar time={{ range: "1h" }} refresh="off" compare={false} editing={false} fetching={false} updatedAt={null}
-      onRange={onRange} onAbsolute={onAbsolute} onZoomOut={vi.fn()} onRefresh={vi.fn()} onRefreshNow={vi.fn()} onCompare={vi.fn()} onEdit={vi.fn()} /></MantineProvider>);
+      onRange={onRange} onAbsolute={onAbsolute} onZoomOut={vi.fn()} onRefresh={vi.fn()} onRefreshNow={vi.fn()} onCompare={vi.fn()} onEdit={vi.fn()} onHistory={onHistory} /></MantineProvider>);
   });
   const trigger = [...host.querySelectorAll("button")].find((button) => button.textContent === "Last hour")!;
   await act(async () => trigger.click());
   expect(trigger.getAttribute("aria-expanded")).toBe("true");
-  return { trigger, onRange, onAbsolute };
+  return { trigger, onRange, onAbsolute, onHistory };
 }
 
 describe("dashboard range menu", () => {
+  it("opens history through an accessible toolbar button", async () => {
+    const { onHistory } = await render();
+    const history = [...document.querySelectorAll("button")].find(button => button.textContent === "History")!;
+    await act(async () => history.click());
+    expect(onHistory).toHaveBeenCalledTimes(1);
+  });
   it("closes after choosing a relative range", async () => {
     const { trigger, onRange } = await render();
     const choice = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Last 6 hours")!;

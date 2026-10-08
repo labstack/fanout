@@ -68,6 +68,66 @@ type VersionInfo struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+type VersionRecord struct {
+	Dashboard        Record        `json:"dashboard"`
+	AuthorKind       string        `json:"author_kind"`
+	AuthorID         string        `json:"author_id,omitempty"`
+	Message          string        `json:"message,omitempty"`
+	CreatedAt        string        `json:"created_at"`
+	Changes          []PanelChange `json:"changes"`
+	LayoutChanged    bool          `json:"layout_changed"`
+	DashboardFields  []string      `json:"dashboard_fields"`
+	ChangesAvailable bool          `json:"changes_available"`
+}
+
+// VersionRecord reads immutable historical content and its shared save diff.
+// IsDefault describes the current owned board; UpdatedAt is the version time.
+func (s *Service) VersionRecord(ctx context.Context, owner, id string, version int) (VersionRecord, error) {
+	if version <= 0 {
+		return VersionRecord{}, ErrNotFound
+	}
+	// Pin both rows so concurrent pruning cannot change predecessor availability.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return VersionRecord{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := generated.New(tx)
+	r, err := q.GetDashboardVersionRecord(ctx, generated.GetDashboardVersionRecordParams{DashboardID: id, OwnerID: owner, Version: int64(version)})
+	if errors.Is(err, sql.ErrNoRows) {
+		return VersionRecord{}, ErrNotFound
+	}
+	if err != nil {
+		return VersionRecord{}, err
+	}
+	var spec panel.Dashboard
+	if err := json.Unmarshal([]byte(r.SpecJson), &spec); err != nil {
+		return VersionRecord{}, err
+	}
+	record := Record{ID: r.ID, Name: spec.Name, Description: spec.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), Spec: spec, CreatedAt: r.DashboardCreatedAt, UpdatedAt: r.VersionCreatedAt}
+	out := VersionRecord{Dashboard: record, AuthorKind: r.AuthorKind, AuthorID: r.AuthorID, Message: r.Message, CreatedAt: r.VersionCreatedAt, Changes: []PanelChange{}, DashboardFields: []string{}}
+	before := panel.Dashboard{}
+	if version > 1 {
+		prior, err := q.GetDashboardVersionRecord(ctx, generated.GetDashboardVersionRecordParams{DashboardID: id, OwnerID: owner, Version: int64(version - 1)})
+		if errors.Is(err, sql.ErrNoRows) {
+			return out, nil
+		}
+		if err != nil {
+			return VersionRecord{}, err
+		}
+		if err := json.Unmarshal([]byte(prior.SpecJson), &before); err != nil {
+			return VersionRecord{}, err
+		}
+	}
+	diff := Changes(before, spec)
+	out.Changes, out.LayoutChanged = diff.Panels, diff.LayoutChanged
+	if diff.DashboardFields != nil {
+		out.DashboardFields = diff.DashboardFields
+	}
+	out.ChangesAvailable = true
+	return out, nil
+}
+
 type Service struct {
 	db        *sql.DB
 	validator Validator

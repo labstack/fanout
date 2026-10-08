@@ -57,6 +57,15 @@ LIMIT 100;
 -- name: GetDashboardVersion :one
 SELECT spec_json FROM dashboard_versions WHERE dashboard_id = ? AND version = ?;
 
+-- name: GetDashboardVersionRecord :one
+SELECT d.id, d.is_default, d.created_at AS dashboard_created_at,
+       v.version, v.spec_json, v.author_kind, v.author_id, v.message,
+       v.created_at AS version_created_at
+FROM dashboard_versions v JOIN dashboards d ON d.id = v.dashboard_id
+WHERE d.id = sqlc.arg(dashboard_id)
+  AND d.owner_id = sqlc.arg(owner_id)
+  AND v.version = sqlc.arg(version);
+
 -- name: PruneDashboardVersions :exec
 DELETE FROM dashboard_versions
 WHERE dashboard_id = sqlc.arg(dashboard_id) AND version < sqlc.arg(keep_from);

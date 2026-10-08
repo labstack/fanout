@@ -14,6 +14,22 @@ import (
 // exactly the regression #188 was about.
 var routeDirs = []string{"../../internal/api", "../../internal/agent", "../../cmd/fanout"}
 
+func TestHistoricalDashboardReadIsDocumentedAsOwnerCapability(t *testing.T) {
+	routes, err := collectRoutes(routeDirs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range routes {
+		if route.Path == "/api/dashboards/:id/versions/:version" && route.Method == "GET" {
+			if route.Capability != "dashboards:manage-own" {
+				t.Fatalf("historical read capability = %q", route.Capability)
+			}
+			return
+		}
+	}
+	t.Fatal("historical dashboard read is missing from generated routes")
+}
+
 // The bug this guards: routes registered on an *echo.Group carry relative
 // paths, and classifyRoute's SPA catch-all reports any non-/api/ path as
 // public — so five telemetry endpoints were published as requiring no
