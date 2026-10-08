@@ -1,13 +1,9 @@
 import { expect, it } from 'vitest';
-import { changeLabel, resolvedProblems, receiptForTurn } from './dashboard-receipt';
+import { changeLabel, receiptForTurn } from './dashboard-receipt';
 import { user, call, result, saved, build } from '../tests/dashboard-receipts';
-it('uses signed panel change chips and actual resolved validation paths',()=>{
+it('uses signed panel change chips',()=>{
  expect(changeLabel({panel_id:'pool',title:'Pool',kind:'added'})).toBe('+ Pool');
  expect(changeLabel({panel_id:'latency',title:'Latency',kind:'changed',fields:['thresholds']})).toBe('~ latency.thresholds');
- const problem={panel_id:'latency',path:'panels[0].query.measures[0]',message:'Unknown field'};
- expect(resolvedProblems([problem],[],new Set(['latency']))).toEqual([problem]);
- expect(resolvedProblems([problem],[],new Set())).toEqual([]);
- expect(resolvedProblems([problem],[problem],new Set(['latency']))).toEqual([]);
 });
 it('reconstructs observed stages, corrections, timings and exact saved receipt on reload',()=>{
  const messages=build(); const receipt=receiptForTurn(messages,'u')!;

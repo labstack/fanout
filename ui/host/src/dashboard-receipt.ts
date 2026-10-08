@@ -4,7 +4,7 @@ import { dashboardToolResult, jsonObject, mutationNames, object, panelCheck, typ
 export type Change={panel_id:string;title:string;kind:'added'|'changed'|'removed';fields?:string[];position_changed?:boolean};
 export const changeLabel=(c:Change):string=>c.kind==='added'?`+ ${c.title}`:c.kind==='removed'?`− ${c.title}`:`~ ${c.panel_id}${c.fields?.length?'.'+c.fields.join(', '):''}${c.position_changed?' · order':''}`;
 export type Correction={panel_id:string;path:string;message:string};
-export function resolvedProblems(before:Correction[],after:Correction[],retainedIDs:Set<string>):Correction[] {
+function resolvedProblems(before:Correction[],after:Correction[],retainedIDs:Set<string>):Correction[] {
   return before.filter(p=>retainedIDs.has(p.panel_id) && !after.some(q=>q.panel_id===p.panel_id && q.path===p.path));
 }
 export type Stage = { state: "unobserved" | "incomplete" | "failed" | "complete"; elapsed_ms?: number };
