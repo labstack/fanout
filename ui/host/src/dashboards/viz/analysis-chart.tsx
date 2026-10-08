@@ -8,7 +8,7 @@ import { EChartCanvas } from "../echart-canvas";
 export type AnalysisProps = {
   panel: Panel; title?: string; result: PanelResult; dark: boolean; height: number; group?: string;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
-  onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
+  onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
 };
 
 export function AnalysisChart({ panel, title, result, dark, height, group, annotations, vars, onSelect, onPoint, onZoom }: AnalysisProps) {

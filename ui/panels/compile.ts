@@ -1,6 +1,6 @@
 import { htmlTooltip } from "./escape";
 import { chartTheme, seriesSlot, statusHex } from "../chart";
-import { fonts, typeScale } from "../tokens";
+import { fonts } from "../tokens";
 import { toCategories, toSeries } from "./frame";
 import { hiddenSeriesNote, isOtherSeries, visibleSeries, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
@@ -109,7 +109,8 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   })) : [];
   const legend = (panel.options?.legend ?? "auto") !== "hidden" && current.length > 1;
   const legendLayout = wrappingLegend(current.map(s => s.name), size.width, legend, theme.text, theme.font, size.measureText);
-  const axes = units.map((axisUnit, i) => ({ type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: formatAxis(axisUnit) } }));
+  const plotHeight = size.height - legendLayout.top - (visible.hidden ? 24 : 8) - 22;
+  const axes = units.map((axisUnit, i) => ({ splitNumber: Math.max(2, Math.floor(plotHeight / 32)), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
@@ -190,21 +191,22 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
   const max = panel.max ?? 100;
   const sorted = [...(panel.thresholds ?? [])].sort((a, b) => a.value - b.value);
   const bands = gaugeBands(panel, min, max, theme);
-  const radius = Math.max(1, Math.min((size.width - 40) / 2, size.height - 30));
-  const center = [size.width / 2, (size.height + radius - 24) / 2];
+  const radius = .4 * Math.min(size.width, 1.6 * size.height);
+  const center = [size.width / 2, Math.max(radius + 1, size.height - 20)];
   const bandWidth = Math.min(10, radius * .14);
   const text = formatValue(unit, value);
-  const fontSize = Math.max(typeScale.micro, Math.min(32, radius * .32, radius * 1.15 / Math.max(1, text.length * .65)));
+  const fontSize = Math.max(24, Math.min(32, radius * .48));
   const status = statusFor(value, panel.thresholds, panel.better);
   const cue = status === "bad" ? "◆ Bad" : status === "warn" ? "■ Warn" : status === "ok" ? "● OK" : value === null ? "○ Unknown" : undefined;
+  const endpointWidth = (value:number) => size.measureText?.(formatValue(unit,value),`11px ${theme.font}`) ?? formatValue(unit,value).length*11;
   const mute = (hex: string) => `${hex}40`;
   return {
     animation: false,
     textStyle: { fontFamily: theme.font, color: theme.text },
     graphic: [
-      { type: "text", left: center[0] - radius, top: center[1] + 6, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
-      { type: "text", right: size.width - center[0] - radius, top: center[1] + 6, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
-      ...(cue ? [{ type: "text", left: "center", top: center[1] - 7, style: { text: cue, fill: theme.text, fontSize: typeScale.micro, fontFamily: theme.font } }] : []),
+      ...(size.width >= 160 ? [{ type: "text", left: center[0] - radius - endpointWidth(min)/2, top: center[1] + 8, style: { text: formatValue(unit, min), fill: theme.muted, fontSize: 11, fontFamily: theme.font } },
+      { type: "text", left: center[0] + radius - endpointWidth(max)/2, top: center[1] + 8, style: { text: formatValue(unit, max), fill: theme.muted, fontSize: 11, fontFamily: theme.font } }] : []),
+      ...(cue ? [{ type: "text", left: "center", top: center[1] - 8, style: { text: cue, fill: theme.text, fontSize: 11, fontFamily: theme.font } }] : []),
     ],
     series: [{
       type: "gauge",
@@ -221,7 +223,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
       splitLine: { show: false },
       axisLabel: { show: false },
       anchor: { show: false },
-      detail: { valueAnimation: true, offsetCenter: [0, -radius * .37], width: radius * 1.15, height: fontSize * 1.3, overflow: "truncate", color: theme.text, fontSize, fontWeight: 600, fontFamily: theme.font, formatter: () => text },
+      detail: { valueAnimation: true, offsetCenter: [0, -fontSize / 2 - 12], height: fontSize * 1.3, color: theme.text, fontSize, fontWeight: 600, fontFamily: theme.font, formatter: () => text },
       data: [{ value: value ?? min }],
     }],
   };

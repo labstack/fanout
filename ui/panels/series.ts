@@ -43,8 +43,8 @@ export function wrappingLegend(names: string[], width: number, show: boolean, co
     used += (used ? 10 : 0) + entry;
   }
   const scroll = rows > 2;
-  return { top: show ? (scroll ? 30 : rows * 26 + 4) : 12,
-    option: { type: scroll ? "scroll" : "plain", show, top: 0, left: 0, right: 0, padding: 0, itemGap: 10,
-      icon: "roundRect", itemWidth: 10, itemHeight: 10, itemStyle: {borderColor:color,borderWidth:1}, textStyle: { color, fontSize: 12, lineHeight: 16 },
+  return { top: show ? (scroll ? 30 : rows * 20 + 2) : 12,
+    option: { type: scroll ? "scroll" : "plain", show, top: 0, left: 0, right: 0, padding: 0, itemGap: 6,
+      icon: "roundRect", itemWidth: 10, itemHeight: 10, itemStyle: {borderColor:color,borderWidth:1}, textStyle: { color, fontSize: 12, lineHeight: 14 },
       data: names, formatter, tooltip: { show: true, renderMode: "html", formatter: (params: { name: string }) => escapeHTML(params.name) } } };
 }

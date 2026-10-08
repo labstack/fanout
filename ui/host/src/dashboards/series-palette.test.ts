@@ -63,13 +63,13 @@ describe("validated categorical series", () => {
     expect(points.series[6].name).toBe("Other (2)");
     expect(points.series[6].data).toHaveLength(2);
   });
-  it("uses slot zero for single series, gauges and the heatmap ramp", () => {
+  it("uses slot zero for single series and gauges, with a dedicated heatmap ramp", () => {
     const theme = chartThemeFor(true);
     const single: Frame = { columns: [{ name: "route", type: "string", role: "dimension" }, frame(1).columns[2]], values: [["/cart"], [5]], rows: 1 };
     expect((barOption({ ...panel, viz: "bar" }, single, theme) as Chart).series[0].itemStyle.color).toBe(series.dark[0]);
     const gauge = gaugeOption({ ...panel, viz: "gauge" }, 5, theme) as { series: { progress: { itemStyle: { color: string } } }[] };
     expect(gauge.series[0].progress.itemStyle.color).toBe(series.dark[0]);
     const heat = analysisOption({ ...panel, viz: "heatmap" }, result(frame(1)), theme) as { visualMap: { inRange: { color: string[] } } };
-    expect(heat.visualMap.inRange.color.at(-1)).toBe(series.dark[0]); expect(heat.visualMap.inRange.color).toHaveLength(6);
+    expect(heat.visualMap.inRange.color.at(-1)).toBe("#7dd3fc"); expect(heat.visualMap.inRange.color).toHaveLength(7);
   });
 });

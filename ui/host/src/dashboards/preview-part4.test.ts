@@ -4,7 +4,7 @@ import { chartThemeFor } from "../../../panels/compile";
 import { relativeLuminance } from "../../../theme";
 import { seriesSlot } from "../../../chart";
 
-it.each([false, true])("Q1: heat counts use distinct monotonic log colours, cap outliers and omit zero (%s)", dark => {
+it.each([false, true])("Q1: heat counts use distinct monotonic quantile colours and omit zero (%s)", dark => {
   const theme = chartThemeFor(dark);
   const counts = [0, 1, 10, 100, 1000, 3000];
   const result = { id: "h", status: "ok" as const, elapsed_ms: 1, interval: "1m", frame: {
@@ -18,14 +18,14 @@ it.each([false, true])("Q1: heat counts use distinct monotonic log colours, cap 
   const levels = colours.map(relativeLuminance);
   const surface = relativeLuminance(theme.surface);
   expect(levels.every((level:number,i:number)=>i===0 || Math.abs(level-surface)>Math.abs(levels[i-1]-surface))).toBe(true);
-  expect(colours.at(-1)).toBe(seriesSlot(0,dark));
+  expect(colours.at(-1)).toBe(dark ? "#7dd3fc" : "#1d4ed8");
   expect(render(1).style.stroke).toBeUndefined();
-  expect(Math.abs(levels[0]-surface)).toBeLessThan(.025);
+  expect(colours[0]).toBe(dark ? "#0f2a43" : "#dbeafe");
   expect(render(0)).toBeUndefined();
   expect(render(99999).style.fill).toBe(colours.at(-1));
   expect(option.visualMap.dimension).toBe(5);
-  expect(option.visualMap.min).toBeCloseTo(Math.log1p(1));
-  expect(option.visualMap.max).toBeCloseTo(Math.log1p(3000));
+  expect(option.visualMap.min).toBe(0);
+  expect(option.visualMap.max).toBe(6);
   expect(option.series[0].data.every((d:any)=>d.value[2]>0)).toBe(true);
   expect(option.series[0].data[1].value[2]).toBe(10);
 });
@@ -34,5 +34,5 @@ it.each([false,true])("Q1: a window of only singleton cells stays dim (%s)",dark
  const theme=chartThemeFor(dark),result={id:"h",status:"ok" as const,elapsed_ms:1,frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[0],[1]],rows:1}};
  const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},result,theme) as any;
  const cell=option.series[0].renderItem({}, {value:(i:number)=>[0,0,1,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:seriesSlot(0,dark)})});
- expect(Math.abs(relativeLuminance(cell.style.fill)-relativeLuminance(theme.surface))).toBeLessThan(.025);
+ expect(cell.style.fill).toBe(dark ? "#0f2a43" : "#dbeafe");
 });

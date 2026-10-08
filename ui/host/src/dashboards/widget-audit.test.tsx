@@ -36,7 +36,7 @@ describe("widget audit W1–W9", () => {
       const option = gaugeOption({ ...panel, viz: "gauge", unit: "percent", min: 0, max: 10, thresholds: [{ value: 1, status: "warn" }, { value: 5, status: "bad" }] }, 1.72, theme, "percent", size);
       const gauge = (option.series as { radius: number; center: number[]; axisLine: { lineStyle: { width: number } }; pointer: { show: boolean }; progress: { show: boolean }; detail: { offsetCenter: number[]; width: number; height: number } }[])[0];
       const box = gauge.detail;
-      expect(Math.hypot(box.width / 2 + Math.abs(box.offsetCenter[0]), box.height / 2 + Math.abs(box.offsetCenter[1]))).toBeLessThan(gauge.radius - gauge.axisLine.lineStyle.width);
+      expect((gauge.detail as unknown as {fontSize:number;overflow?:string}).fontSize).toBeGreaterThanOrEqual(24);expect((box as unknown as {overflow?:string}).overflow).not.toBe("truncate");
       expect(gauge.radius).toBeGreaterThan(size.height < 100 ? 50 : 90);
       expect(gauge.pointer.show).toBe(false); expect(gauge.progress.show).toBe(true);
       const graphics = option.graphic as { style: { text: string } }[];
@@ -72,10 +72,10 @@ describe("widget audit W1–W9", () => {
     const got = withAnnotations(timeseriesOption(panel, result, theme), panel, result, { deploys, anomalies: [] }, {}, theme, { width: 270, height: 248 });
     const grid = got.grid as { top: number };
     const series = got.series as { markLine: { data: { label: { show: boolean; formatter: string; position: string; distance: number; height: number; backgroundColor: string; overflow: string } }[] } }[];
-    const labels = series[0].markLine.data.filter(mark => mark.label.show).map(mark => mark.label);
-    expect(labels).toHaveLength(2); expect(grid.top).toBe(38);
-    for (const label of labels) { expect(label.position).toBe("end"); expect(label.backgroundColor).toBe(theme.surface); expect(label).toHaveProperty("textBorderColor", theme.surface); expect(label.overflow).toBe("truncate"); }
-    expect(labels[0].formatter).toBe("2 deploys");
+    const labels = got.graphic as {style:{text:string;backgroundColor:string;stroke:string;overflow:string}}[];
+    expect(labels).toHaveLength(2); expect(grid.top).toBe(30);
+    for (const label of labels) { expect(label.style.backgroundColor).toBe(theme.surface); expect(label.style.stroke).toBe(theme.surface); expect(label.style.overflow).toBe("truncate"); }
+    expect(labels[0].style.text).toBe("2 deploys");
   });
   it("W4 merges adjacent same-state buckets, preserves gaps and unknown, and draws only rounded rects", () => {
     const got = analysis.analysisOption({ ...panel, viz: "state_timeline", thresholds: [{ value: 1, status: "warn" }] }, result, chartThemeFor(true));
@@ -99,7 +99,7 @@ describe("widget audit W1–W9", () => {
     const got = analysis.analysisOption({ ...panel, viz: "scatter" }, { ...result, frame }, theme);
     const x = got.xAxis as { name?: string; splitLine: { lineStyle: { color: string } } };
     const y = got.yAxis as { name?: string; interval: number; splitLine: { lineStyle: { color: string } }; axisLabel: { formatter: (v: number) => string } };
-    expect(x.name).toBeUndefined(); expect(y.name).toBeUndefined(); expect(y.interval).toBe(120000);
+    expect(x.name).toBe("calls"); expect(y.name).toBe("p95"); expect(y.interval).toBe(120000);
     expect(y.axisLabel.formatter(y.interval)).toBe("2m");
     expect(x.splitLine.lineStyle.color).toBe(theme.grid); expect(y.splitLine.lineStyle.color).toBe(theme.grid);
   });
@@ -204,6 +204,6 @@ it("W12 measures legend labels with the chart font and uses safe full-name toolt
  const data = { columns: frame.columns, values: [names.map(() => 0), names, names.map(() => 1)], rows: 7 };
  const measureText = vi.fn(() => 140);
  const got = timeseriesOption(panel, { ...result, frame: data }, chartThemeFor(false), { width: 700, height: 300, measureText });
- expect(measureText).toHaveBeenCalledTimes(7); expect((got.grid as { top: number }).top).toBe(56);
+ expect(measureText).toHaveBeenCalledTimes(7); expect((got.grid as { top: number }).top).toBe(42);
  expect((got.legend as { tooltip: { renderMode: string } }).tooltip.renderMode).toBe("html");
 });

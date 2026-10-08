@@ -32,7 +32,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const context = document.createElement("canvas").getContext("2d");
     const measureText = context ? (text: string, font: string) => { context.font = font; return context.measureText(text).width; } : undefined;
     const size = { measureText, width: ref.current?.clientWidth ?? 0, height: ref.current?.clientHeight ?? 0 };
-    const compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize(size) : option;
+    let compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize(size) : option;
     const series = (compiled.series ?? []) as { name?: string }[];
     const names = new Set(series.map(item => item.name));
     const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
@@ -54,6 +54,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       const lines = (compiled.series ?? []) as { name?: string; endLabel?: { show?: boolean }; markLine?: { data?: { xAxis?: number; label?: { formatter?: string } }[] }; markArea?: { data?: { label?: { formatter?: string; show?: boolean } }[][] } }[];
       const endNames = lines.filter(s => s.endLabel?.show).map(s => s.name!);
       const deployNames = lines.flatMap(s => s.markLine?.data?.filter(m => m.xAxis !== undefined).map(m => m.label?.formatter) ?? []);
+      const bandNames = (compiled.graphic as {annotation?:boolean;style?:{text?:string}}[] ?? []).filter(g=>g.annotation).map(g=>g.style?.text);
       const anomalyNames = lines.flatMap(s => s.markArea?.data?.filter(area=>area[0]?.label?.show).map(area => area[0]?.label?.formatter) ?? []);
       const display = chart.current.getZr?.().storage.getDisplayList(true) ?? [];
       const bounds = display.flatMap(el => {
@@ -66,9 +67,22 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       });
       ref.current.dataset.chartLabels = JSON.stringify({ width: size.width, height: size.height, grid_top:rect?.y, end_names: endNames,
         ends: bounds.filter(b => b.end && endNames.includes(b.name)),
-        deploys: bounds.filter(b => deployNames.includes(b.name)), anomalies: bounds.filter(b => anomalyNames.includes(b.name)) });
+        deploys: bounds.filter(b => deployNames.includes(b.name) || bandNames.includes(b.name) && b.name !== "anomaly"), anomalies: bounds.filter(b => anomalyNames.includes(b.name) || bandNames.includes(b.name) && b.name === "anomaly") });
     };
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { brush: { toolbox: [], xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
+    // ECharts containment can shrink the nominal plot. Recompute numeric tick
+    // density once from the native rect, including any annotation/legend band.
+    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{height:number}}}}};
+    const plotHeight=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect().height;
+    if(plotHeight && compiled.yAxis) {
+      const splitNumber=Math.max(2,Math.floor(plotHeight/32));
+      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as {type?:string;splitNumber?:number}[];
+      if(axes.some(axis=>(axis.type==="value"||axis.type==="log")&&axis.splitNumber!==splitNumber)) {
+        const updated=axes.map(axis=>axis.type==="value"||axis.type==="log"?{...axis,splitNumber}:axis);
+        compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
+        chart.current?.setOption({yAxis:compiled.yAxis});
+      }
+    }
     // Record actual rendered text bounds, so the collector can check canvas
     // legends without inferring visibility from the configured options.
     if (ref.current) {

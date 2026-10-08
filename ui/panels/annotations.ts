@@ -50,14 +50,13 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const times = deploys.map(d => d.xAxis);
   const windowFrom = Number.isFinite(from) ? from : Math.min(...times,...episodes.map(a=>a.from));
   const windowTo = Number.isFinite(to) ? to : Math.max(...times.map(t=>t+1),...episodes.map(a=>a.to));
-  const measure = (text:string) => size.measureText?.(text,`12px ${theme.font}`) ?? text.length*7.2;
+  const measure = (text:string) => size.measureText?.(text,`12px ${theme.font}`) ?? text.length*12;
   anomalies.forEach((area,i)=>{
     const label=area[0].label!;
     const width=(episodes[i].to-episodes[i].from)/Math.max(1,windowTo-windowFrom)*laneWidth;
     label.width=Math.max(0,width-8);label.show=width>=measure("anomaly")+8;
     label.position=[0,deploys.length ? -34 : -8];
   });
-  const anomalyLane=anomalies.some(a=>a[0].label?.show);
   const clusters: { first: typeof deploys[number]; count: number; x: number; details: string[] }[] = [];
   for (const deploy of [...deploys].sort((a, b) => a.xAxis - b.xAxis)) {
     const x = left + (deploy.xAxis - windowFrom) / Math.max(1, windowTo - windowFrom) * laneWidth;
@@ -75,10 +74,49 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
     if(available<48 && i===clusters.length-1) {label.align="right";label.offset=[-4,-8];label.width=Math.max(24,cluster.x-left-12);}
     else label.width=Math.max(16,available);
   });
+  const legend = option.legend as {show?:boolean;data?:string[];formatter?:(name:string)=>string;itemGap?:number} | undefined;
+  let used = 0;
+  for (const name of legend?.data ?? []) {
+    const entry = 10 + 5 + measure(legend?.formatter?.(name) ?? name);
+    if (used && used + (legend?.itemGap ?? 6) + entry > size.width-16) break;
+    used += (used ? legend?.itemGap ?? 6 : 0) + entry;
+  }
+  const labels = [
+    ...clusters.map(c=>({text:c.first.label.formatter,details:c.details.join("<br/>")})),
+    ...anomalies.flatMap(a=>a[0].label?.show ? [{text:"anomaly",details:a[0].tooltip!.formatter()}] : []),
+  ];
+  const required = labels.reduce((n,l)=>n+measure(l.text)+12,0);
+  const share = Boolean(legend?.show && required <= size.width-16-used-12);
+  const top = (typeof grid.top === "number" ? grid.top : 8) + (labels.length && !share ? 18 : 0);
+  const bandTop = share ? 1 : top-17;
+  // Both marker types share one horizontal band. Lines/areas retain their exact
+  // time coordinates and detailed tooltips; label placement follows free space.
+  let rightOffset = 8;
+  const chips = labels.map(l=>{
+    const width = Math.max(16,Math.min(measure(l.text)+6,(size.width-16)/Math.max(1,labels.length)-6));
+    const chip = {type:"text",right:rightOffset,top:bandTop,annotation:true,style:{text:l.text,fill:theme.muted,backgroundColor:theme.surface,padding:[1,3],fontSize:11,fontFamily:theme.font,width,overflow:"truncate",stroke:theme.surface,lineWidth:3},tooltip:{formatter:()=>l.details}};
+    rightOffset += width+6; return chip;
+  });
+  for (const c of clusters) c.first.label.show=false;
+  for (const a of anomalies) a[0].label!.show=false;
+  const adaptAxis = (axis:Record<string,unknown>) => axis?.type === "value" || axis?.type === "log" ? {...axis,splitNumber:Math.max(2,Math.floor((size.height-top-Number(grid.bottom??8)-22)/32)),axisLabel:{...(axis.axisLabel as object),hideOverlap:true}} : axis;
+  let axes = Array.isArray(option.yAxis) ? option.yAxis.map(adaptAxis) : option.yAxis ? adaptAxis(option.yAxis as Record<string,unknown>) : undefined;
+  let trimmedSeries = series, graphics = [...(option.graphic as unknown[] ?? []),...chips];
+  if(panel.viz === "state_timeline" && axes && !Array.isArray(axes)) {
+    const names=axes.data as string[], capacity=Math.max(1,Math.floor((size.height-top-Number(grid.bottom??8)-22)/16));
+    if(names.length>capacity) {
+      axes={...axes,data:names.slice(0,capacity)};
+      trimmedSeries=series.map(s=>({...s,data:(s.data as {value:number[]}[]).filter(d=>d.value[1]<capacity)}));
+      const old=graphics.find(g=>(g as {style?:{text?:string}}).style?.text?.match(/^\+\d+ rows$/)) as {style:{text:string};tooltip:{formatter():string}} | undefined;
+      const count=names.length-capacity+Number(old?.style.text.match(/\d+/)?.[0]??0);
+      graphics=graphics.filter(g=>g!==old);
+      graphics.push({type:"text",right:0,bottom:0,style:{text:`+${count} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>names.slice(capacity).map(escapeHTML).join("<br/>")+(old?"<br/>"+old.tooltip.formatter():"")}});
+    }
+  }
   return {
     ...option, ...(deploys.length || anomalies.length ? { tooltip: { ...((option.tooltip as Record<string, unknown>) ?? {}), renderMode: "html" } } : {}),
-    ...(deploys.length || anomalyLane ? {grid:{...grid,top:(typeof grid.top==="number"?grid.top:8)+(deploys.length?26:0)+(anomalyLane?26:0)}} : {}),
-    series: series.map((s, i) => {
+    grid:{...grid,top}, ...(axes ? {yAxis:axes} : {}),graphic:graphics,
+    series: trimmedSeries.map((s, i) => {
       if (i !== 0) return s;
       const markLine = (s.markLine ?? {}) as { data?: unknown[] };
       const markArea = (s.markArea ?? {}) as { data?: unknown[] };

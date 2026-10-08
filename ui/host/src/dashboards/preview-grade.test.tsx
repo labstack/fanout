@@ -41,10 +41,10 @@ describe("preview V1", () => {
   });
   it.each([false, true])("provides subtitle, accessible Chart/Data/Spec, syntax tokens and 16px body padding (%s)", async dark => {
     const host = await render(panel, dark);
-    expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · spans");
+    expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · spans · click for exemplar traces");
     expect((host.querySelector('[data-panel-title]') as HTMLElement).style.fontSize).toBe("calc(0.9375rem * var(--mantine-scale))");
     expect((host.querySelector('[data-panel-body]') as HTMLElement).style.padding).toBe("16px");
-    expect(host.textContent).toContain("Click the chart for exemplar traces at that time.");
+    expect(host.textContent).toContain("click for exemplar traces");
     const button = (view: string) => host.querySelector<HTMLButtonElement>(`[data-panel-view="${view}"]`)!;
     await act(async () => button("Data").click());
     expect(host.querySelector("table")?.textContent).toContain("500ms");
@@ -58,12 +58,12 @@ describe("preview V1", () => {
     await act(async () => button("Chart").click()); expect(host.querySelector('[role="img"]')).not.toBeNull();
   });
   it.each([
-    [{ ...panel, viz: "bar", click: { set_variable: "route" }, drill: undefined }, "Click a bar to filter the board by route."],
-    [{ ...panel, viz: "table", sql: "SELECT 1", query: undefined }, "Click a row to open the trace."],
+    [{ ...panel, viz: "bar", click: { set_variable: "route" }, drill: undefined }, "click to filter by route"],
+    [{ ...panel, viz: "table", sql: "SELECT 1", query: undefined }, "click to open trace"],
     [{ ...panel, viz: "logs", query: { from: "logs" }, drill: undefined }, ""],
   ] as [Panel, string][])("uses the interaction hint for %s", async (p, hint) => {
-    const host = await render(p); expect(host.querySelector('[data-panel-hint]')?.textContent ?? "").toBe(hint);
-    if (p.sql) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · sql");
+    const host = await render(p); expect(host.querySelector('[data-panel-hint]')).toBeNull(); if(hint) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toContain(hint);
+    if (p.sql) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · sql · click to open trace");
   });
 });
 

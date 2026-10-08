@@ -1,13 +1,13 @@
 import { init, use } from "echarts/core";
-import { BarChart, CustomChart, LineChart } from "echarts/charts";
-import { GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { BarChart, CustomChart, GaugeChart, ScatterChart, LineChart } from "echarts/charts";
+import { GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import { expect,it } from "vitest";
 import { analysisOption } from "../../../panels/analysis";
-import { barOption,chartThemeFor,timeseriesOption } from "../../../panels/compile";
+import { gaugeOption,barOption,chartThemeFor,timeseriesOption } from "../../../panels/compile";
 import { withAnnotations } from "../../../panels/annotations";
 import { nativeAudit } from "./native-audit";
-use([BarChart,CustomChart,LineChart,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
+use([BarChart,CustomChart,GaugeChart,ScatterChart,LineChart,GraphicComponent,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
 it.each([false,true])("P3c/P3d native labels are horizontal and above the actual plot, away from x ticks (%s)",dark=>{
  const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:500,height:248});
  try {
@@ -48,5 +48,34 @@ it.each([false,true])("Q1 native renderer keeps five heat intensities and exclud
   const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},result,chartThemeFor(dark));chart.setOption(option,{notMerge:true});
   const audit=nativeAudit(chart,option,{width:600,height:248});
   expect(audit.marks).toHaveLength(5);expect(new Set(audit.marks.map(m=>m.fill)).size).toBe(5);
+ }finally{chart.dispose();el.remove();}
+});
+
+it.each([false,true])("F1/F2/F5 native small gauges and m-height plots have unclipped, nonoverlapping labels (%s)",dark=>{
+ const overlaps=(a:{left:number;top:number;right:number;bottom:number},b:typeof a)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;
+ const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:238,height:56});
+ const theme=chartThemeFor(dark);
+ try {
+  for(const width of [159,238]) {
+   chart.resize({width,height:56});
+   const option=gaugeOption({id:"g",title:"Gauge",viz:"gauge",min:0,max:10,thresholds:[{value:1,status:"warn"}]},1.74,theme,"percent",{width,height:56});
+   chart.setOption(option,{notMerge:true});const gaugeAudit=nativeAudit(chart,option,{width,height:56});expect(gaugeAudit.gauge!.diameter).toBeGreaterThanOrEqual(.8*Math.min(width,1.6*56)-.1);const texts=gaugeAudit.texts;
+   expect(texts.find(t=>t.text==="1.74%")?.size).toBeGreaterThanOrEqual(24);
+   for(const [i,text] of texts.entries()) {expect(text.top).toBeGreaterThanOrEqual(0);expect(text.bottom).toBeLessThanOrEqual(56);expect(text.left).toBeGreaterThanOrEqual(0);expect(text.right).toBeLessThanOrEqual(width);for(const other of texts.slice(i+1))expect(overlaps(text,other),JSON.stringify([text,other])).toBe(false);}
+  }
+  for(const width of [400,520]) for(const viz of ["timeseries","scatter","histogram","heatmap","state_timeline"] as const) {
+   const height=210;chart.resize({width,height});
+   const columns=[{name:"time",type:"time" as const,role:"time" as const},{name:"service",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const},{name:"p95",type:"number" as const,role:"measure" as const,unit:"ms"}];
+   const frame={columns,values:[[0,60000,120000,180000,240000,300000],["load-generator","frontend-proxy","product-catalog","fraud-detection","product-reviews","recommendation"],[1,2,3,4,5,6],[10,20,30,40,50,60]],rows:6};
+   const panel={id:"t",title:"Chart",viz},result={id:"t",status:"ok" as const,elapsed_ms:1,interval:"1m",from_ms:0,to_ms:360000,frame};
+   const option=viz==="timeseries"?timeseriesOption(panel,result,theme,{width,height}):analysisOption(panel,result,theme,{width,height});
+   const compiled=withAnnotations(option,panel,result,{deploys:[{service:"cart",namespace:"",version:"2.3",at:new Date(240000).toISOString()}],anomalies:[]},{},theme,{width,height});
+   chart.setOption({...compiled,animation:false},{notMerge:true});
+   const rect=(chart as any).getModel().getComponent("grid").coordinateSystem.getRect();expect(rect.height/height,`${viz} at ${width}`).toBeGreaterThanOrEqual(.55);
+   const audit=nativeAudit(chart,compiled,{width,height},rect);expect(audit.plot!.y_ticks.length).toBeGreaterThan(0);
+   const ticks=audit.texts.filter(t=>t.right<=rect.x&&t.top>=rect.y-6&&t.bottom<=rect.y+rect.height+6);
+   for(const [i,t] of ticks.entries())for(const other of ticks.slice(i+1))expect(overlaps(t,other),`${viz} tick overlap`).toBe(false);
+   if(viz==="scatter")for(const name of ["calls","p95"]) {const title=audit.texts.find(t=>t.text===name)!;expect(title).toBeDefined();expect(title.left).toBeGreaterThanOrEqual(rect.x);expect(title.right).toBeLessThanOrEqual(rect.x+rect.width);expect(title.top).toBeGreaterThanOrEqual(rect.y);expect(title.bottom).toBeLessThanOrEqual(rect.y+rect.height);for(const tick of ticks)expect(overlaps(title,tick)).toBe(false);}
+  }
  }finally{chart.dispose();el.remove();}
 });

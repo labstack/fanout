@@ -20,14 +20,20 @@ const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.buck
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
 
-/** Log density is deliberately faint at one sample; zero has no graphic. */
-function heatColour(theme: ChartTheme, fraction: number): string {
-  const high = seriesSlot(0, theme.dark), amount = .015 + .985 * fraction;
-  return "#" + [1, 3, 5].map(i => Math.round(parseInt(theme.surface.slice(i, i + 2), 16) * (1 - amount)
-    + parseInt(high.slice(i, i + 2), 16) * amount).toString(16).padStart(2, "0")).join("");
+/** Sequential ramps have strictly ordered luminance, with a readable high end. */
+export function heatRamp(theme: ChartTheme): string[] {
+  return theme.dark ? ["#0f2a43", "#164267", "#1e5a8a", "#2879ae", "#399aca", "#57b8e3", "#7dd3fc"]
+    : ["#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8"];
 }
-function heatRamp(theme: ChartTheme): string[] {
-  return [0, .2, .4, .6, .8, 1].map(fraction => heatColour(theme, fraction));
+/** Equal counts share their midrank. One occupied count stays at the low end. */
+function heatSteps(counts: number[]): Map<number, number> {
+  const sorted = [...counts].sort((a,b)=>a-b), steps = new Map<number,number>();
+  for (let first=0; first<sorted.length;) {
+    let end=first+1; while(end<sorted.length && sorted[end]===sorted[first]) end++;
+    steps.set(sorted[first], sorted[0]===sorted.at(-1) ? 0 : Math.min(6,Math.floor((first+end-1)/2/Math.max(1,sorted.length-1)*7)));
+    first=end;
+  }
+  return steps;
 }
 
 /** State runs merge only touching buckets of the same row and status. */
@@ -68,7 +74,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     grid: { left: 70, right: 24, top: 30, bottom: 40, containLabel: true },
     tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text,fontFamily:theme.font,fontSize:12 }, renderMode: "html", formatter: htmlTooltip(value => formatValue(panel.unit, value)) },
     legend: { show: false, textStyle: { color: theme.muted } },
-    xAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, yAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, series: [] as unknown[],
+    xAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, yAxis: { type: "value",splitNumber:Math.max(2,Math.floor((size.height-92)/32)),axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, series: [] as unknown[],
   };
 
   if (panel.viz === "scatter") {
@@ -98,8 +104,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       } },
       legend: legendLayout.option,
       grid: { ...base.grid, top: legendLayout.option.show ? legendLayout.top : 8, left: 8, right: 16, bottom: 8 },
-      xAxis: axis(xUnit, xScale, measures[0]?.name),
-      yAxis: axis(yUnit, yScale, measures[1]?.name),
+      xAxis: { ...axis(xUnit, xScale, measures[0]?.name), name: measures[0]?.name ?? "x", nameLocation: "end", nameGap: -18, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "bottom" } },
+      yAxis: { ...axis(yUnit, yScale, measures[1]?.name), splitNumber: Math.max(2,Math.floor((size.height-legendLayout.top-30)/32)), name: measures[1]?.name ?? "y", nameLocation: "end", nameGap: -18, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "left", verticalAlign: "top" } },
       series: groups.map(({ name, items }, index) => ({
         type: "scatter", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
@@ -122,9 +128,9 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     return {
       ...base,
       legend: legendLayout.option,
-      grid: { ...base.grid, top: legendLayout.top },
+      grid: { ...base.grid, left:8,right:8,top:legendLayout.option.show ? legendLayout.top : 8,bottom:8 },
       xAxis: { ...base.xAxis, type: "category", data: labels, splitLine:{show:false} },
-      yAxis: { ...base.yAxis, type: "value", name: "count",nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11} },
+      yAxis: { ...base.yAxis, type: "value", name:"count",nameLocation:"end",nameGap:-18,nameRotate:0,splitNumber:Math.max(2,Math.floor((size.height-(legendLayout.option.show ? legendLayout.top : 8)-30)/32)),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"left",verticalAlign:"top"} },
       series: names.map(({ name, items }, index) => ({
         type: "bar", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: buckets.map(bucket => {
@@ -146,11 +152,13 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const heat = panel.viz === "heatmap";
     const item = dimensions[0];
     const category = (row: Record<string, Cell>) => heat ? bucketKey(row) : String(row[item] ?? "");
-    const names = [...new Set((heat ? [...rows].sort(compareBuckets) : rows).map(category))];
+    const allNames = [...new Set((heat ? [...rows].sort(compareBuckets) : rows).map(category))];
+    const names = heat ? allNames : allNames.slice(0,Math.max(1,Math.floor((size.height-54)/16)));
+    const hiddenRows = allNames.slice(names.length);
     const labels = new Map(rows.map(row => [bucketKey(row), bucketLabel(row, bucketUnit)]));
     const interval = spanMs(result.interval);
     const measure = measures[0]?.name ?? "count";
-    const buckets = rows.filter(row => typeof row.time === "number").map(row => {
+    const buckets = rows.filter(row => typeof row.time === "number" && names.includes(category(row))).map(row => {
       const value = row[measure];
       const status = typeof value === "number" ? statusFor(value, panel.thresholds, panel.better ?? result.better) ?? "ok" : null;
       return {
@@ -160,13 +168,18 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         itemStyle: heat ? undefined : { color: status === null ? `${theme.text}26` : theme.status[status] },
       };
     });
-    const data = heat ? buckets.filter(bucket => Number.isFinite(Number(bucket.value[2])) && Number(bucket.value[2]) > 0).map(bucket => ({ ...bucket, value: [...bucket.value, Math.log1p(Number(bucket.value[2]))] })) : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
-    const counts = rows.map(row => Number(row[measure])).filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
-    const maxCount = Math.max(1, counts[Math.ceil(counts.length * .99) - 1] ?? 1);
-    const logMin = Math.log1p(1), logMax = Math.log1p(maxCount);
+    const occupied = buckets.filter(bucket => Number.isFinite(Number(bucket.value[2])) && Number(bucket.value[2]) > 0);
+    const counts = occupied.map(bucket => Number(bucket.value[2])).sort((a,b)=>a-b);
+    const steps = heatSteps(counts), ramp = heatRamp(theme);
+    const data = heat ? occupied.map(bucket => ({ ...bucket, value: [...bucket.value, steps.get(Number(bucket.value[2])) ?? 0] })) : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
+    const stepRange = (step:number) => {
+      const values=counts.filter(n=>steps.get(n)===step);
+      const low=values[0] ?? counts[step===0 ? 0 : counts.length-1] ?? 0, high=values.at(-1) ?? low;
+      return low===high ? formatValue("count",low) : `${formatValue("count",low)}–${formatValue("count",high)}`;
+    };
     return {
       ...base,
-      grid: { ...base.grid, left: 8, right: 8, top: 8, bottom: heat ? 32 : 8 },
+      grid: { ...base.grid, left: 8, right: 8, top: 8, bottom: heat ? 32 : hiddenRows.length ? 24 : 8 },
       tooltip: { ...base.tooltip, trigger: "axis", formatter: (params: TooltipPoint | TooltipPoint[]) => {
         const points = Array.isArray(params) ? params : [params];
         return points.map(point => {
@@ -177,12 +190,13 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },
       xAxis: { type: "time", axisPointer: { show: true }, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatTimeAxis, hideOverlap: true } },
-      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate", ...(heat ? { interval: (size.height-60)/Math.max(1,names.length)<12 ? 1 : 0, hideOverlap: true } : {}) } },
+      yAxis: { type: "category", data: heat ? names.map(name => labels.get(name)) : names, axisLine: { show: false }, axisTick: { show: false }, splitLine:{show:false}, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, width: 140, overflow: "truncate", ...(heat ? { interval: (size.height-60)/Math.max(1,names.length)<12 ? 1 : 0, hideOverlap: true } : { interval: 0 }) } },
       visualMap: heat ? {
         type: "continuous", show: true, orient: "horizontal", right: 16, bottom: 0, padding: 0,
-        itemWidth: 8, itemHeight: 96, text: [`${formatValue("count", maxCount)}+`, "1"], textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
-        min: logMin, max: logMax, dimension: 5, inRange: { color: heatRamp(theme) },
+        itemWidth: 8, itemHeight: 96, text: [stepRange(6), stepRange(0)], textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
+        min: 0, max: 6, dimension: 5, inRange: { color: ramp },
       } : undefined,
+      graphic: hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
         type: "custom", name: panel.title, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; style: () => Record<string, unknown> }) => {
@@ -191,8 +205,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
           const height = Math.abs(api.size([0, 1])[1]) * (heat ? 1 : .65);
           const gap = heat && Math.abs(right[0]-left[0]) >= 8 ? 1 : 0;
           if (heat && !(api.value(2) > 0)) return undefined;
-          const fraction = logMax === logMin ? 0 : (Math.log1p(Math.min(api.value(2), maxCount)) - logMin) / (logMax - logMin);
-          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0, ...(heat ? { fill: heatColour(theme, Math.max(0, fraction)) } : {}) } };
+          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0, ...(heat ? { fill: ramp[steps.get(api.value(2)) ?? 6] } : {}) } };
         },
       }],
     };

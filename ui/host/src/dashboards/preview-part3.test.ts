@@ -19,7 +19,7 @@ it.each([false,true])("P3d puts anomaly text above the grid and omits text in na
  const size={width:500,height:248,measureText:(text:string)=>text.length*7};
  const got=withAnnotations(base,panel,result,{deploys:[],anomalies:[anomaly]},{},theme,size) as any;
  expect(got.grid.top).toBeGreaterThan(base.grid.top);
- const area=got.series[0].markArea.data[0][0];expect(area.label.show).toBe(true);expect(area.label.position[0]).toBe(0);expect(area.label.position[1]).toBeLessThan(0);expect(area.label.verticalAlign).toBe("bottom");expect(area.label.width).toBeLessThan(125);expect(area.tooltip.formatter()).toContain("Slow · bad");
+ const area=got.series[0].markArea.data[0][0];expect(got.graphic.some((g:any)=>g.annotation && g.style.text==="anomaly")).toBe(true);expect(area.label.show).toBe(false);expect(area.label.position[0]).toBe(0);expect(area.label.position[1]).toBeLessThan(0);expect(area.label.verticalAlign).toBe("bottom");expect(area.label.width).toBeLessThan(125);expect(area.tooltip.formatter()).toContain("Slow · bad");
  const narrow=withAnnotations(base,panel,result,{deploys:[],anomalies:[{...anomaly,to:new Date(901000).toISOString()}]},{},theme,size) as any;
  expect(narrow.series[0].markArea.data[0][0].label.show).toBe(false);expect(narrow.series[0].markArea.data[0][0].tooltip.formatter()).toContain("Slow");
 });

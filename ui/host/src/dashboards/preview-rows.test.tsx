@@ -106,7 +106,7 @@ it.each([false,true])("Q2: short OTLP labels, full titles and isolated service/c
  expect(host.querySelector<HTMLTableColElement>('col[data-field="count"]')?.style.width).toBe("140px");
 });
 
-it.each([false,true])("Q3: one padded muted footer stacks hint before distinct data notes (%s)",async dark=>{
+it.each([false,true])("Q3: one padded muted footer stacks distinct data notes outside scrolling rows (%s)",async dark=>{
  const p:Panel={id:"t",title:"Traces",viz:"traces",drill:"traces"};
  const note="Service is All; showing the unsplit whole-window frame.";
  const r:PanelResult={...result,frame:{...frame,truncated:true,note},annotation_error:note,annotation_scope:{limited:true,services:[]}};
@@ -114,8 +114,8 @@ it.each([false,true])("Q3: one padded muted footer stacks hint before distinct d
  const body=host.querySelector<HTMLElement>("[data-panel-body]")!,footer=host.querySelector<HTMLElement>("[data-panel-notes]")!;
  expect(footer).not.toBeNull();expect(body.classList.contains("dashboard-panel-padding")).toBe(true);expect(footer.classList.contains("dashboard-panel-padding")).toBe(true);
  const notes=[...footer.querySelectorAll<HTMLElement>("[data-panel-note]")];
- expect(notes[0].textContent).toBe("Click a row to open the trace.");
- expect(notes.map(n=>n.textContent)).toEqual(["Click a row to open the trace.","Truncated: showing limited data",note,"Annotation service scope is limited."]);
+ expect(host.querySelector("[data-panel-subtitle]")?.textContent).toContain("click to open trace");
+ expect(notes.map(n=>n.textContent)).toEqual(["Truncated: showing limited data",note,"Annotation service scope is limited."]);
  for(const n of notes){expect(n.style.fontSize).toBe("calc(0.75rem * var(--mantine-scale))");expect(n.style.color).toBe("var(--mantine-color-dimmed)");}
  expect(host.textContent).not.toContain("Showing 2 rows.");
 });

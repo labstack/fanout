@@ -1,4 +1,4 @@
-import type { Frame, PanelResult, Status } from "./types";
+import type { Cell, Frame, PanelResult, Status } from "./types";
 
 export const healthGlyph: Record<string, string> = { healthy: "●", degraded: "■", unhealthy: "◆", unknown: "○" };
 export type ServiceNode = { id: string; health: string; spans: number | null; p95_ms: number | null; error_rate: number | null; request_rate: number | null };
@@ -27,4 +27,20 @@ export function serviceMapModel(frame: Frame, window: Pick<PanelResult, "from_ms
   }
   for (const edge of edges) for (const id of [edge.caller, edge.callee]) if (!nodes.has(id)) nodes.set(id, { id, health: "unknown", spans: null, p95_ms: null, error_rate: null, request_rate: null });
   return { nodes: [...nodes.values()].sort((a, b) => order(a.id, b.id)), edges: edges.sort((a, b) => order(a.id, b.id)) };
+}
+
+/** Q4: error-rate evidence uses Wilson's 95% lower bound, n >= 20.
+ * Unsupported rows follow supported ones in descending sample count. */
+export function worstHealthServices(rows: Record<string,Cell>[]) {
+  const number=(value:Cell|undefined)=>typeof value==="number"&&Number.isFinite(value)?value:null;
+  const wilson=(rate:number,n:number)=>{
+    const p=Math.max(0,Math.min(1,rate/100)),z2=3.8416;
+    return Math.max(0,(p+z2/(2*n)-1.96*Math.sqrt(p*(1-p)/n+z2/(4*n*n)))/(1+z2/n));
+  };
+  return rows.filter(r=>typeof r.service==="string").map(r=>{
+    const n=Math.max(0,number(r.spans)??0),error=number(r.error_rate);
+    const eligible=n>=20&&error!==null;
+    return {name:String(r.service),health:String(r.health??"unknown"),n,eligible,
+      score:eligible?wilson(error!,n):0,metric:error!==null?`${error.toFixed(1)}%`:"—"};
+  }).sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(a.eligible?b.score-a.score:0)||b.n-a.n||order(a.name,b.name)).slice(0,4);
 }

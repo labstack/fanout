@@ -85,7 +85,7 @@ describe("M2 visualizations",()=>{
 it("formats distinct scatter axis units and numeric bucket order",()=>{
  const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
  const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
- expect(option.xAxis.name).toBeUndefined();expect(option.yAxis.name).toBeUndefined();expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ expect(option.xAxis.name).toBe("count");expect(option.yAxis.name).toBe("p95");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
  const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;
@@ -113,11 +113,11 @@ it.each(["histogram","heatmap"] as const)("preserves distinct %s buckets when ro
  if (viz === "heatmap") expect(data.map(point=>(point.value as number[])[1])).toEqual([0,1]);
 });
 
-it("caps heatmap colour at p99 and shows a compact continuous count scale", () => {
+it("ranks heatmap colour by cell percentile and shows a compact continuous count scale", () => {
  const counts = [...Array(99).fill(10),100000];
  const frame = {columns:fixtures.heatmap!.columns,values:[counts.map((_,i)=>1000+i*60000),counts.map(()=>128),counts.map(()=>256),counts],rows:100};
  const option = analysisOption({id:"p",title:"Latency heatmap",viz:"heatmap"},{...resultFor("heatmap"),frame},chartThemeFor(false)) as {visualMap:{show:boolean;type:string;max:number;orient:string;itemWidth:number};legend?:{show:boolean}};
- expect(option.visualMap.max).toBeLessThanOrEqual(10);
+ expect(option.visualMap.max).toBe(6);
  expect(option.visualMap.show).toBe(true);
  expect(option.visualMap.type).toBe("continuous");
  expect(option.visualMap.orient).toBe("horizontal");

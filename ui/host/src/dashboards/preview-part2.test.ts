@@ -19,8 +19,8 @@ it.each([false,true])("V4: discrete full-height heat cells and single-hue inline
   const cell = option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:"#fff"})});
   // Q1 uses a surface gap without a uniform identity-colour outline.
   expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
-  expect(option.visualMap.inRange.color).toHaveLength(6);
-  expect(option.visualMap.inRange.color.at(-1)).toBe(seriesSlot(0,dark));
+  expect(option.visualMap.inRange.color).toHaveLength(7);
+  expect(option.visualMap.inRange.color.at(-1)).toBe(dark ? "#7dd3fc" : "#1d4ed8");
   expect(option.visualMap.itemWidth).toBe(8);
   expect(option.grid.bottom).toBeLessThanOrEqual(32);
   expect(option.yAxis.data).toEqual(["<25 ms","25–50 ms","≥3.2 s"]);
