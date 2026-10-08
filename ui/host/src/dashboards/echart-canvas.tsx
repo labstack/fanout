@@ -1,12 +1,12 @@
 import { BarChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
-import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
+import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 import type { ChartSize } from "../../../panels/compile";
 import { registerAudit, chartAuditSnapshot } from "./chart-audit-dev";
 
-use([CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent]);
+use([CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent, ToolboxComponent]);
 
 /* Dashboard panels draw on canvas: SVG stays smooth only to a few thousand
    points, and a dashboard of a dozen time series passes that. One instance
@@ -40,7 +40,9 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
     selected.current = retained;
     const legend = compiled.legend as { type?: string; show?: boolean; data?: string[]; formatter?: (name: string) => string; selected?: Record<string, boolean> } | undefined;
-    chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { brush: { toolbox: [], xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
+    // ECharts 6 brush preprocessing always creates a toolbox, even without
+    // buttons. Register it and hide it; activation uses takeGlobalCursor.
+    chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { toolbox: { show: false }, brush: { xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
     // ECharts containment can shrink the nominal plot. Recompute numeric tick
     // density once from the native rect, including any annotation/legend band.
     const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{height:number}}}}};

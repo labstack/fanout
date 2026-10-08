@@ -55,8 +55,8 @@ describe("EChartCanvas", () => {
     await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" onZoom={zoom} />));
     const cursorCalls = () => instance.dispatchAction.mock.calls.filter(([a]) => a.type === "takeGlobalCursor");
     expect(cursorCalls()).toHaveLength(1);
-    expect(instance.setOption.mock.lastCall?.[0].toolbox).toBeUndefined();
-    expect(instance.setOption.mock.lastCall?.[0].brush.toolbox).toEqual([]);
+    expect(instance.setOption.mock.lastCall?.[0].toolbox?.show).toBe(false);
+    expect(instance.setOption.mock.lastCall?.[0].brush.toolbox).toBeUndefined();
     expect(instance.dispatchAction).toHaveBeenCalledWith({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
     const nextOption = { series: [{ type: "line", data: [[1, 2]] }] };
     await act(async () => root.render(<EChartCanvas option={nextOption} height={100} label="P" onZoom={zoom} />));

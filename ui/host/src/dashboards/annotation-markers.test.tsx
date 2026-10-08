@@ -68,7 +68,7 @@ describe("annotation scope and windows", () => {
     const band = got.series[0].markArea.data[0];
     expect(band[0].xAxis).toBe(0); expect(band[1].xAxis).toBe(10000);
     expect(band[0].itemStyle).toEqual({ color: theme.status.warn, opacity: .09 });
-    expect(band[0].tooltip.formatter()).toBe(`checkout · Slow · bad · ${at(-1000)} – ${at(11000)}`);
+    expect(band[0].tooltip.formatter()).toBe(`checkout · Slow · bad · latency · ${at(-1000)} – ${at(11000)}`);
     expect(got.tooltip.renderMode).toBe("html");
     expect(got.series[0].markLine.silent).toBe(false); expect(got.series[0].markArea.silent).toBe(false);
   });
@@ -102,4 +102,40 @@ describe("annotation scope and windows", () => {
     expect(first.markArea.data).toHaveLength(2); expect((got.series as unknown[])[1]).toBe(option.series[1]);
     expect(option.series[0].markLine?.data).toHaveLength(1); expect(option.series[0].markArea?.data).toHaveLength(1);
   });
+});
+
+const mixedKinds: AnnotationsResponse = {
+  deploys: [], anomalies: [
+    { namespace: "shop", service: "cart", kind: "volume_change", title: "Changed", severity: "warn", from: at(4000), to: at(9000) },
+    { namespace: "shop", service: "cart", kind: "latency_degradation", title: "Changed", severity: "bad", from: at(2000), to: at(7000) },
+    { namespace: "shop", service: "cart", kind: "error_rate_change", title: "Changed", severity: "bad", from: at(1000), to: at(5000) },
+  ],
+};
+it.each([false, true])("final5 merges three overlapping kinds into one band with every kind/window (dark=%s)", dark => {
+  const got = withAnnotations({ series: [{ type: "line" }] }, panel, { ...result, annotation_scope: undefined }, mixedKinds, {}, chartThemeFor(dark));
+  const areas = (got.series as { markArea: { data: (Area & [{ name: string }, unknown])[] } }[])[0].markArea.data;
+  expect(areas).toHaveLength(1);
+  expect(areas[0].map(bound => bound.xAxis)).toEqual([1000, 9000]);
+  expect(areas[0][0].itemStyle.opacity).toBe(dark ? .12 : .09);
+  for (const episode of mixedKinds.anomalies) {
+    for (const value of [episode.kind, episode.from, episode.to]) {
+      expect(areas[0][0].name).toContain(value);
+      expect(areas[0][0].tooltip.formatter()).toContain(value);
+    }
+  }
+  expect(mixedKinds.anomalies.map(episode => episode.from)).toEqual([at(4000), at(2000), at(1000)]);
+});
+it("final5 merges adjacent kinds but preserves gaps, services, namespaces and clipped bounds", () => {
+  const base = mixedKinds.anomalies[0];
+  const anomalies = [...mixedKinds.anomalies,
+    { ...base, kind: "adjacent", from: at(9000), to: at(11000) },
+    { ...base, kind: "separate", from: at(12000), to: at(14000) },
+    { ...base, namespace: "ops" }, { ...base, service: "checkout" },
+  ];
+  const data = { ...result, from_ms: 3000, to_ms: 15000, annotation_scope: undefined };
+  const areas = markers(data, "timeseries", { deploys: [], anomalies }).series[0].markArea.data;
+  expect(areas.map(area => area.map(bound => bound.xAxis)).sort((a, b) => a[0] - b[0])).toEqual([[3000, 11000], [4000, 9000], [4000, 9000], [12000, 14000]]);
+  const merged = areas.find(area => area[0].xAxis === 3000)!;
+  expect(merged[0].tooltip.formatter()).toContain("adjacent");
+  expect(merged[0].tooltip.formatter()).toContain(at(1000));
 });
