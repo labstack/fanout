@@ -302,7 +302,7 @@ social-card:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: script-tests test-names-check go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
+check: script-tests dashboard-eval-generate-check test-names-check go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:
@@ -317,8 +317,16 @@ go-deadcode:
 # Run every script test, including failure injection, as part of CI.
 script-tests:
     bun test scripts/*.test.ts scripts/dashboard-eval
-    bun scripts/dashboard-eval/main.ts --mock
+    bun scripts/dashboard-eval/main.ts --mock --no-output
 
 # Test names describe behavior; specification scenarios such as S8 are allowed.
 test-names-check:
     node scripts/test-names.mjs
+
+# Regenerate the eval response fixtures through the native server implementation.
+dashboard-eval-generate:
+    FANOUT_EVAL_UPDATE_GOLDENS=1 just test ./internal/agent -run TestDashboardEvalGoldensCurrent
+
+# Force fresh server execution so test caching cannot hide response-shape drift.
+dashboard-eval-generate-check:
+    just test ./internal/agent -count=1 -run TestDashboardEvalGoldensCurrent

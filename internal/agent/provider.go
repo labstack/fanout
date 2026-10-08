@@ -78,6 +78,7 @@ type StreamEvent struct {
 	ToolCall      *ToolCall         // completed tool call (EventToolUse)
 	StopReason    string            // e.g. "end_turn", "tool_calls", "length", "max_tokens" (EventStop)
 	Error         string            // error message (EventError)
+	Model         string            // model reported by the provider response
 	Usage         *TokenUsage       // provider-reported token snapshot, including failed calls
 	ProviderItems []json.RawMessage `json:"-"` // opaque continuation items (EventStop)
 }

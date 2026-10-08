@@ -1,7 +1,7 @@
-export type SavedPanel = { id:string; description?:string };
+export type SavedPanel = { id:string; description?:string; viz?:string; content?:string };
 export type Check = { id:string; status:string; rows:number; diagnosis?:string };
 export type Run = {
-  saved:boolean; elapsed_ms:number|null; valid:boolean; checked:boolean;
+  complete:boolean; saved:boolean; elapsed_ms:number|null; valid:boolean; checked:boolean;
   panels:SavedPanel[]; checks:Check[];
 };
 export type Edit = { passed:boolean; changed_ids:string[]; expected_ids:string[]; layout_changed?:boolean };
@@ -14,15 +14,15 @@ export function panelPass(p:SavedPanel, checks:Check[]):boolean {
   const matches=checks.filter(c=>c.id===p.id);
   if(matches.length!==1)return false;
   const c=matches[0];
-  return c.status==='ok' && c.rows>0 || c.status==='empty' && Boolean(c.diagnosis?.trim()) && Boolean(p.description?.trim());
+  return c.status==='ok' && (c.rows>0 || p.viz==='text' && Boolean(p.content?.trim())) || c.status==='empty' && Boolean(c.diagnosis?.trim()) && Boolean(p.description?.trim());
 }
 export function score(runs:Run[], edits:Edit[]) {
-  const complete=runs.length===10;
+  const complete=runs.length===10 && runs.every(r=>r.complete);
   const times=runs.map(r=>r.elapsed_ms);
   const latency=times.every(t=>t!==null && Number.isFinite(t) && t>=0) ? median(times as number[]) : null;
   const total=runs.reduce((n,r)=>n+r.panels.length,0);
   const good=runs.reduce((n,r)=>n+(r.checked ? r.panels.filter(p=>panelPass(p,r.checks)).length : 0),0);
-  const validation_failures=runs.filter(r=>r.saved && !r.valid).length;
+  const validation_failures=runs.filter(r=>r.saved && r.checked && !r.valid).length;
   const s1=complete && runs.every(r=>r.saved);
   const s2=complete && total>0 && good===total && runs.every(r=>r.checked && r.panels.length>0 && r.checks.length===r.panels.length && new Set(r.panels.map(p=>p.id)).size===r.panels.length);
   // Checked validation is required even when the caller claims valid=true.
@@ -49,11 +49,34 @@ export function compareEdit(before:Spec, after:Spec, expected:Spec, operation:Op
   const changed_ids=changedPanels(before.panels,after.panels,allowGrid);
   const expected_ids=changedPanels(before.panels,expected.panels,allowGrid);
   const layout_changed=stable(physical(before))!==stable(physical(after));
-  const authoredEqual=stable(normalized(after))===stable(normalized(expected));
+  // Added panels may acquire only the server's documented defaults. Existing
+  // panels and all explicitly authored fields remain exact comparisons.
+  const comparable=structuredClone(normalized(after));
+  if(operation==='add')for(const actual of comparable.panels){
+    if(before.panels.some(p=>p.id===actual.id))continue;
+    const authored=expected.panels.find(p=>p.id===actual.id);
+    if(!authored)continue;
+    for(const [key,value] of Object.entries(panelDefaults(authored))) {
+      if(!(key in authored) && stable(actual[key])===stable(value))delete actual[key];
+    }
+    if(authored.query && !('bucket' in authored.query) && actual.query?.bucket==='auto' && bucketViz.has(authored.viz))delete actual.query.bucket;
+  }
+  const authoredEqual=stable(comparable)===stable(normalized(expected));
   // A move has a specific requested placement; other placement operations may pack neighbors.
   const moveOK=operation!=='move' || expected.panels.every(p=>stable(p.grid)===stable(after.panels.find(a=>a.id===p.id)?.grid));
   const noOp=stable(normalized(before))===stable(normalized(expected)) && !(operation==='move' && stable(physical(before))!==stable(physical(expected)));
   return {passed:!noOp && authoredEqual && moveOK && stable(changed_ids)===stable(expected_ids),changed_ids,expected_ids,layout_changed,
     layout_diff:{before:physical(before),expected:physical(expected),actual:physical(after)},
     expected_diff:{changed_ids:expected_ids,before:normalized(before),after:normalized(expected)},actual_diff:{changed_ids,before:normalized(before),after:normalized(after)}};
+}
+
+const bucketViz=new Set(['timeseries','heatmap','log_patterns','state_timeline']);
+export function panelDefaults(p:Record<string,any>):Record<string,any> {
+ const sizes:Record<string,[number,string]>={stat:[3,'s'],gauge:[3,'s'],timeseries:[6,'m'],bar:[6,'m'],table:[12,'m'],text:[4,'s'],service_map:[12,'l'],health:[12,'m'],logs:[12,'l'],log_patterns:[12,'m'],traces:[12,'m'],heatmap:[6,'m'],histogram:[6,'m'],scatter:[6,'m'],state_timeline:[6,'m']};
+ const size=sizes[p.viz];return size?{width:size[0],height:size[1],...(['stat','gauge'].includes(p.viz)?{reduce:'window'}:{})}:{};
+}
+export function normalizeAddedPanel(p:Record<string,any>):any {
+ const out={...panelDefaults(p),...structuredClone(p)};
+ if(out.query && !('bucket' in out.query) && bucketViz.has(out.viz))out.query.bucket='auto';
+ return out;
 }

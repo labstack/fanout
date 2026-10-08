@@ -210,7 +210,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
 	truncated, runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 	if runErr != nil {
-		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", clientErrorMessage(runErr))
+		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", serverErrorMessage(runErr))
 	}
 
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
@@ -247,6 +247,10 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 	if err := emitter.emit(events.NewRunStartedEvent(threadID, runID)); err != nil {
 		return truncated, err
 	}
+	provider, model := runtimeUsageIdentity(r.provider)
+	if err := emitter.emit(events.NewCustomEvent("model_configuration", events.WithValue(map[string]any{"provider": provider, "model": model}))); err != nil {
+		return truncated, err
+	}
 	conversation := providerMessages(*messages)
 	for step := 0; step < r.maxSteps; step++ {
 		if ctx.Err() != nil {
@@ -261,6 +265,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		var stopReason string
 		var providerItems []json.RawMessage
 		var usage *TokenUsage
+		var servedModel string
 		textStarted := false
 		appendText := func(delta string) error {
 			if delta == "" {
@@ -276,6 +281,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			return emitter.emit(events.NewTextMessageContentEvent(messageID, delta))
 		}
 		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
+			if event.Model != "" {
+				servedModel = event.Model
+			}
 			// Reported snapshots replace earlier counts for this call. Never use
 			// tool text or assistant narration to infer token usage.
 			if event.Usage != nil {
@@ -301,6 +309,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			streamErr = ctx.Err()
 		}
 		provider, model := runtimeUsageIdentity(r.provider)
+		if servedModel != "" {
+			model = servedModel
+		}
 		status := "completed"
 		if streamErr != nil {
 			status = "error"
@@ -550,4 +561,14 @@ func (e *eventEmitter) emit(event events.Event) error {
 	}
 	e.events = append(e.events, raw)
 	return nil
+}
+
+// Provider/API errors may contain response bodies. Operational errors retain
+// their detail in the server log while the wire message stays sanitized.
+func serverErrorMessage(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) || errors.Is(err, errProvider) {
+		return clientErrorMessage(err)
+	}
+	return err.Error()
 }

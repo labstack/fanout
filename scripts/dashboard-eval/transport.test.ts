@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, findSaved, type Ledger } from './transport';
 const servers: ReturnType<typeof Bun.serve>[]=[];
 const roots:string[]=[];
@@ -23,7 +24,8 @@ it('rejects duplicate tool IDs and error mutations',async()=>{
   expect(findSaved(unknown,[{role:'tool',toolCallId:'save',error:'failed'}])).toBeNull();
 });
 it('records missing terminal, truncation, RUN_ERROR and socket failure as incomplete',async()=>{
-  for(const raw of [frame(start),frame({...finish,outcome:{type:'success'},truncated:true}),frame({type:'RUN_ERROR',message:'private failure'})]) {
+  const g=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
+  for(const raw of [frame(start),g.incomplete_sse,g.error_sse]) {
     expect((await readSSE(response(raw),new AbortController().signal)).incomplete).toBe(true);
   }
   const s=await readSSE(new Response(new ReadableStream({start(c){c.enqueue(new TextEncoder().encode(frame(start)));c.error(new Error('secret socket body'));}}),{headers:{'Content-Type':'text/event-stream'}}),new AbortController().signal);
@@ -67,16 +69,16 @@ it('refuses collisions, unsafe labels, symlink ancestors and internal sealed-set
 });
 const ledger=():Ledger=>({schema:1,rates:[{provider:'fake',model:'observed',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:1,output:2,cache_read:0.1,cache_write:1.5}],calls:[],prompts:[]});
 const call=(run_id:string,step=1)=>({run_id,step,provider:'fake',model:'observed',status:'completed',usage:{input_tokens:100000,output_tokens:10000,cache_read_tokens:10000,cache_write_tokens:0,reasoning_tokens:5000}});
-it('uses exact $0.60 prior and stops before HTTP when insufficient',async()=>{
-  let n=0;const base=server(()=>{n++;return Response.json({})});const l=ledger();
+it('uses the exact $0.60 prior before any measured prompt',()=>{
+  const l=ledger();
   expect(canStartPrompt(l,0.60)).toBe(true);expect(canStartPrompt(l,0.599999)).toBe(false);
-  if(canStartPrompt(l,0))await requestJSON(base,'/api/read',{});expect(n).toBe(0);
+  expect(canStartPrompt(l,0)).toBe(false);
 });
 it('debits each provider call once including failure and does not charge reasoning twice',()=>{
   const l=ledger();beginPrompt(l,'run');recordUsage(l,call('run'));expect(l.calls[0].cost_usd).toBeCloseTo(0.111);
   recordUsage(l,call('run'));expect(l.calls).toHaveLength(1);
   recordUsage(l,{...call('run',2),status:'error'});expect(l.calls).toHaveLength(2);expect(l.calls[1].cost_usd).toBeCloseTo(0.111);
-  expect(canStartPrompt(l,100)).toBe(false);expect(settlePrompt(l,'run',false)).toBe(false);expect(canStartPrompt(l,100)).toBe(false);
+  expect(canStartPrompt(l,100)).toBe(false);expect(settlePrompt(l,'run',false)).toBe(true);expect(canStartPrompt(l,100)).toBe(true);
 });
 it('uses nearest-rank p95, equality at cap and accumulated ledger across invocations',()=>{
   const l=ledger();for(let i=1;i<=20;i++){beginPrompt(l,String(i));recordUsage(l,{...call(String(i)),usage:{...call('x').usage,input_tokens:i*100000,output_tokens:0,cache_read_tokens:0,reasoning_tokens:0}});expect(settlePrompt(l,String(i),true)).toBe(true);}

@@ -4,7 +4,7 @@ import { stable, type Check, type Spec } from './score';
 
 export type ObjectValue = Record<string, any>;
 export type Tool = {id:string;name:string;args:string;result:any;is_error:boolean|null;ended:boolean;elapsed_ms:number};
-export type StreamState = {tools:Tool[];terminal:'RUN_FINISHED'|'RUN_ERROR'|null;incomplete:boolean;truncated:boolean;error_code:string|null;usage:CallUsage[];started_at:string;finished_at:string|null};
+export type StreamState = {tools:Tool[];terminal:'RUN_FINISHED'|'RUN_ERROR'|null;incomplete:boolean;truncated:boolean;error_code:string|null;usage:CallUsage[];started_at:string;finished_at:string|null; configuration?:{provider:string;model:string}};
 const mutations=new Set(['create_dashboard','edit_dashboard','replace_dashboard']);
 const decode=(v:any)=>{if(typeof v!=='string')return v;try{return JSON.parse(v)}catch{return null}};
 export function originURL(origin:string):URL {
@@ -83,10 +83,11 @@ export async function readSSE(response:Response,signal:AbortSignal,onUsage?:(u:C
         break;
       }
       case 'CUSTOM': {
+        if(e.name==='model_configuration')state.configuration=e.value;
         if(e.name==='model_call_usage') {state.usage.push(e.value);onUsage?.(e.value);if(e.value.status==='incomplete'){state.truncated=true;fail('truncated');}}
         break;
       }
-      case 'RUN_FINISHED':state.terminal='RUN_FINISHED';if(e.truncated||e.outcome?.type==='error'){state.truncated=Boolean(e.truncated);fail('truncated');}break;
+      case 'RUN_FINISHED':state.terminal='RUN_FINISHED';break;
       case 'RUN_ERROR':state.terminal='RUN_ERROR';fail('run_error');break;
     }
   };
@@ -104,7 +105,7 @@ export async function readSSE(response:Response,signal:AbortSignal,onUsage?:(u:C
   if(!state.terminal)fail('missing_terminal');
   return state;
 }
-export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:ObjectValue;elapsed_ms:number;tool_id:string}|null {
+export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:ObjectValue;elapsed_ms:number;first_elapsed_ms:number;tool_id:string}|null {
   for(const t of state.tools) {
     const matches=messages.filter(m=>m.role==='tool'&&m.toolCallId===t.id);
     if(matches.length===1)t.is_error=t.is_error===true||Boolean(matches[0].error);
@@ -115,7 +116,7 @@ export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:O
   // Multiple writes to different dashboards are ambiguous even if the last one looks right.
   if(new Set(saves.map(t=>t.result.dashboard.id)).size!==1)return null;
   const t=saves.at(-1)!;
-  return {record:structuredClone(t.result.dashboard),elapsed_ms:saves[0].elapsed_ms,tool_id:t.id};
+  return {record:structuredClone(t.result.dashboard),elapsed_ms:t.elapsed_ms,first_elapsed_ms:saves[0].elapsed_ms,tool_id:t.id};
 }
 export async function executePanels(request:(path:string,init?:RequestInit)=>Promise<any>,spec:Spec,signal:AbortSignal):Promise<{valid:boolean;checked:boolean;checks:Check[]}> {
   try {
@@ -131,11 +132,11 @@ export async function executePanels(request:(path:string,init?:RequestInit)=>Pro
 export type Usage={input_tokens:number;output_tokens:number;cache_read_tokens:number;cache_write_tokens:number;reasoning_tokens:number};
 export type CallUsage={run_id:string;step:number;provider:string;model:string;status:string;usage:Usage|null};
 export type Rate={provider:string;model:string;verified_at:string;input_includes_cache:boolean;input:number;output:number;cache_read:number;cache_write:number};
-export type Ledger={schema:1;rates:Rate[];calls:(CallUsage&{cost_usd:number|null})[];prompts:{run_id:string;settled:boolean;completed:boolean;cost_usd:number|null}[]};
+export type Ledger={schema:1;rates:Rate[];calls:(CallUsage&{cost_usd:number|null})[];prompts:{run_id:string;prompt_id?:string;settled:boolean;completed:boolean;status?:'completed'|'failed';cost_usd:number|null;manual_settlement?:{cost_usd:number;reason:string;settled_at:string}}[]};
 function callCost(ledger:Ledger,call:CallUsage):number|null {
   if(!call.usage)return null;
   const rates=ledger.rates.filter(r=>r.provider===call.provider&&r.model===call.model);
-  if(rates.length!==1)throw new Error('Unverified provider rates');
+  if(rates.length!==1)return null;
   const rate=rates[0],u=call.usage;
   const tokens=[u.input_tokens,u.output_tokens,u.cache_read_tokens,u.cache_write_tokens,u.reasoning_tokens];
   if(!Number.isFinite(Date.parse(rate.verified_at))||typeof rate.input_includes_cache!=='boolean'||[rate.input,rate.output,rate.cache_read,rate.cache_write,...tokens].some(v=>!Number.isFinite(v)||v<0)||tokens.some(v=>!Number.isInteger(v))||u.reasoning_tokens>u.output_tokens)throw new Error('Invalid rates or usage');
@@ -153,19 +154,27 @@ export function validateLedger(l:Ledger):void {
     if(seen.has(key)||!l.prompts.some(p=>p.run_id===c.run_id)||!Number.isInteger(c.step)||c.step<1||c.step>16||!['completed','incomplete','error'].includes(c.status)||!c.provider||!c.model||stable(c.cost_usd)!==stable(callCost(l,c)))throw new Error('Invalid ledger call');
     seen.add(key);
   }
-  for(const p of l.prompts) {const calls=l.calls.filter(c=>c.run_id===p.run_id);if(p.settled&&(!p.completed||!calls.length||calls.some(c=>c.cost_usd===null||c.status!=='completed')||p.cost_usd!==calls.reduce((n,c)=>n+c.cost_usd!,0)||calls.some((c,i)=>c.step!==i+1)))throw new Error('Invalid prompt settlement');}
+  for(const p of l.prompts) {
+    const calls=l.calls.filter(c=>c.run_id===p.run_id),known=calls.reduce((n,c)=>n+(c.cost_usd??0),0);
+    if(p.manual_settlement) {
+      const m=p.manual_settlement;
+      if(!p.settled||p.completed||p.status!=='failed'||!Number.isFinite(m.cost_usd)||m.cost_usd<known||!m.reason?.trim()||!Number.isFinite(Date.parse(m.settled_at))||p.cost_usd!==m.cost_usd)throw new Error('Invalid manual settlement');
+    }else if(p.settled && (!calls.length||calls.some(c=>c.cost_usd===null)||p.cost_usd!==known||calls.some((c,i)=>c.step!==i+1)||p.completed&&calls.some(c=>c.status!=='completed')||p.status!==undefined&&p.status!==(p.completed?'completed':'failed')))throw new Error('Invalid prompt settlement');
+  }
 }
-export function spentUSD(l:Ledger):number {return l.calls.reduce((n,c)=>n+(c.cost_usd??0),0)}
+export function spentUSD(l:Ledger):number {
+ return l.prompts.reduce((n,p)=>n+Math.max(p.manual_settlement?.cost_usd??0,l.calls.filter(c=>c.run_id===p.run_id).reduce((sum,c)=>sum+(c.cost_usd??0),0)),0);
+}
 export function canStartPrompt(ledger:Ledger,capUSD:number):boolean {
   try {validateLedger(ledger)}catch {return false}
-  if(!Number.isFinite(capUSD)||capUSD<0||ledger.prompts.some(p=>!p.settled)||ledger.calls.some(c=>c.cost_usd===null))return false;
+  if(!Number.isFinite(capUSD)||capUSD<0||ledger.prompts.some(p=>!p.settled)||ledger.calls.some(c=>c.cost_usd===null&&!ledger.prompts.find(p=>p.run_id===c.run_id)?.manual_settlement))return false;
   const measured=ledger.prompts.filter(p=>p.completed&&p.settled).map(p=>p.cost_usd!).sort((a,b)=>a-b);
   const estimate=measured.length?measured[Math.ceil(measured.length*0.95)-1]:0.60;
   return spentUSD(ledger)+estimate<=capUSD;
 }
-export function beginPrompt(l:Ledger,run_id:string):void {
+export function beginPrompt(l:Ledger,run_id:string,prompt_id=run_id):void {
   if(l.prompts.some(p=>!p.settled||p.run_id===run_id))throw new Error('Unsettled or duplicate prompt');
-  l.prompts.push({run_id,settled:false,completed:false,cost_usd:null});
+  l.prompts.push({run_id,prompt_id,settled:false,completed:false,cost_usd:null});
 }
 export function recordUsage(l:Ledger,c:CallUsage):void {
   if(!l.prompts.some(p=>p.run_id===c.run_id&&!p.settled)||!Number.isInteger(c.step)||c.step<1||c.step>16||!['completed','incomplete','error'].includes(c.status)||!c.provider||!c.model)throw new Error('Invalid usage correlation');
@@ -173,12 +182,22 @@ export function recordUsage(l:Ledger,c:CallUsage):void {
   if(previous) {const {cost_usd,...old}=previous;if(stable(old)!==stable(c))throw new Error('Conflicting usage correlation');return;}
   const cost_usd=callCost(l,c);l.calls.push({...structuredClone(c),cost_usd});
 }
-export function settlePrompt(l:Ledger,run_id:string,complete:boolean):boolean {
+export function settlePrompt(l:Ledger,run_id:string,complete:boolean,definitive=true):boolean {
   const p=l.prompts.find(p=>p.run_id===run_id);if(!p)throw new Error('Unknown prompt');
   const calls=l.calls.filter(c=>c.run_id===run_id);
   p.cost_usd=!calls.length||calls.some(c=>c.cost_usd===null)?null:calls.reduce((n,c)=>n+c.cost_usd!,0);
   p.completed=complete&&calls.length>0&&calls.every((c,i)=>c.cost_usd!==null&&c.status==='completed'&&c.step===i+1);
-  p.settled=p.completed;return p.settled;
+  p.settled=definitive&&p.cost_usd!==null&&calls.every((c,i)=>c.step===i+1);
+  if(p.settled)p.status=p.completed?'completed':'failed';
+  return p.settled;
+}
+export function manualSettlement(l:Ledger,prompt_id:string,cost_usd:number,reason:string):void {
+ validateLedger(l);
+ const matches=l.prompts.filter(p=>!p.settled&&(p.run_id===prompt_id||p.prompt_id===prompt_id));
+ if(matches.length!==1||!Number.isFinite(cost_usd)||cost_usd<0||!reason.trim()||reason.length>1000)throw new Error('Invalid manual settlement');
+ const p=matches[0],known=l.calls.filter(c=>c.run_id===p.run_id).reduce((n,c)=>n+(c.cost_usd??0),0);
+ if(cost_usd<known)throw new Error('Settlement cannot remove spend');
+ p.manual_settlement={cost_usd,reason,settled_at:new Date().toISOString()};p.cost_usd=cost_usd;p.completed=false;p.settled=true;p.status='failed';validateLedger(l);
 }
 
 const inside=(root:string,path:string)=>{const rel=relative(root,path);return rel===''||!(rel==='..'||rel.startsWith('..'+sep)||rel.startsWith(sep));};
@@ -188,11 +207,15 @@ export function noSymlinks(path:string):string {
   return target;
 }
 export function privateFile(path:string):string {const target=noSymlinks(path);if(!lstatSync(target).isFile())throw new Error('Input must be a regular file');return target;}
-export function safeOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.FANOUT_HOLDOUT_OUT_ROOT):string {
+export function validateOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.FANOUT_HOLDOUT_OUT_ROOT):string {
   const root=realpathSync(worktree),target=noSymlinks(path),evalRoot=resolve(root,'.superpowers/eval');
   if(set==='benchmark') {if(!inside(evalRoot,target)||target===evalRoot)throw new Error('Benchmark output must be under .superpowers/eval/');}
   else if(set==='holdout') {if(!sealedRoot)throw new Error('Controller output root required');const outRoot=noSymlinks(sealedRoot);if(inside(root,outRoot)||inside(root,target)||!inside(outRoot,target)||target===outRoot)throw new Error('Sealed output must be outside the worktree');}
   else throw new Error('Invalid evaluation set');
   if(existsSync(target))throw new Error('Output already exists');
+  return target;
+}
+export function safeOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.FANOUT_HOLDOUT_OUT_ROOT):string {
+  const target=validateOutput(path,set,worktree,sealedRoot);
   mkdirSync(dirname(target),{recursive:true});noSymlinks(dirname(target));mkdirSync(target);return target;
 }

@@ -14,7 +14,7 @@ type meteredProvider struct{ scriptedProvider }
 func (*meteredProvider) usageIdentity() (string, string) { return "fake", "observed-model" }
 
 func TestRuntimeRecordsAuthoritativeUsageOncePerCall(t *testing.T) {
-	for _, terminal := range []StreamEvent{{Type: EventStop, StopReason: "end_turn"}, {Type: EventStop, StopReason: "length"}, {Type: EventError, Error: "private provider body"}} {
+	for _, terminal := range []StreamEvent{{Type: EventStop, StopReason: "end_turn"}, {Type: EventStop, StopReason: "length"}, {Type: EventStop, StopReason: "content_filter"}, {Type: EventError, Error: "private provider body"}} {
 		name := terminal.StopReason
 		if name == "" {
 			name = "provider_error"
@@ -43,6 +43,17 @@ func TestRuntimeRecordsAuthoritativeUsageOncePerCall(t *testing.T) {
 					continue
 				}
 				count++
+				wantStatus := "completed"
+				if count == 2 {
+					if terminal.Type == EventError {
+						wantStatus = "error"
+					} else if terminal.StopReason == "length" || terminal.StopReason == "content_filter" {
+						wantStatus = "incomplete"
+					}
+				}
+				if e.Value["status"] != wantStatus {
+					t.Fatalf("status=%v want %s", e.Value["status"], wantStatus)
+				}
 				if e.Value["run_id"] != "run" || e.Value["provider"] != "fake" || e.Value["model"] != "observed-model" || e.Value["step"] != float64(count) {
 					t.Fatalf("correlation: %#v", e.Value)
 				}
@@ -116,5 +127,67 @@ func TestOpenAIUsageSurvivesMalformedTerminalOutput(t *testing.T) {
 	}
 	if usage == nil || usage.InputTokens != 12 || usage.OutputTokens != 3 {
 		t.Fatalf("lost reported usage: %#v", usage)
+	}
+}
+
+func TestProviderReportsServedModelIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		parse       func(*strings.Reader, func(StreamEvent) error) error
+	}{
+		{"openai", `data: {"type":"response.completed","response":{"model":"served-model","output":[],"usage":{"input_tokens":2,"output_tokens":1}}}` + "\n", func(r *strings.Reader, cb func(StreamEvent) error) error { return parseOpenAI(r, cb) }},
+		{"anthropic", `data: {"type":"message_start","message":{"model":"served-model","usage":{"input_tokens":2,"output_tokens":1}}}` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}` + "\n", func(r *strings.Reader, cb func(StreamEvent) error) error { return parseAnthropic(r, cb) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := false
+			if err := tc.parse(strings.NewReader(tc.input), func(e StreamEvent) error {
+				if e.Model == "served-model" {
+					seen = true
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !seen {
+				t.Fatal("served model identity lost")
+			}
+		})
+	}
+}
+
+func TestRuntimeMetersTheServedModelAlongsideConfiguredDefault(t *testing.T) {
+	for _, terminal := range []StreamEvent{{Type: EventStop, StopReason: "end_turn"}, {Type: EventError, Error: "private provider body"}} {
+		terminal.Model = "served-model"
+		terminal.Usage = &TokenUsage{InputTokens: 2, OutputTokens: 1}
+		p := &meteredProvider{scriptedProvider{steps: [][]StreamEvent{{terminal}}}}
+		runtime := NewRuntime(p, &fakeTools{}, nil)
+		emitter, _ := newTestEmitter()
+		messages := []agtypes.Message{}
+		_, _ = runtime.execute(t.Context(), "thread", "run", &messages, emitter)
+		sawUsage, sawConfiguration := false, false
+		for _, raw := range emitter.events {
+			var e struct {
+				Name  string         `json:"name"`
+				Value map[string]any `json:"value"`
+			}
+			if err := json.Unmarshal(raw, &e); err != nil {
+				t.Fatal(err)
+			}
+			switch e.Name {
+			case "model_call_usage":
+				sawUsage = true
+				if e.Value["model"] != "served-model" {
+					t.Fatalf("metered configured model instead of served model: %#v", e.Value)
+				}
+			case "model_configuration":
+				sawConfiguration = true
+				if e.Value["model"] != "observed-model" {
+					t.Fatalf("lost configured default: %#v", e.Value)
+				}
+			}
+		}
+		if !sawUsage || !sawConfiguration {
+			t.Fatal("missing model identity evidence")
+		}
 	}
 }

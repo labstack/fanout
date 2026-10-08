@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 import { score, changedPanels, compareEdit, type Run } from './score';
-const run = (): Run => ({ saved:true, elapsed_ms:45000, valid:true, checked:true, panels:[{id:'latency'}], checks:[{id:'latency',status:'ok',rows:2}] });
+const run = (): Run => ({ complete:true, saved:true, elapsed_ms:45000, valid:true, checked:true, panels:[{id:'latency'}], checks:[{id:'latency',status:'ok',rows:2}] });
 const edits = () => Array.from({length:5}, () => ({passed:true,changed_ids:['latency'],expected_ids:['latency']}));
 it('requires all ten saves and all five consecutive edits', () => {
   expect(score(Array.from({length:10},run),edits()).passed).toBe(true);
@@ -24,8 +24,8 @@ it('fails missing latency and measures a true even-sized median', () => {
 it('distinguishes unsaved timeout, saved invalid spec and incomplete validation', () => {
   const runs=Array.from({length:10},run); Object.assign(runs[0],{saved:false,valid:false,checked:false,elapsed_ms:null});
   expect(score(runs,edits()).s1).toBe(false); expect(score(runs,edits()).validation_failures).toBe(0);
-  runs[0].saved=true;expect(score(runs,edits()).validation_failures).toBe(1);expect(score(runs,edits()).s3).toBe(false);
-  runs[0].valid=true;expect(score(runs,edits()).s3).toBe(false);
+  runs[0].saved=true;runs[0].checked=true;expect(score(runs,edits()).validation_failures).toBe(1);expect(score(runs,edits()).s3).toBe(false);
+  runs[0].valid=true;runs[0].checked=false;expect(score(runs,edits()).s3).toBe(false);
 });
 it('detects unrelated changes, deletion, addition and reordering in field arrays', () => {
   const a=[{id:'a',query:{by:['service','namespace']}},{id:'b',title:'B'}];

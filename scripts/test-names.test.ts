@@ -14,7 +14,7 @@ test("accepts behavioral names and specification scenario identifiers", () => {
 });
 test("allows fixture and finalize names but rejects complete review words", () => {
   expect(check({ "scope_test.go": 'package scope\nfunc TestFixtureX() {}\nfunc TestFinalizeX() {}' }).exitCode).toBe(0);
-  for (const name of ["TestFinal", "TestFix", "BenchmarkFinal", "ExampleFix"]) {
+  for (const name of ["TestFinal", "TestFix", "TestFix3", "TestFinal2", "TestFix_", "TestFix_Retry", "TestFixRetry", "BenchmarkFinal", "ExampleFix"]) {
     expect(check({ "scope_test.go": `package scope\nfunc ${name}() {}` }).exitCode).not.toBe(0);
   }
 });
