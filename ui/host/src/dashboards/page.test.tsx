@@ -193,7 +193,7 @@ describe("DashboardPage", () => {
   });
   it("opens history by key and blocks dashboard actions behind the drawer",async()=>{
     const {host,onSearch}=await render();const toolbar=host.querySelector<HTMLElement>('[aria-label="Refresh now"]')!;
-    await key(toolbar,"h");expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Version history");
+    await key(toolbar,"h");await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Version history"));
     await key(toolbar,"e");expect(onSearch).not.toHaveBeenCalled();
     await key(document.querySelector<HTMLElement>('[role="dialog"] button')!,"Escape");await closed();
   });
@@ -352,6 +352,7 @@ describe("DashboardPage", () => {
     const initial: DashboardSearch = { range: "1h", compare: "1", vars: { other: "kept" } };
     const { host, onSearch, rerender } = await render(initial);
     await vi.waitFor(() => expect(host.querySelector('[data-panel="latency"] [role="status"]')?.textContent).toBe("Shifted 1d"), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(host.querySelector('[aria-label="Select Services: time series"]')).not.toBeNull(), { interval: 5, timeout: 3000 });
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Select Services: time series"]')!.click());
     expect(onSearch).toHaveBeenLastCalledWith({ ...initial, vars: { other: "kept", service: "cart" } }, true);
     const filtered = onSearch.mock.lastCall![0] as DashboardSearch;
@@ -722,4 +723,16 @@ it("shows fix for a loaded owner-scoped dashboard without maintaining a client r
  const {host}=await render();
  const fix=[...host.querySelectorAll<HTMLButtonElement>("button")].find(el=>el.textContent==="Ask Fanout to fix it");
  expect(fix).toBeDefined();await act(async()=>fix!.click());expect(app.openChat.mock.lastCall![0]).toContain("explicit dashboard edit request");
+});
+
+it("removes an explicit empty multi-select chip and restores its default",async()=>{
+ servedRecord={...record,spec:{...spec,variables:[{name:"service",kind:"custom",options:["checkout","cart"],multi:true,default:"checkout"}]}};
+ const {host,onSearch,rerender}=await render({compare:"1",vars:{service:[],other:"kept"}});
+ const chip=host.querySelector<HTMLButtonElement>('[aria-label="Remove filter service"]')!;
+ expect(chip).not.toBeNull();
+ await act(async()=>chip.click());
+ expect(onSearch).toHaveBeenLastCalledWith({compare:"1",vars:{other:"kept"}},true);
+ await rerender({compare:"1",vars:{other:"kept"}});
+ expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
+ expect(host.textContent).toContain("checkout");
 });

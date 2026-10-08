@@ -111,3 +111,21 @@ func TestSQLLogRedactionKeepsBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestQualifiedLogColumnsFailClosed(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, nil, []telemetry.Log{{Namespace: "shop", Body: "token=private failed", BodyTemplate: "token=private failed", EventUnixNanos: n, IngestedAt: n}})
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := Dashboard{Name: "Qualified logs", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Qualified", Viz: "table", SQL: "SELECT main.logs.body FROM main.logs WHERE $__window(time)"}}}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err == nil {
+		t.Fatalf("qualified column unexpectedly accepted: %+v", got)
+	}
+	var problems Problems
+	if !errors.As(err, &problems) || !strings.Contains(err.Error(), "Referenced table") || strings.Contains(err.Error(), "private") {
+		t.Fatalf("unsafe qualified failure: %v", err)
+	}
+	t.Logf("deferred M4 redaction-safe failure: %s", err)
+}

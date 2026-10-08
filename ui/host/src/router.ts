@@ -7,7 +7,9 @@ function stringifySearch(search: Record<string, unknown>): string {
   for (const [key, value] of Object.entries(search)) {
     for (const item of Array.isArray(value) ? value : [value]) {
       if (item === undefined) continue;
-      params.append(key, item !== null && typeof item === "object" ? JSON.stringify(item) : String(item));
+      // Quote strings that could otherwise be decoded as structured objects.
+      const structuredString = typeof item === "string" && /^[{"]/.test(item);
+      params.append(key, structuredString || item !== null && typeof item === "object" ? JSON.stringify(item) : String(item));
     }
   }
   const query = params.toString();
@@ -17,10 +19,10 @@ function stringifySearch(search: Record<string, unknown>): string {
 function parseSearch(query: string): Record<string, unknown> {
   const search: Record<string, unknown> = Object.create(null);
   const decode = (value: string): unknown => {
-    if (value.startsWith("{")) {
+    if (value.startsWith("{") || value.startsWith('"')) {
       try {
         const object: unknown = JSON.parse(value);
-        if (object !== null && typeof object === "object" && !Array.isArray(object)) return object;
+        if (typeof object === "string" || object !== null && typeof object === "object" && !Array.isArray(object)) return object;
       } catch { /* A literal value that resembles JSON remains a string. */ }
     }
     return value;

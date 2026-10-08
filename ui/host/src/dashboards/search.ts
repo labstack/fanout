@@ -33,9 +33,12 @@ export function parseSearch(raw: Record<string, unknown>): DashboardSearch {
     if (!key.startsWith("var-")) continue;
     const name = key.slice(4);
     if (!/^[a-z][a-z0-9_]{0,39}$/.test(name)) continue;
-    if (Array.isArray(value)) {
-      const items = value.map(primitiveString);
-      if (items.every((v) => v !== undefined)) vars[name] = items;
+    if (value !== null && typeof value === "object") {
+      // Query variables resolve at most 500 options (custom lists at most 200).
+      if (!Array.isArray(value) && Object.keys(value).length === 1 && Object.hasOwn(value, "values")) {
+        const items = (value as { values: unknown }).values;
+        if (Array.isArray(items) && items.length <= 500 && items.every((item): item is string => typeof item === "string")) vars[name] = items;
+      }
     } else {
       const scalar = primitiveString(value);
       if (scalar !== undefined) vars[name] = scalar;
@@ -55,7 +58,7 @@ export function toSearchParams(search: DashboardSearch): Record<string, unknown>
   if (search.compare) out.compare = search.compare;
   if (search.view) out.view = search.view;
   if (search.edit) out.edit = search.edit;
-  for (const [name, value] of Object.entries(search.vars ?? {})) out[`var-${name}`] = value;
+  for (const [name, value] of Object.entries(search.vars ?? {})) out[`var-${name}`] = Array.isArray(value) ? { values: value } : value;
   return out;
 }
 
