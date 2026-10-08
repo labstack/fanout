@@ -5,7 +5,7 @@
 # is the primary artifact; `ui-*` and `db-*` namespace the rest. A `-check`
 # suffix always means non-mutating verification, safe to run on a dirty tree.
 #
-# The ordering rule this file exists to encode: the browser workspaces write
+# The ordering rule this file exists to encode: the browser workspace writes
 # into `internal/ui/dist` and `internal/mcp/apps`, both of which are committed
 # and compiled in via `go:embed`. The binary is therefore only as fresh as the
 # last UI build, so `build` always runs the UI first and `ui-check` guards the
@@ -26,7 +26,7 @@ goose_version := `awk '$1 == "github.com/pressly/goose/v3" { print $2; exit }' g
 goose := "go run -tags=no_postgres,no_mysql,no_mssql,no_clickhouse,no_vertica,no_ydb,no_libsql github.com/pressly/goose/v3/cmd/goose@" + goose_version
 
 # Everything `go:embed` compiles into the binary. Keep in sync with `outDir` in
-# ui/host/vite.config.ts and the `cp` targets in ui/apps/package.json.
+# ui/host/vite.config.ts and ui/host/vite.apps.config.ts.
 embedded := "internal/ui/dist internal/mcp/apps"
 
 default:
@@ -37,7 +37,6 @@ default:
 
 # Browser dependencies only.
 ui-deps:
-    cd ui/apps && bun install --frozen-lockfile
     cd ui/host && bun install --frozen-lockfile
 
 # Everything needed to work on the repo: dependencies plus the git hooks.
@@ -48,14 +47,14 @@ install: ui-deps
 
 # Portable React MCP Apps → internal/mcp/apps/*.html
 ui-apps:
-    cd ui/apps && bun run build
+    cd ui/host && bun run build:apps
 
 # AG-UI browser host → internal/ui/dist
 ui-host:
-    cd ui/host && bun run build
+    cd ui/host && bun run build:host
 
 # Every embedded browser asset.
-ui: ui-apps ui-host
+ui: ui-lint ui-host ui-apps
 
 # Browser assets, then the binary that embeds them.
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
@@ -138,60 +137,37 @@ test-race:
 
 # ── Browser quality ──────────────────────────────────────────────────────────
 
-# `ui` and `ui-check` already type-check via `bun run build`, so the gate does
+# `ui` and `ui-check` already run ui-lint once, so the gate does
 # not invoke this separately — it exists for fast feedback on its own.
 
-# Type-check both browser workspaces.
+# Type-check the host, shared panels, app and build configurations.
 ui-lint:
-    cd ui/apps && bun run lint
     cd ui/host && bun run lint
 
 # Run the browser host's vitest suite.
 ui-test:
     cd ui/host && bun run test
 
-# Workspaces share only package-free UI modules, never each other's source.
+# Shared UI modules remain package-free.
 ui-boundaries-check:
     bun test scripts/ui-boundaries.test.ts
     bun scripts/ui-boundaries.mjs
 
-# Audit both independent browser dependency graphs. Security overrides live in
-# each package.json so installs, local checks, and CI all resolve the same fixes.
-#
-# GHSA-vfj7-8cjw-p6xm (braces <= 3.0.3, no patched release as of 2026-10-05)
-# reaches ui/apps only through vite-plugin-singlefile > micromatch, at build
-# time, on glob patterns from our own vite config. No outside input can reach
-# it. Drop the ignore once braces publishes a fix and add an override instead.
+# Audit the one locked browser graph. GHSA-vfj7-8cjw-p6xm reaches host
+# through vite-plugin-singlefile > micromatch at build time, on our own globs.
+# Drop this exception when a patched braces release is available.
 ui-audit:
-    cd ui/apps && bun audit --ignore=GHSA-vfj7-8cjw-p6xm
-    cd ui/host && bun audit
+    cd ui/host && bun audit --ignore=GHSA-vfj7-8cjw-p6xm
 
-# Uses git as the backup, which is sound only because these outputs are
-# committed: the check refuses to run when they are already dirty, and always
-# restores them afterwards, so it never mutates the working tree.
-
-# Fail if the committed embedded assets differ from a fresh build.
+# Compare temporary builds without requiring clean or committed embeds.
 ui-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -n "$(git status --porcelain -- {{embedded}})" ]; then
-      echo "ui-check: embedded assets have uncommitted changes." >&2
-      echo "  Commit or stash them first — this check restores them from git." >&2
-      exit 1
-    fi
-    just ui
-    # --porcelain rather than `git diff`: a rebuild can introduce a new
-    # content-hashed filename, which is untracked and so invisible to git diff.
-    if [ -z "$(git status --porcelain -- {{embedded}})" ]; then
-      echo "ui-check: embedded assets match a fresh build."
-      exit 0
-    fi
-    echo "ui-check: embedded assets are STALE — they do not match a fresh build:" >&2
-    git status --porcelain -- {{embedded}} >&2
-    git checkout -- {{embedded}}
-    git clean -qfd {{embedded}}
-    echo "  Run 'just ui' and commit the result." >&2
-    exit 1
+    staged=$(mktemp -d)
+    trap 'rm -rf "$staged"' EXIT
+    FANOUT_UI_OUT="$staged/ui" FANOUT_APPS_OUT="$staged/apps" just ui
+    bun scripts/ui-compare.mjs internal/ui/dist "$staged/ui"
+    bun scripts/ui-compare.mjs internal/mcp/apps "$staged/apps" --apps
 
 # ── Diagrams ─────────────────────────────────────────────────────────────────
 

@@ -376,9 +376,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				if err != nil {
 					return truncated, err
 				}
-				content := map[string]any{"resourceUri": execution.AppResourceURI, "toolName": call.Name, "toolInput": json.RawMessage(call.Input), "toolResult": execution.Structured, "isError": execution.IsError}
-				if content["toolResult"] == nil {
-					content["toolResult"] = execution.Content
+				content := map[string]any{"resource_uri": execution.AppResourceURI, "tool_name": call.Name, "tool_input": json.RawMessage(call.Input), "tool_result": execution.Structured, "is_error": execution.IsError}
+				if content["tool_result"] == nil {
+					content["tool_result"] = execution.Content
 				}
 				if err := emitter.emit(events.NewActivitySnapshotEvent(activityID, "mcp-app", content)); err != nil {
 					return truncated, err

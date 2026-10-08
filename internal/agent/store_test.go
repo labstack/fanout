@@ -394,7 +394,10 @@ func TestStoreStartRunKeepsStoredHistory(t *testing.T) {
 	stored := []agtypes.Message{
 		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
 		{ID: "assistant-1", Role: agtypes.RoleAssistant, Content: "here it is"},
-		{ID: "activity-1", Role: agtypes.RoleActivity, ActivityType: "mcp-app"},
+		{ID: "activity-1", Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: map[string]any{
+			"resource_uri": "ui://fanout/panels.html", "tool_name": "query_telemetry", "tool_input": map[string]any{}, "is_error": false,
+			"tool_result": map[string]any{"dashboard": map[string]any{"version": 1, "name": "Fixture", "panels": []any{map[string]any{"id": "text", "title": "Text", "viz": "text", "content": "Hello"}}}, "results": []any{map[string]any{"id": "text", "status": "ok"}}},
+		}},
 	}
 	if err := store.FinishRun(ctx, "owner-1", first.ThreadID, first.RunID, stored, nil, false, nil); err != nil {
 		t.Fatal(err)

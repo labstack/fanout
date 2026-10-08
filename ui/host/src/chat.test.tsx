@@ -184,3 +184,9 @@ async function clickCopy() {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
+
+it.each([null,{}, {resourceUri:"ui://fanout/panels.html",toolName:"query_telemetry"}, {resource_uri:"ui://fanout/trace-detail.html",tool_name:"inspect_trace",tool_input:{},tool_result:{},is_error:false}])("shows an Alert for incompatible persisted mcp-app content (%s)",async content=>{
+ const root=await mount(value({messages:[{id:"activity",role:"activity",activityType:"mcp-app",content} as unknown as Message]}));
+ expect(document.body.textContent).toContain("This view could not be loaded. Please try again.");
+ expect(document.querySelector("iframe")).toBeNull();await act(async()=>root.unmount());document.body.innerHTML="";
+});

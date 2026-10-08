@@ -19,14 +19,13 @@ function check(files: Record<string, string>) {
 }
 
 test.each([
-  ["host/src/test.ts", 'import type { X } from "../../apps/src/x";'],
-  ["apps/src/test.tsx", 'export { X } from "../../host/src/x";'],
-  ["host/src/test.js", 'const x = import("../../apps/src/x");'],
-  ["apps/src/test.cjs", 'const x = require("../../host/src/x");'],
-  ["host/src/test.css", '@import "../../apps/src/x.css";'],
-  ["apps/src/test.css", '@import url(../../host/src/x.css); .x { color: #fff; }'],
-  ["host/src/test.ts", 'import type {\n X,\n Y\n} from\n "../../apps/src/x";'],
-  ["host/src/test.ts", 'const x = import(`../../apps/src/x`);'],
+  ["shared/test.css", '@import "../host/src/x.css";'],
+  ["shared/test.css", '@import url(../host/src/x.css);'],
+  ["shared/test.html", '<script src="../host/src/x.js"></script>'],
+  ["shared/test.html", '<script>import "react";</script>'],
+  ["panels/test.ts", 'import type { X } from "../host/node_modules/react";'],
+  ["panels/test.ts", 'const x=require("react");'],
+  ["panels/test.ts", 'const x=import(`react`);'],
   ["panels/test.ts", 'type X = import("react").ReactNode;'],
   ["panels/test.ts", 'import type { X } from "react";'],
   ["panels/test.ts", 'export type { X } from "@mantine/core";'],
@@ -44,11 +43,11 @@ test.each([
 test("allows workspace packages and package-free shared imports; skips comments and dependencies", () => {
   expect(check({
     "host/src/test.ts": 'import { X } from "react"; import { Y } from "../../panels/test";',
-    "apps/src/test.ts": 'import { X } from "@mantine/core"; import { Y } from "../../panels/test";',
+    "host/src/mcp-apps/test.ts": 'import { X } from "@mantine/core"; import { Y } from "../dashboards/test";',
     "panels/test.ts": 'export type { Y } from "./types"; import { X } from "../tokens"; // import "react";\n/* export { X } from "react"; */ const text = \'import "react";\';',
     "tokens.ts": 'export const X = 1; const regex = /[&<>"\']/g; const template = `${X} text import "react";`;',
     "host/src/test.css": '.x { color: #fff; } /* @import "../../apps/src/x.css"; */',
     "host/node_modules/test/index.ts": 'import { X } from "../../../apps/src/x";',
-    "apps/dist/test.js": 'import { X } from "../../host/src/x";',
+
   }).exitCode).toBe(0);
 });

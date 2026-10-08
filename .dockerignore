@@ -17,8 +17,6 @@ bin/
 fanout
 ui/host/node_modules/
 ui/host/dist/
-ui/apps/node_modules/
-ui/apps/dist/
 
 # Dev files
 .env

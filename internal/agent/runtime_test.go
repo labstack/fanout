@@ -157,7 +157,7 @@ func TestRuntimeToolCallLoop(t *testing.T) {
 		t.Fatalf("missing mcp-app activity message: %#v", messages)
 	}
 	content, ok := activity.Content.(map[string]any)
-	if !ok || content["resourceUri"] != "ui://overview" {
+	if !ok || content["resource_uri"] != "ui://overview" {
 		t.Fatalf("activity content = %#v", activity.Content)
 	}
 }

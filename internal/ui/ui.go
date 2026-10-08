@@ -23,7 +23,7 @@ func Handler() http.Handler {
 	// Fail at startup, not with blank pages at runtime, when the binary was
 	// built without the frontend assets.
 	if _, err := fs.Stat(dist, "index.html"); err != nil {
-		panic("internal/ui/dist is missing index.html — run `just build` (it builds ui/apps and ui/host before the Go binary)")
+		panic("internal/ui/dist is missing index.html — run `just build` (it builds the host and MCP app before the Go binary)")
 	}
 	files := http.FileServer(http.FS(dist))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

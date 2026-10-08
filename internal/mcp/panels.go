@@ -46,6 +46,13 @@ const baseSpecGuide = `A dashboard is {name, description, time:{range}, variable
 
 func (s *Server) registerPanelTools() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)}
+	fragmentTool(s.mcp, &mcp.Tool{Name: "query_telemetry", Title: "Telemetry panel", Description: "Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide.", Annotations: readOnly, Meta: appToolMeta(panelsAppURI)}, s.queryTelemetry)
+	fragmentTool(s.mcp, &mcp.Tool{Name: "query_panel_fragment", Title: "Refresh telemetry panels", Description: "Run every panel in a dashboard fragment; panel subsets are forbidden.", Annotations: readOnly, Meta: appHelperMeta()}, func(ctx context.Context, req *mcp.CallToolRequest, input fragmentInput) (*mcp.CallToolResult, PanelFragment, error) {
+		return s.queryPanelFragment(ctx, req, panel.RunRequest{Dashboard: input.Dashboard, Time: input.Time, Vars: input.Vars, Widths: input.Widths, Compare: input.Compare})
+	})
+	fragmentTool(s.mcp, &mcp.Tool{Name: "get_panel_exemplars", Title: "Panel exemplars", Description: "Find bounded traces for a panel selection.", Annotations: readOnly, Meta: appHelperMeta()}, s.panelExemplars)
+	fragmentTool(s.mcp, &mcp.Tool{Name: "resolve_panel_variables", Title: "Panel variable options", Description: "Resolve variable options within a dashboard fragment window.", Annotations: readOnly, Meta: appHelperMeta()}, s.resolvePanelVariables)
+
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "get_telemetry_schema", Title: "Telemetry schema",
 		Description: "List the signals, columns with their common values, attribute keys seen per service, metric names, services, measure functions and units. Read this before drafting panels so filters use values that exist. See create_dashboard for the spec guide.",

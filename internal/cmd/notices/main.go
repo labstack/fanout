@@ -122,7 +122,7 @@ func collect(root string) ([]component, error) {
 	}
 	id := "Native: DuckDB " + engine.Version + " (" + engine.SourceCommit + ")"
 	all[id] = component{id: id, kind: "native engine and static extensions", documents: []document{{name: "duckdb-NOTICE", text: string(data)}}}
-	for _, workspace := range []string{"ui/host", "ui/apps"} {
+	for _, workspace := range []string{"ui/host"} {
 		if err := collectNPM(root, filepath.Join(root, workspace), all); err != nil {
 			return nil, err
 		}

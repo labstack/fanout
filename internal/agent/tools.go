@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/labstack/fanout/internal/dashboard"
@@ -54,6 +53,9 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 	}
 	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}}
 	for _, tool := range listed.Tools {
+		if appOnlyTool(tool.Meta) {
+			continue
+		}
 		registry.definitions = append(registry.definitions, ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 		if resourceURI := appResourceURI(tool.Meta); resourceURI != "" {
 			registry.apps[tool.Name] = resourceURI
@@ -90,18 +92,26 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 	if err != nil {
 		return ToolExecution{}, fmt.Errorf("call MCP tool %s: %w", call.Name, err)
 	}
+	content, err := r.modelContent(call.Name, result)
+	if err != nil {
+		return ToolExecution{}, err
+	}
+	return ToolExecution{Content: content, Structured: result.StructuredContent, AppResourceURI: r.apps[call.Name], IsError: result.IsError}, nil
+}
+
+func (r *ToolRegistry) modelContent(name string, result *mcp.CallToolResult) (string, error) {
 	content := textContent(result.Content)
-	if result.StructuredContent != nil {
+	if r.apps[name] == "" && result.StructuredContent != nil {
 		if encoded, marshalErr := json.Marshal(result.StructuredContent); marshalErr == nil {
 			content = string(encoded)
 		} else {
-			slog.Warn("encode MCP structured content failed, falling back to text content", "tool", call.Name, "err", marshalErr)
+			return "", fmt.Errorf("encode MCP structured content for %s: %w", name, marshalErr)
 		}
 	}
 	if content == "" {
 		content = "{}"
 	}
-	return ToolExecution{Content: content, Structured: result.StructuredContent, AppResourceURI: r.apps[call.Name], IsError: result.IsError}, nil
+	return content, nil
 }
 
 func textContent(contents []mcp.Content) string {
@@ -120,8 +130,16 @@ func appResourceURI(meta mcp.Meta) string {
 			return value
 		}
 	}
-	if value, ok := meta["ui/resourceUri"].(string); ok {
-		return value
-	}
 	return ""
+}
+
+func appOnlyTool(meta mcp.Meta) bool {
+	ui, _ := meta["ui"].(map[string]any)
+	switch visibility := ui["visibility"].(type) {
+	case []string:
+		return len(visibility) == 1 && visibility[0] == "app"
+	case []any:
+		return len(visibility) == 1 && visibility[0] == "app"
+	}
+	return false
 }

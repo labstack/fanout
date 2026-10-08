@@ -51,18 +51,18 @@ and browser tests, then the Go suite under the race detector.
 formatting and linting on commit and the full gate on push. That is the fastest
 way to avoid a red CI run.
 
-Both browser workspaces use `package.json` overrides for transitive security
+The browser workspace uses `package.json` overrides for transitive security
 fixes that their direct dependencies have not locked yet. Keep those overrides
 until the upstream ranges resolve to patched versions; `just ui-audit` accepts
-no advisory exceptions.
+only the existing build-only braces advisory exception documented in the justfile.
 
 ## Things that surprise people
 
 **The browser assets are committed.** `ui/host` builds into `internal/ui/dist`
-and `ui/apps` builds into `internal/mcp/apps`, and both outputs are tracked in
+and its MCP app builds into `internal/mcp/apps`; both outputs are tracked in
 git because `go:embed` needs them present in a source checkout. If you change
 anything under `ui/`, run `just ui` and commit the regenerated output.
-`just ui-check` fails when the committed bytes do not match a fresh build, so
+`just ui-check` fails when the embedded bytes do not match a fresh build, so
 CI catches this, but it is friendlier to catch it yourself.
 
 **Diagrams are generated.** `docs/diagrams/*.svg` is rendered from the `.d2`

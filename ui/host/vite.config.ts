@@ -10,5 +10,5 @@ export default defineConfig({
       "/mcp": { target: "http://localhost:7520", changeOrigin: true, secure: false },
     },
   },
-  build: { outDir: "../../internal/ui/dist", emptyOutDir: true },
+  build: { outDir: process.env.FANOUT_UI_OUT ?? "../../internal/ui/dist", emptyOutDir: true },
 });

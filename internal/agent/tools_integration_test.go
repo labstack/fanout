@@ -54,11 +54,12 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	})
 
 	want := map[string]string{
-		"get_observability_overview": "ui://fanout/observability-overview.html",
-		"get_service_topology":       "ui://fanout/service-topology.html",
-		"get_service_performance":    "ui://fanout/service-performance.html",
-		"inspect_trace":              "ui://fanout/trace-detail.html",
-		"search_logs":                "ui://fanout/log-explorer.html",
+		"query_telemetry":            "ui://fanout/panels.html",
+		"get_observability_overview": "ui://fanout/panels.html",
+		"get_service_topology":       "ui://fanout/panels.html",
+		"get_service_performance":    "ui://fanout/panels.html",
+		"inspect_trace":              "ui://fanout/panels.html",
+		"search_logs":                "ui://fanout/panels.html",
 	}
 	if len(registry.apps) != len(want) {
 		t.Fatalf("registered MCP apps = %v, want %v", registry.apps, want)

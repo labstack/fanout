@@ -9,7 +9,7 @@ import { useStickToBottom } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
-import type { MCPAppContent } from "./mcp-app-frame";
+import { mcpAppContent } from "./mcp-app-content";
 import { Link } from "@tanstack/react-router";
 import { dashboardToolResult } from "./dashboard-tool-result";
 
@@ -112,8 +112,12 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
 
 function ChatMessage({ message, time, send }: { message: Message; time?: number; send: (text: string) => Promise<void> }) {
   if (message.role === "activity") {
-    const activity = message as Message & { activityType?: string; content: MCPAppContent };
-    if (activity.activityType === "mcp-app") return <Paper withBorder radius="lg" style={{ overflow: "hidden" }} aria-label={toolTitle(activity.content.toolName)}><Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={activity.content} onMessage={send} /></Suspense></Paper>;
+    const activity = message as Message & { activityType?: string; content: unknown };
+    if (activity.activityType === "mcp-app") {
+      const content = mcpAppContent(activity.content);
+      if (!content) return <Alert color="bad">This view could not be loaded. Please try again.</Alert>;
+      return <Paper withBorder radius="lg" style={{ overflow: "hidden" }} aria-label={toolTitle(content.tool_name)}><Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={content} onMessage={send} /></Suspense></Paper>;
+    }
     return null;
   }
   const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);

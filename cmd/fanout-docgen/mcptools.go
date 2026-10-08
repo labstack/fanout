@@ -71,6 +71,17 @@ func renderMCPTools() ([]byte, error) {
 
 	b.WriteString("Every tool is **closed-world**: it reads or writes what this instance holds\n")
 	b.WriteString("and reaches nothing else.\n\n")
+	b.WriteString("The catalog below includes MCP Apps helpers. App-only helpers are omitted from\n")
+	b.WriteString("ordinary clients and model tool definitions. Interactive view tools return a\n")
+	b.WriteString("`PanelFragment`: `{dashboard, results, vars?, trace?}`. Results match every\n")
+	b.WriteString("dashboard panel id exactly once. Variables retain scalar, `$__all`, empty-list\n")
+	b.WriteString("and multi-list values. Model text is a deterministic summary of at most 16 KiB;\n")
+	b.WriteString("structured content is the same bounded full fragment persisted for reload, at\n")
+	b.WriteString("most 256 KiB, with visible row truncation. Oversized authored spec/variables\n")
+	b.WriteString("are rejected before execution at 128 KiB rather than changing their semantics.\n\n")
+	b.WriteString("AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,\n")
+	b.WriteString("`tool_input`, `tool_result`, and `is_error`. Protocol `structuredContent`,\n")
+	b.WriteString("`resourceUri`, `toolCallId`, `threadId`, and `runId` keep their spelling.\n\n")
 
 	// Each row links to the tool's own section, whose heading is the tool name.
 	// That only works while the name is already what a slugger would produce
@@ -100,6 +111,12 @@ func renderMCPTools() ([]byte, error) {
 		fmt.Fprintf(&b, "## %s\n\n", tool.Name)
 		fmt.Fprintf(&b, "**%s** — %s\n\n", mdx(tool.Title), mdx(tool.Description))
 		fmt.Fprintf(&b, "%s\n\n", effectProse(tool))
+		if tool.AppOnly {
+			b.WriteString("**Visibility:** app only; no resource attachment.\n\n")
+		}
+		if tool.ResourceURI != "" {
+			fmt.Fprintf(&b, "**View resource:** `%s` (model and app visible).\n\n", tool.ResourceURI)
+		}
 
 		if len(tool.Inputs) == 0 {
 			b.WriteString("Takes no arguments.\n\n")

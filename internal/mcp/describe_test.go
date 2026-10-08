@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // The public catalogue follows the same verb-first convention as Monk and
@@ -23,7 +24,7 @@ func TestToolsUseVerbFirstSnakeCase(t *testing.T) {
 			t.Errorf("tool name %q must be lowercase snake_case and at most 64 characters", doc.Name)
 		}
 		switch verb {
-		case "get", "list", "search", "inspect", "create", "replace", "edit", "preview":
+		case "get", "list", "search", "inspect", "create", "replace", "edit", "preview", "query", "resolve":
 		default:
 			t.Errorf("tool name %q must start with an operation verb", doc.Name)
 		}
@@ -39,7 +40,7 @@ func TestDescribeToolsMatchesWhatAClientIsServed(t *testing.T) {
 	}
 
 	server := NewWithIntelligence(nil, dashboard.New(nil, nil), nil, describeIntelligence{}, "test")
-	session := connectTestClient(t, server, nil)
+	session := connectTestClient(t, server, &mcp.ClientCapabilities{Extensions: map[string]any{mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}}}})
 	listed, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -160,7 +161,7 @@ func TestDescribeToolsReportsTheSharedObservabilityScope(t *testing.T) {
 	// stale. And each tool must actually be seen — filtering by name and
 	// asserting nothing when the filter matches nothing is a test that renaming
 	// a tool would silently switch off.
-	want := map[string]string{"window": "string", "namespace": "string", "limit": "integer"}
+	want := map[string]string{"window": "string", "namespace": "string", "limit": "integer", "from": "string", "to": "string"}
 
 	for _, name := range []string{"get_observability_overview", "get_service_topology"} {
 		var doc ToolDoc
@@ -224,5 +225,26 @@ func TestSchemaTypeRendersUnionsWithoutNull(t *testing.T) {
 	}
 	if got != "string or integer" {
 		t.Errorf("union rendered %q, want \"string or integer\"", got)
+	}
+}
+
+func TestDescribeToolsDocumentsFragmentResourcesAndAppHelpers(t *testing.T) {
+	docs, err := DescribeTools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]ToolDoc{}
+	for _, doc := range docs {
+		found[doc.Name] = doc
+	}
+	for _, name := range []string{"query_telemetry", "get_observability_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
+		if found[name].ResourceURI != panelsAppURI || found[name].AppOnly {
+			t.Fatalf("%s doc=%+v", name, found[name])
+		}
+	}
+	for _, name := range []string{"query_panel_fragment", "get_panel_exemplars", "resolve_panel_variables"} {
+		if !found[name].AppOnly || found[name].ResourceURI != "" {
+			t.Fatalf("%s helper doc=%+v", name, found[name])
+		}
 	}
 }

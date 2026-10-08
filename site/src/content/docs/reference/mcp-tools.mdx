@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "14 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
+summary: "18 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -13,11 +13,24 @@ generated: true
     tool list rather than reading the registrations. Edit the generator, not
     this page. */}
 
-A Fanout instance serves MCP at `/mcp`. 14 tools, listed below exactly as the
+A Fanout instance serves MCP at `/mcp`. 18 tools, listed below exactly as the
 server reports them to a connecting client.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
 and reaches nothing else.
+
+The catalog below includes MCP Apps helpers. App-only helpers are omitted from
+ordinary clients and model tool definitions. Interactive view tools return a
+`PanelFragment`: `{dashboard, results, vars?, trace?}`. Results match every
+dashboard panel id exactly once. Variables retain scalar, `$__all`, empty-list
+and multi-list values. Model text is a deterministic summary of at most 16 KiB;
+structured content is the same bounded full fragment persisted for reload, at
+most 256 KiB, with visible row truncation. Oversized authored spec/variables
+are rejected before execution at 128 KiB rather than changing their semantics.
+
+AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
+`tool_input`, `tool_result`, and `is_error`. Protocol `structuredContent`,
+`resourceUri`, `toolCallId`, `threadId`, and `runId` keep their spelling.
 
 | Tool | Changes state |
 |---|---|
@@ -26,6 +39,7 @@ and reaches nothing else.
 | [`get_dashboard`](#get_dashboard) | No — read-only |
 | [`get_intelligence_snapshot`](#get_intelligence_snapshot) | No — read-only |
 | [`get_observability_overview`](#get_observability_overview) | No — read-only |
+| [`get_panel_exemplars`](#get_panel_exemplars) | No — read-only |
 | [`get_service_dependencies`](#get_service_dependencies) | No — read-only |
 | [`get_service_performance`](#get_service_performance) | No — read-only |
 | [`get_service_topology`](#get_service_topology) | No — read-only |
@@ -33,7 +47,10 @@ and reaches nothing else.
 | [`inspect_trace`](#inspect_trace) | No — read-only |
 | [`list_dashboards`](#list_dashboards) | No — read-only |
 | [`preview_panels`](#preview_panels) | No — read-only |
+| [`query_panel_fragment`](#query_panel_fragment) | No — read-only |
+| [`query_telemetry`](#query_telemetry) | No — read-only |
 | [`replace_dashboard`](#replace_dashboard) | **Yes — replaces existing state** |
+| [`resolve_panel_variables`](#resolve_panel_variables) | No — read-only |
 | [`search_logs`](#search_logs) | No — read-only |
 
 ## create_dashboard
@@ -83,11 +100,35 @@ Takes no arguments.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
+
+## get_panel_exemplars
+
+**Panel exemplars** — Find bounded traces for a panel selection.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | — |
+| `from` | `string` | **yes** | — |
+| `panel_id` | `string` | **yes** | — |
+| `to` | `string` | **yes** | — |
+| `bucket` | `object` | no | — |
+| `dimensions` | `object` | no | — |
+| `kind` | `string` | no | — |
+| `time` | `object` | no | — |
+| `vars` | `object` | no | — |
 
 ## get_service_dependencies
 
@@ -106,15 +147,19 @@ Read-only. Calling it changes nothing.
 
 ## get_service_performance
 
-**Service performance explorer** — Inspect activity, errors, latency, endpoints, cross-signal correlation, and change over time for one service or the system.
+**Service performance explorer** — Display separate latency, error rate and request rate panels plus slow endpoints for one service or the system.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum endpoints to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional exact OpenTelemetry service name; omit for the whole system |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## get_service_topology
@@ -123,10 +168,14 @@ Read-only. Calling it changes nothing.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## get_telemetry_schema
@@ -146,11 +195,15 @@ Read-only. Calling it changes nothing.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum spans and correlated logs to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional service filter when choosing a recent trace |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `trace_id` | `string` | no | Exact trace ID; omit to inspect the most relevant recent error or slow trace |
 | `window` | `string` | no | Trace lookup window such as 1h, 24h, 168h, or 720h; defaults to 1h |
 
@@ -175,6 +228,37 @@ Read-only. Calling it changes nothing.
 | `variables` | `array` | no | Variables the panels reference |
 | `vars` | `object` | no | Variable values to preview with; $__all selects All |
 
+## query_panel_fragment
+
+**Refresh telemetry panels** — Run every panel in a dashboard fragment; panel subsets are forbidden.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | — |
+| `compare` | `boolean` | no | — |
+| `time` | `object` | no | — |
+| `vars` | `object` | no | — |
+| `widths` | `object` | no | — |
+
+## query_telemetry
+
+**Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide.
+
+Read-only. Calling it changes nothing.
+
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `panel` | `object` | **yes** | One v1 panel to display in the answer |
+| `time` | `object` | no | — |
+| `variables` | `array` | no | — |
+| `vars` | `object` | no | — |
+
 ## replace_dashboard
 
 **Replace dashboard** — Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. See create_dashboard for the spec guide.
@@ -188,19 +272,37 @@ Read-only. Calling it changes nothing.
 | `base_version` | `integer` | no | Version you read; the call fails if someone saved since |
 | `message` | `string` | no | One line describing the change, shown in history |
 
+## resolve_panel_variables
+
+**Panel variable options** — Resolve variable options within a dashboard fragment window.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | — |
+| `time` | `object` | no | — |
+| `vars` | `object` | no | — |
+
 ## search_logs
 
 **Log explorer** — Search and filter logs with a severity timeline and links back to correlated traces.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum log entries to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `search` | `string` | no | Optional case-insensitive text contained in the log body |
 | `service` | `string` | no | Optional exact OpenTelemetry service name |
 | `severity` | `string` | no | Optional exact severity such as ERROR, WARN, or INFO |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## Authentication

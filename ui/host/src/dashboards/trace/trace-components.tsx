@@ -1,6 +1,5 @@
 import { Badge, Box, Group, Table, Text, Tooltip } from "@mantine/core";
 import { ListBullets } from "@phosphor-icons/react";
-// Adapted copy of ui/apps/src/trace.tsx (M1 echart.tsx precedent). Consolidate in M3.
 import type { LogEntry, TraceSpan } from "../../../../contracts";
 import { seriesSlot, severityColor } from "../../../../chart";
 import { duration, exactTimestamp, timeZoneLabel } from "../../../../format";

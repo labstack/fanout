@@ -33,9 +33,7 @@ updates:
       go:
         update-types: [minor, patch]
 
-  # The two browser workspaces are separate dependency graphs on purpose, and
-  # each carries its own `overrides` block pinning security fixes, so they are
-  # listed separately rather than as one glob.
+  # One browser workspace builds the SPA and portable MCP app.
   - package-ecosystem: bun
     directory: /ui/host
     schedule:
@@ -44,16 +42,6 @@ updates:
       prefix: "chore(deps)"
     groups:
       host:
-        update-types: [minor, patch]
-
-  - package-ecosystem: bun
-    directory: /ui/apps
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      apps:
         update-types: [minor, patch]
 
   # The documentation site is npm, not bun.

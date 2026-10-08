@@ -39,6 +39,7 @@ export const createDashboardPrompt = "Build me a dashboard for my services, show
 // The session names the activity, so the map lives beside it: nothing here
 // may reach for the view.
 const toolLabels: Record<string, { activity: string; title: string }> = {
+  query_telemetry: { activity: "Querying telemetry…", title: "Telemetry panels" },
   get_observability_overview: { activity: "Checking system health…", title: "System health" },
   get_service_topology: { activity: "Mapping service dependencies…", title: "Service map" },
   get_service_performance: { activity: "Reading performance signals…", title: "Performance" },

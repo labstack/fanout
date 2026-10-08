@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,11 +12,16 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func newPanelServer(t *testing.T) *Server {
+	return panelServerFixture(t, false)
+}
+
+func panelServerFixture(t *testing.T, seed bool) *Server {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
@@ -34,8 +40,34 @@ func newPanelServer(t *testing.T) *Server {
 	if _, err := sqlite.DB.Exec(`INSERT INTO users (id, email) VALUES ('owner', 'owner@example.com')`); err != nil {
 		t.Fatal(err)
 	}
+	if seed {
+		at := time.Now().UTC().Add(-30 * time.Minute)
+		var spans []telemetry.Span
+		var logs []telemetry.Log
+		for i := range 30 {
+			n := at.Add(time.Duration(i) * time.Second).UnixNano()
+			route := "/cart"
+			if i == 0 {
+				route = ""
+			}
+			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, HTTPRoute: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
+			logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", TimeUnixNanos: n, Severity: "ERROR", Body: "timeout", IngestedAt: n})
+		}
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := duck.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',30,30,100,100,.1,30,0)`, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
+			t.Fatal(err)
+		}
+	}
 	executor := panel.NewExecutor(duck, 30)
 	executor.SetRollupReader(observability.New(duck, duck, 30))
+	if seed {
+		return New(observability.New(duck, duck, 30), dashboard.New(sqlite.DB, executor), executor, "test")
+	}
 	return New(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, "test")
 }
 

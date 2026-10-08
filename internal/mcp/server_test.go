@@ -167,18 +167,16 @@ func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
 		want   time.Duration
 	}{{"15m", 15 * time.Minute}, {"720h", 30 * 24 * time.Hour}} {
 		t.Run(tt.window, func(t *testing.T) {
-			backend := &fakeObservability{}
-			s := New(backend, nil, nil, "test")
-			s.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
-			result, output, err := s.overview(context.Background(), nil, QueryInput{Window: tt.window, Namespace: "prod"})
+			s := newPanelServer(t)
+			result, output, err := s.overview(t.Context(), nil, QueryInput{Window: tt.window, Namespace: "prod"})
 			if err != nil {
-				t.Fatalf("overview: %v", err)
+				t.Fatal(err)
 			}
-			if len(result.Content) != 1 || output.Schema != observability.OverviewSchema {
-				t.Fatalf("unexpected result: %#v %#v", result, output)
+			if len(result.Content) != 1 || output.Dashboard.Version != 1 || len(output.Results) != 1 {
+				t.Fatalf("result=%+v", output)
 			}
-			if got := backend.scope.End.Sub(backend.scope.Start); got != tt.want {
-				t.Fatalf("window = %s, want %s", got, tt.want)
+			if got := output.Dashboard.Time.To.Sub(*output.Dashboard.Time.From); got != tt.want {
+				t.Fatalf("window=%s", got)
 			}
 		})
 	}
@@ -258,14 +256,20 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(listed.Tools) != 8 {
-			t.Fatalf("tool count = %d, want 8", len(listed.Tools))
+		if len(listed.Tools) != 12 {
+			t.Fatalf("tool count = %d, want 12", len(listed.Tools))
 		}
 		resources := map[string]bool{}
 		for _, tool := range listed.Tools {
 			if tool.Name == "get_service_dependencies" {
 				if _, ok := tool.Meta["ui"]; ok {
 					t.Fatal("dependency traversal advertised a UI resource")
+				}
+				continue
+			}
+			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+				if !appOnly(tool.Meta) {
+					t.Fatalf("not app-only: %s", tool.Name)
 				}
 				continue
 			}
@@ -281,16 +285,16 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 				t.Fatalf("tool %s has no nested ui metadata: %#v", tool.Name, tool.Meta)
 			}
 			uri, _ := ui["resourceUri"].(string)
-			if !strings.HasPrefix(uri, "ui://") {
+			if uri != panelsAppURI {
 				t.Fatalf("tool %s resource URI = %q", tool.Name, uri)
 			}
-			if legacy, _ := tool.Meta["ui/resourceUri"].(string); legacy != uri {
-				t.Fatalf("tool %s legacy resource URI = %q, want %q", tool.Name, legacy, uri)
+			if _, exists := tool.Meta["ui/resourceUri"]; exists {
+				t.Fatal("flat UI metadata present")
 			}
 			resources[uri] = true
 		}
-		if len(resources) != 5 {
-			t.Fatalf("resource count = %d, want 5", len(resources))
+		if len(resources) != 1 {
+			t.Fatalf("resource count = %d, want 1", len(resources))
 		}
 		for uri := range resources {
 			result, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
@@ -314,8 +318,8 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(listed.Tools) != 8 {
-			t.Fatalf("tool count = %d, want 8", len(listed.Tools))
+		if len(listed.Tools) != 9 {
+			t.Fatalf("tool count = %d, want 9", len(listed.Tools))
 		}
 		for _, tool := range listed.Tools {
 			if _, ok := tool.Meta["ui"]; ok {
@@ -329,7 +333,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 }
 
 func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
-	server := New(&fakeObservability{}, nil, nil, "test")
+	server := newPanelServer(t)
 	session := connectTestClient(t, server, nil)
 	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_observability_overview") || !strings.Contains(instructions, "authenticated user") {
 		t.Fatalf("server instructions = %q", instructions)

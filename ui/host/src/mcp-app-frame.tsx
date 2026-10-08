@@ -2,6 +2,7 @@ import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { Alert, Box, Center, Loader, Text, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
+import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { authorizedFetch } from "./auth";
 
 const mcpAppMIME = "text/html;profile=mcp-app";
@@ -12,16 +13,11 @@ const maxAppHeight = 2000;
 
 class InvalidMCPAppResourceError extends Error {}
 
-export type MCPAppContent = {
-  resourceUri: string;
-  toolName: string;
-  toolInput?: Record<string, unknown>;
-  toolResult?: unknown;
-  isError?: boolean;
-};
+export type { MCPAppContent } from "./mcp-app-content";
 
 type BrowserMCPConnection = {
   client: Client;
+  tools: Promise<Awaited<ReturnType<Client["listTools"]>>>;
   references: number;
   closed: boolean;
   closeListeners: Set<() => void>;
@@ -46,10 +42,13 @@ async function createBrowserMCPConnection(): Promise<BrowserMCPConnection> {
     await client.connect(transport);
     const connection: BrowserMCPConnection = {
       client,
+      tools: client.listTools(),
       references: 0,
       closed: false,
       closeListeners: new Set(),
     };
+    // Handle rejection immediately even if the resource load fails first.
+    void connection.tools.catch(() => undefined);
     client.onclose = () => invalidateBrowserMCPConnection(connection, false);
     client.onerror = () => invalidateBrowserMCPConnection(connection, true);
     return connection;
@@ -156,6 +155,25 @@ export function mcpAppCSP(meta: unknown): string {
   return `${directives.join("; ")};`;
 }
 
+type CachedResource = { text: string; _meta?: unknown };
+const resources = new Map<string, { pending: Promise<CachedResource>; expires: number }>();
+async function cachedResource(client: Client, uri: string): Promise<CachedResource> {
+  const existing = resources.get(uri);
+  if (existing && existing.expires > Date.now()) return existing.pending;
+  const entry = { pending: Promise.resolve({ text: "" }) as Promise<CachedResource>, expires: Infinity };
+  entry.pending = client.readResource({ uri }).then(resource => {
+    const first = resource.contents[0];
+    if (resource.contents.length !== 1 || !first || !("text" in first) || !first.text) throw new InvalidMCPAppResourceError("MCP App resource has no HTML content");
+    if (first.uri !== uri) throw new InvalidMCPAppResourceError("MCP App resource URI does not match the requested URI");
+    if (first.mimeType !== mcpAppMIME) throw new InvalidMCPAppResourceError("MCP App resource has an unsupported MIME type");
+    const ttl = record(resource)?.ttlMs;
+    entry.expires = Date.now() + (typeof ttl === "number" && ttl > 0 ? ttl : 300_000);
+    return { text: first.text, _meta: first._meta };
+  }).catch(cause => { if (resources.get(uri) === entry) resources.delete(uri); throw cause; });
+  resources.set(uri, entry);
+  return entry.pending;
+}
+
 function enforceMCPAppCSP(html: string, meta: unknown): string {
   const policy = mcpAppCSP(meta);
   const tag = `<meta http-equiv="Content-Security-Policy" content="${policy}">`;
@@ -168,7 +186,13 @@ function userText(blocks: Array<Record<string, unknown>>): string {
   return blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n");
 }
 
-export default function MCPAppFrame({ content, onMessage }: { content: MCPAppContent; onMessage: (text: string) => Promise<void> }) {
+export default function MCPAppFrame({ content: value, onMessage }: { content: unknown; onMessage: (text: string) => Promise<void> }) {
+  const content = mcpAppContent(value);
+  if (!content) return <Alert color="bad" m="md">This view could not be loaded. Please try again.</Alert>;
+  return <ValidatedMCPAppFrame content={content} onMessage={onMessage} />;
+}
+
+function ValidatedMCPAppFrame({ content, onMessage }: { content: MCPAppContent; onMessage: (text: string) => Promise<void> }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const clientRef = useRef<Client | null>(null);
   const connectionRef = useRef<BrowserMCPConnection | null>(null);
@@ -192,7 +216,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
     bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: "inline" });
   }, [colorScheme]);
 
-  useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resourceUri]);
+  useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resource_uri]);
 
   useEffect(() => {
     let disposed = false;
@@ -218,11 +242,8 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         connectionRef.current = connection;
         connection.closeListeners.add(reconnect);
         clientRef.current = connection.client;
-        const resource = await connection.client.readResource({ uri: content.resourceUri });
-        const first = resource.contents[0];
-        if (!first || !("text" in first) || !first.text) throw new InvalidMCPAppResourceError("MCP App resource has no HTML content");
-        if (first.uri !== content.resourceUri) throw new InvalidMCPAppResourceError("MCP App resource URI does not match the requested URI");
-        if (first.mimeType !== mcpAppMIME) throw new InvalidMCPAppResourceError("MCP App resource has an unsupported MIME type");
+        const first = await cachedResource(connection.client, content.resource_uri);
+        await connection.tools;
         if (!disposed) {
           reconnectAttemptRef.current = 0;
           setHTML(enforceMCPAppCSP(first.text, first._meta));
@@ -251,7 +272,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
       clientRef.current = null;
       connectionRef.current = null;
     };
-  }, [content.resourceUri, connectionGeneration]);
+  }, [content.resource_uri, connectionGeneration]);
 
   async function connectBridge() {
     const iframe = iframeRef.current;
@@ -261,10 +282,18 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
       const bridge = new AppBridge(
         null,
         { name: "Fanout", version: "0.2.0" },
-        { openLinks: {}, serverTools: {}, logging: {} },
+        { serverTools: {}, logging: {} },
         { hostContext: { theme: colorSchemeRef.current, displayMode: "inline" } },
       );
-      bridge.oncalltool = (params, extra) => mcpClient.callTool(params, { signal: extra.mcpReq.signal });
+      const connection = connectionRef.current;
+      if (!connection) throw new Error("MCP connection unavailable");
+      bridge.oncalltool = async (params, extra) => {
+        const tools = await connection.tools;
+        const tool = tools.tools.find(tool => tool.name === params.name);
+        const visibility = record(record(tool?._meta)?.ui)?.visibility;
+        if (!Array.isArray(visibility) || !visibility.includes("app") || /^(?:create|edit|replace|restore|delete)_/.test(params.name)) throw new Error("This tool is unavailable in the app");
+        return mcpClient.callTool(params, { signal: extra.mcpReq.signal });
+      };
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
         if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.ceil(requested) + 32)));
@@ -276,11 +305,11 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         return {};
       };
       bridge.oninitialized = async () => {
-        await bridge.sendToolInput({ arguments: content.toolInput ?? {} });
+        await bridge.sendToolInput({ arguments: content.tool_input ?? {} });
         await bridge.sendToolResult({
-          content: [{ type: "text", text: JSON.stringify(content.toolResult ?? {}) }],
-          structuredContent: content.toolResult as Record<string, unknown> | undefined,
-          isError: content.isError,
+          content: [{ type: "text", text: JSON.stringify(content.tool_result ?? {}) }],
+          structuredContent: content.tool_result as Record<string, unknown> | undefined,
+          isError: content.is_error,
         });
       };
       await bridge.connect(new PostMessageTransport(iframe.contentWindow, iframe.contentWindow));

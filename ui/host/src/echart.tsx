@@ -7,12 +7,8 @@ use([SVGRenderer, GridComponent, LegendComponent, TooltipComponent, VisualMapCom
 
 export { use as useECharts };
 
-/* Adapted from ui/apps/src/echart.tsx: the same registration and renderer,
-   plus a string height, a class name, and a width that lets the chart shrink
-   inside a grid cell. It is not shared through ui/ because that directory has
-   no node_modules to resolve echarts from. One chart instance lives for the
-   component's lifetime and option changes are applied in place, so a parent
-   re-render never rebuilds the SVG or restarts its animation. */
+/* One chart instance lives for the component's lifetime. Applying options
+   in place avoids rebuilding the SVG or restarting animation on re-render. */
 export function EChart({ option, height = 260, label, onClick, className }: { option: EChartsCoreOption; height?: number | string; label: string; onClick?: (params: unknown) => void; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<EChartsType | null>(null);
