@@ -45,31 +45,37 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     catch { active = false; worker.terminate(); setLayoutError("Service layout unavailable"); return; }
     return () => { active = false; worker.terminate(); };
   }, [structure.key, measured]);
-  const graph = useMemo(() => cached ? fitServiceMap(cached.layout, cached.key === structure.key ? model : cached.model, size) : { nodes: [], edges: [], scale: 1, compact:true, contentWidth: size.width, contentHeight: size.height, uncalledLabel: undefined }, [cached, model, size, structure.key]);
+  const graph = useMemo(() => cached ? fitServiceMap(cached.layout, cached.key === structure.key ? model : cached.model, size) : { nodes: [], edges: [], scale: 1, compact:true, contentWidth: size.width, contentHeight: size.height, uncalledLabel: undefined,initialView:{x:0,y:0} }, [cached, model, size, structure.key]);
   const theme = chartThemeFor(dark), ring = brand[dark ? 4 : 7], id = useId().replaceAll(":", "");
   const active = hover ?? focused;
   const neighbours = new Set([active, ...model.edges.filter(e => e.caller === active || e.callee === active).flatMap(e => [e.caller, e.callee])]);
   const maxZoom = Math.max(12, 1 / graph.scale);
   const maxRate = Math.max(1e-9, ...model.edges.map(e => e.request_rate ?? e.calls));
-  const fit = useCallback(() => setView(fittedView), []);
+  const fittedX=graph.initialView.x,fittedY=graph.initialView.y;
+  const fit = useCallback(() => setView({x:fittedX,y:fittedY,zoom:1}), [fittedX,fittedY]);
   useLayoutEffect(() => {
     const element = viewport.current; if (!element) return;
     const measure = () => { const rect = element.getBoundingClientRect(); const width = element.clientWidth || rect.width, height = element.clientHeight || rect.height; if (width > 0 && height > 0) setSize(old => old.width === width && old.height === height ? old : { width, height }); };
     measure(); setMeasured(true); const observer = new ResizeObserver(measure); observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  useLayoutEffect(fit, [fit, structure.topology]);
-  useEffect(() => { onMapView?.({ canFit: view.zoom !== 1 || view.x !== 0 || view.y !== 0, fit }); return () => onMapView?.({ canFit: false, fit: () => undefined }); }, [onMapView, view, fit]);
+  const fittedKey=useRef<string | undefined>(undefined);
+  const previousFit=useRef(fittedView);
+  useLayoutEffect(()=>{
+    if(cached && (cached.key!==fittedKey.current || view.zoom===1 && view.x===previousFit.current.x && view.y===previousFit.current.y)) fit();
+    fittedKey.current=cached?.key;previousFit.current={x:fittedX,y:fittedY,zoom:1};
+  }, [cached,fit]);
+  useEffect(() => { onMapView?.({ canFit: view.zoom !== 1 || view.x !== fittedX || view.y !== fittedY, fit }); return () => onMapView?.({ canFit: false, fit: () => undefined }); }, [onMapView, view, fit,fittedX,fittedY]);
   useEffect(() => {
     const element = viewport.current; if (!element) return;
     const wheel = (event: WheelEvent) => {
       if (!cached || layoutError || event.deltaY === 0) return;
       event.preventDefault(); const rect = element.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top;
-      setView(old => { const zoom = clamp(old.zoom * Math.exp(-event.deltaY * .002), 1, maxZoom); if (zoom === 1) return fittedView; const ratio = zoom / old.zoom; return { zoom, x: x - (x - old.x) * ratio, y: y - (y - old.y) * ratio }; });
+      setView(old => { const zoom = clamp(old.zoom * Math.exp(-event.deltaY * .002), 1, maxZoom); if (zoom === 1) return {x:fittedX,y:fittedY,zoom:1}; const ratio = zoom / old.zoom; return { zoom, x: x - (x - old.x) * ratio, y: y - (y - old.y) * ratio }; });
     };
     element.addEventListener("wheel", wheel, { passive: false });
     return () => element.removeEventListener("wheel", wheel);
-  }, [maxZoom, Boolean(cached), layoutError]);
+  }, [maxZoom, Boolean(cached), layoutError,fittedX,fittedY]);
   const select = (service: string) => { if (suppressClick.current) { suppressClick.current = false; return; } if (panel.click && onSelect) onSelect(service); else onPoint?.({ dimensions: { service } }); };
   return <div role="region" aria-label={`${title}: service dependency graph; ${analysisSummary({ ...panel, title }, result)}`} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0, width: "100%" }}>
     <div ref={viewport} {...(import.meta.env.DEV ? { "data-service-viewport": true, "data-layout-scale": graph.scale, "data-card-mode":graph.compact?"compact":"full" } : {})} style={{ position: "relative", flex: "1 1 auto", minHeight: 0, overflow: "hidden", touchAction: "none", cursor: dragging.current ? "grabbing" : "grab" }} onMouseLeave={() => setHover(undefined)}

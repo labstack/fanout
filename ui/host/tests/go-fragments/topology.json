@@ -1,4 +1,8 @@
 {
+  "view": {
+    "kind": "preset",
+    "key": "0846eaf4f61296fe9f69480ca33825c793559cd8ea88426af183ae245646c9db"
+  },
   "dashboard": {
     "version": 1,
     "name": "Service dependencies",

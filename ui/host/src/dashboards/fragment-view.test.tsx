@@ -25,8 +25,8 @@ it("shows only the panel title for one panel and no refresh for snapshot answers
     expect(view.el.querySelector('[aria-label="Refresh panels"]')).toBeNull();
   } finally { await view.cleanup(); }
 });
-it("names persisted multi-panel presets without the generic Telemetry title", async () => {
-  const fragment = presetFixture("performance"); fragment.dashboard.name = "Telemetry";
+it("uses the authored multi-panel preset title without a legacy title decoder", async () => {
+  const fragment = presetFixture("performance");
   const view = await mount(fragment);
   try { expect(view.el.querySelector('[data-fragment-header]')?.textContent).toBe("Service performance"); }
   finally { await view.cleanup(); }

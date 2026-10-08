@@ -16,25 +16,15 @@ import { dashboardToolResult } from "./dashboard-tool-result";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
-const presetTools = new Set(["get_observability_overview", "get_service_performance", "get_service_topology", "search_logs", "inspect_trace"]);
-const isPreset = (content: MCPAppContent) => presetTools.has(content.tool_name);
-
+const isPreset = (content: MCPAppContent) => content.tool_result.view.kind === "preset";
 type AppView = { content: MCPAppContent; expanded: boolean };
-// Sort object keys so reloads and equivalent JSON field orders dedupe alike.
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
-  return JSON.stringify(value) ?? "null";
-}
 function chatAppViews(messages: Message[]) {
   const views = new Map<string, AppView>(), duplicates = new Set<string>();
   let turn: Array<{ id: string; content: MCPAppContent }> = [];
   const finish = () => {
     const winners = new Map<string, typeof turn[number]>();
     for (const item of turn) {
-      const fragment = item.content.tool_result;
-      const mapFrame = fragment.dashboard.panels.length === 1 && fragment.dashboard.panels[0].viz === "service_map" && fragment.results[0].frame && !fragment.results[0].frame.truncated ? fragment.results[0].frame : undefined;
-      const key = canonical({ dashboard: { ...fragment.dashboard, name: "", panels: fragment.dashboard.panels.map(panel => ({ ...panel, id: "", title: "", ...(panel.query ? { query: { ...panel.query, where: [...(panel.query.where ?? [])].sort(), ...(mapFrame ? { limit: undefined } : {}) } } : {}) })) }, vars: fragment.vars ?? {}, ...(mapFrame ? { map: mapFrame } : {}), ...(fragment.dashboard.time.from ? {} : { windows: fragment.results.map(result => [result.from_ms ?? 0, result.to_ms ?? 0]) }) });
+      const key = item.content.tool_result.view.key;
       const previous = winners.get(key);
       if (!previous || isPreset(item.content) || !isPreset(previous.content)) winners.set(key, item);
     }
@@ -55,6 +45,32 @@ function chatAppViews(messages: Message[]) {
     }
   }
   finish(); return { views, duplicates };
+}
+type ToolFailure = {name:string;message:string};
+function toolFailures(messages: Message[]) {
+  const groups = new Map<string, ToolFailure[]>();
+  let first:string|undefined;
+  const names=new Map<string,string>();
+  for(const message of messages) {
+    if(message.role==="user") {first=undefined;names.clear();}
+    if(message.role==="assistant") for(const call of message.toolCalls??[]) names.set(call.id,call.function.name);
+    if(message.role==="tool" && message.error) {
+      first??=message.id;
+      const failures=groups.get(first)??[];
+      failures.push({name:names.get(message.toolCallId)??"Tool",message:String(message.content||message.error)});
+      groups.set(first,failures);
+    }
+  }
+  return groups;
+}
+function ToolFailures({failures}:{failures:ToolFailure[]}) {
+  const [expanded,setExpanded]=useState(false);
+  return <Box data-chat-anchor>
+    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)} style={{color:"var(--mantine-color-dimmed)"}}>
+      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failures.length} tool calls failed</span>
+    </UnstyledButton>
+    {expanded && <Stack gap="xs" pl="md">{failures.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}
+  </Box>;
 }
 function ChatAppView({ view }: { view: AppView }) {
   const [expanded, setExpanded] = useState(view.expanded);
@@ -95,7 +111,8 @@ export function ChatPage() {
     return saved ? [[message.id, saved] as const] : [];
   }));
   const appViews = chatAppViews(messages);
-  const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || Boolean(message.error) || dashboardResults.has(message.id)));
+  const failures = toolFailures(messages);
+  const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || failures.has(message.id) || dashboardResults.has(message.id)));
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
@@ -114,7 +131,7 @@ export function ChatPage() {
           <Stack gap="lg" aria-live="polite">
             {visibleMessages.map((message) => {
               const saved = dashboardResults.get(message.id);
-              return saved ? <Paper key={message.id} withBorder radius="md" p="sm" data-dashboard-result={saved.id}>
+              return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : saved ? <Paper key={message.id} withBorder radius="md" p="sm" data-dashboard-result={saved.id}>
                 <Group justify="space-between" gap="sm">
                   <Box miw={0}><Text size="xs" c="dimmed">{saved.label}</Text><Text size="sm" fw={500} style={{ overflowWrap: "anywhere" }}>{saved.name}</Text></Box>
                   <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{ dashboardId: saved.id }} search={{}} />} variant="subtle" size="compact-sm">Open dashboard</Button>
@@ -171,7 +188,7 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
 }
 
 function ChatMessage({ message, time, appView }: { message: Message; time?: number; appView?: AppView }) {
-  if (message.role === "tool" && message.error) return <Alert color="bad" data-chat-anchor>{String(message.content || message.error)}</Alert>;
+
   if (message.role === "activity") {
     if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
     return null;

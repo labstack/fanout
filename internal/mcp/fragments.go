@@ -25,7 +25,12 @@ type QueryTelemetryInput struct {
 	Time      *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
 	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
+type FragmentView struct {
+	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
+	Key  string `json:"key" jsonschema:"Stable SHA-256 hash of the view specification, captured window and variables"`
+}
 type PanelFragment struct {
+	View      FragmentView                                     `json:"view"`
 	Dashboard panel.Dashboard                                  `json:"dashboard"`
 	Results   []panel.Result                                   `json:"results"`
 	Vars      map[string]panel.Value                           `json:"vars,omitempty"`
@@ -65,11 +70,16 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 	mcp.AddTool(server.mcp, tool, handler)
 }
 
-func (s *Server) runFragment(ctx context.Context, req panel.RunRequest) (*mcp.CallToolResult, PanelFragment, error) {
+func (s *Server) runFragment(ctx context.Context, req panel.RunRequest, kinds ...string) (*mcp.CallToolResult, PanelFragment, error) {
 	out, err := s.executeFragment(ctx, req)
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
+	kind := "query"
+	if len(kinds) > 0 {
+		kind = kinds[0]
+	}
+	out.View = fragmentView(out, kind)
 	out, err = boundFragment(ctx, out)
 	if err != nil {
 		return nil, PanelFragment{}, err
@@ -437,9 +447,8 @@ func clipJSON(text string, budget int) string {
 }
 func jsonBytes(value any) (int, error) { raw, err := json.Marshal(value); return len(raw), err }
 
-// Measure each collection once and proportionally drop the excess from the
-// largest first, leaving small panels intact. Remeasure the fragment once after
-// cutting; a final hard check handles oversized metadata.
+// Reduce the largest serialized collection first, retaining the maximal prefix.
+// Metadata is discarded only after every reducible collection is exhausted.
 func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, error) {
 	if err := ctx.Err(); err != nil {
 		return PanelFragment{}, err
@@ -479,56 +488,46 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 	if size <= fragmentPayloadLimit {
 		return out, nil
 	}
+
 	type collection struct {
-		key  string
-		size int
-		cut  func(float64)
+		key   string
+		count int
+		value func() any
+		cut   func(int)
+		owner func() any
 	}
 	choices := []collection{}
-	add := func(key string, value any, cut func(float64)) error {
-		n, err := jsonBytes(value)
-		if err != nil {
-			return err
-		}
-		choices = append(choices, collection{key, n, cut})
-		return nil
-	}
+	minimum := map[string]int{}
 	for i := range out.Results {
-		if err := ctx.Err(); err != nil {
-			return PanelFragment{}, err
-		}
 		r := &out.Results[i]
 		if scope := r.AnnotationScope; scope != nil && len(scope.Services) > 0 {
-			if err := add(r.ID+"/scope", scope.Services, func(fraction float64) {
-				scope.Services = scope.Services[:int(float64(len(scope.Services))*fraction)]
-				scope.Limited = true
-				r.AnnotationError = payloadLimitNote
-			}); err != nil {
-				return PanelFragment{}, err
-			}
+			original := scope.Services
+			choices = append(choices, collection{r.ID + "/scope", len(original), func() any { return scope.Services }, func(n int) { scope.Services = original[:n]; scope.Limited = true; r.AnnotationError = payloadLimitNote }, func() any { return r }})
 		}
 		for j, f := range []*panel.Frame{r.Frame, r.Previous} {
-			if f == nil {
+			if f == nil || f.Rows == 0 {
 				continue
 			}
-			if err := add(fmt.Sprintf("%s/%d", r.ID, j), f, func(fraction float64) {
-				rows := int(float64(f.Rows) * fraction)
-				for c := range f.Values {
-					f.Values[c] = f.Values[c][:min(rows, len(f.Values[c]))]
+			values, trends := f.Values, f.Trends
+			choices = append(choices, collection{fmt.Sprintf("%s/%d", r.ID, j), f.Rows, func() any { return f }, func(n int) {
+				f.Values = make([][]any, len(values))
+				for c := range values {
+					f.Values[c] = values[c][:min(n, len(values[c]))]
 				}
-				for name, trend := range f.Trends {
-					f.Trends[name] = trend[:min(rows, len(trend))]
+				if trends != nil {
+					f.Trends = make(map[string][][]any, len(trends))
+					for name, trend := range trends {
+						f.Trends[name] = trend[:min(n, len(trend))]
+					}
 				}
-				f.Rows = rows
+				f.Rows = n
 				f.Totals = nil
 				f.Truncated = true
 				f.Note = payloadLimitNote
 				if f.Health != nil {
 					f.Health.ErrorTrend = nil
 				}
-			}); err != nil {
-				return PanelFragment{}, err
-			}
+			}, func() any { return f }})
 		}
 	}
 	if out.Trace != nil {
@@ -538,38 +537,149 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 			out.Trace.Provenance.Complete = false
 			out.Trace.Summary = payloadLimitNote
 		}
-		for _, entry := range []struct {
-			key   string
-			value any
-			cut   func(float64)
-		}{
-			{"~trace/spans", d.Spans, func(f float64) { d.Spans = d.Spans[:int(float64(len(d.Spans))*f)]; mark() }},
-			{"~trace/logs", d.Logs, func(f float64) { d.Logs = d.Logs[:int(float64(len(d.Logs))*f)]; mark() }},
-			{"~trace/services", d.Services, func(f float64) { d.Services = d.Services[:int(float64(len(d.Services))*f)]; mark() }},
-		} {
-			if err := add(entry.key, entry.value, entry.cut); err != nil {
-				return PanelFragment{}, err
+		originalSpans := d.Spans
+		indices := make([]int, len(originalSpans))
+		for i := range indices {
+			indices[i] = i
+		}
+		parents := map[string]bool{}
+		for _, span := range originalSpans {
+			parents[span.SpanID] = true
+		}
+		priority := func(span observability.TraceSpan) int {
+			if span.ParentSpanID == "" || !parents[span.ParentSpanID] {
+				return 0
+			}
+			if strings.EqualFold(span.Status, "error") {
+				return 1
+			}
+			return 2
+		}
+		sort.SliceStable(indices, func(i, j int) bool {
+			left, right := originalSpans[indices[i]], originalSpans[indices[j]]
+			a, b := priority(left), priority(right)
+			if a != b {
+				return a < b
+			}
+			return left.DurationMS > right.DurationMS
+		})
+		protected := 0
+		for _, i := range indices {
+			if priority(originalSpans[i]) < 2 {
+				protected++
 			}
 		}
-	}
-	sort.SliceStable(choices, func(i, j int) bool {
-		if choices[i].size == choices[j].size {
-			return choices[i].key < choices[j].key
+		floor := min(len(indices), protected+1)
+		protectedSpans := make([]observability.TraceSpan, floor)
+		for i, index := range indices[:floor] {
+			protectedSpans[i] = originalSpans[index]
 		}
-		return choices[i].size > choices[j].size
-	})
-	remaining := size - fragmentPayloadLimit + 4096
-	for _, choice := range choices {
+		protectedBytes, e := jsonBytes(protectedSpans)
+		if e != nil {
+			return PanelFragment{}, e
+		}
+		if protectedBytes > fragmentPayloadLimit {
+			floor = min(1, len(indices))
+		}
+		minimum["~trace/spans"] = floor
+		logs, services := d.Logs, d.Services
+		choices = append(choices,
+			collection{"~trace/spans", len(indices), func() any { return d.Spans }, func(n int) {
+				selected := make([]bool, len(indices))
+				for _, index := range indices[:n] {
+					selected[index] = true
+				}
+				d.Spans = []observability.TraceSpan{}
+				for index, span := range originalSpans {
+					if selected[index] {
+						d.Spans = append(d.Spans, span)
+					}
+				}
+				mark()
+			}, func() any { return out.Trace }},
+			collection{"~trace/logs", len(logs), func() any { return d.Logs }, func(n int) { d.Logs = logs[:n]; mark() }, func() any { return out.Trace }},
+			collection{"~trace/services", len(services), func() any { return d.Services }, func(n int) { d.Services = services[:n]; mark() }, func() any { return out.Trace }},
+		)
+	}
+	sizes := make([]int, len(choices))
+	for i, choice := range choices {
 		if err := ctx.Err(); err != nil {
 			return PanelFragment{}, err
 		}
-		if remaining <= 0 {
+		sizes[i], err = jsonBytes(choice.value())
+		if err != nil {
+			return PanelFragment{}, err
+		}
+	}
+	for size > fragmentPayloadLimit {
+		if err := ctx.Err(); err != nil {
+			return PanelFragment{}, err
+		}
+		largest, largestBytes := -1, 0
+		for i, choice := range choices {
+			if choice.count <= minimum[choice.key] {
+				continue
+			}
+			n := sizes[i]
+			if n > largestBytes || n == largestBytes && (largest < 0 || choice.key < choices[largest].key) {
+				largest, largestBytes = i, n
+			}
+		}
+		if largest < 0 {
+			// Priority spans are only sacrificed when all ordinary rows have
+			// been exhausted and their protected detail alone cannot fit.
+			if len(minimum) > 0 {
+				clear(minimum)
+				continue
+			}
 			break
 		}
-		removed := min(remaining, choice.size)
-		fraction := max(0, 1-float64(removed)/float64(max(1, choice.size)))
-		choice.cut(fraction)
-		remaining -= removed
+		choice := &choices[largest]
+		// Test the empty collection, then search the exact serialized payload
+		// for the maximal retained prefix. No average row size is assumed.
+		ownerBytes, e := jsonBytes(choice.owner())
+		if e != nil {
+			return PanelFragment{}, e
+		}
+		otherBytes := size - ownerBytes
+		measure := func() (int, error) { n, e := jsonBytes(choice.owner()); return otherBytes + n, e }
+		floor := minimum[choice.key]
+		choice.cut(floor)
+		size, err = measure()
+		if err != nil {
+			return PanelFragment{}, err
+		}
+		if size <= fragmentPayloadLimit {
+			lo, hi := floor, choice.count-1
+			for lo < hi {
+				if err := ctx.Err(); err != nil {
+					return PanelFragment{}, err
+				}
+				mid := (lo + hi + 1) / 2
+				choice.cut(mid)
+				n, e := measure()
+				if e != nil {
+					return PanelFragment{}, e
+				}
+				if n <= fragmentPayloadLimit {
+					lo = mid
+				} else {
+					hi = mid - 1
+				}
+			}
+			choice.cut(lo)
+			choice.count = lo
+			size, err = measure()
+			if err != nil {
+				return PanelFragment{}, err
+			}
+		} else {
+			choice.count = floor
+		}
+		sizes[largest], err = jsonBytes(choice.value())
+		if err != nil {
+			return PanelFragment{}, err
+		}
 	}
 	size, err = jsonBytes(out)
 	if err != nil {

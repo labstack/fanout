@@ -15,7 +15,7 @@ export const traceFixture: Result<TraceDetail> = {
     logs: [{ time: "2026-10-08T00:00:00Z", severity: "ERROR", service: "checkout", body: "correlated failure" }], span_count: 3, service_count: 2, truncated: true },
 };
 export function fixture(viz: "health" | "service_map" | "logs" | "traces" | "log_patterns" = "logs"): PanelFragment {
-  return { dashboard: { version: 1, name: "Answer", time: { range: "1h", refresh: "off" }, panels: [{ id: "p", title: "Checkout logs", viz, query: { from: "logs" } }] },
+  return { view: {kind:"query",key:"0".repeat(64)}, dashboard: { version: 1, name: "Answer", time: { range: "1h", refresh: "off" }, panels: [{ id: "p", title: "Checkout logs", viz, query: { from: "logs" } }] },
     results: [{ id: "p", status: "empty", diagnosis: "No logs for checkout", elapsed_ms: 1, from_ms: 0, to_ms: 3600000 }] };
 }
 

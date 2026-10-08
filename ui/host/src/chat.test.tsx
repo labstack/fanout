@@ -29,9 +29,27 @@ async function mount(context: FanoutAppContextValue) {
 function button(text: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === text);
 }
+it("groups recovered tool failures quietly and expands escaped names/messages",async()=>{
+ const messages=[{id:"a",role:"assistant",content:"",toolCalls:[{id:"c1",type:"function",function:{name:"query_telemetry",arguments:"{}"}},{id:"c2",type:"function",function:{name:"edit_dashboard",arguments:"{}"}}]},
+ {id:"e1",role:"tool",toolCallId:"c1",content:"<img src=x onerror=alert(1)>",error:"tool error"},{id:"e2",role:"tool",toolCallId:"c2",content:"Invalid panel",error:"tool error"},{id:"done",role:"assistant",content:"Recovered answer"}] as Message[];
+ const root=await mount(value({messages}));try {
+ expect(document.querySelector('[role="alert"]')).toBeNull();const toggle=button("2 tool calls failed")!;expect(toggle).toBeTruthy();expect(toggle.getAttribute("aria-expanded")).toBe("false");expect(document.body.textContent).not.toContain("Invalid panel");
+ await act(async()=>toggle.click());expect(document.body.textContent).toContain("query_telemetry");expect(document.body.textContent).toContain("edit_dashboard");expect(document.body.textContent).toContain("<img src=x onerror=alert(1)>");expect(document.querySelector("img")).toBeNull();
+ }finally{await act(async()=>root.unmount());}
+});
+it("keeps a single recovered failure quiet and preserves the run-error alert",async()=>{
+ const messages=[{id:"t",role:"tool",toolCallId:"c",content:"Temporary failure",error:"tool error"},{id:"answer",role:"assistant",content:"Answer"}] as Message[];
+ for(const error of ["","Provider unavailable"]) {const root=await mount(value({messages,error}));try {expect(button("1 tool calls failed")).toBeTruthy();expect(document.querySelectorAll('[role="alert"]')).toHaveLength(error?1:0);if(error)expect(document.querySelector('[role="alert"]')?.textContent).toContain(error);}finally{await act(async()=>root.unmount());}}
+});
+it("uses server view keys and kinds even when tool names and specifications differ",async()=>{
+ const first=appMessage("one","renamed_preset","Requested"),second=appMessage("two","get_service_performance","Discovery");
+ (first.content as any).tool_result.view={kind:"preset",key:"a".repeat(64)};(second.content as any).tool_result.view={kind:"query",key:"a".repeat(64)};
+ const root=await mount(value({messages:[first,second]}));try {expect(document.querySelectorAll('[data-chat-app]')).toHaveLength(1);expect(document.querySelector('button[aria-expanded="true"]')?.textContent).toContain("Requested");}finally{await act(async()=>root.unmount());}
+});
 
 function appMessage(id: string, tool: string, title: string, rows = 1): Message {
   const fragment = fixture(); fragment.dashboard.panels[0].title = title;
+  fragment.view = {kind:tool === "query_telemetry" ? "query" : "preset", key:(id === "one" ? "1" : "2").repeat(64)};
   fragment.results[0] = { id: "p", status: "ok", elapsed_ms: 0, frame: { columns: [{ name: "body", type: "string", role: "dimension" }], values: [Array.from({ length: rows }, () => title)], rows } };
   fragment.dashboard.time = { from: `2026-10-07T${id === "one" ? "18" : "19"}:00:00Z`, to: "2026-10-07T20:00:00Z", refresh: "off" };
   return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: tool, tool_input: {}, tool_result: fragment, is_error: false } } as Message;
@@ -71,7 +89,7 @@ it.each(["mixed", "presets", "custom"])("expands requested presets over discover
 });
 it("prefers a deduped preset over an equivalent later custom view", async () => {
   const preset = appMessage("one", "get_service_topology", "Requested");
-  const custom = structuredClone(preset) as Message & { content: Record<string, unknown> }; custom.id = "two"; custom.content.tool_name = "query_telemetry";
+  const custom = structuredClone(preset) as Message & { content: Record<string, unknown> }; custom.id = "two"; custom.content.tool_name = "query_telemetry"; (custom.content.tool_result as ReturnType<typeof fixture>).view.kind="query";
   const root = await mount(value({ messages: [preset, custom, appMessage("three", "query_telemetry", "Discovery")] }));
   try {
     const toggles = [...document.querySelectorAll('button[aria-expanded]')];
@@ -82,6 +100,7 @@ it("prefers a deduped preset over an equivalent later custom view", async () => 
 it("collapses earlier views, dedupes within a turn, expands accessibly and restores on reload", async () => {
   const app = (id: string, title: string, changed = false): Message => {
     const f = fixture(); f.dashboard.name = title; f.dashboard.panels[0].title = title;
+    f.view.key=(changed?"1":"0").repeat(64);
     if (changed) f.dashboard.time = { from: "2026-10-07T18:45:00Z", to: "2026-10-07T19:45:00Z", refresh: "off" };
     return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: f, is_error: false } } as Message;
   };
@@ -104,6 +123,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
 it("shows app tool errors and old string activities without throwing", async () => {
   const messages = [{ id: "error", role: "tool", toolCallId: "call", content: "Invalid telemetry window", error: "Invalid telemetry window" }, { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
   const root = await mount(value({ messages }));
+  await act(async()=>button("1 tool calls failed")!.click());
   expect(document.body.textContent).toContain("Invalid telemetry window");
   expect(document.body.textContent).toContain("This view could not be loaded. Please try again.");
   await act(async () => root.unmount());
@@ -111,7 +131,7 @@ it("shows app tool errors and old string activities without throwing", async () 
 
 it("keeps distinct captured windows and variables, and resets dedupe at the next user turn", async () => {
   const app = (id: string, from: number, vars?: Record<string, string>): Message => {
-    const fragment = fixture(); fragment.results[0].from_ms = from; fragment.vars = vars;
+    const fragment = fixture(); fragment.results[0].from_ms = from; fragment.vars = vars; fragment.view.key=(vars?"3":String(from)).repeat(64);
     return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message;
   };
   const root = await mount(value({ messages: [{ id: "u1", role: "user", content: "Show" } as Message, app("one", 0), app("two", 1), app("three", 0, { service: "checkout" }), { id: "u2", role: "user", content: "Again" } as Message, app("four", 0)] }));
@@ -124,7 +144,7 @@ it("keeps distinct captured windows and variables, and resets dedupe at the next
 it("dedupes a complete custom map and topology preset with different row limits", async () => {
   const map = fixture("service_map"); map.dashboard.panels[0].query = { from: "spans", limit: 20 };
   map.results[0].frame = { columns: [{ name: "service", type: "string", role: "dimension" }], values: [["checkout"]], rows: 1 };
-  const preset = structuredClone(map); preset.dashboard.name = "Telemetry"; preset.dashboard.panels[0].id = "services"; preset.dashboard.panels[0].title = "Service dependencies"; preset.dashboard.panels[0].query!.limit = 400; preset.results[0].id = "services";
+  const preset = structuredClone(map); preset.dashboard.name = "Telemetry"; preset.dashboard.panels[0].id = "services"; preset.dashboard.panels[0].title = "Service dependencies"; preset.dashboard.panels[0].query!.limit = 400; preset.results[0].id = "services"; preset.view.kind="preset";
   const messages = [map, preset].map((fragment, i) => ({ id: String(i), role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: i ? "get_service_topology" : "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message));
   const root = await mount(value({ messages }));
   try { expect(document.querySelectorAll("[data-chat-app]")).toHaveLength(1); }

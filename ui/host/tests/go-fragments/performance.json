@@ -1,4 +1,8 @@
 {
+  "view": {
+    "kind": "preset",
+    "key": "fa7c95c69601faab1058f0577d8429987d4df9a77bfd478c2696518c3cd591f7"
+  },
   "dashboard": {
     "version": 1,
     "name": "Service performance",

@@ -1,10 +1,12 @@
 /** Self-contained browser collector: run on a fitted map viewport in either surface. */
-export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = false }: {requireNames?:boolean} = {}) {
+export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = false, allowOverflow = false }: {requireNames?:boolean;allowOverflow?:boolean} = {}) {
   const body = viewport.getBoundingClientRect();
   const fail = (message: string) => { throw new Error(`Service map geometry: ${message}`); };
   if (body.width <= 0 || body.height <= 0) fail("empty viewport");
+  const content=viewport.querySelector<HTMLElement>("[data-service-content]");
+  const canvas=allowOverflow && content ? DOMRect.fromRect({x:body.x,y:body.y,width:parseFloat(content.style.width),height:parseFloat(content.style.height)}) : body;
   const inside = (box: DOMRect, label: string) => {
-    if (box.left < body.left + 1 || box.top < body.top + 1 || box.right > body.right - 1 || box.bottom > body.bottom - 1) fail(`${label} is clipped`);
+    if (box.left < canvas.left + 1 || box.top < canvas.top + 1 || box.right > canvas.right - 1 || box.bottom > canvas.bottom - 1) fail(`${label} is clipped`);
   };
   const nodes = [...viewport.querySelectorAll<HTMLButtonElement>("button[title]")].map(element => ({ element, id: element.dataset.serviceNode ?? element.title.split(" · ")[0], box: element.getBoundingClientRect() }));
   if (!nodes.length) fail("no nodes");

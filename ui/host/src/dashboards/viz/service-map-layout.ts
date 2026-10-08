@@ -68,7 +68,7 @@ function layoutCards(model:ServiceGraph,cardWidths:CardWidths,compact:boolean):C
   return { nodes: boxes, routes, width, height: Math.max(1, graphHeight, uncalled.length ? rowY + cardHeight : 0), label: uncalled.length ? { x: (width - labelWidth) / 2, y: rowY - (compact?18:26) } : undefined, labelWidth };
 }
 
-/** Contain the complete graph, routing, label and arrow/stroke padding in both axes. */
+/** Contain at natural size or above the text floor, with entry-centred pan for overflow. */
 export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: ChartSize) {
   const bounds=(raw:CardLayout)=>{
     const points = raw.routes.flat();
@@ -80,8 +80,10 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
   };
   const compact=bounds(layout.full).scale<1;
   const raw=compact?layout:layout.full;
-  const {minX,minY,width,height,scale}=bounds(raw);
-  const offsetX = (size.width - width * scale) / 2, offsetY = (size.height - height * scale) / 2;
+  const {minX,minY,width,height,scale:containScale}=bounds(raw);
+  const scale=clamp(containScale,compact?compactReadableScale:1,1);
+  const contentWidth=Math.max(size.width,width*scale+24),contentHeight=Math.max(size.height,height*scale+24);
+  const offsetX = (contentWidth - width * scale) / 2, offsetY = (contentHeight - height * scale) / 2;
   const fit = (p: Point) => ({ x: offsetX + (p.x - minX) * scale, y: offsetY + (p.y - minY) * scale });
   const nodesByID = new Map(model.nodes.map(n => [n.id, n]));
   const nodes = raw.nodes.map(n => ({ ...n, ...nodesByID.get(n.id), ...fit(n), width: n.width * scale, height: n.height * scale }));
@@ -92,7 +94,13 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
     const path = points.map((p,i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
     return { ...e, points, path };
   });
-  return { nodes, edges, scale, compact, contentWidth: size.width, contentHeight: size.height, uncalledLabel: raw.label ? fit(raw.label) : undefined };
+  const entries=nodes.filter(n=>n.entry);
+  const entryWidth=Math.max(...entries.map(n=>n.x+n.width))-Math.min(...entries.map(n=>n.x));
+  const entryHeight=Math.max(...entries.map(n=>n.y+n.height))-Math.min(...entries.map(n=>n.y));
+  const anchor=entries.length && entryWidth<=size.width-24 && entryHeight<=size.height-24 ? entries : (entries.length?entries:nodes).slice(0,1);
+  const centre=(axis:"x"|"y",dimension:"width"|"height")=>anchor.reduce((sum,n)=>sum+n[axis]+n[dimension]/2,0)/Math.max(1,anchor.length);
+  const initialView={x:clamp(size.width/2-centre("x","width"),size.width-contentWidth,0),y:clamp(size.height/2-centre("y","height"),size.height-contentHeight,0)};
+  return { nodes, edges, scale, compact, initialView, contentWidth, contentHeight, uncalledLabel: raw.label ? fit(raw.label) : undefined };
 }
 
 export const nodeMetrics = (n: ServiceNode) => `${formatValue("per_second", n.request_rate)} · ${formatValue("percent", n.error_rate)} err · ${formatValue("ms", n.p95_ms)} p95`;

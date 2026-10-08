@@ -2,6 +2,7 @@ import type { Result, TraceDetail } from "../contracts";
 import type { DashboardSpec, PanelResult, VarValue } from "./types";
 
 export type PanelFragment = {
+  view: { kind: "preset" | "query"; key: string };
   dashboard: DashboardSpec;
   results: PanelResult[];
   vars?: Record<string, VarValue>;
@@ -9,18 +10,13 @@ export type PanelFragment = {
 };
 
 export function fragmentTitle(fragment: PanelFragment): string {
-  const panels = fragment.dashboard.panels;
-  if (panels.length === 1) return panels[0].title;
-  if (fragment.dashboard.name !== "Telemetry") return fragment.dashboard.name;
-  const ids = new Set(panels.map(panel => panel.id));
-  if (["latency", "errors", "requests", "endpoints"].every(id => ids.has(id))) return "Service performance";
-  if (ids.has("volume") && ids.has("events")) return "Log explorer";
-  return `${panels[0].title} and ${panels.length - 1} panels`;
+  return fragment.dashboard.panels.length === 1 ? fragment.dashboard.panels[0].title : fragment.dashboard.name;
 }
 
 export function panelFragment(value: unknown): PanelFragment {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Missing panel view");
   const f = value as Partial<PanelFragment>;
+  if (!f.view || !["preset", "query"].includes(f.view.kind) || !/^[a-f0-9]{64}$/.test(f.view.key)) throw new Error("Invalid panel view identity");
   if (f.dashboard?.version !== 1 || !Array.isArray(f.dashboard.panels) || !f.dashboard.panels.length || f.dashboard.panels.length > 40 || !Array.isArray(f.results)) throw new Error("Invalid panel view");
   if (f.dashboard.panels.some(p => !p || typeof p.id !== "string" || !p.id) || f.results.some(r => !r || typeof r.id !== "string")) throw new Error("Invalid panel view");
   const ids = new Set(f.dashboard.panels.map(p => p.id));

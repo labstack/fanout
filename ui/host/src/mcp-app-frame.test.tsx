@@ -3,7 +3,7 @@ import { act, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const uri="ui://fanout/panels.html";
-const fragment={dashboard:{version:1,name:"Fixture",panels:[{id:"text",title:"Text",viz:"text",content:"hello"}]},results:[{id:"text",status:"ok"}]};
+const fragment={view:{kind:"query",key:"0".repeat(64)},dashboard:{version:1,name:"Fixture",panels:[{id:"text",title:"Text",viz:"text",content:"hello"}]},results:[{id:"text",status:"ok"}]};
 const content={resource_uri:uri,tool_name:"query_telemetry",tool_input:{},tool_result:fragment,is_error:false};
 const mcp=vi.hoisted(()=>({connect:vi.fn(),readResource:vi.fn(),listTools:vi.fn(),callTool:vi.fn(),close:vi.fn(),clients:[] as Array<{onclose?:()=>void}>,bridges:[] as Array<{oncalltool?:(params:{name:string},extra:{mcpReq:{signal:AbortSignal}})=>Promise<unknown>;onsizechange?:(size:{height:number})=>void}>,capabilities:[] as unknown[]}));
 vi.mock("@modelcontextprotocol/client",()=>({Client:class {onclose?:()=>void;onerror?:()=>void;constructor(){mcp.clients.push(this);}connect=mcp.connect;readResource=mcp.readResource;listTools=mcp.listTools;callTool=mcp.callTool;close=mcp.close;},StreamableHTTPClientTransport:class {close=mcp.close;}}));

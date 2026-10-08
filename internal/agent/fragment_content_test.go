@@ -167,7 +167,7 @@ func TestFix1AppToolErrorHasNoActivity(t *testing.T) {
 }
 
 func TestFix1DuplicateMapActivitiesStoppedAtSource(t *testing.T) {
-	fragment := map[string]any{"dashboard": map[string]any{"version": 1, "name": "Map", "time": map[string]any{"from": "2026-10-07T18:45:00Z", "to": "2026-10-07T19:45:00Z"}, "panels": []any{map[string]any{"id": "services", "title": "Service dependencies", "viz": "service_map", "query": map[string]any{"from": "spans"}}}}, "results": []any{map[string]any{"id": "services", "status": "ok"}}}
+	fragment := map[string]any{"view": map[string]any{"kind": "query", "key": "server-key"}, "dashboard": map[string]any{"version": 1, "name": "Map", "time": map[string]any{"from": "2026-10-07T18:45:00Z", "to": "2026-10-07T19:45:00Z"}, "panels": []any{map[string]any{"id": "services", "title": "Service dependencies", "viz": "service_map", "query": map[string]any{"from": "spans"}}}}, "results": []any{map[string]any{"id": "services", "status": "ok"}}}
 	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "map"}}
 	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "custom", Name: "query_telemetry", Input: `{}`}}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "preset", Name: "get_service_topology", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
 	runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: "Map summary", Structured: fragment, AppResourceURI: "ui://fanout/panels.html"}}, nil)
@@ -189,35 +189,41 @@ func TestFix1DuplicateMapActivitiesStoppedAtSource(t *testing.T) {
 	}
 }
 
-func TestFix1FragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
-	f := fanoutmcp.PanelFragment{Dashboard: panel.Dashboard{Name: "Map", Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "a", Title: "A", Viz: "service_map", Query: &panel.Query{From: "spans"}}}}, Results: []panel.Result{{ID: "a", FromMS: 1, ToMS: 2}}}
-	original := fragmentIdentity(f)
-	f.Dashboard.Name = "Another title"
-	f.Dashboard.Panels[0].ID = "b"
-	f.Dashboard.Panels[0].Title = "B"
-	if original != fragmentIdentity(f) {
-		t.Fatal("cosmetic fields prevented dedupe")
-	}
-	f.Results[0].FromMS = 3
-	if original == fragmentIdentity(f) {
-		t.Fatal("different captured windows deduped")
-	}
-	f.Results[0].FromMS = 1
-	f.Vars = map[string]panel.Value{"service": panel.Value{Values: []string{"checkout"}}}
-	if original == fragmentIdentity(f) {
-		t.Fatal("different vars deduped")
-	}
-}
+type viewTools struct{ fakeTools }
 
-func TestFix1MapIdentityIgnoresLimitsOnlyForIdenticalCompleteProjections(t *testing.T) {
-	f := fanoutmcp.PanelFragment{Dashboard: panel.Dashboard{Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &panel.Query{From: "spans", Limit: 20}}}}, Results: []panel.Result{{ID: "map", FromMS: 1, ToMS: 2, Frame: &panel.Frame{Columns: []panel.Column{{Name: "service", Type: "string", Role: "dimension"}}, Values: [][]any{{"checkout"}}, Rows: 1}}}}
-	first := fragmentIdentity(f)
-	f.Dashboard.Panels[0].Query.Limit = 400
-	if first != fragmentIdentity(f) {
-		t.Fatal("custom map and topology limits created duplicate complete maps")
+func (f *viewTools) Execute(_ context.Context, call ToolCall) (ToolExecution, error) {
+	kind := "query"
+	if call.Name == "renamed_preset" {
+		kind = "preset"
 	}
-	f.Results[0].Frame.Values[0][0] = "payment"
-	if first == fragmentIdentity(f) {
-		t.Fatal("different maps deduped")
+	return ToolExecution{Content: kind, AppResourceURI: "ui://fanout/panels.html", Structured: fanoutmcp.PanelFragment{View: fanoutmcp.FragmentView{Kind: kind, Key: "authoritative-key"}}}, nil
+}
+func TestFix4RuntimeUsesServerIdentityAndPresetWinner(t *testing.T) {
+	for _, order := range [][]string{{"query", "renamed_preset"}, {"renamed_preset", "query"}} {
+		messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "show"}}
+		calls := []StreamEvent{}
+		for i, name := range order {
+			calls = append(calls, StreamEvent{Type: EventToolUse, ToolCall: &ToolCall{ID: string(rune('a' + i)), Name: name, Input: `{}`}})
+		}
+		calls = append(calls, StreamEvent{Type: EventStop, StopReason: "tool_calls"})
+		provider := &scriptedProvider{steps: [][]StreamEvent{calls, {{Type: EventStop, StopReason: "end_turn"}}}}
+		runtime := NewRuntime(provider, &viewTools{}, nil)
+		emitter, _ := newTestEmitter()
+		if _, err := runtime.execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, message := range messages {
+			if message.Role == agtypes.RoleActivity {
+				count++
+				content := message.Content.(map[string]any)
+				if content["tool_name"] != "renamed_preset" {
+					t.Fatalf("wrong persisted winner: %v", content)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("activities=%d", count)
+		}
 	}
 }

@@ -224,7 +224,12 @@ func (r *Runtime) Run(c *echo.Context) error {
 }
 
 func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (bool, error) {
-	seenAppViews := map[string]bool{}
+	type appView struct {
+		id    string
+		kind  string
+		index int
+	}
+	seenAppViews := map[string]appView{}
 	caller := ctx
 	timeout := r.runTimeout
 	if timeout == 0 {
@@ -372,18 +377,19 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			}
 			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: errorString(execution.IsError)})
 			conversation = append(conversation, ProviderMessage{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: call.ID, Content: execution.Content, IsError: execution.IsError}})
-			emitApp := execution.AppResourceURI != "" && !execution.IsError
-			identity := fragmentIdentity(execution.Structured)
-			if identity != "" && seenAppViews[identity] {
-				emitApp = false
-			}
-			if emitApp {
-				if identity != "" {
-					seenAppViews[identity] = true
+			if execution.AppResourceURI != "" && !execution.IsError {
+				view := fragmentView(execution.Structured)
+				previous, seen := seenAppViews[view.Key]
+				if view.Key != "" && seen && previous.kind == "preset" && view.Kind != "preset" {
+					continue
 				}
-				activityID, err := appid.New()
-				if err != nil {
-					return truncated, err
+				activityID := previous.id
+				if !seen || view.Key == "" {
+					var err error
+					activityID, err = appid.New()
+					if err != nil {
+						return truncated, err
+					}
 				}
 				content := map[string]any{"resource_uri": execution.AppResourceURI, "tool_name": call.Name, "tool_input": json.RawMessage(call.Input), "tool_result": execution.Structured, "is_error": execution.IsError}
 				if content["tool_result"] == nil {
@@ -392,7 +398,17 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				if err := emitter.emit(events.NewActivitySnapshotEvent(activityID, "mcp-app", content)); err != nil {
 					return truncated, err
 				}
-				*messages = append(*messages, agtypes.Message{ID: activityID, Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: content})
+				message := agtypes.Message{ID: activityID, Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: content}
+				index := len(*messages)
+				if seen && view.Key != "" {
+					index = previous.index
+					(*messages)[index] = message
+				} else {
+					*messages = append(*messages, message)
+				}
+				if view.Key != "" {
+					seenAppViews[view.Key] = appView{activityID, view.Kind, index}
+				}
 			}
 		}
 	}

@@ -1,4 +1,8 @@
 {
+  "view": {
+    "kind": "preset",
+    "key": "47b805b3e8d6f11bc808c22e5bc643280996b5bf1bc4aa51f43bf7e924f45070"
+  },
   "dashboard": {
     "version": 1,
     "name": "Log explorer",

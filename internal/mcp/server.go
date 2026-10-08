@@ -307,7 +307,7 @@ func (s *Server) presetFragment(ctx context.Context, input QueryInput, kind, ser
 	}
 	d := fragmentPreset(kind, service, input.Namespace, severity, search, input.Limit)
 	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
-	return s.runFragment(ctx, panel.RunRequest{Dashboard: d})
+	return s.runFragment(ctx, panel.RunRequest{Dashboard: d}, "preset")
 }
 func (s *Server) overview(ctx context.Context, _ *mcp.CallToolRequest, input QueryInput) (*mcp.CallToolResult, PanelFragment, error) {
 	return s.presetFragment(ctx, input, "overview", "", "", "")
@@ -353,6 +353,7 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 		detail.Data.Services = []string{}
 	}
 	out.Trace = &detail
+	out.View = fragmentView(out, "preset")
 	out, err = boundFragment(ctx, out)
 	if err != nil {
 		return nil, PanelFragment{}, err
@@ -425,7 +426,7 @@ func (s *Server) validateToolArguments(next mcp.MethodHandler) mcp.MethodHandler
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		if method == "tools/call" {
 			if call, ok := req.(*mcp.CallToolRequest); ok {
-				if len(call.Params.Arguments) == 0 {
+				if len(call.Params.Arguments) == 0 || strings.TrimSpace(string(call.Params.Arguments)) == "null" {
 					call.Params.Arguments = json.RawMessage(`{}`)
 				}
 				var raw map[string]json.RawMessage

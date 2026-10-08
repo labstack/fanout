@@ -1,4 +1,8 @@
 {
+  "view": {
+    "kind": "preset",
+    "key": "234368af52567aef4ddc5821bed83b1d60feef9e35cb57305d060171d5555042"
+  },
   "dashboard": {
     "version": 1,
     "name": "Trace detail",

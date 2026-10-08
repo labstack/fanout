@@ -21,8 +21,12 @@ and reaches nothing else.
 
 The catalog below includes MCP Apps helpers. App-only helpers are omitted from
 ordinary clients and model tool definitions. Interactive view tools return a
-`PanelFragment`: `{dashboard, results, vars?, trace?}`. Results match every
-dashboard panel id exactly once. Variables retain scalar, `$__all`, empty-list
+`PanelFragment`: `{view, dashboard, results, vars?, trace?}`. Results match every
+dashboard panel id exactly once. Required `view` contains `kind` (`preset` or
+`query`) and `key`, a stable SHA-256 hash computed once by Go from the spec,
+captured window and variables. Cosmetic titles and IDs do not affect identity.
+The agent and host use this key and prefer presets when equivalent views repeat.
+Variables retain scalar, `$__all`, empty-list
 and multi-list values. Model text is a deterministic summary of at most 16 KiB;
 structured content is the same bounded full fragment persisted for reload, at
 most 256 KiB, with visible row truncation. Oversized authored spec/variables

@@ -1,4 +1,8 @@
 {
+  "view": {
+    "kind": "preset",
+    "key": "ea44323e9fa35b08e4784e8c24182d9264dc7f57275e9d16e6771a4704b1ae3c"
+  },
   "dashboard": {
     "version": 1,
     "name": "System health",
