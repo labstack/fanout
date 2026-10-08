@@ -118,3 +118,37 @@ func TestDashboardValidationTimeoutIs504(t *testing.T) {
 		t.Fatalf("timeout create = %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestDashboardBrowserSummaryKeepsOwnerScopedBuildProvenance(t *testing.T) {
+	s := newTestAuthServer(t)
+	owner, err := s.users.CreateWithAudit("origin@example.test", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.users.CreateWithAudit("other-origin@example.test", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.db.DB.Exec(`INSERT INTO agui_threads(thread_id,owner_id) VALUES ('source',?)`, owner.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := dashboard.New(s.db.DB, structuralValidator{})
+	origin := dashboard.BuildOrigin{ThreadID: "source", MessageID: "request", RequestExcerpt: "Private request"}
+	_, err = service.Create(dashboard.WithBuildOrigin(t.Context(), origin), owner.ID, panel.Dashboard{Name: "Origin", Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hi"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	RegisterDashboardRoutes(s.e, service)
+	for _, user := range []auth.User{owner, other} {
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, sessionRequest(http.MethodGet, "/api/dashboards", nil, s.login(t, user)))
+		if rec.Code != http.StatusOK {
+			t.Fatal(rec.Code, rec.Body)
+		}
+		has := strings.Contains(rec.Body.String(), `"request_excerpt":"Private request"`)
+		if has != (user.ID == owner.ID) {
+			t.Fatal("browser origin scope", rec.Body)
+		}
+	}
+}

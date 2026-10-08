@@ -1,7 +1,7 @@
 import type { Message } from "@ag-ui/client";
-import { createContext, useContext, useMemo, type FormEvent, type RefObject } from "react";
+import { createContext, useContext, useMemo, useRef, type FormEvent, type RefObject } from "react";
 
-import { receiptForTurn } from "./dashboard-receipt";
+import { receiptForTurn, type BuildReceipt } from "./dashboard-receipt";
 
 export type FanoutAppContextValue = {
   agentAvailable: boolean;
@@ -75,9 +75,19 @@ export function runErrorMessage(code?: string): string {
 // Reconstructed from the persisted transcript, so switching threads and reload
 // use the same evidence as live tool events.
 export function useDashboardReceipts(messages: readonly Message[]) {
- return useMemo(() => new Map(messages.flatMap(message => {
-  if (message.role !== "user") return [];
-  const receipt = receiptForTurn(messages, message.id);
-  return receipt ? [[message.id, receipt] as const] : [];
- })), [messages]);
+  const finished = useRef(new Map<string,{last:Message;length:number;receipt:BuildReceipt | null}>());
+  return useMemo(() => {
+    const receipts = new Map<string,BuildReceipt>(), turnIDs = new Set<string>();
+    const starts = messages.flatMap((message,index)=>message.role === "user" ? [index] : []);
+    starts.forEach((start,index)=>{
+      const end = starts[index+1] ?? messages.length, user=messages[start], last=messages[end-1];
+      turnIDs.add(user.id);
+      const cached=finished.current.get(user.id);
+      const receipt=cached && cached.last === last && cached.length === end-start ? cached.receipt : receiptForTurn(messages.slice(start,end),user.id);
+      if(index < starts.length-1) finished.current.set(user.id,{last,length:end-start,receipt});
+      if(receipt) receipts.set(user.id,receipt);
+    });
+    for(const id of finished.current.keys()) if(!turnIDs.has(id)) finished.current.delete(id);
+    return receipts;
+  },[messages]);
 }

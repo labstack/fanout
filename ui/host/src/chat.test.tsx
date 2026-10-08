@@ -73,10 +73,11 @@ describe("provisional answer stream", () => {
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: JSON.stringify(receiptFixture) });
       await emit({ type: "CUSTOM", name: "model_call_usage", value: { step: 2 } });
       await vi.waitFor(() => expect(document.querySelector("[data-dashboard-result]")).not.toBeNull());
-      expect(document.body.textContent).toContain("Saved v2");
+      expect(document.body.textContent).toContain("Analyzing your system");
+      expect(document.querySelector('[data-build-receipt] [data-build-running]')).not.toBeNull();
       expect(document.querySelector('button[aria-label="Stop"]')).not.toBeNull();
       await emit({ type: "TEXT_MESSAGE_START", messageId: "final", role: "assistant" });
-      expect(document.body.textContent).toContain("Saved v2");
+      expect(document.body.textContent).toContain("Analyzing your system");
       await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Updated the latency panel." });
       await emit({ type: "TEXT_MESSAGE_END", messageId: "final" });
       await vi.waitFor(() => expect(document.body.textContent).toContain("Updated the latency panel."));
@@ -122,7 +123,7 @@ describe("provisional answer stream", () => {
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
       expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).toContain("Building dashboard");
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: "{}" });
-      expect(document.querySelector('[role="status"]')?.textContent).toContain("Building dashboard");
+      expect(document.querySelector('[role="status"]')?.textContent).toContain("Fixing the sort…");
       expect(document.body.textContent).not.toContain("Checking another thing.");
       await emit({ type: "REASONING_START", messageId: "provisional" });await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
       await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Updated " });
@@ -197,7 +198,7 @@ describe("provisional answer stream", () => {
       await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"next"});
       await emit({type:"TOOL_CALL_START",toolCallId:"call",toolCallName:"edit_dashboard",parentMessageId:"step"});await emit({type:"TOOL_CALL_ARGS",toolCallId:"call",delta:"{}"});await emit({type:"TOOL_CALL_END",toolCallId:"call"});
       await emit({type:"TOOL_CALL_RESULT",toolCallId:"call",messageId:"result",content:"{}"});
-      expect(document.querySelector('[role="status"]')?.textContent).toContain("Building dashboard");
+      expect(document.querySelector('[role="status"]')?.textContent).toContain("Analyzing your system");
       expect(document.body.textContent).not.toContain("Stale narration");
       await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"next"});await close();
     } finally {warn.mockRestore();log.mockRestore();await act(async()=>root.unmount());}
@@ -543,4 +544,26 @@ it("reconstructs one receipt per build turn with no final card or narrated tool 
  const {root}=await mountStreamChat(JSON.parse(JSON.stringify(messages)),false);
  try{expect(document.querySelectorAll("[data-build-receipt]")).toHaveLength(1);expect(document.querySelectorAll("[data-dashboard-result]")).toHaveLength(1);expect(document.querySelectorAll('[data-build-receipt] [role="status"]')).toHaveLength(1);expect(document.body.textContent).not.toContain("Stray intermediate paragraph");expect(document.body.textContent).toContain("Latency now uses the requested threshold.");}
  finally{await act(async()=>root.unmount());}
+});
+
+it.each([false,true])("renders no empty transcript slots after a finished run (receipt=%s)",async withReceipt=>{
+ const messages:Message[]=withReceipt?receiptBuild():[{id:"user",role:"user",content:"Explain"},{id:"tool-step",role:"assistant",content:"",toolCalls:[{id:"read",type:"function",function:{name:"get_dashboard",arguments:"{}"}}]},{id:"read-result",role:"tool",toolCallId:"read",content:"{}"}];
+ messages.push({id:"empty-final",role:"assistant",content:""},{id:"ignored-activity",role:"activity",activityType:"model_call_usage",content:{}},{id:"actual-final",role:"assistant",content:"Final answer."});
+ const {root}=await mountStreamChat(messages as Message[],false);
+ try{const answer=document.querySelector('[data-answer-position]')!;expect(answer.textContent).toContain('Final answer.');
+ const siblings=[...answer.parentElement!.children];expect(siblings.filter(el=>!el.textContent?.trim()&&!el.querySelector('iframe'))).toHaveLength(0);
+ expect(document.querySelectorAll('.chat-message-meta').length).toBe(1); // final answer copy only; unstamped user has no meta slot
+ }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+it('labels in-flight stages as progress and reserves attention for ended runs',async()=>{
+ const {root,emit,close}=await mountStreamChat();
+ try{await emit({type:'RUN_STARTED',threadId:'thread-stream',runId:'run'});await emit({type:'TOOL_CALL_START',toolCallId:'pending',toolCallName:'create_dashboard',parentMessageId:'step'});await emit({type:'TOOL_CALL_ARGS',toolCallId:'pending',delta:'{}'});await emit({type:'TOOL_CALL_END',toolCallId:'pending'});
+ expect(document.querySelector('[data-receipt-attention]')).toBeNull();expect(document.querySelector('[data-build-running]')).not.toBeNull();
+ await emit({type:'RUN_FINISHED',threadId:'thread-stream',runId:'run'});await close();await vi.waitFor(()=>expect(document.querySelector('[data-build-running]')).toBeNull());expect(document.querySelector('[data-receipt-attention]')?.textContent).toContain('save: incomplete');
+ }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+it('renders nothing for an empty final-answer slot after the run',async()=>{
+ const {root}=await mountStreamChat([{id:'user',role:'user',content:'Explain'},{id:'empty',role:'assistant',content:''}],false);
+ try{expect(document.querySelector('[data-answer-position]')).toBeNull();expect(document.querySelector('.chat-message-meta')).toBeNull();}
+ finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });

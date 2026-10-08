@@ -28,7 +28,7 @@ it('labels removals, requires later successful previews and keeps parallel panel
  const messages=build().slice(0,5);
  messages.push(call('other','preview_panels',{panels:[{id:'pool'}]}),result('other',{elapsed_ms:12,panels:[{id:'pool',status:'ok'}]}));
  expect(receiptForTurn(messages,'u')?.corrections).toEqual([]);
- messages.push(call('save','replace_dashboard',{dashboard:{panels:[{id:'pool'}]}}),result('save',{...saved,receipt:{...saved.receipt,changes:[{panel_id:'latency',title:'Latency',kind:'removed'}]}}));
+ messages.push(call('save','replace_dashboard',{dashboard:{panels:[{id:'pool'}]}}),result('save',{...saved,receipt:{...saved.receipt,changes:[{panel_id:'latency',title:'Latency',kind:'removed'}],save_check:{...saved.receipt.save_check,panels:[{id:'pool',status:'ok',rows:1}]}}}));
  expect(receiptForTurn(messages,'u')?.corrections).toEqual([]);
  expect(receiptForTurn(messages,'u')?.saved?.receipt.changes[0].kind).toBe('removed');
 });
@@ -50,4 +50,36 @@ it('keeps separate receipts across build turns and uses create chips only from t
  const messages=build();messages.push(user('second'),call('create','create_dashboard',{dashboard:{panels:[{id:'pool'}]}}),result('create',{dashboard:{id:'new',name:'New',version:1},receipt:{base_version:0,version:1,changes:[{panel_id:'pool',title:'<script>Pool</script>',kind:'added'}],layout_changed:false,save_check:{checked:true,elapsed_ms:20,panels:[{id:'pool',status:'ok',rows:1}]}}}));
  expect(receiptForTurn(messages,'u')?.saved?.id).toBe('board');expect(receiptForTurn(messages,'second')?.saved?.version).toBe(1);
  expect(changeLabel(receiptForTurn(messages,'second')!.saved!.receipt.changes[0])).toBe('+ <script>Pool</script>');
+});
+it.each(['empty','error'])('records a correction when validation resolves into %s',status=>{
+ const messages=build().slice(0,5);messages.push(call('fixed','preview_panels',{panels:[{id:'latency'}]}),result('fixed',{elapsed_ms:20,panels:[{id:'latency',status,diagnosis:'No matching events'}]}));
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.problems).toEqual([]);expect(receipt.corrections).toHaveLength(1);expect(receipt.stages.validation.state).toBe('complete');expect(receipt.stages.preview.state).toBe('complete');expect(receipt.explanations.join(' ')).toContain(status);
+});
+it('records a correction from the committed save check of the same panel',()=>{
+ const messages=build().slice(0,5);messages.push(call('save','edit_dashboard'),result('save',saved));
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.corrections).toHaveLength(1);expect(receipt.problems).toEqual([]);expect(receipt.stages.validation.state).toBe('complete');expect(receipt.stages.preview.state).toBe('incomplete');
+});
+it('keeps the committed version when a later change fails, and clears failure on a successful retry',()=>{
+ const messages=build();messages.push(call('failed','edit_dashboard'),result('failed',{error:'stale'}));
+ let receipt=receiptForTurn(messages,'u')!;expect(receipt.saved?.version).toBe(2);expect(receipt.explanations.join(' ')).toContain('A later change failed; v2 remains saved');expect(receipt.explanations.join(' ')).not.toContain('dashboard was not saved');
+ messages.push(call('retry','edit_dashboard'),result('retry',{...saved,dashboard:{...saved.dashboard,version:3},receipt:{...saved.receipt,base_version:2,version:3,changes:[]}}));
+ receipt=receiptForTurn(messages,'u')!;expect(receipt.saved?.version).toBe(3);expect(receipt.explanations.join(' ')).not.toContain('failed');
+});
+it('renders no receipt for an undecodable committed save without inventing failure',()=>{
+ expect(receiptForTurn([user(),call('old','create_dashboard'),result('old',{dashboard:{id:'old',name:'Old',version:1}})],'u')).toBeNull();
+ expect(receiptForTurn([user(),call('drift','create_dashboard'),result('drift',{dashboard:saved.dashboard,receipt:{unsupported:true}})],'u')).toBeNull();
+});
+it.each([
+ {first:'added',next:'changed',expected:'added'},
+ {first:'added',next:'removed',expected:undefined},
+ {first:'changed',next:'removed',expected:'removed'},
+] as const)('accumulates net panel chips for $first then $next',({first,next,expected})=>{
+ const mutation=(kind:string,version:number)=>({...saved,dashboard:{...saved.dashboard,version},receipt:{...saved.receipt,base_version:first==='added'&&version===1?0:version-1,version,changes:[{panel_id:'latency',title:'Latency',kind,fields:kind==='changed'?['thresholds']:undefined}]}});
+ const messages=[user(),call('first',first==='added'?'create_dashboard':'edit_dashboard'),result('first',mutation(first,1)),call('next','edit_dashboard'),result('next',mutation(next,2))];
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.saved!.receipt.changes).toEqual(expected?[expect.objectContaining({kind:expected})]:[]);expect(receipt.saved!.receipt.base_version).toBe(0);if(expected==='added')expect(receipt.saved!.label).toBe('Created');
+});
+
+it('records resolved validation paths even when a later preview finds another problem',()=>{
+ const messages=build().slice(0,5);messages.push(call('next','preview_panels',{panels:[{id:'latency'}]}),result('next',{elapsed_ms:20,panels:[{id:'latency',status:'invalid',problems:[{path:'query.sort',message:'Invalid sort'}]}]}));
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.corrections).toHaveLength(1);expect(receipt.problems).toEqual([{panel_id:'latency',path:'query.sort',message:'Invalid sort'}]);expect(receipt.stages.validation.state).toBe('failed');
 });

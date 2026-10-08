@@ -222,3 +222,60 @@ func TestInProcessCreatePersistsInjectedOrigin(t *testing.T) {
 		t.Fatalf("origin=%+v %v", list, err)
 	}
 }
+
+func TestDashboardMCPResultsExcludePrivateBuildProvenance(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test'); INSERT INTO agui_threads(thread_id,owner_id) VALUES ('private-thread','owner')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := dashboard.New(database.DB, structural{})
+	origin := dashboard.BuildOrigin{ThreadID: "private-thread", MessageID: "private-message", RequestExcerpt: "PRIVATE REQUEST"}
+	board, err := service.Create(dashboard.WithBuildOrigin(t.Context(), origin), "owner", textDashboard("Private"), dashboard.Author{Kind: "agent", ID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewWithIntelligence(&fakeObservability{}, service, nil, nil, "test")
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "in_process", true: "remote"}[remote], func(t *testing.T) {
+			req := requestFor("owner")
+			if remote {
+				req.Extra = &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}
+			}
+			_, list, err := s.dashboardList(t.Context(), req, struct{}{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, get, err := s.dashboardGet(t.Context(), req, DashboardIDInput{ID: board.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, edited, err := s.dashboardEdit(t.Context(), req, DashboardEditInput{ID: board.ID, Operations: []dashboard.Operation{{Op: "rename", Name: "Private"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, out := range []any{list, get, edited} {
+				raw, err := json.Marshal(out)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, private := range []string{"origin", "thread_id", "message_id", "request_excerpt", "PRIVATE REQUEST", "private-thread", "private-message"} {
+					if strings.Contains(string(raw), private) {
+						t.Fatalf("private %s leaked: %s", private, raw)
+					}
+				}
+			}
+		})
+	}
+}
+func TestOAuthIdentityCannotFallBackToInjectedOwnerMetadata(t *testing.T) {
+	req := requestFor("owner")
+	req.Extra = &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{Scopes: []string{dashboard.OAuthScope}}}
+	if _, err := dashboardOwner(req); err == nil {
+		t.Fatal("empty OAuth identity accepted owner metadata")
+	}
+}

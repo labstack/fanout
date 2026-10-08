@@ -629,20 +629,21 @@ func TestStoreStartRunRepairsUnansweredToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, message := range seed {
-		for _, call := range message.ToolCalls {
-			t.Fatalf("seed still carries the unanswered tool call %q, which the provider rejects", call.ID)
-		}
+	if len(seed[1].ToolCalls) != 1 || seed[1].ToolCalls[0].ID != "call-1" {
+		t.Fatal("interrupted call was erased")
 	}
-	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,run-1-outcome,user-2" {
-		t.Fatalf("seed = %v, want the turn and stopped outcome kept with its unanswered call dropped", got)
+	if seed[2].Role != agtypes.RoleTool || seed[2].ToolCallID != "call-1" || seed[2].Content != `{"error":"interrupted"}` {
+		t.Fatalf("missing interrupted result: %+v", seed)
+	}
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,assistant-1-call-1-interrupted,run-1-outcome,user-2" {
+		t.Fatal(got)
 	}
 	if seed[1].Content != "checking" {
 		t.Fatalf("assistant text = %q, want the spoken part kept", seed[1].Content)
 	}
 }
 
-func TestStoreStartRunDropsAnEmptyInterruptedTurn(t *testing.T) {
+func TestStoreStartRunPreservesAnEmptyInterruptedToolTurn(t *testing.T) {
 	database, err := controlstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -668,7 +669,42 @@ func TestStoreStartRunDropsAnEmptyInterruptedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,run-1-outcome,user-2" {
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,assistant-1-call-1-interrupted,run-1-outcome,user-2" {
 		t.Fatalf("seed = %v, want the empty interrupted turn dropped and stopped outcome kept", got)
+	}
+}
+
+func TestInterruptedBuildEvidenceSurvivesReloadAndTheNextRun(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewStore(database.DB)
+	ctx := t.Context()
+	input := agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Build"}}}
+	seed, err := store.StartRun(ctx, "owner", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed = append(seed, agtypes.Message{ID: "build", Role: agtypes.RoleAssistant, ToolCalls: []agtypes.ToolCall{{ID: "create", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "create_dashboard", Arguments: "{}"}}}})
+	if err := store.FinishRun(ctx, "owner", "thread", "run", seed, nil, false, context.Canceled); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.Thread(ctx, "owner", "thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before.Messages) < 3 || before.Messages[2].ToolCallID != "create" || before.Messages[2].Content != `{"error":"interrupted"}` {
+		t.Fatalf("reload=%+v", before.Messages)
+	}
+	next, err := store.StartRun(ctx, "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "next", Messages: []agtypes.Message{{ID: "next-user", Role: agtypes.RoleUser, Content: "Again"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldJSON, _ := json.Marshal(before.Messages)
+	nextJSON, _ := json.Marshal(next[:len(before.Messages)])
+	if string(oldJSON) != string(nextJSON) {
+		t.Fatal("next run rewrote interrupted evidence")
 	}
 }

@@ -289,6 +289,22 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  it("refetches dashboard origins immediately after source-thread deletion",async()=>{
+    let deleted=false;
+    fetchMock.mockImplementation(async(input,init)=>{
+      if(String(input)==="/api/dashboards")return json({dashboards:[{id:"board",name:"Private board",...(deleted?{}:{origin:{thread_id:"thread-checkout",message_id:"request",request_excerpt:"Private request"}})}]});
+      if(init?.method==='DELETE'){deleted=true;return new Response(null,{status:204});}
+      return respond(input,init);
+    });
+    const {root,render}=mount();try{await act(async()=>render());await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).not.toBeNull());
+    const before=fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length;
+    await act(async()=>document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Checkout latency"]')!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el=>el.textContent?.includes('Delete'))!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(el=>el.textContent?.trim()==='Delete')!.click());
+    await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).toBeNull());expect(fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length).toBeGreaterThan(before);expect(document.body.textContent).not.toContain('Private request');
+    }finally{await act(async()=>root.unmount());}
+  });
+
   it("renames and deletes a chat", async () => {
     const { root, handlers, render } = mount();
     await act(async () => render());

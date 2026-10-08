@@ -3,13 +3,20 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/encoding/sse"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/fanout/internal/auth"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/panel"
 
 	"github.com/labstack/fanout/internal/dashboard"
 	controlstore "github.com/labstack/fanout/internal/store"
@@ -324,5 +331,69 @@ func TestBuildOriginUsesLastAuthoritativeUserAndUnicodeLimit(t *testing.T) {
 	}
 	if _, ok := buildOriginForSeed("thread", seed[2:]); ok {
 		t.Fatal("fabricated request")
+	}
+}
+
+func TestBuildOriginSkipsMissingMessageIdentity(t *testing.T) {
+	for _, id := range []string{"", "   "} {
+		if _, ok := buildOriginForSeed("thread", []agtypes.Message{{ID: id, Role: agtypes.RoleUser, Content: "Build"}}); ok {
+			t.Fatal("origin without message identity")
+		}
+	}
+}
+
+type originValidator struct{}
+
+func (originValidator) Validate(_ context.Context, d *panel.Dashboard) error {
+	panel.Normalize(d)
+	if problems := panel.Validate(d); len(problems) > 0 {
+		return problems
+	}
+	return nil
+}
+func TestRuntimeRunInjectsAuthoritativeOriginIntoDashboardTool(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database.DB)
+	seed := []agtypes.Message{{ID: "old-user", Role: agtypes.RoleUser, Content: "Old request"}, {ID: "actual-user", Role: agtypes.RoleUser, Content: "Authoritative stored request"}}
+	_, err = store.StartRun(t.Context(), "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "seed", Messages: seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := dashboard.New(database.DB, originValidator{})
+	registry, err := NewToolRegistry(t.Context(), fanoutmcp.NewWithIntelligence(registryQueries{}, service, nil, nil, "test").MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "create", Name: "create_dashboard", Input: `{"dashboard":{"name":"Wired","panels":[{"id":"notes","title":"Notes","viz":"text","content":"hello"}]}}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventText, Delta: "Done."}, {Type: EventStop, StopReason: "end_turn"}}}}
+	input := agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "actual-user", Role: agtypes.RoleUser, Content: "Browser forged request"}, {ID: "old-user", Role: agtypes.RoleUser, Content: "Browser last user is wrong"}}}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs", strings.NewReader(string(raw)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("auth_user", &auth.User{ID: "owner", Role: "admin"})
+	if err := NewRuntime(provider, registry, store).Run(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	list, err := service.List(t.Context(), "owner")
+	want := dashboard.BuildOrigin{ThreadID: "thread", MessageID: "actual-user", RequestExcerpt: "Authoritative stored request"}
+	if err != nil || len(list) != 1 || list[0].Origin == nil || *list[0].Origin != want {
+		t.Fatalf("runtime origin=%+v err=%v stream=%s", list, err, rec.Body)
 	}
 }

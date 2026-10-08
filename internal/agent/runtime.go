@@ -654,6 +654,9 @@ func buildOriginForSeed(threadID string, seed []agtypes.Message) (dashboard.Buil
 		if seed[i].Role != agtypes.RoleUser {
 			continue
 		}
+		if strings.TrimSpace(seed[i].ID) == "" {
+			return dashboard.BuildOrigin{}, false
+		}
 		excerpt := []rune(messageText(seed[i].Content))
 		if len(excerpt) > 280 {
 			excerpt = excerpt[:280]

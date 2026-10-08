@@ -117,12 +117,18 @@ export function ChatPage() {
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
-  const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || failures.has(message.id)));
+  const visibleMessages = messages.filter((message) => {
+    if(appViews.duplicates.has(message.id)) return false;
+    if(message.role === "tool") return failures.has(message.id);
+    if(message.role === "assistant") return !message.toolCalls?.length && typeof message.content === "string" && message.content.trim().length > 0;
+    if(message.role === "activity") return message.activityType === "mcp-app" || message.activityType === "agent-outcome";
+    return message.role === "user";
+  });
   // Tool receipts can finish before the buffered final answer. Only text in
   // the current user turn replaces its running status.
   const turnStart = messages.findIndex(message => message.id === lastSent);
   const hasFinalText = messages.slice(turnStart + 1).some(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.length > 0);
-  const answer = messages.slice(turnStart + 1).filter(message => message.role === "assistant" && !message.toolCalls?.length).at(-1);
+  const answer = messages.slice(turnStart + 1).filter(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.trim().length > 0).at(-1);
   const liveText = running && provisional && !provisional.collapsed && provisional.text && !hasFinalText;
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
@@ -143,7 +149,7 @@ export function ChatPage() {
             {visibleMessages.filter(message => message.id !== answer?.id).map((message) => {
               return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : <Box key={message.id}>
                 <ChatMessage message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />
-                {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} /></Box>}
+                {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText && !liveText} activity={activity} /></Box>}
               </Box>;
             })}
             {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
@@ -217,12 +223,12 @@ function ChatMessage({ message, time, appView, provisional = false }: { message:
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
       : <Typography className={`chat-markdown${provisional ? " chat-markdown--provisional" : ""}`} data-provisional={provisional || undefined}><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
-    <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
+    {(provisional || stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
       {provisional ? <Loader type="dots" size={20} /> : <>
         {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
         {!user && <CopyButton text={content} label="Copy message" />}
       </>}
-    </Group>
+    </Group>}
   </Box>;
 }
 

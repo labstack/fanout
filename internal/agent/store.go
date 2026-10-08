@@ -275,7 +275,7 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 // request carrying the browser's copy. The thread keeps the question and loses
 // the answer, where before it might have been restored by accident.
 func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
-	stored = dropUnansweredToolCalls(stored)
+	stored = completeInterruptedToolCalls(stored)
 	known := make(map[string]struct{}, len(stored))
 	for _, message := range stored {
 		if message.ID != "" {
@@ -298,42 +298,29 @@ func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
 	return merged
 }
 
-// dropUnansweredToolCalls removes tool calls that no result answers.
-//
-// A run can die between the model asking for a tool and the tool replying —
-// the reader pressing Stop is the everyday case, since that cancels the
-// request while the final write still goes through on an uncancelled context.
-// What lands is an ask with no answer, and both providers reject a
-// conversation carrying one. That used to be survivable because the next run
-// rebuilt the thread from the browser's copy; now that the server seeds from
-// its own record, an orphan left in it would fail every later run on the
-// thread with no way for the reader to clear it. An assistant turn that said
-// something keeps its words and loses the dangling call; one that only asked
-// is dropped whole, because nothing of it remains to say.
-func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
-	answered := make(map[string]struct{})
+// completeInterruptedToolCalls preserves observed calls and supplies a stable
+// error result when a run ended before answering them. The provider receives a
+// valid call/result sequence, and later runs cannot erase build evidence.
+func completeInterruptedToolCalls(messages []agtypes.Message) []agtypes.Message {
+	answered := make(map[string]bool)
 	for _, message := range messages {
 		if message.Role == agtypes.RoleTool && message.ToolCallID != "" {
-			answered[message.ToolCallID] = struct{}{}
+			answered[message.ToolCallID] = true
 		}
 	}
 	repaired := make([]agtypes.Message, 0, len(messages))
 	for _, message := range messages {
-		if message.Role != agtypes.RoleAssistant || len(message.ToolCalls) == 0 {
-			repaired = append(repaired, message)
-			continue
-		}
-		kept := make([]agtypes.ToolCall, 0, len(message.ToolCalls))
-		for _, call := range message.ToolCalls {
-			if _, ok := answered[call.ID]; ok {
-				kept = append(kept, call)
-			}
-		}
-		if len(kept) == 0 && strings.TrimSpace(messageText(message.Content)) == "" {
-			continue
-		}
-		message.ToolCalls = kept
 		repaired = append(repaired, message)
+		if message.Role != agtypes.RoleAssistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if answered[call.ID] {
+				continue
+			}
+			repaired = append(repaired, agtypes.Message{ID: message.ID + "-" + call.ID + "-interrupted", Role: agtypes.RoleTool, ToolCallID: call.ID, Content: `{"error":"interrupted"}`, Error: "interrupted"})
+			answered[call.ID] = true
+		}
 	}
 	return repaired
 }
@@ -356,6 +343,7 @@ func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, 
 		}
 		messages = append(append([]agtypes.Message(nil), messages...), agtypes.Message{ID: runID + "-outcome", Role: agtypes.RoleActivity, ActivityType: "agent-outcome", Content: map[string]any{"status": status, "message": clientErrorMessage(runErr)}})
 	}
+	messages = completeInterruptedToolCalls(messages)
 	messagesJSON, err := json.Marshal(messages)
 	if err != nil {
 		return fmt.Errorf("encode final messages: %w", err)

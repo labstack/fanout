@@ -121,7 +121,7 @@ describe("Session", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboard", "saved-1"] });
       await vi.waitFor(() => expect(host.querySelector('nav a[href="/dashboards/saved-1"]')).not.toBeNull());
       const link = host.querySelector<HTMLAnchorElement>('.chat-scroll a[href="/dashboards/saved-1"]');
-      expect(link?.textContent).toBe("Open dashboard · saved v2");
+      expect(link?.textContent).toBe("Open dashboard");
       expect(link?.closest("[data-dashboard-result]")?.textContent).toContain("Saved v2");
       const transcript = host.querySelector('[role="log"]')!.textContent!;
       expect(transcript).not.toContain("Saving it now");

@@ -37,8 +37,19 @@ type DashboardEditInput struct {
 	Message     string                `json:"message,omitempty" jsonschema:"One line describing the change, shown in history"`
 }
 
+// dashboardToolSummary is intentionally separate from the browser summary:
+// MCP dashboard scope does not grant access to private conversation provenance.
+type dashboardToolSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	IsDefault   bool   `json:"is_default"`
+	Version     int    `json:"version"`
+	PanelCount  int    `json:"panel_count"`
+	UpdatedAt   string `json:"updated_at"`
+}
 type dashboardListOutput struct {
-	Dashboards []dashboard.Summary `json:"dashboards"`
+	Dashboards []dashboardToolSummary `json:"dashboards"`
 }
 
 type dashboardOutput struct {
@@ -146,7 +157,11 @@ func (s *Server) dashboardList(ctx context.Context, req *mcp.CallToolRequest, _ 
 	if err != nil {
 		return nil, dashboardListOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Found %d dashboards.", len(items))), dashboardListOutput{Dashboards: items}, nil
+	summaries := make([]dashboardToolSummary, 0, len(items))
+	for _, item := range items {
+		summaries = append(summaries, dashboardToolSummary{ID: item.ID, Name: item.Name, Description: item.Description, IsDefault: item.IsDefault, Version: item.Version, PanelCount: item.PanelCount, UpdatedAt: item.UpdatedAt})
+	}
+	return summary(fmt.Sprintf("Found %d dashboards.", len(items))), dashboardListOutput{Dashboards: summaries}, nil
 }
 
 func (s *Server) dashboardGet(ctx context.Context, req *mcp.CallToolRequest, input DashboardIDInput) (*mcp.CallToolResult, dashboardOutput, error) {
@@ -169,7 +184,7 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 	// Strip any upstream context first: only authenticated in-process metadata
 	// may supply provenance. OAuth requests never accept this client-suppliable key.
 	ctx = dashboard.WithBuildOrigin(ctx, dashboard.BuildOrigin{})
-	if req.Extra == nil || req.Extra.TokenInfo == nil {
+	if inProcess(req) {
 		if value, exists := req.Params.Meta[dashboard.BuildOriginMetaKey]; exists {
 			raw, err := json.Marshal(value)
 			if err != nil {
@@ -303,17 +318,23 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 	return summary(text), out, nil
 }
 
-// dashboardOwner resolves the authenticated owner for a dashboard tool call.
-//
-// Trust model: OAuth TokenInfo, when present, is always authoritative — the
+// inProcess identifies calls without a transport-authenticated OAuth identity.
+func inProcess(req *mcp.CallToolRequest) bool {
+	return req == nil || req.Extra == nil || req.Extra.TokenInfo == nil
+}
+
+// dashboardOwner resolves the authenticated owner. OAuth TokenInfo, when present, is always authoritative — the
 // client-suppliable _meta owner key is never consulted alongside it, so a
 // remote client cannot spoof another owner. The _meta fallback is safe only
-// because ProtectMCP (internal/api/oauth.go) attaches TokenInfo to every
+// because ProtectMCP and ProtectBrowserMCP (internal/api/oauth.go) attach TokenInfo to every
 // HTTP-transport request, leaving the fallback reachable solely via the
 // in-process transport, where the agent runtime (internal/agent/tools.go)
 // injects the already-authenticated user's ID. See dashboard.OwnerMetaKey.
 func dashboardOwner(req *mcp.CallToolRequest) (string, error) {
-	if req != nil && req.Extra != nil && req.Extra.TokenInfo != nil && strings.TrimSpace(req.Extra.TokenInfo.UserID) != "" {
+	if !inProcess(req) {
+		if strings.TrimSpace(req.Extra.TokenInfo.UserID) == "" {
+			return "", errors.New("authenticated dashboard owner is required")
+		}
 		if !slices.Contains(req.Extra.TokenInfo.Scopes, dashboard.OAuthScope) {
 			return "", errors.New("dashboard permission is required")
 		}
