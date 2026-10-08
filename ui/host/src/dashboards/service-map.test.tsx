@@ -1,5 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { act } from "react";
+import { act, Profiler } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceMapModel } from "../../../panels/rollups";
@@ -20,6 +20,69 @@ const cleanups: (() => void)[] = [];
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(fn => fn())); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 const model = () => serviceMapModel(demoFrame, { from_ms: 0, to_ms: 3600000 });
+describe("Part 9 C1 scroll event lifetime and feedback", () => {
+  const tallFrame: Frame = {
+    ...demoFrame,
+    rows: demoFrame.rows + 40,
+    values: demoFrame.values.map((values, column) => [...values, ...Array.from({ length: 40 }, (_, i) =>
+      ["node", `isolated-${i}`, "", "", "", null, null, 0, "healthy", 30, 1000][column] as string | number | null)]),
+  };
+  async function renderTall() {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+      return this.hasAttribute("data-service-viewport") ? DOMRect.fromRect({ width: 1100, height: 180 }) : original.call(this);
+    });
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host); cleanups.push(() => root.unmount());
+    const commits = vi.fn(), mapView = vi.fn();
+    await act(async () => root.render(<MantineProvider><Profiler id="map" onRender={commits}><ServiceMapViz
+      panel={{ id: "m", title: "Map", viz: "service_map" }}
+      result={{ id: "m", status: "ok", elapsed_ms: 1, frame: tallFrame }} dark={false} height={204} onMapView={mapView}
+    /></Profiler></MantineProvider>));
+    const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
+    expect(Number(viewport.dataset.contentHeight)).toBeGreaterThan(180);
+    commits.mockClear();
+    return { viewport, commits, fit: mapView.mock.lastCall![0].fit as () => void };
+  }
+  it("snapshots user scroll positions before queued updaters outlive the event", async () => {
+    const { viewport } = await renderTall();
+    await act(async () => {
+      // Two events before React flushes force the second updater to run after
+      // React clears SyntheticEvent.currentTarget, rather than only eagerly.
+      for (const top of [45, 90]) {
+        viewport.scrollTop = top;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    });
+    expect(viewport.dataset.panY).toBe("-90");
+    expect(viewport.scrollTop).toBe(90);
+    expect(viewport.dataset.panX).toBe("0");
+  });
+  it("ignores programmatic scroll echoes and repeated equal positions", async () => {
+    const { viewport, commits } = await renderTall();
+    await act(async () => viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: 45, bubbles: true, cancelable: true })));
+    const top = viewport.scrollTop;
+    expect(viewport.dataset.panY).toBe(String(-top));
+    await act(async () => viewport.dispatchEvent(new Event("scroll", { bubbles: true })));
+    expect(commits.mock.calls.length).toBeLessThanOrEqual(1);
+    commits.mockClear();
+    await act(async () => {
+      viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: 0, bubbles: true, cancelable: true }));
+    });
+    expect(commits).not.toHaveBeenCalled();
+  });
+  it("keeps a queued wheel scroll followed by Fit at the fitted position", async () => {
+    const { viewport, fit } = await renderTall();
+    const initial = viewport.scrollTop;
+    await act(async () => {
+      viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: 45, bubbles: true, cancelable: true }));
+      fit();
+    });
+    expect(viewport.scrollTop).toBe(initial);
+    expect(Number(viewport.dataset.panY)).toBeCloseTo(-initial);
+  });
+});
 describe("preview V10", () => {
   it("P3a keeps the default demo readable and uses vertical overflow for short bodies", () => {
     const normal = layoutServiceMap(model(), {width:1100,height:480});

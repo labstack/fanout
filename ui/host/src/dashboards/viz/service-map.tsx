@@ -172,6 +172,7 @@ type Transform = { scale: number; x: number; y: number };
 const fitted: Transform = { scale: 1, x: 0, y: 0 };
 export function ServiceMapViz({ panel, title = panel.title, result, dark, height, onSelect, onPoint, onMapView }: AnalysisProps & { onMapView?: (view: MapView) => void }) {
   const viewport = useRef<HTMLDivElement>(null);
+  const programmaticTop = useRef<number | null>(null);
   const [size, setSize] = useState({ width: 500, height: Math.max(40, height - 24) });
   const [transform, setTransform] = useState(fitted);
   const [fontVersion,setFontVersion] = useState(0);
@@ -199,12 +200,24 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
   const scrollTo = (x: number, y: number, scale = transform.scale) => {
     const el = viewport.current; if (!el) return;
     el.scrollLeft = 0;
-    el.scrollTop = clamp(y, 0, Math.max(0, graph.contentHeight * scale - (el.clientHeight||size.height)));
-    setTransform({scale:1,x:0,y:-el.scrollTop});
+    const next = clamp(y, 0, Math.max(0, graph.contentHeight * scale - (el.clientHeight||size.height)));
+    if (el.scrollTop !== next) {
+      el.scrollTop = next;
+      programmaticTop.current = el.scrollTop;
+    }
+    const top = el.scrollTop;
+    setTransform(old => old.scale === 1 && old.x === 0 && old.y === -top ? old : {scale:1,x:0,y:-top});
   };
   const fit = () => { scrollTo(0,graph.initialScrollY,1); };
   useLayoutEffect(() => {
-    const el=viewport.current;if(el){el.scrollLeft=0;el.scrollTop=-transform.y;}
+    const el=viewport.current;
+    if(el){
+      el.scrollLeft=0;
+      if(el.scrollTop!==-transform.y){
+        el.scrollTop=-transform.y;
+        programmaticTop.current=el.scrollTop;
+      }
+    }
   },[transform]);
   useLayoutEffect(() => {
     const el = viewport.current; if (!el) return;
@@ -226,7 +239,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     const el = viewport.current; if (!el) return;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      scrollTo(0,el.scrollTop+e.deltaY);
+      if (e.deltaY !== 0) scrollTo(0,el.scrollTop+e.deltaY);
     };
     el.addEventListener("wheel", wheel, { passive: false }); return () => el.removeEventListener("wheel", wheel);
   }, [size,graph.contentHeight,graph.contentWidth,transform]);
@@ -238,7 +251,15 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
   const below=graph.nodes.filter(n=>n.y+n.height>size.height-transform.y+.5).length;
   return <div role="region" aria-label={`${title}: service dependency graph; ${analysisSummary({ ...panel, title }, result)}`} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
     <div style={{position:"relative",flex:"1 1 auto",minHeight:0}}>
-    <div ref={viewport} data-service-viewport data-card-mode={graph.compact ? "compact" : "full"} data-initial-scroll-y={graph.initialScrollY} data-layout-scale={graph.scale} data-content-width={graph.contentWidth} data-content-height={graph.contentHeight} data-zoom={transform.scale} data-pan-x={transform.x} data-pan-y={transform.y} style={{ position: "relative", height: "100%", minHeight: 0, overflowX: "hidden", overflowY:"auto", touchAction: "none", cursor: "grab" }} onMouseLeave={() => setHover(undefined)} onScroll={e=>{e.currentTarget.scrollLeft=0;setTransform(old=>({...old,x:0,y:-e.currentTarget.scrollTop}));}}
+    <div ref={viewport} data-service-viewport data-card-mode={graph.compact ? "compact" : "full"} data-initial-scroll-y={graph.initialScrollY} data-layout-scale={graph.scale} data-content-width={graph.contentWidth} data-content-height={graph.contentHeight} data-zoom={transform.scale} data-pan-x={transform.x} data-pan-y={transform.y} style={{ position: "relative", height: "100%", minHeight: 0, overflowX: "hidden", overflowY:"auto", touchAction: "none", cursor: "grab" }} onMouseLeave={() => setHover(undefined)} onScroll={e=>{
+      const top = e.currentTarget.scrollTop;
+      e.currentTarget.scrollLeft=0;
+      // Native scroll events are queued and may coalesce. Keep the last
+      // programmed position until a user scroll differs, ignoring its echoes.
+      if (programmaticTop.current === top) return;
+      programmaticTop.current = null;
+      setTransform(old => old.y === -top ? old : { ...old, x: 0, y: -top });
+    }}
       onPointerDown={e => { if (e.button !== 0) return; suppressClick.current = false; dragging.current = { x: e.clientX, y: e.clientY, initial: transform, moved: false }; if (!(e.target as Element).closest("button")) e.currentTarget.setPointerCapture?.(e.pointerId); }}
       onPointerMove={e => { const drag = dragging.current; if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true; if (drag.moved) { e.currentTarget.setPointerCapture?.(e.pointerId); scrollTo(-drag.initial.x-dx,-drag.initial.y-dy,drag.initial.scale); } }}
       onPointerUp={() => { suppressClick.current = dragging.current?.moved ?? false; dragging.current = null; }} onPointerCancel={() => { dragging.current = null; suppressClick.current = false; }}>

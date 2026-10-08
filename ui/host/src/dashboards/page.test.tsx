@@ -94,6 +94,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { cleanups.splice(0).forEach((cleanup) => cleanup()); });
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   document.body.innerHTML = "";
 });
 
@@ -116,6 +117,39 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
+  it.each([1100, 1440])("Part 9 keeps a tall service-map dashboard alive at width %s", async width => {
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(target: Element) { this.callback([{ target, contentRect: { width, height: 180 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      unobserve() {}
+      disconnect() {}
+    });
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
+      return this.hasAttribute("data-service-viewport") ? DOMRect.fromRect({ width, height: 180 }) : original.call(this);
+    });
+    const columns = ["kind", "service", "health", "spans"];
+    const rows = Array.from({ length: 40 }, (_, i) => ["node", `isolated-${i}`, "healthy", 10]);
+    servedRecord = { ...record, spec: { ...spec, panels: [{ id: "map", title: "Map", viz: "service_map", grid: { x: 0, y: 0, w: 12, h: 6 }, query: { from: "spans" } }] } };
+    panelResponse = async () => json({ results: [{ id: "map", status: "ok", elapsed_ms: 1, frame: {
+      columns: columns.map(name => ({ name, type: "string", role: "dimension" })),
+      values: columns.map((_, i) => rows.map(row => row[i])), rows: rows.length,
+    } }] });
+    const { host } = await render();
+    const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
+    expect(viewport).not.toBeNull();
+    expect(Number(viewport.dataset.contentHeight)).toBeGreaterThan(180);
+    await act(async () => {
+      for (const top of [45, 90]) {
+        viewport.scrollTop = top;
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+    });
+    expect(host.textContent).not.toContain("Something went wrong");
+    expect(host.querySelector('[data-panel="map"]')).not.toBeNull();
+    expect(host.querySelectorAll("[data-service-node]")).toHaveLength(40);
+    expect(viewport.dataset.panY).toBe("-90");
+  });
   it.each(["deploys", "anomalies"] as const)("shares annotations with time panels and refreshes when %s is disabled", async disabled => {
     const annotations: AnnotationsResponse = {
       deploys: [{ namespace: "shop", service: "checkout", version: "v2", at: new Date(1000).toISOString() }],
