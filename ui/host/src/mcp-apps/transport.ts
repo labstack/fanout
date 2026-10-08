@@ -7,7 +7,14 @@ import type { DrillClient } from "../dashboards/drill-client";
 export function appTransport(app: App) {
   async function call<T>(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) throw new DOMException("Canceled", "AbortError");
-    const result = await app.callServerTool({ name, arguments: args }, { signal });
+    let result: Awaited<ReturnType<App["callServerTool"]>>;
+    try {
+      result = await app.callServerTool({ name, arguments: args }, { signal });
+    } catch (cause) {
+      if (cause instanceof Error && cause.name === "AbortError") throw cause;
+      if (signal?.aborted) throw new DOMException("Canceled", "AbortError");
+      throw new Error("This view could not be refreshed.");
+    }
     if (signal?.aborted) throw new DOMException("Canceled", "AbortError");
     if (result.isError || !result.structuredContent) throw new Error("This view could not be refreshed.");
     return result.structuredContent as T;

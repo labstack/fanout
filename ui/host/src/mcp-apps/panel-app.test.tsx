@@ -2,9 +2,9 @@ import { act } from "react";
 import { createRoot as realCreateRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { App } from "@modelcontextprotocol/ext-apps";
-import { PanelApp } from "./main";
+import { PanelApp } from "./panel-app";
 import template from "../../panels.html?raw";
-import { fixture, traceFixture } from "./fixtures";
+import { fixture, traceFixture, presets, presetFixture, assertPresetData } from "../../tests/fixtures";
 const bridge = vi.hoisted(() => ({ app: null as unknown as App, connected: true, connectionError: null as Error | null }));
 vi.mock("@modelcontextprotocol/ext-apps/react", async () => {
   const { useEffect } = await import("react");
@@ -12,10 +12,6 @@ vi.mock("@modelcontextprotocol/ext-apps/react", async () => {
     useEffect(() => { if (bridge.connected) onAppCreated(bridge.app); }, []);
     return { app: bridge.connected ? bridge.app : null, error: bridge.connectionError };
   } };
-});
-vi.mock("react-dom/client", async () => {
-  const real = await vi.importActual<typeof import("react-dom/client")>("react-dom/client");
-  return { ...real, createRoot: (node: HTMLElement | null) => node ? real.createRoot(node) : { render() {} } };
 });
 vi.mock("../dashboards/echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }));
 beforeEach(() => {
@@ -60,6 +56,8 @@ it("sanitizes tool and bridge errors and recovers with a new valid fragment", as
     expect(view.node.textContent).toContain("No logs for checkout");
     await act(async () => bridge.app.onerror!(new Error("private bridge error")));
     expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be refreshed. Please try again.");
+    expect(view.node.textContent).toContain("No logs for checkout");
+    expect(view.node.querySelector('[data-panel="p"]')).not.toBeNull();
   } finally { await view.cleanup(); }
 });
 it("waits for the bridge and sanitizes connection errors", async () => {
@@ -70,5 +68,28 @@ it("waits for the bridge and sanitizes connection errors", async () => {
     bridge.connectionError = new Error("private connection error");
     await act(async () => view.root.render(<PanelApp />));
     expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be loaded. Please try again.");
+  } finally { await view.cleanup(); }
+});
+
+it.each(presets.flatMap(preset => [false, true].map(dark => ({ preset, dark }))))("renders the real $preset preset through panels.html and PanelApp (dark=$dark)", async ({ preset, dark }) => {
+  const fetch = vi.spyOn(globalThis, "fetch"); const view = await mount();
+  try {
+    const raw = presetFixture(preset);
+    await act(async () => { await bridge.app.ontoolresult!({ structuredContent: raw, content: [] }); await bridge.app.onhostcontextchanged!({ theme: dark ? "dark" : "light" }); });
+    expect(document.documentElement.getAttribute("data-mantine-color-scheme")).toBe(dark ? "dark" : "light");
+    expect(view.node.querySelectorAll("[data-panel]")).toHaveLength(raw.dashboard.panels.length);
+    assertPresetData(view.node, preset);
+    expect(fetch).not.toHaveBeenCalled(); expect(bridge.app.callServerTool).not.toHaveBeenCalled();
+  } finally { await view.cleanup(); fetch.mockRestore(); }
+});
+it("keeps the last good answer and sanitizes rejected refresh requests", async () => {
+  const view = await mount();
+  try {
+    await act(async () => bridge.app.ontoolresult!({ structuredContent: fixture(), content: [] }));
+    vi.mocked(bridge.app.callServerTool).mockRejectedValue(new Error("private RPC diagnostic"));
+    await act(async () => view.node.querySelector<HTMLButtonElement>('[aria-label="Refresh panels"]')!.click());
+    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be refreshed.");
+    expect(view.node.textContent).toContain("No logs for checkout");
+    expect(view.node.textContent).not.toContain("private");
   } finally { await view.cleanup(); }
 });

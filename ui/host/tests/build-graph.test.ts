@@ -1,12 +1,12 @@
 // @vitest-environment node
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { build } from "vite";
 import { expect, it } from "vitest";
-import { appBuildBoundary, blobWorkerOnly } from "../../vite.apps.config";
+import { appBuildBoundary, blobWorkerOnly } from "../build/apps";
 
-it.each(["auth.ts", "router.ts", "routes/index.ts", "App.tsx", "main.tsx", "app-context.tsx", "provider-context.tsx", "dashboards/api.ts"].flatMap(file => [false, true].map(transitive => ({ file, transitive }))))("rejects forbidden runtime imports: $file transitive=$transitive", async ({ file, transitive }) => {
+it.each(["auth.ts", "auth-session.ts", "api.ts", "observability.ts", "mcp-app-frame.tsx", "router.ts", "routes/index.ts", "App.tsx", "main.tsx", "app-context.tsx", "provider-context.tsx", "dashboards/api.ts"].flatMap(file => [false, true].map(transitive => ({ file, transitive }))))("rejects forbidden runtime imports: $file transitive=$transitive", async ({ file, transitive }) => {
   const root = mkdtempSync(resolve(tmpdir(), "fanout-graph-"));
   try {
     mkdirSync(resolve(root, "src/mcp-apps"), { recursive: true }); mkdirSync(resolve(root, "src/dashboards"));
@@ -27,27 +27,21 @@ it("permits shared rendering and erased API contracts", async () => {
     await expect(build({ configFile: false, root, plugins: [appBuildBoundary()], build: { write: false, rollupOptions: { input: "src/mcp-apps/main.ts" } } })).resolves.toBeDefined();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
-it("constructs emitted inline workers from Blob URLs and never falls back to data: under CSP", () => {
-  const plugin = blobWorkerOnly();
-  const transform = plugin.transform as (code: string, id: string) => { code: string } | undefined;
-  const source = 'export default function WorkerWrapper(options) { let objURL;try { objURL=URL.createObjectURL(new Blob(["self.onmessage=()=>{}"],{type:"text/javascript"})); return new Worker(objURL,options); } catch { return new Worker("data:text/javascript;base64,AA", options); } finally { if(objURL)URL.revokeObjectURL(objURL); } }';
-  const code = transform(source, "map.worker.ts?worker&inline")!.code.replace("export default", "return");
-  const urls: string[] = []; const URL = { createObjectURL: () => "blob:map", revokeObjectURL: () => undefined };
-  class Worker { constructor(url: string) { urls.push(url); } }
-  new (new Function("Blob", "URL", "Worker", code)(Blob, URL, Worker))();
-  expect(urls).toEqual(["blob:map"]);
-  const failingURL = { ...URL, createObjectURL: () => { throw new Error("CSP blocked"); } };
-  expect(() => new (new Function("Blob", "URL", "Worker", code)(Blob, failingURL, Worker))()).toThrow("CSP blocked");
-  expect(urls).toEqual(["blob:map"]);
-});
-it.skipIf(!existsSync(resolve("../../.superpowers/build/m3-apps/panels.html")))("stages exactly one self-contained HTML artifact when built", () => {
-  const dir = resolve("../../.superpowers/build/m3-apps");
-  expect(readdirSync(dir)).toEqual(["panels.html"]);
-  const html = readFileSync(resolve(dir, "panels.html"), "utf8");
-  expect(html).not.toMatch(/<script[^>]+src=|<link[^>]+(?:stylesheet|modulepreload)/);
-  expect(html).not.toMatch(/new Worker\([^)]*["']data:/);
-  expect(html).toContain("createObjectURL"); expect(html).toContain("revokeObjectURL"); expect(html).toContain("data:font/");
-});
+it("builds the real app graph into one self-contained HTML artifact", async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "fanout-app-"));
+  const previousEnvironment = process.env.NODE_ENV; process.env.NODE_ENV = "production";
+  try {
+    await build({ configFile: resolve("vite.apps.config.ts"), build: { outDir: dir } });
+    expect(readdirSync(dir)).toEqual(["panels.html"]);
+    const html = readFileSync(resolve(dir, "panels.html"), "utf8");
+    const markup = html.replace(/(<script\b[^>]*>)[\s\S]*?<\/script>/g, "$1</script>").replace(/(<style\b[^>]*>)[\s\S]*?<\/style>/g, "$1</style>");
+    expect(/<script[^>]+src=|<link[^>]+(?:stylesheet|modulepreload)/.test(markup)).toBe(false);
+    expect(/(?:src|href)=["']https?:/.test(markup)).toBe(false);
+    expect(html).not.toContain("data:text/javascript");
+    expect(html).toContain("createObjectURL"); expect(html).toContain("revokeObjectURL"); expect(html).toContain("data:font/");
+    expect(html).not.toContain("chat-composer"); expect(html).not.toContain("rail-row");
+  } finally { if (previousEnvironment === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousEnvironment; rmSync(dir, { recursive: true, force: true }); }
+}, 30_000);
 
 it("executes the Vite-emitted worker wrapper using a Blob URL and surfaces initialization failure", async () => {
   const root = mkdtempSync(resolve(tmpdir(), "fanout-worker-"));

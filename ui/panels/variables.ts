@@ -23,7 +23,16 @@ export function currentValue(variable: Variable, vars: Record<string, VarValue>,
   return opts?.[0]?.value ?? "";
 }
 
-
 export const interpolate = (text: string, vars: Record<string, VarValue>) =>
   text.replace(/\$([a-z][a-z0-9_]*)/g, (match, name: string) => { const v = vars[name]; return v === undefined ? match : v === "$__all" ? "all" : Array.isArray(v) ? v.join(", ") : v; });
 
+/** Placeholder options are display-only; unresolved query values stay server-owned. */
+export function resolvedVariables(variables: Variable[] | undefined, vars: Record<string, VarValue>, options?: Record<string, { value: string }[]>) {
+  const out: Record<string, VarValue> = {};
+  for (const variable of variables ?? []) {
+    const value = currentValue(variable, vars, options?.[variable.name]);
+    if (variable.kind === "query" && value === "") continue;
+    out[variable.name] = value;
+  }
+  return out;
+}

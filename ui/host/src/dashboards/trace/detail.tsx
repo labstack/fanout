@@ -2,7 +2,8 @@ import { Alert, Badge, Box, Button, Group, Paper, ScrollArea, Stack, Text } from
 import { Tooltip } from "@mantine/core";
 import { useMemo, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
-import { seriesSlot } from "../../../../chart";
+import { seriesSlot, statusHex } from "../../../../chart";
+import { filledTextOn } from "../../../../theme";
 import { duration } from "../../../../format";
 import { TraceLogs, Waterfall } from "./trace-components";
 
@@ -12,7 +13,7 @@ export function TraceDetailView({ result, dark, onSpan }: { result: Result<Trace
   return <Stack gap="sm">
     <Group><Text fw={600}>{data.trace_id}</Text><Text c={data.has_error ? "bad" : "dimmed"}>{data.has_error ? "■ Error" : "● OK"}</Text></Group>
     {data.spans.length > 0 ? <>
-      <Group role="group" aria-label="Trace view"><Button variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
+      <Group role="group" aria-label="Trace view"><Button aria-pressed={view === "waterfall"} variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button aria-pressed={view === "flame"} variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
       {view === "waterfall" ? <Waterfall spans={data.spans} dark={dark} onSpan={onSpan} /> : <FlameGraph spans={data.spans} dark={dark} onSpan={onSpan} />}
     </> : <Text c="dimmed">No spans were found for this trace.</Text>}
     <Text fw={600}>Correlated logs</Text><TraceLogs entries={data.logs} />
@@ -34,7 +35,14 @@ function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean
             {model.frames.map(({ span, lane, left, width }) => {
               const failed = span.status.toUpperCase().includes("ERROR");
               const compact = width < 7;
-              return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow><Button variant="filled" color={failed ? "bad" : seriesSlot(services.indexOf(span.service), dark)} aria-label={`${span.operation} · ${span.service} · ${duration(span.duration_ms)}`} pos="absolute" left={`${left}%`} top={lane * 36 + 6} w={`${Math.max(width, .35)}%`} h={30} px={compact ? 2 : "xs"} size="compact-xs" disabled={!onSpan} onClick={() => onSpan?.(span)} style={{ overflow: "hidden", minWidth: 3 }}><Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text></Button></Tooltip>;
+              const color = failed ? statusHex(dark).bad : seriesSlot(services.indexOf(span.service), dark);
+              const label = `${span.operation} · ${span.service} · ${duration(span.duration_ms)}`;
+              const content = <Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text>;
+              const geometry = { position: "absolute" as const, left: `${left}%`, top: lane * 36 + 6, width: `${Math.max(width, .35)}%`, height: 30, overflow: "hidden", minWidth: 3 };
+              return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow events={{ hover: true, focus: true, touch: false }}>
+                {onSpan ? <Button variant="filled" color={color} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
+                  : <Box role="img" tabIndex={0} aria-label={label} style={{ ...geometry, display: "flex", alignItems: "center", paddingInline: compact ? 2 : 8, borderRadius: "var(--mantine-radius-sm)", background: color, color: filledTextOn(color) }}>{content}</Box>}
+              </Tooltip>;
             })}
           </Box>
         </Box>
@@ -44,7 +52,7 @@ function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean
   </Stack>;
 }
 
-export function flameModel(spans: TraceSpan[]) {
+function flameModel(spans: TraceSpan[]) {
   const start = Math.min(...spans.map((span) => new Date(span.start).valueOf()));
   const end = Math.max(...spans.map((span) => new Date(span.start).valueOf() + span.duration_ms));
   const total = Math.max(end - start, 1);

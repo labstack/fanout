@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FragmentView } from "../dashboards/fragment-view";
 import { layoutServiceMapRaw } from "../dashboards/viz/service-map-layout";
 import type { PanelFragment } from "../../../panels/fragment";
-import { fixture } from "./fixtures";
+import { fixture } from "../../tests/fixtures";
 
 const workers = vi.hoisted(() => ({ create: vi.fn(), post: vi.fn(), terminate: vi.fn(), current: null as unknown as Worker }));
 vi.mock("../dashboards/viz/service-map.worker?worker&inline", () => ({ default: class {

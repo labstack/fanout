@@ -16,5 +16,6 @@ export function panelFragment(value: unknown): PanelFragment {
   const ids = new Set(f.dashboard.panels.map(p => p.id));
   if (ids.size !== f.dashboard.panels.length || f.results.length !== ids.size || new Set(f.results.map(r => r.id)).size !== ids.size || f.results.some(r => !ids.has(r.id) || !["ok", "empty", "error"].includes(r.status))) throw new Error("Panel results do not match the view");
   if (f.vars !== undefined && (!f.vars || typeof f.vars !== "object" || Array.isArray(f.vars) || Object.values(f.vars).some(v => typeof v !== "string" && !(Array.isArray(v) && v.every(x => typeof x === "string"))))) throw new Error("Invalid panel variables");
+  if (f.trace !== undefined && (!f.trace?.data || !Array.isArray(f.trace.data.spans) || !Array.isArray(f.trace.data.logs) || !Array.isArray(f.trace.data.services))) throw new Error("Invalid trace detail");
   return f as PanelFragment;
 }

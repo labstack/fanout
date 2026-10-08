@@ -1,18 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { ALL, type DashboardSpec, type DashboardTime, type VarValue } from "../../../panels/types";
-import { panelContent, retryQuery } from "./query-policy";
-import { resolveVariables } from "./api";
+import { panelContent } from "../../../panels/content";
+import type { QueryBody } from "./api";
+export type VariableOptions = Record<string, { value: string; count?: number }[]>;
+export type VariableResolver = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) => Promise<VariableOptions>;
 
-export function useVariableOptions(dashboardId: string, _version: number, spec: DashboardSpec, time: DashboardTime, vars: Record<string, VarValue>) {
-  const hasVariables = (spec.variables?.length ?? 0) > 0;
+export function useVariableOptions(scope: string, spec: DashboardSpec, time: DashboardTime, vars: Record<string, VarValue>, resolveVariables: VariableResolver, retry: false | ((count: number, error: Error) => boolean) = false) {
+  const hasVariables = Boolean(spec.variables?.some(v => v.kind === "query"));
   const query = useQuery({
-    queryKey: ["variables", dashboardId, panelContent(spec), time, vars],
+    queryKey: ["variables", scope, panelContent(spec), time, vars],
     queryFn: async ({ signal }) => {
       const options = await resolveVariables({ dashboard: spec, time, vars }, signal);
-      return Object.fromEntries((spec.variables ?? []).map(variable => [variable.name, options[variable.name] ?? []]));
+      return Object.fromEntries((spec.variables ?? []).map(variable => [variable.name, options[variable.name] ?? (variable.kind === "custom" ? variable.options?.map(value => ({ value })) : undefined) ?? []]));
     },
     enabled: hasVariables,
-    retry: retryQuery,
+    retry,
     staleTime: 60_000,
     placeholderData: (previous) => previous,
   });

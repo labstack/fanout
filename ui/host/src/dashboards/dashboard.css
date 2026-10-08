@@ -1,0 +1,59 @@
+/* Shared panel and dashboard integration rules. */
+.dashboard-grid {
+  min-height: 420px;
+}
+
+.dashboard-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.dashboard-dimension-nowrap {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.react-grid-item.react-grid-placeholder {
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-primary-color-filled);
+  opacity: 0.14;
+}
+
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.react-grid-item:hover > .react-resizable-handle,
+.react-grid-item:focus-within > .react-resizable-handle {
+  opacity: 0.55;
+}
+
+.panel-markdown {
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.panel-markdown :where(p, ul, ol) {
+  margin: 0 0 0.5em;
+}
+
+.panel-markdown code {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 12px;
+}
+
+/* Route and viewport changes must settle before the next paint. Editing keeps
+   react-grid-layout's drag/resize transitions. */
+.dashboard-grid:not(.dashboard-grid-editing) {
+  transition: none;
+}
+.dashboard-grid:not(.dashboard-grid-editing) > .react-grid-item {
+  transition: none;
+}
+
+.dashboard-panel-padding {
+  padding-inline: 16px;
+}

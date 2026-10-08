@@ -13,6 +13,7 @@ import "@fontsource-variable/geist-mono";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "./index.css";
+import "./dashboards/dashboard.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

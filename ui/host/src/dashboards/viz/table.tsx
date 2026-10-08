@@ -20,8 +20,9 @@ type Row = Cell[];
 
 export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowIndex: number; columnIndex: number };
 
-export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell }: { panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
+export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks }: { traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
   const dark=useComputedColorScheme("light")==="dark";
+  const traceInteractive = Boolean(onPoint);
   const pointCallback = useRef(onPoint);
   const variableCallback = useRef(onVariable);
   pointCallback.current = onPoint;
@@ -50,10 +51,10 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         if (format.format === "sparkline" && !panel.query && column.type !== "json") return <Text fz={12} c="dimmed" role="status">Sparkline requires an array column</Text>;
         const selection = { ...model.selection(model.rows[info.row.index]), trace_id: value === null ? undefined : String(value) };
         const target = format.format === "trace_link" ? makeDrill(panel, result, selection) : undefined;
-        const url = target ? new URL(window.location.href) : undefined;
+        const url = target && !traceLinks ? new URL(window.location.href) : undefined;
         if (url && target) url.searchParams.set("drill", JSON.stringify(target));
         return <FormattedCell format={{ ...format, unit: format.unit ?? (column.unit as Unit | undefined) ?? panel.unit }} value={value} max={maxima[index]} panel={panel} better={result.better}
-          trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={url?.toString()}
+          trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={url?.toString()} traceButton={traceLinks === "button" && Boolean(target && selection.trace_id && traceInteractive)}
           onTrace={() => pointCallback.current?.(selection)} onService={(name, value) => variableCallback.current?.(name, value)} />;
       }
       if (column.type === "number" && typeof value === "number") {
@@ -74,7 +75,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
     if(panel.viz!=="log_patterns") return 0;
     const order=["severity","body_template","service","count","trend"];
     return order.indexOf(a.id!)-order.indexOf(b.id!);
-  }), [frame, panel, panel.options?.columns, result, firstMeasure, maxima, renderCell, model,hidden,dark]);
+  }), [frame, panel, panel.options?.columns, result, firstMeasure, maxima, renderCell, model,hidden,dark,traceLinks,traceInteractive]);
   const [sorting, setSorting] = useState<SortingState>([]);
   const table = useTable({ features, data: rows, columns, state: { sorting }, onSortingChange: setSorting });
   const firstDimension = panel.query?.by?.length ? frame.columns.findIndex(c => c.role === "dimension") : panel.query && frame.columns.some(c => c.name === "service") ? frame.columns.findIndex(c => c.name === "service") : frame.columns.findIndex(c => c.role === "dimension");
@@ -129,9 +130,9 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   </Box>;
 }
 
-function FormattedCell({ format, value, max, panel, better, trend, traceHref, onTrace, onService }: {
+function FormattedCell({ format, value, max, panel, better, trend, traceHref, traceButton, onTrace, onService }: {
   format: ColumnFormat; value: Cell; max: number; panel: Panel; better?: "lower" | "higher"; trend?: (number | null)[];
-  traceHref?: string; onTrace: () => void; onService: (name: string, value: string) => void;
+  traceHref?: string; traceButton?: boolean; onTrace: () => void; onService: (name: string, value: string) => void;
 }): ReactNode {
   const dark=useComputedColorScheme("light")==="dark";
   const display = columnDisplay(format, value, max, panel, better, trend);
@@ -153,7 +154,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, on
         {(typeof value === "number" || value === null) && <Text size="sm" ff="monospace" style={{ flex: "none" }}>{display.text}</Text>}
         {display.points && display.points.filter(p => p !== null).length >= 2 ? <Sparkline points={display.points} /> : <Text c="dimmed">No trend</Text>}
       </Box>;
-    case "trace_link": return traceHref ? <Anchor ff="monospace" fz={12} title={display.text} href={traceHref} onClick={event => {
+    case "trace_link": return traceButton ? <Anchor component="button" type="button" ff="monospace" fz={12} title={display.text} onClick={event => { event.stopPropagation(); onTrace(); }}>{display.text.slice(0,16)}</Anchor> : traceHref ? <Anchor ff="monospace" fz={12} title={display.text} href={traceHref} onClick={event => {
       if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
         event.preventDefault(); event.stopPropagation(); onTrace();
       }

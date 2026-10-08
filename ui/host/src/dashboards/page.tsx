@@ -4,10 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp } from "../app-context";
-import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace } from "./api";
+import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
-import { makeDrill, parseDrill } from "./drill-state";
+import { parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
 import { useBrushZoom } from "./use-brush-zoom";
@@ -15,7 +15,9 @@ import { usePanelResults } from "./use-panel-results";
 import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
 
-import { currentValue } from "../../../panels/variables";
+import { resolvedVariables } from "../../../panels/variables";
+import { drillSelection } from "./panel-handlers";
+import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
 const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
 
@@ -54,18 +56,8 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
   const compare = search.compare ? search.compare === "1" : spec.time.compare === "previous_period";
   const vars = search.vars ?? {};
-  const options = useVariableOptions(id, version, spec, time, vars);
-  const resolvedVars = useMemo(() => {
-    const out: Record<string, VarValue> = {};
-    for (const v of spec.variables ?? []) {
-      const value = currentValue(v, vars, options.currentData?.[v.name]);
-      // An unresolved or empty query choice belongs to the server's chooseValue.
-      // Placeholder options are display-only, never values for a new request.
-      if (v.kind === "query" && value === "") continue;
-      out[v.name] = value;
-    }
-    return out;
-  }, [spec.variables, vars, options.currentData]);
+  const options = useVariableOptions(`dashboard-${id}`, spec, time, vars, resolveVariables, retryQuery);
+  const resolvedVars = useMemo(() => resolvedVariables(spec.variables, vars, options.currentData), [spec.variables, vars, options.currentData]);
   // Panel widths come from the layout and the viewport, known at first
   // render, so the first batch already carries them and no second request
   // follows once the grid has measured itself.
@@ -133,11 +125,8 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
       agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
       onPoint={(panel, selection) => {
-        const result = data.results.get(panel.id); if (!result) return;
-        const target = makeDrill(panel, result, selection); if (!target) return;
-        const first = Object.values(selection.dimensions)[0]; const variable = panel.click?.set_variable;
-        const vars = variable && first !== undefined ? { ...search.vars, [variable]: first } : search.vars;
-        onSearch({ ...search, vars, drill: JSON.stringify(target) }, false);
+        const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
+        if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);
       }} />
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
   </Box>;

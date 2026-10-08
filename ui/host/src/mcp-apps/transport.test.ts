@@ -1,8 +1,16 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { expect, it, vi } from "vitest";
 import { appTransport } from "./transport";
-import { fixture, traceFixture } from "./fixtures";
+import { fixture, traceFixture } from "../../tests/fixtures";
 import type { QueryBody } from "../dashboards/api";
+
+it("sanitizes bridge rejections while retaining AbortError cancellation", async () => {
+  const callServerTool = vi.fn().mockRejectedValue(new Error("private RPC diagnostic"));
+  const transport = appTransport({ callServerTool } as unknown as App);
+  await expect(transport.query({ dashboard: fixture().dashboard })).rejects.toThrow("This view could not be refreshed.");
+  callServerTool.mockRejectedValue(new DOMException("Canceled", "AbortError"));
+  await expect(transport.query({ dashboard: fixture().dashboard })).rejects.toMatchObject({ name: "AbortError" });
+});
 
 it("queries a complete fragment with scalar, multi, All and empty values without fetch", async () => {
   const fetch = vi.spyOn(globalThis, "fetch");

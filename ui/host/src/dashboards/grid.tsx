@@ -5,6 +5,8 @@ import { Responsive, type Layout } from "react-grid-layout/legacy";
 import type { DashboardSpec, DashboardTime, Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { ApiError, patchDashboard, replaceDashboard } from "./api";
+import { interpolate } from "../../../panels/variables";
+import { panelHandlers } from "./panel-handlers";
 import { PanelCard } from "./panel-card";
 
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
@@ -22,9 +24,6 @@ export type GridProps = {
   onPoint?(panel: Panel, selection: Selection): void; onZoom?(from: number, to: number): void;
   zoomed?: boolean; onZoomReset?(): void;
 };
-
-export { interpolate } from "../../../panels/variables";
-import { interpolate } from "../../../panels/variables";
 
 let panelIdCounter = 0;
 export function newPanelId(panels: Panel[]): string {
@@ -132,8 +131,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
 
   const card = (panel: Panel, height: number) => <PanelCard panel={panel} title={interpolate(panel.title, vars)} result={results.get(panel.id)} loading={fetching && fetchingIds.includes(panel.id)} height={height} group={group} editing={canEdit} agentAvailable={agentAvailable}
     compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
-    onSelect={panel.click && (panel.viz === "service_map" || !(panel.drill && onPoint)) ? value => onVariable(panel.click!.set_variable, value) : undefined}
-    onPoint={onPoint && (panel.viz === "service_map" || panel.click || panel.drill || results.get(panel.id)?.frame?.columns.some((c, i) => c.name === "trace_id" && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")) || panel.options?.columns?.some(c => c.format === "trace_link" && results.get(panel.id)?.frame?.columns.some((column, i) => column.name === c.field && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")))) ? selection => onPoint(panel, selection) : undefined}
+    {...panelHandlers(panel, results.get(panel.id), onVariable, onPoint ? selection => onPoint(panel, selection) : undefined)}
     onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}

@@ -13,7 +13,7 @@ export function usePanelApp() {
       const next = panelFragment(incoming.structuredContent);
       setFragment(next); setToolError(null);
     } catch {
-      setFragment(null); setToolError("This view could not be loaded. Please try again.");
+      setToolError("This view could not be loaded. Please try again.");
     }
   }
   const connection = useApp({

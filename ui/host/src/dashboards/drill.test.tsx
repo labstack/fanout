@@ -72,10 +72,11 @@ import { createRoot } from "react-dom/client";
 import { DrillDrawer } from "./drill";
 import type { DashboardSpec } from "../../../panels/types";
 import type { DrillTarget } from "./drill-state";
+const hostAPI = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
 const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
 vi.mock("./api", () => ({
-  queryExemplars: wire.exemplars,
-  getTrace: wire.trace,
+  queryExemplars: hostAPI.exemplars,
+  getTrace: hostAPI.trace,
 }));
 const spec: DashboardSpec = {
   version: 1,
@@ -94,7 +95,11 @@ const target: DrillTarget = {
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  expect(hostAPI.exemplars).not.toHaveBeenCalled();
+  expect(hostAPI.trace).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
 it("aborts an obsolete selection and keeps the next selection visible", async () => {
   let signal: AbortSignal | undefined;
   let finish: (value: { traces: [] }) => void = () => undefined;

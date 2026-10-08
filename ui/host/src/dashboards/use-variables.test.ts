@@ -53,7 +53,6 @@ it("handles null options for saved single and multi selections", () => {
 });
 
 const wire = vi.hoisted(() => ({resolve:vi.fn()}));
-vi.mock("./api",()=>({resolveVariables:wire.resolve}));
 it.each([{service:null},{}])("normalizes loaded null or missing options %j for saved selections",async response=>{
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
  wire.resolve.mockResolvedValue(response);
@@ -61,7 +60,7 @@ it.each([{service:null},{}])("normalizes loaded null or missing options %j for s
  const node=document.createElement("div");const root=createRoot(node);
  const spec:DashboardSpec={version:1,name:"Empty",time:{range:"1h"},variables:[variable],panels:[]};
  let loaded: {value:string}[] | undefined;
- function Host(){const options=useVariableOptions("d",1,spec,spec.time,{service:"checkout"});loaded=options.currentData?.service;return null;}
+ function Host(){const options=useVariableOptions("d",spec,spec.time,{service:"checkout"},wire.resolve);loaded=options.currentData?.service;return null;}
  try{
   await act(async()=>root.render(createElement(QueryClientProvider,{client},createElement(Host))));
   await act(async()=>{await vi.waitFor(()=>expect(loaded).toEqual([]),{interval:5});});

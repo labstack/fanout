@@ -5,17 +5,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FragmentView } from "./fragment-view";
 import { panelFragment } from "../../../panels/fragment";
-import { fixture, traceFixture } from "../mcp-apps/fixtures";
+import { fixture, traceFixture, presets, presetFixture, assertPresetData } from "../../tests/fixtures";
+import type { VariableResolver } from "./use-variables";
 import type { PanelFragment } from "../../../panels/fragment";
 
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }));
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(() => vi.unstubAllGlobals());
-async function mount(fragment: PanelFragment, dark = false, onQuery = vi.fn().mockResolvedValue(fragment)) {
+async function mount(fragment: PanelFragment, dark = false, onQuery = vi.fn().mockResolvedValue(fragment), resolveVariables?: VariableResolver) {
   const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+  const drill = { exemplars: vi.fn(), trace: vi.fn().mockResolvedValue(traceFixture) };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><QueryClientProvider client={client}><FragmentView fragment={fragment} dark={dark} drillClient={{ exemplars: vi.fn(), trace: vi.fn() }} onQuery={onQuery} /></QueryClientProvider></MantineProvider>));
-  return { el, onQuery, async cleanup() { await act(async () => root.unmount()); el.remove(); client.clear(); } };
+  await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><QueryClientProvider client={client}><FragmentView fragment={fragment} dark={dark} drillClient={drill} resolveVariables={resolveVariables} onQuery={onQuery} /></QueryClientProvider></MantineProvider>));
+  return { el, onQuery, drill, async cleanup() { await act(async () => root.unmount()); el.remove(); client.clear(); } };
 }
 it.each([false, true])("uses PanelCard for spec/data/empty states and never fetches the host (dark=%s)", async dark => {
   const fetch = vi.spyOn(globalThis, "fetch"); const view = await mount(fixture(), dark);
@@ -27,7 +29,7 @@ it.each([false, true])("uses PanelCard for spec/data/empty states and never fetc
     expect(fetch).not.toHaveBeenCalled();
   } finally { await view.cleanup(); fetch.mockRestore(); }
 });
-it.each(["health", "service_map", "logs", "traces", "log_patterns"] as const)("decodes the %s preset, variables and trace detail", viz => {
+it.each(["health", "service_map", "logs", "traces", "log_patterns"] as const)("decodes the %s visualization, variables and trace detail", viz => {
   const raw = { ...fixture(viz), vars: { all: "$__all", scalar: "checkout", empty: [], multi: ["a", "b"] }, trace: traceFixture };
   expect(panelFragment(raw)).toEqual(raw);
 });
@@ -35,7 +37,7 @@ it("decodes query_telemetry and errors/empty/truncated frames", () => {
   const raw = fixture(); raw.dashboard.panels[0] = { id: "p", title: "Count", viz: "stat", query: { from: "spans", measures: ["count()"] } };
   for (const status of ["ok", "empty", "error"] as const) expect(panelFragment({ ...raw, results: [{ ...raw.results[0], status, error: "safe error", frame: { columns: [], values: [], rows: 0, truncated: true, note: "Limited rows" } }] })).toBeDefined();
 });
-it.each([null, { data: {} }, { ...fixture(), results: [] }, { ...fixture(), results: [fixture().results[0], fixture().results[0]] }, { ...fixture(), results: [{ ...fixture().results[0], id: "other" }] }, { ...fixture(), vars: { service: [1] } }, { ...fixture(), vars: [] }, { ...fixture(), vars: null }])("rejects missing/duplicate/subset/old payloads and invalid vars (%j)", raw => {
+it.each([{ ...fixture(), trace: {} }, { ...fixture(), trace: { data: { spans: null, logs: [], services: [] } } }, null, { data: {} }, { ...fixture(), results: [] }, { ...fixture(), results: [fixture().results[0], fixture().results[0]] }, { ...fixture(), results: [{ ...fixture().results[0], id: "other" }] }, { ...fixture(), vars: { service: [1] } }, { ...fixture(), vars: [] }, { ...fixture(), vars: null }])("rejects missing/duplicate/subset/old payloads and invalid vars (%j)", raw => {
   expect(() => panelFragment(raw)).toThrow();
 });
 it.each(["empty", "error", "ok"] as const)("hides chat mutations and unsaved Copy link in %s menus and full-screen", async status => {
@@ -68,5 +70,66 @@ it("keeps stale rows, exposes failures and ignores earlier refresh completions",
     await act(async () => refresh.click());
     expect(view.el.textContent).toContain("Bridge unavailable"); expect(view.el.textContent).toContain("new rows"); expect(view.el.textContent).toContain("Stale:");
     expect(onQuery.mock.calls.every(([body]) => !Object.hasOwn(body, "panels"))).toBe(true);
+  } finally { await view.cleanup(); }
+});
+
+it.each(["traces", "logs", "table"] as const)("renders iframe %s trace IDs as drill buttons without navigation URLs", async viz => {
+  const raw = fixture(); raw.dashboard.panels[0].viz = viz;
+  if (viz === "table") raw.dashboard.panels[0].options = { columns: [{ field: "trace_id", format: "trace_link" }] }; raw.dashboard.panels[0].query = { from: "spans" };
+  raw.results[0] = { ...raw.results[0], status: "ok", frame: { rows: 1, columns: [{ name: "trace_id", type: "string", role: "dimension" }, { name: "namespace", type: "string", role: "dimension" }], values: [["abc"], ["shop"]] } };
+  const view = await mount(raw);
+  try {
+    const trace = view.el.querySelector<HTMLButtonElement>(viz === "table" ? '[title="abc"]' : '[aria-label="Trace ID abc"]');
+    expect(trace?.tagName).toBe("BUTTON"); expect(trace?.hasAttribute("href")).toBe(false);
+    await act(async () => trace!.click());
+    expect(view.drill.trace).toHaveBeenCalledWith(expect.objectContaining({ trace_id: "abc", namespace: "shop" }), expect.any(AbortSignal));
+  } finally { await view.cleanup(); }
+});
+
+it.each(presets.flatMap(preset => [false, true].map(dark => ({ preset, dark }))))("renders the real $preset preset through FragmentView (dark=$dark)", async ({ preset, dark }) => {
+  const raw = presetFixture(preset); expect(panelFragment(raw)).toEqual(raw);
+  const view = await mount(raw, dark);
+  try {
+    expect(view.el.querySelectorAll("[data-panel]")).toHaveLength(raw.dashboard.panels.length);
+    for (const panel of raw.dashboard.panels) expect(view.el.querySelector(`[data-panel="${panel.id}"]`)?.textContent).toContain(panel.title);
+    assertPresetData(view.el, preset);
+  } finally { await view.cleanup(); }
+});
+it("keeps performance siblings visible with only one focused visualization", async () => {
+  const view = await mount(presetFixture("performance"));
+  try {
+    await act(async () => view.el.querySelector<HTMLButtonElement>('[aria-label="p95 latency menu"]')!.click());
+    await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
+    expect(view.el.querySelector('[data-panel="latency"]')).toBeNull();
+    expect(view.el.querySelector('[data-panel="endpoints"]')?.textContent).toContain("/checkout");
+    expect(document.body.querySelectorAll('[data-panel="latency"]')).toHaveLength(1);
+    expect(document.body.querySelectorAll('[data-panel]')).toHaveLength(4);
+    expect(view.onQuery).not.toHaveBeenCalled();
+  } finally { await view.cleanup(); }
+});
+
+it("keeps a focused query MultiSelect and its dropdown open across option and fragment updates", async () => {
+  const raw = fixture(); raw.dashboard.variables = [{ name: "service", kind: "query", from: "spans", field: "service", multi: true, include_all: true }];
+  const resolveVariables = vi.fn().mockResolvedValue({ service: [{ value: "checkout" }, { value: "cart" }] });
+  let finish!: (value: PanelFragment) => void;
+  const onQuery = vi.fn().mockImplementation(() => new Promise<PanelFragment>(resolve => { finish = resolve; }));
+  const view = await mount(raw, false, onQuery, resolveVariables);
+  try {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    const bar = view.el.querySelector('[aria-label="Dashboard variables"]');
+    const input = bar!.querySelector<HTMLInputElement>("input:not([type=hidden])")!;
+    await act(async () => { input.focus(); input.click(); });
+    const choice = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "cart")!;
+    expect(choice).toBeDefined();
+    await act(async () => { choice.click(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(document.activeElement).toBe(input);
+    expect(view.el.querySelector('[aria-label="Dashboard variables"]')).toBe(bar);
+    expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
+    await act(async () => { finish(structuredClone(raw)); await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(document.activeElement).toBe(input);
+    expect(view.el.querySelector('[aria-label="Dashboard variables"]')).toBe(bar);
+    expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
+    expect(resolveVariables).toHaveBeenCalledTimes(2);
+    expect(onQuery.mock.lastCall![0].vars).toEqual({ service: ["cart"] });
   } finally { await view.cleanup(); }
 });

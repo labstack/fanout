@@ -10,9 +10,9 @@ import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
 import { Viz } from "./viz";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onZoomReset, zoomed, onView, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onZoomReset, zoomed, onView, onCopyLink, onExplain, onRemove, onDuplicate, staleAt, traceLinks }: {
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
-  annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
+  annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button";
   onSelect?: (value: string) => void; onView(): void; onCopyLink?: () => void; onExplain?: () => void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
   zoomed?: boolean; onZoomReset?: () => void;
@@ -117,7 +117,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
-        : <Viz onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} />}
+        : <Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} />}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, background: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}

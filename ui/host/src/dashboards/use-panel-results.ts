@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardSpec, DashboardTime, PanelResult, VarValue } from "../../../panels/types";
-import { panelContent, retryPanelQuery } from "./query-policy";
+import { retryPanelQuery } from "./query-policy";
+import { panelContent } from "../../../panels/content";
 import { refreshDashboard } from "./refresh";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 

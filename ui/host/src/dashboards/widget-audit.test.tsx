@@ -126,7 +126,7 @@ describe("widget audit W1–W9", () => {
 });
 
 it("W10 disables view-mode item and container transitions without changing resize handle opacity", () => {
- const css = readFileSync("src/index.css", "utf8") as string;
+ const css = readFileSync("src/dashboards/dashboard.css", "utf8") as string;
  expect(css).toMatch(/\.dashboard-grid:not\(\.dashboard-grid-editing\)\s*\{[^}]*transition:\s*none/s);
  expect(css).toMatch(/\.dashboard-grid:not\(\.dashboard-grid-editing\) > \.react-grid-item\s*\{[^}]*transition:\s*none/s);
  expect(css).toContain("transition: opacity 150ms ease");

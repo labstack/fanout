@@ -30,6 +30,9 @@ export function RowPanel(props: AnalysisProps) {
     if (name === "trace_id" && value) {
       const target = makeDrill(props.panel, props.result, selection);
       if (!target) return <Text size="sm" ff="monospace" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`}>{String(value).slice(0,16)}</Text>;
+      if (props.traceLinks === "button") return <Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" onClick={event => {
+        event.stopPropagation(); props.onPoint?.(selection);
+      }}>{String(value).slice(0,16)}</Anchor>;
       const url = new URL(window.location.href); url.searchParams.set("drill", JSON.stringify(target));
       return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={url.toString()} onClick={event => {
         if (props.onPoint && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
@@ -70,8 +73,8 @@ export function RowPanel(props: AnalysisProps) {
       </svg>;
     }
     return undefined;
-  }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, model]);
+  }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, props.traceLinks, model]);
   return <div role="region" aria-label={`${props.title ?? props.panel.title}: ${model.rows.length} rows`}>
-    <TableViz panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
+    <TableViz traceLinks={props.traceLinks} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
   </div>;
 }
