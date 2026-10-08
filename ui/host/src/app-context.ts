@@ -3,6 +3,8 @@ import { createContext, useContext, useMemo, useRef, type FormEvent, type RefObj
 
 import { receiptForTurn, type BuildReceipt } from "./dashboard-receipt";
 
+export type TurnOptions = { answer_only?: boolean };
+
 export type FanoutAppContextValue = {
   agentAvailable: boolean;
   threadID: string;
@@ -18,13 +20,13 @@ export type FanoutAppContextValue = {
   setInput: (value: string) => void;
   error: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
-  send: (text: string) => Promise<void>;
+  send: (text: string, options?: TurnOptions) => Promise<void>;
   submit: (event: FormEvent) => void;
   stop: () => void;
   retry: () => void;
   /** Asks the server for this thread again after a load that failed. */
   reloadThread: () => void;
-  openChat: (prompt?: string) => void;
+  openChat: (prompt?: string, options?: TurnOptions) => void;
   newThread: () => void;
   selectThread: (threadID: string) => void;
 };

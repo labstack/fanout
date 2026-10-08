@@ -26,7 +26,7 @@ import (
 
 const systemPrompt = `You are Fanout's observability assistant. When a view is attached to your reply it is the picture: never draw diagrams, trees, or charts in text, never use code fences to draw boxes, arrows, or trees, and never add a table or list that restates what an attached view already shows; your prose adds only what the view omits. Use get_observability_overview first for broad health questions, get_intelligence_snapshot for the latest precomputed anomalies and recurring log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for activity/latency/endpoints/comparisons, inspect_trace for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You build and change the user's dashboards. Build one whenever the user asks for an overview, asks why something is slow, failing or changing, asks to compare, break down or track telemetry, or asks for anything they would want to look at again; answer a single factual question with a view instead. To build one, read get_telemetry_schema, draft a complete spec of panels that answer the request, run preview_panels, fix every invalid panel, replace or explain every empty one, and only then call create_dashboard. Cover every part of the request: when a part has no data, keep its panel and say why in the panel description instead of dropping it. Title each panel with exactly what it measures. Prefer a few precise panels over many vague ones: headline stats first, then the time series that explain them, then a table of the worst offenders. After saving, reply in two or three sentences with what the dashboard shows and what stands out. Use filter values exactly as the schema lists them. To change a dashboard, get_dashboard first and use edit_dashboard so unrelated panels stay as they are; replace only when the user asks for a redesign. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.` + dashboardAnalysisGuidance
 
-const dashboardAnalysisGuidance = ` For analysis dashboards, use only the types the question needs; do not fill a dashboard with all of them. Use heatmap for latency changes, histogram for distributions, scatter for relationships, state_timeline for threshold states, logs for events, log_patterns for repeated messages, traces for slow or erroring traces, service_map for dependencies, and health for service health. Use drill for span or log evidence; keep checked filters. Include annotations for change investigations; deploys and detector findings do not prove causes. Use a deploy split for scoped before/since comparisons; retain missing-deploy explanations. A definition, explanation, or single fact is an answer intent; do not create or replace a dashboard for it. Preserve every requested facet and explain absent telemetry without inventing it. In replies, never name schema fields to the user.`
+const dashboardAnalysisGuidance = ` For analysis dashboards, use only the types the question needs; do not fill a dashboard with all of them. Use heatmap for latency changes, histogram for distributions, scatter for relationships, state_timeline for threshold states, logs for events, log_patterns for repeated messages, traces for slow or erroring traces, service_map for dependencies, and health for service health. Use drill for span or log evidence; keep checked filters. Include annotations for change investigations; deploys and detector findings do not prove causes. Use a deploy split for scoped before/since comparisons; retain missing-deploy explanations. A definition, explanation, or single fact is an answer intent; do not create or replace a dashboard for it. Preserve every requested facet and explain absent telemetry without inventing it. In replies, never name schema fields to the user. Explain in chat is answer intent: use the observed absolute panel window and resolved variables, explain errors and suggest corrections without creating, editing, replacing or restoring dashboards.`
 
 // Error categories used to pick a client-safe RUN_ERROR message; the raw
 // error (which can include provider response bodies) stays server-side.
@@ -178,6 +178,10 @@ func (r *Runtime) Run(c *echo.Context) error {
 	if err := c.Bind(&input); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid AG-UI input")
 	}
+	answerOnly, err := answerOnlyRequest(input.ForwardedProps)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	if input.ThreadID == "" {
 		threadID, err := appid.New()
 		if err != nil {
@@ -211,6 +215,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	emitter := &eventEmitter{ctx: c.Request().Context(), writer: response, sse: sse.NewSSEWriter()}
 	messages := append([]agtypes.Message(nil), seed...)
 	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
+	runCtx = context.WithValue(runCtx, answerOnlyKey{}, answerOnly)
 	if origin, ok := buildOriginForSeed(input.ThreadID, seed); ok {
 		runCtx = dashboard.WithBuildOrigin(runCtx, origin)
 	}
@@ -519,6 +524,15 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 }
 
 func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution ToolExecution, err error) {
+	if answerOnly, _ := ctx.Value(answerOnlyKey{}).(bool); answerOnly {
+		readOnly := reviewedReadOnly(call.Name, nil)
+		if classifier, ok := r.tools.(interface{ ReadOnly(string) bool }); ok {
+			readOnly = classifier.ReadOnly(call.Name)
+		}
+		if !readOnly {
+			return ToolExecution{Content: `{"error":"This explanation request is answer-only. Do not save changes; explain the observed evidence and suggest corrections in your answer."}`, IsError: true}, nil
+		}
+	}
 	ctx = dashboard.TrackSave(ctx)
 	defer func() {
 		if value := recover(); value != nil {
@@ -533,6 +547,27 @@ func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution Too
 		}
 	}()
 	return r.tools.Execute(ctx, call)
+}
+
+type answerOnlyKey struct{}
+
+func answerOnlyRequest(props any) (bool, error) {
+	if props == nil {
+		return false, nil
+	}
+	fields, ok := props.(map[string]any)
+	if !ok {
+		return false, errors.New("forwardedProps must be an object")
+	}
+	value, exists := fields["answer_only"]
+	if !exists {
+		return false, nil
+	}
+	answerOnly, ok := value.(bool)
+	if !ok {
+		return false, errors.New("forwardedProps.answer_only must be a boolean")
+	}
+	return answerOnly, nil
 }
 
 func emitFinalText(emitter *eventEmitter, messageID, text string) error {

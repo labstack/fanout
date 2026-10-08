@@ -30,6 +30,7 @@ type ToolRegistry struct {
 	definitions   []ToolDef
 	apps          map[string]string
 	mutations     map[string]bool
+	readOnly      map[string]bool
 }
 
 func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, error) {
@@ -54,12 +55,13 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 		serverSession.Close()
 		return nil, fmt.Errorf("list MCP tools: %w", err)
 	}
-	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}, mutations: map[string]bool{}}
+	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}, mutations: map[string]bool{}, readOnly: map[string]bool{}}
 	for _, tool := range listed.Tools {
 		if fanoutmcp.AppOnly(tool.Meta) {
 			continue
 		}
 		registry.definitions = append(registry.definitions, ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		registry.readOnly[tool.Name] = reviewedReadOnly(tool.Name, tool.Annotations)
 		if fanoutmcp.RequiredToolScope(tool.Name) == dashboard.OAuthScope && tool.Annotations != nil && !tool.Annotations.ReadOnlyHint {
 			registry.mutations[tool.Name] = true
 		}
@@ -84,6 +86,26 @@ func (r *ToolRegistry) Close() error {
 }
 
 func (r *ToolRegistry) Definitions() []ToolDef { return append([]ToolDef(nil), r.definitions...) }
+
+// MCP metadata classifies registered tools. Explicit writes remain writes even
+// if their annotations drift; tools without metadata require a reviewed entry.
+func reviewedReadOnly(name string, annotations *mcp.ToolAnnotations) bool {
+	switch name {
+	case "create_dashboard", "edit_dashboard", "replace_dashboard", "restore_dashboard_version":
+		return false
+	}
+	if annotations != nil {
+		return annotations.ReadOnlyHint
+	}
+	switch name {
+	case "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs", "get_intelligence_snapshot", "get_telemetry_schema", "query_telemetry", "preview_panels", "list_dashboards", "get_dashboard", "list_dashboard_versions":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *ToolRegistry) ReadOnly(name string) bool { return r.readOnly[name] }
 
 func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecution, error) {
 	allowed := false

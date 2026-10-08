@@ -26,7 +26,7 @@ function StreamChat() {
 
 async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "assistant", content: "Earlier answer" }], start = true) {
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-  const requests: Array<{ messages: Message[] }> = [];
+  const requests: Array<{ messages: Message[]; forwardedProps: { answer_only?: boolean } }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "https://fanout.example.test").pathname;
     if (path === "/api/agent/runs") {
@@ -64,8 +64,9 @@ async function reasoning(emit: (event: Record<string, unknown>) => Promise<void>
 describe("provisional answer stream", () => {
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
   it("shows escaped structured tool errors while the SSE run is live", async () => {
-    const { root, emit, close } = await mountStreamChat();
+    const { root, emit, close, requests } = await mountStreamChat();
     try {
+      expect(requests[0].forwardedProps.answer_only).toBeUndefined();
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
       await emit({ type: "TOOL_CALL_START", toolCallId: "failed", toolCallName: "query_telemetry", parentMessageId: "step" });
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "failed", delta: "{}" });

@@ -1,4 +1,4 @@
-import { Alert, Box, Modal, Stack, Text } from "@mantine/core";
+import { Alert, Box, Stack, Text } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { panelFragment, fragmentTitle, type PanelFragment } from "../../../panels/fragment";
 import { resolvedVariables, interpolate } from "../../../panels/variables";
@@ -8,6 +8,7 @@ import type { DrillClient } from "./drill-client";
 import { DrillDrawer } from "./drill";
 import type { DrillTarget } from "./drill-state";
 import { PanelCard } from "./panel-card";
+import { PanelFullscreen } from "./panel-fullscreen";
 import { VariableBar } from "./variable-bar";
 import { TraceDetailView } from "./trace/detail";
 import { useVariableOptions, type VariableResolver } from "./use-variables";
@@ -32,6 +33,9 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
   const generation = useRef(0);
   const [target, setTarget] = useState<DrillTarget>();
   const [view, setView] = useState<string>();
+  const menus = useRef(new Map<string, HTMLButtonElement>());
+  const focusedPanel = useRef<string | undefined>(undefined);
+  if (view) focusedPanel.current = view;
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
   useEffect(() => {
     const resize = () => setWindowHeight(window.innerHeight);
@@ -71,7 +75,9 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     if (selected.vars !== vars) void query(selected.vars);
     setTarget(selected.target);
   };
-  const card = (panel: Panel, cardHeight: number) => <PanelCard panel={panel} title={interpolate(panel.title, resolvedVars)} result={shown.results.find(r => r.id === panel.id)}
+  const card = (panel: Panel, cardHeight: number, fullscreen = false) => <PanelCard panel={panel} title={interpolate(panel.title, resolvedVars)} result={shown.results.find(r => r.id === panel.id)}
+    suspended={!fullscreen && panel.id === view}
+    menuRef={!fullscreen ? node => { if (node) menus.current.set(panel.id, node); else menus.current.delete(panel.id); } : undefined}
     group={group} height={cardHeight} loading={pending} staleAt={staleAt} editing={false} agentAvailable={false} vars={resolvedVars}
     range={panel.time?.range ?? time.range} compare={time.compare === "previous_period"} onVariable={setVariable}
     {...panelHandlers(panel, shown.results.find(r => r.id === panel.id), setVariable, selection => point(panel, selection))}
@@ -82,11 +88,11 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVariable} />
     {options.error && <Alert color="bad">Variable options could not be loaded.</Alert>}
     {error && <Alert color="bad">{error}</Alert>}
-    {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{panel.id !== view && card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
+    {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
-    <Modal opened={Boolean(viewed)} onClose={() => setView(undefined)} fullScreen aria-label={viewed?.title} closeButtonProps={{ "aria-label": "Close panel view" }}>
-      {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140))}</Box>}
-    </Modal>
+    <PanelFullscreen opened={Boolean(viewed)} onClose={() => setView(undefined)} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} returnFocusTo={() => menus.current.get(focusedPanel.current ?? "")}>
+      {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140), true)}</Box>}
+    </PanelFullscreen>
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={target} onChange={setTarget} />
   </Stack>;
 }

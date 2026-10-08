@@ -29,6 +29,9 @@ func TestDashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
 		"Preserve every requested facet and explain absent telemetry without inventing it.",
 		"use only the types the question needs; do not fill a dashboard with all of them",
 		"never name schema fields to the user",
+		"Explain in chat is answer intent",
+		"observed absolute panel window and resolved variables",
+		"without creating, editing, replacing or restoring dashboards",
 	} {
 		if !strings.Contains(dashboardAnalysisGuidance, sentence) {
 			t.Errorf("guidance omits %q", sentence)

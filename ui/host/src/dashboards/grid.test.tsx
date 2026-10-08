@@ -52,7 +52,7 @@ afterEach(async () => { await act(async () => { cleanups.splice(0).forEach((clea
 async function render(overrides: Partial<Parameters<typeof PanelGrid>[0]> = {}) {
   const host = document.createElement("div");
   document.body.append(host);
-  const props = { dashboardId: "d1", version: 2, spec, vars: { service: "checkout" }, results, fetching: false, editing: false, agentAvailable: true, onOpenChat: vi.fn(), onVariable: vi.fn(), onView: vi.fn(), onVisible: vi.fn(), ...overrides };
+  const props = { dashboardId: "d1", version: 2, spec, vars: { service: "checkout" }, results, fetching: false, editing: false, agentAvailable: true, canManage: true, onOpenChat: vi.fn(), onVariable: vi.fn(), onView: vi.fn(), onVisible: vi.fn(), ...overrides };
   const root = createRoot(host);
   const client = new QueryClient();
   cleanups.push(() => { root.unmount(); client.clear(); });
@@ -179,12 +179,29 @@ async function menu(host: HTMLElement, title: string, item: string) {
   await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === item)!.click(); });
 }
 
-it("includes ids, effective time and resolved variables in Explain without tool names", async () => {
-  const { host, props } = await render({ time: { from: "2026-10-01T00:00:00Z", to: "2026-10-01T01:00:00Z" }, vars: { service: "cart" } });
+it("pins dashboard Explain to the executed panel window and keeps fix a separate edit", async () => {
+  const observed = new Map(results);
+  observed.set("broken", { ...results.get("broken")!, from_ms: 0, to_ms: 3600000 });
+  const { host, props } = await render({ results: observed, time: { range: "1h" }, vars: { service: ["cart"] } });
   await menu(host, "Broken", "Explain in chat");
-  const prompt = vi.mocked(props.onOpenChat).mock.calls[0][0] as string;
-  for (const value of ["dashboard id: d1", "panel id: broken", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", '"service":"cart"', "fix the panel"]) expect(prompt).toContain(value);
-  expect(prompt).not.toContain("edit_dashboard");
+  const [prompt, options] = vi.mocked(props.onOpenChat).mock.calls[0];
+  for (const value of ["dashboard id d1", "version 2", "panel id broken", "1970-01-01T00:00:00.000Z", "1970-01-01T01:00:00.000Z", '"service":["cart"]', "Do not create, edit, replace or restore"]) expect(prompt).toContain(value);
+  expect(options).toEqual({ answer_only: true });
+  expect(prompt).not.toContain("Please fix");
+  const fix = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Ask Fanout to fix it")!;
+  await act(async () => fix.click());
+  const [edit, editOptions] = vi.mocked(props.onOpenChat).mock.calls[1];
+  expect(edit).toContain("Please fix");
+  expect(edit).toContain("version 2");
+  expect(edit).toContain("Could not convert");
+  expect(editOptions?.answer_only).not.toBe(true);
+});
+
+it("hides fix without manage permission while keeping Explain answer-only", async () => {
+  const { host, props } = await render({ canManage: false });
+  expect(host.textContent).not.toContain("Ask Fanout to fix it");
+  await menu(host, "Broken", "Explain in chat");
+  expect(vi.mocked(props.onOpenChat).mock.calls[0][1]).toEqual({ answer_only: true });
 });
 
 it("copies a view link without edit mode and reports success", async () => {

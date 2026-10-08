@@ -3,7 +3,7 @@ import { WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
-import { createDashboardPrompt, useFanoutApp } from "../app-context";
+import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
@@ -19,6 +19,7 @@ import { VariableBar } from "./variable-bar";
 
 import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
+import { useViewer } from "../auth";
 import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
 const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
@@ -52,7 +53,10 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
   return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} agentAvailable={agentAvailable} openChat={openChat} />;
 }
 
-function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string): void }) {
+function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
+  const viewer = useViewer();
+  // All three authenticated roles can manage their own dashboards (server capability).
+  const canManage = ["viewer", "operator", "admin"].includes(viewer.role);
   const [historyOpen, setHistoryOpen] = useState(false);
   const client = useQueryClient();
   const [restoreRefresh, setRestoreRefresh] = useState<number>();
@@ -133,8 +137,8 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
-    <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
+    <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
+      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);

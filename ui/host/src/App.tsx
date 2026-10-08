@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { threadHistoryQueryKey } from "./api";
-import { activityLabel, FanoutAppContext, runErrorMessage, type FanoutAppContextValue } from "./app-context";
+import { activityLabel, FanoutAppContext, runErrorMessage, type FanoutAppContextValue, type TurnOptions } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
 import { createID } from "./id";
 import { dashboardsKey } from "./dashboards/api";
@@ -37,7 +37,8 @@ function Session() {
   // Bumped by the Retry button on a thread that failed to load. It is a
   // dependency of the session effect, so a bump asks the server again.
   const [reloadCount, setReloadCount] = useState(0);
-  const pendingPromptRef = useRef("");
+  const pendingPromptRef = useRef<{ text: string; options?: TurnOptions } | null>(null);
+  const turnOptionsRef = useRef<TurnOptions>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // A turn can hold several tool calls at once, and each one ends separately.
   // Tracking them keeps the activity line on the work still in flight instead
@@ -61,6 +62,7 @@ function Session() {
   useEffect(() => {
     let active = true;
     setMessages([]);
+    turnOptionsRef.current = {};
     setMessageTimes({});
     setLoadedThreadID("");
     setThreadMissing(false);
@@ -87,7 +89,7 @@ function Session() {
         setLoadedThreadID(threadID);
       }).catch(() => {
         if (!active) return;
-        pendingPromptRef.current = "";
+        pendingPromptRef.current = null;
         setError("This chat could not be restored. Start a new chat or try again.");
       });
     }
@@ -186,7 +188,7 @@ function Session() {
   async function run() {
     setRunning(true);
     setError("");
-    try { await agent.runAgent(); } catch (cause) {
+    try { await agent.runAgent({ forwardedProps: { ...turnOptionsRef.current } }); } catch (cause) {
       if (isAbort(cause)) {setError("");setStopped(true);}
       else {console.error("Agent run failed", cause);setError(runErrorMessage());}
       setRunning(false);
@@ -195,9 +197,10 @@ function Session() {
     }
   }
 
-  async function send(text: string) {
+  async function send(text: string, options?: TurnOptions) {
     const content = text.trim();
     if (!agentAvailable || !content || running || !ready || threadMissing) return;
+    turnOptionsRef.current = { ...options };
     if (!routeThreadID) {
       draftsRef.current.add(threadID);
       void navigate({ to: "/chat/$threadId", params: { threadId: threadID }, replace: true });
@@ -213,27 +216,30 @@ function Session() {
   useEffect(() => {
     const prompt = pendingPromptRef.current;
     if (!ready || !routeThreadID || !prompt) return;
-    pendingPromptRef.current = "";
-    void send(prompt);
+    pendingPromptRef.current = null;
+    void send(prompt.text, prompt.options);
   }, [ready, routeThreadID, threadID]);
 
   function submit(event: FormEvent) { event.preventDefault(); void send(input); }
   function stop() { stoppingRef.current = true;setError("");setStopped(true);agent.abortRun(); setRunning(false); clearActivity(); draftsRef.current.delete(threadID); }
   function retry() { if (!running && agent.messages.some((message) => message.role === "user")) void run(); }
-  function openChat(prompt?: string) {
+  function openChat(prompt?: string, options?: TurnOptions) {
     if (!agentAvailable) return;
     const nextThreadID = createID();
     draftsRef.current.add(nextThreadID);
-    pendingPromptRef.current = prompt ?? "";
+    pendingPromptRef.current = prompt ? { text: prompt, options: { ...options } } : null;
     void navigate({ to: "/chat/$threadId", params: { threadId: nextThreadID } });
   }
   function newThread() {
     agent.abortRun();
-    pendingPromptRef.current = "";
+    pendingPromptRef.current = null;
+    turnOptionsRef.current = {};
     setDraftID(createID());
     void navigate({ to: "/chat" });
   }
   function selectThread(selectedThreadID: string) {
+    pendingPromptRef.current = null;
+    turnOptionsRef.current = {};
     void navigate({ to: "/chat/$threadId", params: { threadId: selectedThreadID } });
   }
   function reloadThread() { setReloadCount((n) => n + 1); }

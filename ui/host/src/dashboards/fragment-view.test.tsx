@@ -119,10 +119,10 @@ it("keeps performance siblings visible with only one focused visualization", asy
   try {
     await act(async () => view.el.querySelector<HTMLButtonElement>('[aria-label="p95 latency menu"]')!.click());
     await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
-    expect(view.el.querySelector('[data-panel="latency"]')).toBeNull();
+    expect(view.el.querySelector('[data-panel="latency"]')?.textContent).toContain("Open in full-screen");
     expect(view.el.querySelector('[data-panel="endpoints"]')?.textContent).toContain("/cart");
-    expect(document.body.querySelectorAll('[data-panel="latency"]')).toHaveLength(1);
-    expect(document.body.querySelectorAll('[data-panel]')).toHaveLength(4);
+    expect(document.body.querySelectorAll('[data-panel="latency"]')).toHaveLength(2);
+    expect(document.body.querySelectorAll('[data-panel]')).toHaveLength(5);
     expect(view.onQuery).not.toHaveBeenCalled();
   } finally { await view.cleanup(); }
 });

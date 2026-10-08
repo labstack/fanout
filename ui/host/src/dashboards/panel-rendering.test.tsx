@@ -158,15 +158,15 @@ it("wraps six names plus Other into a plain legend and reserves both rows", () =
 });
 
 it("lets long Markdown and long errors scroll to their final action", async () => {
- const explain = vi.fn();
- const props = { title: "Content", loading: false, height: 140, group: "g", editing: false, agentAvailable: true, onView: vi.fn(), onCopyLink: vi.fn(), onExplain: explain };
+ const fix = vi.fn();
+ const props = { title: "Content", loading: false, height: 140, group: "g", editing: false, agentAvailable: true, onView: vi.fn(), onCopyLink: vi.fn(), onFix: fix };
  const markdown = await render(<PanelCard {...props} panel={{ ...panel, viz: "text", content: "Long paragraph\n\n".repeat(100) }} />);
  expect(markdown.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
  const error = await render(<PanelCard {...props} panel={panel} result={{ ...result, status: "error", error: "Detailed failure ".repeat(100) }} />);
  expect(error.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
  const action = [...error.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Ask Fanout to fix it")!;
  expect(action.closest<HTMLElement>(".mantine-Center-root")!.style.height).not.toBe("100%");
- await act(async () => action.click()); expect(explain).toHaveBeenCalledOnce();
+ await act(async () => action.click()); expect(fix).toHaveBeenCalledOnce();
 });
 
 it("reserves a separate bottom lane for SQL series omission notices", () => {

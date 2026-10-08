@@ -9,6 +9,11 @@ import { DashboardPage } from "./page";
 import { demoFrame } from "../../tests/service-map-demo";
 import { assertServiceMapDOM } from "../../tests/service-map-collector";
 
+vi.mock("../auth", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../auth")>(),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: "viewer" }),
+}));
+
 const charts = vi.hoisted(() => ({ option: vi.fn() }));
 
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ option, label, onClick, onZoom }: { option: Record<string, unknown>; label: string; onClick?: (event: { name: string; seriesName: string; value: number[] }) => void; onZoom?: (from: number, to: number) => void }) => { charts.option(option); return <div data-chart={label}>

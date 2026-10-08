@@ -11,7 +11,7 @@ import type { DrillDrawer } from "./drill";
 import { fixture, presetFixture } from "../../tests/fixtures";
 import type { PanelFragment } from "../../../panels/fragment";
 const ui = vi.hoisted(() => ({ cards: {} as Record<string, ComponentProps<typeof PanelCard>>, card: null as unknown as ComponentProps<typeof PanelCard>, bar: null as unknown as ComponentProps<typeof VariableBar>, drill: null as unknown as ComponentProps<typeof DrillDrawer> }));
-vi.mock("./panel-card", () => ({ PanelCard: (props: ComponentProps<typeof PanelCard>) => { ui.card = props; ui.cards[props.panel.id] = props; return <div data-card={props.panel.id} />; } }));
+vi.mock("./panel-card", () => ({ PanelCard: (props: ComponentProps<typeof PanelCard>) => { ui.card = props; ui.cards[props.panel.id] = props; return <div data-card={props.panel.id} data-suspended={props.suspended || undefined} />; } }));
 vi.mock("./variable-bar", () => ({ VariableBar: (props: ComponentProps<typeof VariableBar>) => { ui.bar = props; return <div data-bar />; } }));
 vi.mock("./drill", () => ({ DrillDrawer: (props: ComponentProps<typeof DrillDrawer>) => { ui.drill = props; return <div data-drill={props.target?.trace_id} />; } }));
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
@@ -127,12 +127,12 @@ it("never polls persisted chat answers even when the authored refresh is enabled
   try { await act(async () => vi.advanceTimersByTime(120000)); expect(view.onQuery).not.toHaveBeenCalled(); }
   finally { await view.cleanup(); }
 });
-it("renders only one focused card and tracks viewport resize", async () => {
+it("keeps the grid card with only one active full-screen body and tracks viewport resize", async () => {
   const view = await mount(fixture()); const original = window.innerHeight;
   try {
     await act(async () => ui.card.onView());
-    expect(view.el.querySelector('[data-card]')).toBeNull();
-    expect(document.body.querySelectorAll('[data-card]')).toHaveLength(1);
+    expect(view.el.querySelector('[data-card]')?.getAttribute('data-suspended')).toBe('true');
+    expect(document.body.querySelectorAll('[data-card]:not([data-suspended])')).toHaveLength(1);
     await act(async () => { window.innerHeight = 750; window.dispatchEvent(new Event("resize")); });
     expect(ui.card.height).toBe(610);
   } finally { window.innerHeight = original; await view.cleanup(); }
