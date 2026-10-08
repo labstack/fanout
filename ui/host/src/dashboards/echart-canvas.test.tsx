@@ -31,6 +31,7 @@ describe("EChartCanvas", () => {
       expect(getDisplayList).not.toHaveBeenCalled();
       expect(container.querySelector("[data-chart-audit],[data-chart-labels],[data-chart-legend],[data-chart-plot]")).toBeNull();
       expect((window as any).__fanoutAudit).toBeUndefined();
+      expect(container.querySelector("[role=img]")!.hasAttribute("id")).toBe(false);
       for(const node of container.querySelectorAll("*")) for(const attr of node.attributes) if(attr.name.startsWith("data-")) expect(attr.value.length).toBeLessThanOrEqual(1024);
     } finally { await act(async()=>root.unmount()); vi.unstubAllEnvs(); }
   });

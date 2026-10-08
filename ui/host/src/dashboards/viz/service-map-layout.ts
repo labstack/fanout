@@ -14,7 +14,7 @@ export function serviceMapStructure(model: ServiceGraph, measureText?: ChartSize
   for (const n of model.nodes) widths[n.id] = {full:serviceCardWidth(n,false,measureText),compact:serviceCardWidth(n,true,measureText),identity:serviceCardWidth(n,true,measureText,false)};
   const orderedWidths=Object.entries(widths).sort(([a],[b])=>order(a,b));
   const topology=JSON.stringify([orderedWidths.map(([id])=>id),model.edges.map(e=>[e.id,e.caller,e.callee]).sort((a,b)=>order(a[0],b[0]))]);
-  const key=JSON.stringify([topology,model.nodes.length>60 ? orderedWidths.map(([id,w])=>[id,w.identity]) : orderedWidths]);
+  const key=JSON.stringify([topology,orderedWidths]);
   return {key,topology,widths};
 }
 export type Box = ServiceNode & Point & {width:number;height:number;entry:boolean;uncalled:boolean};
@@ -33,7 +33,12 @@ export function layoutServiceMapRaw(model: ServiceGraph, size: ChartSize, cardWi
   g.setDefaultEdgeLabel(()=>({}));
   for(const e of edges)g.setEdge(e.caller,e.callee,{weight:1,minlen:1},e.id);
   const innerWidth=Math.max(1,size.width-24), innerHeight=Math.max(1,size.height-24);
-  let compact=false, height=44, nodesep=16, ranksep=48, metrics=true;
+  // A simple fan-out has one leaf rank. If even the minimum full-card
+  // separation cannot fit it vertically, full-card trials cannot succeed.
+  const fanout = entries.length === 1 && uncalled.length === 0 && edges.length === nodes.length - 1
+    && incoming.size === nodes.length - 1 && edges.every(e => e.caller === entries[0].id);
+  const compactFirst = fanout && (nodes.length - 1) * 44 + Math.max(0, nodes.length - 2) * .1 > innerHeight;
+  let compact=compactFirst, height=compactFirst?20:44, nodesep=compactFirst?4:16, ranksep=48, metrics=true;
   let widths=new Map<string,number>();
   const entryIDs = new Set(entries.map(n=>n.id)), isolatedIDs = new Set(uncalled.map(n=>n.id));
   const isolatedIndexes = new Map(uncalled.map((n,i)=>[n.id,i]));
@@ -71,8 +76,9 @@ export function layoutServiceMapRaw(model: ServiceGraph, size: ChartSize, cardWi
   if(large){compact=true;height=20;nodesep=4;metrics=false;configure();run();}
   else {
   configure();
-  for(const gap of [16,8,.1]){nodesep=gap;fitRanks();if(regular().height<=innerHeight)break;}
-  if(regular().height>innerHeight||regular().width*.85>innerWidth){
+  if(compact)fitRanks();
+  else for(const gap of [16,8,.1]){nodesep=gap;fitRanks();if(regular().height<=innerHeight)break;}
+  if(!compact&&(regular().height>innerHeight||regular().width*.85>innerWidth)){
     compact=true;height=20;nodesep=4;configure();fitRanks();
   }
   if(regular().width*.85>innerWidth){metrics=false;configure();fitRanks();}
@@ -188,10 +194,6 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
   }),scale,compact,folded,initialScrollY,contentWidth,contentHeight,uncalledLabel:raw.label?fit(raw.label):undefined};
 }
 
-export function layoutServiceMap(model: ServiceGraph, size: ChartSize) {
-  return fitServiceMap(layoutServiceMapRaw(model,size),model,size);
-}
-
 export const nodeMetrics = (n: ServiceNode) => `${formatValue("per_second", n.request_rate)} · ${formatValue("percent", n.error_rate)} err · ${formatValue("ms", n.p95_ms)} p95`;
 const shortFormat = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 2, notation: "compact", useGrouping: false });
 const shortNumber = (value: number | null): string => {
@@ -217,13 +219,32 @@ export function serviceCardLabels(n: ServiceNode, {width,scale,compact,measureTe
   return {name,metric,nameSize,metricSize,nameWidth,metricWidth};
 }
 
+// Per measurement context (and thus font load generation), reserve the widest
+// short-number form instead of measuring a live value. IEEE doubles need at
+// most three exponent digits; shortNumber uses two significant digits.
+const slotWidths = new WeakMap<NonNullable<ChartSize["measureText"]>, Map<string, number>>();
+function fixedSlotWidth(measure: NonNullable<ChartSize["measureText"]>, font: string, metric: boolean) {
+  let cache = slotWidths.get(measure);
+  if (!cache) { cache = new Map(); slotWidths.set(measure, cache); }
+  const key = `${metric ? "metric" : "health"}:${font}`;
+  let width = cache.get(key);
+  if (width === undefined) {
+    const templates = metric ? Array.from({length:10}, (_, digit) => [
+      `${digit}${digit}${digit}/s`, `${digit}${digit}.${digit}% err`,
+      `-${digit}.${digit}e-${digit}${digit}${digit}/s`, `-${digit}.${digit}e-${digit}${digit}${digit}% err`,
+      ...["K", "M", "B", "T"].map(suffix => `-${digit}${digit}${digit}${suffix}% err`),
+    ]).flat() : Object.values(healthGlyph);
+    width = Math.max(...templates.map(text => measure(text, font)));
+    cache.set(key, width);
+  }
+  return width;
+}
 function serviceCardWidth(n:ServiceNode,compact:boolean,measureText?:ChartSize["measureText"],metrics=true) {
   // Size for the floor's compensated fonts, so later scale selection cannot
-  // turn a protected name into clipped text.
-  const label=serviceCardLabels(n,{width:1000,scale:compact?.75:.85,compact,measureText}),measure=measureText??textMeasure;
-  const font=`600 ${label.nameSize}px ${fonts.display}`;
-  const name=measure(label.name,font)+measure(healthGlyph[n.health]??"○",font)+18;
-  const withMetric=name+4+measure(label.metric,`${label.metricSize}px ${fonts.display}`);
+  // turn a protected name into clipped text. Health and metrics have fixed slots.
+  const scale=compact?.75:.85, nameSize=Math.max(12,Math.ceil(1100/scale)/100), metricSize=Math.ceil(1100/scale)/100;
+  const measure=measureText??textMeasure, font=`600 ${nameSize}px ${fonts.display}`;
+  const name=measure(protectedName(n.id),font)+fixedSlotWidth(measure,font,false)+18;
+  const withMetric=name+4+fixedSlotWidth(measure,`${metricSize}px ${fonts.display}`,true);
   return compact?(metrics&&withMetric<=200?Math.ceil(withMetric):Math.ceil(name)):Math.ceil(Math.max(168,name));
 }
-

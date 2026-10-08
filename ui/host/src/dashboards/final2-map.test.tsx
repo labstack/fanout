@@ -10,6 +10,7 @@ vi.mock("@dagrejs/dagre", async importOriginal => {
 });
 import { serviceMapModel } from "../../../panels/rollups";
 import { fitServiceMap, layoutServiceMapRaw, serviceMapStructure } from "./viz/service-map-layout";
+import * as mapLayout from "./viz/service-map-layout";
 import { ServiceMapViz } from "./viz/service-map";
 
 function frame(n: number, metric = 100): Frame {
@@ -20,7 +21,7 @@ function frame(n: number, metric = 100): Frame {
 }
 const cleanups: (() => void)[] = [];
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(fn => fn())); vi.restoreAllMocks(); vi.unstubAllGlobals(); calls.layout.mockClear(); });
-async function mount(n = 4) {
+async function mount(n = 4, initial = frame(n)) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   let resize = () => {}, width = 1100, height = 300;
   vi.stubGlobal("ResizeObserver", class { constructor(cb: () => void) { resize = cb; } observe() {} disconnect() {} });
@@ -28,7 +29,7 @@ async function mount(n = 4) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host); cleanups.push(() => { root.unmount(); host.remove(); });
   const render = async (f: Frame, end = 3600000) => act(async () => root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:f,from_ms:end-3600000,to_ms:end}} dark={false} height={324}/></MantineProvider>));
-  await render(frame(n));
+  await render(initial);
   const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
   return { host, viewport, render, resize: async (w = 1050, h = 280) => act(async () => { width = w; height = h; resize(); }) };
 }
@@ -124,4 +125,58 @@ it("I1 reports worker failures while leaving page scrolling available",async()=>
   expect(host.textContent).toContain("Service layout unavailable");
   const wheel=new WheelEvent("wheel",{deltaY:10,cancelable:true}); viewport.dispatchEvent(wheel);
   expect(wheel.defaultPrevented).toBe(false);
+});
+
+function fanout(n: number, metric = 3600, error = 0, health = "healthy"): Frame {
+  const f = frame(n, metric);
+  const caller = f.columns.findIndex(c => c.name === "caller");
+  f.values[caller] = f.values[caller].map((value, i) => i < n ? value : "svc-0");
+  f.values[f.columns.findIndex(c => c.name === "error_rate")] = f.values[0].map(() => error);
+  f.values[f.columns.findIndex(c => c.name === "health")] = f.values[0].map(() => health);
+  return f;
+}
+it.each([20, 30, 40, 60])("I-B synchronous compact metric refresh performs no layout for %s services", async n => {
+  const raw = vi.spyOn(mapLayout, "layoutServiceMapRaw");
+  const { host, viewport, render } = await mount(n, fanout(n));
+  expect(viewport.dataset.cardMode).toBe("compact");
+  expect([...host.querySelectorAll<HTMLElement>("[data-service-metric]")].some(el => el.style.display !== "none" && el.textContent)).toBe(true);
+  expect(raw).toHaveBeenCalledOnce();
+  expect(calls.layout).toHaveBeenCalledOnce();
+  const passes = calls.layout.mock.calls.length;
+  const positions = [...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width]);
+  const labels = host.textContent;
+  for (const [metric, error, health] of [[360000, 12.3, "degraded"], [360000000, 0, "healthy"]] as const) {
+    const next = serviceMapModel(fanout(n, metric, error, health), {from_ms:30000,to_ms:3630000});
+    const base = serviceMapModel(fanout(n), {from_ms:0,to_ms:3600000});
+    expect(serviceMapStructure(next).key).toBe(serviceMapStructure(base).key);
+    const start = performance.now();
+    await render(fanout(n, metric, error, health), metric);
+    console.log(`final3 synchronous refresh n=${n}: ${(performance.now()-start).toFixed(2)}ms; Dagre passes=${calls.layout.mock.calls.length-passes}`);
+    expect(raw).toHaveBeenCalledOnce();
+    expect(calls.layout).toHaveBeenCalledTimes(passes);
+    expect([...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width])).toEqual(positions);
+    expect(host.textContent).not.toBe(labels);
+  }
+});
+it("I-B measures the fixed metric slot once per font and measurement context", () => {
+  const measure = vi.fn((text: string) => text.length * 6);
+  const model = serviceMapModel(fanout(30), {from_ms:0,to_ms:3600000});
+  serviceMapStructure(model, measure);
+  const slots = () => measure.mock.calls.filter(([text]) => text.endsWith("/s") || text.endsWith("% err"));
+  expect(slots().length).toBeGreaterThan(0);
+  const count = slots().length;
+  serviceMapStructure(serviceMapModel(fanout(30, 360000), {from_ms:0,to_ms:3600000}), measure);
+  expect(slots()).toHaveLength(count);
+});
+
+it("removes service-map collector instrumentation in production", async () => {
+  vi.stubEnv("DEV", false);
+  try {
+    const { host } = await mount(30, fanout(30));
+    const region = host.querySelector('[role="region"]')!;
+    expect(region.querySelectorAll("button")).toHaveLength(30);
+    for (const node of region.querySelectorAll("*")) {
+      expect([...node.attributes].map(attr => attr.name).filter(name => name.startsWith("data-") && !name.startsWith("data-mantine-"))).toEqual([]);
+    }
+  } finally { vi.unstubAllEnvs(); }
 });

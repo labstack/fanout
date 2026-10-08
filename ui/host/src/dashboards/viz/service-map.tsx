@@ -8,9 +8,8 @@ import { brand, fonts } from "../../../../tokens";
 import type { AnalysisProps } from "./analysis-chart";
 
 import { fitServiceMap, layoutServiceMapRaw, nodeMetrics, serviceCardLabels, serviceMapStructure, type MapLayout } from "./service-map-layout";
-export { layoutServiceMap, serviceCardLabels } from "./service-map-layout";
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
-export type MapView = { zoomed: boolean; fit(): void };
+export type MapView = { canFit: boolean; fit(): void };
 
 export function ServiceMapViz({ panel, title = panel.title, result, dark, height, onSelect, onPoint, onMapView }: AnalysisProps & { onMapView?: (view: MapView) => void }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -99,7 +98,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     else scrollTo(viewport.current.scrollTop);
     fittedKey.current = cached.topology;
   }, [graph,cached]);
-  useEffect(() => { onMapView?.({ zoomed: scrollY !== 0 || graph.contentHeight > size.height, fit }); return () => onMapView?.({ zoomed: false, fit: () => undefined }); }, [onMapView, scrollY, graph.contentHeight, size, fit]);
+  useEffect(() => { onMapView?.({ canFit: scrollY !== 0 || graph.contentHeight > size.height, fit }); return () => onMapView?.({ canFit: false, fit: () => undefined }); }, [onMapView, scrollY, graph.contentHeight, size, fit]);
   const select = (service: string) => {
     if (suppressClick.current) { suppressClick.current = false; return; }
     if (panel.click && onSelect) onSelect(service);
@@ -108,7 +107,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
   const below=graph.nodes.filter(n=>n.y+n.height>size.height+scrollY+.5).length;
   return <div role="region" aria-label={`${title}: service dependency graph; ${analysisSummary({ ...panel, title }, result)}`} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
     <div style={{position:"relative",flex:"1 1 auto",minHeight:0}}>
-    <div ref={viewport} data-service-viewport data-card-mode={graph.compact ? "compact" : "full"} data-initial-scroll-y={graph.initialScrollY} data-layout-scale={graph.scale} data-content-width={graph.contentWidth} data-content-height={graph.contentHeight} data-pan-y={-scrollY} style={{ position: "relative", height: "100%", minHeight: 0, overflowX: "hidden", overflowY:"auto", touchAction: "pan-y", cursor: "grab" }} onMouseLeave={() => setHover(undefined)} onScroll={e=>{
+    <div ref={viewport} {...(import.meta.env.DEV ? { "data-service-viewport": true, "data-card-mode": (graph.compact ? "compact" : "full"), "data-initial-scroll-y": graph.initialScrollY, "data-layout-scale": graph.scale, "data-content-width": graph.contentWidth, "data-content-height": graph.contentHeight } : {})} style={{ position: "relative", height: "100%", minHeight: 0, overflowX: "hidden", overflowY:"auto", touchAction: "pan-y", cursor: "grab" }} onMouseLeave={() => setHover(undefined)} onScroll={e=>{
       const top = e.currentTarget.scrollTop;
       e.currentTarget.scrollLeft=0;
       // Native scroll events are queued and may coalesce. Keep the last
@@ -121,27 +120,27 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
       onPointerMove={e => { const drag = dragging.current; if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true; if (drag.moved) { e.currentTarget.setPointerCapture?.(e.pointerId); scrollTo(drag.initial-dy); } }}
       onPointerUp={() => { suppressClick.current = dragging.current?.moved ?? false; dragging.current = null; }} onPointerCancel={() => { dragging.current = null; suppressClick.current = false; }}>
       {(layoutError || !cached) && <Text role="status" c="dimmed">{layoutError ?? "Laying out services…"}</Text>}
-      <div data-service-content style={{position:"relative",width:graph.contentWidth,height:graph.contentHeight}}>
+      <div {...(import.meta.env.DEV ? { "data-service-content": true } : {})} style={{position:"relative",width:graph.contentWidth,height:graph.contentHeight}}>
       <svg aria-hidden="true" width={graph.contentWidth} height={graph.contentHeight} viewBox={`0 0 ${graph.contentWidth} ${graph.contentHeight}`} style={{ position: "absolute", inset: 0 }}>
         <defs>{[theme.muted, theme.status.warn, theme.status.bad].map((color, i) => <marker key={color} id={`${id}-arrow-${i}`} viewBox="0 0 6 6" refX={5} refY={3} markerWidth={5} markerHeight={5} orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill={color} /></marker>)}</defs>
         <g>
-          {graph.edges.map(e => <path key={e.id} data-service-edge={e.id} d={e.path} fill="none" stroke={e.status ? theme.status[e.status] : theme.muted} strokeWidth={1 + 3 * Math.log1p(e.request_rate ?? e.calls) / Math.log1p(maxRate)} opacity={active && e.caller !== active && e.callee !== active ? .25 : 1} markerEnd={`url(#${id}-arrow-${e.status === "bad" ? 2 : e.status === "warn" ? 1 : 0})`} style={{ pointerEvents: "stroke" }}><title>{`${e.caller} → ${e.callee}\n${e.edge_type} · ${formatValue("per_second", e.request_rate)} · ${formatValue("count", e.calls)} calls\n${formatValue("percent", e.error_rate)} errors · ${formatValue("ms", e.average_ms)} average`}</title></path>)}
+          {graph.edges.map(e => <path key={e.id} d={e.path} fill="none" stroke={e.status ? theme.status[e.status] : theme.muted} strokeWidth={1 + 3 * Math.log1p(e.request_rate ?? e.calls) / Math.log1p(maxRate)} opacity={active && e.caller !== active && e.callee !== active ? .25 : 1} markerEnd={`url(#${id}-arrow-${e.status === "bad" ? 2 : e.status === "warn" ? 1 : 0})`} style={{ pointerEvents: "stroke" }}><title>{`${e.caller} → ${e.callee}\n${e.edge_type} · ${formatValue("per_second", e.request_rate)} · ${formatValue("count", e.calls)} calls\n${formatValue("percent", e.error_rate)} errors · ${formatValue("ms", e.average_ms)} average`}</title></path>)}
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, transformOrigin: "0 0", pointerEvents: "none" }}>
-        {graph.uncalledLabel && <span data-uncalled-label style={{ position: "absolute", left: graph.uncalledLabel.x, top: graph.uncalledLabel.y - 12 * graph.scale, transform: `scale(${graph.scale})`, transformOrigin: "0 0", color: theme.muted, fontSize: Math.ceil(1200/graph.scale)/100, lineHeight:1, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
+        {graph.uncalledLabel && <span style={{ position: "absolute", left: graph.uncalledLabel.x, top: graph.uncalledLabel.y - 12 * graph.scale, transform: `scale(${graph.scale})`, transformOrigin: "0 0", color: theme.muted, fontSize: Math.ceil(1200/graph.scale)/100, lineHeight:1, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
         {graph.nodes.map(n => {
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
           const label = serviceCardLabels(n,{width:n.width/graph.scale,scale:graph.scale,compact:graph.compact,measureText});
-          return <button type="button" key={n.id} data-service-node={n.id} data-service-entry={n.entry} data-focused={focused === n.id} data-uncalled={n.uncalled} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} aria-label={`${n.id}, ${n.health}, ${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
+          return <button type="button" key={n.id} {...(import.meta.env.DEV ? { "data-service-node": n.id, "data-service-entry": n.entry } : {})} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} aria-label={`${n.id}, ${n.health}, ${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
             style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, boxSizing: "border-box", border: `1px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: 0, background: theme.surface, color: theme.text, textAlign: "left", overflow: "hidden", opacity: active && !neighbours.has(n.id) ? .25 : 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
             <span style={{ display: "block", width: n.width / graph.scale, height: graph.compact ? 20 : 44, boxSizing: "border-box", padding: graph.compact?"1px 6px":"3px 6px", transform: `scale(${graph.scale})`, transformOrigin: "0 0" }}>
-            {graph.compact ? <span data-service-text style={{display:"flex",alignItems:"center",gap:4,fontSize:label.metricSize,lineHeight:"18px",whiteSpace:"nowrap",minWidth:0}}>
-              <span aria-hidden="true" style={{color,flex:"none"}}>{healthGlyph[n.health] ?? "○"}</span><span data-service-name data-text-width={label.nameWidth} style={{minWidth:0,maxWidth:label.nameWidth,fontWeight:600,fontSize:label.nameSize,whiteSpace:"nowrap"}}>{label.name}</span>
-              <span data-service-metric data-text-width={label.metricWidth} style={{display:label.metric?"inline":"none",marginLeft:"auto",flex:"none",fontSize:label.metricSize,color:theme.muted,whiteSpace:"nowrap"}}>{label.metric}</span>
+            {graph.compact ? <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{display:"flex",alignItems:"center",gap:4,fontSize:label.metricSize,lineHeight:"18px",whiteSpace:"nowrap",minWidth:0}}>
+              <span aria-hidden="true" style={{color,flex:"none"}}>{healthGlyph[n.health] ?? "○"}</span><span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{minWidth:0,maxWidth:label.nameWidth,fontWeight:600,fontSize:label.nameSize,whiteSpace:"nowrap"}}>{label.name}</span>
+              <span {...(import.meta.env.DEV ? { "data-service-metric": true } : {})} style={{display:label.metric?"inline":"none",marginLeft:"auto",flex:"none",fontSize:label.metricSize,color:theme.muted,whiteSpace:"nowrap"}}>{label.metric}</span>
             </span> : <>
-              <span data-service-text style={{display:"flex",gap:4,fontWeight:600,fontSize:label.nameSize,lineHeight:"16px",minWidth:0,whiteSpace:"nowrap"}}><span aria-hidden="true" style={{color,flex:"none"}}>{healthGlyph[n.health] ?? "○"}</span><span data-service-name data-text-width={label.nameWidth} style={{fontSize:label.nameSize,maxWidth:label.nameWidth,whiteSpace:"nowrap"}}>{label.name}</span></span>
-              <span data-service-text data-service-metric data-text-width={label.metricWidth} style={{display:"block",color:theme.muted,fontSize:label.metricSize,lineHeight:"14px",whiteSpace:"nowrap"}}>{label.metric}</span>
+              <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{display:"flex",gap:4,fontWeight:600,fontSize:label.nameSize,lineHeight:"16px",minWidth:0,whiteSpace:"nowrap"}}><span aria-hidden="true" style={{color,flex:"none"}}>{healthGlyph[n.health] ?? "○"}</span><span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{fontSize:label.nameSize,maxWidth:label.nameWidth,whiteSpace:"nowrap"}}>{label.name}</span></span>
+              <span {...(import.meta.env.DEV ? { "data-service-text": true, "data-service-metric": true } : {})} style={{display:"block",color:theme.muted,fontSize:label.metricSize,lineHeight:"14px",whiteSpace:"nowrap"}}>{label.metric}</span>
             </>}
             </span>
           </button>;
@@ -149,9 +148,9 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
       </div>
       </div>
     </div>
-    {scrollY > 1 && <div data-service-overflow-fade="top" style={{position:"absolute",top:0,left:0,right:0,height:16,pointerEvents:"none",background:`linear-gradient(${theme.surface}, transparent)`}}/>}
-    {graph.contentHeight-size.height-scrollY>1 && <div data-service-overflow-fade style={{position:"absolute",bottom:0,left:0,right:0,height:16,pointerEvents:"none",background:`linear-gradient(transparent, ${theme.surface})`}}/>}
-    {below>0&&<span data-service-below-hint data-count={below} style={{position:"absolute",bottom:4,right:12,fontSize:12,color:theme.muted,background:theme.surface,padding:"0 4px",pointerEvents:"none"}}>+{below} below</span>}
+    {scrollY > 1 && <div {...(import.meta.env.DEV ? { "data-service-overflow-fade": "top" } : {})} style={{position:"absolute",top:0,left:0,right:0,height:16,pointerEvents:"none",background:`linear-gradient(${theme.surface}, transparent)`}}/>}
+    {graph.contentHeight-size.height-scrollY>1 && <div {...(import.meta.env.DEV ? { "data-service-overflow-fade": true } : {})} style={{position:"absolute",bottom:0,left:0,right:0,height:16,pointerEvents:"none",background:`linear-gradient(transparent, ${theme.surface})`}}/>}
+    {below>0&&<span {...(import.meta.env.DEV ? { "data-service-below-hint": true } : {})} style={{position:"absolute",bottom:4,right:12,fontSize:12,color:theme.muted,background:theme.surface,padding:"0 4px",pointerEvents:"none"}}>+{below} below</span>}
     </div>
     <Text c="dimmed" fz={12} mt={4} style={{ flexShrink: 0 }}>{model.nodes.length} services · {model.edges.length} {model.edges.length === 1 ? "route" : "routes"}</Text>
   </div>;

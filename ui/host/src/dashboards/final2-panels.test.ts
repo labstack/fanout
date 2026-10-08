@@ -18,10 +18,12 @@ it.each([{width:220,height:140},{width:500,height:300},{width:159,height:56}])("
   expect(bands[1].shape.r).toEqual([0,5,5,0]);
   expect(graphics.filter((g:any)=>g.type === "text").map((g:any)=>g.style.text)).toEqual(expect.arrayContaining(["0","100"]));
 });
-it("M2 draws only current named overlays and matches the counted Other label", () => {
-  const f = (names:string[]):Frame => ({rows:names.length,columns:[{name:"time",type:"time",role:"time"},{name:"service",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[names.map(()=>1000),names,names.map(()=>1)]});
+it("M2 draws only current named overlays and preserves the previous Other count", () => {
+  const f = (names:string[]):Frame => ({rows:names.length,columns:[{name:"time",type:"time",role:"time"},{name:"service",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[names.map(()=>1000),names,names.map(name=>name.startsWith("Other")?Number(name.match(/\d+/)![0]):1)]});
   const option = timeseriesOption({id:"p",title:"P",viz:"timeseries"},{id:"p",status:"ok",elapsed_ms:1,frame:f(["A","B","Other (5)"]),previous:f(["X","B","Other (4)"]),shift_ms:1000},chartThemeFor(false)) as any;
-  expect(option.series.map((s:any)=>s.name)).toEqual(["A","B","Other (5)","B · previous","Other (5) · previous"]);
+  expect(option.series.map((s:any)=>s.name)).toEqual(["A","B","Other (5)","B · previous","Other (4) · previous"]);
+  expect(option.series.find((s:any)=>s.name === "Other (5)").data).toEqual([[1000,5]]);
+  expect(option.series.find((s:any)=>s.name === "Other (4) · previous").data).toEqual([[2000,4]]);
 });
 it("M4 removes superseded registrations, status chip and invisible annotation geometry", () => {
   expect(existsSync("src/dashboards/status-chip.tsx")).toBe(false);

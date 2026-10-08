@@ -84,7 +84,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       {!small && panel.viz !== "text" && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
         {["Chart", "Data", "Spec"].map(mode => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: mode === "Chart" ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
       </Group>}
-      {panel.viz === "service_map" && mapView?.zoomed && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
+      {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal>
         <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}><DotsThree size={18} weight="bold" /></ActionIcon></Menu.Target>
@@ -92,7 +92,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           {(small || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
               <Box role="group" aria-label={`${title} view`}>
-                {(panel.viz === "text" ? ["Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode}>{mode}</Menu.RadioItem>)}
+                {(panel.viz === "text" ? ["Chart", "Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode}>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
               </Box>
             </Menu.RadioGroup>
             <Menu.Divider />

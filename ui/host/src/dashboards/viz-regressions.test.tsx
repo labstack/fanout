@@ -3,13 +3,13 @@ import { MantineProvider } from "@mantine/core";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Frame, Panel, PanelResult } from "../../../panels/types";
+import { visualizations, type Frame, type Panel, type PanelResult } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { warn, bad, ok } from "../../../tokens";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
 vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: {}, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 import { BarViz } from "./viz/bar";
@@ -78,14 +78,36 @@ describe("visualization regressions", () => {
     } finally { measure.mockRestore(); }
   });
 
-  it("offers only Spec in the text panel view menu", async () => {
-    const { host } = await render(<PanelCard panel={{ ...panel, viz: "text", content: "Text content" }} title="Note" loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
-    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Note menu"]')!.click());
-    await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
-    const choices = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-    expect(choices.map(item => item.textContent)).toEqual(["Spec"]);
-    await act(async () => choices[0].click());
-    expect(host.querySelector('[data-panel-spec]')).not.toBeNull();
+  it.each(visualizations.flatMap(viz => [300, 600].map(width => ({ viz, width }))))("round trips $viz views through UI controls at $width px", async ({ viz, width }) => {
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ width, height: 200 }));
+    try {
+      const { host } = await render(<PanelCard panel={{ ...panel, viz, content: "Text content" }} title="Panel" result={viz === "text" ? undefined : result} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+      const content = viz === "text" ? "Content" : "Chart";
+      const modes = viz === "text" ? [content, "Spec"] : [content, "Data", "Spec"];
+      const folded = width < 360 || viz === "text";
+      const controls = async () => {
+        if (folded) {
+          await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Panel menu"]')!.click());
+          await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+        }
+        const choices = [...(folded ? document : host).querySelectorAll<HTMLButtonElement>('[data-panel-view]')];
+        expect(choices.map(item => item.textContent)).toEqual(modes);
+        return choices;
+      };
+      const choose = async (mode: string, selected: string) => {
+        const choices = await controls();
+        expect(choices.map(item => item.getAttribute(folded ? "aria-checked" : "aria-pressed"))).toEqual(modes.map(item => String(item === selected)));
+        await act(async () => choices[modes.indexOf(mode)].click());
+      };
+      for (const mode of modes.slice(1)) {
+        await choose(mode, content);
+        expect(host.querySelector(mode === "Data" ? '[data-panel-data]' : '[data-panel-spec]')).not.toBeNull();
+        await choose(content, mode);
+        expect(host.querySelector('[data-panel-data]')).toBeNull();
+        expect(host.querySelector('[data-panel-spec]')).toBeNull();
+        if (viz === "text") expect(host.textContent).toContain("Text content");
+      }
+    } finally { measure.mockRestore(); }
   });
 
   it.each(["bar", "timeseries", "gauge", "heatmap", "histogram", "scatter", "state_timeline", "service_map"] as const)("fits %s into the flex body including the split note", async (viz) => {

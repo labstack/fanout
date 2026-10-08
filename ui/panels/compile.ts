@@ -69,7 +69,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   const currentNames = new Set(current.map(s => s.name));
   const other = current.find(s => isOtherSeries(s.name));
   const previousSeries = result.previous && result.shift_ms !== undefined ? chartSeries(result.previous, panel).shown.flatMap(s => {
-    if (isOtherSeries(s.name)) return other ? [{ ...s, name: other.name }] : [];
+    if (isOtherSeries(s.name)) return other ? [s] : [];
     return currentNames.has(s.name) ? [s] : [];
   }) : [];
   const units = [...new Set([...current, ...previousSeries].map((s) => s.unit ?? panel.unit))];

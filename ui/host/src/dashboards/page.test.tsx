@@ -155,7 +155,7 @@ describe("DashboardPage", () => {
     expect(host.textContent).not.toContain("Something went wrong");
     expect(host.querySelector('[data-panel="map"]')).not.toBeNull();
     expect(host.querySelectorAll("[data-service-node]")).toHaveLength(40);
-    expect(viewport.dataset.panY).toBe("-90");
+    expect(viewport.scrollTop).toBe(90);
   });
   it.each(["deploys", "anomalies"] as const)("shares annotations with time panels and refreshes when %s is disabled", async disabled => {
     const annotations: AnnotationsResponse = {

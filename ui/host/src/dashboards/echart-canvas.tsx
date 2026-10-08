@@ -2,7 +2,7 @@ import { BarChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "ec
 import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useRef } from "react";
 import type { ChartSize } from "../../../panels/compile";
 import { registerAudit, chartAuditSnapshot } from "./chart-audit-dev";
 
@@ -25,7 +25,6 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const zoomEnabled = Boolean(onZoom);
   const description = zoomEnabled ? `${label} Brush across the chart to zoom to that range.` : label;
   const apply = useRef<() => void>(() => undefined);
-  const auditID = useId();
   const auditInput = useRef<{ compiled: EChartsCoreOption; size: ChartSize } | null>(null);
   const context = useRef<CanvasRenderingContext2D | null | undefined>(undefined);
   const responsive = useRef(false);
@@ -64,7 +63,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const instance = init(ref.current, undefined, { renderer: "canvas" });
     chart.current = instance;
     const removeAudit = import.meta.env.DEV && new URLSearchParams(location.search).get("__fanout_audit") === "1"
-      ? registerAudit(auditID, () => auditInput.current ? chartAuditSnapshot(instance, auditInput.current.compiled, auditInput.current.size) : undefined)
+      ? registerAudit(ref.current, () => auditInput.current ? chartAuditSnapshot(instance, auditInput.current.compiled, auditInput.current.size) : undefined)
       : undefined;
     instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }));
     instance.on("brushEnd", (payload) => {
@@ -106,5 +105,5 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     };
   }, [group]);
 
-  return <div id={auditID} ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+  return <div ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
 }
