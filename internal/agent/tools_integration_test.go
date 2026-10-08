@@ -7,9 +7,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"testing"
 
+	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/fanout/internal/intelligence"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/panel"
+	controlstore "github.com/labstack/fanout/internal/store"
 )
 
 type registryQueries struct{}
@@ -106,5 +109,67 @@ func TestToolRegistryInjectsAuthenticatedBuildOrigin(t *testing.T) {
 	}
 	if meta[dashboard.BuildOriginMetaKey] != nil {
 		t.Fatal("origin without authenticated owner")
+	}
+}
+
+func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
+	db, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test'),('other','other@example.test')`); err != nil {
+		t.Fatal(err)
+	}
+	executor := panel.NewExecutor(nil, 30)
+	service := dashboard.New(db.DB, executor)
+	created, err := service.Create(t.Context(), "owner", panel.Dashboard{Name: "History", Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "first"}}}, dashboard.Author{Kind: "user", ID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
+	registry, err := NewToolRegistry(t.Context(), server.MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	listInput, _ := json.Marshal(map[string]any{"id": created.ID})
+	restoreInput, _ := json.Marshal(map[string]any{"id": created.ID, "version": 1})
+	calls := []ToolCall{{ID: "history", Name: "list_dashboard_versions", Input: string(listInput)}, {ID: "restore", Name: "restore_dashboard_version", Input: string(restoreInput)}}
+	for _, owner := range []string{"", "other"} {
+		for _, call := range calls {
+			result, err := registry.Execute(dashboard.WithOwner(t.Context(), owner), call)
+			if err != nil || !result.IsError {
+				t.Fatalf("owner=%q %s result=%+v err=%v", owner, call.Name, result, err)
+			}
+		}
+	}
+	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &calls[0]}, {Type: EventToolUse, ToolCall: &calls[1]}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
+	runtime := NewRuntime(provider, registry, nil)
+	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Restore version 1"}}
+	emitter, _ := newTestEmitter()
+	if _, err := runtime.execute(dashboard.WithOwner(t.Context(), "owner"), "thread", "run", &messages, emitter); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, message := range messages {
+		if message.Role != agtypes.RoleTool || message.ToolCallID != "restore" {
+			continue
+		}
+		found = true
+		var output struct {
+			Dashboard dashboard.Record `json:"dashboard"`
+			Receipt   struct {
+				BaseVersion int `json:"base_version"`
+				Version     int `json:"version"`
+			} `json:"receipt"`
+		}
+		if message.Error != "" || json.Unmarshal([]byte(messageText(message.Content)), &output) != nil || output.Dashboard.ID != created.ID || output.Dashboard.Version != 2 || output.Receipt.BaseVersion != 1 || output.Receipt.Version != 2 {
+			t.Fatalf("restore result=%+v", message)
+		}
+	}
+	versions, err := service.Versions(t.Context(), "owner", created.ID)
+	if !found || err != nil || len(versions) != 2 || versions[0].AuthorKind != "agent" || versions[0].AuthorID != "owner" || versions[0].Message != "Restored version 1" || versions[1].AuthorKind != "user" {
+		t.Fatalf("runtime history=%+v err=%v", versions, err)
 	}
 }

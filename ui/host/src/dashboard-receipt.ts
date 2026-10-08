@@ -96,7 +96,7 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
     if (mutationNames.has(name)) {
       const saved = result && dashboardToolResult(call.id,result.content,messages);
       const interrupted = !!result && interruptedResult(result);
-      const error = !interrupted && result?.role === "tool" && (!!result.error || !!payload?.error || !!payload?.isError || !payload && typeof result.content === "string" && /error|fail|invalid|conflict|stale|denied|required|interrupted|cancelled|canceled|timeout|timed out|not found/i.test(result.content));
+      const error = !interrupted && result?.role === "tool" && (!!result.error || !!payload?.error || !!payload?.isError);
       lastMutationError = !!error;
       unreadableSave = !!result && !saved && !error && !interrupted;
       stages.save = {state:saved ? "complete" : interrupted ? "interrupted" : error ? "failed" : "incomplete"};

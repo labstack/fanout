@@ -568,11 +568,32 @@ it('renders nothing for an empty final-answer slot after the run',async()=>{
  finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });
 
-it.each(['create_dashboard','edit_dashboard'])('keeps an interrupted %s out of chat error groups',async name=>{
+it.each(['create_dashboard','edit_dashboard','restore_dashboard_version'])('keeps an interrupted %s out of chat error groups',async name=>{
  const messages=[user(),call('save',name),result('save',{error:'interrupted'},'interrupted')];
  const {root}=await mountStreamChat(messages,false);
  try{expect(document.body.textContent).toContain('Save interrupted · outcome unknown');expect(document.body.textContent).not.toMatch(/tool calls? failed|Save failed|not saved/);}
  finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+
+it.each(['live','reloaded'])('renders the committed restore receipt in %s chat',async mode=>{
+ const messages=[user(),call('restore','restore_dashboard_version',{id:'board',version:1}),result('restore',receiptFixture)];
+ const {root,emit,close}=await mountStreamChat(mode==='reloaded'?JSON.parse(JSON.stringify(messages)):[],mode==='live');
+ try{
+  if(mode==='live') {
+   await emit({type:'RUN_STARTED',threadId:'thread-stream',runId:'run'});
+   await emit({type:'TOOL_CALL_START',toolCallId:'restore',toolCallName:'restore_dashboard_version',parentMessageId:'restore-step'});
+   await emit({type:'TOOL_CALL_ARGS',toolCallId:'restore',delta:'{"id":"board","version":1}'});
+   await emit({type:'TOOL_CALL_END',toolCallId:'restore'});
+   await emit({type:'TOOL_CALL_RESULT',toolCallId:'restore',messageId:'restored',content:JSON.stringify(receiptFixture)});
+   await emit({type:'RUN_FINISHED',threadId:'thread-stream',runId:'run'});
+   await close();
+  }
+  expect(document.querySelectorAll('[data-build-receipt]')).toHaveLength(1);
+  expect(document.body.textContent).toContain('Saved v2');
+  expect(document.body.textContent).not.toContain('restore_dashboard_version');
+  await act(async()=>button('Details')!.click());
+  expect(document.body.textContent).toContain('Restored');
+ }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });
 it('replaces interrupted chat uncertainty with a later proven save',async()=>{
  const messages=[user(),call('save','edit_dashboard'),result('save',{error:'interrupted'},'interrupted'),{...result('save',receiptFixture),id:'proven-result'}];

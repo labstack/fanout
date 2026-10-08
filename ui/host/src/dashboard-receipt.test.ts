@@ -108,3 +108,24 @@ it('keeps the last proven version when a later save is interrupted',()=>{
  const messages=build();messages.push(call('next','edit_dashboard'),result('next',{error:'interrupted'},'interrupted'));
  const receipt=receiptForTurn(messages,'u')!;expect(receipt.saved?.version).toBe(2);expect(receipt.stages.save.state).toBe('interrupted');expect(receipt.explanations).toContain('Save interrupted · outcome unknown');expect(receipt.explanations.join(' ')).not.toContain('failed');
 });
+
+it('uses the same committed restore receipt for live and reloaded turns',()=>{
+ const messages=[user(),call('restore','restore_dashboard_version',{id:'board',version:1}),result('restore',saved)];
+ const receipt=receiptForTurn(messages,'u')!;
+ expect(receipt.saved).toMatchObject({id:'board',version:2,label:'Restored',receipt:saved.receipt});
+ expect(receipt.stages.save.state).toBe('complete');
+ expect(receiptForTurn(JSON.parse(JSON.stringify(messages)),'u')).toEqual(receipt);
+});
+it.each(['error','failed','invalid','conflict','stale','denied','required','interrupted','cancelled','canceled','timeout','timed out','not found'])('does not infer a mutation error from free text containing %s',text=>{
+ for(const name of ['create_dashboard','edit_dashboard','replace_dashboard','restore_dashboard_version']) {
+  const messages=[user(),call('save',name),{id:'r-save',role:'tool' as const,toolCallId:'save',content:`Summary: ${text}`}];
+  expect(receiptForTurn(messages,'u')).toBeNull();
+ }
+});
+it.each(['create_dashboard','restore_dashboard_version'])('reads %s errors only from structured fields',name=>{
+ for(const message of [result('save',{error:'denied'}),result('save',{isError:true}),{id:'r-save',role:'tool' as const,toolCallId:'save',content:'Denied',error:'failed'}]) {
+  const messages=[user(),call('save',name),message];
+  expect(receiptForTurn(messages,'u')?.stages.save.state).toBe('failed');
+  expect(receiptForTurn(JSON.parse(JSON.stringify(messages)),'u')?.stages.save.state).toBe('failed');
+ }
+});

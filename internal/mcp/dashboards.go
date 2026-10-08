@@ -37,6 +37,15 @@ type DashboardEditInput struct {
 	Message     string                `json:"message,omitempty" jsonschema:"One line describing the change, shown in history"`
 }
 
+type DashboardRestoreInput struct {
+	ID      string `json:"id" jsonschema:"Dashboard ID"`
+	Version int    `json:"version" jsonschema:"Positive stored version to restore; restoring creates a new version"`
+}
+
+type dashboardVersionsOutput struct {
+	Versions []dashboard.VersionInfo `json:"versions"`
+}
+
 // dashboardToolSummary is intentionally separate from the browser summary:
 // MCP dashboard scope does not grant access to private conversation provenance.
 type dashboardToolSummary struct {
@@ -89,6 +98,8 @@ const (
 	createDashboardTool
 	replaceDashboardTool
 	editDashboardTool
+	listDashboardVersionsTool
+	restoreDashboardVersionTool
 )
 
 const saveReceiptGuide = "Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run. "
@@ -120,6 +131,16 @@ var dashboardTools = [...]mcp.Tool{
 		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
+	{
+		Name: "list_dashboard_versions", Title: "List dashboard versions",
+		Description: "List the authenticated user's saved versions of one dashboard, newest first, with author and message. The historical version identifies a restore target; restore_dashboard_version saves it as a new version.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
+	},
+	{
+		Name: "restore_dashboard_version", Title: "Restore dashboard version",
+		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. " + saveReceiptGuide,
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
+	},
 }
 
 // RequiredToolScope reports additional delegated scope needed by a tool.
@@ -144,6 +165,8 @@ func (s *Server) registerDashboardTools() {
 	mcp.AddTool(s.mcp, &dashboardTools[createDashboardTool], s.dashboardCreate)
 	mcp.AddTool(s.mcp, &dashboardTools[replaceDashboardTool], s.dashboardReplace)
 	mcp.AddTool(s.mcp, &dashboardTools[editDashboardTool], s.dashboardEdit)
+	mcp.AddTool(s.mcp, &dashboardTools[listDashboardVersionsTool], s.dashboardVersions)
+	mcp.AddTool(s.mcp, &dashboardTools[restoreDashboardVersionTool], s.dashboardRestore)
 }
 
 func agentAuthor(owner string) dashboard.Author { return dashboard.Author{Kind: "agent", ID: owner} }
@@ -226,6 +249,33 @@ func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, in
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
 	return s.saved(ctx, "Updated", record)
+}
+
+func (s *Server) dashboardVersions(ctx context.Context, req *mcp.CallToolRequest, input DashboardIDInput) (*mcp.CallToolResult, dashboardVersionsOutput, error) {
+	owner, err := dashboardOwner(req)
+	if err != nil {
+		return nil, dashboardVersionsOutput{}, err
+	}
+	versions, err := s.dashboards.Versions(ctx, owner, strings.TrimSpace(input.ID))
+	if err != nil {
+		return nil, dashboardVersionsOutput{}, dashboardToolError(err)
+	}
+	return summary(fmt.Sprintf("Found %d saved versions.", len(versions))), dashboardVersionsOutput{Versions: versions}, nil
+}
+
+func (s *Server) dashboardRestore(ctx context.Context, req *mcp.CallToolRequest, input DashboardRestoreInput) (*mcp.CallToolResult, dashboardOutput, error) {
+	owner, err := dashboardOwner(req)
+	if err != nil {
+		return nil, dashboardOutput{}, err
+	}
+	if input.Version <= 0 {
+		return nil, dashboardOutput{}, errors.New("version must be positive")
+	}
+	mutation, err := s.dashboards.RestoreWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Version, agentAuthor(owner))
+	if err != nil {
+		return nil, dashboardOutput{}, dashboardToolError(err)
+	}
+	return s.saved(ctx, "Restored", mutation)
 }
 
 // saveCheckBudget bounds the post-save run that reports empty or failing

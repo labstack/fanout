@@ -442,7 +442,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if err := emitter.emit(events.NewToolCallEndEvent(call.ID)); err != nil {
 				return truncated, err
 			}
-			execution, err := r.tools.Execute(ctx, call)
+			execution, err := r.executeTool(ctx, call)
 			if ctx.Err() != nil {
 				return truncated, r.fail(threadID, runID, deadlineError(ctx.Err()), emitter)
 			}
@@ -451,6 +451,20 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				// tool-transport failures are findable server-side.
 				slog.Warn("agent tool execution failed", "thread_id", threadID, "run_id", runID, "tool", call.Name, "err", err)
 				execution = ToolExecution{Content: fmt.Sprintf(`{"error":%q}`, err.Error()), IsError: true}
+			}
+			if execution.IsError {
+				// AG-UI's live result event carries content, not Message.Error.
+				// Keep the error structural on that path as well as on reload.
+				var payload map[string]any
+				if json.Unmarshal([]byte(execution.Content), &payload) != nil || payload == nil {
+					payload = map[string]any{"error": execution.Content}
+				}
+				payload["isError"] = true
+				raw, marshalErr := json.Marshal(payload)
+				if marshalErr != nil {
+					return truncated, marshalErr
+				}
+				execution.Content = string(raw)
 			}
 			toolMessageID, err := appid.New()
 			if err != nil {
@@ -497,6 +511,17 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		}
 	}
 	return truncated, r.fail(threadID, runID, fmt.Errorf("%w: exceeded %d tool steps", errStepLimit, r.maxSteps), emitter)
+}
+
+func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution ToolExecution, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			slog.Error("agent tool panicked", "tool", call.Name, "panic", value)
+			execution = ToolExecution{}
+			err = errors.New("tool execution failed")
+		}
+	}()
+	return r.tools.Execute(ctx, call)
 }
 
 func emitFinalText(emitter *eventEmitter, messageID, text string) error {

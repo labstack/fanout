@@ -57,6 +57,8 @@ const toolLabels: Record<string, { activity: string; title: string }> = {
   create_dashboard: { activity: "Building your dashboard…", title: "Dashboard" },
   edit_dashboard: { activity: "Updating your dashboard…", title: "Dashboard" },
   replace_dashboard: { activity: "Redesigning your dashboard…", title: "Dashboard" },
+  list_dashboard_versions: { activity: "Reading your dashboard history…", title: "Dashboard history" },
+  restore_dashboard_version: { activity: "Restoring your dashboard…", title: "Dashboard" },
 };
 
 export function activityLabel(toolName: string): string {

@@ -258,7 +258,15 @@ func TestDashboardMCPResultsExcludePrivateBuildProvenance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, out := range []any{list, get, edited} {
+			_, versions, err := s.dashboardVersions(t.Context(), req, DashboardIDInput{ID: board.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, restored, err := s.dashboardRestore(t.Context(), req, DashboardRestoreInput{ID: board.ID, Version: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, out := range []any{list, get, edited, versions, restored} {
 				raw, err := json.Marshal(out)
 				if err != nil {
 					t.Fatal(err)

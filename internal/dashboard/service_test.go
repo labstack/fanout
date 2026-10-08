@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -98,6 +99,50 @@ func TestMutationUsesSuccessfulOptimisticBase(t *testing.T) {
 				t.Fatalf("versions=%+v err=%v", versions, err)
 			}
 		})
+	}
+}
+
+func TestRestoreMutationUsesSuccessfulOptimisticBase(t *testing.T) {
+	s := newTestService(t)
+	spec := textSpec("Restore race")
+	spec.Panels[0].Content = "first writer"
+	created, err := s.Create(t.Context(), "owner", spec, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Edit(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": "second writer"}}}, 1, agent, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &blockingValidator{entered: make(chan struct{}), release: make(chan struct{})}
+	s.validator = v
+	type answer struct {
+		mutation Mutation
+		err      error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		mutation, err := s.RestoreWithChanges(t.Context(), "owner", created.ID, 1, agent)
+		done <- answer{mutation, err}
+	}()
+	<-v.entered
+	concurrent, err := s.EditWithChanges(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"title": "Concurrent title"}}}, 2, agent, "")
+	close(v.release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	m := result.mutation
+	if result.err != nil || m.BaseVersion != 3 || m.Record.Version != 4 || !reflect.DeepEqual(m.Before, concurrent.Record.Spec) || m.Record.Spec.Panels[0].Title != created.Spec.Panels[0].Title || m.Record.Spec.Panels[0].Content != "first writer" {
+		t.Fatalf("restore retry=%+v", result)
+	}
+	diff := Changes(m.Before, m.Record.Spec)
+	if len(diff.Panels) != 1 || len(diff.Panels[0].Fields) != 2 || diff.Panels[0].Fields[0] != "content" || diff.Panels[0].Fields[1] != "title" {
+		t.Fatal(diff)
+	}
+	versions, err := s.Versions(t.Context(), "owner", created.ID)
+	if err != nil || len(versions) != 4 || versions[0].Message != "Restored version 1" {
+		t.Fatalf("versions=%+v err=%v", versions, err)
 	}
 }
 

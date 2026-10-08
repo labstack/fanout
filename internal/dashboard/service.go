@@ -268,24 +268,30 @@ func (s *Service) EditWithChanges(ctx context.Context, ownerID, id string, ops [
 }
 
 func (s *Service) Restore(ctx context.Context, ownerID, id string, version int, author Author) (Record, error) {
+	mutation, err := s.RestoreWithChanges(ctx, ownerID, id, version, author)
+	return mutation.Record, err
+}
+
+// RestoreWithChanges appends a historical spec as a new save against the latest
+// optimistic base, retaining the committed snapshots for the shared diff.
+func (s *Service) RestoreWithChanges(ctx context.Context, ownerID, id string, version int, author Author) (Mutation, error) {
 	if _, err := s.get(ctx, ownerID, id); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	raw, err := generated.New(s.db).GetDashboardVersion(ctx, generated.GetDashboardVersionParams{DashboardID: id, Version: int64(version)})
 	if errors.Is(err, sql.ErrNoRows) {
-		return Record{}, ErrNotFound
+		return Mutation{}, ErrNotFound
 	}
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	var spec panel.Dashboard
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
-	mutation, err := s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
+	return s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
 		return spec, false, nil
 	})
-	return mutation.Record, err
 }
 
 // update reads, changes, validates and writes with an optimistic version

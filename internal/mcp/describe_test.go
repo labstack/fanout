@@ -24,7 +24,7 @@ func TestToolsUseVerbFirstSnakeCase(t *testing.T) {
 			t.Errorf("tool name %q must be lowercase snake_case and at most 64 characters", doc.Name)
 		}
 		switch verb {
-		case "get", "list", "search", "inspect", "create", "replace", "edit", "preview", "query", "resolve":
+		case "get", "list", "search", "inspect", "create", "replace", "edit", "preview", "query", "resolve", "restore":
 		default:
 			t.Errorf("tool name %q must start with an operation verb", doc.Name)
 		}
@@ -67,8 +67,8 @@ func TestDescribeToolsMatchesWhatAClientIsServed(t *testing.T) {
 }
 
 // The dashboard tools register only when a dashboard service is present. If
-// DescribeTools ever passed nil, the reference would silently lose four tools —
-// two of which mutate — while still reading as complete.
+// DescribeTools ever passed nil, the reference would silently lose the dashboard
+// tools while still reading as complete.
 func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 	docs, err := DescribeTools(context.Background())
 	if err != nil {
@@ -80,7 +80,7 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 		found[doc.Name] = doc
 	}
 
-	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard", "get_telemetry_schema", "preview_panels"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard", "list_dashboard_versions", "restore_dashboard_version", "get_telemetry_schema", "preview_panels"} {
 		if _, ok := found[name]; !ok {
 			t.Errorf("%s is registered but absent from DescribeTools", name)
 		}
@@ -100,6 +100,12 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 	}
 	if edit := found["edit_dashboard"]; edit.ReadOnly || !edit.Destructive {
 		t.Errorf("edit_dashboard annotations = %+v, want destructive and not read-only", edit)
+	}
+	if history := found["list_dashboard_versions"]; !history.ReadOnly || history.OpenWorld {
+		t.Errorf("list_dashboard_versions annotations = %+v", history)
+	}
+	if restore := found["restore_dashboard_version"]; restore.ReadOnly || !restore.Destructive || restore.Idempotent || restore.OpenWorld {
+		t.Errorf("restore_dashboard_version annotations = %+v", restore)
 	}
 }
 

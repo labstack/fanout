@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"strings"
@@ -130,8 +131,26 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
-	s.mcp.AddReceivingMiddleware(addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
+	s.mcp.AddReceivingMiddleware(recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
 	return s
+}
+
+// Tool handlers run in the MCP server's request goroutine, outside the agent's
+// execution stack. Recover there so local and remote calls keep a tool error.
+func recoverToolPanic(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+		if method == "tools/call" {
+			defer func() {
+				if value := recover(); value != nil {
+					slog.Error("MCP tool panicked", "panic", value)
+					failure := summary("tool execution failed")
+					failure.IsError = true
+					result, err = failure, nil
+				}
+			}()
+		}
+		return next(ctx, method, req)
+	}
 }
 
 // addStaticCacheHints lets clients reuse catalogs and embedded MCP Apps between

@@ -1,9 +1,13 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect,it,vi } from 'vitest';
-import { useDashboardReceipts } from './app-context';
+import { activityLabel, useDashboardReceipts } from './app-context';
 import { build,user } from '../tests/dashboard-receipts';
 import type { Message } from '@ag-ui/client';
+it('uses plain language for dashboard history and restore activity',()=>{
+ expect(activityLabel('list_dashboard_versions')).toBe('Reading your dashboard history…');
+ expect(activityLabel('restore_dashboard_version')).toBe('Restoring your dashboard…');
+});
 it('reuses finished-turn receipts without reparsing their tool payloads on streamed deltas',async()=>{
  const old=build();const current=[user('next')];let receipts:ReturnType<typeof useDashboardReceipts>;
  function Probe({messages}:{messages:Message[]}) {receipts=useDashboardReceipts(messages);return null;}

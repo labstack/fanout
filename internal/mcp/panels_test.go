@@ -138,7 +138,7 @@ func TestCreateAndEditDashboardTools(t *testing.T) {
 }
 
 func TestDashboardToolScopes(t *testing.T) {
-	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard", "list_dashboard_versions", "restore_dashboard_version"} {
 		if RequiredToolScope(name) != dashboard.OAuthScope {
 			t.Errorf("%s scope = %q", name, RequiredToolScope(name))
 		}

@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "18 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer."
+summary: "20 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -13,8 +13,8 @@ generated: true
     tool list rather than reading the registrations. Edit the generator, not
     this page. */}
 
-A Fanout instance serves MCP at `/mcp`. 18 tools, listed below exactly as the
-server reports them to an Apps-enabled client. Ordinary clients receive the 15 model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.
+A Fanout instance serves MCP at `/mcp`. 20 tools, listed below exactly as the
+server reports them to an Apps-enabled client. Ordinary clients receive the 17 model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
 and reaches nothing else.
@@ -49,12 +49,14 @@ AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
 | [`get_service_topology`](#get_service_topology) | No — read-only |
 | [`get_telemetry_schema`](#get_telemetry_schema) | No — read-only |
 | [`inspect_trace`](#inspect_trace) | No — read-only |
+| [`list_dashboard_versions`](#list_dashboard_versions) | No — read-only |
 | [`list_dashboards`](#list_dashboards) | No — read-only |
 | [`preview_panels`](#preview_panels) | No — read-only |
 | [`query_panel_fragment`](#query_panel_fragment) | No — read-only |
 | [`query_telemetry`](#query_telemetry) | No — read-only |
 | [`replace_dashboard`](#replace_dashboard) | **Yes — replaces existing state** |
 | [`resolve_panel_variables`](#resolve_panel_variables) | No — read-only |
+| [`restore_dashboard_version`](#restore_dashboard_version) | **Yes — replaces existing state** |
 | [`search_logs`](#search_logs) | No — read-only |
 
 ## create_dashboard
@@ -211,6 +213,16 @@ Read-only. Calling it changes nothing.
 | `trace_id` | `string` | no | Exact trace ID; omit to inspect the most relevant recent error or slow trace |
 | `window` | `string` | no | Trace lookup window such as 1h, 24h, 168h, or 720h; defaults to 1h |
 
+## list_dashboard_versions
+
+**List dashboard versions** — List the authenticated user's saved versions of one dashboard, newest first, with author and message. The historical version identifies a restore target; restore_dashboard_version saves it as a new version.
+
+Read-only. Calling it changes nothing.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `id` | `string` | **yes** | Dashboard ID returned by list_dashboards or create_dashboard |
+
 ## list_dashboards
 
 **List dashboards** — List the authenticated user's dashboards with panel counts and versions. See create_dashboard for the spec guide.
@@ -289,6 +301,17 @@ Read-only. Calling it changes nothing.
 | `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
 | `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
 | `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
+
+## restore_dashboard_version
+
+**Restore dashboard version** — Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run.
+
+**Replaces existing state.**
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `id` | `string` | **yes** | Dashboard ID |
+| `version` | `integer` | **yes** | Positive stored version to restore; restoring creates a new version |
 
 ## search_logs
 

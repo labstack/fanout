@@ -7,7 +7,7 @@ export type SaveReceipt = {
   save_check: { checked: boolean; reason?: string; elapsed_ms: number; panels: PanelCheck[] };
 };
 export type DashboardToolResult = { id: string; name: string; version: number; label: string; receipt: SaveReceipt };
-export const mutationNames = new Set(["create_dashboard", "edit_dashboard", "replace_dashboard"]);
+export const mutationNames = new Set(["create_dashboard", "edit_dashboard", "replace_dashboard", "restore_dashboard_version"]);
 export function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value); }
 export function jsonObject(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "string") return;
@@ -44,5 +44,5 @@ export function dashboardToolResult(toolCallId: string, content: unknown, messag
   const payload = jsonObject(content), record = payload?.dashboard, receipt = payload?.receipt;
   if (!payload || payload.error || payload.isError || !object(record) || typeof record.id !== "string" || !record.id || typeof record.name !== "string" || !record.name
     || !saveReceipt(receipt) || record.version !== receipt.version || resultIndex >= 0 && (messages[resultIndex] as Extract<Message, { role: "tool" }>).error) return null;
-  return { id: record.id, name: record.name, version: receipt.version, label: name === "create_dashboard" ? "Created" : "Updated", receipt };
+  return { id: record.id, name: record.name, version: receipt.version, label: name === "create_dashboard" ? "Created" : name === "restore_dashboard_version" ? "Restored" : "Updated", receipt };
 }
