@@ -155,3 +155,24 @@ body,
   font-size: inherit;
   font-family: inherit;
 }
+
+/* App snapshots use one quiet, aligned disclosure row in either state. */
+.chat-app-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--mantine-color-dimmed);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  border-radius: inherit;
+}
+.chat-app-chevron { display: flex; align-items: center; flex: none; }
+.chat-app-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-app-toggle:hover { background: var(--mantine-color-default-hover); }
+.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }

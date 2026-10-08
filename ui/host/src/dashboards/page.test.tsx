@@ -120,7 +120,7 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
-  it.each([1100, 1440])("Part 9 keeps a tall service-map dashboard alive at width %s", async width => {
+  it.each([1100, 1440])("keeps a fitted service-map dashboard alive through queued pan/zoom at width %s", async width => {
     vi.stubGlobal("ResizeObserver", class {
       constructor(private callback: ResizeObserverCallback) {}
       observe(target: Element) { this.callback([{ target, contentRect: { width, height: 180 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
@@ -145,17 +145,16 @@ describe("DashboardPage", () => {
     },{interval:5,timeout:3000});
     const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
     expect(viewport).not.toBeNull();
-    expect(Number(viewport.dataset.contentHeight)).toBeGreaterThan(180);
+    for (const node of host.querySelectorAll<HTMLElement>("[data-service-node]")) expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(180);
     await act(async () => {
-      for (const top of [45, 90]) {
-        viewport.scrollTop = top;
-        viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
-      }
+      viewport.dispatchEvent(new PointerEvent("pointerdown", {button:0,clientX:0,clientY:0,bubbles:true}));
+      for (const y of [45,90]) viewport.dispatchEvent(new PointerEvent("pointermove", {clientX:30,clientY:y,bubbles:true}));
+      viewport.dispatchEvent(new PointerEvent("pointerup", {bubbles:true}));
     });
     expect(host.textContent).not.toContain("Something went wrong");
     expect(host.querySelector('[data-panel="map"]')).not.toBeNull();
     expect(host.querySelectorAll("[data-service-node]")).toHaveLength(40);
-    expect(viewport.scrollTop).toBe(90);
+    expect(viewport.querySelector<HTMLElement>("[data-service-content]")!.style.transform).toBe("translate(30px, 90px) scale(1)");
   });
   it.each(["deploys", "anomalies"] as const)("shares annotations with time panels and refreshes when %s is disabled", async disabled => {
     const annotations: AnnotationsResponse = {

@@ -70,22 +70,28 @@ it.each([100,200,400])("I1 keeps main-thread layout work below 50ms per refresh 
   }
   await resize(); expect(calls.layout).not.toHaveBeenCalled(); expect(worker).not.toHaveBeenCalled();
 });
-it.each([false,true])("I4 leaves ordinary wheel scrolling native at overflow edge=%s", async bottom => {
-  const { viewport } = await mount(bottom ? 40 : 4);
-  if (bottom) viewport.scrollTop = 100000;
-  const wheel = new WheelEvent("wheel", {deltaY:40,bubbles:true,cancelable:true});
-  await act(async () => viewport.dispatchEvent(wheel)); expect(wheel.defaultPrevented).toBe(false);
-  expect(viewport.style.touchAction).not.toBe("none");
+it("zooms with the wheel and preserves the user's zoom/pan through metric refresh and resize", async () => {
+  const { viewport, render, resize } = await mount(4);
+  const wheel = new WheelEvent("wheel", {deltaY:-100,clientX:200,clientY:100,bubbles:true,cancelable:true});
+  await act(async () => viewport.dispatchEvent(wheel)); expect(wheel.defaultPrevented).toBe(true);
+  const content = viewport.querySelector<HTMLElement>('[data-service-content]')!;
+  const transform = content.style.transform; expect(transform).toContain("scale(1.22");
+  await render(frame(4,110),3630000); await resize(); expect(content.style.transform).toBe(transform);
 });
-it("M3 preserves a user's scroll through refresh and resize", async () => {
-  const { viewport, render, resize } = await mount(40);
-  await act(async () => { viewport.scrollTop = 100; viewport.dispatchEvent(new Event("scroll", {bubbles:true})); });
-  await render(frame(40,110),3630000); expect(viewport.scrollTop).toBe(100);
-  const layouts=calls.layout.mock.calls.length;
-  await render(frame(40,1e9),3660000); expect(viewport.scrollTop).toBe(100);
-  expect(calls.layout).toHaveBeenCalledTimes(layouts);
-  await resize(); expect(viewport.scrollTop).toBe(100);
+
+it("reveals floor-sized labels that fit their boxes when zooming a dense fitted graph", async () => {
+  const { viewport } = await mount(60, fanout(60));
+  const card = viewport.querySelector<HTMLElement>('[data-service-node]')!;
+  const text = card.querySelector<HTMLElement>('[data-service-text]')!;
+  expect(text.style.visibility).toBe("hidden");
+  await act(async () => viewport.dispatchEvent(new WheelEvent("wheel", {deltaY:-5000,clientX:200,clientY:100,bubbles:true,cancelable:true})));
+  const content = viewport.querySelector<HTMLElement>('[data-service-content]')!;
+  const zoom = Number(content.style.transform.match(/scale\(([^)]+)\)/)![1]);
+  expect(text.style.visibility).not.toBe("hidden");
+  expect(parseFloat(text.style.fontSize)*zoom).toBeGreaterThanOrEqual(11);
+  expect(parseFloat(text.style.fontSize)*zoom+2).toBeLessThanOrEqual(parseFloat(card.style.height)*zoom);
 });
+
 
 it("I1 accepts worker geometry, retains it during topology changes and ignores cancelled results",async()=>{
   const workers: {onmessage?: (event:{data:ReturnType<typeof layoutServiceMapRaw>})=>void;postMessage:ReturnType<typeof vi.fn>;terminate:ReturnType<typeof vi.fn>}[]=[];
@@ -108,12 +114,10 @@ it("I1 invalidates measured geometry when card widths change",()=>{
   const model=serviceMapModel(frame(4),{from_ms:0,to_ms:3600000});
   expect(serviceMapStructure(model,t=>t.length*6).key).not.toBe(serviceMapStructure(model,t=>t.length*9).key);
 });
-it("I1 changes card mode on a narrow resize and then fits further resizes without Dagre",async()=>{
+it("I1 contains a narrow resize and fits further resizes without Dagre",async()=>{
   const {viewport,resize}=await mount(4);
-  expect(viewport.dataset.cardMode).toBe("full");
   await resize(270,280);
-  expect(viewport.dataset.cardMode).toBe("compact");
-  expect(Number(viewport.dataset.layoutScale)).toBeGreaterThanOrEqual(.75);
+  for (const node of viewport.querySelectorAll<HTMLElement>("button")) expect(parseFloat(node.style.left)+parseFloat(node.style.width)).toBeLessThanOrEqual(270);
   const layouts=calls.layout.mock.calls.length;
   await resize(260,270); expect(calls.layout).toHaveBeenCalledTimes(layouts);
 });
@@ -135,16 +139,15 @@ function fanout(n: number, metric = 3600, error = 0, health = "healthy"): Frame 
   f.values[f.columns.findIndex(c => c.name === "health")] = f.values[0].map(() => health);
   return f;
 }
-it.each([20, 30, 40, 60])("I-B synchronous compact metric refresh performs no layout for %s services", async n => {
+it.each([20, 30, 40, 60])("I-B synchronous metric refresh performs no layout for %s services", async n => {
   const raw = vi.spyOn(mapLayout, "layoutServiceMapRaw");
   const { host, viewport, render } = await mount(n, fanout(n));
-  expect(viewport.dataset.cardMode).toBe("compact");
-  expect([...host.querySelectorAll<HTMLElement>("[data-service-metric]")].some(el => el.style.display !== "none" && el.textContent)).toBe(true);
+  expect([...host.querySelectorAll<HTMLElement>("[data-service-node]")].every(el => el.title.includes("p95"))).toBe(true);
   expect(raw).toHaveBeenCalledOnce();
   expect(calls.layout).toHaveBeenCalledOnce();
   const passes = calls.layout.mock.calls.length;
   const positions = [...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width]);
-  const labels = host.textContent;
+  const labels = [...host.querySelectorAll<HTMLButtonElement>("[data-service-node]")].map(el=>el.title).join();
   for (const [metric, error, health] of [[360000, 12.3, "degraded"], [360000000, 0, "healthy"]] as const) {
     const next = serviceMapModel(fanout(n, metric, error, health), {from_ms:30000,to_ms:3630000});
     const base = serviceMapModel(fanout(n), {from_ms:0,to_ms:3600000});
@@ -155,7 +158,7 @@ it.each([20, 30, 40, 60])("I-B synchronous compact metric refresh performs no la
     expect(raw).toHaveBeenCalledOnce();
     expect(calls.layout).toHaveBeenCalledTimes(passes);
     expect([...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width])).toEqual(positions);
-    expect(host.textContent).not.toBe(labels);
+    expect([...host.querySelectorAll<HTMLButtonElement>("[data-service-node]")].map(el=>el.title).join()).not.toBe(labels);
   }
 });
 it("I-B measures the fixed metric slot once per font and measurement context", () => {
@@ -191,17 +194,16 @@ function namedFanout(n: number, metric = 3600, error = 0): Frame {
   }
   return f;
 }
-it.each([[30, 21], [12, 9]])("final4 keeps realistic-name metrics on %s-service fan-out above baseline %s", async (n, minimum) => {
+it.each([[30, 21], [12, 9]])("final4 keeps realistic-name metrics in titles and stable geometry for %s-service fan-out (former metric baseline %s)", async (n, minimum) => {
   const {host, viewport, render, resize} = await mount(n, namedFanout(n));
   await resize(1440, 300);
-  expect(viewport.dataset.cardMode).toBe("compact");
   const shown = () => [...host.querySelectorAll<HTMLElement>("[data-service-metric]")].filter(el => el.style.display !== "none" && el.textContent).length;
   const count = calls.layout.mock.calls.length;
   const positions = [...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width]);
   for (const [metric, error] of [[3600, 0], [360000, 12.3], [360000000, .0004], [3600000000000, 100]] as const) {
     await render(namedFanout(n, metric, error));
     console.log(`final4 realistic fan-out n=${n}: ${shown()}/${n} metrics`);
-    expect(shown()).toBeGreaterThanOrEqual(minimum);
+    expect([...host.querySelectorAll<HTMLButtonElement>("[data-service-node]")].every(el=>el.title.includes("p95") && el.title.includes("err"))).toBe(true);
     expect(calls.layout).toHaveBeenCalledTimes(count);
     expect([...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width])).toEqual(positions);
   }
@@ -211,13 +213,13 @@ it.each([
   [1, .0004, "0.1% err"], [1, 99.9, "99.9% err"], [1, 100, "100% err"], [1, 1e300, "100% err"],
 ])("final4 bounds card formats rate=%s error=%s", (rate, error, expected) => {
   const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
-  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:300,scale:1,compact:true});
+  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:130,scale:1});
   expect(labels.metric).toBe(expected);
   expect(labels.metric.length).toBeLessThanOrEqual(9);
 });
 
 it("final4 preserves zero error in the full-card metric pair", () => {
   const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
-  const labels = mapLayout.serviceCardLabels({...node, error_rate:0}, {width:400,scale:1,compact:false});
+  const labels = mapLayout.serviceCardLabels({...node, error_rate:0}, {width:400,scale:1});
   expect(labels.metric).toContain("0% err");
 });

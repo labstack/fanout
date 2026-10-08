@@ -30,6 +30,43 @@ function button(text: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === text);
 }
 
+function appMessage(id: string, tool: string, title: string, rows = 1): Message {
+  const fragment = fixture(); fragment.dashboard.panels[0].title = title;
+  fragment.results[0] = { id: "p", status: "ok", elapsed_ms: 0, frame: { columns: [{ name: "body", type: "string", role: "dimension" }], values: [Array.from({ length: rows }, () => title)], rows } };
+  fragment.dashboard.time = { from: `2026-10-07T${id === "one" ? "18" : "19"}:00:00Z`, to: "2026-10-07T20:00:00Z", refresh: "off" };
+  return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: tool, tool_input: {}, tool_result: fragment, is_error: false } } as Message;
+}
+it("aligns collapsed and expanded summaries with a leading chevron and singular/plural row counts", async () => {
+  const root = await mount(value({ messages: [appMessage("one", "query_telemetry", "Discovery"), appMessage("two", "query_telemetry", "Answer", 2)] }));
+  try {
+    const toggle = document.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!;
+    expect(toggle.classList.contains("chat-app-toggle")).toBe(true);
+    expect(toggle.firstElementChild?.classList.contains("chat-app-chevron")).toBe(true);
+    expect(toggle.lastElementChild?.classList.contains("chat-app-summary")).toBe(true);
+    expect(toggle.textContent).toContain("Discovery · logs · 1 row"); expect(toggle.textContent).not.toContain("1 rows");
+    expect(document.querySelector('button[aria-expanded="true"]')?.textContent).toContain("2 rows");
+  } finally { await act(async () => root.unmount()); }
+});
+it.each(["mixed", "presets", "custom"])("expands requested presets over discovery views and restores %s turns on reload", async kind => {
+  const messages = [appMessage("one", kind === "custom" ? "query_telemetry" : "get_service_performance", "Requested"), appMessage("two", kind === "presets" ? "search_logs" : "query_telemetry", "Later")];
+  for (const saved of [messages, JSON.parse(JSON.stringify(messages))]) {
+    const root = await mount(value({ messages: saved }));
+    try {
+      const toggles = [...document.querySelectorAll('button[aria-expanded]')];
+      expect(toggles.map(button => button.getAttribute("aria-expanded"))).toEqual(kind === "mixed" ? ["true", "false"] : kind === "presets" ? ["true", "true"] : ["false", "true"]);
+    } finally { await act(async () => root.unmount()); }
+  }
+});
+it("prefers a deduped preset over an equivalent later custom view", async () => {
+  const preset = appMessage("one", "get_service_topology", "Requested");
+  const custom = structuredClone(preset) as Message & { content: Record<string, unknown> }; custom.id = "two"; custom.content.tool_name = "query_telemetry";
+  const root = await mount(value({ messages: [preset, custom, appMessage("three", "query_telemetry", "Discovery")] }));
+  try {
+    const toggles = [...document.querySelectorAll('button[aria-expanded]')];
+    expect(toggles.map(toggle => toggle.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+  } finally { await act(async () => root.unmount()); }
+});
+
 it("collapses earlier views, dedupes within a turn, expands accessibly and restores on reload", async () => {
   const app = (id: string, title: string, changed = false): Message => {
     const f = fixture(); f.dashboard.name = title; f.dashboard.panels[0].title = title;

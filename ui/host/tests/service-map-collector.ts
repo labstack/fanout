@@ -1,0 +1,46 @@
+/** Self-contained browser collector: run on a fitted map viewport in either surface. */
+export function assertServiceMapDOM(viewport: HTMLElement) {
+  const body = viewport.getBoundingClientRect();
+  const fail = (message: string) => { throw new Error(`Service map geometry: ${message}`); };
+  if (body.width <= 0 || body.height <= 0) fail("empty viewport");
+  const inside = (box: DOMRect, label: string) => {
+    if (box.left < body.left + 1 || box.top < body.top + 1 || box.right > body.right - 1 || box.bottom > body.bottom - 1) fail(`${label} is clipped`);
+  };
+  const nodes = [...viewport.querySelectorAll<HTMLButtonElement>("button[title]")].map(element => ({ element, id: element.dataset.serviceNode ?? element.title.split(" · ")[0], box: element.getBoundingClientRect() }));
+  if (!nodes.length) fail("no nodes");
+  for (const node of nodes) {
+    inside(node.box, node.id);
+    for (const other of nodes) if (node !== other && node.box.left < other.box.right - .1 && node.box.right > other.box.left + .1 && node.box.top < other.box.bottom - .1 && node.box.bottom > other.box.top + .1) fail(`${node.id} overlaps ${other.id}`);
+    const text = node.element.querySelector<HTMLElement>("[data-service-text]") ?? node.element.firstElementChild as HTMLElement;
+    if (text && parseFloat(getComputedStyle(text).fontSize) < 11) fail(`${node.id} text is below micro`);
+  }
+  const edges = [...viewport.querySelectorAll<SVGPathElement>("svg > g > path")];
+  for (const edge of edges) {
+    inside(edge.getBoundingClientRect(), "edge");
+    const [caller, callee] = edge.querySelector("title")!.textContent!.split("\n")[0].split(" → ");
+    const source = nodes.find(n => n.id === caller), target = nodes.find(n => n.id === callee);
+    const entry = !edges.some(candidate => candidate.querySelector("title")!.textContent!.split("\n")[0].endsWith(` → ${caller}`));
+    if (entry && source && target && source.box.right >= target.box.left) fail(`${caller} does not precede ${callee}`);
+    const coordinates = edge.getAttribute("d")!.match(/-?[\d.]+/g)!.map(Number);
+    const matrix = edge.getScreenCTM?.();
+    const points = coordinates.filter((_,i) => i % 2 === 0).map((x,i) => {
+      const y = coordinates[i*2+1];
+      return matrix ? {x:matrix.a*x+matrix.c*y+matrix.e,y:matrix.b*x+matrix.d*y+matrix.f} : {x,y};
+    });
+    for (let i=1;i<points.length;i++) for (const node of nodes) if (node.id !== caller && node.id !== callee) {
+      const a=points[i-1], b=points[i], box=node.box;
+      let lo=0, hi=1;
+      for (const [value,delta,min,max] of [[a.x,b.x-a.x,box.left+.1,box.right-.1],[a.y,b.y-a.y,box.top+.1,box.bottom-.1]]) {
+        if (!delta) { if (value < min || value > max) hi=-1; }
+        else { const p=(min-value)/delta,q=(max-value)/delta;lo=Math.max(lo,Math.min(p,q));hi=Math.min(hi,Math.max(p,q)); }
+      }
+      if (lo<hi) fail(`${caller} → ${callee} crosses ${node.id}`);
+    }
+  }
+  const label = viewport.querySelector<HTMLElement>("[data-service-uncalled-label]") ?? [...viewport.querySelectorAll("span")].find(element => element.textContent === "No traced calls in this window");
+  if (label) inside(label.getBoundingClientRect(), "uncalled label");
+  const width = Math.max(...nodes.map(n => n.box.right)) - Math.min(...nodes.map(n => n.box.left));
+  const height = Math.max(...nodes.map(n => n.box.bottom)) - Math.min(...nodes.map(n => n.box.top));
+  if (Math.max(width / body.width, height / body.height) < .7) fail("graph does not fill 70% of the limiting dimension");
+  return { nodes: nodes.length, edges: edges.length, width, height, body: { width: body.width, height: body.height } };
+}

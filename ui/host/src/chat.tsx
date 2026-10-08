@@ -1,5 +1,5 @@
 import type { Message } from "@ag-ui/client";
-import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography } from "@mantine/core";
+import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -16,6 +16,9 @@ import { dashboardToolResult } from "./dashboard-tool-result";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
+const presetTools = new Set(["get_observability_overview", "get_service_performance", "get_service_topology", "search_logs", "inspect_trace"]);
+const isPreset = (content: MCPAppContent) => presetTools.has(content.tool_name);
+
 type AppView = { content: MCPAppContent; expanded: boolean };
 // Sort object keys so reloads and equivalent JSON field orders dedupe alike.
 function canonical(value: unknown): string {
@@ -27,13 +30,20 @@ function chatAppViews(messages: Message[]) {
   const views = new Map<string, AppView>(), duplicates = new Set<string>();
   let turn: Array<{ id: string; content: MCPAppContent }> = [];
   const finish = () => {
-    const seen = new Set<string>();
-    for (const item of [...turn].reverse()) {
+    const winners = new Map<string, typeof turn[number]>();
+    for (const item of turn) {
       const fragment = item.content.tool_result;
       const mapFrame = fragment.dashboard.panels.length === 1 && fragment.dashboard.panels[0].viz === "service_map" && fragment.results[0].frame && !fragment.results[0].frame.truncated ? fragment.results[0].frame : undefined;
       const key = canonical({ dashboard: { ...fragment.dashboard, name: "", panels: fragment.dashboard.panels.map(panel => ({ ...panel, id: "", title: "", ...(panel.query ? { query: { ...panel.query, where: [...(panel.query.where ?? [])].sort(), ...(mapFrame ? { limit: undefined } : {}) } } : {}) })) }, vars: fragment.vars ?? {}, ...(mapFrame ? { map: mapFrame } : {}), ...(fragment.dashboard.time.from ? {} : { windows: fragment.results.map(result => [result.from_ms ?? 0, result.to_ms ?? 0]) }) });
-      if (seen.has(key)) duplicates.add(item.id);
-      else { views.set(item.id, { content: item.content, expanded: seen.size === 0 }); seen.add(key); }
+      const previous = winners.get(key);
+      if (!previous || isPreset(item.content) || !isPreset(previous.content)) winners.set(key, item);
+    }
+    const chosen = new Set([...winners.values()].map(item => item.id));
+    const hasPreset = [...winners.values()].some(item => isPreset(item.content));
+    const last = turn.filter(item => chosen.has(item.id)).at(-1)?.id;
+    for (const item of turn) {
+      if (!chosen.has(item.id)) duplicates.add(item.id);
+      else views.set(item.id, { content: item.content, expanded: isPreset(item.content) || !hasPreset && item.id === last });
     }
     turn = [];
   };
@@ -53,9 +63,9 @@ function ChatAppView({ view }: { view: AppView }) {
   const title = fragmentTitle(fragment);
   const viz = [...new Set(fragment.dashboard.panels.map(panel => panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")))].join(", ");
   const rows = fragment.results.reduce((count, result) => count + (result.frame?.rows ?? 0), 0);
-  const status = fragment.results.some(result => result.frame) ? `${rows} rows` : fragment.results.map(result => result.status).join(", ");
+  const status = fragment.results.every(result => result.status === "ok") ? `${rows} ${rows === 1 ? "row" : "rows"}` : [...new Set(fragment.results.map(result => result.status))].join(", ");
   return <Paper data-chat-app data-chat-anchor withBorder radius="lg" style={{ overflow: "hidden" }}>
-    <Button fullWidth variant="subtle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)} leftSection={expanded ? <CaretDown /> : <CaretRight />} styles={{ label: { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }}>{title} · {viz} · {status}</Button>
+    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{title} · {viz} · {status}</span></UnstyledButton>
     {expanded && <Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={view.content} /></Suspense>}
   </Paper>;
 }

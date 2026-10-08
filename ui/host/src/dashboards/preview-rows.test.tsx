@@ -21,6 +21,13 @@ const id="0123456789abcdef0123456789abcdef";
 const body="Connection ERROR <*> <str> <num> <ip> <time> token=[REDACTED] "+"very long message ".repeat(25);
 const frame:Frame={columns:[{name:"time",type:"time",role:"time"},{name:"severity",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"},{name:"body",type:"string",role:"dimension"},{name:"trace_id",type:"string",role:"dimension"},{name:"namespace",type:"string",role:"dimension"}],values:[[Date.now(),Date.now()],["ERROR","ERROR"],["checkout","payments"],[body,"short message"],[id,""],["otel-demo","otel-demo"]],rows:2};
 const result:PanelResult={id:"logs",status:"ok",elapsed_ms:1,frame};
+it("retains constant context columns on single-row logs but hides them with at least two rows", async () => {
+ await mount(<RowPanel panel={panel} result={{...result,frame:{...frame,rows:1,values:frame.values.map(values=>values.slice(0,1))}}} height={350} dark={false}/>,false);
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("namespace");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("service");
+ await mount(<RowPanel panel={panel} result={result} height={350} dark={false}/>,false);
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).not.toContain("namespace");
+});
 it.each([false,true])("collector sync: state legend labels reach 4.5:1 in both themes (%s)",async dark=>{
  await mount(<StateTimelineViz panel={{id:"states",title:"States",viz:"state_timeline"}} result={result} height={200} dark={dark}/>,dark);
  for(const label of host.querySelectorAll<HTMLElement>('[aria-label="State legend"] [role="listitem"]')) {

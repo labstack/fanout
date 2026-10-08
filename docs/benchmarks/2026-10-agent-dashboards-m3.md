@@ -34,3 +34,9 @@ The rebuilt `panels.html` is **2,343,092 raw bytes / 773,074 gzip -9 -n bytes**.
 `BenchmarkBoundFragmentLarge`, one measured iteration over 40 × 5,000 cells of 346 characters (200,000 cells, about 69 MB), took **350,498,500 ns/op** (350.5 ms), with **1,363,672,496 B/op** total allocations and **1,203,179 allocs/op**. Total allocations are not peak memory. This is a local benchmark, not a browser or concurrency measurement.
 
 Automated size-reporter tests see no additional notification over a simulated three-second settled interval and test wrapper-only measurement. Actual Chromium convergence, node-label font size, graph width and reader scroll acceptance still require the controller's browser collector.
+
+## Task 1b fix round 2
+
+The rebuilt `panels.html` is **2,333,439 raw bytes / 769,783 gzip -9 -n bytes**. The SPA embedded tree is **2,969,904 raw bytes**. Both trees match a fresh staged build; the app remains below the 2,500,000-byte target.
+
+The shared map now uses one deterministic Dagre LR layout with two-dimensional contain fitting. The 20-node fixture passes box, route and label geometry assertions at 780 × 460 and 1100 × 220. The reusable DOM collector is `ui/host/tests/service-map-collector.ts`; actual Chromium runs on chat and dashboards remain the controller's acceptance gate.

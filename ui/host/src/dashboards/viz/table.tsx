@@ -65,7 +65,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           {index === firstMeasure && maxima[index] > 0 && <Box w={56} h={6} bg="var(--mantine-color-default-border)" style={{ borderRadius: 3, overflow: "hidden", flex: "none" }}><Box h="100%" w={`${(value / maxima[index]) * 100}%`} bg="var(--mantine-primary-color-filled)" /></Box>}
         </Box>;
       }
-      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap", ...(panel.viz === "traces" ? { overflow: "hidden", textOverflow: "ellipsis" } : {}) }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
+      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
       const text = value === null ? "—" : String(value);
       if (column.name === "trace_id") return <Text fz={12} ff="monospace" title={text} data-trace-id={text}>{text.slice(0,16)}</Text>;
       return <Text fz={12} className="dashboard-dimension-nowrap" style={panel.viz === "traces" ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } : undefined} title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
@@ -97,10 +97,11 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   };
   const logWidths:Record<string,number>={time:146,severity:90,service:120,trace_id:150,namespace:100};
   const fixedWidths=columns.flatMap(c=>logWidths[c.id!]? [logWidths[c.id!]]:[]);
+  const traceWidths: Record<string, string> = { trace_id: "136px", duration_ms: "124px", status: "84px" };
   const minWidth=panel.viz === "logs" && columns.some(c=>c.id==="body") ? fixedWidths.reduce((sum,n)=>sum+n,0)+Math.max(180,...fixedWidths) : panel.viz === "log_patterns" ? 660 : undefined;
   return <Box>
     <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth, ...(panel.viz === "traces" ? { width: "100%", tableLayout: "fixed" } : {}) }}>
-      <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "log_patterns" ? ({severity:"100px",service:"140px",count:"140px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
+      <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "traces" ? (frame.columns.find(column => column.name === c.id)?.type === "time" ? "146px" : traceWidths[c.id!]) : panel.viz === "log_patterns" ? ({severity:"100px",service:"140px",count:"140px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
       <Table.Thead>
         {table.getHeaderGroups().map((group) => <Table.Tr key={group.id}>
           {group.headers.map((header) => {
@@ -119,7 +120,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
             const column=frame.columns.find(c=>c.name===cell.column.id)!;
-            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : panel.viz === "traces" ? { overflow: "hidden" } : undefined}>
+            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : panel.viz === "traces" && column.type !== "time" ? { overflow: "hidden" } : undefined}>
               {expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>}
             </Table.Td>;
           })}
