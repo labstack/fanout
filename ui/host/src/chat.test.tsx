@@ -7,7 +7,7 @@ import { FanoutAppContext, useFanoutApp, type FanoutAppContextValue } from "./ap
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import App from "./App";
 import { ChatPage } from "./chat";
-import { saved as receiptFixture, build as receiptBuild } from "../tests/dashboard-receipts";
+import { saved as receiptFixture, build as receiptBuild, user, call, result } from "../tests/dashboard-receipts";
 import { fixture } from "../tests/fixtures";
 vi.mock("./mcp-app-frame", () => ({ default: () => <div data-app-frame>Panel frame</div> }));
 vi.mock("./auth", () => ({
@@ -565,5 +565,18 @@ it('labels in-flight stages as progress and reserves attention for ended runs',a
 it('renders nothing for an empty final-answer slot after the run',async()=>{
  const {root}=await mountStreamChat([{id:'user',role:'user',content:'Explain'},{id:'empty',role:'assistant',content:''}],false);
  try{expect(document.querySelector('[data-answer-position]')).toBeNull();expect(document.querySelector('.chat-message-meta')).toBeNull();}
+ finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+
+it.each(['create_dashboard','edit_dashboard'])('keeps an interrupted %s out of chat error groups',async name=>{
+ const messages=[user(),call('save',name),result('save',{error:'interrupted'},'interrupted')];
+ const {root}=await mountStreamChat(messages,false);
+ try{expect(document.body.textContent).toContain('Save interrupted · outcome unknown');expect(document.body.textContent).not.toMatch(/tool calls? failed|Save failed|not saved/);}
+ finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+it('replaces interrupted chat uncertainty with a later proven save',async()=>{
+ const messages=[user(),call('save','edit_dashboard'),result('save',{error:'interrupted'},'interrupted'),{...result('save',receiptFixture),id:'proven-result'}];
+ const {root}=await mountStreamChat(messages,false);
+ try{expect(document.body.textContent).toContain('Saved v2');expect(document.body.textContent).not.toMatch(/interrupted|outcome unknown|tool calls? failed/);}
  finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });

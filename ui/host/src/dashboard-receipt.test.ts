@@ -83,3 +83,28 @@ it('records resolved validation paths even when a later preview finds another pr
  const messages=build().slice(0,5);messages.push(call('next','preview_panels',{panels:[{id:'latency'}]}),result('next',{elapsed_ms:20,panels:[{id:'latency',status:'invalid',problems:[{path:'query.sort',message:'Invalid sort'}]}]}));
  const receipt=receiptForTurn(messages,'u')!;expect(receipt.corrections).toHaveLength(1);expect(receipt.problems).toEqual([{panel_id:'latency',path:'query.sort',message:'Invalid sort'}]);expect(receipt.stages.validation.state).toBe('failed');
 });
+
+it.each(['create_dashboard','edit_dashboard'])('keeps an interrupted %s outcome unknown after reload',name=>{
+ const messages=[user(),call('save',name),result('save',{error:'interrupted'},'interrupted')];
+ const receipt=receiptForTurn(messages,'u')!;
+ expect(receipt.stages.save.state).toBe('interrupted');expect(receipt.saved).toBeUndefined();
+ expect(receipt.explanations).toContain('Save interrupted · outcome unknown');
+ expect(receipt.explanations.join(' ')).not.toMatch(/failed|not saved/);
+ expect(receiptForTurn(JSON.parse(JSON.stringify(messages)),'u')).toEqual(receipt);
+});
+it.each(['same call','later call'])('uses proven success after an interrupted save (%s)',mode=>{
+ const messages=[user(),call('save','edit_dashboard'),result('save',{error:'interrupted'},'interrupted')];
+ if(mode==='later call') messages.push(call('retry','edit_dashboard'));
+ messages.push({...result(mode==='same call'?'save':'retry',saved),id:'proven-result'});
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.stages.save.state).toBe('complete');expect(receipt.saved?.version).toBe(2);
+ expect(receipt.explanations.join(' ')).not.toMatch(/interrupted|failed|outcome unknown/);
+});
+it('marks an observed failed attempt retried after a successful save',()=>{
+ const messages=[user(),call('failed','edit_dashboard'),result('failed',{error:'stale'}),call('retry','edit_dashboard'),result('retry',saved)];
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.stages.save.state).toBe('complete');
+ expect(receipt.save_attempts).toEqual([{call_id:'failed',state:'retried'},{call_id:'retry',state:'complete'}]);
+});
+it('keeps the last proven version when a later save is interrupted',()=>{
+ const messages=build();messages.push(call('next','edit_dashboard'),result('next',{error:'interrupted'},'interrupted'));
+ const receipt=receiptForTurn(messages,'u')!;expect(receipt.saved?.version).toBe(2);expect(receipt.stages.save.state).toBe('interrupted');expect(receipt.explanations).toContain('Save interrupted · outcome unknown');expect(receipt.explanations.join(' ')).not.toContain('failed');
+});

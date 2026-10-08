@@ -35,6 +35,7 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
         <Stack gap={4}>
           {saved && <Text size="xs">{saved.label} {saved.name} · opens the current dashboard</Text>}
           {Object.entries(receipt.stages).map(([key,stage]) => <Text size="xs" c="dimmed" key={key}>{stageNames[key as keyof typeof stageNames]}: {running && stage.state === "incomplete" ? "in progress" : stage.state}{stage.elapsed_ms !== undefined ? ` · ${seconds(stage.elapsed_ms)}` : ""}</Text>)}
+          {receipt.save_attempts.map((attempt,i) => attempt.state === "retried" && <Text size="xs" c="dimmed" key={attempt.call_id}>Save attempt {i+1}: retried</Text>)}
           {!!receipt.context_counts.deploys && <Text size="xs">{receipt.context_counts.deploys} deploys observed</Text>}
           {!!receipt.context_counts.anomalies && <Text size="xs">{receipt.context_counts.anomalies} anomalies observed</Text>}
           {receipt.panels.map(p => <Text size="xs" key={p.id}>Preview · {p.id}: {p.status}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}

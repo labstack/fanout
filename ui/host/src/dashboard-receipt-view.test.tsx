@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it } from "vitest";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 import { receiptForTurn } from "./dashboard-receipt";
-import { build, result, saved } from "../tests/dashboard-receipts";
+import { build, call, user, result, saved } from "../tests/dashboard-receipts";
 
 function view(receipt:BuildReceipt, running=false) {
  const route=createRootRoute({component:()=> <DashboardReceiptView receipt={receipt} running={running} awaitingAnswer={running}/>});
@@ -48,5 +48,24 @@ it('shows in-flight stages as progress while keeping observed failures visible',
  expect(host.querySelector('[data-receipt-attention]')?.textContent).toBe('context: failed');
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
  expect(host.textContent).toContain('Save: in progress');expect(host.textContent).not.toContain('save: incomplete');
+ }finally{await act(async()=>root.unmount());}
+});
+
+it.each(['create_dashboard','edit_dashboard'])('renders interrupted %s with muted outcome-unknown text',async name=>{
+ const receipt=receiptForTurn([user(),call('save',name),result('save',{error:'interrupted'},'interrupted')],'u')!;
+ const host=document.createElement('div');const root=createRoot(host);
+ try{await act(async()=>root.render(view(receipt)));
+ const notice=Array.from(host.querySelectorAll<HTMLElement>('[data-receipt-attention]')).find(el=>el.textContent==='Save interrupted · outcome unknown');
+ expect(notice).toBeDefined();expect(notice!.style.color).toBe('var(--mantine-color-dimmed)');expect(notice!.getAttribute('role')).not.toBe('alert');
+ expect(host.textContent).not.toMatch(/Save failed|not saved/);
+ await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());expect(host.textContent).toContain('Save: interrupted');
+ }finally{await act(async()=>root.unmount());}
+});
+it('lists a failed attempt as retried in Details beside the proven save',async()=>{
+ const receipt=receiptForTurn([user(),call('failed','edit_dashboard'),result('failed',{error:'stale'}),call('retry','edit_dashboard'),result('retry',saved)],'u')!;
+ const host=document.createElement('div');const root=createRoot(host);
+ try{await act(async()=>root.render(view(receipt)));expect(host.textContent).toContain('Saved v2');
+ await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+ expect(host.textContent).toContain('Save attempt 1: retried');expect(host.textContent).toContain('Save: complete');expect(host.textContent).not.toContain('Save: failed');
  }finally{await act(async()=>root.unmount());}
 });

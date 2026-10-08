@@ -11,6 +11,8 @@ import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { fragmentTitle } from "../../panels/fragment";
+import { interruptedResult } from "./dashboard-receipt";
+import { mutationNames } from "./dashboard-tool-result";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
@@ -62,6 +64,7 @@ function toolFailures(messages: Message[]) {
     }
     if (message.role === "tool" && message.error) {
       const call = calls.get(message.toolCallId);
+      if(call && mutationNames.has(call.name) && interruptedResult(message)) continue;
       const owner = call?.assistant ?? assistant;
       const first = firstFailures.get(owner) ?? message.id;
       firstFailures.set(owner, first);

@@ -7,14 +7,16 @@ export type Correction={panel_id:string;path:string;message:string};
 function resolvedProblems(before:Correction[],after:Correction[],retainedIDs:Set<string>):Correction[] {
   return before.filter(p=>retainedIDs.has(p.panel_id) && !after.some(q=>q.panel_id===p.panel_id && q.path===p.path));
 }
-export type Stage = { state: "unobserved" | "incomplete" | "failed" | "complete"; elapsed_ms?: number };
+export type Stage = { state: "unobserved" | "incomplete" | "failed" | "complete" | "interrupted"; elapsed_ms?: number };
 export type BuildReceipt = {
   turn_id: string; stages: Record<"schema" | "context" | "draft" | "validation" | "preview" | "save", Stage>;
   panel_count?: number; panels: PanelCheck[]; problems: Correction[]; corrections: Correction[];
+  save_attempts: Array<{call_id:string;state:Stage["state"] | "retried"}>;
   explanations: string[]; context_counts: { deploys: number; anomalies: number }; saved?: DashboardToolResult;
 };
 const contextTools = new Set(["get_intelligence_snapshot", "query_telemetry", "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
 const namedProblems = (value: unknown, id: string): Correction[] => Array.isArray(value) ? value.flatMap(p => object(p) && typeof p.path === "string" && typeof p.message === "string" ? [{panel_id:id,path:p.path,message:p.message}] : []) : [];
+export const interruptedResult = (message:Message) => message.role === "tool" && (message.error === "interrupted" || jsonObject(message.content)?.error === "interrupted");
 const executed = (p: PanelCheck) => !["invalid", "not_run"].includes(p.status);
 
 /** No browser-only progress state: calls, inputs and server results in this user
@@ -27,7 +29,7 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
   const calls = turn.flatMap((m, i) => m.role === "assistant" ? (m.toolCalls ?? []).map(call => ({call,index:i})) : []);
   if (!calls.some(({call}) => mutationNames.has(call.function.name) || call.function.name === "preview_panels")) return null;
   const stages: BuildReceipt["stages"] = {schema:{state:"unobserved"},context:{state:"unobserved"},draft:{state:"unobserved"},validation:{state:"unobserved"},preview:{state:"unobserved"},save:{state:"unobserved"}};
-  const receipt: BuildReceipt = {turn_id:turnID,stages,panels:[],problems:[],corrections:[],explanations:[],context_counts:{deploys:0,anomalies:0}};
+  const receipt: BuildReceipt = {turn_id:turnID,stages,panels:[],problems:[],corrections:[],save_attempts:[],explanations:[],context_counts:{deploys:0,anomalies:0}};
   const callCounts = new Map<string, number>(), toolResults = new Map<string, Array<{index:number;message:Message}>>();
   for (const {call} of calls) callCounts.set(call.id,(callCounts.get(call.id) ?? 0)+1);
   turn.forEach((message,index) => {if(message.role === "tool") {const results=toolResults.get(message.toolCallId) ?? [];results.push({index,message});toolResults.set(message.toolCallId,results);}});
@@ -47,7 +49,9 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
     if (callCounts.get(call.id) !== 1) continue;
     const name = call.function.name, input = jsonObject(call.function.arguments);
     const results = (toolResults.get(call.id) ?? []).filter(r => r.index > index);
-    const result = results.length === 1 ? results[0].message : undefined;
+    // A synthetic interruption is uncertainty, so a later definitive result
+    // for that call can replace it. Other duplicate results stay ambiguous.
+    const result = results.length === 1 || mutationNames.has(name) && results.length > 1 && results.slice(0,-1).every(r => interruptedResult(r.message)) ? results.at(-1)!.message : undefined;
     const payload = result && jsonObject(result.content);
     const success = !!payload && result?.role === "tool" && !result.error && !payload.error && !payload.isError;
     const state = !result ? "incomplete" : success ? "complete" : "failed";
@@ -91,10 +95,13 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
     }
     if (mutationNames.has(name)) {
       const saved = result && dashboardToolResult(call.id,result.content,messages);
-      const error = result?.role === "tool" && (!!result.error || !!payload?.error || !!payload?.isError || !payload && typeof result.content === "string" && /error|fail|invalid|conflict|stale|denied|required|interrupted|cancelled|canceled|timeout|timed out|not found/i.test(result.content));
+      const interrupted = !!result && interruptedResult(result);
+      const error = !interrupted && result?.role === "tool" && (!!result.error || !!payload?.error || !!payload?.isError || !payload && typeof result.content === "string" && /error|fail|invalid|conflict|stale|denied|required|interrupted|cancelled|canceled|timeout|timed out|not found/i.test(result.content));
       lastMutationError = !!error;
-      unreadableSave = !!result && !saved && !error;
-      stages.save = {state:saved ? "complete" : error ? "failed" : "incomplete"};
+      unreadableSave = !!result && !saved && !error && !interrupted;
+      stages.save = {state:saved ? "complete" : interrupted ? "interrupted" : error ? "failed" : "incomplete"};
+      if(saved) for(const attempt of receipt.save_attempts) if(attempt.state === "failed") attempt.state = "retried";
+      receipt.save_attempts.push({call_id:call.id,state:stages.save.state});
       if (saved) {
         if(firstSave?.id !== saved.id) {firstSave=saved;netChanges.clear();}
         for(const change of saved.receipt.changes) {
@@ -136,6 +143,7 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
   for (const p of receipt.problems) receipt.explanations.push(`${p.panel_id}.${p.path}: ${p.message}`);
   const unfinished = Object.entries(stages).filter(([,s]) => s.state === "incomplete" || s.state === "failed").map(([name,s]) => `${name}: ${s.state}`);
   if (unfinished.length) receipt.explanations.push(unfinished.join(" · "));
+  if (stages.save.state === "interrupted") receipt.explanations.push("Save interrupted · outcome unknown");
   if (lastMutationError) receipt.explanations.push(receipt.saved ? `A later change failed; v${receipt.saved.version} remains saved` : "Save failed · dashboard was not saved");
   return receipt;
 }
