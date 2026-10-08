@@ -59,6 +59,7 @@ func TestStoreReloadsSanitizedRunOutcome(t *testing.T) {
 		{"provider", fmt.Errorf("%w: private provider body", errProvider), "Fanout could not reach the model provider. Please try again."},
 		{"step limit", errStepLimit, "Fanout reached its step limit before finishing. Try a narrower question."},
 		{"stopped", context.Canceled, "Stopped"},
+		{"stopped delivery", errors.Join(errAnswerDelivery, context.Canceled), "Stopped"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, err := controlstore.NewSQLite(":memory:")

@@ -92,8 +92,8 @@ function Session() {
       });
     }
     const subscription = agent.subscribe({
-      // The client translates THINKING_* before this callback. Intercept here,
-      // before its default reducer can put provisional text in agent.messages.
+      // Intercept native reasoning events before the default reducer can
+      // put provisional text in agent.messages.
       onEvent: ({ event, messages: next }) => {
         switch (event.type) {
           case "REASONING_MESSAGE_START": {

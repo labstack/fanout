@@ -155,7 +155,7 @@ export function ChatPage() {
               </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />;
             })}
             {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
-              {liveText ? <Box className="chat-message" data-chat-anchor><Text data-provisional c="dimmed" style={{ whiteSpace: "pre-wrap" }}>{provisional.text}</Text><Loader type="dots" size="sm" /></Box> : answer && <ChatMessage message={answer} time={messageTimes[answer.id]} />}
+              <ChatMessage message={liveText ? { id: provisional.id, role: "assistant", content: provisional.text } : answer!} provisional={!!liveText} time={liveText ? undefined : messageTimes[answer!.id]} />
             </Box>}
             {running && !hasFinalText && !liveText && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
             {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
@@ -207,7 +207,7 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   </Stack>;
 }
 
-function ChatMessage({ message, time, appView }: { message: Message; time?: number; appView?: AppView }) {
+function ChatMessage({ message, time, appView, provisional = false }: { message: Message; time?: number; appView?: AppView; provisional?: boolean }) {
 
   if (message.role === "activity") {
     if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
@@ -220,13 +220,15 @@ function ChatMessage({ message, time, appView }: { message: Message; time?: numb
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";
   const stamp = time ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(time)) : "";
-  return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
+  return <Box className={`chat-message${provisional ? " chat-message--provisional" : ""}`} data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
-      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
-    <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4}>
-      {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
-      {!user && <CopyButton text={content} label="Copy message" />}
+      : <Typography className={`chat-markdown${provisional ? " chat-markdown--provisional" : ""}`} data-provisional={provisional || undefined}><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
+    <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
+      {provisional ? <Loader type="dots" size={20} /> : <>
+        {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
+        {!user && <CopyButton text={content} label="Copy message" />}
+      </>}
     </Group>
   </Box>;
 }

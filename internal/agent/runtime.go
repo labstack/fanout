@@ -30,8 +30,10 @@ const dashboardAnalysisGuidance = ` For analysis dashboards, use only the types 
 // Error categories used to pick a client-safe RUN_ERROR message; the raw
 // error (which can include provider response bodies) stays server-side.
 var (
-	errProvider  = errors.New("model provider error")
-	errStepLimit = errors.New("agent step limit exceeded")
+	errProvider       = errors.New("model provider error")
+	errStepLimit      = errors.New("agent step limit exceeded")
+	errTimeLimit      = errors.New("agent time limit exceeded")
+	errAnswerDelivery = errors.New("completed answer delivery failed")
 )
 
 // maxOutputTokens leaves room for a complete dashboard spec in one tool call
@@ -223,7 +225,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	return nil
 }
 
-func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (bool, error) {
+func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (truncated bool, runErr error) {
 	type appView struct {
 		id    string
 		kind  string
@@ -231,16 +233,21 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 	}
 	seenAppViews := map[string]appView{}
 	caller := ctx
+	// A user abort can race with a failed SSE write on any exit path.
+	defer func() {
+		if caller.Err() != nil {
+			runErr = caller.Err()
+		}
+	}()
 	timeout := r.runTimeout
 	if timeout == 0 {
 		timeout = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	truncated := false
 	deadlineError := func(err error) error {
 		if caller.Err() == nil && ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("%w: 5-minute time limit reached", errStepLimit)
+			return fmt.Errorf("%w: exceeded %s", errTimeLimit, timeout)
 		}
 		return err
 	}
@@ -266,7 +273,8 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		var providerItems []json.RawMessage
 		var usage *TokenUsage
 		var servedModel string
-		thinkingStarted := false
+		reasoningID := messageID + "-reasoning"
+		reasoningStarted := false
 		toolStep := false
 		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
 			if event.Model != "" {
@@ -286,16 +294,16 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				if event.Delta == "" {
 					return nil
 				}
-				if !thinkingStarted {
-					if err := emitter.emitProvisional(events.NewThinkingStartEvent()); err != nil {
+				if !reasoningStarted {
+					if err := emitter.emitProvisional(events.NewReasoningStartEvent(reasoningID)); err != nil {
 						return err
 					}
-					if err := emitter.emitProvisional(events.NewThinkingTextMessageStartEvent()); err != nil {
+					if err := emitter.emitProvisional(events.NewReasoningMessageStartEvent(reasoningID, "reasoning")); err != nil {
 						return err
 					}
-					thinkingStarted = true
+					reasoningStarted = true
 				}
-				return emitter.emitProvisional(events.NewThinkingTextMessageContentEvent(event.Delta))
+				return emitter.emitProvisional(events.NewReasoningMessageContentEvent(reasoningID, event.Delta))
 			case EventToolUse:
 				if event.ToolCall != nil {
 					toolStep = true
@@ -312,9 +320,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			streamErr = ctx.Err()
 		}
 		var deliveryErr error
-		if thinkingStarted {
-			deliveryErr = emitter.emitProvisional(events.NewThinkingTextMessageEndEvent())
-			if err := emitter.emitProvisional(events.NewThinkingEndEvent()); deliveryErr == nil {
+		if reasoningStarted {
+			deliveryErr = emitter.emitProvisional(events.NewReasoningMessageEndEvent(reasoningID))
+			if err := emitter.emitProvisional(events.NewReasoningEndEvent(reasoningID)); deliveryErr == nil {
 				deliveryErr = err
 			}
 		}
@@ -403,14 +411,20 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		}
 		if len(toolCalls) == 0 {
 			// The server owns the completed answer even if the client disconnects.
+			deliveryFailure := func(err error) error {
+				if transcriptText != "" {
+					err = fmt.Errorf("%w: %w", errAnswerDelivery, err)
+				}
+				return r.fail(threadID, runID, err, emitter)
+			}
 			if deliveryErr != nil {
-				return truncated, r.fail(threadID, runID, deliveryErr, emitter)
+				return truncated, deliveryFailure(deliveryErr)
 			}
 			if err := emitFinalText(emitter, messageID, transcriptText); err != nil {
-				return truncated, r.fail(threadID, runID, err, emitter)
+				return truncated, deliveryFailure(err)
 			}
 			if err := emitter.emit(events.NewRunFinishedEventWithOptions(threadID, runID, events.WithSuccessOutcome())); err != nil {
-				return truncated, r.fail(threadID, runID, err, emitter)
+				return truncated, deliveryFailure(err)
 			}
 			return truncated, nil
 		}
@@ -523,10 +537,9 @@ func clientErrorCode(err error) string {
 	switch {
 	case errors.As(err, &apiErr), errors.Is(err, errProvider):
 		return "provider_unavailable"
+	case errors.Is(err, errTimeLimit):
+		return "time_limit"
 	case errors.Is(err, errStepLimit):
-		if strings.Contains(err.Error(), "5-minute") {
-			return "time_limit"
-		}
 		return "step_limit"
 	case errors.Is(err, context.Canceled):
 		return "abort"

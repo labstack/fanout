@@ -345,6 +345,10 @@ func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
 // events and outcome. truncated marks a run whose answer was cut off at the
 // provider's token limit; it only applies when runErr is nil.
 func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, messages []agtypes.Message, eventJSON [][]byte, truncated bool, runErr error) error {
+	// A completed answer survives a transport failure without a failure marker.
+	if errors.Is(runErr, errAnswerDelivery) && !errors.Is(runErr, context.Canceled) {
+		runErr = nil
+	}
 	if runErr != nil {
 		status := "failed"
 		if errors.Is(runErr, context.Canceled) {
@@ -367,6 +371,8 @@ func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, 
 	title := threadTitle(messages)
 	status, errorText := "completed", ""
 	switch {
+	case errors.Is(runErr, context.Canceled):
+		status, errorText = "stopped", runErr.Error()
 	case runErr != nil:
 		status, errorText = "failed", runErr.Error()
 	case truncated:

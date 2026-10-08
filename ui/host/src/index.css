@@ -122,6 +122,14 @@ body,
   margin-bottom: var(--mantine-spacing-xs);
 }
 
+.chat-markdown--provisional {
+  color: var(--mantine-color-dimmed);
+}
+
+.chat-message--provisional .chat-message-meta {
+  opacity: 1;
+}
+
 .chat-markdown :where(p, ul, ol) {
   margin-top: 0;
   margin-bottom: var(--mantine-spacing-sm);

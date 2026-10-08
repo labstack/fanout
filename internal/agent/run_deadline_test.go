@@ -33,7 +33,7 @@ func TestAgentWallDeadline(t *testing.T) {
 	emitter, output := newTestEmitter()
 	messages := []agtypes.Message{}
 	_, err := r.execute(t.Context(), "thread", "run", &messages, emitter)
-	if !errors.Is(err, errStepLimit) || !strings.Contains(output.String(), "5-minute time limit") {
+	if !errors.Is(err, errTimeLimit) || errors.Is(err, errStepLimit) || clientErrorCode(err) != "time_limit" || !strings.Contains(output.String(), "5-minute time limit") {
 		t.Fatalf("err=%v stream=%s", err, output.String())
 	}
 }

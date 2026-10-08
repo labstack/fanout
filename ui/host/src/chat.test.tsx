@@ -24,9 +24,13 @@ function StreamChat() {
 
 async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "assistant", content: "Earlier answer" }], start = true) {
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const requests: Array<{ messages: Message[] }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "https://fanout.example.test").pathname;
-    if (path === "/api/agent/runs") return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
+    if (path === "/api/agent/runs") {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
+    }
     const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { threads: [], nextCursor: "" } : { messages: stored };
     return Response.json(body);
   });
@@ -45,7 +49,14 @@ async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "a
   }
   const emit = async (event: Record<string, unknown>) => { await act(async () => controller!.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))); };
   const close = async () => { await act(async () => controller!.close()); };
-  return { root, emit, close };
+  const begin = async () => { const count = requests.length; await act(async () => button("Begin stream")!.click()); await vi.waitFor(() => expect(requests).toHaveLength(count + 1)); };
+  return { root, emit, close, begin, requests };
+}
+
+async function reasoning(emit: (event: Record<string, unknown>) => Promise<void>, text: string) {
+  await emit({type:"REASONING_START",messageId:"provisional"});
+  await emit({type:"REASONING_MESSAGE_START",messageId:"provisional",role:"reasoning"});
+  await emit({type:"REASONING_MESSAGE_CONTENT",messageId:"provisional",delta:text});
 }
 
 describe("provisional answer stream", () => {
@@ -79,9 +90,9 @@ describe("provisional answer stream", () => {
     try {
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
       expect(document.body.textContent).toContain("Analyzing your system");
-      await emit({ type: "THINKING_START" });
-      await emit({ type: "THINKING_TEXT_MESSAGE_START" });
-      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "Unfinished narration" });
+      await emit({ type: "REASONING_START", messageId: "provisional" });
+      await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
+      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Unfinished narration" });
       expect(document.querySelector('[data-provisional]')?.textContent).toBe("Unfinished narration");
       if (outcome === "cancel") await act(async () => (document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement).click());
       else {
@@ -100,24 +111,24 @@ describe("provisional answer stream", () => {
     const { root, emit, close } = await mountStreamChat();
     try {
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
-      await emit({ type: "THINKING_START" });await emit({ type: "THINKING_TEXT_MESSAGE_START" });
-      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "Fixing the sort. Checking another thing." });
+      await emit({ type: "REASONING_START", messageId: "provisional" });await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
+      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Fixing the sort. Checking another thing." });
       await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Fixing the sort."));
-      expect(document.querySelector('[data-provisional]')?.getAttribute('style')).toContain('--mantine-color-dimmed');
+      expect(document.querySelector('[data-provisional]')?.classList.contains('chat-markdown--provisional')).toBe(true);
       expect(document.querySelector('[data-answer-position] .mantine-Loader-root')).not.toBeNull();
-      await emit({ type: "THINKING_TEXT_MESSAGE_END" });await emit({ type: "THINKING_END" });
+      await emit({ type: "REASONING_MESSAGE_END", messageId: "provisional" });await emit({ type: "REASONING_END", messageId: "provisional" });
       await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
       expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).toContain("Updating your dashboard…");
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: "{}" });
       expect(document.querySelector('[role="status"]')?.textContent).toContain("Fixing the sort…");
       expect(document.body.textContent).not.toContain("Checking another thing.");
-      await emit({ type: "THINKING_START" });await emit({ type: "THINKING_TEXT_MESSAGE_START" });
-      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "Updated " });
-      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Updated "));
+      await emit({ type: "REASONING_START", messageId: "provisional" });await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
+      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Updated " });
+      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Updated"));
       const position = document.querySelector('[data-answer-position]');
-      await emit({ type: "THINKING_TEXT_MESSAGE_CONTENT", delta: "the latency panel." });
-      await emit({ type: "THINKING_TEXT_MESSAGE_END" });await emit({ type: "THINKING_END" });
+      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "the latency panel." });
+      await emit({ type: "REASONING_MESSAGE_END", messageId: "provisional" });await emit({ type: "REASONING_END", messageId: "provisional" });
       await emit({ type: "TEXT_MESSAGE_START", messageId: "final", role: "assistant" });
       await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Updated the latency panel." });
       await emit({ type: "TEXT_MESSAGE_END", messageId: "final" });
@@ -129,6 +140,66 @@ describe("provisional answer stream", () => {
     } finally {await act(async () => root.unmount());}
     const reloaded = await mountStreamChat([{id:"user",role:"user",content:"Sort"},{id:"final",role:"assistant",content:"Updated the latency panel."}], false);
     try {expect(document.querySelector('[role="log"]')?.textContent).toContain("Updated the latency panel.");expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).not.toContain("Fixing");}finally{await act(async()=>reloaded.root.unmount());}
+  });
+  it("renders the same markdown tree and meta height when provisional text becomes final", async () => {
+    const {root,emit,close}=await mountStreamChat();
+    const text="## Health\n\n**Healthy** services:\n\n- Cart\n- Checkout\n\n| Service | Errors |\n| --- | --- |\n| Cart | 0 |\n\n```sql\nSELECT 1\n```";
+    try {
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});
+      await reasoning(emit,text);
+      const position=document.querySelector('[data-answer-position]')!;
+      const markdown=position.querySelector('.chat-markdown');
+      expect(markdown).not.toBeNull();
+      expect(markdown?.classList.contains('chat-markdown--provisional')).toBe(true);
+      const tree=markdown?.innerHTML;
+      const metaHeight=position.querySelector<HTMLElement>('.chat-message-meta')?.style.height;
+      expect(metaHeight).toBe('calc(1.5rem * var(--mantine-scale))');
+      await emit({type:"REASONING_MESSAGE_END",messageId:"provisional"});await emit({type:"REASONING_END",messageId:"provisional"});
+      await emit({type:"TEXT_MESSAGE_START",messageId:"final",role:"assistant"});
+      await emit({type:"TEXT_MESSAGE_CONTENT",messageId:"final",delta:text});
+      await emit({type:"TEXT_MESSAGE_END",messageId:"final"});
+      expect(position.querySelector('.chat-markdown')).toBe(markdown);
+      expect(markdown?.classList.contains('chat-markdown--provisional')).toBe(false);
+      // happy-dom has no layout engine: identical markdown DOM + a fixed meta
+      // slot is the layout proxy, rather than a vacuous zero-height assertion.
+      expect(markdown?.innerHTML).toBe(tree);
+      expect(position.querySelector<HTMLElement>('.chat-message-meta')?.style.height).toBe(metaHeight);
+      await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"run"});await close();
+    } finally {await act(async()=>root.unmount());}
+  });
+  it("keeps native reasoning out of the next posted transcript without console warnings",async()=>{
+    const {root,emit,close,begin,requests}=await mountStreamChat();
+    const warn=vi.spyOn(console,"warn").mockImplementation(()=>undefined);
+    try {
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});await reasoning(emit,"Private provisional text");
+      await emit({type:"REASONING_MESSAGE_END",messageId:"provisional"});await emit({type:"REASONING_END",messageId:"provisional"});
+      await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"run"});await close();
+      await vi.waitFor(()=>expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
+      await begin();
+      expect(requests[1].messages.some(message=>message.role==='reasoning')).toBe(false);
+      expect(JSON.stringify(requests[1])).not.toContain("Private provisional text");
+      expect(warn).not.toHaveBeenCalled();
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"next"});await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"next"});await close();
+    } finally {warn.mockRestore();await act(async()=>root.unmount());}
+  });
+  it.each(["empty","error","cancel"])("clears provisional state before a tool-first next run after %s",async outcome=>{
+    const {root,emit,close,begin}=await mountStreamChat();
+    const log=vi.spyOn(console,"error").mockImplementation(()=>undefined);
+    const warn=vi.spyOn(console,"warn").mockImplementation(()=>undefined);
+    try {
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});await reasoning(emit,"Stale narration without punctuation");
+      if(outcome==='cancel')await act(async()=>(document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement).click());
+      else {await emit(outcome==='error'?{type:"RUN_ERROR",code:"provider_unavailable",message:"private"}:{type:"RUN_FINISHED",threadId:"thread-stream",runId:"run"});await close();}
+      await vi.waitFor(()=>expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
+      await begin();
+      expect(document.querySelector('[data-provisional]')).toBeNull();
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"next"});
+      await emit({type:"TOOL_CALL_START",toolCallId:"call",toolCallName:"edit_dashboard",parentMessageId:"step"});await emit({type:"TOOL_CALL_ARGS",toolCallId:"call",delta:"{}"});await emit({type:"TOOL_CALL_END",toolCallId:"call"});
+      await emit({type:"TOOL_CALL_RESULT",toolCallId:"call",messageId:"result",content:"{}"});
+      expect(document.querySelector('[role="status"]')?.textContent).toContain("Analyzing your system");
+      expect(document.body.textContent).not.toContain("Stale narration");
+      await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"next"});await close();
+    } finally {warn.mockRestore();log.mockRestore();await act(async()=>root.unmount());}
   });
   it.each([
     ['provider_unavailable','Fanout could not reach the model provider. Please try again.'],

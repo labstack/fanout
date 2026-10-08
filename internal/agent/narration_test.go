@@ -153,7 +153,7 @@ func TestRuntimeStreamsProvisionalTextBeforeSuccessfulStop(t *testing.T) {
 		if err := cb(StreamEvent{Type: EventText, Delta: "Buffered final"}); err != nil {
 			return err
 		}
-		assertEventOrder(t, out.String(), "THINKING_START", "THINKING_TEXT_MESSAGE_START", "THINKING_TEXT_MESSAGE_CONTENT")
+		assertEventOrder(t, out.String(), "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT")
 		if strings.Contains(out.String(), `"type":"TEXT_MESSAGE_CONTENT"`) {
 			t.Fatal("provisional text became an answer before stop")
 		}
@@ -193,7 +193,7 @@ func TestRuntimeCancellationDiscardsBufferedText(t *testing.T) {
 			_, err := runtime.execute(ctx, "thread", "run", &messages, emitter)
 			want := context.Canceled
 			if deadline {
-				want = errStepLimit
+				want = errTimeLimit
 			}
 			if !errors.Is(err, want) {
 				t.Fatalf("err=%v", err)
@@ -220,7 +220,7 @@ func (w *narrationFailWriter) Write(p []byte) (int, error) {
 	return w.out.Write(p)
 }
 
-// Thinking frames are provisional live UI, never committed answer events.
+// Reasoning frames are provisional live UI, never committed answer events.
 func answerSSE(stream string) string {
 	var out strings.Builder
 	for _, line := range strings.Split(stream, "\n") {
@@ -230,7 +230,7 @@ func answerSSE(stream string) string {
 		var event struct {
 			Type string `json:"type"`
 		}
-		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && !strings.HasPrefix(event.Type, "THINKING_") {
+		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && !strings.HasPrefix(event.Type, "REASONING_") {
 			out.WriteString(line)
 			out.WriteByte('\n')
 		}
@@ -239,7 +239,7 @@ func answerSSE(stream string) string {
 }
 
 func TestRuntimeFinalEmitterFailurePreservesAnswer(t *testing.T) {
-	for _, eventType := range []string{"TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "THINKING_END", "model_call_usage", "RUN_FINISHED"} {
+	for _, eventType := range []string{"TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "REASONING_END", "model_call_usage", "RUN_FINISHED"} {
 		t.Run(eventType, func(t *testing.T) {
 			emitter, _ := newTestEmitter()
 			writer := &narrationFailWriter{target: eventType}
@@ -274,14 +274,14 @@ func TestRuntimeFinalEmitterFailurePreservesAnswer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(loaded.Messages) != 2 || loaded.Messages[0].Content != "Telemetry looks healthy." || loaded.Messages[1].ActivityType != "agent-outcome" {
+			if len(loaded.Messages) != 1 || loaded.Messages[0].Content != "Telemetry looks healthy." {
 				t.Fatalf("reloaded=%+v", loaded.Messages)
 			}
 		})
 	}
 }
 
-func TestRuntimeThinkingStepsNeverPersistProvisionalText(t *testing.T) {
+func TestRuntimeReasoningStepsNeverPersistProvisionalText(t *testing.T) {
 	p := &scriptedProvider{steps: [][]StreamEvent{
 		{{Type: EventText, Delta: "Fixing "}, {Type: EventText, Delta: "the sort."}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "edit_dashboard", Input: `{}`}}, {Type: EventStop, StopReason: "tool_use"}},
 		{{Type: EventText, Delta: "Updated "}, {Type: EventText, Delta: "the panel."}, {Type: EventStop, StopReason: "end_turn"}},
@@ -291,12 +291,15 @@ func TestRuntimeThinkingStepsNeverPersistProvisionalText(t *testing.T) {
 	if _, err := NewRuntime(p, &fakeTools{execution: ToolExecution{Content: `{}`}}, nil).execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
 		t.Fatal(err)
 	}
-	assertEventOrder(t, out.String(), "THINKING_START", "THINKING_TEXT_MESSAGE_START", "THINKING_TEXT_MESSAGE_CONTENT", "THINKING_TEXT_MESSAGE_CONTENT", "THINKING_TEXT_MESSAGE_END", "THINKING_END", "TOOL_CALL_START", "TOOL_CALL_RESULT", "THINKING_START", "THINKING_TEXT_MESSAGE_START", "THINKING_TEXT_MESSAGE_CONTENT", "THINKING_TEXT_MESSAGE_END", "THINKING_END", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED")
+	if strings.Contains(out.String(), "THINKING_") {
+		t.Fatal("deprecated thinking event emitted")
+	}
+	assertEventOrder(t, out.String(), "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT", "REASONING_MESSAGE_CONTENT", "REASONING_MESSAGE_END", "REASONING_END", "TOOL_CALL_START", "TOOL_CALL_RESULT", "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT", "REASONING_MESSAGE_END", "REASONING_END", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED")
 	if strings.Count(out.String(), `"type":"TEXT_MESSAGE_CONTENT"`) != 1 {
 		t.Fatal("tool narration became answer text")
 	}
 	for _, raw := range emitter.events {
-		if strings.Contains(string(raw), "THINKING_") || strings.Contains(string(raw), "Fixing") {
+		if strings.Contains(string(raw), "REASONING_") || strings.Contains(string(raw), "Fixing") {
 			t.Fatalf("provisional event persisted: %s", raw)
 		}
 	}
@@ -314,7 +317,8 @@ func TestRuntimeErrorMessagesArePlain(t *testing.T) {
 	}{
 		{errProvider, "Fanout could not reach the model provider. Please try again."},
 		{errStepLimit, "Fanout reached its step limit before finishing. Try a narrower question."},
-		{fmt.Errorf("%w: 5-minute time limit reached", errStepLimit), "Fanout reached its 5-minute time limit. Try a smaller request."},
+		{fmt.Errorf("%w: unrelated wording", errTimeLimit), "Fanout reached its 5-minute time limit. Try a smaller request."},
+		{fmt.Errorf("%w: misleading 5-minute text", errStepLimit), "Fanout reached its step limit before finishing. Try a narrower question."},
 		{context.Canceled, "Stopped"},
 		{errors.New("private unknown error"), "Fanout could not complete this analysis. Please try again."},
 	} {
@@ -342,6 +346,126 @@ func TestRuntimeUnfinishedProviderToolTruncationHidesNarration(t *testing.T) {
 			}
 			if len(tools.calls) != 0 || len(messages) != 1 || messages[0].Content != "The response was cut off before it finished." {
 				t.Fatalf("messages=%+v calls=%v", messages, tools.calls)
+			}
+		})
+	}
+}
+
+// A Stop may race with any SSE write; the caller cancellation owns the outcome.
+type cancelWrite struct {
+	narrationFailWriter
+	cancel context.CancelFunc
+}
+
+func (w *cancelWrite) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), `"type":"`+w.target+`"`) {
+		w.cancel()
+	}
+	return w.narrationFailWriter.Write(p)
+}
+func TestRuntimeStopPersistsQuietOutcomeOnCancellationAndWriteFailure(t *testing.T) {
+	for _, target := range []string{"context", "TOOL_CALL_START", "TOOL_CALL_ARGS", "TOOL_CALL_END", "TEXT_MESSAGE_CONTENT"} {
+		t.Run(target, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var p Provider = &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "edit_dashboard", Input: `{}`}}, {Type: EventStop, StopReason: "tool_use"}}}}
+			if target == "context" {
+				p = narrationProviderFunc(func(_ context.Context, _ StreamParams, cb func(StreamEvent) error) error {
+					if err := cb(StreamEvent{Type: EventText, Delta: "Partial"}); err != nil {
+						return err
+					}
+					cancel()
+					return nil
+				})
+			}
+			if target == "TEXT_MESSAGE_CONTENT" {
+				p = textProvider{}
+			}
+			emitter, _ := newTestEmitter()
+			if target != "context" {
+				emitter.writer = &cancelWrite{narrationFailWriter: narrationFailWriter{target: target}, cancel: cancel}
+			}
+			db, err := controlstore.NewSQLite(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			store := NewStore(db.DB)
+			messages, err := store.StartRun(t.Context(), "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Show"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			truncated, runErr := NewRuntime(p, &fakeTools{execution: ToolExecution{Content: `{}`}}, store).execute(ctx, "thread", "run", &messages, emitter)
+			if !errors.Is(runErr, context.Canceled) {
+				t.Fatalf("Stop classified as %v", runErr)
+			}
+			if err := store.FinishRun(t.Context(), "owner", "thread", "run", messages, emitter.events, truncated, runErr); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := store.Thread(t.Context(), "owner", "thread")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var status string
+			if err := db.DB.QueryRowContext(t.Context(), `SELECT status FROM agui_runs WHERE run_id = ?`, "run").Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "stopped" {
+				t.Fatalf("stored run status=%q", status)
+			}
+			outcome := loaded.Messages[len(loaded.Messages)-1]
+			if outcome.ActivityType != "agent-outcome" || !strings.Contains(messageText(outcome.Content), `"status":"stopped"`) || !strings.Contains(messageText(outcome.Content), `"message":"Stopped"`) {
+				t.Fatalf("outcome=%+v", outcome)
+			}
+		})
+	}
+}
+
+func TestRuntimeDeliveryFailureWithoutCurrentAnswerKeepsFailureOutcome(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprintf("empty=%t", empty), func(t *testing.T) {
+			db, err := controlstore.NewSQLite(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			store := NewStore(db.DB)
+			seed, err := store.StartRun(t.Context(), "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "old-run", Messages: []agtypes.Message{{ID: "old-user", Role: agtypes.RoleUser, Content: "Before"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			seed = append(seed, agtypes.Message{ID: "old-answer", Role: agtypes.RoleAssistant, Content: "Earlier complete answer"})
+			if err := store.FinishRun(t.Context(), "owner", "thread", "old-run", seed, nil, false, nil); err != nil {
+				t.Fatal(err)
+			}
+			messages, err := store.StartRun(t.Context(), "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Next"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var step []StreamEvent
+			target := "TOOL_CALL_START"
+			if empty {
+				step = []StreamEvent{{Type: EventStop, StopReason: "end_turn"}}
+				target = "model_call_usage"
+			} else {
+				step = []StreamEvent{{Type: EventText, Delta: "Fixing the sort."}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "edit_dashboard", Input: `{}`}}, {Type: EventStop, StopReason: "tool_use"}}
+			}
+			emitter, _ := newTestEmitter()
+			emitter.writer = &narrationFailWriter{target: target}
+			truncated, runErr := NewRuntime(&scriptedProvider{steps: [][]StreamEvent{step}}, &fakeTools{}, store).execute(t.Context(), "thread", "run", &messages, emitter)
+			if runErr == nil || errors.Is(runErr, errAnswerDelivery) {
+				t.Fatalf("run error=%v", runErr)
+			}
+			if err := store.FinishRun(t.Context(), "owner", "thread", "run", messages, emitter.events, truncated, runErr); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := store.Thread(t.Context(), "owner", "thread")
+			if err != nil {
+				t.Fatal(err)
+			}
+			last := loaded.Messages[len(loaded.Messages)-1]
+			if last.ActivityType != "agent-outcome" || !strings.Contains(messageText(last.Content), `"status":"failed"`) {
+				t.Fatalf("missing failure outcome: %+v", loaded.Messages)
 			}
 		})
 	}

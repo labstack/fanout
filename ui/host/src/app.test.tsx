@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { ChatPage } from "./chat";
-import { createDashboardPrompt } from "./app-context";
+import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { parseSearch, toSearchParams } from "./dashboards/search";
 
 declare global {
@@ -58,6 +58,11 @@ function setValue(input: HTMLTextAreaElement, value: string) {
   input.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
 }
 
+function SessionProbe() {
+  const {provisional,send}=useFanoutApp();
+  return <><ChatPage/><output data-provisional-state>{JSON.stringify(provisional)}</output><button onClick={()=>void send("Hello")}>Start probe</button></>;
+}
+
 describe("Session", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
@@ -101,6 +106,7 @@ describe("Session", () => {
       });
       const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, warnings: ["One panel is empty"] });
       const messages = [
+        { id: "provisional", role: "reasoning", content: "Saving it now" },
         { id: "before", role: "assistant", content: "", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
         { id: "result", role: "tool", toolCallId: "call-1", content },
         { id: "after", role: "assistant", content: "All done" },
@@ -220,6 +226,33 @@ describe("Session", () => {
     expect(document.body.textContent).toContain("Summarize system health");
 
     await act(async () => root.unmount());
+  });
+
+  it.each(["failure_callback","run_throw","thread_switch"])("clears provisional context on %s independently of the running render gate",async terminal=>{
+    const log=vi.spyOn(console,"error").mockImplementation(()=>undefined);
+    let rejectRun:(reason:Error)=>void=()=>{};
+    if(terminal==='run_throw')agentMocks.runAgent.mockImplementationOnce(()=>new Promise<undefined>((_resolve,reject)=>{rejectRun=reject;}));
+    fetchMock.mockImplementation(async input=>{
+      const path=new URL(String(input),"https://fanout.example.com").pathname;
+      return json(path==='/api/dashboards'?{dashboards:[]}:path==='/api/agent/threads'?{threads:[],nextCursor:""}:{messages:[]});
+    });
+    window.happyDOM.setURL("https://fanout.example.com/chat/thread");
+    const rootRoute=createRootRoute({component:App});
+    const chat=createRoute({getParentRoute:()=>rootRoute,path:"/chat/$threadId",component:SessionProbe});
+    const router=createRouter({routeTree:rootRoute.addChildren([chat])});
+    const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+    try {
+      await act(async()=>root.render(<MantineProvider><RouterProvider router={router}/></MantineProvider>));
+      await vi.waitFor(()=>expect(document.querySelector('textarea')?.disabled).toBe(false));
+      await act(async()=>button("Start probe")!.click());
+      const subscriber=agentMocks.instances.at(-1)!.subscriber!;
+      for(const event of [{type:"REASONING_MESSAGE_START",messageId:"provisional",role:"reasoning"},{type:"REASONING_MESSAGE_CONTENT",messageId:"provisional",delta:"Unfinished narration"}])await act(async()=>{await subscriber.onEvent?.({event,messages:[]} as unknown as Parameters<NonNullable<AgentSubscriber["onEvent"]>>[0]);});
+      expect(document.querySelector('[data-provisional-state]')?.textContent).toContain("Unfinished narration");
+      if(terminal==='failure_callback')await act(async()=>{await subscriber.onRunFailed?.({error:new Error("socket closed"),messages:[]} as unknown as Parameters<NonNullable<AgentSubscriber["onRunFailed"]>>[0]);});
+      else if(terminal==='run_throw')await act(async()=>rejectRun(new Error("run failed")));
+      else await act(async()=>{await router.navigate({to:"/chat/$threadId",params:{threadId:"another"}});});
+      await vi.waitFor(()=>expect(document.querySelector('[data-provisional-state]')?.textContent).toBe('null'));
+    }finally{log.mockRestore();await act(async()=>root.unmount());}
   });
 
   it("forgets a draft whose first run failed", async () => {
