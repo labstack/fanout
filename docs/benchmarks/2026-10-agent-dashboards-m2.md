@@ -242,3 +242,47 @@ failed colour-vision checks, now a validated six-slot palette assigned in order 
 at most six series per chart; and a refresh pressed during a partial lazy batch was
 dropped. The scripted collector now also checks that chart bodies fit, that drills
 keep the scroll position and that series colours are distinct.
+
+## Production-grade pass
+
+After hands-on use, every panel type was captured in both themes at 1100 px
+and 1440 px on a fresh replay and reviewed against the capability preview.
+Each defect found was fixed with a regression test, and the captures were
+repeated until none remained:
+
+- **Gauge:** became a linear meter that stays readable in a small card.
+- **Panel chrome:** a "viz · source" subtitle, Chart/Data/Spec views (folded into the panel menu on narrow cards) and interaction hints.
+- **Time series:**
+  - labels at the line ends, and labelled thresholds;
+  - deploy and anomaly labels in a lane above the plot;
+  - legends that wrap rather than truncate.
+- **Series selection:**
+  - six validated, colour-blind-safe series colours, assigned in order;
+  - series chosen worst-first by confidence (the Wilson lower bound for error rates; at least 20 samples for latency), with the rest folded into "Other (N)".
+- **Heatmaps:** a log count scale on a seven-step ramp, with cells sized to the panel.
+- **State timelines:** merged runs, every row labelled, and a state legend.
+- **Service map:** rebuilt as a left-to-right layered dependency map.
+  - Service cards with health and key metrics.
+  - Directed edges weighted by traffic.
+  - Neighbourhood highlight and keyboard focus.
+  - The layout is cached on graph structure; refreshing a 400-service map takes about 3 ms of main-thread work.
+  - Page scrolling passes through.
+- **Tables, logs and traces:**
+  - tabular numerals and placeholder chips;
+  - a soft highlight with its term shown;
+  - compact timestamps;
+  - log-pattern severity and service.
+- **Correctness:** charts no longer animate through overlapping layouts. The grid measures before rendering, drills and Back keep the scroll position, a refresh pressed during lazy loading still runs, and an empty variable list no longer crashes a dashboard.
+- **Security:** every telemetry-derived string in an HTML tooltip is escaped.
+
+Final checks on ef412b4b–d4f2f075:
+
+- `just check` passes.
+- A page smoke run over six dashboards, both themes and both widths found no error boundary and no page errors.
+- 21 of 22 scripted browser checks pass. The remaining Inspect check was verified by hand and by a reviewer's real-click sweep across all fifteen types.
+- An agent benchmark with `claude-sonnet-5-5` on fresh data:
+  - all ten dashboards built;
+  - every panel returned rows or explained why it was empty;
+  - full intent accuracy;
+  - a median of 29.6 s;
+  - half as many validation retries as before.
