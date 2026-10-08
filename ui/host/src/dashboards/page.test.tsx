@@ -18,6 +18,8 @@ vi.mock("../app-context", async (importOriginal) => ({
 }));
 
 import { DashboardPage } from "./page";
+import { demoFrame } from "../../tests/service-map-demo";
+import { assertServiceMapDOM } from "../../tests/service-map-collector";
 
 const spec = {
   version: 1, name: "Checkout", description: "Money path", time: { range: "1h", refresh: "30s" },
@@ -120,6 +122,31 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
+  it.each([190,220])("collects every dashboard service name and rendered micro font in a 1100×%s body",async height=>{
+    const width=1100,original=HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width,height}):original.call(this);});
+    const context={font:"",measureText(text:string){return {width:Array.from(text).length*Number(this.font.match(/([\d.]+)px/)![1])*.62};}};
+    vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue(context as unknown as CanvasRenderingContext2D);
+    servedRecord={...record,spec:{...spec,panels:[{id:"map",title:"Map",viz:"service_map",grid:{x:0,y:0,w:12,h:6},query:{from:"spans"}}]}};
+    panelResponse=async()=>json({results:[{id:"map",status:"ok",elapsed_ms:1,frame:demoFrame}]});
+    const {host}=await render();
+    await vi.waitFor(()=>expect(host.querySelectorAll('[data-service-node]')).toHaveLength(20));
+    const viewport=host.querySelector<HTMLElement>('[data-service-viewport]')!;
+    expect(viewport.querySelector<HTMLElement>('[data-service-content]')!.style.transform).toBe("translate(0px, 0px) scale(1)");
+    for(const node of viewport.querySelectorAll<HTMLElement>('[data-service-node]')) node.getBoundingClientRect=()=>DOMRect.fromRect({x:parseFloat(node.style.left),y:parseFloat(node.style.top),width:parseFloat(node.style.width),height:parseFloat(node.style.height)});
+    for(const edge of viewport.querySelectorAll<SVGPathElement>('svg > g > path')) {
+      const coordinates=edge.getAttribute("d")!.match(/-?[\d.]+/g)!.map(Number),xs=coordinates.filter((_,i)=>i%2===0),ys=coordinates.filter((_,i)=>i%2===1);
+      edge.getBoundingClientRect=()=>DOMRect.fromRect({x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)});
+    }
+    const label=viewport.querySelector<HTMLElement>('[data-service-uncalled-label]')!;
+    label.getBoundingClientRect=()=>DOMRect.fromRect({x:(width-198)/2,y:parseFloat(label.style.top),width:198,height:11});
+    expect(assertServiceMapDOM(viewport,{requireNames:true})).toMatchObject({nodes:20,edges:23,body:{width,height}});
+    const name=viewport.querySelector<HTMLElement>('[data-service-name]')!;
+    name.parentElement!.style.visibility="hidden";
+    expect(()=>assertServiceMapDOM(viewport,{requireNames:true})).toThrow(/name is hidden/);
+    name.parentElement!.style.visibility="visible";name.textContent="truncated…";
+    expect(()=>assertServiceMapDOM(viewport,{requireNames:true})).toThrow(/name is missing or abbreviated/);
+  });
   it.each([1100, 1440])("keeps a fitted service-map dashboard alive through queued pan/zoom at width %s", async width => {
     vi.stubGlobal("ResizeObserver", class {
       constructor(private callback: ResizeObserverCallback) {}

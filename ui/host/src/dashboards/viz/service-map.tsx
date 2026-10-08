@@ -45,7 +45,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     catch { active = false; worker.terminate(); setLayoutError("Service layout unavailable"); return; }
     return () => { active = false; worker.terminate(); };
   }, [structure.key, measured]);
-  const graph = useMemo(() => cached ? fitServiceMap(cached.layout, cached.key === structure.key ? model : cached.model, size) : { nodes: [], edges: [], scale: 1, contentWidth: size.width, contentHeight: size.height, uncalledLabel: undefined }, [cached, model, size, structure.key]);
+  const graph = useMemo(() => cached ? fitServiceMap(cached.layout, cached.key === structure.key ? model : cached.model, size) : { nodes: [], edges: [], scale: 1, compact:true, contentWidth: size.width, contentHeight: size.height, uncalledLabel: undefined }, [cached, model, size, structure.key]);
   const theme = chartThemeFor(dark), ring = brand[dark ? 4 : 7], id = useId().replaceAll(":", "");
   const active = hover ?? focused;
   const neighbours = new Set([active, ...model.edges.filter(e => e.caller === active || e.callee === active).flatMap(e => [e.caller, e.callee])]);
@@ -72,7 +72,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
   }, [maxZoom, Boolean(cached), layoutError]);
   const select = (service: string) => { if (suppressClick.current) { suppressClick.current = false; return; } if (panel.click && onSelect) onSelect(service); else onPoint?.({ dimensions: { service } }); };
   return <div role="region" aria-label={`${title}: service dependency graph; ${analysisSummary({ ...panel, title }, result)}`} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0, width: "100%" }}>
-    <div ref={viewport} {...(import.meta.env.DEV ? { "data-service-viewport": true, "data-layout-scale": graph.scale } : {})} style={{ position: "relative", flex: "1 1 auto", minHeight: 0, overflow: "hidden", touchAction: "none", cursor: dragging.current ? "grabbing" : "grab" }} onMouseLeave={() => setHover(undefined)}
+    <div ref={viewport} {...(import.meta.env.DEV ? { "data-service-viewport": true, "data-layout-scale": graph.scale, "data-card-mode":graph.compact?"compact":"full" } : {})} style={{ position: "relative", flex: "1 1 auto", minHeight: 0, overflow: "hidden", touchAction: "none", cursor: dragging.current ? "grabbing" : "grab" }} onMouseLeave={() => setHover(undefined)}
       onPointerDown={e => { if (e.button !== 0) return; suppressClick.current = false; dragging.current = { x: e.clientX, y: e.clientY, initial: view, moved: false }; }}
       onPointerMove={e => { const drag = dragging.current; if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.hypot(dx, dy) > 3) drag.moved = true; if (drag.moved) { e.currentTarget.setPointerCapture?.(e.pointerId); setView({ ...drag.initial, x: drag.initial.x + dx, y: drag.initial.y + dy }); } }}
       onPointerUp={() => { suppressClick.current = dragging.current?.moved ?? false; dragging.current = null; }} onPointerCancel={() => { dragging.current = null; suppressClick.current = false; }}>
@@ -85,17 +85,17 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y - 2, transform: "translateX(-50%)", color: theme.muted, fontSize: typeScale.micro, lineHeight: 1, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
+        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, fontSize: typeScale.micro / view.zoom, lineHeight: 1, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
         {graph.nodes.map(n => {
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
-          const label = serviceCardLabels(n, { width: n.width / graph.scale, scale: graph.scale * view.zoom, measureText });
+          const label = serviceCardLabels(n, { width: n.width / graph.scale, scale: graph.scale * view.zoom, compact:graph.compact, measureText });
           return <button type="button" key={n.id} {...(import.meta.env.DEV ? { "data-service-node": n.id, "data-service-entry": n.entry } : {})} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} aria-label={`${n.id}, ${n.health}, ${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
-            style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", alignItems: "center", gap: 4 / view.zoom, boxSizing: "border-box", border: `${1 / view.zoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${4 / view.zoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: active && !neighbours.has(n.id) ? .25 : 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display, overflow: "hidden" }}>
-            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / view.zoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / view.zoom, 12 * graph.scale), lineHeight: 1, whiteSpace: "nowrap", visibility: n.height * view.zoom < typeScale.micro + 2 ? "hidden" : undefined }}>
+            style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", flexDirection:"column", justifyContent:"center", gap: 3 / view.zoom, boxSizing: "border-box", border: `${1 / view.zoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${5 / view.zoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: active && !neighbours.has(n.id) ? .25 : 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
+            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / view.zoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / view.zoom, 12 * graph.scale), lineHeight: 1, whiteSpace: "nowrap" }}>
               <span aria-hidden="true" style={{ color, flex: "none" }}>{healthGlyph[n.health] ?? "○"}</span>
-              <span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{ minWidth: 0, flex: 1, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label.name}</span>
-              {label.metric && <span {...(import.meta.env.DEV ? { "data-service-metric": true } : {})} style={{ flex: "none", fontSize: typeScale.micro / view.zoom, color: theme.muted }}>{label.metric}</span>}
+              <span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{ flex: "none", fontWeight: 600, whiteSpace: "nowrap" }}>{label.name}</span>
             </span>
+            {!graph.compact && <span {...(import.meta.env.DEV ? { "data-service-text": true, "data-service-metric": true } : {})} style={{ width:"100%", fontSize:label.metricSize*graph.scale, lineHeight:1, color: theme.muted, whiteSpace:"nowrap" }}>{label.metric}</span>}
           </button>;
         })}
       </div>

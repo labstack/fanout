@@ -83,7 +83,8 @@ it("reveals floor-sized labels that fit their boxes when zooming a dense fitted 
   const { viewport } = await mount(60, fanout(60));
   const card = viewport.querySelector<HTMLElement>('[data-service-node]')!;
   const text = card.querySelector<HTMLElement>('[data-service-text]')!;
-  expect(text.style.visibility).toBe("hidden");
+  expect(text.style.visibility).not.toBe("hidden");
+  expect(card.querySelector('[data-service-name]')!.textContent).toBe(card.dataset.serviceNode);
   await act(async () => viewport.dispatchEvent(new WheelEvent("wheel", {deltaY:-5000,clientX:200,clientY:100,bubbles:true,cancelable:true})));
   const content = viewport.querySelector<HTMLElement>('[data-service-content]')!;
   const zoom = Number(content.style.transform.match(/scale\(([^)]+)\)/)![1]);
@@ -144,7 +145,7 @@ it.each([20, 30, 40, 60])("I-B synchronous metric refresh performs no layout for
   const { host, viewport, render } = await mount(n, fanout(n));
   expect([...host.querySelectorAll<HTMLElement>("[data-service-node]")].every(el => el.title.includes("p95"))).toBe(true);
   expect(raw).toHaveBeenCalledOnce();
-  expect(calls.layout).toHaveBeenCalledOnce();
+  expect(calls.layout).toHaveBeenCalledTimes(2); // Cached full and compact LR card sizes.
   const passes = calls.layout.mock.calls.length;
   const positions = [...viewport.querySelectorAll<HTMLElement>("button")].map(el => [el.style.left, el.style.top, el.style.width]);
   const labels = [...host.querySelectorAll<HTMLButtonElement>("[data-service-node]")].map(el=>el.title).join();
@@ -161,11 +162,11 @@ it.each([20, 30, 40, 60])("I-B synchronous metric refresh performs no layout for
     expect([...host.querySelectorAll<HTMLButtonElement>("[data-service-node]")].map(el=>el.title).join()).not.toBe(labels);
   }
 });
-it("I-B measures the fixed metric slot once per font and measurement context", () => {
+it("I-B measures the fixed health slot once per card font and measurement context", () => {
   const measure = vi.fn((text: string) => text.length * 6);
   const model = serviceMapModel(fanout(30), {from_ms:0,to_ms:3600000});
   serviceMapStructure(model, measure);
-  const slots = () => measure.mock.calls.filter(([text]) => text.endsWith("/s") || text.endsWith("% err"));
+  const slots = () => measure.mock.calls.filter(([text]) => ["●","■","◆","○"].includes(text));
   expect(slots().length).toBeGreaterThan(0);
   const count = slots().length;
   serviceMapStructure(serviceMapModel(fanout(30, 360000), {from_ms:0,to_ms:3600000}), measure);
@@ -213,7 +214,7 @@ it.each([
   [1, .0004, "0.1% err"], [1, 99.9, "99.9% err"], [1, 100, "100% err"], [1, 1e300, "100% err"],
 ])("final4 bounds card formats rate=%s error=%s", (rate, error, expected) => {
   const node = serviceMapModel(fanout(2), {from_ms:0,to_ms:3600000}).nodes[0];
-  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:130,scale:1});
+  const labels = mapLayout.serviceCardLabels({...node, request_rate:rate, error_rate:error}, {width:82,scale:1});
   expect(labels.metric).toBe(expected);
   expect(labels.metric.length).toBeLessThanOrEqual(9);
 });

@@ -40,7 +40,7 @@ for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark 
     expect(text.style.visibility).not.toBe("hidden");
     expect(card.querySelector('[data-service-name]')!.textContent).toBe(card.dataset.serviceNode);
     expect(card.title).toContain("p95"); expect(card.title).toContain("err");
-    expect(card.querySelector<HTMLElement>('[data-service-name]')!.style.textOverflow).toBe("ellipsis");
+    expect(card.querySelector<HTMLElement>('[data-service-name]')!.style.textOverflow).not.toBe("ellipsis");
   }
 });
 
@@ -92,7 +92,7 @@ it("measures usable client bounds and refits on resize without changing the LR l
 
 it("drops optional metrics before names and bounds labels without changing the full tooltip", () => {
   const node = {...model().nodes[0],id:"recommendation",request_rate:1.2,error_rate:3.4};
-  expect(serviceCardLabels(node,{width:140,scale:.85}).metric).toBe("");
+  expect(serviceCardLabels(node,{width:140,scale:.85,compact:true}).metric).toBe("");
   expect(serviceCardLabels({...node,id:"cart"},{width:300,scale:1}).metric).toContain("3.4% err");
 });
 

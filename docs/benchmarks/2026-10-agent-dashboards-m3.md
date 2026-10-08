@@ -40,3 +40,9 @@ Automated size-reporter tests see no additional notification over a simulated th
 The rebuilt `panels.html` is **2,333,439 raw bytes / 769,783 gzip -9 -n bytes**. The SPA embedded tree is **2,969,904 raw bytes**. Both trees match a fresh staged build; the app remains below the 2,500,000-byte target.
 
 The shared map now uses one deterministic Dagre LR layout with two-dimensional contain fitting. The 20-node fixture passes box, route and label geometry assertions at 780 × 460 and 1100 × 220. The reusable DOM collector is `ui/host/tests/service-map-collector.ts`; actual Chromium runs on chat and dashboards remain the controller's acceptance gate.
+
+## Task 1b fix round 3
+
+The rebuilt `panels.html` is **2,334,158 raw bytes / 770,144 gzip -9 -n bytes**. The SPA embedded tree is **2,970,771 raw bytes**. Both trees match a fresh staged build; the app remains below the 2,500,000-byte target.
+
+Full 44 px cards and compact 20 px cards now share the same Dagre LR algorithm. Cached geometries let resize choose the card mode without a fresh layout. The restored dashboard fixture passes containment and measured name/font budgets at 1100 × 190 and 1100 × 220, with all twenty names visible at or above 11 px. Call the DOM collector with `{requireNames:true}` for the controller's dashboard browser re-check; automated fixtures do not establish live browser acceptance.

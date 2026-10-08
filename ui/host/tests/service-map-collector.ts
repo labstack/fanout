@@ -1,5 +1,5 @@
 /** Self-contained browser collector: run on a fitted map viewport in either surface. */
-export function assertServiceMapDOM(viewport: HTMLElement) {
+export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = false }: {requireNames?:boolean} = {}) {
   const body = viewport.getBoundingClientRect();
   const fail = (message: string) => { throw new Error(`Service map geometry: ${message}`); };
   if (body.width <= 0 || body.height <= 0) fail("empty viewport");
@@ -13,6 +13,29 @@ export function assertServiceMapDOM(viewport: HTMLElement) {
     for (const other of nodes) if (node !== other && node.box.left < other.box.right - .1 && node.box.right > other.box.left + .1 && node.box.top < other.box.bottom - .1 && node.box.bottom > other.box.top + .1) fail(`${node.id} overlaps ${other.id}`);
     const text = node.element.querySelector<HTMLElement>("[data-service-text]") ?? node.element.firstElementChild as HTMLElement;
     if (text && parseFloat(getComputedStyle(text).fontSize) < 11) fail(`${node.id} text is below micro`);
+    if (requireNames) {
+      const name=node.element.querySelector<HTMLElement>("[data-service-name]")??text?.children[1] as HTMLElement;
+      const expected=Array.from(node.id).slice(0,24).join("")+(Array.from(node.id).length>24?"…":"");
+      if(!name||name.textContent!==expected) fail(`${node.id} name is missing or abbreviated`);
+      for(let ancestor:HTMLElement|null=name;ancestor&&ancestor!==viewport;ancestor=ancestor.parentElement) {
+        const style=getComputedStyle(ancestor);
+        if(style.visibility==="hidden"||style.display==="none"||style.opacity==="0") fail(`${node.id} name is hidden`);
+      }
+      const style=getComputedStyle(name),lineStyle=getComputedStyle(text);
+      const fontSize=parseFloat(style.fontSize)||parseFloat(lineStyle.fontSize);
+      if(!(fontSize>=11)) fail(`${node.id} name is below micro`);
+      if(fontSize+2>node.box.height+1) fail(`${node.id} name exceeds its card height`);
+      const rect=name.getBoundingClientRect();
+      if(rect.width>0&&(rect.left<node.box.left||rect.right>node.box.right||rect.top<node.box.top||rect.bottom>node.box.bottom)) fail(`${node.id} name leaves its card`);
+      if(name.scrollWidth>name.clientWidth+1) fail(`${node.id} name is truncated`);
+      const context=document.createElement("canvas").getContext("2d");
+      if(context) {
+        context.font=`600 ${fontSize}px ${style.fontFamily||lineStyle.fontFamily}`;
+        const glyph=text.firstElementChild!.textContent!;
+        if(!glyph) fail(`${node.id} health icon is missing`);
+        if(context.measureText(name.textContent!+glyph).width+14>node.box.width+1) fail(`${node.id} name exceeds its measured card budget`);
+      }
+    }
   }
   const edges = [...viewport.querySelectorAll<SVGPathElement>("svg > g > path")];
   for (const edge of edges) {

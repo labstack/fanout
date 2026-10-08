@@ -47,6 +47,18 @@ it("aligns collapsed and expanded summaries with a leading chevron and singular/
     expect(document.querySelector('button[aria-expanded="true"]')?.textContent).toContain("2 rows");
   } finally { await act(async () => root.unmount()); }
 });
+it("summarizes multi-panel views with panel counts and only non-ok status counts",async()=>{
+  const fragment=fixture();const base=fragment.dashboard.panels[0];
+  fragment.dashboard.panels=Array.from({length:4},(_,i)=>({...base,id:`p${i}`,title:"Performance"}));
+  fragment.results=fragment.dashboard.panels.map((p,i)=>({id:p.id,status:i===3?"empty":"ok",elapsed_ms:0}));
+  const message={id:"one",role:"activity",activityType:"mcp-app",content:{resource_uri:"ui://fanout/panels.html",tool_name:"get_service_performance",tool_input:{},tool_result:fragment,is_error:false}} as Message;
+  for(const status of ["empty","error","ok"] as const) {
+    fragment.results[3].status=status;
+    const root=await mount(value({messages:[JSON.parse(JSON.stringify(message))]}));
+    try {const summary=document.querySelector('button[aria-expanded]')!.textContent!;expect(summary).toContain(status==="ok"?"4 panels":"4 panels · 1 "+status);expect(summary).not.toContain("ok,");expect(summary).not.toContain("rows");}
+    finally {await act(async()=>root.unmount());}
+  }
+});
 it.each(["mixed", "presets", "custom"])("expands requested presets over discovery views and restores %s turns on reload", async kind => {
   const messages = [appMessage("one", kind === "custom" ? "query_telemetry" : "get_service_performance", "Requested"), appMessage("two", kind === "presets" ? "search_logs" : "query_telemetry", "Later")];
   for (const saved of [messages, JSON.parse(JSON.stringify(messages))]) {
