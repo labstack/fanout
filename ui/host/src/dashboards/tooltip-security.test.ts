@@ -3,7 +3,6 @@ import { analysisOption } from "../../../panels/analysis";
 import { withAnnotations } from "../../../panels/annotations";
 import { barOption, chartThemeFor, timeseriesOption } from "../../../panels/compile";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
-import { performanceAxisTooltip, performanceHeatTooltip, topologyMatrixTooltip } from "../../../panels/tooltips";
 
 const attack = '<img src=x onerror=alert(1)>';
 const theme = chartThemeFor(false);
@@ -23,10 +22,8 @@ describe("telemetry tooltip HTML security", () => {
     const point = (scatter.tooltip as Tooltip).formatter({ name: attack, seriesName: "Items", value: [12,1500] });
     safe(point); expect(point).toContain("calls: 12"); expect(point).toContain("latency: 1.50s");
   });
-  it("escapes every app HTML formatter including service and dimension values", () => {
-    safe(performanceAxisTooltip([{ seriesName: attack, value: 1, axisValueLabel: attack }], () => attack));
-    safe(performanceHeatTooltip(attack, attack));
-    safe(topologyMatrixTooltip(attack, attack, attack, attack, attack));
+  it("escapes service labels across shared timeseries, heatmap and bar formatters",()=>{
+    for(const option of [timeseriesOption({id:"x",title:attack,viz:"timeseries"},result,theme),analysisOption({id:"x",title:attack,viz:"heatmap"},result,theme),barOption({id:"x",title:attack,viz:"bar"},frame,theme)]) safe((option.tooltip as Tooltip).formatter({name:attack,seriesName:attack,axisValueLabel:attack,value:[1000,0,3]}));
   });
   it.each(["timeseries", "bar", "scatter", "heatmap", "state_timeline"] as const)("escapes %s names and categories in tooltips", viz => {
     const panel: Panel = { id: "x", title: attack, viz };

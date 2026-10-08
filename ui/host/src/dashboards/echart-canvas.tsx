@@ -4,7 +4,7 @@ import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsTyp
 import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 import type { ChartSize } from "../../../panels/compile";
-import { registerAudit, chartAuditSnapshot } from "./chart-audit-dev";
+import { registerAudit, chartAuditSnapshot } from "./chart-measurements-dev";
 
 use([CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent, ToolboxComponent]);
 

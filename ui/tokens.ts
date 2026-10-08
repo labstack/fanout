@@ -99,7 +99,6 @@ export const series = {
 
 /** Light-scheme ground and dark-scheme ground, for the browser UI outside the
  *  document — the address bar and the tab strip. */
-export const ground = { light: "#fcfcfc", dark: "#0b0e14" } as const;
 
 /** The small-text sizes this product sets by hand, in pixels.
  *

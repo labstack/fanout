@@ -58,7 +58,3 @@ const toolLabels: Record<string, { activity: string; title: string }> = {
 export function activityLabel(toolName: string): string {
   return toolLabels[toolName]?.activity ?? "Working on it…";
 }
-
-export function toolTitle(toolName: string): string {
-  return toolLabels[toolName]?.title ?? "System analysis";
-}

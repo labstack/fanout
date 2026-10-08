@@ -85,7 +85,7 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg c
 					return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
 				}
 				routePath := c.RouteInfo().Path
-				if isProtectedPath(path) && (routePath == "" || routePath == "/*") {
+				if isProtectedPath(path) && (routePath == "" || routePath == "/*" || routePath == "/api/traces/:id") {
 					return echo.NewHTTPError(http.StatusNotFound, "not found")
 				} else {
 					slog.Error("request reached an unclassified registered route", "method", c.Request().Method, "path", path, "route", routePath)
@@ -276,7 +276,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyServiceCredential, capability: ReadOperations}, read
 	case strings.HasPrefix(path, "/debug/pprof"):
 		return routePolicy{kind: routePolicyCapability, capability: ReadOperations}, read || method == http.MethodPost
-	case strings.HasPrefix(path, "/api/observability/"):
+	case strings.HasPrefix(path, "/api/traces/") && len(strings.TrimPrefix(path, "/api/traces/")) > 0 && !strings.Contains(strings.TrimPrefix(path, "/api/traces/"), "/"):
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/intelligence":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read

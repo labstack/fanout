@@ -21,7 +21,7 @@ import (
 func TestRowMapWidensFloat32(t *testing.T) {
 	db := openTestDuck(t)
 	defer db.Close()
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 
 	resp := d.ExecuteSQL(context.Background(), SQLRequest{
 		Query: "SELECT 327::FLOAT AS as_float, 0.25::FLOAT AS rate, 327::DOUBLE AS as_double",

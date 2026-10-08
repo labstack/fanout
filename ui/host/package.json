@@ -11,7 +11,8 @@
     "build:watch": "bun --bun vite build --watch",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deadcode": "cd .. && bun host/node_modules/knip/bin/knip.js --production --config knip.json --include files,exports"
   },
   "dependencies": {
     "@ag-ui/client": "1.0.1",

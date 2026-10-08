@@ -8,7 +8,7 @@ import (
 )
 
 func TestServiceMapDefaultLayoutLarge(t *testing.T) {
-	for _, pack := range []func([]panel.Panel){Pack, PackMissing} {
+	for _, pack := range []func([]panel.Panel){PackMissing} {
 		panels := []panel.Panel{{ID: "map", Viz: "service_map", Width: 12}}
 		pack(panels)
 		if panels[0].Grid.H != 10 {
@@ -24,7 +24,7 @@ func TestPackFillsGapsWithoutStretching(t *testing.T) {
 		{ID: "b", Width: 3, Height: "s"},
 		{ID: "table", Width: 12, Height: "m"},
 	}
-	Pack(panels)
+	PackMissing(panels)
 	want := map[string]panel.Grid{
 		"a":     {X: 0, Y: 0, W: 3, H: 3},
 		"chart": {X: 3, Y: 0, W: 9, H: 6},

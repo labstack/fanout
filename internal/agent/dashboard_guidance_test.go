@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestM2DashboardGuidancePreservesIntentAndRequiresPreview(t *testing.T) {
+func TestDashboardGuidancePreservesIntentAndRequiresPreview(t *testing.T) {
 	for _, term := range []string{"answer a single factual question with a view instead", "preview_panels", "fix every invalid panel", "get_dashboard first", "edit_dashboard", "heatmap", "histogram", "scatter", "state_timeline", "log_patterns", "service_map", "health", "drill", "annotations", "split", "distinguish missing data from healthy behavior", "single fact"} {
 		if !strings.Contains(systemPrompt, term) {
 			t.Errorf("prompt omits %q", term)
@@ -17,7 +17,7 @@ func TestM2DashboardGuidancePreservesIntentAndRequiresPreview(t *testing.T) {
 	}
 }
 
-func TestM2DashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
+func TestDashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
 	if !strings.HasSuffix(systemPrompt, dashboardAnalysisGuidance) {
 		t.Fatal("analysis guidance is not appended to the system prompt")
 	}

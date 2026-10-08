@@ -48,27 +48,6 @@ func New(db DB, repository traceReader, retentionDays int) *Service {
 	return &Service{db: db, repository: repository, maxWindow: maxWindow, now: time.Now}
 }
 
-// SQLDB adapts a standard database/sql queryer for tests and callers that do
-// not need storage-engine row-lifetime hooks.
-func SQLDB(db queryrows.SQLQueryer) DB { return queryrows.SQLAdapter{DB: db} }
-
-func (s *Service) normalizeScope(scope Scope) (Scope, error) {
-	now := s.now().UTC()
-	if scope.End.IsZero() {
-		scope.End = now
-	}
-	if scope.Start.IsZero() {
-		scope.Start = scope.End.Add(-defaultWindow)
-	}
-	scope.Start = scope.Start.UTC()
-	scope.End = scope.End.UTC()
-	if !scope.Start.Before(scope.End) || scope.End.Sub(scope.Start) > s.maxWindow {
-		return Scope{}, fmt.Errorf("%w: window must be positive and at most %s", ErrInvalidScope, s.maxWindow)
-	}
-	scope.Namespace = strings.TrimSpace(scope.Namespace)
-	return scope, nil
-}
-
 // timelineBucketWidth keeps a chart readable as the window grows. A day at five
 // minutes is 288 points drawn across a card a few hundred pixels wide: the line
 // becomes a band and its shape stops being legible, so the buckets widen with
@@ -144,4 +123,21 @@ func overallHealth(counts HealthCounts) Health {
 		return HealthUnknown
 	}
 	return HealthHealthy
+}
+
+func (s *Service) normalizeScope(scope Scope) (Scope, error) {
+	now := s.now().UTC()
+	if scope.End.IsZero() {
+		scope.End = now
+	}
+	if scope.Start.IsZero() {
+		scope.Start = scope.End.Add(-defaultWindow)
+	}
+	scope.Start = scope.Start.UTC()
+	scope.End = scope.End.UTC()
+	if !scope.Start.Before(scope.End) || scope.End.Sub(scope.Start) > s.maxWindow {
+		return Scope{}, fmt.Errorf("%w: window must be positive and at most %s", ErrInvalidScope, s.maxWindow)
+	}
+	scope.Namespace = strings.TrimSpace(scope.Namespace)
+	return scope, nil
 }

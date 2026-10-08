@@ -60,3 +60,5 @@ describe("Task 6 rollup panels", () => {
     expect(host.querySelector('[aria-label^="Map: service dependency graph"]')).not.toBeNull();
   });
 });
+
+import "../../tests/health-ranking";

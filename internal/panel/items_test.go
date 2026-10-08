@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-func TestM2ItemsExecute(t *testing.T) {
+func TestItemsExecute(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = []Panel{
@@ -30,7 +30,7 @@ func TestM2ItemsExecute(t *testing.T) {
 		t.Fatalf("timeline: %+v", got[1])
 	}
 }
-func TestM2TimelineBudget(t *testing.T) {
+func TestTimelineBudget(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := []telemetry.Span{}
 	for m := range 1440 {
@@ -78,7 +78,7 @@ func TestM2TimelineBudget(t *testing.T) {
 	}
 
 }
-func TestM2ItemsValidation(t *testing.T) {
+func TestItemsValidation(t *testing.T) {
 	mixed := Panel{ID: "s", Title: "S", Viz: "scatter", XUnit: "count", Unit: "ms", Query: &Query{From: "spans", Measures: []string{"count()", "p95(duration_ms)"}, By: []string{"service"}}}
 	d := Dashboard{Name: "Mixed", Panels: []Panel{mixed}}
 	Normalize(&d)
@@ -108,7 +108,7 @@ func TestM2ItemsValidation(t *testing.T) {
 		}
 	}
 }
-func TestM2TimelineSharePartitionsByBucket(t *testing.T) {
+func TestTimelineSharePartitionsByBucket(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Share", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "s", Title: "S", Viz: "state_timeline", Thresholds: []Threshold{{Value: 50, Status: "warn"}}, Query: &Query{From: "spans", Measures: []string{"share()"}, By: []string{"service"}, Bucket: "5m"}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
@@ -127,7 +127,7 @@ func TestM2TimelineSharePartitionsByBucket(t *testing.T) {
 	}
 }
 
-func TestM2TimelineShareBeforeTopN(t *testing.T) {
+func TestTimelineShareBeforeTopN(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	const buckets = 3
 	var spans []telemetry.Span
@@ -170,7 +170,7 @@ func TestM2TimelineShareBeforeTopN(t *testing.T) {
 	}
 }
 
-func TestM2ItemsUnitNormalization(t *testing.T) {
+func TestItemsUnitNormalization(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{ServiceName: "svc", SeverityNumber: 9, EventUnixNanos: n, IngestedAt: n}})
@@ -209,7 +209,7 @@ func TestM2ItemsUnitNormalization(t *testing.T) {
 	}
 }
 
-func TestM2ItemsScatterAxisUnits(t *testing.T) {
+func TestItemsScatterAxisUnits(t *testing.T) {
 	e := newFixtureExecutor(t)
 	for _, tc := range []struct {
 		name, x, y, wantX, wantY string
@@ -233,7 +233,7 @@ func TestM2ItemsScatterAxisUnits(t *testing.T) {
 	}
 }
 
-func TestM2ItemsOptionsValidation(t *testing.T) {
+func TestItemsOptionsValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		panel Panel
@@ -259,7 +259,7 @@ func TestM2ItemsOptionsValidation(t *testing.T) {
 	}
 }
 
-func TestM2ItemsLogsUseRedactedSource(t *testing.T) {
+func TestItemsLogsUseRedactedSource(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{Body: "token=bodysecret failed", BodyTemplate: "token=templatesecret failed", EventUnixNanos: n, IngestedAt: n}})
@@ -293,7 +293,7 @@ func TestM2ItemsLogsUseRedactedSource(t *testing.T) {
 	}
 }
 
-func TestM2TimelinePreservesUnknownBuckets(t *testing.T) {
+func TestTimelinePreservesUnknownBuckets(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, []telemetry.Span{{TraceID: "t", SpanID: "s", ServiceName: "svc", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n}}, nil)
@@ -310,7 +310,7 @@ func TestM2TimelinePreservesUnknownBuckets(t *testing.T) {
 	}
 }
 
-func TestM2TimelineBudgetKeepsNewestCompleteBuckets(t *testing.T) {
+func TestTimelineBudgetKeepsNewestCompleteBuckets(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "States", Panels: []Panel{{ID: "s", Title: "S", Viz: "state_timeline", Thresholds: []Threshold{{Value: 500, Status: "bad"}}, Query: &Query{From: "spans", Measures: []string{"p95(duration_ms)"}, By: []string{"service"}, Bucket: "5m"}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})

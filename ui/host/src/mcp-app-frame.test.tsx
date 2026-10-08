@@ -14,7 +14,8 @@ beforeEach(async()=>{await new Promise(r=>setTimeout(r,0));vi.resetModules();vi.
  mcp.connect.mockResolvedValue(undefined);mcp.close.mockResolvedValue(undefined);mcp.callTool.mockResolvedValue({content:[]});
  mcp.readResource.mockImplementation(({uri})=>Promise.resolve({contents:[{uri,mimeType:"text/html;profile=mcp-app",text:"<!doctype html><html><head></head><body>app</body></html>",_meta:{ui:{csp:{}}}}],ttlMs:300000}));
  mcp.listTools.mockResolvedValue({tools:[{name:"query_panel_fragment",_meta:{ui:{visibility:["app"]}}},{name:"inspect_trace",_meta:{ui:{visibility:["model","app"]}}},{name:"create_dashboard"},{name:"replace_dashboard"},{name:"model_tool",_meta:{ui:{visibility:["model"]}}}]});
- ({default:MCPAppFrame,mcpAppCSP}=await import("./mcp-app-frame"));
+ ({default:MCPAppFrame}=await import("./mcp-app-frame"));
+ ({mcpAppCSP}=await import("./mcp-app-csp"));
 });
 async function mount(contents:unknown[]=[content]){const container=document.createElement("div");document.body.append(container);const root=createRoot(container);await act(async()=>root.render(<MantineProvider>{contents.map((value,i)=><MCPAppFrame key={i} content={value}/>)}</MantineProvider>));return {container,root,async unmount(){await act(async()=>root.unmount());container.remove();}};}
 describe("MCPAppFrame",()=>{

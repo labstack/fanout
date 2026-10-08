@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
-func TestM2AnnotationScopeUsesCheckedAST(t *testing.T) {
+func TestAnnotationScopeUsesCheckedAST(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	_, err := engine.DB.Exec(`INSERT INTO version_rollup VALUES ('shop','checkout','v1',?::TIMESTAMP_NS::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS),('shop','payment','v1',?::TIMESTAMP_NS::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS)`, at, at, at, at)
@@ -70,7 +70,7 @@ func projectedFilters(t *testing.T, parser Parser, sig *signal, vars map[string]
 	}
 	return []AnnotationFilter{*projected}
 }
-func TestM2AnnotationScopeRunPanelAndAllSources(t *testing.T) {
+func TestAnnotationScopeRunPanelAndAllSources(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	if _, err := engine.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',1,1,1,2,0,0,0)`, at); err != nil {
@@ -105,7 +105,7 @@ func (p *failExtraParse) ParseSQL(ctx context.Context, text string) (map[string]
 	}
 	return p.Parser.ParseSQL(ctx, text)
 }
-func TestM2CheckOperationalFailures(t *testing.T) {
+func TestCheckOperationalFailures(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	for _, failure := range []error{context.Canceled, context.DeadlineExceeded} {
 		for _, p := range []Panel{
@@ -133,7 +133,7 @@ func (p *annotationParseCounter) ParseSQL(ctx context.Context, text string) (map
 	p.parses++
 	return p.Engine.ParseSQL(ctx, text)
 }
-func TestM2AnnotationProjectionMemoized(t *testing.T) {
+func TestAnnotationProjectionMemoized(t *testing.T) {
 	e := newFixtureExecutor(t)
 	counter := &annotationParseCounter{Engine: e.engine}
 	e.engine = counter
@@ -159,7 +159,7 @@ func TestM2AnnotationProjectionMemoized(t *testing.T) {
 	}
 }
 
-func TestM2AnnotationProjectionOmitsOnlySignalRestrictions(t *testing.T) {
+func TestAnnotationProjectionOmitsOnlySignalRestrictions(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	if _, err := engine.DB.Exec(`INSERT INTO version_rollup VALUES ('shop','checkout','v1',?::TIMESTAMP_NS::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS),('shop','payment','v1',?::TIMESTAMP_NS::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS)`, at, at, at, at); err != nil {
@@ -214,7 +214,7 @@ func (e *annotationQueryFailure) QueryContext(ctx context.Context, text string, 
 	return e.Engine.QueryContext(ctx, text, args...)
 }
 
-func TestM2AnnotationScopeFailurePreservesFrame(t *testing.T) {
+func TestAnnotationScopeFailurePreservesFrame(t *testing.T) {
 	e := newFixtureExecutor(t)
 	e.engine = &annotationQueryFailure{Engine: e.engine}
 	d := shopDashboard()
@@ -225,7 +225,7 @@ func TestM2AnnotationScopeFailurePreservesFrame(t *testing.T) {
 	}
 }
 
-func TestM2AnnotationScopeLimit(t *testing.T) {
+func TestAnnotationScopeLimit(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	if _, err := engine.DB.Exec(`INSERT INTO version_rollup SELECT 'shop', 'service' || lpad(i::VARCHAR, 4, '0'), 'v1', ?::TIMESTAMP_NS::TIMESTAMPTZ_NS, ?::TIMESTAMP_NS::TIMESTAMPTZ_NS FROM range(1001) t(i)`, at, at); err != nil {

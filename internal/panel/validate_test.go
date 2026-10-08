@@ -146,7 +146,7 @@ func TestProblemsError(t *testing.T) {
 	}
 }
 
-func TestM2VizOrder(t *testing.T) {
+func TestVizOrder(t *testing.T) {
 	if len(vizOrder) != 15 {
 		t.Fatalf("vizOrder has %d types, want 15", len(vizOrder))
 	}
@@ -162,7 +162,7 @@ func TestM2VizOrder(t *testing.T) {
 	}
 }
 
-func TestFinalFixGroupedPanelsRequireOneMeasure(t *testing.T) {
+func TestGroupedPanelsRequireOneMeasure(t *testing.T) {
 	for _, tc := range []struct {
 		viz string
 		by  []string

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duration, exactTimestamp, percent, timeZoneLabel } from "../../format";
+import { duration, exactTimestamp, percent } from "../../format";
 
 describe("duration", () => {
   it("keeps sub-millisecond values legible", () => {
@@ -77,15 +77,11 @@ describe("time zone", () => {
   // so, which is ambiguous the moment two people read the same incident from
   // different offices.
   it("names the viewer's zone and spells an instant out in full", () => {
-    expect(timeZoneLabel(new Date("2026-09-07T14:00:00Z"))).not.toBe("");
-    // An abbreviation belongs to an instant, not to a zone: a table of rows
-    // from before a daylight-saving change must not be headed with today's.
-    expect(timeZoneLabel("2026-09-07T14:00:00Z")).toBe(timeZoneLabel(new Date("2026-09-07T14:00:00Z")));
-    expect(timeZoneLabel("not a time")).toBe(timeZoneLabel());
     const exact = exactTimestamp("2026-09-07T14:00:00Z");
     expect(exact).toContain("2026");
     expect(exact).toMatch(/\d{1,2}:\d{2}:\d{2}/);
-    expect(exact).toContain(timeZoneLabel(new Date("2026-09-07T14:00:00Z")));
+    expect(exact).toMatch(/(?:GMT|UTC|PDT|PST|[A-Z]{2,5})/);
+    expect(exactTimestamp(new Date("2026-09-07T14:00:00Z"))).toBe(exact);
     // A value that is not a time is passed through rather than shown as
     // "Invalid Date".
     expect(exactTimestamp("not a time")).toBe("not a time");

@@ -115,31 +115,13 @@ func TestCompletedBatchCachesIncludeLatePublicationAndPartialMinutes(t *testing.
 	}
 	commit("late", []int{35, 75, 130})
 	w := queryrows.Window{Start: at.Add(20 * time.Second), End: at.Add(140 * time.Second), Namespace: "prod", Service: "api"}
-	for _, kind := range []queryrows.ReadKind{queryrows.EndpointRead, queryrows.LogHistogramRead} {
-		w.Kind = kind
-		ctx := queryrows.WithWindow(t.Context(), w)
-		q := `SELECT (SELECT coalesce(sum(calls),0) FROM endpoint_minutes)+(SELECT count(*) FROM endpoint_tail)`
-		if kind == queryrows.LogHistogramRead {
-			q = `SELECT (SELECT coalesce(sum(count),0) FROM log_minutes)+(SELECT coalesce(sum(count),0) FROM log_tail)`
-		}
-		rows, err := d.QueryContext(ctx, q)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var count int
-		for rows.Next() {
-			if err := rows.Scan(&count); err != nil {
-				t.Fatal(err)
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		if count != 7 {
-			t.Fatalf("kind %d count %d", kind, count)
-		}
+	w.Kind = queryrows.TraceCandidateRead
+	var count int
+	q := `SELECT count(DISTINCT trace_id) FROM (SELECT trace_id FROM trace_candidates UNION ALL SELECT trace_id FROM trace_tail)`
+	if err := d.QueryRowScan(queryrows.WithWindow(t.Context(), w), []any{&count}, q); err != nil || count != 5 {
+		t.Fatalf("partial/late trace candidates=%d: %v", count, err)
 	}
+
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -188,11 +170,8 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 	}
 	check := func() {
 		t.Helper()
-		w := queryrows.Window{Start: at.Add(-time.Minute), End: at.Add(time.Minute), Kind: queryrows.EndpointRead}
+		w := queryrows.Window{Start: at.Add(-time.Minute), End: at.Add(time.Minute)}
 		var count int
-		if err := d.QueryRowScan(queryrows.WithWindow(t.Context(), w), []any{&count}, `SELECT (SELECT coalesce(sum(calls),0) FROM endpoint_minutes)+(SELECT count(*) FROM endpoint_tail)`); err != nil || count != 8 {
-			t.Fatalf("after replacement count=%d: %v", count, err)
-		}
 		w.Kind = queryrows.TraceCandidateRead
 		w.Namespace = "prod"
 		w.Service = "api"
@@ -242,7 +221,7 @@ func TestReadCacheCancellationLeavesNoMarkerOrPartialContributions(t *testing.T)
 	if _, err := d.RefreshReadCaches(ctx); err == nil {
 		t.Fatal("cancelled backfill succeeded")
 	}
-	for _, table := range []string{"read_batches", "read_endpoints", "read_trace_parts", "read_trace_candidates"} {
+	for _, table := range []string{"read_batches", "read_trace_parts", "read_trace_candidates"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
@@ -259,13 +238,13 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Fail after the span writes, before acknowledgement.
-	if _, err := d.DB.Exec(`DROP TABLE read_logs`); err != nil {
+	if _, err := d.DB.Exec(`DROP TABLE read_trace_candidates`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err == nil {
 		t.Fatal("broken cache schema accepted")
 	}
-	for _, table := range []string{"read_batches", "read_endpoints", "read_trace_parts", "read_trace_candidates"} {
+	for _, table := range []string{"read_batches", "read_trace_parts"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
@@ -315,13 +294,13 @@ func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	at := time.Now().UTC().Truncate(time.Minute)
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "semantic", Logs: []telemetry.Log{{TimeUnixNanos: at.UnixNano(), Severity: "INFO", IngestedAt: at.UnixNano()}}}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "semantic", Spans: []telemetry.Span{{TraceID: "semantic-trace", StartUnixNanos: at.UnixNano(), EndUnixNanos: at.UnixNano() + 1, IngestedAt: at.UnixNano()}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`UPDATE read_logs SET severity='info'`, `UPDATE read_cache_version SET version=1`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
+	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_cache_version SET version=3`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
 		if _, err := d.DB.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -329,14 +308,14 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"read_batches", "read_logs", "read_trace_parts", "read_endpoints", "read_trace_candidates"} {
+	for _, table := range []string{"read_batches", "read_trace_parts", "read_trace_candidates"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
 		}
 	}
 	var obsolete int
-	if err := d.DB.QueryRow(`SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('read_obsolete','endpoint_rollup')`).Scan(&obsolete); err != nil || obsolete != 0 {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('read_obsolete','endpoint_rollup','read_endpoints','read_logs')`).Scan(&obsolete); err != nil || obsolete != 0 {
 		t.Fatalf("obsolete tables=%d: %v", obsolete, err)
 	}
 	if err := d.DB.QueryRow(`SELECT count(*) FROM rollup_state WHERE starts_with(cache_key,'endpoint_rollup')`).Scan(&obsolete); err != nil || obsolete != 0 {
@@ -345,10 +324,15 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	var severity string
-	if err := d.DB.QueryRow(`SELECT severity FROM read_logs`).Scan(&severity); err != nil || severity != "INFO" {
-		t.Fatalf("rebuilt label=%q: %v", severity, err)
+	var minStart int64
+	if err := d.DB.QueryRow(`SELECT min_start FROM read_trace_candidates`).Scan(&minStart); err != nil || minStart != at.UnixNano() {
+		t.Fatalf("rebuilt bound=%d: %v", minStart, err)
 	}
+	var version int
+	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 4 {
+		t.Fatalf("version=%d: %v", version, err)
+	}
+
 	// A matching version preserves valid acknowledgements on the next startup.
 	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
@@ -398,7 +382,7 @@ func TestBatchFilenameIdentityWithRelativeDataDir(t *testing.T) {
 	}
 	d, repo := newBatchCacheTestAt(t, relative)
 	for i := range readCacheBatchLimit {
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("relative", i), Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("relative", i), Spans: []telemetry.Span{{TraceID: fmt.Sprint(i), StartUnixNanos: 1, EndUnixNanos: 2, IngestedAt: 1}}, Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -406,7 +390,7 @@ func TestBatchFilenameIdentityWithRelativeDataDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := d.DB.QueryRow(`SELECT sum(count) FROM read_logs WHERE batch_id IN (SELECT batch_id FROM read_batches)`).Scan(&count); err != nil || count != readCacheBatchLimit {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_parts WHERE batch_id IN (SELECT batch_id FROM read_batches)`).Scan(&count); err != nil || count != readCacheBatchLimit {
 		t.Fatalf("relative cache batch identity=%d: %v", count, err)
 	}
 	active := repo.Parquet.BatchMetadata()
@@ -585,11 +569,11 @@ func TestCompletedBatchWriterProgressesDuringAnalyticalTransaction(t *testing.T)
 
 func TestReadCacheRowBudgetAndOversizedFileProgress(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
-	old := make([]telemetry.Log, readCacheRowBudget+1)
+	old := make([]telemetry.Span, readCacheRowBudget+1)
 	for i := range old {
-		old[i] = telemetry.Log{TimeUnixNanos: 1, IngestedAt: 1, Severity: "INFO"}
+		old[i] = telemetry.Span{TraceID: fmt.Sprint(i), StartUnixNanos: 1, EndUnixNanos: 2, IngestedAt: 1}
 	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "oversized", Logs: old}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "oversized", Spans: old}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "newest", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
@@ -610,7 +594,7 @@ func TestReadCacheRowBudgetAndOversizedFileProgress(t *testing.T) {
 		t.Fatalf("oversized file made no progress: %v %v", markers, err)
 	}
 	var count int
-	if err := d.DB.QueryRow(`SELECT sum(count) FROM read_logs WHERE batch_id='oversized'`).Scan(&count); err != nil || count != len(old) {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_parts WHERE batch_id='oversized'`).Scan(&count); err != nil || count != len(old) {
 		t.Fatalf("oversized count=%d: %v", count, err)
 	}
 }

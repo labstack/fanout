@@ -2,10 +2,10 @@ import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, PinI
 import { ArrowLeft, ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
 import { createContext, FormEvent, ReactNode, useContext, useEffect, useRef, useState } from "react";
-import { browserViewerFromMe, BrowserViewer, clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { browserViewerFromMe, BrowserViewer, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
-export { authorizedFetch, clearSession, logout } from "./auth-session";
+export { authorizedFetch, logout } from "./auth-session";
 
 export type Status = {
   setup_required: boolean;
@@ -150,7 +150,6 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   useEffect(() => {
-    clearLegacySession();
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value))).finally(() => setStatusReady(true));
     loadAccount().catch(() => setViewer("none")).finally(() => setSessionReady(true));
     // The session is gone, so the account that came with it is gone too:

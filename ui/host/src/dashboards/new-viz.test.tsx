@@ -1,3 +1,4 @@
+import {visualizations} from "../../tests/visualizations";
 import { init, use } from "echarts/core";
 import { BarChart, CustomChart, GraphChart, ScatterChart } from "echarts/charts";
 import { GridComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
@@ -8,7 +9,7 @@ import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { analysisOption, analysisSummary } from "../../../panels/analysis";
 import { chartThemeFor, timeseriesOption } from "../../../panels/compile";
-import {visualizations,type Panel,type PanelResult,type Viz as VizType} from "../../../panels/types";
+import {type Panel,type PanelResult,type Viz as VizType} from "../../../panels/types";
 import { PanelCard } from "./panel-card";
 import { frameRows, rowModel } from "../../../panels/rows";
 import { TableViz } from "./viz/table";
@@ -32,7 +33,7 @@ const fixtures:Record<string,PanelResult["frame"]>={
 const resultFor=(viz:string):PanelResult=>({id:"p",status:"ok",elapsed_ms:1,interval:"1m",from_ms:0,to_ms:10000,frame:fixtures[viz]});
 const assertFinite=(value:unknown):void=>{if(typeof value==="number")expect(Number.isFinite(value)).toBe(true);else if(Array.isArray(value))value.forEach(assertFinite);else if(value&&typeof value==="object")Object.values(value).forEach(assertFinite);};
 
-describe("M2 visualizations",()=>{
+describe("visualizations",()=>{
   it("has exactly fifteen registry entries",()=>{
     expect(visualizations).toHaveLength(15);expect(new Set(visualizations).size).toBe(15);
   });

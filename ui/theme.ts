@@ -57,7 +57,7 @@ export function filledTextOn(hex: string) {
   return onBlack > onWhite ? "var(--mantine-color-black)" : "var(--mantine-color-white)";
 }
 
-export function filledContrastVariables(scheme: "light" | "dark") {
+function filledContrastVariables(scheme: "light" | "dark") {
   return Object.fromEntries(Object.entries(semanticColors).map(([name, ramp]) => [`--fanout-color-${name}-contrast`, filledTextOn(ramp[filledShade[scheme]])]));
 }
 

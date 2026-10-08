@@ -1,4 +1,3 @@
-const legacyTokenKey = "fanout.access-token";
 export const unauthorizedEvent = "fanout:unauthorized";
 
 export function oauthReturnTo(): string {
@@ -17,12 +16,7 @@ export function browserViewerFromMe(user: unknown): BrowserViewer {
   return "user";
 }
 
-export function clearLegacySession() {
-  localStorage.removeItem(legacyTokenKey);
-}
-
-export function clearSession() {
-  clearLegacySession();
+function clearSession() {
   window.dispatchEvent(new Event(unauthorizedEvent));
 }
 

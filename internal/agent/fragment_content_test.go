@@ -62,7 +62,7 @@ func TestFragmentActivityPersistsExactContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := fanoutmcp.New(registryQueries{}, nil, panel.NewExecutor(nil, 30), "test")
+	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, panel.NewExecutor(nil, 30), nil, "test")
 	tools, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestAppToolContentKeepsTextAndNonAppMarshalFailureIsError(t *testing.T) {
 	}
 }
 
-func TestFix1AppSummariesBoundedOnSuccessAndError(t *testing.T) {
+func TestAppSummariesBoundedOnSuccessAndError(t *testing.T) {
 	registry := &ToolRegistry{apps: map[string]string{"app": "ui://fanout/panels.html"}}
 	for _, failed := range []bool{false, true} {
 		result := &mcp.CallToolResult{IsError: failed, StructuredContent: map[string]any{"frame": strings.Repeat("body", 100000)}, Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("界", 20000)}}}
@@ -141,7 +141,7 @@ func TestFix1AppSummariesBoundedOnSuccessAndError(t *testing.T) {
 	}
 }
 
-func TestFix1AppToolErrorHasNoActivity(t *testing.T) {
+func TestAppToolErrorHasNoActivity(t *testing.T) {
 	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "show"}}
 	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "query_telemetry", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
 	runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: "Invalid telemetry window", IsError: true, AppResourceURI: "ui://fanout/panels.html"}}, nil)
@@ -166,7 +166,7 @@ func TestFix1AppToolErrorHasNoActivity(t *testing.T) {
 	}
 }
 
-func TestFix1DuplicateMapActivitiesStoppedAtSource(t *testing.T) {
+func TestDuplicateMapActivitiesStoppedAtSource(t *testing.T) {
 	fragment := map[string]any{"view": map[string]any{"kind": "query", "key": "server-key"}, "dashboard": map[string]any{"version": 1, "name": "Map", "time": map[string]any{"from": "2026-10-07T18:45:00Z", "to": "2026-10-07T19:45:00Z"}, "panels": []any{map[string]any{"id": "services", "title": "Service dependencies", "viz": "service_map", "query": map[string]any{"from": "spans"}}}}, "results": []any{map[string]any{"id": "services", "status": "ok"}}}
 	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "map"}}
 	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "custom", Name: "query_telemetry", Input: `{}`}}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "preset", Name: "get_service_topology", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
@@ -198,7 +198,7 @@ func (f *viewTools) Execute(_ context.Context, call ToolCall) (ToolExecution, er
 	}
 	return ToolExecution{Content: kind, AppResourceURI: "ui://fanout/panels.html", Structured: fanoutmcp.PanelFragment{View: fanoutmcp.FragmentView{Kind: kind, Key: "authoritative-key"}}}, nil
 }
-func TestFix4RuntimeUsesServerIdentityAndPresetWinner(t *testing.T) {
+func TestRuntimeUsesServerIdentityAndPresetWinner(t *testing.T) {
 	for _, order := range [][]string{{"query", "renamed_preset"}, {"renamed_preset", "query"}} {
 		messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "show"}}
 		calls := []StreamEvent{}

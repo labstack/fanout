@@ -2,17 +2,18 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import type { Layout } from "react-grid-layout/legacy";
+import type { Layout } from "react-grid-layout";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSpec } from "../../../panels/types";
 
-type GridOptions = { children: ReactNode; className: string; width?: number; layouts: { lg: Layout; sm: Layout }; isDraggable: boolean; isResizable: boolean; rowHeight: number; onBreakpointChange?(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
+type GridOptions = { children: ReactNode; className: string; width?: number; layouts: { lg: Layout; sm: Layout }; dragConfig: {enabled:boolean;handle:string;cancel:string}; resizeConfig:{enabled:boolean}; rowHeight: number; onBreakpointChange?(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
 const grid = vi.hoisted(() => ({ current: undefined as GridOptions | undefined }));
-vi.mock("react-grid-layout/legacy", () => ({
-  WidthProvider: (component: unknown) => component,
+vi.mock("react-grid-layout", () => ({
+  verticalCompactor: {},
   Responsive: (props: GridOptions) => { grid.current = props; return <div>{props.children}</div>; },
 }));
-import { PanelGrid, rowHeight } from "./grid";
+import { PanelGrid } from "./grid";
+import { rowHeight } from "./layout";
 
 const spec: DashboardSpec = { version: 1, name: "Notes", time: { range: "1h" }, panels: [
   { id: "note", title: "Note", viz: "text", content: "Hello", grid: { x: 3, y: 0, w: 6, h: 3 } },
@@ -94,8 +95,8 @@ describe("dashboard layout editing", () => {
     await render(false);
     expect(rowHeight).toBe(40);
     expect(grid.current!.rowHeight).toBe(40);
-    expect(grid.current!.isDraggable).toBe(false);
-    expect(grid.current!.isResizable).toBe(false);
+    expect(grid.current!.dragConfig.enabled).toBe(false);
+    expect(grid.current!.resizeConfig.enabled).toBe(false);
   });
 
   it("saves user drag and resize changes with the base version and updates the dashboard cache", async () => {
@@ -145,8 +146,8 @@ describe("dashboard layout editing", () => {
 it("ignores narrow breakpoint stop events and never dirties or saves the compact layout", async () => {
   measuredWidth = 700;
   const { host, save } = await render();
-  expect(grid.current!.isDraggable).toBe(false);
-  expect(grid.current!.isResizable).toBe(false);
+  expect(grid.current!.dragConfig.enabled).toBe(false);
+  expect(grid.current!.resizeConfig.enabled).toBe(false);
   expect(host.textContent).toContain("only on a wider screen");
   await act(async () => { grid.current!.onDragStop(grid.current!.layouts.sm); grid.current!.onResizeStop(grid.current!.layouts.sm); });
   expect(save().disabled).toBe(true);
@@ -233,7 +234,7 @@ it("duplicates with unsaved layout in one PUT on plain HTTP", async () => {
  expect(two.panels.some(p => p.id === body.spec.panels[2].id)).toBe(false);
 });
 
-it("W10 enables grid motion only while editing", async () => {
+it("enables grid motion only while editing", async () => {
  const { rerender } = await render(false);
  expect(grid.current!.className).toBe("dashboard-grid");
  await rerender(true);
@@ -242,7 +243,7 @@ it("W10 enables grid motion only while editing", async () => {
  expect(grid.current!.className).not.toContain("dashboard-grid-editing");
 });
 
-it("I2 preserves the complete layout height while the container is hidden", async () => {
+it("preserves the complete layout height while the container is hidden", async () => {
  measuredWidth = 0;
  const tall = { ...spec, panels: [...spec.panels, { ...spec.panels[0], id: "bottom", grid: { x: 0, y: 18, w: 6, h: 6 } }] };
  const { host } = await render(false, tall);
@@ -250,7 +251,7 @@ it("I2 preserves the complete layout height while the container is hidden", asyn
  await act(async () => reportWidth!(1200));
  expect(host.querySelector("[data-grid-placeholder]")).toBeNull();
 });
-it("I2 mounts from synchronous geometry before observer delivery", async () => {
+it("mounts from synchronous geometry before observer delivery", async () => {
  measuredWidth = 0;
  const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 1200 } as DOMRect);
  await render(false);

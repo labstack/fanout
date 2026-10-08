@@ -294,7 +294,7 @@ func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string
 	d.snapshotMu.Unlock()
 	if !ok {
 		aliases := map[string]string{}
-		for _, name := range []string{"telemetry.spans", "telemetry.logs", "telemetry.metrics", "spans", "logs", "metrics", "endpoint_minutes", "endpoint_tail", "log_minutes", "log_tail", "trace_candidates", "trace_tail"} {
+		for _, name := range []string{"telemetry.spans", "telemetry.logs", "telemetry.metrics", "spans", "logs", "metrics", "trace_candidates", "trace_tail"} {
 			alias := "__fanout_snapshot_" + strings.ReplaceAll(name, ".", "_")
 			aliases[name] = "SELECT * FROM " + alias
 		}

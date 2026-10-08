@@ -39,12 +39,12 @@ it("groups recovered tool failures quietly and expands escaped names/messages",a
 });
 it("keeps a single recovered failure quiet and preserves the run-error alert",async()=>{
  const messages=[{id:"t",role:"tool",toolCallId:"c",content:"Temporary failure",error:"tool error"},{id:"answer",role:"assistant",content:"Answer"}] as Message[];
- for(const error of ["","Provider unavailable"]) {const root=await mount(value({messages,error}));try {expect(button("1 tool calls failed")).toBeTruthy();expect(document.querySelectorAll('[role="alert"]')).toHaveLength(error?1:0);if(error)expect(document.querySelector('[role="alert"]')?.textContent).toContain(error);}finally{await act(async()=>root.unmount());}}
+ for(const error of ["","Provider unavailable"]) {const root=await mount(value({messages,error}));try {expect(button("1 tool call failed")).toBeTruthy();expect(document.querySelectorAll('[role="alert"]')).toHaveLength(error?1:0);if(error)expect(document.querySelector('[role="alert"]')?.textContent).toContain(error);}finally{await act(async()=>root.unmount());}}
 });
 it("uses server view keys and kinds even when tool names and specifications differ",async()=>{
  const first=appMessage("one","renamed_preset","Requested"),second=appMessage("two","get_service_performance","Discovery");
  (first.content as any).tool_result.view={kind:"preset",key:"a".repeat(64)};(second.content as any).tool_result.view={kind:"query",key:"a".repeat(64)};
- const root=await mount(value({messages:[first,second]}));try {expect(document.querySelectorAll('[data-chat-app]')).toHaveLength(1);expect(document.querySelector('button[aria-expanded="true"]')?.textContent).toContain("Requested");}finally{await act(async()=>root.unmount());}
+ const root=await mount(value({messages:[first,second]}));try {expect(document.querySelectorAll('[data-chat-app]')).toHaveLength(1);expect(document.querySelector('button[aria-expanded="true"]')?.textContent).toContain("Discovery");}finally{await act(async()=>root.unmount());}
 });
 
 function appMessage(id: string, tool: string, title: string, rows = 1): Message {
@@ -87,13 +87,13 @@ it.each(["mixed", "presets", "custom"])("expands requested presets over discover
     } finally { await act(async () => root.unmount()); }
   }
 });
-it("prefers a deduped preset over an equivalent later custom view", async () => {
+it("renders the latest server view snapshot without a host preset-winner rule", async () => {
   const preset = appMessage("one", "get_service_topology", "Requested");
   const custom = structuredClone(preset) as Message & { content: Record<string, unknown> }; custom.id = "two"; custom.content.tool_name = "query_telemetry"; (custom.content.tool_result as ReturnType<typeof fixture>).view.kind="query";
   const root = await mount(value({ messages: [preset, custom, appMessage("three", "query_telemetry", "Discovery")] }));
   try {
     const toggles = [...document.querySelectorAll('button[aria-expanded]')];
-    expect(toggles.map(toggle => toggle.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+    expect(toggles.map(toggle => toggle.getAttribute("aria-expanded"))).toEqual(["false", "true"]);
   } finally { await act(async () => root.unmount()); }
 });
 
@@ -123,7 +123,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
 it("shows app tool errors and old string activities without throwing", async () => {
   const messages = [{ id: "error", role: "tool", toolCallId: "call", content: "Invalid telemetry window", error: "Invalid telemetry window" }, { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
   const root = await mount(value({ messages }));
-  await act(async()=>button("1 tool calls failed")!.click());
+  await act(async()=>button("1 tool call failed")!.click());
   expect(document.body.textContent).toContain("Invalid telemetry window");
   expect(document.body.textContent).toContain("This view could not be loaded. Please try again.");
   await act(async () => root.unmount());
@@ -312,4 +312,18 @@ it.each([null,{}, {resourceUri:"ui://fanout/panels.html",toolName:"query_telemet
  const root=await mount(value({messages:[{id:"activity",role:"activity",activityType:"mcp-app",content} as unknown as Message]}));
  expect(document.body.textContent).toContain("This view could not be loaded. Please try again.");
  expect(document.querySelector("iframe")).toBeNull();await act(async()=>root.unmount());document.body.innerHTML="";
+});
+
+it("groups failed calls by assistant message within one user turn",async()=>{
+ const messages=[{id:"u",role:"user",content:"Help"},
+ {id:"a1",role:"assistant",content:"",toolCalls:[{id:"c1",type:"function",function:{name:"query_telemetry",arguments:"{}"}}]},
+ {id:"a2",role:"assistant",content:"",toolCalls:[{id:"c2",type:"function",function:{name:"search_logs",arguments:"{}"}},{id:"c3",type:"function",function:{name:"search_logs",arguments:"{}"}}]},
+ {id:"f1",role:"tool",toolCallId:"c1",content:"first failure",error:"error"},
+ {id:"f2",role:"tool",toolCallId:"c2",content:"second failure",error:"error"},
+ {id:"f3",role:"tool",toolCallId:"c3",content:"third failure",error:"error"}] as Message[];
+ const root=await mount(value({messages}));try {
+ expect(button("1 tool call failed")).toBeTruthy();expect(button("2 tool calls failed")).toBeTruthy();
+ await act(async()=>button("1 tool call failed")!.click());expect(document.body.textContent).toContain("first failure");expect(document.body.textContent).not.toContain("second failure");
+ await act(async()=>button("2 tool calls failed")!.click());expect(document.body.textContent).toContain("second failure");expect(document.body.textContent).toContain("third failure");
+ }finally{await act(async()=>root.unmount());}
 });

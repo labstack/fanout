@@ -249,16 +249,6 @@ func resolveDuckDBMaxConns(cores int) int {
 	return conns
 }
 
-// detectAvailableMemory reports the memory this process may actually use, or 0
-// when no source is conclusive.
-//
-// cgroup limits come first because a container limit — not the host's total —
-// is what the kernel enforces, and reading the host's memory from inside a
-// constrained container is precisely the mistake this code exists to fix.
-func detectAvailableMemory() uint64 {
-	return detectMemory().available
-}
-
 type memoryDetection struct {
 	available  uint64
 	host       uint64
@@ -338,14 +328,10 @@ type cgroupMount struct {
 	mountPoint string
 }
 
-// detectCgroupMemoryLimit finds the process's actual memory cgroup from procfs
+// detectCgroupMemoryLimitDetailed finds the process's actual memory cgroup from procfs
 // and walks toward the controller mount, taking the tightest finite limit. A
 // service such as systemd's fanout.service normally lives below the mount root;
 // reading only /sys/fs/cgroup/memory.max would inspect the host, not the service.
-func detectCgroupMemoryLimit(cgroupPath, mountInfoPath string) uint64 {
-	limit, _, _ := detectCgroupMemoryLimitDetailed(cgroupPath, mountInfoPath)
-	return limit
-}
 
 func detectCgroupMemoryLimitDetailed(cgroupPath, mountInfoPath string) (uint64, bool, error) {
 	if _, err := os.ReadFile(cgroupPath); err != nil {
@@ -528,14 +514,6 @@ func minPositive(values ...uint64) uint64 {
 		}
 	}
 	return minimum
-}
-
-// readCgroupLimit reads a cgroup memory limit. It reports ok=false for "max"
-// and for the effectively-unlimited sentinel cgroup v1 uses, so detection falls
-// through to the next source rather than treating "no limit" as a limit.
-func readCgroupLimit(path string) (uint64, bool) {
-	limit, exists, err := readCgroupLimitDetailed(path)
-	return limit, exists && err == nil && limit > 0
 }
 
 // readCgroupLimitDetailed distinguishes an unlimited controller (exists=true,

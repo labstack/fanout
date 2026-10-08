@@ -117,7 +117,7 @@ func firstCookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *htt
 func TestRetiredRoutesDoNotReachSPA(t *testing.T) {
 	s := newTestAuthServer(t)
 	registerTestUserRoutes(s)
-	admin, err := s.users.Create("retired-routes@example.com", "", "admin")
+	admin, err := s.users.CreateWithAudit("retired-routes@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,8 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/api/auth/logout", routePolicyAuthenticated, ""},
 		{http.MethodGet, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
 		{http.MethodPost, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
-		{http.MethodGet, "/api/observability/overview", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
+		{http.MethodHead, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/intelligence", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/alerts", routePolicyCapability, ReadTelemetry},
 		{http.MethodPost, "/api/alerting/rules", routePolicyCapability, ManageAlerts},
@@ -200,7 +201,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 
 func TestUnknownProtectedPathsReturn404BeforeAuthentication(t *testing.T) {
 	s := newTestAuthServer(t)
-	user, _ := s.users.Create("unknown-path@example.com", "", "admin")
+	user, _ := s.users.CreateWithAudit("unknown-path@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	anonymous := httptest.NewRecorder()
 	s.e.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/not-registered", nil))
 	if anonymous.Code != http.StatusNotFound {
@@ -256,20 +257,20 @@ func TestKnownRouteWrongMethodReturns405(t *testing.T) {
 
 func TestTelemetryReadsRequireAuthenticatedAccount(t *testing.T) {
 	s := newTestAuthServer(t)
-	viewer, err := s.users.Create("viewer@example.com", "", "viewer")
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	s.e.GET("/api/observability/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.GET("/api/traces/abc", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
 	unauthenticated := httptest.NewRecorder()
-	s.e.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/observability/overview", nil))
+	s.e.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/traces/abc", nil))
 	if unauthenticated.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated telemetry read = %d, want 401", unauthenticated.Code)
 	}
 
 	authenticated := httptest.NewRecorder()
-	s.e.ServeHTTP(authenticated, sessionRequest(http.MethodGet, "/api/observability/overview", nil, s.login(t, viewer)))
+	s.e.ServeHTTP(authenticated, sessionRequest(http.MethodGet, "/api/traces/abc", nil, s.login(t, viewer)))
 	if authenticated.Code != http.StatusNoContent {
 		t.Fatalf("viewer telemetry read = %d, want 204", authenticated.Code)
 	}
@@ -277,7 +278,7 @@ func TestTelemetryReadsRequireAuthenticatedAccount(t *testing.T) {
 
 func TestAuthStatusAndMeRequirePersistedAccount(t *testing.T) {
 	s := newTestAuthServer(t)
-	admin, err := s.users.Create("admin@example.com", "", "admin")
+	admin, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -313,7 +314,7 @@ func TestAuthStatusAndMeRequirePersistedAccount(t *testing.T) {
 
 func TestSessionAuthDBFailureReturns500(t *testing.T) {
 	s := newTestAuthServer(t)
-	user, _ := s.users.Create("db-outage@example.com", "", "admin")
+	user, _ := s.users.CreateWithAudit("db-outage@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, user)
 	if _, err := s.db.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
 		t.Fatalf("rename users: %v", err)
@@ -332,18 +333,18 @@ func TestRoleChangeAndDeactivationRevokeSessions(t *testing.T) {
 	}{
 		{name: "role", change: func(users *auth.UserStore, user auth.User) error {
 			role := auth.RoleViewer
-			_, err := users.Update(user.ID, nil, nil, &role, nil)
+			_, err := users.UpdateWithAudit(user.ID, nil, nil, &role, nil, auth.AuditEvent{EventType: "user.updated", Outcome: "success"})
 			return err
 		}},
 		{name: "inactive", change: func(users *auth.UserStore, user auth.User) error {
 			active := false
-			_, err := users.Update(user.ID, nil, nil, nil, &active)
+			_, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &active, auth.AuditEvent{EventType: "user.updated", Outcome: "success"})
 			return err
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestAuthServer(t)
-			user, _ := s.users.Create(tc.name+"@example.com", "", "operator")
+			user, _ := s.users.CreateWithAudit(tc.name+"@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 			cookie := s.login(t, user)
 			if err := tc.change(s.users, user); err != nil {
 				t.Fatalf("change: %v", err)
@@ -359,7 +360,7 @@ func TestRoleChangeAndDeactivationRevokeSessions(t *testing.T) {
 
 func TestCapabilityIsEnforcedCentrally(t *testing.T) {
 	s := newTestAuthServer(t)
-	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
+	viewer, _ := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, viewer)
 	// Deliberately omit route-level RequireCapability. The global policy remains authoritative.
 	s.e.POST("/api/settings/ingest/token/rotate", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
@@ -372,7 +373,7 @@ func TestCapabilityIsEnforcedCentrally(t *testing.T) {
 
 func TestViewerCanRunAgentWithoutOperatorPrivileges(t *testing.T) {
 	s := newTestAuthServer(t)
-	viewer, _ := s.users.Create("viewer-agent@example.com", "", "viewer")
+	viewer, _ := s.users.CreateWithAudit("viewer-agent@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, viewer)
 	s.e.POST("/api/agent/runs", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	s.e.POST("/api/alerting/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
@@ -392,7 +393,7 @@ func TestViewerCanRunAgentWithoutOperatorPrivileges(t *testing.T) {
 
 func TestBrowserMutationValidation(t *testing.T) {
 	s := newTestAuthServer(t)
-	user, _ := s.users.Create("csrf@example.com", "", "operator")
+	user, _ := s.users.CreateWithAudit("csrf@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, user)
 	s.e.POST("/api/alerting/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	for _, tc := range []struct {
@@ -426,7 +427,7 @@ func TestBrowserMutationValidation(t *testing.T) {
 
 func TestLogoutDeletesServerSession(t *testing.T) {
 	s := newTestAuthServer(t)
-	user, _ := s.users.Create("logout@example.com", "", "operator")
+	user, _ := s.users.CreateWithAudit("logout@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, user)
 	logoutRec := httptest.NewRecorder()
 	s.e.ServeHTTP(logoutRec, sessionRequest(http.MethodPost, "/api/auth/logout", nil, cookie))
@@ -443,9 +444,9 @@ func TestLogoutDeletesServerSession(t *testing.T) {
 func TestStartDoesNotRevealAccountState(t *testing.T) {
 	smtp := auth.SMTPConfig{Host: "smtp.example.com", Port: 587, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local"}, smtp)
-	inactive, _ := s.users.Create("inactive@example.com", "", "operator")
+	inactive, _ := s.users.CreateWithAudit("inactive@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	active := false
-	if _, err := s.users.Update(inactive.ID, nil, nil, nil, &active); err != nil {
+	if _, err := s.users.UpdateWithAudit(inactive.ID, nil, nil, nil, &active, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
@@ -472,7 +473,7 @@ func TestStartExplainsWhenSMTPIsNotConfigured(t *testing.T) {
 
 func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 	s := newTestAuthServer(t)
-	user, err := s.users.Create("link@example.com", "", "admin")
+	user, err := s.users.CreateWithAudit("link@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -508,7 +509,7 @@ func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	smtp := auth.SMTPConfig{Host: "127.0.0.1", Port: 1, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, smtp)
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/send", strings.NewReader(`{"email":"new-viewer@example.com"}`))
@@ -525,7 +526,7 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 
 func TestLocalSelfSignupCreatesVerifiedViewer(t *testing.T) {
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, auth.SMTPConfig{})
-	if _, err := s.users.Create("admin@example.com", "", auth.RoleAdmin); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatalf("Create admin: %v", err)
 	}
 	code, err := s.codes.Create("new-viewer@example.com")
@@ -578,15 +579,15 @@ func TestLocalSelfSignupCannotPreemptFirstAdminOrReactivateUser(t *testing.T) {
 
 	t.Run("inactive user", func(t *testing.T) {
 		s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, auth.SMTPConfig{})
-		if _, err := s.users.Create("admin@example.com", "", auth.RoleAdmin); err != nil {
+		if _, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 			t.Fatalf("Create admin: %v", err)
 		}
-		viewer, err := s.users.Create("inactive@example.com", "", auth.RoleViewer)
+		viewer, err := s.users.CreateWithAudit("inactive@example.com", "", auth.RoleViewer, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 		if err != nil {
 			t.Fatalf("Create viewer: %v", err)
 		}
 		active := false
-		if _, err := s.users.Update(viewer.ID, nil, nil, nil, &active); err != nil {
+		if _, err := s.users.UpdateWithAudit(viewer.ID, nil, nil, nil, &active, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 			t.Fatalf("deactivate: %v", err)
 		}
 		code, err := s.codes.Create(viewer.Email)
@@ -609,7 +610,7 @@ func TestLocalSelfSignupCannotPreemptFirstAdminOrReactivateUser(t *testing.T) {
 
 func TestLocalSelfSignupDisabledRejectsUnknownVerifiedAddress(t *testing.T) {
 	s := newTestAuthServer(t)
-	if _, err := s.users.Create("admin@example.com", "", auth.RoleAdmin); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatalf("Create admin: %v", err)
 	}
 	code, err := s.codes.Create("visitor@example.com")
@@ -681,7 +682,7 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 	})
 	t.Run("existing admin", func(t *testing.T) {
 		s := newTestAuthServer(t)
-		if _, err := s.users.CreateFirstAdmin("admin@example.com", "Admin"); err != nil {
+		if _, err := s.users.CreateFirstAdminWithAudit("admin@example.com", "Admin", auth.AuditEvent{EventType: "setup.completed", Outcome: "success"}); err != nil {
 			t.Fatalf("CreateFirstAdmin: %v", err)
 		}
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))

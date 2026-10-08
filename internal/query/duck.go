@@ -474,15 +474,8 @@ func (d *Duck) Close() error {
 	return d.closeErr
 }
 
-// writer returns the handle every write goes through. NewDuck always sets one;
-// the fallback is for a Duck assembled field-by-field in a test, where one
-// handle is the whole point.
-func (d *Duck) writer() *sql.DB {
-	if d.writeDB != nil {
-		return d.writeDB
-	}
-	return d.DB
-}
+// writer returns the dedicated write handle initialized by NewDuck.
+func (d *Duck) writer() *sql.DB { return d.writeDB }
 
 // checkpoint folds the rollup cache's WAL back into its file, and says how long
 // that took. A checkpoint blocks new transactions for its duration, so it is a

@@ -1,0 +1,435 @@
+package query
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"log/slog"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/annotations"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+)
+
+func TestVersionHistoryDeletesOnlyWhenNeeded(t *testing.T) {
+	_, repo := versionEngine(t)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	d := &Duck{DB: db, writeDB: db, repository: repo, versionRollupPasses: 1}
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectQuery(`SELECT coalesce\(max\(last_ingested_unix_nano\),0\) FROM rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(0))
+	if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVersionFailureDoesNotStarveNewBatches(t *testing.T) {
+	_, repo := versionEngine(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	commitVersionLogs(t, repo, "a-old", at, 64001)
+	commitVersionLogs(t, repo, "b-new", at.Add(time.Minute), 1)
+	commitVersionLogs(t, repo, "c-new", at.Add(2*time.Minute), 1)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	d := &Duck{DB: db, writeDB: db, repository: repo, versionRollupPasses: 1}
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*a-old`).WillReturnError(context.DeadlineExceeded)
+	mock.ExpectRollback()
+	if _, err := d.RefreshVersionRollup(t.Context()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first failure=%v", err)
+	}
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*c-new.*b-new`).WillReturnResult(sqlmock.NewResult(0, 1))
+	for i, id := range []string{"b-new", "c-new"} {
+		mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs(id, at.Add(time.Duration(i+1)*time.Minute).UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	mock.ExpectCommit()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 2 {
+		t.Fatalf("new batches=%d %v", n, err)
+	}
+	failure := d.versionRollupFailures["a-old"]
+	if failure.failures != 1 || time.Until(failure.nextAttempt) < 59*time.Second || time.Until(failure.nextAttempt) > time.Minute {
+		t.Fatalf("initial backoff=%+v", failure)
+	}
+	// Expire the in-memory deadline without sleeping for a minute.
+	failure.nextAttempt = time.Now().Add(-time.Second)
+	d.versionRollupFailures["a-old"] = failure
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}).AddRow("b-new").AddRow("c-new"))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*a-old`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs("a-old", at.UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(0)).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	mock.ExpectCommit()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("expired retry=%d %v", n, err)
+	}
+	if len(d.versionRollupFailures) != 0 {
+		t.Fatalf("successful retry retained failures: %+v", d.versionRollupFailures)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVersionFailureBackoffCapsAtThirtyMinutes(t *testing.T) {
+	at := time.Now()
+	failure := versionRollupFailure{}
+	for i, minutes := range []int{1, 2, 4, 8, 16, 30, 30, 30} {
+		failure = nextVersionRollupFailure(failure, at)
+		if failure.failures != i+1 || failure.nextAttempt.Sub(at) != time.Duration(minutes)*time.Minute {
+			t.Fatalf("attempt %d: %+v", i+1, failure)
+		}
+	}
+}
+
+func TestVersionPassTimeoutWarnAndMetric(t *testing.T) {
+	d, _ := versionEngine(t)
+	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	defer unlock()
+	counter := metrics.RollupComponentTotal.WithLabelValues("version", "error")
+	before := testutil.ToFloat64(counter)
+	var log bytes.Buffer
+	logger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	defer slog.SetDefault(logger)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := d.RefreshVersionRollup(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout=%v", err)
+	}
+	if after := testutil.ToFloat64(counter); after != before+1 {
+		t.Fatalf("timeout counter=%v want %v", after, before+1)
+	}
+	if output := log.String(); !strings.Contains(output, "level=WARN") || !strings.Contains(output, "version rollup pass timed out") {
+		t.Fatalf("missing timeout warning: %s", output)
+	}
+}
+
+func TestVersionMetricsCountRows(t *testing.T) {
+	d, repo := versionEngine(t)
+	now := time.Now().UTC().UnixNano()
+	logs := []telemetry.Log{}
+	for _, version := range []string{"v1", "v2"} {
+		logs = append(logs, telemetry.Log{ServiceName: "svc", Resource: map[string]any{"service.version": version}, EventUnixNanos: now, IngestedAt: now})
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metrics", Logs: logs}); err != nil {
+		t.Fatal(err)
+	}
+	counter := metrics.RollupComponentRows.WithLabelValues("version")
+	before := testutil.ToFloat64(counter)
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("pass=%d %v", n, err)
+	}
+	if after := testutil.ToFloat64(counter); after != before+2 {
+		t.Fatalf("materialized rows=%v want %v", after-before, 2)
+	}
+}
+
+func TestDrainBudgetBounded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	started := time.Now()
+	var passes int
+	n, err := drainVersionRollup(ctx, func(ctx context.Context) (int64, error) {
+		passes++
+		select {
+		case <-time.After(25 * time.Millisecond):
+			return 1, nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	})
+	elapsed := time.Since(started)
+	if err != nil || elapsed < 1900*time.Millisecond || elapsed > 2500*time.Millisecond || n != int64(passes) {
+		t.Fatalf("unbounded/incorrect drain: passes=%d n=%d elapsed=%v err=%v", passes, n, elapsed, err)
+	}
+}
+
+func TestDrainReleasesGateBetweenPasses(t *testing.T) {
+	d, repo := versionEngine(t)
+	now := time.Now().UTC().UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "yield", Logs: []telemetry.Log{{ServiceName: "svc", EventUnixNanos: now, IngestedAt: now}}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	serviceDone := make(chan error, 1)
+	passes := 0
+	n, err := drainVersionRollup(ctx, func(ctx context.Context) (int64, error) {
+		passes++
+		if passes == 2 {
+			select {
+			case err := <-serviceDone:
+				if err != nil {
+					return 0, err
+				}
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
+		}
+		n, err := d.RefreshVersionRollup(ctx)
+		if passes == 1 {
+			go func() { _, err := d.refreshServiceRollup(ctx); serviceDone <- err }()
+		}
+		return n, err
+	})
+	if err != nil || n != 1 || passes != 2 {
+		t.Fatalf("service could not acquire gate: %d passes=%d %v", n, passes, err)
+	}
+}
+
+func TestSingleDrainRegistration(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "duck.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || (fn.Name.Name != "rollupOnce" && fn.Name.Name != "runReadCacheLoop") {
+			continue
+		}
+		count := 0
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "DrainVersionRollup" {
+					count++
+				}
+			}
+			return true
+		})
+		want := 0
+		if fn.Name.Name == "runReadCacheLoop" {
+			want = 1
+		}
+		if count != want {
+			t.Fatalf("%s has %d drain registrations, want %d", fn.Name.Name, count, want)
+		}
+	}
+}
+
+func TestAnomalyInputTruncation(t *testing.T) {
+	now := time.Now().UTC()
+	findings := make([]annotations.Anomaly, 10002)
+	for i := range findings {
+		findings[i] = annotations.Anomaly{Service: fmt.Sprint(i), From: now.Add(-time.Minute), To: now.Add(time.Duration(10002-i) * time.Nanosecond)}
+	}
+	started := time.Now()
+	got := boundedAnomalies(findings)
+	if len(got) != 10000 || got[0].Service != "9999" || got[len(got)-1].Service != "0" {
+		t.Fatalf("incorrect latest input selection: len=%d first=%s last=%s", len(got), got[0].Service, got[len(got)-1].Service)
+	}
+	if findings[0].Service != "0" {
+		t.Fatal("input mutated")
+	}
+	if time.Since(started) >= time.Second {
+		t.Fatal("truncation exceeded 1s")
+	}
+	t.Logf("input truncation took %v", time.Since(started))
+}
+
+func TestSlowVersionPassCommits(t *testing.T) {
+	d, repo := versionEngine(t)
+	now := time.Now().UTC().UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "slow", Logs: []telemetry.Log{{ServiceName: "svc", Resource: map[string]any{"service.version": "v1"}, EventUnixNanos: now, IngestedAt: now}}}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	timer := time.AfterFunc(2200*time.Millisecond, unlock)
+	defer func() {
+		if timer.Stop() {
+			unlock()
+		}
+	}()
+	n, err := d.DrainVersionRollup(t.Context())
+	if err != nil || n != 1 {
+		t.Fatalf("slow pass must commit: batches=%d err=%v", n, err)
+	}
+	var count int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='slow'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("marker=%d err=%v", count, err)
+	}
+}
+
+func TestAnomalyMergePerformance(t *testing.T) {
+	d, _ := versionEngine(t)
+	// A nanosecond component makes a microsecond clock (macOS) exercise what Linux sees.
+	now := time.Now().UTC().Truncate(time.Microsecond).Add(123 * time.Nanosecond)
+	if _, err := d.DB.Exec(`INSERT INTO anomaly_log SELECT 'shop','svc-'||i,'latency',?::TIMESTAMP_NS::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS,'old','warn' FROM generate_series(1,10000) t(i)`, now.Add(-5*time.Minute), now); err != nil {
+		t.Fatal(err)
+	}
+	findings := make([]annotations.Anomaly, 10000)
+	for i := range findings {
+		findings[i] = annotations.Anomaly{Namespace: "shop", Service: fmt.Sprint("svc-", i+1), Kind: "latency", From: now.Add(-time.Minute), To: now.Add(time.Minute), Title: "new", Severity: "bad"}
+	}
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := d.RecordAnomalies(ctx, findings, now); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed >= 2*time.Second {
+		t.Fatalf("merge took %v", elapsed)
+	}
+	t.Logf("10,000 overlapping findings merged in %v", time.Since(start))
+	var count int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log WHERE title='new' AND severity='bad' AND start_time=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND end_time=?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, now.Add(-5*time.Minute), now.Add(time.Minute)).Scan(&count); err != nil || count != 10000 {
+		t.Fatalf("merged=%d %v", count, err)
+	}
+}
+
+func TestOversizedVersionBatch(t *testing.T) {
+	d, repo := versionEngine(t)
+	now := time.Now().UTC().UnixNano()
+	logs := make([]telemetry.Log, 64001)
+	for i := range logs {
+		logs[i] = telemetry.Log{ServiceName: "oversized", Resource: map[string]any{"service.version": "v1"}, EventUnixNanos: now, IngestedAt: now}
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "oversized", Logs: logs}); err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	logger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
+	defer slog.SetDefault(logger)
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("oversized pass: %d %v", n, err)
+	}
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
+		t.Fatalf("oversized retry: %d %v", n, err)
+	}
+	if output := log.String(); strings.Contains(output, "version rollup batch exceeds row budget") {
+		t.Fatalf("oversized warning spam: %s", output)
+	}
+	var count, limited int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("oversized scanned=%d %v", count, err)
+	}
+	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 0 {
+		t.Fatalf("limited=%d %v", limited, err)
+	}
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='oversized'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("oversized batch acknowledged=%d %v", count, err)
+	}
+}
+
+func TestVersionMarkerColdInput(t *testing.T) {
+	d, _ := versionEngine(t)
+	if _, err := d.DB.Exec(`INSERT INTO version_rollup_batches VALUES ('warm',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.transferVersionMarker(t.Context(), telemetry.BatchMetadata{ID: "output", MaxIngestedNanos: 2}, []string{"warm", "cold"}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='output'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("cold output marked=%d %v", count, err)
+	}
+}
+
+func TestOrdinaryFailedBatchRetriesSingly(t *testing.T) {
+	_, repo := versionEngine(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	commitVersionLogs(t, repo, "a-bad", at, 1)
+	commitVersionLogs(t, repo, "b-good", at.Add(time.Minute), 1)
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	d := &Duck{DB: db, writeDB: db, repository: repo, versionRollupPasses: 1}
+	failed := func(pattern string) {
+		mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+		mock.ExpectBegin()
+		mock.ExpectExec(pattern).WillReturnError(errors.New("unreadable A"))
+		mock.ExpectRollback()
+	}
+	failed(`(?s)INSERT INTO version_rollup SELECT.*b-good.*a-bad`)
+	if _, err := d.RefreshVersionRollup(t.Context()); err == nil {
+		t.Fatal("expected multi-pass failure")
+	}
+	for id, failure := range d.versionRollupFailures {
+		failure.nextAttempt = at
+		d.versionRollupFailures[id] = failure
+	}
+	failed(`(?s)INSERT INTO version_rollup SELECT.*read_parquet\(\[\x27[^\x27]*a-bad[^\x27]*\x27\]`)
+	if _, err := d.RefreshVersionRollup(t.Context()); err == nil {
+		t.Fatal("expected single A failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
+
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)INSERT INTO version_rollup SELECT.*b-good`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs("b-good", at.Add(time.Minute).UnixNano()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`INSERT INTO rollup_state`).WithArgs("version_rollup_v1_limited", int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	mock.ExpectCommit()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
+		t.Fatalf("healthy B withheld: %d %v", n, err)
+	}
+	if d.versionRollupFailures["a-bad"].failures != 2 || d.versionRollupFailures["b-good"].failures != 0 {
+		t.Fatalf("failures: %+v", d.versionRollupFailures)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestIdleVersionPassDoesNotWrite(t *testing.T) {
+	d, _ := versionEngine(t)
+	if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	} // startup retirement is due
+	stamp := func() string {
+		var s string
+		if err := d.DB.QueryRow(`SELECT coalesce(string_agg(cache_key||'='||updated_at::VARCHAR,',' ORDER BY cache_key),'') FROM rollup_state WHERE cache_key LIKE 'version_rollup%'`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	before := stamp()
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
+		t.Fatalf("idle: %d %v", n, err)
+	}
+	if after := stamp(); after != before {
+		t.Fatalf("idle wrote state: before=%s after=%s", before, after)
+	}
+	var unused int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM rollup_state WHERE cache_key='version_rollup_v1'`).Scan(&unused); err != nil || unused != 0 {
+		t.Fatalf("unused watermark: %d %v", unused, err)
+	}
+}

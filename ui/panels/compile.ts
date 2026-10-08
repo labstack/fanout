@@ -233,7 +233,7 @@ export function gaugeOption(panel: Panel, value: number | null, theme: ChartThem
 
 /** Gauge bands coloured by statusFor at each band's midpoint, so the gauge and
  *  the stat card can never disagree; adjacent bands of one status merge. */
-export function gaugeBands(panel: Panel, min: number, max: number, theme: ChartTheme): [number, string][] {
+function gaugeBands(panel: Panel, min: number, max: number, theme: ChartTheme): [number, string][] {
   const span = max - min || 1;
   const edges = [min, ...(panel.thresholds ?? []).map((t) => Math.min(max, Math.max(min, t.value))), max].sort((a, b) => a - b);
   const bands: { end: number; status: Status }[] = [];

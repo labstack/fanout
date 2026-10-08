@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ColorSchemeToggle } from "./shell";
+import { ColorSchemeToggle } from "./color-scheme-toggle";
 
 async function mount() {
   const container = document.createElement("div");

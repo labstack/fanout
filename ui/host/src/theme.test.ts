@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fanoutCssVariables, fanoutThemeConfig, relativeLuminance } from "../../theme";
 import { bad, brand, chart, fonts, info, ok, typeScale, warn } from "../../tokens";
-import { fanoutTheme, filledTextFollowsTheScheme } from "./theme";
+import { fanoutTheme } from "./theme";
 
 /* WCAG contrast between two hex colours, so a claim about a filled control is
    a number this suite computes rather than a variable name it recognises. */
@@ -39,7 +39,7 @@ describe("light scheme", () => {
 describe("filled surfaces", () => {
   // Mantine decides filled text from the light-scheme shade whatever scheme is
   // rendering, which put white on the dark scheme's #a97ce0 at 3.16:1 and on
-  // #f26d78 at 2.90:1 — under WCAG AA, on the button that removes a widget and
+  // #f26d78 at 2.90:1 — under WCAG AA, on the button that removes a panel and
   // on the most-used control in the product.
   const ramps: Record<string, readonly string[]> = { brand, ok, warn, bad, info };
 
@@ -54,24 +54,24 @@ describe("filled surfaces", () => {
   });
 
   it("routes a semantic filled surface to its own per-scheme variable", () => {
-    expect(filledTextFollowsTheScheme({ color: "brand", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
-    expect(filledTextFollowsTheScheme({ color: "bad", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-bad-contrast)");
+    expect(fanoutTheme.variantColorResolver!({ color: "brand", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
+    expect(fanoutTheme.variantColorResolver!({ color: "bad", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-bad-contrast)");
     // A component that names no colour is asking for the accent.
-    expect(filledTextFollowsTheScheme({ variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
+    expect(fanoutTheme.variantColorResolver!({ variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
     // A shade named explicitly is still the same hue and still needs the same
     // text colour.
-    expect(filledTextFollowsTheScheme({ color: "ok", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-ok-contrast)");
+    expect(fanoutTheme.variantColorResolver!({ color: "ok", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-ok-contrast)");
   });
 
   it("leaves other colours, other variants and an opted-out component to Mantine", () => {
-    const gray = filledTextFollowsTheScheme({ color: "gray", variant: "filled", theme: fanoutTheme } as never);
+    const gray = fanoutTheme.variantColorResolver!({ color: "gray", variant: "filled", theme: fanoutTheme } as never);
     expect(gray.color).toBe("var(--mantine-color-white)");
 
-    const light = filledTextFollowsTheScheme({ color: "brand", variant: "light", theme: fanoutTheme } as never);
+    const light = fanoutTheme.variantColorResolver!({ color: "brand", variant: "light", theme: fanoutTheme } as never);
     expect(light.color).toBe("var(--mantine-color-brand-light-color)");
 
     // autoContrast={false} is a component saying it wants Mantine's white.
-    const optedOut = filledTextFollowsTheScheme({ color: "brand", variant: "filled", autoContrast: false, theme: fanoutTheme } as never);
+    const optedOut = fanoutTheme.variantColorResolver!({ color: "brand", variant: "filled", autoContrast: false, theme: fanoutTheme } as never);
     expect(optedOut.color).toBe("var(--mantine-color-white)");
   });
 

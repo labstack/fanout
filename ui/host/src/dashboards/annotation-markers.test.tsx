@@ -111,7 +111,7 @@ const mixedKinds: AnnotationsResponse = {
     { namespace: "shop", service: "cart", kind: "error_rate_change", title: "Changed", severity: "bad", from: at(1000), to: at(5000) },
   ],
 };
-it.each([false, true])("final5 merges three overlapping kinds into one band with every kind/window (dark=%s)", dark => {
+it.each([false, true])("merges three overlapping kinds into one band with every kind/window (dark=%s)", dark => {
   const got = withAnnotations({ series: [{ type: "line" }] }, panel, { ...result, annotation_scope: undefined }, mixedKinds, {}, chartThemeFor(dark));
   const areas = (got.series as { markArea: { data: (Area & [{ name: string }, unknown])[] } }[])[0].markArea.data;
   expect(areas).toHaveLength(1);
@@ -125,7 +125,7 @@ it.each([false, true])("final5 merges three overlapping kinds into one band with
   }
   expect(mixedKinds.anomalies.map(episode => episode.from)).toEqual([at(4000), at(2000), at(1000)]);
 });
-it("final5 merges adjacent kinds but preserves gaps, services, namespaces and clipped bounds", () => {
+it("merges adjacent kinds but preserves gaps, services, namespaces and clipped bounds", () => {
   const base = mixedKinds.anomalies[0];
   const anomalies = [...mixedKinds.anomalies,
     { ...base, kind: "adjacent", from: at(9000), to: at(11000) },

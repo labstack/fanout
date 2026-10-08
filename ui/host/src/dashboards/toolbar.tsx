@@ -7,7 +7,7 @@ import { ranges, refreshes } from "./search";
 
 const rangeLabel: Record<string, string> = { "5m": "Last 5 minutes", "15m": "Last 15 minutes", "1h": "Last hour", "3h": "Last 3 hours", "6h": "Last 6 hours", "12h": "Last 12 hours", "24h": "Last 24 hours", "2d": "Last 2 days", "7d": "Last 7 days", "30d": "Last 30 days" };
 
-export function timeLabel(time: DashboardTime): string {
+function timeLabel(time: DashboardTime): string {
   if (time.from && time.to) return `${exactTimestamp(time.from)} – ${exactTimestamp(time.to)}`;
   return rangeLabel[time.range ?? "1h"] ?? time.range ?? "Last hour";
 }

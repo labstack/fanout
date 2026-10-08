@@ -1,6 +1,4 @@
 import { defineCollection } from "astro:content";
-// `z` re-exported from `astro:content` is deprecated in Astro 7; the bundled
-// copy is the supported path and keeps a single zod version in the graph.
 import { z } from "astro/zod";
 import { docsLoader } from "@astrojs/starlight/loaders";
 import { docsSchema } from "@astrojs/starlight/schema";

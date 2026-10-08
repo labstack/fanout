@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/labstack/fanout/internal/auth"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ func (discardExport) Submit(context.Context, telemetrystore.Batch) error { retur
 // Preserve these cross-credential cases when changing routing or auth middleware.
 func TestSharedListenerCredentialBoundaries(t *testing.T) {
 	s := newTestAuthServer(t)
-	user, err := s.users.Create("listener@example.com", "", "admin")
+	user, err := s.users.CreateWithAudit("listener@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}

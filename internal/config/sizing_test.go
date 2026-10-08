@@ -261,3 +261,17 @@ func writeTestFile(t *testing.T, path, contents string) {
 		t.Fatal(err)
 	}
 }
+
+func detectAvailableMemory() uint64 {
+	return detectMemory().available
+}
+
+func detectCgroupMemoryLimit(cgroupPath, mountInfoPath string) uint64 {
+	limit, _, _ := detectCgroupMemoryLimitDetailed(cgroupPath, mountInfoPath)
+	return limit
+}
+
+func readCgroupLimit(path string) (uint64, bool) {
+	limit, exists, err := readCgroupLimitDetailed(path)
+	return limit, exists && err == nil && limit > 0
+}

@@ -229,7 +229,7 @@ func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	rows, err := d.QueryContext(context.Background(), "SELECT 1")
 	if err != nil {
 		t.Fatalf("QueryContext: %v", err)
@@ -332,7 +332,7 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	mustRLock(t, &d.parquetMu)
 	writerAcquired := make(chan struct{})
 	releaseWriter := make(chan struct{})
@@ -409,7 +409,7 @@ func TestRollupAdmissionLeaseDoesNotCancelAdmittedWork(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(100))
 	mock.ExpectCommit()
 
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
 		t.Fatalf("admitted rollup was canceled by its admission lease: %v", err)
 	}
@@ -479,7 +479,7 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
+	d := &Duck{DB: db, writeDB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
 	mustRLock(t, &d.parquetMu)
 	release := d.writeGate.Lock(writegate.WriteRollupService)
 	done := make(chan error, 1)
@@ -519,7 +519,7 @@ func TestMaintenanceRetriesRetiredDirectoryCleanup(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, repository: repository}
+	d := &Duck{DB: db, writeDB: db, repository: repository}
 	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestMaintenanceTracksConsecutiveFailures(t *testing.T) {
 		mock.ExpectExec("CHECKPOINT").WillReturnError(errors.New("injected checkpoint failure"))
 	}
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	for range 3 {
 		if err := d.runRepositoryMaintenance(context.Background()); err == nil {
 			t.Fatal("maintenance succeeded despite checkpoint failure")
@@ -586,7 +586,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d := &Duck{DB: db, repository: repository, cfg: config.Config{RetentionDays: 1}}
+	d := &Duck{DB: db, writeDB: db, repository: repository, cfg: config.Config{RetentionDays: 1}}
 	for i := range 8 {
 		batch := telemetrystore.Batch{
 			ID:      fmt.Sprintf("expired-%d", i),
@@ -735,7 +735,7 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			}
 			defer db.Close()
 
-			d := &Duck{DB: db, cfg: config.Config{}}
+			d := &Duck{DB: db, writeDB: db, cfg: config.Config{}}
 			watermarkRows := func(value int64) *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
 			}
@@ -776,7 +776,7 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 	defer db.Close()
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Hour}}
+	d := &Duck{DB: db, writeDB: db, cfg: config.Config{MaintenanceInterval: time.Hour}}
 	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
 		t.Fatal(err)
 	}

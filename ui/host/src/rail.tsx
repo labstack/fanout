@@ -4,10 +4,8 @@ import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { threadHistoryQueryKey } from "./api";
-import type { Overview } from "../../contracts";
 import { authorizedFetch } from "./auth";
-import { dashboardsKey, listDashboards } from "./dashboards/api";
-import { freshFor, observabilityParams, useObservability } from "./observability";
+import { dashboardsKey, dashboardsStaleTime, listDashboards } from "./dashboards/api";
 
 export type RailHandle = { focusSearch(): void };
 
@@ -58,19 +56,19 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     getNextPageParam: (last) => last.nextCursor || undefined,
     enabled: agentAvailable,
   });
-  const dashboards = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, refetchInterval: 30_000, staleTime: freshFor });
+  const dashboards = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, refetchInterval: 30_000, staleTime: dashboardsStaleTime });
   const threads = useMemo(() => history.data?.pages.flatMap((page) => page.threads) ?? [], [history.data]);
   const groups = useMemo(() => groupThreads(threads), [threads]);
   // Searching for a service used to answer "No matching chats / No matching
   // dashboards" while that service was live, traced and logged — the search
   // looked only at what the user had already named. The catalogue is fetched
   // only once someone is actually searching.
-  const overview = useObservability<Overview>("overview", observabilityParams({ window: "1h", namespace: "" }), Boolean(query) && Boolean(onInvestigateService));
+  const schema = useQuery({queryKey:["telemetry-schema","1h"],queryFn:async()=>{ const response=await authorizedFetch("/api/telemetry/schema?window=1h"); if(!response.ok) throw new Error("Service search failed"); return response.json() as Promise<{services:Array<{value:string;count?:number}>}>; },enabled:Boolean(query)&&Boolean(onInvestigateService),staleTime:60_000});
   const matchingServices = useMemo(() => {
     if (!query) return [];
     const needle = query.toLowerCase();
-    return (overview.data?.data.services ?? []).map((entry) => entry.service).filter((service) => service.toLowerCase().includes(needle)).slice(0, 6);
-  }, [overview.data, query]);
+    return (schema.data?.services ?? []).map((entry) => entry.value).filter((service) => service.toLowerCase().includes(needle)).slice(0, 6);
+  }, [schema.data, query]);
   const visibleDashboards = useMemo(() => {
     const items = dashboards.data ?? [];
     const needle = query.toLowerCase();
@@ -122,8 +120,10 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
-        {matchingServices.length > 0 && onInvestigateService && <Stack gap={4}>
+        {query && onInvestigateService && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
+          {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
+          {schema.isSuccess && matchingServices.length === 0 && <Text c="dimmed" size="sm" px="sm">No matching services</Text>}
           {matchingServices.map((service) => <UnstyledButton key={service} className="rail-row" p="sm" onClick={() => onInvestigateService(service)}>
             <Text size="sm" fw={500} truncate>{service}</Text>
           </UnstyledButton>)}
@@ -222,7 +222,7 @@ function dayStart(value: Date): number {
 // rather than derived from insertion order.
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"];
 
-export function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads: ThreadSummary[] }> {
+function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads: ThreadSummary[] }> {
   const today = dayStart(new Date());
   const day = 24 * 60 * 60 * 1000;
   const groups = new Map<string, ThreadSummary[]>();
@@ -236,7 +236,7 @@ export function groupThreads(threads: ThreadSummary[]): Array<{ label: string; t
   return GROUP_ORDER.filter((label) => groups.has(label)).map((label) => ({ label, threads: groups.get(label)! }));
 }
 
-export function threadTime(value: string): string {
+function threadTime(value: string): string {
   const date = parseSQLiteTime(value);
   const today = dayStart(new Date());
   const age = Math.floor((today - dayStart(date)) / (24 * 60 * 60 * 1000));

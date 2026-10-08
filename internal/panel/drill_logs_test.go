@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-func TestM2DrillLogsKeepCheckedSelection(t *testing.T) {
+func TestDrillLogsKeepCheckedSelection(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	at := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{ServiceName: "checkout", Severity: "ERROR", Body: "failed", TimeUnixNanos: at, EventUnixNanos: at, IngestedAt: at}, {ServiceName: "frontend", Severity: "INFO", Body: "ok", TimeUnixNanos: at, EventUnixNanos: at, IngestedAt: at}})
@@ -31,7 +31,7 @@ func TestM2DrillLogsKeepCheckedSelection(t *testing.T) {
 	}
 }
 
-func TestM2ExemplarKindValidation(t *testing.T) {
+func TestExemplarKindValidation(t *testing.T) {
 	e := newFixtureExecutor(t)
 	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", Kind: "other", From: fixtureStart, To: fixtureStart.Add(time.Minute)}
 	_, err := e.Exemplars(t.Context(), req)
@@ -41,7 +41,7 @@ func TestM2ExemplarKindValidation(t *testing.T) {
 		t.Fatalf("got %v want %+v", err, want)
 	}
 }
-func TestM2ExemplarCapturedWindowDoesNotMove(t *testing.T) {
+func TestExemplarCapturedWindowDoesNotMove(t *testing.T) {
 	e := newFixtureExecutor(t)
 	from, to := fixtureStart, fixtureStart.Add(time.Hour)
 	d := shopDashboard()
@@ -54,7 +54,7 @@ func TestM2ExemplarCapturedWindowDoesNotMove(t *testing.T) {
 	}
 }
 
-func TestM2DrillLogsCapAndSource(t *testing.T) {
+func TestDrillLogsCapAndSource(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	logs := make([]telemetry.Log, 201)
 	for i := range logs {

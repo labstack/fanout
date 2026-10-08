@@ -84,9 +84,6 @@ func toUser(u generated.User) User {
 }
 
 // Create adds a new user.
-func (s *UserStore) Create(email, name string, role Role) (User, error) {
-	return s.create(email, name, role, nil)
-}
 
 func (s *UserStore) CreateWithAudit(email, name string, role Role, event AuditEvent) (User, error) {
 	return s.create(email, name, role, &event)
@@ -180,9 +177,6 @@ func (s *UserStore) List() ([]User, error) {
 }
 
 // Update modifies a user's fields. Email, role, or active-state changes revoke every browser session.
-func (s *UserStore) Update(id string, email, name *string, role *Role, active *bool) (User, error) {
-	return s.update(id, email, name, role, active, nil)
-}
 
 func (s *UserStore) UpdateWithAudit(id string, email, name *string, role *Role, active *bool, event AuditEvent) (User, error) {
 	return s.update(id, email, name, role, active, &event)
@@ -290,9 +284,6 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 }
 
 // Delete removes a user and all of its browser sessions by ID.
-func (s *UserStore) Delete(id string) error {
-	return s.delete(id, nil)
-}
 
 func (s *UserStore) DeleteWithAudit(id string, event AuditEvent) error {
 	return s.delete(id, &event)
@@ -385,9 +376,6 @@ func (s *UserStore) CountActiveAdmins() (int64, error) {
 }
 
 // RevokeAllSessions invalidates and removes every browser session for a user.
-func (s *UserStore) RevokeAllSessions(id string) error {
-	return s.revokeAllSessions(id, nil)
-}
 
 func (s *UserStore) RevokeAllSessionsWithAudit(id string, event AuditEvent) error {
 	return s.revokeAllSessions(id, &event)
@@ -444,9 +432,6 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 
 // CreateFirstAdmin atomically creates the first admin user.
 // Returns ErrSetupComplete if users already exist (race-safe).
-func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
-	return s.createFirstAdmin(email, name, nil)
-}
 
 func (s *UserStore) CreateFirstAdminWithAudit(email, name string, event AuditEvent) (User, error) {
 	return s.createFirstAdmin(email, name, &event)

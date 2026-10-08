@@ -54,7 +54,7 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
 		t.Fatal(err)
 	}
-	server := New(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, "test")
+	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}, Extra: &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}}
 	spec := panel.Dashboard{Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 	_, output, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Dashboard: withName(spec, "AI overview")})
@@ -88,7 +88,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := New(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, "test")
+	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
 	// A remote client always carries TokenInfo (ProtectMCP guarantees it), so a
 	// spoofed _meta owner key must lose to the token identity.
 	req := &mcp.CallToolRequest{
@@ -109,7 +109,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 }
 
 func TestDashboardOwnerRejectsTokenMissingDashboardScope(t *testing.T) {
-	server := New(&fakeObservability{}, nil, nil, "test")
+	server := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 	// Even with a spoofed _meta owner key, a token lacking the dashboard scope
 	// must be rejected outright — the meta fallback never applies once
 	// TokenInfo is present.
@@ -155,7 +155,7 @@ func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
 }
 
 func TestInvalidWindowIsToolError(t *testing.T) {
-	s := New(&fakeObservability{}, nil, nil, "test")
+	s := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 	if _, _, err := s.topology(context.Background(), nil, QueryInput{Window: "later"}); err == nil {
 		t.Fatal("expected invalid window error")
 	}
@@ -163,7 +163,7 @@ func TestInvalidWindowIsToolError(t *testing.T) {
 
 func TestDependencyToolForwardsScopeAndBounds(t *testing.T) {
 	backend := &fakeObservability{}
-	server := New(backend, nil, nil, "test")
+	server := NewWithIntelligence(backend, nil, nil, nil, "test")
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	server.now = func() time.Time { return now }
 	session := connectTestClient(t, server, nil)
@@ -219,7 +219,7 @@ func TestIntelligenceSnapshotReportsNotReady(t *testing.T) {
 
 func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 	t.Run("negotiated client", func(t *testing.T) {
-		server := New(&fakeObservability{}, nil, nil, "test")
+		server := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 		session := connectTestClient(t, server, &mcp.ClientCapabilities{Extensions: map[string]any{
 			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 		}})
@@ -284,7 +284,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 	})
 
 	t.Run("client without extension", func(t *testing.T) {
-		server := New(&fakeObservability{}, nil, nil, "test")
+		server := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 		session := connectTestClient(t, server, nil)
 		listed, err := session.ListTools(context.Background(), nil)
 		if err != nil {

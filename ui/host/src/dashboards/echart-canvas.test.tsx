@@ -20,7 +20,7 @@ function fresh() {
 describe("EChartCanvas", () => {
   afterEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
 
-  it("I2 has no production audit hook, large data attributes or per-frame audit", async () => {
+  it("has no production audit hook, large data attributes or per-frame audit", async () => {
     vi.stubEnv("DEV", false);
     const instance=fresh(), getDisplayList=vi.fn(() => []);
     Object.assign(instance,{getZr:()=>({storage:{getDisplayList}})});
@@ -159,7 +159,7 @@ describe("EChartCanvas", () => {
   });
 });
 
-it("W12 inspects rendered legend text bounds on demand", async () => {
+it("inspects rendered legend text bounds on demand", async () => {
  vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__fanout_audit=1");
  const instance = fresh();
  Object.assign(instance, { getZr: () => ({ storage: { getDisplayList: () => [{ style: { text: "load-generator" }, getBoundingRect: () => ({ clone: () => ({ x: 10, y: 0, width: 100, height: 16, applyTransform: () => {} }) }), getComputedTransform: () => null }] } }) });

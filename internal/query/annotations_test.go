@@ -15,7 +15,7 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func TestM2AnnotationWidenedRangeAccepted(t *testing.T) {
+func TestAnnotationWidenedRangeAccepted(t *testing.T) {
 	d, _ := versionEngine(t)
 	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, days := range []int{31, 430} {
@@ -26,7 +26,7 @@ func TestM2AnnotationWidenedRangeAccepted(t *testing.T) {
 	}
 }
 
-func TestM2AnnotationWidenedRangeRejected(t *testing.T) {
+func TestAnnotationWidenedRangeRejected(t *testing.T) {
 	d, _ := versionEngine(t)
 	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	_, err := annotations.New(d).Read(t.Context(), annotations.Request{From: from, To: from.Add(430*24*time.Hour + time.Nanosecond)})
@@ -51,7 +51,7 @@ func versionEngine(t *testing.T) (*Duck, *telemetrystore.Repository) {
 	return d, repo
 }
 
-func TestM2VersionIncrementalLateBatch(t *testing.T) {
+func TestVersionIncrementalLateBatch(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	add := func(id, version string, offset time.Duration) {
@@ -91,7 +91,7 @@ func TestM2VersionIncrementalLateBatch(t *testing.T) {
 	}
 }
 
-func TestM2AnnotationHistoryBounds(t *testing.T) {
+func TestAnnotationHistoryBounds(t *testing.T) {
 	started := time.Now()
 	d, _ := versionEngine(t)
 	now := time.Now().UTC()
@@ -121,7 +121,7 @@ func TestM2AnnotationHistoryBounds(t *testing.T) {
 	t.Logf("history bounds took %v", time.Since(started))
 }
 
-func TestM2AnnotationSourcesNoRawScan(t *testing.T) {
+func TestAnnotationSourcesNoRawScan(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	for i, version := range []string{"v1", "v2"} {
@@ -156,7 +156,7 @@ func (e *annotationCountingEngine) QueryContext(ctx context.Context, text string
 	return e.Duck.QueryContext(ctx, text, args...)
 }
 
-func TestM2VersionPassAndHistoryCaps(t *testing.T) {
+func TestVersionPassAndHistoryCaps(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	for i := 0; i < 65; i++ {
@@ -193,7 +193,7 @@ func TestM2VersionPassAndHistoryCaps(t *testing.T) {
 		t.Fatalf("disclosed cap: %+v %v", got, err)
 	}
 }
-func TestM2VersionDrainAndLimitedReset(t *testing.T) {
+func TestVersionDrainAndLimitedReset(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	for i := range 70 {
@@ -238,7 +238,7 @@ func commitVersionLogs(t *testing.T, repo *telemetrystore.Repository, id string,
 	}
 }
 
-func TestM2VersionOversizedBatchDrains(t *testing.T) {
+func TestVersionOversizedBatchDrains(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	commitVersionLogs(t, repo, "oversized", at, 64001)
@@ -258,7 +258,7 @@ func TestM2VersionOversizedBatchDrains(t *testing.T) {
 	}
 }
 
-func TestM2VersionMixedBatchPasses(t *testing.T) {
+func TestVersionMixedBatchPasses(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	for i, size := range []int{1, 64001, 2, 64002, 3} {
@@ -284,7 +284,7 @@ func TestM2VersionMixedBatchPasses(t *testing.T) {
 		t.Fatalf("drained pass=%d %v", n, err)
 	}
 }
-func TestM2VersionResourceLogsAndMetrics(t *testing.T) {
+func TestVersionResourceLogsAndMetrics(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	n := at.UnixNano()
@@ -313,7 +313,7 @@ func TestM2VersionResourceLogsAndMetrics(t *testing.T) {
 		t.Fatalf("extra rows or error: %v", rows.Err())
 	}
 }
-func TestM2VersionMarkersCompactionRetention(t *testing.T) {
+func TestVersionMarkersCompactionRetention(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Truncate(time.Hour)
 	for i := range 8 {
@@ -348,7 +348,7 @@ func TestM2VersionMarkersCompactionRetention(t *testing.T) {
 		t.Fatalf("retention markers=%d %v", n, err)
 	}
 }
-func TestM2AnomalyCoalescesOpenEpisode(t *testing.T) {
+func TestAnomalyCoalescesOpenEpisode(t *testing.T) {
 	d, _ := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	a := annotations.Anomaly{Namespace: "shop", Service: "checkout", Kind: "latency", From: at, To: at.Add(5 * time.Minute), Title: "Slow", Severity: "warn"}
@@ -377,7 +377,7 @@ func TestM2AnomalyCoalescesOpenEpisode(t *testing.T) {
 	}
 }
 
-func TestFinalFixVersionSchemaRebuildClearsPair(t *testing.T) {
+func TestVersionSchemaRebuildClearsPair(t *testing.T) {
 	for _, table := range []string{"version_rollup", "version_rollup_batches"} {
 		t.Run(table, func(t *testing.T) {
 			d, repo := versionEngine(t)

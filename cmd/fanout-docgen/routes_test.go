@@ -37,15 +37,15 @@ func TestCollectRoutesResolvesGroupPrefixes(t *testing.T) {
 
 	var found bool
 	for _, r := range routes {
-		if r.Path == "/api/observability/overview" {
+		if r.Path == "/api/traces/:id" {
 			found = true
 			if r.Capability != "telemetry:read" {
-				t.Errorf("observability overview requires %q, want telemetry:read", r.Capability)
+				t.Errorf("trace read requires %q, want telemetry:read", r.Capability)
 			}
 		}
 	}
 	if !found {
-		t.Error("the observability group's routes are missing from the reference entirely")
+		t.Error("the trace routes are missing from the reference entirely")
 	}
 }
 

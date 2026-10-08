@@ -45,30 +45,9 @@ export function duration(value: number): string {
   return restMinutes === 0 ? `${hours}h` : `${hours}h ${restMinutes}m`;
 }
 
-export function windowLabel(window: string) {
-  const [startValue, endValue] = window.split("/");
-  const start = new Date(startValue);
-  const end = new Date(endValue);
-  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf())) return window;
-  const minutes = Math.round((end.valueOf() - start.valueOf()) / 60_000);
-  if (minutes >= 60 && minutes % 60 === 0) return `Last ${minutes / 60}h`;
-  return `Last ${Math.max(minutes, 1)}m`;
-}
 
-export function timelineTimestamp(value: string, window: string, seconds = false) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value;
-  const [startValue, endValue] = window.split("/");
-  const start = new Date(startValue);
-  const end = new Date(endValue);
-  const multiDay = !Number.isNaN(start.valueOf()) && !Number.isNaN(end.valueOf()) && end.valueOf() - start.valueOf() > 24 * 60 * 60 * 1000;
-  return date.toLocaleString([], {
-    ...(multiDay ? { month: "short", day: "numeric" } as const : {}),
-    hour: "numeric",
-    minute: "2-digit",
-    ...(seconds ? { second: "2-digit" } as const : {}),
-  });
-}
+
+
 
 /** The viewer's time zone, abbreviated the way their locale writes it.
  *
@@ -80,12 +59,7 @@ export function timelineTimestamp(value: string, window: string, seconds = false
  *  A table of rows from before a daylight-saving change headed "PST" when its
  *  rows read PDT is a worse answer than no heading at all, so a caller labels
  *  the rows it is actually showing. */
-export function timeZoneLabel(when: Date | string | number = new Date()) {
-  const at = when instanceof Date ? when : new Date(when);
-  if (Number.isNaN(at.valueOf())) return timeZoneLabel(new Date());
-  const parts = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(at);
-  return parts.find((part) => part.type === "timeZoneName")?.value ?? "";
-}
+
 
 /** The whole instant — date, seconds and zone — for the title of a timestamp
  *  that is displayed shortened. Takes whatever the caller holds, so nobody has

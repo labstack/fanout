@@ -50,6 +50,7 @@ type npmPackage struct {
 	Version              string            `json:"version"`
 	License              any               `json:"license"`
 	Dependencies         map[string]string `json:"dependencies"`
+	DevDependencies      map[string]string `json:"devDependencies"`
 	OptionalDependencies map[string]string `json:"optionalDependencies"`
 	PeerDependencies     map[string]string `json:"peerDependencies"`
 	PeerDependenciesMeta map[string]struct {
@@ -200,10 +201,14 @@ func collectNPM(root, workspace string, all map[string]component) error {
 	type dependency struct {
 		name, from string
 		optional   bool
+		buildOnly  bool
 	}
 	queue := make([]dependency, 0, len(names))
 	for _, name := range names {
 		queue = append(queue, dependency{name: name, from: workspace})
+	}
+	if _, ok := manifest.DevDependencies["knip"]; ok {
+		queue = append(queue, dependency{name: "knip", from: workspace, buildOnly: true})
 	}
 	seenDirs := map[string]bool{}
 	for len(queue) > 0 {
@@ -251,18 +256,22 @@ func collectNPM(root, workspace string, all map[string]component) error {
 				return fmt.Errorf("%s resolves to conflicting package contents", id)
 			}
 		} else {
-			all[id] = component{id: id, kind: "npm production package", license: license, documents: docs}
+			kind := "npm production package"
+			if next.buildOnly {
+				kind = "npm build tool"
+			}
+			all[id] = component{id: id, kind: kind, license: license, documents: docs}
 		}
 
 		for _, name := range sortedKeys(pkg.Dependencies) {
-			queue = append(queue, dependency{name: name, from: realDir})
+			queue = append(queue, dependency{name: name, from: realDir, buildOnly: next.buildOnly})
 		}
 		for _, name := range sortedKeys(pkg.OptionalDependencies) {
-			queue = append(queue, dependency{name: name, from: realDir, optional: true})
+			queue = append(queue, dependency{name: name, from: realDir, optional: true, buildOnly: next.buildOnly})
 		}
 		for _, name := range sortedKeys(pkg.PeerDependencies) {
 			queue = append(queue, dependency{
-				name: name, from: realDir,
+				name: name, from: realDir, buildOnly: next.buildOnly,
 				optional: pkg.PeerDependenciesMeta[name].Optional,
 			})
 		}

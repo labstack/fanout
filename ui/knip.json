@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@6.38.0/schema.json",
+  "entry": [
+    "host/src/main.tsx!",
+    "host/src/mcp-apps/main.tsx!",
+    "host/src/routeTree.gen.ts!"
+  ],
+  "project": [
+    "host/src/**/*.{ts,tsx}!",
+    "*.ts!",
+    "panels/**/*.ts!",
+    "!host/src/**/*.test.{ts,tsx}!",
+    "!panels/**/*.test.ts!"
+  ],
+  "vite": {
+    "config": [
+      "host/vite.config.ts",
+      "host/vite.apps.config.ts"
+    ]
+  }
+}

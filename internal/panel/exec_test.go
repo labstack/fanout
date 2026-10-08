@@ -271,7 +271,7 @@ func TestRunWarmCacheCancelledContextIsError(t *testing.T) {
 	}
 }
 
-func TestFinalFixEmptyVariableOptionsWire(t *testing.T) {
+func TestEmptyVariableOptionsWire(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }

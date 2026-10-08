@@ -90,10 +90,6 @@ type Server struct {
 	limitTools   map[string]bool
 }
 
-func New(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, version string) *Server {
-	return newServer(queries, dashboards, panels, nil, version)
-}
-
 func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	return newServer(queries, dashboards, panels, snapshots, version)
 }

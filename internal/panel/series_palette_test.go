@@ -99,7 +99,7 @@ func TestGroupedBarOtherAggregatesBeforeErrorRate(t *testing.T) {
 	t.Fatalf("missing grouped-bar Other: %+v", f)
 }
 
-func TestM3TimelineTwelveRows(t *testing.T) {
+func TestTimelineTwelveRows(t *testing.T) {
 	duck, repo := newTestEngine(t)
 	spans := shopSpans()[:0]
 	for i := range 12 {
@@ -130,7 +130,7 @@ func TestM3TimelineTwelveRows(t *testing.T) {
 	}
 }
 
-func TestI4WorstFirstSeries(t *testing.T) {
+func TestWorstFirstSeries(t *testing.T) {
 	duck, repo := newTestEngine(t)
 	spans := shopSpans()[:0]
 	for service := range 6 {
@@ -197,7 +197,7 @@ func TestI4WorstFirstSeries(t *testing.T) {
 	}
 }
 
-func TestM3NonCategoricalLimits(t *testing.T) {
+func TestNonCategoricalLimits(t *testing.T) {
 	for _, viz := range []string{"bar", "table", "state_timeline", "scatter", "heatmap"} {
 		p := Panel{Viz: viz}
 		if p.Top() != 8 {

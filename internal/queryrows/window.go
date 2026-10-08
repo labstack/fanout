@@ -29,8 +29,6 @@ type ReadKind uint8
 
 const (
 	RawRead ReadKind = iota
-	EndpointRead
-	LogHistogramRead
 	TraceCandidateRead
 )
 

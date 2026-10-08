@@ -21,22 +21,11 @@ const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.b
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
 
 /** Sequential ramps have strictly ordered luminance, with a readable high end. */
-export function heatRamp(theme: ChartTheme): string[] {
-  return theme.dark ? ["#0f2a43", "#164267", "#1e5a8a", "#2879ae", "#399aca", "#57b8e3", "#7dd3fc"]
-    : ["#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8"];
-}
-/** Count magnitude on a capped log scale; the cap occupies the seventh step. */
-export function heatStep(count: number, cap: number): number {
-  // A singleton has no logarithmic magnitude; also avoids log(1) / log(1).
-  if (count <= 1) return 0;
-  if (count >= cap) return 6;
-  return Math.max(0, Math.min(6, Math.floor(Math.log10(Math.max(1, count)) / Math.log10(cap) * 6)));
-}
-
+import { heatRamp, heatStep } from "./heat-scale";
 const heatCountLabel = (count: number) => count >= 1000 && count < 1e6 && count % 1000 === 0 ? `${count / 1000}k` : formatValue("count", count);
 
 /** State runs merge only touching buckets of the same row and status. */
-export function mergeStateRuns<T extends { value: (string | number | null | boolean)[]; selection: { from?: string; to?: string } }>(buckets: T[]): T[] {
+function mergeStateRuns<T extends { value: (string | number | null | boolean)[]; selection: { from?: string; to?: string } }>(buckets: T[]): T[] {
   const runs: T[] = [];
   for (const bucket of [...buckets].sort((a, b) => Number(a.value[1]) - Number(b.value[1]) || Number(a.value[0]) - Number(b.value[0]))) {
     const last = runs.at(-1);

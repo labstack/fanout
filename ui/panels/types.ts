@@ -4,8 +4,8 @@ export const ALL = "$__all";
 
 export type Unit = "ms" | "s" | "ns" | "percent" | "ratio" | "count" | "per_second" | "per_minute" | "bytes" | "none";
 export type Status = "ok" | "warn" | "bad";
-export const visualizations = ["stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces", "service_map", "health"] as const;
-export type Viz = typeof visualizations[number];
+
+export type Viz = "stat" | "gauge" | "timeseries" | "bar" | "table" | "text" | "heatmap" | "histogram" | "scatter" | "state_timeline" | "logs" | "log_patterns" | "traces" | "service_map" | "health";
 export type Selection = { from?: string; to?: string; time?: number; dimensions: Record<string, string>; trace_id?: string; namespace?: string; bucket?: { lower: number; upper?: number } };
 export type ColumnFormat = { field: string; format: "unit"|"bar"|"status"|"sparkline"|"trace_link"|"service_link"|"log_template"; unit?: Unit; variable?: string };
 

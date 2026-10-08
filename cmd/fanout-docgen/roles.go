@@ -8,9 +8,6 @@ import (
 	"github.com/labstack/fanout/internal/api"
 )
 
-// roleCount is set by renderRoles so the summary line can report it.
-var roleCount []string
-
 // capabilityNotes is the authored half: what a capability lets someone do, in a
 // reader's terms. The matrix itself comes from the middleware.
 //
@@ -135,7 +132,6 @@ func renderRoles() ([]byte, error) {
 	b.WriteString("domain.\n")
 	b.WriteString(":::\n")
 
-	roleCount = caps
 	return []byte(b.String()), nil
 }
 

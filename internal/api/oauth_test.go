@@ -107,7 +107,7 @@ func TestMCPRejectsUnexpectedHostBeforeAuthentication(t *testing.T) {
 
 func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
-	user, err := users.Create("owner@example.com", "Owner", "admin")
+	user, err := users.CreateWithAudit("owner@example.com", "Owner", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if role := mcp.Header().Get("X-Test-MCP-Role"); role != "" {
 		t.Fatalf("delegated MCP context exposed account role %q", role)
 	}
-	if err := users.RevokeAllSessions(user.ID); err != nil {
+	if err := users.RevokeAllSessionsWithAudit(user.ID, auth.AuditEvent{EventType: "session.revoked", Outcome: "success"}); err != nil {
 		t.Fatalf("logout everywhere: %v", err)
 	}
 	replayed := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + access})
@@ -249,7 +249,7 @@ func TestMCPOAuthRejectsUnknownBearerAndAdvertisesDiscovery(t *testing.T) {
 
 func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
-	user, err := users.Create("browser-mcp@example.com", "Browser MCP", "viewer")
+	user, err := users.CreateWithAudit("browser-mcp@example.com", "Browser MCP", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestMCPOAuthConsentUsesSchemeSourceForIPv6Redirect(t *testing.T) {
 	const redirect = "http://[::1]:5000/callback"
 
 	e, users, _ := newOAuthTestServer(t)
-	user, err := users.Create("ipv6-owner@example.com", "IPv6 Owner", "admin")
+	user, err := users.CreateWithAudit("ipv6-owner@example.com", "IPv6 Owner", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -400,7 +400,7 @@ func oauthCookieForUser(t *testing.T, e *echo.Echo, user auth.User) *http.Cookie
 
 func oauthSessionCookie(t *testing.T, e *echo.Echo, users *auth.UserStore, email string) *http.Cookie {
 	t.Helper()
-	user, err := users.Create(email, "", "admin")
+	user, err := users.CreateWithAudit(email, "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -491,13 +491,13 @@ func decodeTokens(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 
 // --- HTTP-layer negative-path and scope tests ---------------------------------
 
-func TestMCPOAuthScopePolicyCanonicalizesLegacyNames(t *testing.T) {
+func TestMCPOAuthScopePolicyRejectsRetiredNames(t *testing.T) {
 	legacy := "fanout:dashboard fanout:read fanout:dashboard"
-	if !validMCPScopes(strings.Fields(legacy)) {
-		t.Fatal("legacy scope aliases were rejected")
+	if validMCPScopes(strings.Fields(legacy)) {
+		t.Fatal("retired scope aliases were accepted")
 	}
 	want := mcpReadScope + " " + auth.MCPScopeDashboardManage
-	if got := authorizationScope(legacy); got != want {
+	if got := authorizationScope(legacy); got != "" {
 		t.Fatalf("canonical scope = %q, want %q", got, want)
 	}
 	if !userCanUseMCPScopes(auth.User{Role: auth.RoleViewer}, want) {

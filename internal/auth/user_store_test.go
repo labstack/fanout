@@ -25,7 +25,7 @@ func TestAuthorizationMutationRollsBackWhenAuditWriteFails(t *testing.T) {
 	}
 	defer db.Close()
 	users := NewUserStore(db.DB)
-	user, err := users.Create("audit@example.com", "", "viewer")
+	user, err := users.CreateWithAudit("audit@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -63,11 +63,11 @@ func newTestUserStore(t *testing.T) *UserStore {
 func TestUserAndIdentityConflictsAreTyped(t *testing.T) {
 	db := newTestSQLite(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("conflict@example.com", "", "admin")
+	user, err := users.CreateWithAudit("conflict@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create("conflict@example.com", "", "viewer"); !errors.Is(err, ErrUserConflict) {
+	if _, err := users.CreateWithAudit("conflict@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"}); !errors.Is(err, ErrUserConflict) {
 		t.Fatalf("duplicate user = %v, want ErrUserConflict", err)
 	}
 	identities := NewIdentityStore(db.DB)
@@ -87,7 +87,7 @@ func TestUserInfrastructureFailureIsNotConflict(t *testing.T) {
 	if _, err := db.DB.Exec("ALTER TABLE users RENAME TO users_offline"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create("infra@example.com", "", "viewer"); err == nil || errors.Is(err, ErrUserConflict) {
+	if _, err := users.CreateWithAudit("infra@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"}); err == nil || errors.Is(err, ErrUserConflict) {
 		t.Fatalf("infrastructure failure = %v, want non-conflict error", err)
 	}
 }
@@ -95,7 +95,7 @@ func TestUserInfrastructureFailureIsNotConflict(t *testing.T) {
 func TestUserStore_CreateAndGet(t *testing.T) {
 	s := newTestUserStore(t)
 
-	u, err := s.Create("test@example.com", "Test User", "operator")
+	u, err := s.CreateWithAudit("test@example.com", "Test User", "operator", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -117,8 +117,8 @@ func TestUserStore_CreateAndGet(t *testing.T) {
 
 func TestUserStore_List(t *testing.T) {
 	s := newTestUserStore(t)
-	s.Create("a@example.com", "", "viewer")
-	s.Create("b@example.com", "", "operator")
+	s.CreateWithAudit("a@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
+	s.CreateWithAudit("b@example.com", "", "operator", AuditEvent{EventType: "user.created", Outcome: "success"})
 
 	users, err := s.List()
 	if err != nil {
@@ -131,10 +131,10 @@ func TestUserStore_List(t *testing.T) {
 
 func TestUserStore_Update(t *testing.T) {
 	s := newTestUserStore(t)
-	u, _ := s.Create("up@example.com", "", "viewer")
+	u, _ := s.CreateWithAudit("up@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
 
 	newRole := RoleAdmin
-	updated, err := s.Update(u.ID, nil, nil, &newRole, nil)
+	updated, err := s.UpdateWithAudit(u.ID, nil, nil, &newRole, nil, AuditEvent{EventType: "user.updated", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -145,9 +145,9 @@ func TestUserStore_Update(t *testing.T) {
 
 func TestUserStore_Delete(t *testing.T) {
 	s := newTestUserStore(t)
-	u, _ := s.Create("del@example.com", "", "viewer")
+	u, _ := s.CreateWithAudit("del@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
 
-	if err := s.Delete(u.ID); err != nil {
+	if err := s.DeleteWithAudit(u.ID, AuditEvent{EventType: "user.deleted", Outcome: "success"}); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	_, err := s.GetByID(u.ID)
@@ -159,7 +159,7 @@ func TestUserStore_Delete(t *testing.T) {
 func TestUserStore_CreateFirstAdmin(t *testing.T) {
 	s := newTestUserStore(t)
 
-	user, err := s.CreateFirstAdmin("admin@example.com", "Admin")
+	user, err := s.CreateFirstAdminWithAudit("admin@example.com", "Admin", AuditEvent{EventType: "setup.completed", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("CreateFirstAdmin: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestUserStore_CreateFirstAdmin(t *testing.T) {
 		t.Fatalf("role = %q, want admin", user.Role)
 	}
 
-	_, err = s.CreateFirstAdmin("other@example.com", "Other")
+	_, err = s.CreateFirstAdminWithAudit("other@example.com", "Other", AuditEvent{EventType: "setup.completed", Outcome: "success"})
 	if !errors.Is(err, ErrSetupComplete) {
 		t.Fatalf("second CreateFirstAdmin error = %v, want ErrSetupComplete", err)
 	}
@@ -176,7 +176,7 @@ func TestUserStore_CreateFirstAdmin(t *testing.T) {
 func TestUserTimestampsUseOneSortableFormat(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("timestamps@example.com", "", RoleViewer)
+	user, err := users.CreateWithAudit("timestamps@example.com", "", RoleViewer, AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,28 +21,6 @@ const (
 
 var heightRows = map[string]int{"s": 3, "m": 6, "l": 10}
 
-// Pack assigns every panel a grid position. In order, each panel takes the
-// first position, scanning from the top and then from the left, where its
-// width and height fit. Short panels are never stretched to a taller
-// neighbour; later panels fill the space under them (#232 item 24).
-func Pack(panels []panel.Panel) {
-	placed := make([]panel.Grid, 0, len(panels))
-	for i := range panels {
-		w := min(max(panels[i].Width, 1), columns)
-		h := heightRows[panels[i].Height]
-		if h == 0 {
-			h = heightRows["m"]
-			if panels[i].Viz == "service_map" {
-				h = heightRows["l"]
-			}
-		}
-		x, y := firstFit(placed, w, h)
-		grid := panel.Grid{X: x, Y: y, W: w, H: h}
-		panels[i].Grid = &grid
-		placed = append(placed, grid)
-	}
-}
-
 func firstFit(placed []panel.Grid, w, h int) (int, int) {
 	for y := 0; ; y++ {
 		for x := 0; x+w <= columns; x++ {

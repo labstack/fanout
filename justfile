@@ -303,8 +303,14 @@ social-card:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
+check: go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:
     rm -rf bin
+
+ui-deadcode:
+    cd ui/host && bun run deadcode
+
+go-deadcode:
+    node scripts/go-deadcode.mjs

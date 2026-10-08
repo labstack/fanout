@@ -18,7 +18,7 @@ const result: PanelResult = {
   to_ms: 500000,
   interval: "1m",
 };
-describe("M2 drill URL", () => {
+describe("drill URL", () => {
   it("reproduces bucket, dimensions, trace and variables", () => {
     const target = makeDrill(panel, result, {
       time: 200000,

@@ -7,21 +7,17 @@ const (
 	MCPScopeTelemetryRead = "telemetry:read"
 	// MCPScopeDashboardManage grants access to manage the authenticated user's dashboards.
 	MCPScopeDashboardManage = "dashboard:manage"
-
-	legacyMCPScopeRead      = "fanout:read"
-	legacyMCPScopeDashboard = "fanout:dashboard"
 )
 
 // CanonicalMCPOAuthScope validates an MCP OAuth scope string and returns its
-// deduplicated canonical representation. The retired fanout:* names remain
-// accepted so existing codes and tokens keep their original authority.
+// deduplicated canonical representation. Retired scope names are rejected.
 func CanonicalMCPOAuthScope(raw string) (string, bool) {
 	var read, dashboards bool
 	for _, scope := range strings.Fields(raw) {
 		switch scope {
-		case MCPScopeTelemetryRead, legacyMCPScopeRead:
+		case MCPScopeTelemetryRead:
 			read = true
-		case MCPScopeDashboardManage, legacyMCPScopeDashboard:
+		case MCPScopeDashboardManage:
 			dashboards = true
 		default:
 			return "", false

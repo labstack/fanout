@@ -62,3 +62,34 @@ func writeTestFile(t *testing.T, path, contents string) {
 		t.Fatal(err)
 	}
 }
+
+func TestCollectGoExcludesToolOnlyModules(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module fixture\ngo 1.27.1\nrequire example.com/tools v0.0.0\nreplace example.com/tools => ./tools\ntool example.com/tools/cmd/check\n")
+	writeTestFile(t, filepath.Join(root, "cmd/fanout/main.go"), "package main\nfunc main() {}\n")
+	writeTestFile(t, filepath.Join(root, "tools/go.mod"), "module example.com/tools\ngo 1.27.1\n")
+	writeTestFile(t, filepath.Join(root, "tools/cmd/check/main.go"), "package main\nfunc main() {}\n")
+	all := map[string]component{}
+	if err := collectGo(root, all); err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("tool-only modules entered production notices: %+v", all)
+	}
+}
+func TestCollectNPMIncludesPinnedDeadCodeBuildTool(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "ui/host")
+	writeTestFile(t, filepath.Join(workspace, "package.json"), `{"dependencies":{},"devDependencies":{"knip":"6.38.0","unrelated-dev":"1.0.0"}}`)
+	tool := filepath.Join(workspace, "node_modules/knip")
+	writeTestFile(t, filepath.Join(tool, "package.json"), `{"name":"knip","version":"6.38.0","license":"ISC","dependencies":{"parser":"1.0.0"}}`)
+	parser := filepath.Join(workspace, "node_modules/parser")
+	writeTestFile(t, filepath.Join(parser, "package.json"), `{"name":"parser","version":"1.0.0","license":"MIT"}`)
+	all := map[string]component{}
+	if err := collectNPM(root, workspace, all); err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all["npm: knip 6.38.0"].kind != "npm build tool" || all["npm: parser 1.0.0"].kind != "npm build tool" {
+		t.Fatalf("build notices: %+v", all)
+	}
+}

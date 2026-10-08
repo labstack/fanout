@@ -61,25 +61,3 @@ export function healthBorderType(health: string) {
  *  the product puts every busy service back on the same bounding box, which is
  *  where the diamond loses a third of its area again. The node a map is
  *  shouting about is allowed to be the biggest thing on it. */
-export function healthSymbolScale(health: string) {
-  if (health === "unhealthy") return 1.25;
-  if (health === "degraded") return 0.91;
-  return 1;
-}
-
-export function severityColor(value: string) {
-  const severity = String(value).toUpperCase();
-  if (severity === "ERROR" || severity === "FATAL") return "bad";
-  if (severity === "WARN" || severity === "WARNING") return "warn";
-  if (severity === "INFO") return "info";
-  return "gray";
-}
-
-export function severityHex(value: string, dark: boolean) {
-  const status = statusHex(dark);
-  const severity = String(value).toUpperCase();
-  if (severity === "ERROR" || severity === "FATAL") return status.bad;
-  if (severity === "WARN" || severity === "WARNING") return status.warn;
-  if (severity === "INFO") return status.info;
-  return chartTheme(dark).muted;
-}

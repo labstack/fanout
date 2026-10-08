@@ -229,7 +229,7 @@ it("runs a manual refresh pressed during a partial lazy batch once that batch se
   } finally { await host.dispose(); }
 });
 
-it("M1 prioritizes a queued full refresh over a newly visible lazy batch", async () => {
+it("prioritizes a queued full refresh over a newly visible lazy batch", async () => {
  const pending = deferred<PanelResult[]>();
  wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockImplementationOnce(() => pending.promise).mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
  const host = await mountVisibility(["loaded"]);

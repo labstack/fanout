@@ -22,7 +22,7 @@ func newConfigServer(t *testing.T, cfg config.Config) (*testAuthServer, *setting
 
 func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	s, _ := newConfigServer(t, config.Config{Addr: ":7520"})
-	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	admin, _ := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie)
 	req.Host = "fanout.example.com:7520"
@@ -42,7 +42,7 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 
 func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	s, store := newConfigServer(t, config.Config{Addr: ":7520"})
-	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	admin, _ := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie)
 	req.Host = "fanout.example.com:7520"
@@ -63,7 +63,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 
 func TestIngestSettingsCapabilities(t *testing.T) {
 	s, _ := newConfigServer(t, config.Config{Addr: ":7520"})
-	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
+	viewer, _ := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	cookie := s.login(t, viewer)
 	readRec := httptest.NewRecorder()
 	s.e.ServeHTTP(readRec, sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie))

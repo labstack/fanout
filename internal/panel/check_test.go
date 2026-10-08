@@ -110,7 +110,7 @@ func TestCheckReturnsOperationalErrorsNotProblems(t *testing.T) {
 	}
 }
 
-func TestFinalFixSQLCTEsCannotShadowTelemetry(t *testing.T) {
+func TestSQLCTEsCannotShadowTelemetry(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	for _, name := range []string{"logs", "spans", "metrics", "service_rollup", "edge_rollup", "LOGS", "safe"} {
 		t.Run(name, func(t *testing.T) {

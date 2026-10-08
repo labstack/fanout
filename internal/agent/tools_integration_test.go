@@ -29,16 +29,8 @@ func (registryQueries) Dependencies(context.Context, observability.Scope, observ
 	return observability.Result[observability.Dependencies]{}, nil
 }
 
-func (registryQueries) Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
-	return observability.Result[observability.Performance]{}, nil
-}
-
 func (registryQueries) Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error) {
 	return observability.Result[observability.TraceDetail]{}, nil
-}
-
-func (registryQueries) Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error) {
-	return observability.Result[observability.Logs]{}, nil
 }
 
 func TestToolRegistryNegotiatesMCPApps(t *testing.T) {

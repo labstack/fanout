@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/labstack/fanout/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,10 +40,10 @@ func (f *fakePanels) Schema(_ context.Context, req panel.SchemaRequest) (*panel.
 func servePanels(t *testing.T, engine PanelEngine, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	s := newTestAuthServer(t)
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
-	viewer, err := s.users.Create("viewer@example.com", "", "viewer")
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func (f *partialBatchPanels) Run(ctx context.Context, _ panel.RunRequest) ([]pan
 	}
 	return []panel.Result{{ID: "fast", Status: panel.StatusOK}, {ID: "slow", Status: panel.StatusError, Error: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard."}}, nil
 }
-func TestFinalFixPanelBatchHTTPKeepsPartialResults(t *testing.T) {
+func TestPanelBatchHTTPKeepsPartialResults(t *testing.T) {
 	rec := servePanels(t, &partialBatchPanels{}, http.MethodPost, "/api/panels/query", `{"dashboard":{"name":"x","panels":[]}}`)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard.") {
 		t.Fatalf("partial batch %d %s", rec.Code, rec.Body)
@@ -139,7 +140,7 @@ func TestFinalFixPanelBatchHTTPKeepsPartialResults(t *testing.T) {
 func (f *fakePanels) Exemplars(context.Context, panel.ExemplarRequest) (panel.ExemplarResponse, error) {
 	return panel.ExemplarResponse{Traces: []panel.Exemplar{}}, nil
 }
-func TestM2ExemplarRoutePolicy(t *testing.T) {
+func TestExemplarRoutePolicy(t *testing.T) {
 	rec := servePanels(t, &fakePanels{}, http.MethodPost, "/api/panels/exemplars", `{"dashboard":{"name":"Inline","panels":[]},"panel_id":"latency","from":"2026-10-01T12:00:00Z","to":"2026-10-01T12:05:00Z","dimensions":{}}`)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"traces":[]`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)

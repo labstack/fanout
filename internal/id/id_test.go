@@ -29,9 +29,14 @@ func TestNewReturnsCanonicalRFC4122UUIDv7(t *testing.T) {
 }
 
 func TestIsV7RejectsOtherValues(t *testing.T) {
-	for _, value := range []string{"", "widget", uuid.NewString(), "01900000-0000-7000-8000-000000000000-extra"} {
+	for _, value := range []string{"", "invalid-id", uuid.NewString(), "01900000-0000-7000-8000-000000000000-extra"} {
 		if IsV7(value) {
 			t.Fatalf("IsV7(%q) = true", value)
 		}
 	}
+}
+
+func IsV7(value string) bool {
+	parsed, err := uuid.Parse(value)
+	return err == nil && parsed.String() == value && parsed.Version() == 7
 }

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/labstack/fanout/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,7 +25,7 @@ func (structuralValidator) Validate(_ context.Context, d *panel.Dashboard) error
 
 func TestAnonymousCannotOwnDashboards(t *testing.T) {
 	s := newTestAuthServer(t)
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatalf("Create admin: %v", err)
 	}
 	RegisterDashboardRoutes(s.e, dashboard.New(s.db.DB, structuralValidator{}))
@@ -37,11 +38,11 @@ func TestAnonymousCannotOwnDashboards(t *testing.T) {
 
 func TestDashboardLifecycleOverHTTP(t *testing.T) {
 	s := newTestAuthServer(t)
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
-	owner, _ := s.users.Create("owner@example.com", "", "operator")
-	other, _ := s.users.Create("other@example.com", "", "operator")
+	owner, _ := s.users.CreateWithAudit("owner@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	other, _ := s.users.CreateWithAudit("other@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	RegisterDashboardRoutes(s.e, dashboard.New(s.db.DB, structuralValidator{}))
 	ownerCookie, otherCookie := s.login(t, owner), s.login(t, other)
 	call := func(method, path, body string, cookie *http.Cookie, headers ...string) *httptest.ResponseRecorder {
@@ -103,10 +104,10 @@ func (v failingValidator) Validate(context.Context, *panel.Dashboard) error { re
 
 func TestDashboardValidationTimeoutIs504(t *testing.T) {
 	s := newTestAuthServer(t)
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
-	owner, _ := s.users.Create("owner@example.com", "", "operator")
+	owner, _ := s.users.CreateWithAudit("owner@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	RegisterDashboardRoutes(s.e, dashboard.New(s.db.DB, failingValidator{err: context.DeadlineExceeded}))
 	cookie := s.login(t, owner)
 	req := sessionRequest(http.MethodPost, "/api/dashboards", strings.NewReader(`{"spec":{"name":"Ops","panels":[{"id":"notes","title":"Notes","viz":"text","content":"hi"}]}}`), cookie)

@@ -1,7 +1,7 @@
 import { Alert, Button, Group, Modal, Text } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Responsive, type Layout } from "react-grid-layout/legacy";
+import { Responsive, verticalCompactor, type Layout } from "react-grid-layout";
 import type { DashboardSpec, DashboardTime, Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { ApiError, patchDashboard, replaceDashboard } from "./api";
@@ -12,7 +12,6 @@ import { PanelCard } from "./panel-card";
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
  *  with the same row unit. */
 import { rowHeight, margin, pixels, defaultRows } from "./layout";
-export { rowHeight } from "./layout";
 
 export type GridProps = {
   dashboardId: string; version: number; spec: DashboardSpec; vars: Record<string, VarValue>; results: Map<string, PanelResult>; fetching: boolean; editing: boolean; view?: string;
@@ -24,7 +23,7 @@ export type GridProps = {
 };
 
 let panelIdCounter = 0;
-export function newPanelId(panels: Panel[]): string {
+function newPanelId(panels: Panel[]): string {
   let id: string;
   do {
     id = `p_${Date.now().toString(36)}_${(++panelIdCounter).toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -155,7 +154,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     {copyFeedback && <Alert role="status" mb="sm">{copyFeedback}</Alert>}
     {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...visibleLayout.map(l => l.y + l.h))) }} />}
     {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: visibleLayout, md: visibleLayout, sm: visibleLayout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
-      rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactType="vertical" isDraggable={canEdit} isResizable={canEdit} draggableHandle=".panel-drag" draggableCancel="button"
+      rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactor={verticalCompactor} dragConfig={{enabled:canEdit,handle:".panel-drag",cancel:"button"}} resizeConfig={{enabled:canEdit}}
       onDragStop={changeLayout} onResizeStop={changeLayout}>
       {spec.panels.map((panel) => { const g = visibleLayout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}

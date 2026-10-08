@@ -25,8 +25,7 @@ function chatAppViews(messages: Message[]) {
     const winners = new Map<string, typeof turn[number]>();
     for (const item of turn) {
       const key = item.content.tool_result.view.key;
-      const previous = winners.get(key);
-      if (!previous || isPreset(item.content) || !isPreset(previous.content)) winners.set(key, item);
+      winners.set(key, item);
     }
     const chosen = new Set([...winners.values()].map(item => item.id));
     const hasPreset = [...winners.values()].some(item => isPreset(item.content));
@@ -49,16 +48,27 @@ function chatAppViews(messages: Message[]) {
 type ToolFailure = {name:string;message:string};
 function toolFailures(messages: Message[]) {
   const groups = new Map<string, ToolFailure[]>();
-  let first:string|undefined;
-  const names=new Map<string,string>();
-  for(const message of messages) {
-    if(message.role==="user") {first=undefined;names.clear();}
-    if(message.role==="assistant") for(const call of message.toolCalls??[]) names.set(call.id,call.function.name);
-    if(message.role==="tool" && message.error) {
-      first??=message.id;
-      const failures=groups.get(first)??[];
-      failures.push({name:names.get(message.toolCallId)??"Tool",message:String(message.content||message.error)});
-      groups.set(first,failures);
+  const calls = new Map<string, { assistant: string; name: string }>();
+  const firstFailures = new Map<string, string>();
+  let assistant = "unattributed";
+  for (const message of messages) {
+    if (message.role === "user") {
+      calls.clear();
+      firstFailures.clear();
+      assistant = message.id;
+    }
+    if (message.role === "assistant") {
+      assistant = message.id;
+      for (const call of message.toolCalls ?? []) calls.set(call.id, { assistant, name: call.function.name });
+    }
+    if (message.role === "tool" && message.error) {
+      const call = calls.get(message.toolCallId);
+      const owner = call?.assistant ?? assistant;
+      const first = firstFailures.get(owner) ?? message.id;
+      firstFailures.set(owner, first);
+      const failures = groups.get(first) ?? [];
+      failures.push({ name: call?.name ?? "Tool", message: String(message.content || message.error) });
+      groups.set(first, failures);
     }
   }
   return groups;
@@ -67,7 +77,7 @@ function ToolFailures({failures}:{failures:ToolFailure[]}) {
   const [expanded,setExpanded]=useState(false);
   return <Box data-chat-anchor>
     <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)} style={{color:"var(--mantine-color-dimmed)"}}>
-      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failures.length} tool calls failed</span>
+      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failures.length} tool {failures.length === 1 ? "call" : "calls"} failed</span>
     </UnstyledButton>
     {expanded && <Stack gap="xs" pl="md">{failures.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}
   </Box>;

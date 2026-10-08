@@ -70,11 +70,11 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 	executor := panel.NewExecutor(duck, 30)
 	executor.SetRollupReader(observability.New(duck, duck, 30))
 	if seed {
-		server := New(observability.New(duck, duck, 30), dashboard.New(sqlite.DB, executor), executor, "test")
+		server := NewWithIntelligence(observability.New(duck, duck, 30), dashboard.New(sqlite.DB, executor), executor, nil, "test")
 		server.now = func() time.Time { return now }
 		return server
 	}
-	return New(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, "test")
+	return NewWithIntelligence(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, nil, "test")
 }
 
 func ownerRequest() *mcp.CallToolRequest {
@@ -135,7 +135,7 @@ func TestDashboardToolScopes(t *testing.T) {
 	}
 }
 
-func TestM2ItemsSpecGuide(t *testing.T) {
+func TestItemsSpecGuide(t *testing.T) {
 	for _, phrase := range []string{
 		"Scatter supports options.x_scale and options.y_scale (log or linear)",
 		"distinct x_unit for x and unit for y",
@@ -150,7 +150,7 @@ func TestM2ItemsSpecGuide(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixSpecGuide(t *testing.T) {
+func TestSpecGuide(t *testing.T) {
 	for _, phrase := range []string{
 		"Row panel types are logs, log_patterns and traces.",
 		"Logs and traces take no measures, by or bucket.",
@@ -169,7 +169,7 @@ func TestM2RowsFixSpecGuide(t *testing.T) {
 	}
 }
 
-func TestM4SeriesGuide(t *testing.T) {
+func TestSeriesGuide(t *testing.T) {
 	for _, phrase := range []string{"Structured panels: the server computes Other", "SQL panels: series past six are left out, with a note", "state_timeline defaults to 8 rows, maximum 20"} {
 		if !strings.Contains(specGuide, phrase) {
 			t.Errorf("guide missing %q", phrase)
@@ -177,13 +177,13 @@ func TestM4SeriesGuide(t *testing.T) {
 	}
 }
 
-func TestI4RankingGuide(t *testing.T) {
+func TestRankingGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N)") {
 		t.Fatal("missing ranking semantics")
 	}
 }
 
-func TestQ4ConfidenceGuide(t *testing.T) {
+func TestConfidenceGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
 		t.Fatal("missing confidence semantics")
 	}

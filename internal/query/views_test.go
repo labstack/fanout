@@ -56,7 +56,7 @@ func TestCreateTables_CacheTablesIncludePartitionColumns(t *testing.T) {
 	rows, err := db.Query(`
 SELECT table_name, column_name
 FROM duckdb_columns()
-WHERE table_name IN ('service_rollup', 'edge_rollup', 'read_endpoints', 'rollup_state')
+WHERE table_name IN ('service_rollup', 'edge_rollup', 'read_trace_parts', 'rollup_state')
 ORDER BY table_name, column_name`)
 	if err != nil {
 		t.Fatalf("query duckdb_columns failed: %v", err)
@@ -79,10 +79,10 @@ ORDER BY table_name, column_name`)
 	}
 
 	required := map[string][]string{
-		"service_rollup": {"namespace", "bucket", "service"},
-		"edge_rollup":    {"namespace", "bucket", "caller", "callee", "edge_type"},
-		"read_endpoints": {"batch_id", "namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"},
-		"rollup_state":   {"cache_key", "last_ingested_unix_nano", "updated_at"},
+		"service_rollup":   {"namespace", "bucket", "service"},
+		"edge_rollup":      {"namespace", "bucket", "caller", "callee", "edge_type"},
+		"read_trace_parts": {"batch_id", "namespace", "service", "trace_id", "min_start", "max_start", "max_end", "has_error"},
+		"rollup_state":     {"cache_key", "last_ingested_unix_nano", "updated_at"},
 	}
 	for table, columns := range required {
 		for _, column := range columns {

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestM2DeploySplitUsesEffectiveWindowAndRates(t *testing.T) {
+func TestDeploySplitUsesEffectiveWindowAndRates(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	commit(t, repo, shopSpans(), nil)
 	at := fixtureStart
@@ -66,7 +66,7 @@ func TestM2DeploySplitUsesEffectiveWindowAndRates(t *testing.T) {
 	}
 }
 
-func TestM2DeploySplitAllFallsBackAndRequiresEquality(t *testing.T) {
+func TestDeploySplitAllFallsBackAndRequiresEquality(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = d.Panels[2:3]
@@ -85,7 +85,7 @@ func TestM2DeploySplitAllFallsBackAndRequiresEquality(t *testing.T) {
 	}
 }
 
-func TestM2DeploySplitLatestDeployAndBoundaries(t *testing.T) {
+func TestDeploySplitLatestDeployAndBoundaries(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	commit(t, repo, shopSpans(), nil)
 	at := fixtureStart
@@ -125,7 +125,7 @@ func TestM2DeploySplitLatestDeployAndBoundaries(t *testing.T) {
 	}
 }
 
-func TestM2DeploySplitChecksASTScopeReferences(t *testing.T) {
+func TestDeploySplitChecksASTScopeReferences(t *testing.T) {
 	e := newFixtureExecutor(t)
 	for _, tc := range []struct {
 		expr  string

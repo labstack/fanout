@@ -5,7 +5,7 @@ export type Categories = { categories: string[]; series: { name: string; unit?: 
 
 const num = (cell: Cell | undefined): number | null => (typeof cell === "number" && Number.isFinite(cell) ? cell : null);
 
-export function measureColumns(frame: Frame): number[] {
+function measureColumns(frame: Frame): number[] {
   return frame.columns.flatMap((column, index) => (column.role === "measure" ? [index] : []));
 }
 
@@ -63,7 +63,7 @@ export function toCategories(frame: Frame): Categories {
   return { categories, series: measures.map((m) => ({ name: frame.columns[m].name, unit: frame.columns[m].unit, values: frame.values[m].map(num) })) };
 }
 
-export function reduce(values: (number | null)[], reducer: string): number | null {
+function reduce(values: (number | null)[], reducer: string): number | null {
   const present = values.filter((v): v is number => v !== null);
   if (present.length === 0) return null;
   switch (reducer) {

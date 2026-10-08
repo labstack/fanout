@@ -24,7 +24,7 @@ func (e *confidenceCounter) QueryContext(ctx context.Context, text string, args 
 	return e.Engine.QueryContext(ctx, text, args...)
 }
 
-func TestQ4ConfidenceRankingEngine(t *testing.T) {
+func TestConfidenceRankingEngine(t *testing.T) {
 	duck, repo := newTestEngine(t)
 	spans := make([]telemetry.Span, 0, 262000)
 	add := func(route, service string, n, errors int, latency float64) {
@@ -123,7 +123,7 @@ func TestQ4ConfidenceRankingEngine(t *testing.T) {
 	}
 }
 
-func TestQ4ConfidenceSchemaText(t *testing.T) {
+func TestConfidenceSchemaText(t *testing.T) {
 	field, _ := reflect.TypeFor[Options]().FieldByName("Top")
 	if !strings.Contains(field.Tag.Get("jsonschema"), "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
 		t.Fatal("missing confidence semantics in schema")

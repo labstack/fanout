@@ -28,11 +28,8 @@ function dashboards() {
 function respond(input: RequestInfo | URL, init?: RequestInit) {
   const url = new URL(String(input), "http://localhost");
   if (url.pathname === "/api/dashboards") return dashboards();
-  if (url.pathname === "/api/observability/overview") {
-    return json({ schema: "test", summary: "", provenance: {}, data: { health: "unhealthy", counts: { healthy: 0, degraded: 0, unhealthy: 1 }, total_spans: 10, error_rate: 0.1, service_count: 2, services: [
-      { service: "checkout", health: "unhealthy", spans: 10, error_rate: 0.1, p50_ms: 4, p95_ms: 900, log_count: 0, metric_count: 0 },
-      { service: "payments", health: "healthy", spans: 8, error_rate: 0, p50_ms: 3, p95_ms: 40, log_count: 0, metric_count: 0 },
-    ] } });
+  if (url.pathname === "/api/telemetry/schema") {
+    return json({window:"1h",signals:{},measures:[],units:[],services:[{value:"checkout",count:10},{value:"payments",count:8}]});
   }
   if (url.pathname === "/api/agent/threads") return threadsPage(url.searchParams.get("q") ?? "");
   if (url.pathname.startsWith("/api/agent/threads/") && init?.method === "PATCH") return json({ title: "Checkout follow-up" });
@@ -173,7 +170,7 @@ describe("Rail", () => {
     const now = new Date();
     const sqliteTimestamp = (date: Date) => date.toISOString().slice(0, 19).replace("T", " ");
     const todayThread = { threadId: "thread-standup", title: "Standup notes", updatedAt: sqliteTimestamp(now) };
-    const olderThread = { threadId: "thread-legacy", title: "Legacy migration", updatedAt: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
+    const olderThread = { threadId: "thread-historical", title: "Historical chat", updatedAt: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/dashboards") return dashboards();
@@ -182,7 +179,7 @@ describe("Rail", () => {
     });
     const { root, render } = mount();
     await act(async () => render());
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Legacy migration"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Historical chat"));
     expect(document.body.textContent).toContain("Standup notes");
     const text = document.body.textContent ?? "";
     const todayIndex = text.indexOf("Today");
@@ -253,7 +250,7 @@ describe("Rail", () => {
     const { root, render } = mount();
     await act(async () => render());
     await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/observability/overview"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/telemetry/schema"))).toBe(false);
     await act(async () => root.unmount());
   });
 
@@ -281,4 +278,16 @@ describe("Rail", () => {
     expect(handlers.onDeletedThread).toHaveBeenCalledWith("thread-checkout");
     await act(async () => root.unmount());
   });
+
+it.each(["empty","error"])("keeps schema search %s visible without inventing services",async mode=>{
+ vi.stubGlobal("fetch",fetchMock);fetchMock.mockReset();document.body.innerHTML="";
+ fetchMock.mockImplementation(async(input,init)=>String(input).includes("/api/telemetry/schema")?json(mode==="error"?{message:"Unavailable"}:{services:[]},mode==="error"?503:200):respond(input,init));
+ const {root,render}=mount();await act(async()=>render());try {
+ await vi.waitFor(()=>expect(document.body.textContent).toContain("System overview"));
+ await act(async()=>setValue(document.querySelector('input[aria-label="Search chats, dashboards and services"]')!,"missing-service"));
+ await vi.waitFor(()=>expect(fetchMock.mock.calls.some(([input])=>String(input)==="/api/telemetry/schema?window=1h")).toBe(true),{timeout:1500});
+ await vi.waitFor(()=>expect(document.body.textContent).toContain(mode==="error"?"Services could not be searched":"No matching services"));
+ expect([...document.querySelectorAll(".rail-row")].some(n=>n.textContent?.trim()==="missing-service")).toBe(false);
+ }finally{await act(async()=>root.unmount());}
+});
 });

@@ -7,7 +7,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	dto "github.com/prometheus/client_model/go"
 )
 
 type RollupComponent string
@@ -397,7 +396,7 @@ func poolStats() sql.DBStats {
 }
 
 // The read pool is the one that can starve: background writers, the detector,
-// the alert engine and every dashboard widget draw from it, and a request that
+// the alert engine and every dashboard panel draw from it, and a request that
 // waits for a connection waits invisibly — database/sql counts that wait and
 // nothing exported it.
 var (
@@ -439,31 +438,6 @@ func RecordParquetRead(reader string, waitSec float64, admitted bool) {
 	}
 	parquetReadRefusals.WithLabelValues(reader).Inc()
 }
-
-// ParquetReadWaitForTest and ParquetReadRefusalsForTest hand the two series to
-// a test in another package, which asserts on them rather than on the call —
-// the call is the easy half. They return collectors rather than the vectors so
-// production code still cannot set an arbitrary label, and they keep
-// prometheus/testutil out of the release dependency graph.
-func ParquetReadWaitForTest() prometheus.Collector { return parquetReadWait }
-
-func ParquetReadRefusalsForTest(reader string) prometheus.Counter {
-	return parquetReadRefusals.WithLabelValues(reader)
-}
-
-// DuckDBStatementSecondsForTest reports the statement histogram's running
-// total, so a test can prove what the timer does and does not cover.
-func DuckDBStatementSecondsForTest() float64 {
-	metric := &dto.Metric{}
-	if err := DuckDBStatement.Write(metric); err != nil {
-		return 0
-	}
-	return metric.GetHistogram().GetSampleSum()
-}
-
-// DuckDBPoolStatsForTest exposes what the pool gauges are reading, so a test
-// can prove they point at the read pool rather than the write handle.
-func DuckDBPoolStatsForTest() sql.DBStats { return poolStats() }
 
 // RecordWriteGate records one complete Telemetry catalog write critical section.
 // Callers constrain operation to the fixed writegate.WriteOperation set so this

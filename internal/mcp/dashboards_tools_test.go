@@ -29,7 +29,7 @@ func newToolServer(t *testing.T, validator dashboard.Validator, panels *panel.Ex
 			t.Fatal(err)
 		}
 	}
-	return New(&fakeObservability{}, dashboard.New(database.DB, validator), panels, "test")
+	return NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, validator), panels, nil, "test")
 }
 
 func requestFor(owner string) *mcp.CallToolRequest {

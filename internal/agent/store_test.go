@@ -283,11 +283,11 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 	}
 	defer database.Close()
 	users := auth.NewUserStore(database.DB)
-	ownerA, err := users.Create("thread-a@example.com", "", "operator")
+	ownerA, err := users.CreateWithAudit("thread-a@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownerB, err := users.Create("thread-b@example.com", "", "operator")
+	ownerB, err := users.CreateWithAudit("thread-b@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,7 @@ import { relativeLuminance } from "../theme";
 import { bad, ok, warn } from "../tokens";
 import type { ChartTheme } from "./compile";
 
-export function contrastRatio(a: string, b: string): number {
+function contrastRatio(a: string, b: string): number {
   const x = relativeLuminance(a), y = relativeLuminance(b);
   return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);
 }

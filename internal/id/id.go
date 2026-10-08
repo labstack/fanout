@@ -19,7 +19,3 @@ func MustNew() string {
 }
 
 // IsV7 reports whether value is a canonical UUIDv7 string.
-func IsV7(value string) bool {
-	parsed, err := uuid.Parse(value)
-	return err == nil && parsed.String() == value && parsed.Version() == 7
-}

@@ -1,0 +1,1 @@
+import{_t as e}from"./brand-BUxUP_Hq.js";import{l as t,n}from"./auth-D9gEICkr.js";var r=e();function i(){let{agent_available:e}=n();return e?(0,r.jsx)(t,{to:`/chat`,replace:!0}):(0,r.jsx)(t,{to:`/dashboards`,replace:!0})}export{i as component};

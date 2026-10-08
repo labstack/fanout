@@ -83,14 +83,14 @@ describe("authorizedFetch", () => {
     expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 
-  it("clears legacy state and announces a rejected session without retrying", async () => {
+  it("announces a rejected session without retrying", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
     fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
     const response = await authorizedFetch("/api/data");
     expect(response.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
     expect(unauthorized).toHaveBeenCalledTimes(1);
     window.removeEventListener(unauthorizedEvent, unauthorized);
   });
@@ -111,7 +111,7 @@ describe("authorizedFetch", () => {
     window.addEventListener(unauthorizedEvent, unauthorized);
     fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
     await expect(logout()).resolves.toBeUndefined();
-    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
     expect(unauthorized).toHaveBeenCalledTimes(1);
     expect(window.location.pathname).toBe("/");
     window.removeEventListener(unauthorizedEvent, unauthorized);

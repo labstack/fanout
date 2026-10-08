@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-func TestM2StructuredTableSparklineRejectsDimension(t *testing.T) {
+func TestStructuredTableSparklineRejectsDimension(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Invalid trend", Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}, Options: &Options{Columns: []ColumnFormat{{Field: "service", Format: "sparkline"}}}}}}
 	Normalize(&d)
@@ -31,7 +31,7 @@ func TestM2StructuredTableSparklineRejectsDimension(t *testing.T) {
 	}
 }
 
-func TestM2TableTrendsRedactedLogSource(t *testing.T) {
+func TestTableTrendsRedactedLogSource(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{ServiceName: "checkout", BodyTemplate: "token=templatesecret failed <*>", EventUnixNanos: n, IngestedAt: n}})
@@ -65,7 +65,7 @@ func (e failingTableTrendEngine) QueryContext(ctx context.Context, text string, 
 	}
 	return e.Engine.QueryContext(ctx, text, args...)
 }
-func TestM2TableTrendFailurePreservesTable(t *testing.T) {
+func TestTableTrendFailurePreservesTable(t *testing.T) {
 	e := newFixtureExecutor(t)
 	e.engine = failingTableTrendEngine{e.engine}
 	d := shopDashboard()
@@ -78,7 +78,7 @@ func TestM2TableTrendFailurePreservesTable(t *testing.T) {
 	}
 }
 
-func TestM2TableTrendsMultipleMeasuresDimensionsAndWindow(t *testing.T) {
+func TestTableTrendsMultipleMeasuresDimensionsAndWindow(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = d.Panels[2:3]
@@ -114,7 +114,7 @@ func TestM2TableTrendsMultipleMeasuresDimensionsAndWindow(t *testing.T) {
 	}
 }
 
-func TestM2TableTrendsNanosecondEnd(t *testing.T) {
+func TestTableTrendsNanosecondEnd(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = d.Panels[2:3]
@@ -134,7 +134,7 @@ func TestM2TableTrendsNanosecondEnd(t *testing.T) {
 	}
 }
 
-func TestM2TableTrendsPerTableCellBudget(t *testing.T) {
+func TestTableTrendsPerTableCellBudget(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := shopSpans()[:1]
 	for i := 1; i < 200; i++ {
@@ -172,7 +172,7 @@ func TestM2TableTrendsPerTableCellBudget(t *testing.T) {
 	}
 }
 
-func TestM2TableTrendsBatchRowsHealthAndDeterminism(t *testing.T) {
+func TestTableTrendsBatchRowsHealthAndDeterminism(t *testing.T) {
 	first := newFrame([]Column{{Name: "count", Type: "number", Role: "measure"}})
 	first.bucketed = true
 	for i := 0; i < 199995; i++ {
@@ -210,7 +210,7 @@ func TestM2TableTrendsBatchRowsHealthAndDeterminism(t *testing.T) {
 	}
 }
 
-func TestM2StructuredTableSparklineMeasure(t *testing.T) {
+func TestStructuredTableSparklineMeasure(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = d.Panels[2:3]
@@ -269,7 +269,7 @@ func TestM2StructuredTableSparklineMeasure(t *testing.T) {
 	}
 }
 
-func TestFinalFixLimitedShareTrendUsesOriginalScope(t *testing.T) {
+func TestLimitedShareTrendUsesOriginalScope(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := []telemetry.Span{}
 	for minute := range 2 {

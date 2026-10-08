@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestFix1FragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
+func TestFragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
 	f := PanelFragment{Dashboard: panel.Dashboard{Name: "Map", Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "a", Title: "A", Viz: "service_map", Query: &panel.Query{From: "spans"}}}}, Results: []panel.Result{{ID: "a", FromMS: 1, ToMS: 2}}}
 	original := fragmentIdentity(f)
 	f.Dashboard.Name = "Another title"
@@ -25,7 +25,7 @@ func TestFix1FragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
 	}
 }
 
-func TestFix1MapIdentityIgnoresLimitsOnlyForIdenticalCompleteProjections(t *testing.T) {
+func TestMapIdentityIgnoresLimitsOnlyForIdenticalCompleteProjections(t *testing.T) {
 	f := PanelFragment{Dashboard: panel.Dashboard{Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &panel.Query{From: "spans", Limit: 20}}}}, Results: []panel.Result{{ID: "map", FromMS: 1, ToMS: 2, Frame: &panel.Frame{Columns: []panel.Column{{Name: "service", Type: "string", Role: "dimension"}}, Values: [][]any{{"checkout"}}, Rows: 1}}}}
 	first := fragmentIdentity(f)
 	f.Dashboard.Panels[0].Query.Limit = 400

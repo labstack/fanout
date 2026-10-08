@@ -11,7 +11,7 @@ import (
 func TestOAuthStoreAuthorizationCodeIsSingleUse(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("oauth@example.com", "OAuth User", "admin")
+	user, err := users.CreateWithAudit("oauth@example.com", "OAuth User", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -40,10 +40,10 @@ func TestOAuthStoreAuthorizationCodeIsSingleUse(t *testing.T) {
 	}
 }
 
-func TestOAuthStoreCanonicalizesLegacyScopesWithoutInvalidatingGrants(t *testing.T) {
+func TestOAuthStoreRejectsRetiredStoredGrants(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("legacy-oauth@example.com", "Legacy OAuth", "viewer")
+	user, err := users.CreateWithAudit("legacy-oauth@example.com", "Legacy OAuth", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,32 +57,24 @@ func TestOAuthStoreCanonicalizesLegacyScopesWithoutInvalidatingGrants(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy := legacyMCPScopeRead + " " + legacyMCPScopeDashboard
+	legacy := "fanout:read fanout:dashboard"
 	if _, err := sqlite.DB.Exec(`UPDATE oauth_tokens SET scope = ? WHERE family_id IN (SELECT family_id FROM oauth_tokens WHERE token_hash = ?)`, legacy, oauthHash(pair.AccessToken)); err != nil {
 		t.Fatal(err)
 	}
 
-	record, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource)
-	if err != nil {
-		t.Fatalf("VerifyAccessToken legacy scope: %v", err)
+	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("retired access grant=%v", err)
 	}
-	want := MCPScopeTelemetryRead + " " + MCPScopeDashboardManage
-	if record.Scope != want {
-		t.Fatalf("verified scope = %q, want %q", record.Scope, want)
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthScope) {
+		t.Fatalf("retired refresh grant=%v", err)
 	}
-	rotated, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, "")
-	if err != nil {
-		t.Fatalf("RotateRefreshToken legacy scope: %v", err)
-	}
-	if rotated.Scope != want {
-		t.Fatalf("rotated scope = %q, want %q", rotated.Scope, want)
-	}
+
 }
 
 func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("rotate@example.com", "", "admin")
+	user, err := users.CreateWithAudit("rotate@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -114,7 +106,7 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("incident@example.com", "", "operator")
+	user, err := users.CreateWithAudit("incident@example.com", "", "operator", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +120,7 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := users.RevokeAllSessions(user.ID); err != nil {
+	if err := users.RevokeAllSessionsWithAudit(user.ID, AuditEvent{EventType: "session.revoked", Outcome: "success"}); err != nil {
 		t.Fatalf("RevokeAllSessions: %v", err)
 	}
 	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
@@ -142,7 +134,7 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("inactive-oauth@example.com", "", "operator")
+	user, err := users.CreateWithAudit("inactive-oauth@example.com", "", "operator", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -160,7 +152,7 @@ func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 		t.Fatalf("wrong audience = %v, want invalid token", err)
 	}
 	active := false
-	if _, err := users.Update(user.ID, nil, nil, nil, &active); err != nil {
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &active, AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatalf("deactivate user: %v", err)
 	}
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {
@@ -174,7 +166,7 @@ func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 func TestOAuthStoreReuseDetectionRunsBeforeExpiryCheck(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("late-reuse@example.com", "", "admin")
+	user, err := users.CreateWithAudit("late-reuse@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -212,7 +204,7 @@ func TestOAuthStoreReuseDetectionRunsBeforeExpiryCheck(t *testing.T) {
 func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("db-hiccup@example.com", "", "admin")
+	user, err := users.CreateWithAudit("db-hiccup@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -251,7 +243,7 @@ func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 func TestOAuthStoreVerifyAccessTokenDBErrorIsNotInvalidToken(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("verify-hiccup@example.com", "", "admin")
+	user, err := users.CreateWithAudit("verify-hiccup@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -283,7 +275,7 @@ func TestOAuthStoreVerifyAccessTokenDBErrorIsNotInvalidToken(t *testing.T) {
 func TestOAuthStoreCleanupExpired(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("cleanup@example.com", "", "admin")
+	user, err := users.CreateWithAudit("cleanup@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -348,7 +340,7 @@ func TestOAuthStoreCleanupExpired(t *testing.T) {
 func TestOAuthStoreCleanupKeepsLiveFamiliesAndActiveClients(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.Create("cleanup-live@example.com", "", "admin")
+	user, err := users.CreateWithAudit("cleanup-live@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -399,7 +391,7 @@ func TestOAuthTokenPairStringRedactsSecrets(t *testing.T) {
 func TestOAuthStoreExpiredCodeFails(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, _ := users.Create("expired@example.com", "", "admin")
+	user, _ := users.CreateWithAudit("expired@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	store := NewOAuthStore(sqlite.DB)
 	now := time.Now().UTC()
 	store.now = func() time.Time { return now }

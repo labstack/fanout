@@ -8,7 +8,7 @@ import { useBrushZoom } from "./use-brush-zoom";
 
 const panel: Panel = { id: "p", title: "P", viz: "timeseries", query: { from: "spans", measures: ["count()"], by: ["service"] }, time: { shift: "1d" } };
 const result: PanelResult = { id: "p", status: "ok", elapsed_ms: 1, from_ms: 1000, to_ms: 10000, interval: "1m" };
-describe("M2 interactions", () => {
+describe("interactions", () => {
   it("writes one valid absolute range, retaining comparison and variables", () => {
     const selected = brushRange(1000, 9000); expect(selected).toEqual({ from: new Date(1000).toISOString(), to: new Date(9000).toISOString() });
     const state = { ...parseSearch({ range: "1h", "var-service": "checkout", compare: "1" }), ...selected, range: undefined };
