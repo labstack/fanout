@@ -77,11 +77,12 @@ export function nativeAudit(instance:unknown, compiled:unknown, size:{width:numb
     });
   });
   const xAxis=(option as {xAxis?:{name?:string}}).xAxis;
-  const axisTitles=option.series?.some(s=>s.type==="scatter")?[xAxis?.name,axes[0]?.name].filter((n):n is string=>Boolean(n)):[];
+  const axisTitles=[xAxis?.name,axes[0]?.name].filter((n):n is string=>Boolean(n));
   const gauge=(option.series as {type?:string;detail?:{formatter?:()=>string}}[]|undefined)?.find(s=>s.type==="gauge");
+  const linear=(option as {graphic?:{id?:string;style?:{text?:string}}[]}).graphic?.find(g=>g.id==="gauge-value");
   return {texts,marks,
-    ...(gauge?{gauge:{width:size.width,height:size.height,diameter:gaugeDiameter,texts,value:gauge.detail?.formatter?.()}}:{}),
-    ...(plot?{plot:{fraction:plot.height/size.height,height:plot.height,y_ticks:ticks,...(axisTitles.length?{titles:axisTitles.map(name=>({name,boxes:texts.filter(t=>t.text===name)})),rect:{left:plot.x??0,top:plot.y??0,right:(plot.x??0)+plot.width,bottom:(plot.y??0)+plot.height}}:{}),split_number:axes[0]?.splitNumber,...(axes[0]?.type==="category"&&option.series?.[0]?.type==="custom"&&!scale?{rows:axes[0].data,labelled}: {})}}:{}),
+    ...(gauge||linear?{gauge:{mode:linear?"linear":"arc",width:size.width,height:size.height,diameter:gaugeDiameter,texts,value:linear?.style?.text??gauge?.detail?.formatter?.()}}:{}),
+    ...(plot?{plot:{fraction:plot.height/size.height,height:plot.height,y_ticks:ticks,...(axisTitles.length?{titles:axisTitles.map(name=>({name,boxes:texts.filter(t=>t.text===name)})),body:{left:0,top:0,right:size.width,bottom:size.height},rect:{left:plot.x??0,top:plot.y??0,right:(plot.x??0)+plot.width,bottom:(plot.y??0)+plot.height}}:{}),split_number:axes[0]?.splitNumber,...(axes[0]?.type==="category"&&option.series?.[0]?.type==="custom"&&!scale?{rows:axes[0].data,labelled}: {})}}:{}),
     ...(scale?{heat:{cells,gaps,gap:gaps.length ? (Math.abs(gaps[0])<.5?0:1) : undefined,scale_width:scale.width,scale_height:scale.height,plot_fraction:(plot?.height??0)/size.height}}:{}),
     ...(option.yAxis?.type==="category"&&option.series?.some(s=>s.type==="bar")?{bars:{category_fraction:Math.max(0,...categories.map(c=>c.right-c.left))/size.width,expected_labels:[...new Set(expected)],value_labels:texts.map(t=>t.text)}}:{})};
 }

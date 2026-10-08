@@ -38,24 +38,26 @@ export function layoutServiceMap(model: ServiceGraph, size: ChartSize) {
   const regular=():Raw=>{
     // Isolated cards live beside the graph, sharing its height rather than
     // adding a footer rank that clips otherwise fitted connected services.
-    const lane=uncalled.length?Math.max(252,...uncalled.map(n=>widths.get(n.id)!))+8:0;
+    const strip=compact&&uncalled.length>0&&uncalled.reduce((sum,n)=>sum+widths.get(n.id)!+4,0)<=innerWidth/.75;
+    const lane=uncalled.length&&!strip?Math.max(252,...uncalled.map(n=>widths.get(n.id)!))+8:0;
+    const graphTop=strip?17+height+4:0;
     const boxes=nodes.map(n=>{
       const i=uncalled.indexOf(n), isolated=i>=0, width=widths.get(n.id)!;
-      const raw=isolated?{x:0,y:17+i*(height+6)}:{x:lane+g.node(n.id).x-width/2,y:g.node(n.id).y-height/2};
+      const raw=isolated?{x:strip?uncalled.slice(0,i).reduce((sum,n)=>sum+widths.get(n.id)!+4,0):0,y:strip?17:17+i*(height+4)}:{x:lane+g.node(n.id).x-width/2,y:graphTop+g.node(n.id).y-height/2};
       return {...n,...raw,width,height,entry:entries.includes(n),uncalled:isolated};
     });
-    const routes=edges.map(e=>(g.edge(e.caller,e.callee,e.id).points as Point[]).map(p=>({x:p.x+lane,y:p.y})));
-    return {nodes:boxes,routes,width:Math.max(1,lane+(g.graph().width??0),...boxes.map(n=>n.x+n.width))+16,height:Math.max(1,g.graph().height??0,...boxes.map(n=>n.y+n.height)),label:uncalled.length?{x:0,y:12}:undefined};
+    const routes=edges.map(e=>(g.edge(e.caller,e.callee,e.id).points as Point[]).map(p=>({x:p.x+lane,y:p.y+graphTop})));
+    return {nodes:boxes,routes,width:Math.max(1,lane+(g.graph().width??0),...boxes.map(n=>n.x+n.width))+16,height:Math.max(1,graphTop+(g.graph().height??0),...boxes.map(n=>n.y+n.height)),label:uncalled.length?{x:0,y:12}:undefined};
   };
   const fitRanks=()=>{
-    for(const gap of [48,24,8,0]){
-      ranksep=gap;run();if(regular().width*.85<=innerWidth)break;
+    for(const gap of compact?[24,16,8]:[48,24,8,0]){
+      ranksep=gap;run();if(regular().width*(compact?.75:.85)<=innerWidth)break;
     }
   };
   configure();
   for(const gap of [16,8,.1]){nodesep=gap;fitRanks();if(regular().height<=innerHeight)break;}
   if(regular().height>innerHeight||regular().width*.85>innerWidth){
-    compact=true;height=24;nodesep=6;configure();fitRanks();
+    compact=true;height=20;nodesep=4;configure();fitRanks();
   }
   if(regular().width*.85>innerWidth){metrics=false;configure();fitRanks();}
   let raw=regular(),folded=false;
@@ -95,7 +97,7 @@ export function layoutServiceMap(model: ServiceGraph, size: ChartSize) {
     // A long chain cannot fit readable full identities in a narrow LR view.
     // Fold Dagre's ordered ranks into bounded rows, retaining the dependency
     // ordering and routed edges while allowing only vertical navigation.
-    compact=true;height=24;nodesep=6;metrics=false;configure();run();
+    compact=true;height=20;nodesep=4;metrics=false;configure();run();
     const groups:ServiceNode[][]=[entries];
     const ranks=[...new Set(g.nodes().map(id=>g.node(id).x))].sort((a,b)=>a-b);
     for(const x of ranks)groups.push(nodes.filter(n=>connected.has(n.id)&&!entries.includes(n)&&g.node(n.id).x===x).sort((a,b)=>g.node(a.id).y-g.node(b.id).y||order(a.id,b.id)));
@@ -118,7 +120,7 @@ export function layoutServiceMap(model: ServiceGraph, size: ChartSize) {
   const points=raw.routes.flat(), minX=Math.min(0,...points.map(p=>p.x)),minY=Math.min(0,...points.map(p=>p.y));
   const width=Math.max(raw.width,...points.map(p=>p.x+8))-minX;
   const totalHeight=Math.max(raw.height,...points.map(p=>p.y))-minY;
-  const scale=Math.min(1,innerWidth/width,Math.max(.85,innerHeight/totalHeight));
+  const scale=Math.min(1,innerWidth/width,Math.max(compact?.75:.85,innerHeight/totalHeight));
   const contentWidth=size.width,contentHeight=Math.max(size.height,totalHeight*scale+24);
   const offsetX=(size.width-width*scale)/2+8*scale,offsetY=(contentHeight-totalHeight*scale)/2;
   const fit=(p:Point)=>({x:offsetX+(p.x-minX)*scale,y:offsetY+(p.y-minY)*scale});
@@ -161,7 +163,7 @@ export function serviceCardLabels(n: ServiceNode, {width,scale,compact,measureTe
 function serviceCardWidth(n:ServiceNode,compact:boolean,measureText?:ChartSize["measureText"],metrics=true) {
   // Size for the floor's compensated fonts, so later scale selection cannot
   // turn a protected name into clipped text.
-  const label=serviceCardLabels(n,{width:1000,scale:.85,compact,measureText}),measure=measureText??textMeasure;
+  const label=serviceCardLabels(n,{width:1000,scale:compact?.75:.85,compact,measureText}),measure=measureText??textMeasure;
   const font=`600 ${label.nameSize}px ${fonts.display}`;
   const name=measure(label.name,font)+measure(healthGlyph[n.health]??"○",font)+18;
   const withMetric=name+4+measure(label.metric,`${label.metricSize}px ${fonts.display}`);
@@ -271,13 +273,13 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, transformOrigin: "0 0", transform: `scale(${transform.scale})`, pointerEvents: "none" }}>
-        {graph.uncalledLabel && <span data-uncalled-label style={{ position: "absolute", left: graph.uncalledLabel.x, top: graph.uncalledLabel.y - 12 * graph.scale, transform: `scale(${graph.scale})`, transformOrigin: "0 0", color: theme.muted, fontSize: Math.ceil(1200/graph.scale)/100, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
+        {graph.uncalledLabel && <span data-uncalled-label style={{ position: "absolute", left: graph.uncalledLabel.x, top: graph.uncalledLabel.y - 12 * graph.scale, transform: `scale(${graph.scale})`, transformOrigin: "0 0", color: theme.muted, fontSize: Math.ceil(1200/graph.scale)/100, lineHeight:1, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
         {graph.nodes.map(n => {
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
           const label = serviceCardLabels(n,{width:n.width/graph.scale,scale:graph.scale,compact:graph.compact,measureText});
           return <button type="button" key={n.id} data-service-node={n.id} data-service-entry={n.entry} data-focused={focused === n.id} data-uncalled={n.uncalled} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} aria-label={`${n.id}, ${n.health}, ${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
             style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, boxSizing: "border-box", border: `1px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: 0, background: theme.surface, color: theme.text, textAlign: "left", overflow: "hidden", opacity: active && !neighbours.has(n.id) ? .25 : 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
-            <span style={{ display: "block", width: n.width / graph.scale, height: graph.compact ? 24 : 44, boxSizing: "border-box", padding: graph.compact?"2px 6px":"3px 6px", transform: `scale(${graph.scale})`, transformOrigin: "0 0" }}>
+            <span style={{ display: "block", width: n.width / graph.scale, height: graph.compact ? 20 : 44, boxSizing: "border-box", padding: graph.compact?"1px 6px":"3px 6px", transform: `scale(${graph.scale})`, transformOrigin: "0 0" }}>
             {graph.compact ? <span data-service-text style={{display:"flex",alignItems:"center",gap:4,fontSize:label.metricSize,lineHeight:"18px",whiteSpace:"nowrap",minWidth:0}}>
               <span aria-hidden="true" style={{color,flex:"none"}}>{healthGlyph[n.health] ?? "○"}</span><span data-service-name data-text-width={label.nameWidth} style={{minWidth:0,maxWidth:label.nameWidth,fontWeight:600,fontSize:label.nameSize,whiteSpace:"nowrap"}}>{label.name}</span>
               <span data-service-metric data-text-width={label.metricWidth} style={{display:label.metric?"inline":"none",marginLeft:"auto",flex:"none",fontSize:label.metricSize,color:theme.muted,whiteSpace:"nowrap"}}>{label.metric}</span>

@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { gaugeOption, chartThemeFor, timeseriesOption } from "../../../panels/compile";
-import { analysisOption } from "../../../panels/analysis";
+import { analysisOption, heatRamp } from "../../../panels/analysis";
 import { withAnnotations } from "../../../panels/annotations";
 import { worstHealthServices } from "../../../panels/rollups";
 import { relativeLuminance } from "../../../theme";
@@ -23,11 +23,9 @@ async function render(panel:Panel=p,result:PanelResult=r,onSelect:((value:string
 }
 it.each([120,159,160,238,300])("F1 gauge fills its measured body, readable untruncated value and separate status at %ipx",width=>{
   const height=76, o=gaugeOption({...p,viz:"gauge",min:0,max:10,unit:"percent",thresholds:[{value:1,status:"warn"}]},1.74,chartThemeFor(false),"percent",{width,height}) as any;
-  const s=o.series[0];expect(s.radius*2).toBeGreaterThanOrEqual(.8*Math.min(width,1.6*height));
-  expect(s.detail.fontSize).toBeGreaterThanOrEqual(24);expect(s.detail.overflow).not.toBe("truncate");expect(s.detail.formatter()).toBe("1.74%");
-  const status=o.graphic.find((g:any)=>g.style.text.includes("Warn"));
-  expect(status.top).toBeGreaterThan(s.center[1]+s.detail.offsetCenter[1]+s.detail.fontSize/2);
-  expect(o.graphic.filter((g:any)=>g.style.text.includes("%"))).toHaveLength(width<160?0:2);
+  expect(o.series).toEqual([]);const value=o.graphic.find((g:any)=>g.id==="gauge-value");
+  expect(value.style.fontSize).toBeGreaterThanOrEqual(24);expect(value.style.text).toBe("1.74%");
+  expect(o.graphic.filter((g:any)=>g.type==="text"&&g.style.text.includes("%"))).toHaveLength(3);
 });
 it("F2 puts the interaction hint in the subtitle and recovers the footer row",async()=>{
   const h=await render();expect(h.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · spans · click for exemplar traces");
@@ -61,21 +59,22 @@ it("F3 text panels keep Spec in the menu with no segmented views",async()=>{
   const spec=document.querySelector<HTMLButtonElement>('[data-panel-view="Spec"]')!;expect(spec).not.toBeNull();
   await act(async()=>spec.click());expect(h.querySelector("pre")).not.toBeNull();
 });
-it.each([false,true])("F4 skewed heat cells use all seven monotonic perceptual steps (%s)",dark=>{
+it.each([false,true])("Part 10 retains F4's seven monotonic colours while skewed counts encode log magnitude (%s)",dark=>{
   const counts=[0,...Array.from({length:69},(_,i)=>i+1),1000000000],theme=chartThemeFor(dark);
   const frame={columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[counts.map((_,i)=>i*60000),counts],rows:counts.length};
   const o=analysisOption({...p,viz:"heatmap"},{...r,frame},theme) as any;
   const fills=o.series[0].data.map((d:any)=>o.series[0].renderItem({}, {value:(i:number)=>d.value[i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({})}).style.fill);
-  const ramp=[...new Set(fills)] as string[];expect(ramp).toHaveLength(7);
+  expect(new Set(fills).size).toBe(3);
+  const ramp=heatRamp(theme);expect(ramp).toHaveLength(7);
   const l=ramp.map(relativeLuminance);expect(l.every((v,i)=>!i||(dark?v>l[i-1]:v<l[i-1]))).toBe(true);
   const top=l.at(-1)!,surface=relativeLuminance(theme.surface);expect((Math.max(top,surface)+.05)/(Math.min(top,surface)+.05)).toBeGreaterThanOrEqual(3);
-  expect(o.visualMap.text).toEqual(["61–1B","1–10"]);expect(o.series[0].data.at(-1).value[2]).toBe(1000000000);
+  expect(o.visualMap.text).toEqual(["1B","1"]);expect(o.series[0].data.at(-1).value[2]).toBe(1000000000);
 });
-it("F5 scatter has muted 11px alias titles inside the plot corners",()=>{
+it("G3 scatter has muted 11px alias titles outside the plot",()=>{
   const frame={...r.frame!,columns:[{name:"operation",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const},{name:"p95",type:"number" as const,role:"measure" as const,unit:"ms"}],values:[["GET"],[100],[50]],rows:1};
   const theme=chartThemeFor(false),o=analysisOption({...p,viz:"scatter"},{...r,frame},theme) as any;
-  expect(o.xAxis).toMatchObject({name:"calls",nameLocation:"end",nameGap:-18,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"bottom"}});
-  expect(o.yAxis).toMatchObject({name:"p95",nameLocation:"end",nameGap:-18,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"left",verticalAlign:"top"}});
+  expect(o.xAxis).toMatchObject({name:"calls",nameLocation:"middle",nameGap:28,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"top"}});
+  expect(o.yAxis).toMatchObject({name:"p95",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"bottom"}});
 });
 it.each(["logs","traces","table","log_patterns"] as const)("F6 %s notes follow the bounded scroll body",async viz=>{
   const h=await render({...p,viz},{...r,frame:{...r.frame!,truncated:true}});

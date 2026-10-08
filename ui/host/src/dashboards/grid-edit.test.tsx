@@ -33,7 +33,7 @@ beforeEach(() => {
     constructor(private callback: ResizeObserverCallback) {}
     observe(target: Element) {
       const report = (width:number) => this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
-      if(!target.hasAttribute("data-panel")&&!target.hasAttribute("data-service-viewport"))reportWidth=report;
+      if(!target.closest("[data-panel]"))reportWidth=report;
       if (measuredWidth > 0) report(measuredWidth);
     }
     unobserve() {}

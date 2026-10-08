@@ -25,8 +25,8 @@ export function HealthViz({ result, dark, onSelect, onVariable, vars }: Analysis
       <Metric label="Health" value={<Group gap={6}><HealthShape health={health} />{empty ? "No data" : health.charAt(0).toUpperCase() + health.slice(1)}</Group>}
         color={healthColor(health)} hint={empty ? "No telemetry in this window" : `${integer.format(data.service_count)} services`}>
         {worst.map(service => {
-          const content=<><HealthShape health={service.health}/><Text component="span" fz={12} truncate style={{flex:1}} title={service.name}>{service.name}</Text><Text component="span" fz={12} ff="monospace" style={{flexShrink:0}}>{service.metric}</Text></>;
-          const style={display:"flex",alignItems:"center",gap:6,minHeight:20,minWidth:0};
+          const content=<><HealthShape health={service.health}/><Text component="span" fz={12} truncate style={{minWidth:0,textAlign:"left"}} title={service.name}>{service.name}</Text><Text component="span" fz={12} ff="monospace" style={{textAlign:"right"}}>{service.metric}</Text></>;
+          const style={display:"grid",gridTemplateColumns:"12px minmax(0, 1fr) 64px",alignItems:"center",textAlign:"left" as const,gap:6,minHeight:20,minWidth:0,width:"100%"};
           return select ? <Anchor key={service.name} component="button" type="button" data-health-service={service.name} style={style} onClick={()=>select(service.name)}>{content}</Anchor> : <Box key={service.name} data-health-service={service.name} style={style}>{content}</Box>;
         })}
       </Metric>

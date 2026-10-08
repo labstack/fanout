@@ -68,8 +68,8 @@ it.each([false,true])("V8: every axis is muted mono 11–12, gauges respect the 
   if(axis.splitLine?.show!==false) expect(axis.splitLine.lineStyle.color).toBe(theme.grid);
  }
  const option=gaugeOption({id:"g",title:"Gauge",viz:"gauge",min:0,max:100,thresholds:[{value:50,status:"bad"}]},99,theme,"percent",{width:100,height:60}) as any;
- expect(option.series[0].detail.fontSize).toBeGreaterThanOrEqual(typeScale.micro);
- for(const item of option.graphic) expect(item.style.fontSize).toBeGreaterThanOrEqual(typeScale.micro);
+ expect(option.graphic.find((item:any)=>item.id==="gauge-value").style.fontSize).toBeGreaterThanOrEqual(24);
+ for(const item of option.graphic.filter((g:any)=>g.type==="text")) expect(item.style.fontSize).toBeGreaterThanOrEqual(typeScale.micro);
 });
 
 const contrast=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};

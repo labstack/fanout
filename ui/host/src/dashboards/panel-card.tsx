@@ -37,9 +37,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const [view, setView] = useState("Chart");
   const [mapView, setMapView] = useState<MapView>();
   const onMapView = useCallback((next: MapView) => setMapView(next), []);
-  const hint = panel.click && panel.viz === "bar" ? `click to filter by ${panel.click.set_variable}`
-    : panel.drill && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) ? "click for exemplar traces"
-    : (panel.drill === "traces" || result?.frame?.columns.some(c => c.name === "trace_id")) && ["table", "traces"].includes(panel.viz) ? "click to open trace" : undefined;
+  const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
+    : panel.viz === "traces" || (panel.drill === "traces" || result?.frame?.columns.some(c => c.name === "trace_id")) && panel.viz === "table" ? "click to open trace"
+    : panel.drill === "logs" ? "click for matching logs"
+    : panel.drill === "traces" && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
   const bodyHeight = Math.max(40, height - 88);
   const constants = logConstants(panel,result?.frame);
   const source = constants.length ? [...new Set(constants.map(c => c.value))].join(" · ") : panel.sql ? "sql" : panel.query?.from ?? (panel.viz === "service_map" || panel.viz === "health" ? "spans" : panel.viz === "log_patterns" ? "logs" : "spec");
@@ -54,7 +55,22 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     note, result?.annotation_error,
     result?.annotation_scope?.limited ? "Annotation service scope is limited." : undefined,
   ].filter((text): text is string => Boolean(text)))];
-  return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id} data-compact-views={small}>
+  const body = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState<{bottom:number}>();
+  useLayoutEffect(()=>{
+    const el=body.current, parent=card.current;if(!el||!parent)return;
+    if(!scrolls||!(rows||view==="Data")){setFade(undefined);return;}
+    const measure=()=>{
+      const bottom=Math.max(0,parent.getBoundingClientRect().bottom-el.getBoundingClientRect().bottom);
+      const overflowing=el.scrollHeight>el.clientHeight;
+      setFade(old=>overflowing?(old?.bottom===bottom?old:{bottom}):undefined);
+    };
+    measure();const observer=new ResizeObserver(measure);observer.observe(el);
+    if(el.firstElementChild)observer.observe(el.firstElementChild);
+    const mutations=new MutationObserver(measure);mutations.observe(el,{childList:true,subtree:true,attributes:true,characterData:true});
+    return ()=>{observer.disconnect();mutations.disconnect();};
+  },[result,view,rows,scrolls,height,small,notes.length]);
+  return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={small}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
         <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={small ? {overflowWrap:"anywhere"} : undefined}>{subtitle}</Text>
@@ -83,7 +99,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Menu>
       </Group>
     </Group>
-    <Box data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
+    <Box ref={body} data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
       {view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
@@ -99,6 +115,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, background: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
     </Box>}
+    {fade&&<Box data-panel-scroll-fade aria-hidden="true" style={{position:"absolute",left:16,right:16,bottom:fade.bottom,height:16,pointerEvents:"none",zIndex:1,background:"linear-gradient(to bottom, transparent, var(--mantine-color-body))"}}/>}
   </Paper>;
 }
 

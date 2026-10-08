@@ -43,14 +43,17 @@ const cleanups: (() => void)[] = [];
 const defaultPanels = () => json({ results: [{ id: "requests", status: "ok", frame, elapsed_ms: 2 }, { id: "latency", status: "empty", diagnosis: "No spans match service = 'cart'.", elapsed_ms: 3 }] });
 const settle = async (client: QueryClient) => {
   const deadline = Date.now() + 3000;
-  // Flush notifications between polls so dependent queries can become enabled.
+  let idleCycles = 0;
+  // Two idle notification cycles let React enable dependent queries and render
+  // their results; a momentarily idle QueryClient does not imply a ready DOM.
   do {
     await act(async () => {
-      do { await new Promise(resolve => setTimeout(resolve, 5)); }
-      while ((client.isFetching() !== 0 || client.isMutating() !== 0) && Date.now() < deadline);
+      await new Promise(resolve => setTimeout(resolve, 5));
     });
+    idleCycles = client.isFetching() === 0 && client.isMutating() === 0 ? idleCycles + 1 : 0;
   }
-  while ((client.isFetching() !== 0 || client.isMutating() !== 0) && Date.now() < deadline);
+  while (idleCycles < 2 && Date.now() < deadline);
+  expect(idleCycles).toBe(2);
   expect(client.isFetching()).toBe(0);
   expect(client.isMutating()).toBe(0);
 };
@@ -136,6 +139,10 @@ describe("DashboardPage", () => {
       values: columns.map((_, i) => rows.map(row => row[i])), rows: rows.length,
     } }] });
     const { host } = await render();
+    await vi.waitFor(async()=>{
+      await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+      expect(host.querySelector("[data-service-viewport]")).not.toBeNull();
+    },{interval:5,timeout:3000});
     const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
     expect(viewport).not.toBeNull();
     expect(Number(viewport.dataset.contentHeight)).toBeGreaterThan(180);

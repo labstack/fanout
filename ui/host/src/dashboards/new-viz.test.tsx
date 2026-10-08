@@ -113,7 +113,7 @@ it.each(["histogram","heatmap"] as const)("preserves distinct %s buckets when ro
  if (viz === "heatmap") expect(data.map(point=>(point.value as number[])[1])).toEqual([0,1]);
 });
 
-it("ranks heatmap colour by cell percentile and shows a compact continuous count scale", () => {
+it("maps heatmap colour by log count and shows a compact continuous count scale", () => {
  const counts = [...Array(99).fill(10),100000];
  const frame = {columns:fixtures.heatmap!.columns,values:[counts.map((_,i)=>1000+i*60000),counts.map(()=>128),counts.map(()=>256),counts],rows:100};
  const option = analysisOption({id:"p",title:"Latency heatmap",viz:"heatmap"},{...resultFor("heatmap"),frame},chartThemeFor(false)) as {visualMap:{show:boolean;type:string;max:number;orient:string;itemWidth:number};legend?:{show:boolean}};

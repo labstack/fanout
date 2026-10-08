@@ -20,6 +20,23 @@ const cleanups: (() => void)[] = [];
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(fn => fn())); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 const model = () => serviceMapModel(demoFrame, { from_ms: 0, to_ms: 3600000 });
+it("G4 fits all twenty demo services and the isolated heading in a 1100×190 body",()=>{
+ const graph=layoutServiceMap(model(),{width:1100,height:190});
+ expect(graph.compact).toBe(true);expect(graph.scale).toBeGreaterThanOrEqual(.75);expect(graph.contentHeight).toBe(190);
+ expect(graph.nodes).toHaveLength(20);
+ for(const n of graph.nodes){expect(n.height/graph.scale).toBe(20);expect(n.x).toBeGreaterThanOrEqual(0);expect(n.y).toBeGreaterThanOrEqual(0);expect(n.x+n.width).toBeLessThanOrEqual(1100);expect(n.y+n.height).toBeLessThanOrEqual(190);}
+ expect(new Set(graph.nodes.filter(n=>n.uncalled).map(n=>n.y)).size).toBe(1);
+ expect(graph.uncalledLabel!.y-12*graph.scale).toBeGreaterThanOrEqual(0);
+});
+it("G4 compact card content and isolated heading stay within their 20px/17px lanes",async()=>{
+ const original=HTMLElement.prototype.getBoundingClientRect;
+ vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockImplementation(function(this:HTMLElement){return this.hasAttribute("data-service-viewport")?DOMRect.fromRect({width:1100,height:190}):original.call(this);});
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+ await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={214}/></MantineProvider>));
+ const card=host.querySelector<HTMLElement>('[data-service-node] > span')!;
+ expect(card.style.height).toBe("20px");expect(card.style.paddingTop).toBe("1px");
+ expect(host.querySelector<HTMLElement>('[data-uncalled-label]')!.style.lineHeight).toBe("1");
+});
 describe("Part 9 C1 scroll event lifetime and feedback", () => {
   const tallFrame: Frame = {
     ...demoFrame,
@@ -84,14 +101,14 @@ describe("Part 9 C1 scroll event lifetime and feedback", () => {
   });
 });
 describe("preview V10", () => {
-  it("P3a keeps the default demo readable and uses vertical overflow for short bodies", () => {
+  it("G4 keeps the default demo readable and fits the saved short body", () => {
     const normal = layoutServiceMap(model(), {width:1100,height:480});
     expect(normal.scale).toBeGreaterThanOrEqual(.85);
     expect(Math.max(...normal.nodes.map(n=>n.x+n.width))-Math.min(...normal.nodes.map(n=>n.x))).toBeGreaterThanOrEqual(1050);
     for(const n of normal.nodes) expect(n.y+n.height).toBeLessThanOrEqual(468.01);
     const short = layoutServiceMap(model(), {width:1100,height:180});
-    expect(short.scale).toBeGreaterThanOrEqual(.85);
-    expect(short.contentHeight).toBeGreaterThan(180);
+    expect(short.scale).toBeGreaterThanOrEqual(.75);
+    expect(short.contentHeight).toBeLessThanOrEqual(190);
     const defaultBody=layoutServiceMap(model(),{width:1100,height:396});
     expect(defaultBody.contentHeight).toBe(396);
   });
@@ -181,7 +198,7 @@ describe("Part 5 R1",()=>{
   const graph=layoutServiceMap(model(),{width:1100,height:230});
   expect(graph).toMatchObject({compact:true,contentHeight:230,contentWidth:1100,initialScrollY:0});
   expect(graph.nodes).toHaveLength(20);expect(graph.edges).toHaveLength(23);
-  for(const node of graph.nodes){expect(node.height).toBeLessThanOrEqual(24);expect(node.height).toBeGreaterThanOrEqual(24*.85);expect(node.y+node.height).toBeLessThanOrEqual(230);}
+  for(const node of graph.nodes){expect(node.height).toBeLessThanOrEqual(20);expect(node.height).toBeGreaterThanOrEqual(20*.75);expect(node.y+node.height).toBeLessThanOrEqual(230);}
  });
  it.each([180,181,200,230,280,396,480])("keeps entry services initially visible at body height %s",height=>{
   const graph=layoutServiceMap(model(),{width:1100,height});
@@ -192,10 +209,10 @@ describe("Part 5 R1",()=>{
   const graph=model();
   for(let i=0;i<35;i++){const id=`dependency-${i}`;graph.nodes.push({...graph.nodes[0],id});graph.edges.push({id,caller:"frontend",callee:id,edge_type:"call",calls:1,request_rate:1,error_rate:0,average_ms:1,status:null});}
   const layout=layoutServiceMap(graph,{width:1100,height:180});
-  expect(layout.compact).toBe(true);expect(layout.scale).toBe(.85);expect(layout.contentHeight).toBeGreaterThan(180);expect(layout.initialScrollY).toBeGreaterThan(0);
+  expect(layout.compact).toBe(true);expect(layout.scale).toBe(.75);expect(layout.contentHeight).toBeGreaterThan(180);expect(layout.initialScrollY).toBeGreaterThan(0);
   const entry=layout.nodes.find(n=>n.id==="load-generator")!;
   expect(entry.y-layout.initialScrollY).toBeGreaterThanOrEqual(0);expect(entry.y+entry.height-layout.initialScrollY).toBeLessThanOrEqual(180);
-  expect(Math.abs(entry.y+entry.height/2-layout.initialScrollY-90)).toBeLessThanOrEqual(80);
+  expect(Math.abs(entry.y+entry.height/2-layout.initialScrollY-90)).toBeLessThanOrEqual(90-entry.height/2);
  });
  it.each([false,true])("compact DOM cards expose full metrics and Fit restores the entry-centred view (%s)",async dark=>{
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
@@ -337,19 +354,19 @@ describe("Part 7 M7a",()=>{
 
 describe("Part 7 M7b/M7c",()=>{
  it.each([270,744,1100,1440])("fits node and routed edge bounds horizontally at width %s",width=>{
-  const graph=layoutServiceMap(model(),{width,height:230});expect(graph.contentWidth).toBe(width);expect(graph.scale).toBeGreaterThanOrEqual(.85);
+  const graph=layoutServiceMap(model(),{width,height:230});expect(graph.contentWidth).toBe(width);expect(graph.scale).toBeGreaterThanOrEqual(graph.compact?.75:.85);
   for(const n of graph.nodes){expect(n.x).toBeGreaterThanOrEqual(0);expect(n.x+n.width).toBeLessThanOrEqual(width);}
   for(const edge of graph.edges){const numbers=edge.path.match(/-?[\d.]+/g)!.map(Number);for(let i=0;i<numbers.length;i+=2){expect(numbers[i]).toBeGreaterThanOrEqual(0);expect(numbers[i]).toBeLessThanOrEqual(width);}}
  });
- it("fits the 24px compact demo at 1100×230 with no clipping or pan",()=>{
+ it("fits the 20px compact demo at 1100×230 with no clipping or pan",()=>{
   const graph=layoutServiceMap(model(),{width:1100,height:230});expect(graph).toMatchObject({compact:true,contentWidth:1100,contentHeight:230,initialScrollY:0});
-  for(const n of graph.nodes){expect(n.height/graph.scale).toBeCloseTo(24);expect(n.y).toBeGreaterThanOrEqual(0);expect(n.y+n.height).toBeLessThanOrEqual(230);}
+  for(const n of graph.nodes){expect(n.height/graph.scale).toBeCloseTo(20);expect(n.y).toBeGreaterThanOrEqual(0);expect(n.y+n.height).toBeLessThanOrEqual(230);}
  });
- it("uses compact nodesep of 6–8 logical pixels",()=>{
+ it("uses compact nodesep of 4 logical pixels",()=>{
   const base=model().nodes[0],nodes=[{...base,id:"entry"},...Array.from({length:8},(_,i)=>({...base,id:`callee-${i}`}))];
   const edges=nodes.slice(1).map(n=>({...model().edges[0],id:n.id,caller:"entry",callee:n.id}));
   const graph=layoutServiceMap({nodes,edges},{width:1100,height:230}),rank=graph.nodes.filter(n=>n.id!=="entry").sort((a,b)=>a.y-b.y);
-  expect(graph.compact).toBe(true);for(let i=1;i<rank.length;i++){const gap=(rank[i].y-rank[i-1].y-rank[i-1].height)/graph.scale;expect(gap).toBeGreaterThanOrEqual(6-.01);expect(gap).toBeLessThanOrEqual(8+.01);}
+  expect(graph.compact).toBe(true);for(let i=1;i<rank.length;i++){const gap=(rank[i].y-rank[i-1].y-rank[i-1].height)/graph.scale;expect(gap).toBeCloseTo(4);}
  });
  it("reports the number below the centred initial viewport and updates it on pan",async()=>{
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
