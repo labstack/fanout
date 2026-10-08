@@ -100,6 +100,20 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  it("loads persisted provenance across threads and reload without per-dashboard requests", async () => {
+    fetchMock.mockImplementation(async (input,init) => String(input)==="/api/dashboards" ? json({dashboards:[{id:"origin-board",name:"Origin board",origin:{thread_id:"source-thread",message_id:"user",request_excerpt:"Build latency <img src=x>"}}]}) : respond(input,init));
+    for(let reload=0;reload<2;reload++) {
+      const {root,handlers,render}=mount({activeThreadID:"different-thread"});
+      try{await act(async()=>render());await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).not.toBeNull());
+      const link=document.querySelector<HTMLAnchorElement>('[data-request-provenance]')!;expect(link.getAttribute('href')).toBe('/chat/source-thread');expect(link.textContent).toContain('Built from: Build latency <img src=x>');expect(link.querySelector('img')).toBeNull();
+      const modified=new MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true});await act(async()=>link.dispatchEvent(modified));expect(modified.defaultPrevented).toBe(false);
+      await act(async()=>link.click());expect(handlers.onSelectThread).toHaveBeenCalledWith('source-thread');
+      }finally{await act(async()=>root.unmount());}
+    }
+    expect(fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards')).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input])=>String(input).includes('/api/dashboards/'))).toBe(false);
+  });
+
   it("lists panel dashboard summaries from the new dashboard API", async () => {
     const { root, render } = mount();
     await act(async () => render());

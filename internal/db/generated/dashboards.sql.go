@@ -7,6 +7,7 @@ package generated
 
 import (
 	"context"
+	"database/sql"
 )
 
 const countDashboards = `-- name: CountDashboards :one
@@ -119,6 +120,35 @@ func (q *Queries) InsertDashboardBelowOwnerLimit(ctx context.Context, arg Insert
 	return result.RowsAffected()
 }
 
+const insertDashboardOrigin = `-- name: InsertDashboardOrigin :execrows
+INSERT INTO dashboard_origins (dashboard_id, thread_id, message_id, request_excerpt)
+SELECT ?1, ?2, ?3, ?4
+WHERE EXISTS (SELECT 1 FROM agui_threads t WHERE t.thread_id = ?2 AND t.owner_id = ?5)
+  AND EXISTS (SELECT 1 FROM dashboards d WHERE d.id = ?1 AND d.owner_id = ?5)
+`
+
+type InsertDashboardOriginParams struct {
+	DashboardID    string `json:"dashboard_id"`
+	ThreadID       string `json:"thread_id"`
+	MessageID      string `json:"message_id"`
+	RequestExcerpt string `json:"request_excerpt"`
+	OwnerID        string `json:"owner_id"`
+}
+
+func (q *Queries) InsertDashboardOrigin(ctx context.Context, arg InsertDashboardOriginParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, insertDashboardOrigin,
+		arg.DashboardID,
+		arg.ThreadID,
+		arg.MessageID,
+		arg.RequestExcerpt,
+		arg.OwnerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const insertDashboardVersion = `-- name: InsertDashboardVersion :exec
 INSERT INTO dashboard_versions (dashboard_id, version, spec_json, author_kind, author_id, message, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -193,20 +223,25 @@ func (q *Queries) ListDashboardVersions(ctx context.Context, dashboardID string)
 }
 
 const listDashboards = `-- name: ListDashboards :many
-SELECT id, name, description, is_default, version, panel_count, updated_at
-FROM dashboards
-WHERE owner_id = ?
-ORDER BY is_default DESC, updated_at DESC
+SELECT d.id, d.name, d.description, d.is_default, d.version, d.panel_count, d.updated_at,
+       o.thread_id AS origin_thread_id, o.message_id AS origin_message_id, o.request_excerpt AS origin_request_excerpt
+FROM dashboards d
+LEFT JOIN dashboard_origins o ON o.dashboard_id = d.id
+WHERE d.owner_id = ?
+ORDER BY d.is_default DESC, d.updated_at DESC
 `
 
 type ListDashboardsRow struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	IsDefault   int64  `json:"is_default"`
-	Version     int64  `json:"version"`
-	PanelCount  int64  `json:"panel_count"`
-	UpdatedAt   string `json:"updated_at"`
+	ID                   string         `json:"id"`
+	Name                 string         `json:"name"`
+	Description          string         `json:"description"`
+	IsDefault            int64          `json:"is_default"`
+	Version              int64          `json:"version"`
+	PanelCount           int64          `json:"panel_count"`
+	UpdatedAt            string         `json:"updated_at"`
+	OriginThreadID       sql.NullString `json:"origin_thread_id"`
+	OriginMessageID      sql.NullString `json:"origin_message_id"`
+	OriginRequestExcerpt sql.NullString `json:"origin_request_excerpt"`
 }
 
 func (q *Queries) ListDashboards(ctx context.Context, ownerID string) ([]ListDashboardsRow, error) {
@@ -226,6 +261,9 @@ func (q *Queries) ListDashboards(ctx context.Context, ownerID string) ([]ListDas
 			&i.Version,
 			&i.PanelCount,
 			&i.UpdatedAt,
+			&i.OriginThreadID,
+			&i.OriginMessageID,
+			&i.OriginRequestExcerpt,
 		); err != nil {
 			return nil, err
 		}

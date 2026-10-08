@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"testing"
 
 	"github.com/labstack/fanout/internal/intelligence"
@@ -70,5 +73,38 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	}
 	if !foundIntelligence {
 		t.Fatal("get_intelligence_snapshot was not registered for the agent")
+	}
+}
+
+func TestToolRegistryInjectsAuthenticatedBuildOrigin(t *testing.T) {
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	var meta mcp.Meta
+	mcp.AddTool(server, &mcp.Tool{Name: "capture"}, func(_ context.Context, req *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, map[string]any, error) {
+		meta = req.Params.Meta
+		return nil, map[string]any{}, nil
+	})
+	registry, err := NewToolRegistry(t.Context(), server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	origin := dashboard.BuildOrigin{ThreadID: "server-thread", MessageID: "server-user", RequestExcerpt: "Actual request"}
+	ctx := dashboard.WithBuildOrigin(dashboard.WithOwner(t.Context(), "owner"), origin)
+	_, err = registry.Execute(ctx, ToolCall{Name: "capture", Input: `{"_meta":{"io.fanout/build-origin":{"thread_id":"spoof"}}}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(meta[dashboard.BuildOriginMetaKey])
+	var got dashboard.BuildOrigin
+	_ = json.Unmarshal(raw, &got)
+	if meta[dashboard.OwnerMetaKey] != "owner" || got != origin {
+		t.Fatalf("metadata=%+v", meta)
+	}
+	_, err = registry.Execute(dashboard.WithBuildOrigin(t.Context(), origin), ToolCall{Name: "capture", Input: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta[dashboard.BuildOriginMetaKey] != nil {
+		t.Fatal("origin without authenticated owner")
 	}
 }

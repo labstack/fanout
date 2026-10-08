@@ -126,6 +126,7 @@ function Session() {
       onToolCallResultEvent: ({ event, messages: next }) => {
         toolCallsRef.current.delete(event.toolCallId);
         setActivity([...toolCallsRef.current.values()].at(-1) ?? provisionalStatus());
+        // Only a committed server receipt may refresh the dashboard/rail cache.
         const saved = dashboardToolResult(event.toolCallId, event.content, next);
         if (!saved) return;
         void queryClient.invalidateQueries({ queryKey: dashboardsKey });

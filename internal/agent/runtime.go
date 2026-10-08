@@ -210,6 +210,9 @@ func (r *Runtime) Run(c *echo.Context) error {
 	emitter := &eventEmitter{ctx: c.Request().Context(), writer: response, sse: sse.NewSSEWriter()}
 	messages := append([]agtypes.Message(nil), seed...)
 	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
+	if origin, ok := buildOriginForSeed(input.ThreadID, seed); ok {
+		runCtx = dashboard.WithBuildOrigin(runCtx, origin)
+	}
 	truncated, runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 	if runErr != nil {
 		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", serverErrorMessage(runErr))
@@ -643,4 +646,19 @@ func serverErrorMessage(err error) string {
 		return clientErrorMessage(err)
 	}
 	return err.Error()
+}
+
+// The authoritative seed, not provider narration or browser history, owns the request.
+func buildOriginForSeed(threadID string, seed []agtypes.Message) (dashboard.BuildOrigin, bool) {
+	for i := len(seed) - 1; i >= 0; i-- {
+		if seed[i].Role != agtypes.RoleUser {
+			continue
+		}
+		excerpt := []rune(messageText(seed[i].Content))
+		if len(excerpt) > 280 {
+			excerpt = excerpt[:280]
+		}
+		return dashboard.BuildOrigin{ThreadID: threadID, MessageID: seed[i].ID, RequestExcerpt: string(excerpt)}, true
+	}
+	return dashboard.BuildOrigin{}, false
 }

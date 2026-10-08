@@ -99,6 +99,9 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 	params := &mcp.CallToolParams{Name: call.Name, Arguments: arguments}
 	if owner := dashboard.OwnerFromContext(ctx); owner != "" {
 		params.Meta = mcp.Meta{dashboard.OwnerMetaKey: owner}
+		if origin, ok := dashboard.BuildOriginFromContext(ctx); ok {
+			params.Meta[dashboard.BuildOriginMetaKey] = origin
+		}
 	}
 	result, err := r.session.CallTool(ctx, params)
 	if err != nil {

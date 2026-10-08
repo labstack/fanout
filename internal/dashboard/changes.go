@@ -49,6 +49,8 @@ type ChangeSet struct {
 // once; authored fields and only panels outside the longest common surviving
 // order get panel chips. Normalization applies to copies for diffing only.
 func Changes(before, after panel.Dashboard) ChangeSet {
+	// The zero base is a create: only added panel chips apply, for every consumer.
+	created := before.Version == 0 && before.Name == "" && len(before.Panels) == 0
 	before = normalizedForDiff(before)
 	after = normalizedForDiff(after)
 	old := map[string]panel.Panel{}
@@ -106,6 +108,10 @@ func Changes(before, after panel.Dashboard) ChangeSet {
 		if field != "version" {
 			fields = append(fields, field)
 		}
+	}
+	if created {
+		layout = false
+		fields = nil
 	}
 	return ChangeSet{Panels: out, LayoutChanged: layout, DashboardFields: fields}
 }

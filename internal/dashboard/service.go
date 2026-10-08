@@ -50,13 +50,14 @@ type Mutation struct {
 }
 
 type Summary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	IsDefault   bool   `json:"is_default"`
-	Version     int    `json:"version"`
-	PanelCount  int    `json:"panel_count"`
-	UpdatedAt   string `json:"updated_at"`
+	Origin      *BuildOrigin `json:"origin,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	IsDefault   bool         `json:"is_default"`
+	Version     int          `json:"version"`
+	PanelCount  int          `json:"panel_count"`
+	UpdatedAt   string       `json:"updated_at"`
 }
 
 type VersionInfo struct {
@@ -89,7 +90,11 @@ func (s *Service) List(ctx context.Context, ownerID string) ([]Summary, error) {
 	}
 	out := make([]Summary, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, Summary{ID: r.ID, Name: r.Name, Description: r.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), PanelCount: int(r.PanelCount), UpdatedAt: r.UpdatedAt})
+		item := Summary{ID: r.ID, Name: r.Name, Description: r.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), PanelCount: int(r.PanelCount), UpdatedAt: r.UpdatedAt}
+		if r.OriginThreadID.Valid {
+			item.Origin = &BuildOrigin{ThreadID: r.OriginThreadID.String, MessageID: r.OriginMessageID.String, RequestExcerpt: r.OriginRequestExcerpt.String}
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -177,6 +182,18 @@ func (s *Service) CreateWithChanges(ctx context.Context, ownerID string, spec pa
 	}
 	if affected == 0 {
 		return Mutation{}, panel.Problems{{Path: "dashboards", Message: "at most 500 dashboards per owner; delete a dashboard before creating another"}}
+	}
+	if origin, ok := BuildOriginFromContext(ctx); ok {
+		if strings.TrimSpace(origin.ThreadID) == "" || strings.TrimSpace(origin.MessageID) == "" {
+			return Mutation{}, errors.New("invalid dashboard build origin")
+		}
+		rows, err := q.InsertDashboardOrigin(ctx, generated.InsertDashboardOriginParams{DashboardID: id, ThreadID: origin.ThreadID, MessageID: origin.MessageID, RequestExcerpt: origin.RequestExcerpt, OwnerID: ownerID})
+		if err != nil {
+			return Mutation{}, err
+		}
+		if rows != 1 {
+			return Mutation{}, errors.New("dashboard build origin thread is not owned by the dashboard owner")
+		}
 	}
 	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: 1, SpecJson: string(raw), AuthorKind: author.Kind, AuthorID: author.ID, Message: "Created", CreatedAt: now}); err != nil {
 		return Mutation{}, err
@@ -398,7 +415,7 @@ func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	if err != nil || count > 0 {
 		return err
 	}
-	_, err = s.Create(ctx, ownerID, DefaultSpec(), Author{Kind: "system"})
+	_, err = s.Create(WithBuildOrigin(ctx, BuildOrigin{}), ownerID, DefaultSpec(), Author{Kind: "system"})
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

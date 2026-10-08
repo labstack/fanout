@@ -90,6 +90,13 @@ type Dashboard struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type DashboardOrigin struct {
+	DashboardID    string `json:"dashboard_id"`
+	ThreadID       string `json:"thread_id"`
+	MessageID      string `json:"message_id"`
+	RequestExcerpt string `json:"request_excerpt"`
+}
+
 type DashboardVersion struct {
 	DashboardID string `json:"dashboard_id"`
 	Version     int64  `json:"version"`

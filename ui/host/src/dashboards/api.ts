@@ -4,7 +4,8 @@ import type { AnnotationBody, AnnotationsResponse } from "../../../panels/annota
 import type { Frame, Selection, DashboardSpec, DashboardTime, Panel, PanelResult, Variable, VarValue } from "../../../panels/types";
 import { authorizedFetch } from "../auth";
 
-export type DashboardSummary = { id: string; name: string; description: string; is_default: boolean; version: number; panel_count: number; updated_at: string };
+export type BuildOrigin = { thread_id: string; message_id: string; request_excerpt: string };
+export type DashboardSummary = { origin?: BuildOrigin; id: string; name: string; description: string; is_default: boolean; version: number; panel_count: number; updated_at: string };
 export type DashboardRecord = { id: string; name: string; description: string; is_default: boolean; version: number; spec: DashboardSpec; created_at: string; updated_at: string };
 export type VersionInfo = { version: number; author_kind: "user" | "agent" | "system"; author_id?: string; message?: string; created_at: string };
 export type Problem = { path: string; message: string; hint?: string };

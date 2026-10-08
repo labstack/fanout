@@ -7,6 +7,7 @@ import { FanoutAppContext, useFanoutApp, type FanoutAppContextValue } from "./ap
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import App from "./App";
 import { ChatPage } from "./chat";
+import { saved as receiptFixture, build as receiptBuild } from "../tests/dashboard-receipts";
 import { fixture } from "../tests/fixtures";
 vi.mock("./mcp-app-frame", () => ({ default: () => <div data-app-frame>Panel frame</div> }));
 vi.mock("./auth", () => ({
@@ -68,14 +69,14 @@ describe("provisional answer stream", () => {
       await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });
       await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
-      expect(document.body.textContent).toContain("Updating your dashboard…");
-      await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: JSON.stringify({ dashboard: { id: "board", name: "Latency", version: 2, spec: { name: "Latency", panels: [] } } }) });
+      expect(document.body.textContent).toContain("Building dashboard");
+      await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: JSON.stringify(receiptFixture) });
       await emit({ type: "CUSTOM", name: "model_call_usage", value: { step: 2 } });
       await vi.waitFor(() => expect(document.querySelector("[data-dashboard-result]")).not.toBeNull());
-      expect(document.body.textContent).toContain("Analyzing your system");
+      expect(document.body.textContent).toContain("Saved v2");
       expect(document.querySelector('button[aria-label="Stop"]')).not.toBeNull();
       await emit({ type: "TEXT_MESSAGE_START", messageId: "final", role: "assistant" });
-      expect(document.body.textContent).toContain("Analyzing your system");
+      expect(document.body.textContent).toContain("Saved v2");
       await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Updated the latency panel." });
       await emit({ type: "TEXT_MESSAGE_END", messageId: "final" });
       await vi.waitFor(() => expect(document.body.textContent).toContain("Updated the latency panel."));
@@ -119,9 +120,9 @@ describe("provisional answer stream", () => {
       await emit({ type: "REASONING_MESSAGE_END", messageId: "provisional" });await emit({ type: "REASONING_END", messageId: "provisional" });
       await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
-      expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).toContain("Updating your dashboard…");
+      expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).toContain("Building dashboard");
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: "{}" });
-      expect(document.querySelector('[role="status"]')?.textContent).toContain("Fixing the sort…");
+      expect(document.querySelector('[role="status"]')?.textContent).toContain("Building dashboard");
       expect(document.body.textContent).not.toContain("Checking another thing.");
       await emit({ type: "REASONING_START", messageId: "provisional" });await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
       await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Updated " });
@@ -196,7 +197,7 @@ describe("provisional answer stream", () => {
       await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"next"});
       await emit({type:"TOOL_CALL_START",toolCallId:"call",toolCallName:"edit_dashboard",parentMessageId:"step"});await emit({type:"TOOL_CALL_ARGS",toolCallId:"call",delta:"{}"});await emit({type:"TOOL_CALL_END",toolCallId:"call"});
       await emit({type:"TOOL_CALL_RESULT",toolCallId:"call",messageId:"result",content:"{}"});
-      expect(document.querySelector('[role="status"]')?.textContent).toContain("Analyzing your system");
+      expect(document.querySelector('[role="status"]')?.textContent).toContain("Building dashboard");
       expect(document.body.textContent).not.toContain("Stale narration");
       await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"next"});await close();
     } finally {warn.mockRestore();log.mockRestore();await act(async()=>root.unmount());}
@@ -533,4 +534,13 @@ it("groups failed calls by assistant message within one user turn",async()=>{
  await act(async()=>button("1 tool call failed")!.click());expect(document.body.textContent).toContain("first failure");expect(document.body.textContent).not.toContain("second failure");
  await act(async()=>button("2 tool calls failed")!.click());expect(document.body.textContent).toContain("second failure");expect(document.body.textContent).toContain("third failure");
  }finally{await act(async()=>root.unmount());}
+});
+
+it("reconstructs one receipt per build turn with no final card or narrated tool inventory",async()=>{
+ const messages=receiptBuild(); const assistant=messages.find(m=>m.role==="assistant")!;
+ if(assistant.role==="assistant")assistant.content="Stray intermediate paragraph with panel inventory";
+ messages.push({id:"final-receipt",role:"assistant",content:"Latency now uses the requested threshold."});
+ const {root}=await mountStreamChat(JSON.parse(JSON.stringify(messages)),false);
+ try{expect(document.querySelectorAll("[data-build-receipt]")).toHaveLength(1);expect(document.querySelectorAll("[data-dashboard-result]")).toHaveLength(1);expect(document.querySelectorAll('[data-build-receipt] [role="status"]')).toHaveLength(1);expect(document.body.textContent).not.toContain("Stray intermediate paragraph");expect(document.body.textContent).toContain("Latency now uses the requested threshold.");}
+ finally{await act(async()=>root.unmount());}
 });

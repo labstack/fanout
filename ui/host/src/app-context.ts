@@ -1,5 +1,7 @@
 import type { Message } from "@ag-ui/client";
-import { createContext, useContext, type FormEvent, type RefObject } from "react";
+import { createContext, useContext, useMemo, type FormEvent, type RefObject } from "react";
+
+import { receiptForTurn } from "./dashboard-receipt";
 
 export type FanoutAppContextValue = {
   agentAvailable: boolean;
@@ -68,4 +70,14 @@ export function runErrorMessage(code?: string): string {
     case "time_limit": return "Fanout reached its 5-minute time limit. Try a smaller request.";
     default: return "Fanout could not complete this analysis. Please try again.";
   }
+}
+
+// Reconstructed from the persisted transcript, so switching threads and reload
+// use the same evidence as live tool events.
+export function useDashboardReceipts(messages: readonly Message[]) {
+ return useMemo(() => new Map(messages.flatMap(message => {
+  if (message.role !== "user") return [];
+  const receipt = receiptForTurn(messages, message.id);
+  return receipt ? [[message.id, receipt] as const] : [];
+ })), [messages]);
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/panel"
 	controlstore "github.com/labstack/fanout/internal/store"
+	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -176,5 +177,48 @@ func TestSaveReportsPanelsItCouldNotCheck(t *testing.T) {
 	}
 	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "Panels were not checked:") {
 		t.Fatalf("summary hides the failed check: %q", text)
+	}
+}
+
+func TestBuildOriginMetadataTrustBoundary(t *testing.T) {
+	s := newToolServer(t, structural{}, nil)
+	origin := dashboard.BuildOrigin{ThreadID: "missing", MessageID: "user", RequestExcerpt: "Spoof"}
+	req := requestFor("owner")
+	req.Params.Meta[dashboard.BuildOriginMetaKey] = origin
+	if _, _, err := s.dashboardCreate(t.Context(), req, DashboardCreateInput{Dashboard: textDashboard("Invalid local")}); err == nil {
+		t.Fatal("nonowned local origin silently ignored")
+	}
+	req.Extra = &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}
+	// Even an in-process context origin must be stripped at a remote boundary.
+	_, out, err := s.dashboardCreate(dashboard.WithBuildOrigin(t.Context(), origin), req, DashboardCreateInput{Dashboard: textDashboard("Remote")})
+	if err != nil || out.Dashboard.ID == "" {
+		t.Fatal(out, err)
+	}
+	list, err := s.dashboards.List(t.Context(), "owner")
+	if err != nil || len(list) != 1 || list[0].Origin != nil {
+		t.Fatalf("remote fabricated provenance: %+v %v", list, err)
+	}
+}
+
+func TestInProcessCreatePersistsInjectedOrigin(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test'); INSERT INTO agui_threads(thread_id,owner_id) VALUES ('source','owner')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
+	session := connectTestClient(t, s, nil)
+	origin := dashboard.BuildOrigin{ThreadID: "source", MessageID: "request", RequestExcerpt: "Build volume"}
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "create_dashboard", Arguments: map[string]any{"dashboard": textDashboard("Local origin")}, Meta: mcp.Meta{dashboard.OwnerMetaKey: "owner", dashboard.BuildOriginMetaKey: origin}})
+	if err != nil || result.IsError {
+		t.Fatal(result, err)
+	}
+	list, err := s.dashboards.List(t.Context(), "owner")
+	if err != nil || len(list) != 1 || list[0].Origin == nil || *list[0].Origin != origin {
+		t.Fatalf("origin=%+v %v", list, err)
 	}
 }

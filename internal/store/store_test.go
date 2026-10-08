@@ -205,7 +205,7 @@ func TestNewSQLite_InitializesWithOnlyGooseMetadata(t *testing.T) {
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM goose_db_version WHERE version_id > 0 AND is_applied=1`).Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 2 {
-		t.Fatalf("applied versions = %d, want 2", applied)
+	if applied != 3 {
+		t.Fatalf("applied versions = %d, want 3", applied)
 	}
 }

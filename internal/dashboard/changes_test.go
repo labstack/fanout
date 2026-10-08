@@ -137,3 +137,12 @@ func TestChangesReportWholeAuthoredFieldsAndDashboardFields(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestCreateChangesHaveNoLayoutOrDashboardChips(t *testing.T) {
+	after := textSpec("Created")
+	PackMissing(after.Panels)
+	got := Changes(panel.Dashboard{}, after)
+	if got.LayoutChanged || len(got.DashboardFields) != 0 || len(got.Panels) != 1 || got.Panels[0].Kind != "added" {
+		t.Fatalf("create changes=%+v", got)
+	}
+}

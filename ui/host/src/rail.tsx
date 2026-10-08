@@ -104,6 +104,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
       const deletedID = deleting.threadId;
       setDeleting(null);
       await queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
+      await queryClient.invalidateQueries({ queryKey: dashboardsKey });
       onDeletedThread(deletedID);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : "Unable to delete this chat.");
@@ -144,7 +145,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">No matching dashboards</Text>}
           {visibleDashboards.map((dashboard) => {
             const active = dashboard.id === activeDashboardID;
-            return <UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} key={dashboard.id} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
+            return <Stack key={dashboard.id} gap={0}><UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
               event.preventDefault();
               onSelectDashboard(dashboard.id);
@@ -153,7 +154,14 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
                 <Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text>
                 {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
               </Group>
-            </UnstyledButton>;
+            </UnstyledButton>
+              {dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault(); onSelectThread(dashboard.origin!.thread_id);
+              }}>
+                <Text size="xs" c="dimmed" lineClamp={2}>Built from: {dashboard.origin.request_excerpt}</Text>
+              </UnstyledButton>}
+            </Stack>;
           })}
           {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>{dashboards.data?.length === 0 ? "New dashboard" : "Create with AI"}</Button>}
         </Stack>

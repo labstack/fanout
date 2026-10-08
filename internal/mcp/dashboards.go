@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -165,6 +166,22 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
+	// Strip any upstream context first: only authenticated in-process metadata
+	// may supply provenance. OAuth requests never accept this client-suppliable key.
+	ctx = dashboard.WithBuildOrigin(ctx, dashboard.BuildOrigin{})
+	if req.Extra == nil || req.Extra.TokenInfo == nil {
+		if value, exists := req.Params.Meta[dashboard.BuildOriginMetaKey]; exists {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return nil, dashboardOutput{}, errors.New("invalid dashboard build origin")
+			}
+			var origin dashboard.BuildOrigin
+			if err := json.Unmarshal(raw, &origin); err != nil || strings.TrimSpace(origin.ThreadID) == "" || strings.TrimSpace(origin.MessageID) == "" {
+				return nil, dashboardOutput{}, errors.New("invalid dashboard build origin")
+			}
+			ctx = dashboard.WithBuildOrigin(ctx, origin)
+		}
+	}
 	record, err := s.dashboards.CreateWithChanges(ctx, owner, input.Dashboard, agentAuthor(owner))
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
@@ -204,10 +221,6 @@ const saveCheckBudget = 8 * time.Second
 func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Mutation) (*mcp.CallToolResult, dashboardOutput, error) {
 	record := mutation.Record
 	diff := dashboard.Changes(mutation.Before, record.Spec)
-	if mutation.BaseVersion == 0 {
-		diff.LayoutChanged = false
-		diff.DashboardFields = nil
-	}
 	out := dashboardOutput{Dashboard: record, Receipt: &dashboardReceipt{
 		BaseVersion: mutation.BaseVersion, Version: record.Version, Changes: diff.Panels,
 		LayoutChanged: diff.LayoutChanged, DashboardFields: diff.DashboardFields,

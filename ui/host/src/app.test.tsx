@@ -104,8 +104,9 @@ describe("Session", () => {
         if (url.pathname === "/api/agent/threads") return json({ threads: [], nextCursor: "" });
         return json({ message: "not found" }, 404);
       });
-      const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, warnings: ["One panel is empty"] });
+      const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, receipt: {base_version: name === "create_dashboard" ? 0 : 1, version: 2, changes: [], layout_changed: false, save_check: {checked: true, elapsed_ms: 12, panels: []}} });
       const messages = [
+        { id: "user", role: "user", content: "Build errors" },
         { id: "provisional", role: "reasoning", content: "Saving it now" },
         { id: "before", role: "assistant", content: "", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
         { id: "result", role: "tool", toolCallId: "call-1", content },
@@ -120,8 +121,8 @@ describe("Session", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboard", "saved-1"] });
       await vi.waitFor(() => expect(host.querySelector('nav a[href="/dashboards/saved-1"]')).not.toBeNull());
       const link = host.querySelector<HTMLAnchorElement>('.chat-scroll a[href="/dashboards/saved-1"]');
-      expect(link?.textContent).toBe("Open dashboard");
-      expect(link?.closest("[data-dashboard-result]")?.textContent).toContain(`${name === "create_dashboard" ? "Created" : "Updated"}Cart errors`);
+      expect(link?.textContent).toBe("Open dashboard · saved v2");
+      expect(link?.closest("[data-dashboard-result]")?.textContent).toContain("Saved v2");
       const transcript = host.querySelector('[role="log"]')!.textContent!;
       expect(transcript).not.toContain("Saving it now");
       expect(transcript.indexOf("Open dashboard")).toBeLessThan(transcript.indexOf("All done"));

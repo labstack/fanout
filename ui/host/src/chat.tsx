@@ -4,15 +4,14 @@ import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight } from "@phosp
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useFanoutApp } from "./app-context";
+import { useFanoutApp, useDashboardReceipts } from "./app-context";
 import { useStickToBottom } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
-import { Link } from "@tanstack/react-router";
 import { fragmentTitle } from "../../panels/fragment";
-import { dashboardToolResult } from "./dashboard-tool-result";
+import { DashboardReceiptView } from "./dashboard-receipt-view";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
@@ -110,19 +109,15 @@ const suggestions = [
 export function ChatPage() {
   const { agentAvailable, messages, messageTimes, ready, running, activity, provisional, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
   const { scrollRef, contentRef, toBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
+  const receipts = useDashboardReceipts(messages);
   // Sending is a request to see the answer, so it returns a reader who had
   // scrolled back through the thread to the bottom of it.
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   useEffect(() => { if (lastSent) toBottom(); }, [lastSent, toBottom]);
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
-  const dashboardResults = new Map(messages.flatMap(message => {
-    if (message.role !== "tool" || message.error) return [];
-    const saved = dashboardToolResult(message.toolCallId, message.content, messages);
-    return saved ? [[message.id, saved] as const] : [];
-  }));
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
-  const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || failures.has(message.id) || dashboardResults.has(message.id)));
+  const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || failures.has(message.id)));
   // Tool receipts can finish before the buffered final answer. Only text in
   // the current user turn replaces its running status.
   const turnStart = messages.findIndex(message => message.id === lastSent);
@@ -144,20 +139,17 @@ export function ChatPage() {
         {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
         {!threadMissing && ready && <>
           {visibleMessages.length === 0 && <Welcome onSelect={send} />}
-          <Stack gap="lg" aria-live="polite">
+          <Stack gap="lg">
             {visibleMessages.filter(message => message.id !== answer?.id).map((message) => {
-              const saved = dashboardResults.get(message.id);
-              return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : saved ? <Paper key={message.id} withBorder radius="md" p="sm" data-dashboard-result={saved.id}>
-                <Group justify="space-between" gap="sm">
-                  <Box miw={0}><Text size="xs" c="dimmed">{saved.label}</Text><Text size="sm" fw={500} style={{ overflowWrap: "anywhere" }}>{saved.name}</Text></Box>
-                  <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{ dashboardId: saved.id }} search={{}} />} variant="subtle" size="compact-sm">Open dashboard</Button>
-                </Group>
-              </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />;
+              return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : <Box key={message.id}>
+                <ChatMessage message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />
+                {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} /></Box>}
+              </Box>;
             })}
             {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
               <ChatMessage message={liveText ? { id: provisional.id, role: "assistant", content: provisional.text } : answer!} provisional={!!liveText} time={liveText ? undefined : messageTimes[answer!.id]} />
             </Box>}
-            {running && !hasFinalText && !liveText && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+            {running && !hasFinalText && !liveText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
             {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
             {error && <RunError message={error} onRetry={retry} />}
           </Stack>
@@ -216,6 +208,7 @@ function ChatMessage({ message, time, appView, provisional = false }: { message:
     if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
     return null;
   }
+  if (message.role === "assistant" && message.toolCalls?.length) return null;
   const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";

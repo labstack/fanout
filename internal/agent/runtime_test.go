@@ -11,6 +11,7 @@ import (
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/encoding/sse"
 
+	"github.com/labstack/fanout/internal/dashboard"
 	controlstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -311,5 +312,17 @@ func TestSystemPromptBuildsDashboardsForDashboardShapedRequests(t *testing.T) {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("system prompt is missing %q", want)
 		}
+	}
+}
+
+func TestBuildOriginUsesLastAuthoritativeUserAndUnicodeLimit(t *testing.T) {
+	seed := []agtypes.Message{{ID: "old", Role: agtypes.RoleUser, Content: "Old"}, {ID: "last", Role: agtypes.RoleUser, Content: strings.Repeat("🐈", 281)}, {ID: "assistant", Role: agtypes.RoleAssistant, Content: "Never use narration"}}
+	got, ok := buildOriginForSeed("thread", seed)
+	want := dashboard.BuildOrigin{ThreadID: "thread", MessageID: "last", RequestExcerpt: strings.Repeat("🐈", 280)}
+	if !ok || got != want {
+		t.Fatal(got, ok)
+	}
+	if _, ok := buildOriginForSeed("thread", seed[2:]); ok {
+		t.Fatal("fabricated request")
 	}
 }
