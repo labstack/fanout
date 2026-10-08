@@ -21,7 +21,17 @@ type Option = Record<string, unknown>;
 const colorFor = (name: string, index: number, theme: ChartTheme) => (isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark));
 
 function chartSeries(frame: Frame, panel: Panel) {
-  return visibleSeries(toSeries(frame), panel);
+  const series = toSeries(frame);
+  if (!frame.columns.some(column => column.role === "dimension")) {
+    for (const item of series) {
+      const name = item.name;
+      item.name = /^p\d+(?:\(.*\))?$/.test(name) && ["ms", "s", "ns"].includes(item.unit ?? "") ? `${name.match(/^p\d+/)![0]} latency`
+        : /^error_rate(?:\(\))?$/.test(name) ? "Error rate"
+        : /^rate(?:\(\))?$/.test(name) ? "Request rate"
+        : name.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
+    }
+  }
+  return visibleSeries(series, panel);
 }
 
 function baseOption(theme: ChartTheme, unit?: string): Option {
@@ -75,7 +85,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   const units = [...new Set([...current, ...previousSeries].map((s) => s.unit ?? panel.unit))];
   if (units.length === 0) units.push(panel.unit);
   const style = panel.options?.style ?? "line";
-  const direct = current.length <= 6 && visible.hidden === 0 && style !== "bars" && style !== "stacked";
+  const direct = current.length >= 2 && current.length <= 6 && visible.hidden === 0 && style !== "bars" && style !== "stacked";
   const endWidth = direct ? Math.min(size.width * .3, 180, Math.max(40, ...current.map(s => (size.measureText?.(s.name, `12px ${theme.font}`) ?? Array.from(s.name).length * 7.2) + 8))) : 0;
   const period = result.shift_ms;
   const lines = current.map((s, i) => {

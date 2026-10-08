@@ -1,0 +1,8 @@
+volume: status=ok rows=1 truncated=false
+  time=2026-10-07T19:15:00Z, severity=ERROR, count=30 count
+events: status=ok rows=30 truncated=false
+  time=2026-10-07T19:15:29Z, severity=ERROR, service=checkout, body=timeout, trace_id=trace-29, namespace=shop
+  time=2026-10-07T19:15:28Z, severity=ERROR, service=checkout, body=timeout, trace_id=trace-28, namespace=shop
+  time=2026-10-07T19:15:27Z, severity=ERROR, service=checkout, body=timeout, trace_id=trace-27, namespace=shop
+  time=2026-10-07T19:15:26Z, severity=ERROR, service=checkout, body=timeout, trace_id=trace-26, namespace=shop
+  time=2026-10-07T19:15:25Z, severity=ERROR, service=checkout, body=timeout, trace_id=trace-25, namespace=shop

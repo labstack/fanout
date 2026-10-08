@@ -45,7 +45,7 @@ install: ui-deps
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
-# Portable React MCP Apps → internal/mcp/apps/*.html
+# Portable React MCP Apps → internal/mcp/apps/panels.html
 ui-apps:
     cd ui/host && bun run build:apps
 
@@ -150,7 +150,7 @@ ui-test:
 
 # Shared UI modules remain package-free.
 ui-boundaries-check:
-    bun test scripts/ui-boundaries.test.ts
+    bun test scripts/ui-boundaries.test.ts scripts/ui-compare.test.ts
     bun scripts/ui-boundaries.mjs
 
 # Audit the one locked browser graph. GHSA-vfj7-8cjw-p6xm reaches host

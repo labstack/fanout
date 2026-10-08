@@ -1,0 +1,148 @@
+{
+  "dashboard": {
+    "version": 1,
+    "name": "Service dependencies",
+    "time": {
+      "from": "2026-10-07T18:45:00Z",
+      "to": "2026-10-07T19:45:00Z",
+      "refresh": "off"
+    },
+    "panels": [
+      {
+        "id": "services",
+        "title": "Service dependencies",
+        "viz": "service_map",
+        "width": 12,
+        "height": "l",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "limit": 400
+        }
+      }
+    ]
+  },
+  "results": [
+    {
+      "id": "services",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "kind",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "service",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "caller",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "callee",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "edge_type",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "calls",
+            "type": "number",
+            "role": "measure",
+            "unit": "count"
+          },
+          {
+            "name": "average_ms",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          },
+          {
+            "name": "error_rate",
+            "type": "number",
+            "role": "measure",
+            "unit": "percent"
+          },
+          {
+            "name": "health",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "p95_ms",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          },
+          {
+            "name": "spans",
+            "type": "number",
+            "role": "measure",
+            "unit": "count"
+          }
+        ],
+        "values": [
+          [
+            "node",
+            "edge"
+          ],
+          [
+            "checkout",
+            ""
+          ],
+          [
+            "",
+            "checkout"
+          ],
+          [
+            "",
+            "payment"
+          ],
+          [
+            "",
+            "call"
+          ],
+          [
+            null,
+            30
+          ],
+          [
+            null,
+            100
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            "unhealthy",
+            ""
+          ],
+          [
+            100,
+            null
+          ],
+          [
+            30,
+            null
+          ]
+        ],
+        "rows": 2
+      },
+      "sql": "observability.Service.Topology",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000
+    }
+  ]
+}

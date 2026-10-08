@@ -1,0 +1,260 @@
+{
+  "dashboard": {
+    "version": 1,
+    "name": "Service performance",
+    "time": {
+      "from": "2026-10-07T18:45:00Z",
+      "to": "2026-10-07T19:45:00Z",
+      "refresh": "off"
+    },
+    "panels": [
+      {
+        "id": "latency",
+        "title": "p95 latency",
+        "viz": "timeseries",
+        "width": 6,
+        "height": "m",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "measures": [
+            "p95(duration_ms)"
+          ],
+          "bucket": "auto",
+          "limit": 400
+        },
+        "unit": "ms",
+        "drill": "traces"
+      },
+      {
+        "id": "errors",
+        "title": "Error rate",
+        "viz": "timeseries",
+        "width": 6,
+        "height": "m",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "measures": [
+            "error_rate()"
+          ],
+          "bucket": "auto",
+          "limit": 400
+        },
+        "unit": "percent",
+        "drill": "traces"
+      },
+      {
+        "id": "requests",
+        "title": "Request rate",
+        "viz": "timeseries",
+        "width": 6,
+        "height": "m",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "measures": [
+            "rate()"
+          ],
+          "bucket": "auto",
+          "limit": 400
+        },
+        "unit": "per_second",
+        "drill": "traces"
+      },
+      {
+        "id": "endpoints",
+        "title": "Slow endpoints",
+        "viz": "table",
+        "width": 12,
+        "height": "m",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'",
+            "http_route \u003c\u003e ''"
+          ],
+          "measures": [
+            "p95(duration_ms)"
+          ],
+          "by": [
+            "http_route"
+          ],
+          "limit": 400
+        },
+        "unit": "ms",
+        "drill": "traces"
+      }
+    ]
+  },
+  "results": [
+    {
+      "annotation_scope": {
+        "services": [
+          {
+            "namespace": "shop",
+            "service": "checkout"
+          }
+        ],
+        "namespace_scoped": true
+      },
+      "id": "latency",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "time",
+            "type": "time",
+            "role": "time"
+          },
+          {
+            "name": "p95",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          }
+        ],
+        "values": [
+          [
+            1791400500000
+          ],
+          [
+            100
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", quantile_cont(\"duration_ms\", 0.95)::DOUBLE AS \"p95\" FROM base GROUP BY time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
+      "interval": "30s",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000,
+      "better": "lower"
+    },
+    {
+      "annotation_scope": {
+        "services": [
+          {
+            "namespace": "shop",
+            "service": "checkout"
+          }
+        ],
+        "namespace_scoped": true
+      },
+      "id": "errors",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "time",
+            "type": "time",
+            "role": "time"
+          },
+          {
+            "name": "error_rate",
+            "type": "number",
+            "role": "measure",
+            "unit": "percent"
+          }
+        ],
+        "values": [
+          [
+            1791400500000
+          ],
+          [
+            100
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", 100.0 * avg(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS \"error_rate\" FROM base GROUP BY time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
+      "interval": "30s",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000,
+      "better": "lower"
+    },
+    {
+      "annotation_scope": {
+        "services": [
+          {
+            "namespace": "shop",
+            "service": "checkout"
+          }
+        ],
+        "namespace_scoped": true
+      },
+      "id": "requests",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "time",
+            "type": "time",
+            "role": "time"
+          },
+          {
+            "name": "rate",
+            "type": "number",
+            "role": "measure",
+            "unit": "per_second"
+          }
+        ],
+        "values": [
+          [
+            1791400500000
+          ],
+          [
+            1
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", count(*) / 30.0 AS \"rate\" FROM base GROUP BY time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
+      "interval": "30s",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000,
+      "better": "higher"
+    },
+    {
+      "id": "endpoints",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "http_route",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "p95",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          }
+        ],
+        "values": [
+          [
+            "/cart"
+          ],
+          [
+            100
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop')) AND ((http_route != ''))) SELECT coalesce(\"http_route\", '') AS \"http_route\", quantile_cont(\"duration_ms\", 0.95)::DOUBLE AS \"p95\" FROM base GROUP BY \"http_route\" ORDER BY \"p95\" DESC NULLS LAST LIMIT 400",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000,
+      "better": "lower"
+    }
+  ]
+}

@@ -20,8 +20,6 @@
 ui/host/node_modules/
 ui/host/dist/
 ui/host/tsconfig.tsbuildinfo
-ui/apps/node_modules/
-ui/apps/dist/
 
 # Documentation site workspace outputs.
 site/node_modules/

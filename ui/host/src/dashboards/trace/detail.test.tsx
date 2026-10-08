@@ -4,6 +4,20 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { TraceDetailView } from "./detail";
 import { traceFixture } from "../../../tests/fixtures";
+import { formatTimestamp } from "../../../../panels/units";
+
+it("uses the dashboard logs table for correlated logs with compact times and complete badges", async () => {
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const log = { ...traceFixture.data.logs[0], severity: "ERROR", service: "frontend-proxy" };
+  try {
+    await act(async () => root.render(<MantineProvider><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, logs: [log] } }} dark={false} /></MantineProvider>));
+    const table = node.querySelector(".dashboard-table")!;
+    expect(table).not.toBeNull();
+    expect(table.querySelector('td[data-field="time"]')?.textContent).toBe(formatTimestamp(Date.parse(log.time)));
+    expect(table.querySelector('td[data-field="severity"]')?.textContent).toContain("◆ ERROR");
+    expect(table.querySelector<HTMLElement>('td[data-field="service"] > *')?.style.whiteSpace).toBe("nowrap");
+  } finally { await act(async () => root.unmount()); node.remove(); }
+});
 
 it.each([false, true])("shares waterfall/logs/truncation and flame view without chat actions (dark=%s)", async dark => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

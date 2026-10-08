@@ -3,8 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/panel"
 	"reflect"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	controlstore "github.com/labstack/fanout/internal/store"
@@ -25,6 +29,10 @@ func TestAppToolModelContentAndVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer registry.Close()
+	denied, err := registry.Execute(t.Context(), ToolCall{Name: "query_panel_fragment", Input: `{}`})
+	if err != nil || !denied.IsError || denied.Structured != nil || denied.AppResourceURI != "" {
+		t.Fatalf("app-only model call accepted: %+v %v", denied, err)
+	}
 	for _, d := range registry.Definitions() {
 		if d.Name == "query_panel_fragment" {
 			t.Fatal("app-only tool exposed to model")
@@ -54,9 +62,19 @@ func TestFragmentActivityPersistsExactContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fragment := map[string]any{"dashboard": map[string]any{"version": 1, "name": "Fixture", "panels": []any{map[string]any{"id": "text", "title": "Text", "viz": "text", "content": "hello"}}}, "results": []any{map[string]any{"id": "text", "status": "ok"}}}
-	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "query_telemetry", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
-	tools := &fakeTools{execution: ToolExecution{Content: "compact summary", Structured: fragment, AppResourceURI: "ui://fanout/panels.html"}}
+	server := fanoutmcp.New(registryQueries{}, nil, panel.NewExecutor(nil, 30), "test")
+	tools, err := NewToolRegistry(t.Context(), server.MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tools.Close()
+	call := ToolCall{ID: "call", Name: "query_telemetry", Input: `{"panel":{"id":"text","title":"Text","viz":"text","content":"hello"},"time":{"from":"2026-10-07T18:45:00Z","to":"2026-10-07T19:45:00Z","refresh":"off"}}`}
+	expected, err := tools.Execute(t.Context(), call)
+	if err != nil || expected.IsError {
+		t.Fatalf("real MCP fixture: %+v %v", expected, err)
+	}
+	fragment := expected.Structured
+	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &call}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
 	runtime := NewRuntime(provider, tools, nil)
 	emitter, _ := newTestEmitter()
 	if _, err := runtime.execute(t.Context(), input.ThreadID, input.RunID, &messages, emitter); err != nil {
@@ -71,7 +89,7 @@ func TestFragmentActivityPersistsExactContent(t *testing.T) {
 	}
 	found := false
 	for _, message := range thread.Messages {
-		if message.Role == agtypes.RoleTool && message.Content != "compact summary" {
+		if message.Role == agtypes.RoleTool && message.Content != expected.Content {
 			t.Fatal("full frames persisted as model content")
 		}
 		if message.Role != agtypes.RoleActivity {
@@ -95,7 +113,7 @@ func TestFragmentActivityPersistsExactContent(t *testing.T) {
 			t.Fatalf("fragment changed on reload: %s", raw)
 		}
 	}
-	if !found || len(tools.calls) != 1 {
+	if !found {
 		t.Fatal("missing activity or re-query")
 	}
 }
@@ -109,5 +127,97 @@ func TestAppToolContentKeepsTextAndNonAppMarshalFailureIsError(t *testing.T) {
 	}
 	if _, err := r.modelContent("ordinary", result); err == nil {
 		t.Fatal("non-app marshal failure silently fell back")
+	}
+}
+
+func TestFix1AppSummariesBoundedOnSuccessAndError(t *testing.T) {
+	registry := &ToolRegistry{apps: map[string]string{"app": "ui://fanout/panels.html"}}
+	for _, failed := range []bool{false, true} {
+		result := &mcp.CallToolResult{IsError: failed, StructuredContent: map[string]any{"frame": strings.Repeat("body", 100000)}, Content: []mcp.Content{&mcp.TextContent{Text: strings.Repeat("界", 20000)}}}
+		got, err := registry.modelContent("app", result)
+		if err != nil || len(got) > 16*1024 || !utf8.ValidString(got) || strings.Contains(got, "body") {
+			t.Fatalf("failed=%t bytes=%d err=%v", failed, len(got), err)
+		}
+	}
+}
+
+func TestFix1AppToolErrorHasNoActivity(t *testing.T) {
+	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "show"}}
+	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "query_telemetry", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
+	runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: "Invalid telemetry window", IsError: true, AppResourceURI: "ui://fanout/panels.html"}}, nil)
+	emitter, _ := newTestEmitter()
+	if _, err := runtime.execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, message := range messages {
+		if message.Role == agtypes.RoleActivity {
+			t.Fatal("error emitted an app activity")
+		}
+		if message.Role == agtypes.RoleTool {
+			found = true
+			if message.Content != "Invalid telemetry window" || message.Error == "" {
+				t.Fatal("tool error lost")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("tool error missing")
+	}
+}
+
+func TestFix1DuplicateMapActivitiesStoppedAtSource(t *testing.T) {
+	fragment := map[string]any{"dashboard": map[string]any{"version": 1, "name": "Map", "time": map[string]any{"from": "2026-10-07T18:45:00Z", "to": "2026-10-07T19:45:00Z"}, "panels": []any{map[string]any{"id": "services", "title": "Service dependencies", "viz": "service_map", "query": map[string]any{"from": "spans"}}}}, "results": []any{map[string]any{"id": "services", "status": "ok"}}}
+	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "map"}}
+	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "custom", Name: "query_telemetry", Input: `{}`}}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "preset", Name: "get_service_topology", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
+	runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: "Map summary", Structured: fragment, AppResourceURI: "ui://fanout/panels.html"}}, nil)
+	emitter, _ := newTestEmitter()
+	if _, err := runtime.execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
+		t.Fatal(err)
+	}
+	activities, tools := 0, 0
+	for _, message := range messages {
+		if message.Role == agtypes.RoleActivity {
+			activities++
+		}
+		if message.Role == agtypes.RoleTool {
+			tools++
+		}
+	}
+	if activities != 1 || tools != 2 {
+		t.Fatalf("activities=%d tool results=%d", activities, tools)
+	}
+}
+
+func TestFix1FragmentIdentityIncludesRelativeWindowAndVars(t *testing.T) {
+	f := fanoutmcp.PanelFragment{Dashboard: panel.Dashboard{Name: "Map", Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "a", Title: "A", Viz: "service_map", Query: &panel.Query{From: "spans"}}}}, Results: []panel.Result{{ID: "a", FromMS: 1, ToMS: 2}}}
+	original := fragmentIdentity(f)
+	f.Dashboard.Name = "Another title"
+	f.Dashboard.Panels[0].ID = "b"
+	f.Dashboard.Panels[0].Title = "B"
+	if original != fragmentIdentity(f) {
+		t.Fatal("cosmetic fields prevented dedupe")
+	}
+	f.Results[0].FromMS = 3
+	if original == fragmentIdentity(f) {
+		t.Fatal("different captured windows deduped")
+	}
+	f.Results[0].FromMS = 1
+	f.Vars = map[string]panel.Value{"service": panel.Value{Values: []string{"checkout"}}}
+	if original == fragmentIdentity(f) {
+		t.Fatal("different vars deduped")
+	}
+}
+
+func TestFix1MapIdentityIgnoresLimitsOnlyForIdenticalCompleteProjections(t *testing.T) {
+	f := fanoutmcp.PanelFragment{Dashboard: panel.Dashboard{Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &panel.Query{From: "spans", Limit: 20}}}}, Results: []panel.Result{{ID: "map", FromMS: 1, ToMS: 2, Frame: &panel.Frame{Columns: []panel.Column{{Name: "service", Type: "string", Role: "dimension"}}, Values: [][]any{{"checkout"}}, Rows: 1}}}}
+	first := fragmentIdentity(f)
+	f.Dashboard.Panels[0].Query.Limit = 400
+	if first != fragmentIdentity(f) {
+		t.Fatal("custom map and topology limits created duplicate complete maps")
+	}
+	f.Results[0].Frame.Values[0][0] = "payment"
+	if first == fragmentIdentity(f) {
+		t.Fatal("different maps deduped")
 	}
 }

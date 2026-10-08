@@ -16,7 +16,7 @@ describe("telemetry tooltip HTML security", () => {
   it("preserves time/value and mixed-unit scatter tooltip semantics at the escaping boundary", () => {
     const timeFrame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "p95", type: "number", role: "measure", unit: "ms" }], values: [[1000], [1500]], rows: 1 };
     const time = timeseriesOption({ id: "x", title: "x", viz: "timeseries" }, { ...result, frame: timeFrame }, theme);
-    const text = (time.tooltip as Tooltip).formatter({ name: "Jan 1", seriesName: "p95", value: [1000,1500] });
+    const text = (time.tooltip as Tooltip).formatter({ name: "Jan 1", seriesName: (time.series as { name: string }[])[0].name, value: [1000,1500] });
     expect(text).toContain("1.50s"); expect(text).not.toContain("1.00s");
     const scatterFrame: Frame = { columns: [{ name: "item", role: "dimension", type: "string" }, { name: "calls", role: "measure", type: "number", unit: "count" }, { name: "latency", role: "measure", type: "number", unit: "ms" }], values: [[attack],[12],[1500]], rows: 1 };
     const scatter = analysisOption({ id: "x", title: "x", viz: "scatter" }, { ...result, frame: scatterFrame }, theme);

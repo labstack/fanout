@@ -177,9 +177,9 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
   const nodesByID=new Map(model.nodes.map(n=>[n.id,n])),edges=[...model.edges].sort((a,b)=>order(a.id,b.id));
   // Include routed points and stroke/arrow room, not only card rectangles.
   const points=raw.routes.flat(), minX=Math.min(0,...points.map(p=>p.x)),minY=Math.min(0,...points.map(p=>p.y));
-  const width=Math.max(raw.width,...points.map(p=>p.x+8))-minX;
+  const width=(points.length ? Math.max(raw.width,...points.map(p=>p.x+8)) : Math.max(1,...raw.nodes.map(n=>n.x+n.width))+8)-minX;
   const totalHeight=Math.max(raw.height,...points.map(p=>p.y))-minY;
-  const scale=Math.min(1,innerWidth/width,Math.max(compact?.75:.85,innerHeight/totalHeight));
+  const scale=Math.min(innerWidth/width,Math.max(innerWidth*.78/width,Math.min(1,Math.max(compact?.75:.85,innerHeight/totalHeight))));
   const contentWidth=size.width,contentHeight=Math.max(size.height,totalHeight*scale+24);
   const offsetX=(size.width-width*scale)/2+8*scale,offsetY=(contentHeight-totalHeight*scale)/2;
   const fit=(p:Point)=>({x:offsetX+(p.x-minX)*scale,y:offsetY+(p.y-minY)*scale});
@@ -210,7 +210,7 @@ const protectedName=(name:string)=>Array.from(name).length>24?Array.from(name).s
 
 /** Keep the identity; optional metrics consume only its remaining space. */
 export function serviceCardLabels(n: ServiceNode, {width,scale,compact,measureText}: {width:number;scale:number;compact:boolean;measureText?:ChartSize["measureText"]}) {
-  const nameSize=Math.max(12,Math.ceil(1100/scale)/100),metricSize=Math.ceil(1100/scale)/100;
+  const nameSize=Math.max(12/Math.max(1,scale),Math.ceil(1100/scale)/100),metricSize=Math.ceil(1100/scale)/100;
   const measure=measureText??textMeasure,nameFont=`600 ${nameSize}px ${fonts.display}`,metricFont=`${metricSize}px ${fonts.display}`;
   const name=protectedName(n.id),available=Math.max(0,width-14),glyph=measure(healthGlyph[n.health]??"○",nameFont);
   const rate=`${shortNumber(n.request_rate)}/s`,error=shortError(n.error_rate);
@@ -242,7 +242,7 @@ function fixedSlotWidth(measure: NonNullable<ChartSize["measureText"]>, font: st
 function serviceCardWidth(n:ServiceNode,compact:boolean,measureText?:ChartSize["measureText"],metrics=true) {
   // Size for the floor's compensated fonts, so later scale selection cannot
   // turn a protected name into clipped text. Health and metrics have fixed slots.
-  const scale=compact?.75:.85, nameSize=Math.max(12,Math.ceil(1100/scale)/100), metricSize=Math.ceil(1100/scale)/100;
+  const scale=compact?.75:.85, nameSize=Math.max(12/Math.max(1,scale),Math.ceil(1100/scale)/100), metricSize=Math.ceil(1100/scale)/100;
   const measure=measureText??textMeasure, font=`600 ${nameSize}px ${fonts.display}`;
   const name=measure(protectedName(n.id),font)+fixedSlotWidth(measure,font,false)+18;
   const withMetric=name+4+fixedSlotWidth(measure,`${metricSize}px ${fonts.display}`,true);

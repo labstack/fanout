@@ -7,7 +7,7 @@ import { EChartCanvas } from "../echart-canvas";
 
 export type AnalysisProps = {
   panel: Panel; title?: string; result: PanelResult; dark: boolean; height: number; group?: string;
-  traceLinks?: "button"; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
+  foldConstants?: boolean; traceLinks?: "button"; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
   onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
 };
 

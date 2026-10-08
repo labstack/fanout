@@ -5,18 +5,26 @@ import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
 import { seriesSlot, statusHex } from "../../../../chart";
 import { filledTextOn } from "../../../../theme";
 import { duration } from "../../../../format";
-import { TraceLogs, Waterfall } from "./trace-components";
+import { EmptyState } from "./components";
+import { ListBullets } from "@phosphor-icons/react";
+import { Waterfall } from "./trace-components";
+import { LogsViz } from "../viz/logs";
+import type { PanelResult } from "../../../../panels/types";
 
 export function TraceDetailView({ result, dark, onSpan }: { result: Result<TraceDetail>; dark: boolean; onSpan?: (span: TraceSpan) => void }) {
   const [view, setView] = useState("waterfall");
   const data = result.data;
+  const logResult: PanelResult = useMemo(() => ({ id: "correlated_logs", status: data.logs.length ? "ok" : "empty", elapsed_ms: 0, frame: {
+    columns: [{ name: "time", type: "time", role: "time" }, ...["severity", "service", "body"].map(name => ({ name, type: "string" as const, role: "dimension" as const }))],
+    rows: data.logs.length, values: [data.logs.map(log => Date.parse(log.time)), data.logs.map(log => log.severity), data.logs.map(log => log.service), data.logs.map(log => log.body)],
+  } }), [data.logs]);
   return <Stack gap="sm">
     <Group><Text fw={600}>{data.trace_id}</Text><Text c={data.has_error ? "bad" : "dimmed"}>{data.has_error ? "■ Error" : "● OK"}</Text></Group>
     {data.spans.length > 0 ? <>
       <Group role="group" aria-label="Trace view"><Button aria-pressed={view === "waterfall"} variant={view === "waterfall" ? "light" : "subtle"} onClick={() => setView("waterfall")}>Waterfall</Button><Button aria-pressed={view === "flame"} variant={view === "flame" ? "light" : "subtle"} onClick={() => setView("flame")}>Flame graph</Button></Group>
       {view === "waterfall" ? <Waterfall spans={data.spans} dark={dark} onSpan={onSpan} /> : <FlameGraph spans={data.spans} dark={dark} onSpan={onSpan} />}
     </> : <Text c="dimmed">No spans were found for this trace.</Text>}
-    <Text fw={600}>Correlated logs</Text><TraceLogs entries={data.logs} />
+    <Text fw={600}>Correlated logs</Text>{data.logs.length ? <Box style={{ overflow: "auto", minWidth: 0 }}><LogsViz foldConstants={false} panel={{ id: "correlated_logs", title: "Correlated logs", viz: "logs" }} result={logResult} dark={dark} height={320} /></Box> : <EmptyState tall icon={<ListBullets size={20} weight="duotone" />} title="No correlated logs">No logs in this window carry the selected trace ID.</EmptyState>}
     {data.truncated && <Alert color="warn">This trace is truncated: {data.spans.length} of {data.span_count} spans, {data.services.length} of {data.service_count} services.</Alert>}
   </Stack>;
 }

@@ -43,11 +43,21 @@ export function useStickToBottom<Scroller extends HTMLElement, Content extends H
   const stuck = useRef(true);
   const detach = useRef<() => void>(() => {});
   const observer = useRef<ResizeObserver | null>(null);
+  const anchor = useRef<{ node: HTMLElement; top: number } | null>(null);
+  const captureAnchor = useCallback(() => {
+    const pane = scroller.current;
+    if (!pane) return;
+    const top = pane.getBoundingClientRect().top;
+    const node = [...pane.querySelectorAll<HTMLElement>("[data-chat-anchor]")].find(item => item.getBoundingClientRect().bottom > top);
+    anchor.current = node ? { node, top: node.getBoundingClientRect().top } : null;
+  }, []);
 
   const follow = useCallback(() => {
     const node = scroller.current;
     if (node && stuck.current) node.scrollTop = node.scrollHeight;
-  }, []);
+    else if (node && anchor.current?.node.isConnected) node.scrollTop += anchor.current.node.getBoundingClientRect().top - anchor.current.top;
+    captureAnchor();
+  }, [captureAnchor]);
 
   const scrollRef = useCallback((node: Scroller | null) => {
     detach.current();
@@ -62,6 +72,7 @@ export function useStickToBottom<Scroller extends HTMLElement, Content extends H
     const onScroll = () => {
       if (node.scrollHeight - node.clientHeight - node.scrollTop <= anchorSlack) stuck.current = true;
       else if (dragging || Date.now() - handledAt < inputSettles) stuck.current = false;
+      captureAnchor();
     };
     node.addEventListener("scroll", onScroll, { passive: true });
     node.addEventListener("wheel", handled, { passive: true });
@@ -83,7 +94,8 @@ export function useStickToBottom<Scroller extends HTMLElement, Content extends H
     // the way returning to a conversation should.
     stuck.current = true;
     node.scrollTop = node.scrollHeight;
-  }, []);
+    anchor.current = null;
+  }, [captureAnchor]);
 
   const contentRef = useCallback((node: Content | null) => {
     observer.current?.disconnect();

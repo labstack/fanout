@@ -8,6 +8,16 @@ export type PanelFragment = {
   trace?: Result<TraceDetail>;
 };
 
+export function fragmentTitle(fragment: PanelFragment): string {
+  const panels = fragment.dashboard.panels;
+  if (panels.length === 1) return panels[0].title;
+  if (fragment.dashboard.name !== "Telemetry") return fragment.dashboard.name;
+  const ids = new Set(panels.map(panel => panel.id));
+  if (["latency", "errors", "requests", "endpoints"].every(id => ids.has(id))) return "Service performance";
+  if (ids.has("volume") && ids.has("events")) return "Log explorer";
+  return `${panels[0].title} and ${panels.length - 1} panels`;
+}
+
 export function panelFragment(value: unknown): PanelFragment {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Missing panel view");
   const f = value as Partial<PanelFragment>;

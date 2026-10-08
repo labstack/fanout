@@ -123,42 +123,14 @@ func TestDashboardOwnerRejectsTokenMissingDashboardScope(t *testing.T) {
 	}
 }
 
-func (f *fakeObservability) Overview(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Overview], error) {
-	f.scope = scope
-	return observability.Result[observability.Overview]{
-		Schema:  observability.OverviewSchema,
-		Summary: "2 services: 0 unhealthy, 0 degraded, 2 healthy",
-		Data:    observability.Overview{ServiceCount: 2},
-	}, nil
-}
-
 func (f *fakeObservability) Dependencies(_ context.Context, scope observability.Scope, options observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
 	f.scope = scope
 	return observability.Result[observability.Dependencies]{Schema: observability.DependenciesSchema, Data: observability.Dependencies{Service: options.Service, Direction: options.Direction, MaxDepth: options.MaxDepth, MaxNodes: options.MaxNodes}}, nil
 }
 
-func (f *fakeObservability) Topology(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Topology], error) {
-	f.scope = scope
-	return observability.Result[observability.Topology]{
-		Schema:  observability.TopologySchema,
-		Summary: "2 services connected by 1 dependency edge",
-		Data:    observability.Topology{Edges: []observability.Edge{{Caller: "api", Callee: "db"}}},
-	}, nil
-}
-
-func (f *fakeObservability) Performance(_ context.Context, scope observability.Scope, _ observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
-	f.scope = scope
-	return observability.Result[observability.Performance]{Schema: observability.PerformanceSchema, Summary: "performance"}, nil
-}
-
 func (f *fakeObservability) Trace(_ context.Context, scope observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
 	f.scope = scope
 	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema, Summary: "trace", Data: observability.TraceDetail{Spans: nil}}, nil
-}
-
-func (f *fakeObservability) Logs(_ context.Context, scope observability.Scope, _, _, _ string, _ int) (observability.Result[observability.Logs], error) {
-	f.scope = scope
-	return observability.Result[observability.Logs]{Schema: observability.LogsSchema, Summary: "logs", Data: observability.Logs{Entries: nil}}, nil
 }
 
 func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
@@ -317,6 +289,11 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 		listed, err := session.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
+		}
+		for _, tool := range listed.Tools {
+			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+				t.Fatalf("app helper exposed without negotiation: %s", tool.Name)
+			}
 		}
 		if len(listed.Tools) != 9 {
 			t.Fatalf("tool count = %d, want 9", len(listed.Tools))

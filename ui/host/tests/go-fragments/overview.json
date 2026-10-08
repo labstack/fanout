@@ -1,0 +1,128 @@
+{
+  "dashboard": {
+    "version": 1,
+    "name": "System health",
+    "time": {
+      "from": "2026-10-07T18:45:00Z",
+      "to": "2026-10-07T19:45:00Z",
+      "refresh": "off"
+    },
+    "panels": [
+      {
+        "id": "health",
+        "title": "System health",
+        "viz": "health",
+        "width": 12,
+        "height": "m",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "limit": 400
+        }
+      }
+    ]
+  },
+  "results": [
+    {
+      "id": "health",
+      "status": "ok",
+      "frame": {
+        "health": {
+          "health": "unhealthy",
+          "counts": {
+            "healthy": 0,
+            "degraded": 0,
+            "unhealthy": 1
+          },
+          "total_spans": 30,
+          "error_rate": 10,
+          "service_count": 1,
+          "error_trend": [
+            10
+          ]
+        },
+        "columns": [
+          {
+            "name": "service",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "health",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "spans",
+            "type": "number",
+            "role": "measure",
+            "unit": "count"
+          },
+          {
+            "name": "error_rate",
+            "type": "number",
+            "role": "measure",
+            "unit": "percent"
+          },
+          {
+            "name": "p50_ms",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          },
+          {
+            "name": "p95_ms",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          },
+          {
+            "name": "log_count",
+            "type": "number",
+            "role": "measure",
+            "unit": "count"
+          },
+          {
+            "name": "metric_count",
+            "type": "number",
+            "role": "measure",
+            "unit": "count"
+          }
+        ],
+        "values": [
+          [
+            "checkout"
+          ],
+          [
+            "unhealthy"
+          ],
+          [
+            30
+          ],
+          [
+            10
+          ],
+          [
+            100
+          ],
+          [
+            100
+          ],
+          [
+            30
+          ],
+          [
+            0
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "observability.Service.Overview",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000
+    }
+  ]
+}

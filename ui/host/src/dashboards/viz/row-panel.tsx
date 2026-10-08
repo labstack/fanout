@@ -75,6 +75,6 @@ export function RowPanel(props: AnalysisProps) {
     return undefined;
   }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, props.traceLinks, model]);
   return <div role="region" aria-label={`${props.title ?? props.panel.title}: ${model.rows.length} rows`}>
-    <TableViz traceLinks={props.traceLinks} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
+    <TableViz foldConstants={props.foldConstants} traceLinks={props.traceLinks} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
   </div>;
 }

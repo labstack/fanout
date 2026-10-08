@@ -1,19 +1,64 @@
 import type { Message } from "@ag-ui/client";
 import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography } from "@mantine/core";
-import { Check, Copy, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
-import { lazy, Suspense, useEffect, type ComponentProps, type ReactNode } from "react";
+import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight } from "@phosphor-icons/react";
+import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { toolTitle, useFanoutApp } from "./app-context";
+import { useFanoutApp } from "./app-context";
 import { useStickToBottom } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
-import { mcpAppContent } from "./mcp-app-content";
+import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { Link } from "@tanstack/react-router";
+import { fragmentTitle } from "../../panels/fragment";
 import { dashboardToolResult } from "./dashboard-tool-result";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
+
+type AppView = { content: MCPAppContent; expanded: boolean };
+// Sort object keys so reloads and equivalent JSON field orders dedupe alike.
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  return JSON.stringify(value) ?? "null";
+}
+function chatAppViews(messages: Message[]) {
+  const views = new Map<string, AppView>(), duplicates = new Set<string>();
+  let turn: Array<{ id: string; content: MCPAppContent }> = [];
+  const finish = () => {
+    const seen = new Set<string>();
+    for (const item of [...turn].reverse()) {
+      const fragment = item.content.tool_result;
+      const mapFrame = fragment.dashboard.panels.length === 1 && fragment.dashboard.panels[0].viz === "service_map" && fragment.results[0].frame && !fragment.results[0].frame.truncated ? fragment.results[0].frame : undefined;
+      const key = canonical({ dashboard: { ...fragment.dashboard, name: "", panels: fragment.dashboard.panels.map(panel => ({ ...panel, id: "", title: "", ...(panel.query ? { query: { ...panel.query, where: [...(panel.query.where ?? [])].sort(), ...(mapFrame ? { limit: undefined } : {}) } } : {}) })) }, vars: fragment.vars ?? {}, ...(mapFrame ? { map: mapFrame } : {}), ...(fragment.dashboard.time.from ? {} : { windows: fragment.results.map(result => [result.from_ms ?? 0, result.to_ms ?? 0]) }) });
+      if (seen.has(key)) duplicates.add(item.id);
+      else { views.set(item.id, { content: item.content, expanded: seen.size === 0 }); seen.add(key); }
+    }
+    turn = [];
+  };
+  for (const message of messages) {
+    if (message.role === "user") finish();
+    if (message.role === "activity" && message.activityType === "mcp-app") {
+      const content = mcpAppContent(message.content);
+      if (content) turn.push({ id: message.id, content });
+    }
+  }
+  finish(); return { views, duplicates };
+}
+function ChatAppView({ view }: { view: AppView }) {
+  const [expanded, setExpanded] = useState(view.expanded);
+  useEffect(() => setExpanded(view.expanded), [view.expanded]);
+  const fragment = view.content.tool_result;
+  const title = fragmentTitle(fragment);
+  const viz = [...new Set(fragment.dashboard.panels.map(panel => panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")))].join(", ");
+  const rows = fragment.results.reduce((count, result) => count + (result.frame?.rows ?? 0), 0);
+  const status = fragment.results.some(result => result.frame) ? `${rows} rows` : fragment.results.map(result => result.status).join(", ");
+  return <Paper data-chat-app data-chat-anchor withBorder radius="lg" style={{ overflow: "hidden" }}>
+    <Button fullWidth variant="subtle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)} leftSection={expanded ? <CaretDown /> : <CaretRight />} styles={{ label: { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }}>{title} · {viz} · {status}</Button>
+    {expanded && <Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={view.content} /></Suspense>}
+  </Paper>;
+}
 
 const suggestions = [
   "Summarize system health for the last hour",
@@ -35,7 +80,8 @@ export function ChatPage() {
     const saved = dashboardToolResult(message.toolCallId, message.content, messages);
     return saved ? [[message.id, saved] as const] : [];
   }));
-  const visibleMessages = messages.filter((message) => message.role !== "tool" || dashboardResults.has(message.id));
+  const appViews = chatAppViews(messages);
+  const visibleMessages = messages.filter((message) => !appViews.duplicates.has(message.id) && (message.role !== "tool" || Boolean(message.error) || dashboardResults.has(message.id)));
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
@@ -59,7 +105,7 @@ export function ChatPage() {
                   <Box miw={0}><Text size="xs" c="dimmed">{saved.label}</Text><Text size="sm" fw={500} style={{ overflowWrap: "anywhere" }}>{saved.name}</Text></Box>
                   <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{ dashboardId: saved.id }} search={{}} />} variant="subtle" size="compact-sm">Open dashboard</Button>
                 </Group>
-              </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} send={send} />;
+              </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />;
             })}
             {running && <Group gap="xs"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
             {error && <RunError message={error} onRetry={retry} />}
@@ -110,21 +156,17 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   </Stack>;
 }
 
-function ChatMessage({ message, time, send }: { message: Message; time?: number; send: (text: string) => Promise<void> }) {
+function ChatMessage({ message, time, appView }: { message: Message; time?: number; appView?: AppView }) {
+  if (message.role === "tool" && message.error) return <Alert color="bad" data-chat-anchor>{String(message.content || message.error)}</Alert>;
   if (message.role === "activity") {
-    const activity = message as Message & { activityType?: string; content: unknown };
-    if (activity.activityType === "mcp-app") {
-      const content = mcpAppContent(activity.content);
-      if (!content) return <Alert color="bad">This view could not be loaded. Please try again.</Alert>;
-      return <Paper withBorder radius="lg" style={{ overflow: "hidden" }} aria-label={toolTitle(content.tool_name)}><Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={content} onMessage={send} /></Suspense></Paper>;
-    }
+    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
     return null;
   }
   const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";
   const stamp = time ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(time)) : "";
-  return <Box className="chat-message" data-role={user ? "user" : "assistant"}>
+  return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
       : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}

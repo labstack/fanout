@@ -1,0 +1,145 @@
+{
+  "dashboard": {
+    "version": 1,
+    "name": "Trace detail",
+    "time": {
+      "from": "2026-10-07T18:45:00Z",
+      "to": "2026-10-07T19:45:00Z",
+      "refresh": "off"
+    },
+    "panels": [
+      {
+        "id": "traces",
+        "title": "Slow or erroring traces",
+        "viz": "traces",
+        "width": 12,
+        "height": "m",
+        "query": {
+          "from": "spans",
+          "where": [
+            "namespace = 'shop'",
+            "trace_id = 'trace-1'"
+          ],
+          "limit": 50
+        },
+        "drill": "traces"
+      }
+    ]
+  },
+  "results": [
+    {
+      "id": "traces",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "trace_id",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "namespace",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "service",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "operation",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "duration_ms",
+            "type": "number",
+            "role": "measure",
+            "unit": "ms"
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "start",
+            "type": "time",
+            "role": "time"
+          }
+        ],
+        "values": [
+          [
+            "trace-1"
+          ],
+          [
+            "shop"
+          ],
+          [
+            "checkout"
+          ],
+          [
+            "GET cart"
+          ],
+          [
+            100
+          ],
+          [
+            "STATUS_CODE_ERROR"
+          ],
+          [
+            1791400501000
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "WITH candidates AS (SELECT namespace,trace_id FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop')) AND ((trace_id = 'trace-1')) AND trace_id\u003c\u003e'' GROUP BY namespace,trace_id ORDER BY max(duration_ms) DESC,namespace,trace_id LIMIT 51), roots AS (SELECT s.trace_id,s.namespace,s.service,s.operation,s.duration_ms,CASE WHEN max(CASE WHEN s.status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END) OVER(PARTITION BY s.namespace,s.trace_id)\u003e0 THEN 'STATUS_CODE_ERROR' ELSE coalesce(s.status,'') END AS status,s.start_time,row_number() OVER(PARTITION BY s.namespace,s.trace_id ORDER BY (coalesce(s.parent_span_id,'')='') DESC,s.start_time,s.span_id) AS n\nFROM spans s JOIN candidates c ON s.namespace=c.namespace AND s.trace_id=c.trace_id\nWHERE s.start_time\u003e=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time\u003c?::TIMESTAMP_NS::TIMESTAMPTZ_NS)\nSELECT coalesce(trace_id,''),coalesce(namespace,'')…",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000
+    }
+  ],
+  "trace": {
+    "schema": "fanout.trace.result@1",
+    "summary": "Trace trace-1 contains 1 spans across 1 services",
+    "data": {
+      "trace_id": "trace-1",
+      "duration_ms": 100,
+      "has_error": true,
+      "services": [
+        "checkout"
+      ],
+      "spans": [
+        {
+          "span_id": "span-1",
+          "service": "checkout",
+          "operation": "GET cart",
+          "kind": "SPAN_KIND_SERVER",
+          "start": "2026-10-07T19:15:01Z",
+          "duration_ms": 100,
+          "status": "STATUS_CODE_ERROR"
+        }
+      ],
+      "logs": [
+        {
+          "time": "2026-10-07T19:15:01Z",
+          "severity": "ERROR",
+          "service": "checkout",
+          "body": "timeout",
+          "trace_id": "trace-1"
+        }
+      ],
+      "span_count": 1,
+      "service_count": 1,
+      "truncated": false
+    },
+    "provenance": {
+      "query_id": "seeded-trace",
+      "window": "2026-10-07T18:45:00Z/2026-10-07T19:45:00Z",
+      "generated_at": "2026-10-07T19:45:00Z",
+      "complete": true,
+      "data_source": "parquet_index"
+    }
+  }
+}

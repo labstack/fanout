@@ -13,7 +13,6 @@ const maxAppHeight = 2000;
 
 class InvalidMCPAppResourceError extends Error {}
 
-export type { MCPAppContent } from "./mcp-app-content";
 
 type BrowserMCPConnection = {
   client: Client;
@@ -182,17 +181,13 @@ function enforceMCPAppCSP(html: string, meta: unknown): string {
   return `<!doctype html><html><head>${tag}</head><body>${html}</body></html>`;
 }
 
-function userText(blocks: Array<Record<string, unknown>>): string {
-  return blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n");
-}
-
-export default function MCPAppFrame({ content: value, onMessage }: { content: unknown; onMessage: (text: string) => Promise<void> }) {
+export default function MCPAppFrame({ content: value }: { content: unknown }) {
   const content = mcpAppContent(value);
   if (!content) return <Alert color="bad" m="md">This view could not be loaded. Please try again.</Alert>;
-  return <ValidatedMCPAppFrame content={content} onMessage={onMessage} />;
+  return <ValidatedMCPAppFrame content={content} />;
 }
 
-function ValidatedMCPAppFrame({ content, onMessage }: { content: MCPAppContent; onMessage: (text: string) => Promise<void> }) {
+function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const clientRef = useRef<Client | null>(null);
   const connectionRef = useRef<BrowserMCPConnection | null>(null);
@@ -296,14 +291,9 @@ function ValidatedMCPAppFrame({ content, onMessage }: { content: MCPAppContent; 
       };
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
-        if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.ceil(requested) + 32)));
+        if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.round(requested))));
       };
-      bridge.onmessage = async ({ content: blocks }) => {
-        const text = userText(blocks as Array<Record<string, unknown>>);
-        if (!text) return { isError: true };
-        await onMessage(text);
-        return {};
-      };
+      bridge.onmessage = async () => ({ isError: true });
       bridge.oninitialized = async () => {
         await bridge.sendToolInput({ arguments: content.tool_input ?? {} });
         await bridge.sendToolResult({
@@ -321,5 +311,5 @@ function ValidatedMCPAppFrame({ content, onMessage }: { content: MCPAppContent; 
 
   if (error) return <Alert color="bad" m="md">{error}</Alert>;
   if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
-  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
+  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height }} onLoad={() => void connectBridge()} />;
 }

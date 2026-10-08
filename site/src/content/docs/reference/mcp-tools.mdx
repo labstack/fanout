@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "18 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
+summary: "18 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -14,7 +14,7 @@ generated: true
     this page. */}
 
 A Fanout instance serves MCP at `/mcp`. 18 tools, listed below exactly as the
-server reports them to a connecting client.
+server reports them to an Apps-enabled client. Ordinary clients receive the 15 model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
 and reaches nothing else.
@@ -120,15 +120,15 @@ Read-only. Calling it changes nothing.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
-| `dashboard` | `object` | **yes** | — |
-| `from` | `string` | **yes** | — |
-| `panel_id` | `string` | **yes** | — |
-| `to` | `string` | **yes** | — |
-| `bucket` | `object` | no | — |
-| `dimensions` | `object` | no | — |
-| `kind` | `string` | no | — |
-| `time` | `object` | no | — |
-| `vars` | `object` | no | — |
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `from` | `string` | **yes** | Selection start as an RFC3339Nano UTC timestamp |
+| `panel_id` | `string` | **yes** | ID of the selected panel in dashboard |
+| `to` | `string` | **yes** | Selection end as an RFC3339Nano UTC timestamp, after from |
+| `bucket` | `object` | no | Optional selected bucket with its exact bounds |
+| `dimensions` | `object` | no | Exact dimension values of the selected series or row |
+| `kind` | `string` | no | Selection signal: traces or logs; defaults from the selected panel |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
 
 ## get_service_dependencies
 
@@ -238,15 +238,15 @@ Read-only. Calling it changes nothing.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
-| `dashboard` | `object` | **yes** | — |
-| `compare` | `boolean` | no | — |
-| `time` | `object` | no | — |
-| `vars` | `object` | no | — |
-| `widths` | `object` | no | — |
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `compare` | `boolean` | no | Override previous-period comparison for the complete fragment |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
+| `widths` | `object` | no | Optional panel widths in pixels, keyed by panel ID |
 
 ## query_telemetry
 
-**Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide.
+**Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide. The authored spec plus vars must fit 128 KiB (131072 serialized JSON bytes); larger inputs are rejected with their actual size.
 
 Read-only. Calling it changes nothing.
 
@@ -255,9 +255,9 @@ Read-only. Calling it changes nothing.
 | Input | Type | Required | Means |
 |---|---|---|---|
 | `panel` | `object` | **yes** | One v1 panel to display in the answer |
-| `time` | `object` | no | — |
-| `variables` | `array` | no | — |
-| `vars` | `object` | no | — |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `variables` | `array` | no | Optional v1 variable definitions used by this panel |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
 
 ## replace_dashboard
 
@@ -282,9 +282,9 @@ Read-only. Calling it changes nothing.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
-| `dashboard` | `object` | **yes** | — |
-| `time` | `object` | no | — |
-| `vars` | `object` | no | — |
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
 
 ## search_logs
 
@@ -299,7 +299,7 @@ Read-only. Calling it changes nothing.
 | `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum log entries to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
-| `search` | `string` | no | Optional case-insensitive text contained in the log body |
+| `search` | `string` | no | Optional case-insensitive text contained in the log body, at most 200 characters |
 | `service` | `string` | no | Optional exact OpenTelemetry service name |
 | `severity` | `string` | no | Optional exact severity such as ERROR, WARN, or INFO |
 | `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |

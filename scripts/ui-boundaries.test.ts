@@ -46,8 +46,7 @@ test("allows workspace packages and package-free shared imports; skips comments 
     "host/src/mcp-apps/test.ts": 'import { X } from "@mantine/core"; import { Y } from "../dashboards/test";',
     "panels/test.ts": 'export type { Y } from "./types"; import { X } from "../tokens"; // import "react";\n/* export { X } from "react"; */ const text = \'import "react";\';',
     "tokens.ts": 'export const X = 1; const regex = /[&<>"\']/g; const template = `${X} text import "react";`;',
-    "host/src/test.css": '.x { color: #fff; } /* @import "../../apps/src/x.css"; */',
-    "host/node_modules/test/index.ts": 'import { X } from "../../../apps/src/x";',
-
+    "host/src/test.css": '.x { color: #fff; } /* @import "../outside/x.css"; */',
+    "host/node_modules/test/index.ts": 'import { X } from "../../../outside/src/x";',
   }).exitCode).toBe(0);
 });

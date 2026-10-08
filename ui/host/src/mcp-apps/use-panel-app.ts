@@ -17,6 +17,7 @@ export function usePanelApp() {
     }
   }
   const connection = useApp({
+    autoResize: false,
     appInfo: { name: "Fanout panels", version: "1.0.0" }, capabilities: {},
     onAppCreated: app => {
       app.ontoolresult = acceptResult;

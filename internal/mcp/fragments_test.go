@@ -86,8 +86,8 @@ func largeLogsFragment() PanelFragment {
 }
 func TestFragmentSummaryBoundedLogsFixture(t *testing.T) {
 	f := largeLogsFragment()
-	a := fragmentSummary(f.Results)
-	b := fragmentSummary(f.Results)
+	a := fragmentSummary(f)
+	b := fragmentSummary(f)
 	if len(a) > 16*1024 || a != b {
 		t.Fatalf("summary bytes=%d deterministic=%v", len(a), a == b)
 	}
@@ -102,7 +102,7 @@ func TestFragmentSummaryBoundedLogsFixture(t *testing.T) {
 }
 func TestFragmentPayloadCapLogsFixture(t *testing.T) {
 	original := largeLogsFragment()
-	got := boundFragment(original)
+	got := boundedTestFragment(t, original)
 	raw, err := json.Marshal(got)
 	if err != nil {
 		t.Fatal(err)
@@ -134,8 +134,8 @@ func TestFragmentSummaryBoundedWideUnicode(t *testing.T) {
 		}
 		results = append(results, panel.Result{ID: fmt.Sprintf("panel_%d", i), Status: panel.StatusOK, Frame: f, SQL: "DO NOT EXPOSE SQL", Diagnosis: "diagnosis"})
 	}
-	got := fragmentSummary(results)
-	if len(got) > 16*1024 || !utf8.ValidString(got) || got != fragmentSummary(results) || strings.Contains(got, "DO NOT EXPOSE SQL") {
+	got := fragmentSummary(PanelFragment{Results: results})
+	if len(got) > 16*1024 || !utf8.ValidString(got) || got != fragmentSummary(PanelFragment{Results: results}) || strings.Contains(got, "DO NOT EXPOSE SQL") {
 		t.Fatal("summary bound/determinism/UTF-8/SQL")
 	}
 	for _, r := range results {
@@ -158,8 +158,8 @@ func TestFragmentPayloadLargestPreviousTrendsAndTrace(t *testing.T) {
 		original.Trace.Data.Spans[i].Operation = strings.Repeat("operation", 1000)
 		original.Trace.Data.Logs[i].Body = strings.Repeat("log", 1000)
 	}
-	got := boundFragment(original)
-	if fragmentBytes(got) > fragmentPayloadLimit || got.Results[0].Frame.Rows != 1 {
+	got := boundedTestFragment(t, original)
+	if testFragmentBytes(t, got) > fragmentPayloadLimit || got.Results[0].Frame.Rows != 1 {
 		t.Fatal("cap or largest selection")
 	}
 	for _, f := range []*panel.Frame{got.Results[1].Frame, got.Results[1].Previous} {
@@ -187,7 +187,7 @@ func TestFragmentPayloadLargestPreviousTrendsAndTrace(t *testing.T) {
 
 func TestFragmentPayloadFixedMetadataAndSmallUnchanged(t *testing.T) {
 	small := PanelFragment{Dashboard: fragmentPreset("trace", "", "", "", "", 50), Results: []panel.Result{{ID: "traces", Status: panel.StatusEmpty, Diagnosis: "No traces"}}}
-	if !reflect.DeepEqual(boundFragment(small), small) {
+	if !reflect.DeepEqual(boundedTestFragment(t, small), small) {
 		t.Fatal("small payload changed")
 	}
 	var f PanelFragment
@@ -196,9 +196,9 @@ func TestFragmentPayloadFixedMetadataAndSmallUnchanged(t *testing.T) {
 		f.Dashboard.Panels = append(f.Dashboard.Panels, panel.Panel{ID: id, Title: id, Viz: "text", Content: "Text"})
 		f.Results = append(f.Results, panel.Result{ID: id, Status: panel.StatusError, SQL: strings.Repeat("sql", 100000), Error: strings.Repeat("error", 100000), Diagnosis: strings.Repeat("diagnosis", 100000), Frame: &panel.Frame{Columns: []panel.Column{}, Values: [][]any{}, Note: strings.Repeat("note", 100000)}})
 	}
-	got := boundFragment(f)
-	if fragmentBytes(got) > fragmentPayloadLimit {
-		t.Fatalf("fixed metadata bytes=%d", fragmentBytes(got))
+	got := boundedTestFragment(t, f)
+	if testFragmentBytes(t, got) > fragmentPayloadLimit {
+		t.Fatalf("fixed metadata bytes=%d", testFragmentBytes(t, got))
 	}
 }
 
@@ -262,14 +262,24 @@ func TestFragmentPresetsExecutedSummariesAndEndpointScope(t *testing.T) {
 				t.Fatalf("%s: %+v", name, r)
 			}
 			if r.ID == "endpoints" {
+				if r.Frame == nil {
+					t.Fatal("missing endpoints frame")
+				}
+				cart := false
 				for c, col := range r.Frame.Columns {
 					if col.Name == "http_route" {
 						for _, value := range r.Frame.Values[c] {
+							if value == "/cart" {
+								cart = true
+							}
 							if value == "" {
 								t.Fatal("empty route included")
 							}
 						}
 					}
+				}
+				if !cart {
+					t.Fatal("missing /cart endpoint")
 				}
 			}
 		}
@@ -317,9 +327,9 @@ func TestFragmentPayloadCapFixedWideFramesAndScopes(t *testing.T) {
 		}
 		f.Results = append(f.Results, r)
 	}
-	got := boundFragment(f)
-	if fragmentBytes(got) > fragmentPayloadLimit {
-		t.Fatalf("fixed metadata escaped cap: %d", fragmentBytes(got))
+	got := boundedTestFragment(t, f)
+	if testFragmentBytes(t, got) > fragmentPayloadLimit {
+		t.Fatalf("fixed metadata escaped cap: %d", testFragmentBytes(t, got))
 	}
 	for _, r := range got.Results {
 		if !r.Frame.Truncated || r.Frame.Note == "" || len(r.Frame.Columns) != len(r.Frame.Values) {
@@ -382,7 +392,7 @@ func TestFragmentNamedToolsMCPSeededContract(t *testing.T) {
 			if name == "inspect_trace" && (f.Trace == nil || f.Trace.Data.TraceID != "trace-1") {
 				t.Fatal("missing exact trace")
 			}
-			if result.Content[0].(*mcp.TextContent).Text != fragmentSummary(f.Results) {
+			if result.Content[0].(*mcp.TextContent).Text != fragmentSummary(f) {
 				t.Fatal("summary differs from bounded fragment")
 			}
 		}
@@ -401,4 +411,21 @@ func TestQueryTelemetryDoesNotMutateAuthoredInput(t *testing.T) {
 	if string(after) != string(before) {
 		t.Fatalf("authored input changed: %s", after)
 	}
+}
+
+func boundedTestFragment(t *testing.T, f PanelFragment) PanelFragment {
+	t.Helper()
+	out, err := boundFragment(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+func testFragmentBytes(t *testing.T, f PanelFragment) int {
+	t.Helper()
+	size, err := jsonBytes(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return size
 }

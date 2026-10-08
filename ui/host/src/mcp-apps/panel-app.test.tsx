@@ -5,10 +5,11 @@ import type { App } from "@modelcontextprotocol/ext-apps";
 import { PanelApp } from "./panel-app";
 import template from "../../panels.html?raw";
 import { fixture, traceFixture, presets, presetFixture, assertPresetData } from "../../tests/fixtures";
-const bridge = vi.hoisted(() => ({ app: null as unknown as App, connected: true, connectionError: null as Error | null }));
+const bridge = vi.hoisted(() => ({ app: null as unknown as App, connected: true, connectionError: null as Error | null, autoResize: undefined as boolean | undefined }));
 vi.mock("@modelcontextprotocol/ext-apps/react", async () => {
   const { useEffect } = await import("react");
-  return { useApp: ({ onAppCreated }: { onAppCreated(app: App): void }) => {
+  return { useApp: ({ onAppCreated, autoResize }: { onAppCreated(app: App): void; autoResize?: boolean }) => {
+    bridge.autoResize = autoResize;
     useEffect(() => { if (bridge.connected) onAppCreated(bridge.app); }, []);
     return { app: bridge.connected ? bridge.app : null, error: bridge.connectionError };
   } };
@@ -16,7 +17,7 @@ vi.mock("@modelcontextprotocol/ext-apps/react", async () => {
 vi.mock("../dashboards/echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }));
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); bridge.connected = true; bridge.connectionError = null;
-  bridge.app = { callServerTool: vi.fn(), getHostContext: () => ({ theme: "light" }) } as unknown as App;
+  bridge.app = { callServerTool: vi.fn(), sendSizeChanged: vi.fn(), getHostContext: () => ({ theme: "light" }) } as unknown as App;
 });
 afterEach(() => vi.unstubAllGlobals());
 async function mount() {
@@ -82,14 +83,11 @@ it.each(presets.flatMap(preset => [false, true].map(dark => ({ preset, dark })))
     expect(fetch).not.toHaveBeenCalled(); expect(bridge.app.callServerTool).not.toHaveBeenCalled();
   } finally { await view.cleanup(); fetch.mockRestore(); }
 });
-it("keeps the last good answer and sanitizes rejected refresh requests", async () => {
+
+it("disables document autosizing and measures only an intrinsic content wrapper", async () => {
   const view = await mount();
   try {
-    await act(async () => bridge.app.ontoolresult!({ structuredContent: fixture(), content: [] }));
-    vi.mocked(bridge.app.callServerTool).mockRejectedValue(new Error("private RPC diagnostic"));
-    await act(async () => view.node.querySelector<HTMLButtonElement>('[aria-label="Refresh panels"]')!.click());
-    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("This view could not be refreshed.");
-    expect(view.node.textContent).toContain("No logs for checkout");
-    expect(view.node.textContent).not.toContain("private");
+    expect(bridge.autoResize).toBe(false);
+    expect(view.node.querySelector("[data-app-content]")).not.toBeNull();
   } finally { await view.cleanup(); }
 });

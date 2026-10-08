@@ -224,6 +224,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 }
 
 func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (bool, error) {
+	seenAppViews := map[string]bool{}
 	caller := ctx
 	timeout := r.runTimeout
 	if timeout == 0 {
@@ -371,7 +372,15 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			}
 			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: errorString(execution.IsError)})
 			conversation = append(conversation, ProviderMessage{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: call.ID, Content: execution.Content, IsError: execution.IsError}})
-			if execution.AppResourceURI != "" {
+			emitApp := execution.AppResourceURI != "" && !execution.IsError
+			identity := fragmentIdentity(execution.Structured)
+			if identity != "" && seenAppViews[identity] {
+				emitApp = false
+			}
+			if emitApp {
+				if identity != "" {
+					seenAppViews[identity] = true
+				}
 				activityID, err := appid.New()
 				if err != nil {
 					return truncated, err

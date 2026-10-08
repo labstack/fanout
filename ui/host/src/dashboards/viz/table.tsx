@@ -20,7 +20,7 @@ type Row = Cell[];
 
 export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowIndex: number; columnIndex: number };
 
-export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks }: { traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
+export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks, foldConstants = true }: { foldConstants?: boolean; traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
   const dark=useComputedColorScheme("light")==="dark";
   const traceInteractive = Boolean(onPoint);
   const pointCallback = useRef(onPoint);
@@ -28,7 +28,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   pointCallback.current = onPoint;
   variableCallback.current = onVariable;
   const frame = result.frame!;
-  const hidden = useMemo(() => new Set(logConstants(panel,frame).map(c=>c.name)),[panel,frame]);
+  const hidden = useMemo(() => new Set((foldConstants ? logConstants(panel,frame) : []).map(c=>c.name)),[panel,frame,foldConstants]);
   const [expanded,setExpanded] = useState<Set<number>>(new Set());
   useEffect(()=>setExpanded(new Set()),[frame]);
   const expandable = (column: Column) => ["body","body_template"].includes(column.name) || panel.options?.columns?.some(c=>c.field===column.name&&c.format==="log_template");
@@ -65,10 +65,10 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           {index === firstMeasure && maxima[index] > 0 && <Box w={56} h={6} bg="var(--mantine-color-default-border)" style={{ borderRadius: 3, overflow: "hidden", flex: "none" }}><Box h="100%" w={`${(value / maxima[index]) * 100}%`} bg="var(--mantine-primary-color-filled)" /></Box>}
         </Box>;
       }
-      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
+      if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap", ...(panel.viz === "traces" ? { overflow: "hidden", textOverflow: "ellipsis" } : {}) }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
       const text = value === null ? "—" : String(value);
       if (column.name === "trace_id") return <Text fz={12} ff="monospace" title={text} data-trace-id={text}>{text.slice(0,16)}</Text>;
-      return <Text fz={12} className="dashboard-dimension-nowrap" title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
+      return <Text fz={12} className="dashboard-dimension-nowrap" style={panel.viz === "traces" ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } : undefined} title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
     },
     sortFn: column.role === "measure" ? "basic" : "alphanumeric",
   })).filter(c=>!hidden.has(c.id!)).sort((a,b)=> {
@@ -99,14 +99,14 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   const fixedWidths=columns.flatMap(c=>logWidths[c.id!]? [logWidths[c.id!]]:[]);
   const minWidth=panel.viz === "logs" && columns.some(c=>c.id==="body") ? fixedWidths.reduce((sum,n)=>sum+n,0)+Math.max(180,...fixedWidths) : panel.viz === "log_patterns" ? 660 : undefined;
   return <Box>
-    <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth}}>
+    <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth, ...(panel.viz === "traces" ? { width: "100%", tableLayout: "fixed" } : {}) }}>
       <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "log_patterns" ? ({severity:"100px",service:"140px",count:"140px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
       <Table.Thead>
         {table.getHeaderGroups().map((group) => <Table.Tr key={group.id}>
           {group.headers.map((header) => {
             const measure = frame.columns.find(c=>c.name===header.column.id)?.type === "number";
             return <Table.Th aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none"} key={header.id} ta={measure ? "right" : undefined}>
-              <UnstyledButton onClick={header.column.getToggleSortingHandler()} fz="xs" c="dimmed" ff="monospace" fw={500}>
+              <UnstyledButton onClick={header.column.getToggleSortingHandler()} fz="xs" c="dimmed" ff="monospace" fw={500} title={header.column.id} style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <table.FlexRender header={header} />{header.column.getIsSorted() === "asc" ? <CaretUp size={10} /> : header.column.getIsSorted() === "desc" ? <CaretDown size={10} /> : null}
               </UnstyledButton>
             </Table.Th>;
@@ -119,7 +119,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
             const column=frame.columns.find(c=>c.name===cell.column.id)!;
-            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : undefined}>
+            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : panel.viz === "traces" ? { overflow: "hidden" } : undefined}>
               {expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>}
             </Table.Td>;
           })}

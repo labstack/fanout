@@ -1,18 +1,22 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	mcpUIExtension = "io.modelcontextprotocol/ui"
-	mcpAppMIME     = "text/html;profile=mcp-app"
+	mcpUIExtension = fanoutmcp.UIExtension
+	mcpAppMIME     = fanoutmcp.AppMIME
 )
 
 type ToolExecution struct {
@@ -53,7 +57,7 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 	}
 	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}}
 	for _, tool := range listed.Tools {
-		if appOnlyTool(tool.Meta) {
+		if fanoutmcp.AppOnly(tool.Meta) {
 			continue
 		}
 		registry.definitions = append(registry.definitions, ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
@@ -80,6 +84,16 @@ func (r *ToolRegistry) Close() error {
 func (r *ToolRegistry) Definitions() []ToolDef { return append([]ToolDef(nil), r.definitions...) }
 
 func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecution, error) {
+	allowed := false
+	for _, definition := range r.definitions {
+		if definition.Name == call.Name {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return ToolExecution{Content: "This tool is unavailable to the model: " + call.Name, IsError: true}, nil
+	}
 	arguments := json.RawMessage(call.Input)
 	if len(arguments) == 0 {
 		arguments = json.RawMessage(`{}`)
@@ -108,6 +122,12 @@ func (r *ToolRegistry) modelContent(name string, result *mcp.CallToolResult) (st
 			return "", fmt.Errorf("encode MCP structured content for %s: %w", name, marshalErr)
 		}
 	}
+	if r.apps[name] != "" && len(content) > 16*1024 {
+		content = content[:16*1024]
+		for !utf8.ValidString(content) {
+			content = content[:len(content)-1]
+		}
+	}
 	if content == "" {
 		content = "{}"
 	}
@@ -133,13 +153,65 @@ func appResourceURI(meta mcp.Meta) string {
 	return ""
 }
 
-func appOnlyTool(meta mcp.Meta) bool {
-	ui, _ := meta["ui"].(map[string]any)
-	switch visibility := ui["visibility"].(type) {
-	case []string:
-		return len(visibility) == 1 && visibility[0] == "app"
-	case []any:
-		return len(visibility) == 1 && visibility[0] == "app"
+// Titles and transport IDs do not make two projections different views. A
+// custom service map followed by the topology preset gets one app activity;
+// both tool results still reach the model. Scope, vars and rendering options
+// remain part of the identity.
+func fragmentIdentity(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ""
 	}
-	return false
+	var fragment fanoutmcp.PanelFragment
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err = decoder.Decode(&fragment); err != nil || len(fragment.Dashboard.Panels) == 0 {
+		return ""
+	}
+	fragment.Dashboard.Name = ""
+	var mapData any
+	if len(fragment.Dashboard.Panels) == 1 && fragment.Dashboard.Panels[0].Viz == "service_map" && len(fragment.Results) == 1 && fragment.Results[0].Frame != nil && !fragment.Results[0].Frame.Truncated {
+		// Different safe caps can return exactly the same complete graph. Require
+		// identical projected data before treating those limits as equivalent.
+		if query := fragment.Dashboard.Panels[0].Query; query != nil {
+			query.Limit = 0
+		}
+		mapData = fragment.Results[0].Frame
+	}
+	for i := range fragment.Dashboard.Panels {
+		p := &fragment.Dashboard.Panels[i]
+		p.ID = ""
+		p.Title = ""
+		if p.Query != nil {
+			sort.Strings(p.Query.Where)
+		}
+	}
+	var vars any = fragment.Vars
+	if fragment.Vars == nil {
+		vars = map[string]any{}
+	}
+	var windows [][2]int64
+	if fragment.Dashboard.Time.From == nil {
+		for _, result := range fragment.Results {
+			windows = append(windows, [2]int64{result.FromMS, result.ToMS})
+		}
+	}
+	if fragment.Dashboard.Time.From != nil {
+		at := fragment.Dashboard.Time.From.UTC()
+		fragment.Dashboard.Time.From = &at
+	}
+	if fragment.Dashboard.Time.To != nil {
+		at := fragment.Dashboard.Time.To.UTC()
+		fragment.Dashboard.Time.To = &at
+	}
+	key, err := json.Marshal(struct {
+		Dashboard any        `json:"dashboard"`
+		Vars      any        `json:"vars"`
+		Windows   [][2]int64 `json:"windows,omitempty"`
+		MapData   any        `json:"map,omitempty"`
+	}{fragment.Dashboard, vars, windows, mapData})
+	if err != nil {
+		return ""
+	}
+	return string(key)
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/intelligence"
@@ -21,15 +22,11 @@ const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every panel is ok or deliberately empty, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
+const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every panel is ok or deliberately empty, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
 
 type Observability interface {
-	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
-	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
 	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
-	Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error)
 	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
-	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
 }
 
 type IntelligenceSnapshots interface {
@@ -79,7 +76,7 @@ type LogsInput struct {
 	Namespace string     `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	Service   string     `json:"service,omitempty" jsonschema:"Optional exact OpenTelemetry service name"`
 	Severity  string     `json:"severity,omitempty" jsonschema:"Optional exact severity such as ERROR, WARN, or INFO"`
-	Search    string     `json:"search,omitempty" jsonschema:"Optional case-insensitive text contained in the log body"`
+	Search    string     `json:"search,omitempty" jsonschema:"Optional case-insensitive text contained in the log body, at most 200 characters"`
 	Limit     int        `json:"limit,omitempty" jsonschema:"Maximum log entries to return, from 1 to 500"`
 }
 
@@ -90,6 +87,7 @@ type Server struct {
 	dashboards   *dashboard.Service
 	panels       *panel.Executor
 	now          func() time.Time
+	limitTools   map[string]bool
 }
 
 func New(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, version string) *Server {
@@ -119,12 +117,13 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 		dashboards:   dashboards,
 		panels:       panels,
 		now:          time.Now,
+		limitTools:   make(map[string]bool),
 	}
 	s.registerTools()
 	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
-	s.mcp.AddReceivingMiddleware(addStaticCacheHints, filterMCPAppToolMetadata, rejectFragmentSubset)
+	s.mcp.AddReceivingMiddleware(addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
 	return s
 }
 
@@ -236,35 +235,35 @@ func (s *Server) registerTools() {
 		Description: "Find upstream or downstream dependencies of one service with minimum hop counts. Uses the full scoped edge rollup, handles cycles, and reports truncation from depth or node limits.",
 		Annotations: readOnly,
 	}, s.dependencies)
-	fragmentTool(s.mcp, &mcp.Tool{
+	fragmentTool(s, &mcp.Tool{
 		Name:        "get_observability_overview",
 		Title:       "System health overview",
 		Description: "Summarize service health for a bounded telemetry window. Start here for incident triage.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(panelsAppURI),
 	}, s.overview)
-	fragmentTool(s.mcp, &mcp.Tool{
+	fragmentTool(s, &mcp.Tool{
 		Name:        "get_service_topology",
 		Title:       "Service dependency topology",
 		Description: "Return services and observed dependency edges with health, traffic, latency, and error data.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(panelsAppURI),
 	}, s.topology)
-	fragmentTool(s.mcp, &mcp.Tool{
+	fragmentTool(s, &mcp.Tool{
 		Name:        "get_service_performance",
 		Title:       "Service performance explorer",
 		Description: "Display separate latency, error rate and request rate panels plus slow endpoints for one service or the system.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(panelsAppURI),
 	}, s.performance)
-	fragmentTool(s.mcp, &mcp.Tool{
+	fragmentTool(s, &mcp.Tool{
 		Name:        "inspect_trace",
 		Title:       "Trace detail",
 		Description: "Inspect an exact trace, or select the most relevant recent error or slow trace, with spans, waterfall, flame graph, and correlated logs.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(panelsAppURI),
 	}, s.trace)
-	fragmentTool(s.mcp, &mcp.Tool{
+	fragmentTool(s, &mcp.Tool{
 		Name:        "search_logs",
 		Title:       "Log explorer",
 		Description: "Search and filter logs with a severity timeline and links back to correlated traces.",
@@ -320,6 +319,9 @@ func (s *Server) performance(ctx context.Context, _ *mcp.CallToolRequest, input 
 	return s.presetFragment(ctx, QueryInput{Window: input.Window, Namespace: input.Namespace, Limit: input.Limit, From: input.From, To: input.To}, "performance", input.Service, "", "")
 }
 func (s *Server) logs(ctx context.Context, _ *mcp.CallToolRequest, input LogsInput) (*mcp.CallToolResult, PanelFragment, error) {
+	if utf8.RuneCountInString(input.Search) > 200 {
+		return nil, PanelFragment{}, errors.New("search must be at most 200 characters")
+	}
 	return s.presetFragment(ctx, QueryInput{Window: input.Window, Namespace: input.Namespace, Limit: input.Limit, From: input.From, To: input.To}, "logs", input.Service, input.Severity, input.Search)
 }
 func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceInput) (*mcp.CallToolResult, PanelFragment, error) {
@@ -351,8 +353,11 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 		detail.Data.Services = []string{}
 	}
 	out.Trace = &detail
-	out = boundFragment(out)
-	return summary(fragmentSummary(out.Results)), out, nil
+	out, err = boundFragment(ctx, out)
+	if err != nil {
+		return nil, PanelFragment{}, err
+	}
+	return summary(fragmentSummary(out)), out, nil
 }
 
 func (s *Server) scope(input QueryInput) (observability.Scope, error) {
@@ -416,24 +421,27 @@ func appVisibility(meta mcp.Meta) []string {
 }
 func appOnly(meta mcp.Meta) bool { v := appVisibility(meta); return len(v) == 1 && v[0] == "app" }
 func appHelperMeta() mcp.Meta    { return mcp.Meta{"ui": map[string]any{"visibility": []string{"app"}}} }
-func rejectFragmentSubset(next mcp.MethodHandler) mcp.MethodHandler {
+func (s *Server) validateToolArguments(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		if method == "tools/call" {
 			if call, ok := req.(*mcp.CallToolRequest); ok {
+				if len(call.Params.Arguments) == 0 {
+					call.Params.Arguments = json.RawMessage(`{}`)
+				}
 				var raw map[string]json.RawMessage
-				if err := json.Unmarshal(call.Params.Arguments, &raw); err != nil {
-					return nil, err
+				if err := json.Unmarshal(call.Params.Arguments, &raw); err != nil || raw == nil {
+					return summaryToolError("arguments must be an object"), nil
 				}
 				if _, exists := raw["panels"]; exists && call.Params.Name == "query_panel_fragment" {
-					return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "panels is forbidden for query_panel_fragment"}}}, nil
+					return summaryToolError("panels is forbidden for query_panel_fragment"), nil
 				}
-				switch call.Params.Name {
-				case "get_observability_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs":
-					if value, present := raw["limit"]; present {
-						var limit int
-						if err := json.Unmarshal(value, &limit); err != nil || limit < 1 || limit > 500 {
-							return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "limit must be from 1 to 500"}}}, nil
-						}
+				// Registered limit-bearing inputs use this one wire check: absent is the
+				// typed default; explicit zero/null is invalid. Scope checks
+				// typed calls too, where absence and zero cannot be separated.
+				if value, present := raw["limit"]; present && s.limitTools[call.Params.Name] {
+					var limit int
+					if err := json.Unmarshal(value, &limit); err != nil || limit < 1 || limit > 500 {
+						return summaryToolError("limit must be from 1 to 500"), nil
 					}
 				}
 			}
@@ -441,3 +449,15 @@ func rejectFragmentSubset(next mcp.MethodHandler) mcp.MethodHandler {
 		return next(ctx, method, req)
 	}
 }
+
+func summaryToolError(text string) *mcp.CallToolResult {
+	result := summary(text)
+	result.IsError = true
+	return result
+}
+
+// Shared with the in-process agent catalog; protocol visibility is identical.
+func AppOnly(meta mcp.Meta) bool { return appOnly(meta) }
+
+const UIExtension = mcpUIExtension
+const AppMIME = mcpAppMIME

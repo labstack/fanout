@@ -1,0 +1,5 @@
+Trace trace-1: root=GET cart duration=100 ms status=Error spans=1 truncated=false
+  slowest: checkout / GET cart duration=100 ms status=STATUS_CODE_ERROR start=2026-10-07T19:15:01Z
+  erroring: checkout / GET cart duration=100 ms status=STATUS_CODE_ERROR start=2026-10-07T19:15:01Z
+traces: status=ok rows=1 truncated=false
+  trace_id=trace-1, namespace=shop, service=checkout, operation=GET cart, duration_ms=100 ms, status=STATUS_CODE_ERROR, start=2026-10-07T19:15:01Z

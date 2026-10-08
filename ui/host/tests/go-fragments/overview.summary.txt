@@ -1,0 +1,3 @@
+health: status=ok rows=1 truncated=false
+  health=unhealthy healthy=0 degraded=0 unhealthy=1 services=1 spans=30 error_rate=10%
+  service=checkout, health=unhealthy, spans=30 count, error_rate=10%, p50_ms=100 ms, p95_ms=100 ms, log_count=30 count, metric_count=0 count

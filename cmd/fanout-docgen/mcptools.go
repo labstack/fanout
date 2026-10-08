@@ -26,13 +26,19 @@ func renderMCPTools() ([]byte, error) {
 		return nil, err
 	}
 
+	modelVisible := 0
+	for _, tool := range tools {
+		if !tool.AppOnly {
+			modelVisible++
+		}
+	}
 	var b strings.Builder
 
 	b.WriteString("---\n")
 	b.WriteString("title: \"MCP tools\"\n")
 	b.WriteString("description: \"Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything.\"\n")
 	fmt.Fprintf(&b,
-		"summary: \"%s served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer.\"\n",
+		"summary: \"%s served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer.\"\n",
 		count(len(tools), "tool"),
 	)
 	b.WriteString("read_when:\n")
@@ -47,8 +53,8 @@ func renderMCPTools() ([]byte, error) {
 	b.WriteString("    this page. */}\n\n")
 
 	fmt.Fprintf(&b,
-		"A Fanout instance serves MCP at `/mcp`. %s, listed below exactly as the\nserver reports them to a connecting client.\n\n",
-		count(len(tools), "tool"),
+		"A Fanout instance serves MCP at `/mcp`. %s, listed below exactly as the\nserver reports them to an Apps-enabled client. Ordinary clients receive the %d model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.\n\n",
+		count(len(tools), "tool"), modelVisible,
 	)
 
 	// The closed-world sentence below is a safety claim a reader acts on. It is

@@ -107,7 +107,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     else onPoint?.({ dimensions: { service } });
   };
   const below=graph.nodes.filter(n=>n.y+n.height>size.height+scrollY+.5).length;
-  return <div role="region" aria-label={`${title}: service dependency graph; ${analysisSummary({ ...panel, title }, result)}`} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0 }}>
+  return <div role="region" aria-label={`${title}: service dependency graph; ${analysisSummary({ ...panel, title }, result)}`} style={{ display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0, width: "100%" }}>
     <div style={{position:"relative",flex:"1 1 auto",minHeight:0}}>
     <div ref={viewport} {...(import.meta.env.DEV ? { "data-service-viewport": true, "data-card-mode": (graph.compact ? "compact" : "full"), "data-initial-scroll-y": graph.initialScrollY, "data-layout-scale": graph.scale, "data-content-width": graph.contentWidth, "data-content-height": graph.contentHeight } : {})} style={{ position: "relative", height: "100%", minHeight: 0, overflowX: "hidden", overflowY:"auto", touchAction: "pan-y", cursor: "grab" }} onMouseLeave={() => setHover(undefined)} onScroll={e=>{
       const top = e.currentTarget.scrollTop;

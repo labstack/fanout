@@ -14,9 +14,9 @@ type Option struct {
 }
 
 type ResolveRequest struct {
-	Dashboard Dashboard        `json:"dashboard"`
-	Time      *Time            `json:"time,omitempty"`
-	Vars      map[string]Value `json:"vars,omitempty"`
+	Dashboard Dashboard        `json:"dashboard" jsonschema:"Complete v1 dashboard specification; every panel is executed"`
+	Time      *Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
+	Vars      map[string]Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 
 // ResolveVariables lists the options of every query, custom and constant

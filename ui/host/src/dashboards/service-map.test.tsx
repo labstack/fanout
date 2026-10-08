@@ -23,6 +23,13 @@ const cleanups: (() => void)[] = [];
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(fn => fn())); vi.restoreAllMocks(); document.body.innerHTML = ""; });
 const model = () => serviceMapModel(demoFrame, { from_ms: 0, to_ms: 3600000 });
+it("chat-sized small graphs fill at least 70% of the card without shrinking text below micro", () => {
+ const graphModel = serviceMapModel({ ...demoFrame, rows: 2, values: demoFrame.values.map(values => values.slice(0,2)) }, { from_ms: 0, to_ms: 3600000 });
+ const graph = layoutServiceMap(graphModel, { width: 814, height: 372 });
+ const width = Math.max(...graph.nodes.map(node => node.x + node.width)) - Math.min(...graph.nodes.map(node => node.x));
+ expect(width).toBeGreaterThanOrEqual(814 * .7);
+ for(const node of graph.nodes) { const label=serviceCardLabels(node,{width:node.width/graph.scale,scale:graph.scale,compact:graph.compact}); expect(label.nameSize*graph.scale).toBeGreaterThanOrEqual(11); expect(label.metricSize*graph.scale).toBeGreaterThanOrEqual(11); }
+});
 it("G4 fits all twenty demo services and the isolated heading in a 1100×190 body",()=>{
  const graph=layoutServiceMap(model(),{width:1100,height:190});
  expect(graph.compact).toBe(true);expect(graph.scale).toBeGreaterThanOrEqual(.75);expect(graph.contentHeight).toBe(190);

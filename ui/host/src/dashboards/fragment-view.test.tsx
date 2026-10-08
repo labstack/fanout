@@ -12,6 +12,25 @@ import type { PanelFragment } from "../../../panels/fragment";
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }));
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(() => vi.unstubAllGlobals());
+it("sizes fragments with dashboard defaults and a readable map minimum", async () => {
+  const { fragmentPanelHeight } = await import("./layout");
+  expect(fragmentPanelHeight({ id: "map", title: "Map", viz: "service_map" })).toBeGreaterThanOrEqual(460);
+  expect(fragmentPanelHeight({ id: "map", title: "Map", viz: "service_map", height: "s" })).toBeGreaterThanOrEqual(460);
+  expect(fragmentPanelHeight({ id: "p", title: "P", viz: "logs", height: "l" })).toBeGreaterThan(fragmentPanelHeight({ id: "p", title: "P", viz: "logs" }));
+});
+it("shows only the panel title for one panel and no refresh for snapshot answers", async () => {
+  const view = await mount(fixture());
+  try {
+    expect(view.el.querySelector('[data-fragment-header]')).toBeNull();
+    expect(view.el.querySelector('[aria-label="Refresh panels"]')).toBeNull();
+  } finally { await view.cleanup(); }
+});
+it("names persisted multi-panel presets without the generic Telemetry title", async () => {
+  const fragment = presetFixture("performance"); fragment.dashboard.name = "Telemetry";
+  const view = await mount(fragment);
+  try { expect(view.el.querySelector('[data-fragment-header]')?.textContent).toBe("Service performance"); }
+  finally { await view.cleanup(); }
+});
 async function mount(fragment: PanelFragment, dark = false, onQuery = vi.fn().mockResolvedValue(fragment), resolveVariables?: VariableResolver) {
   const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
   const drill = { exemplars: vi.fn(), trace: vi.fn().mockResolvedValue(traceFixture) };
@@ -55,19 +74,19 @@ it.each(["empty", "error", "ok"] as const)("hides chat mutations and unsaved Cop
     expect(view.onQuery).not.toHaveBeenCalled();
   } finally { await view.cleanup(); }
 });
-it("keeps stale rows, exposes failures and ignores earlier refresh completions", async () => {
-  const old = fixture(); old.results[0].diagnosis = "old rows";
+it("keeps stale rows, exposes failures and ignores earlier variable query completions", async () => {
+  const old = fixture(); old.dashboard.variables = [{name:"service",kind:"text"}]; old.results[0].diagnosis = "old rows";
   let finish!: (f: PanelFragment) => void;
   const onQuery = vi.fn().mockImplementationOnce(() => new Promise<PanelFragment>(resolve => { finish = resolve; })).mockResolvedValueOnce({ ...old, results: [{ ...old.results[0], diagnosis: "new rows" }] }).mockRejectedValueOnce(new Error("Bridge unavailable"));
   const view = await mount(old, false, onQuery);
   try {
-    const refresh = view.el.querySelector<HTMLButtonElement>('[aria-label="Refresh panels"]')!;
-    await act(async () => refresh.click());
+    const change = (value: string) => { const input = view.el.querySelector<HTMLInputElement>("input")!; input.value=value; input.dispatchEvent(new FocusEvent("focusout",{bubbles:true})); };
+    await act(async () => change(String(onQuery.mock.calls.length+1)));
     expect(view.el.textContent).toContain("old rows"); expect(view.el.textContent).toContain("Stale:");
-    await act(async () => refresh.click());
+    await act(async () => change(String(onQuery.mock.calls.length+1)));
     await act(async () => finish(old));
     expect(view.el.textContent).toContain("new rows");
-    await act(async () => refresh.click());
+    await act(async () => change(String(onQuery.mock.calls.length+1)));
     expect(view.el.textContent).toContain("Bridge unavailable"); expect(view.el.textContent).toContain("new rows"); expect(view.el.textContent).toContain("Stale:");
     expect(onQuery.mock.calls.every(([body]) => !Object.hasOwn(body, "panels"))).toBe(true);
   } finally { await view.cleanup(); }
@@ -101,7 +120,7 @@ it("keeps performance siblings visible with only one focused visualization", asy
     await act(async () => view.el.querySelector<HTMLButtonElement>('[aria-label="p95 latency menu"]')!.click());
     await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
     expect(view.el.querySelector('[data-panel="latency"]')).toBeNull();
-    expect(view.el.querySelector('[data-panel="endpoints"]')?.textContent).toContain("/checkout");
+    expect(view.el.querySelector('[data-panel="endpoints"]')?.textContent).toContain("/cart");
     expect(document.body.querySelectorAll('[data-panel="latency"]')).toHaveLength(1);
     expect(document.body.querySelectorAll('[data-panel]')).toHaveLength(4);
     expect(view.onQuery).not.toHaveBeenCalled();

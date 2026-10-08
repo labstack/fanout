@@ -11,10 +11,8 @@ import { PanelCard } from "./panel-card";
 
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
  *  with the same row unit. */
-export const rowHeight = 40;
-const margin = 12;
-const pixels = (h: number) => h * rowHeight + (h - 1) * margin;
-const defaultRows = (p: Panel) => ({s:3,m:6,l:10}[p.height ?? (p.viz === "service_map" ? "l" : "m")]);
+import { rowHeight, margin, pixels, defaultRows } from "./layout";
+export { rowHeight } from "./layout";
 
 export type GridProps = {
   dashboardId: string; version: number; spec: DashboardSpec; vars: Record<string, VarValue>; results: Map<string, PanelResult>; fetching: boolean; editing: boolean; view?: string;

@@ -49,7 +49,7 @@ it("deduplicates linked zooms into one absolute batch and restores the prior tim
     expect(ui.card.zoomed).toBe(false);
   } finally { await view.cleanup(); }
 });
-it("uses the clicked result window and preserves closed drills after refresh completion", async () => {
+it("uses the clicked result window and preserves closed drills after query completion", async () => {
   const f = fixture(); const p = f.dashboard.panels[0]; p.drill = "traces"; p.click = { set_variable: "service" };
   f.dashboard.variables = [{ name: "service", kind: "text" }];
   let finish!: (f: PanelFragment) => void;
@@ -84,7 +84,7 @@ it("keeps VariableBar mounted while query choices load through the adapter", asy
     expect(resolveVariables.mock.lastCall![1]).toBeInstanceOf(AbortSignal);
     await act(async () => { finish({ service: [{ value: "checkout" }] }); await new Promise(resolve => setTimeout(resolve, 20)); });
     expect(view.el.querySelector('[data-bar]')).not.toBeNull(); expect(ui.bar.options.service).toEqual([{ value: "checkout" }]);
-    await act(async () => (view.el.querySelector('[aria-label="Refresh panels"]') as HTMLButtonElement).click());
+    await act(async () => ui.bar.onChange("service", ui.drill.vars.service ?? "checkout"));
     expect(view.onQuery.mock.lastCall![0].vars).toEqual({ service: "checkout" });
   } finally { await view.cleanup(); }
 });
@@ -100,7 +100,7 @@ it("keeps options and the picker mounted with one resolution per content/time/va
     await act(async () => ui.bar.onChange("service", ["checkout"]));
     expect(view.el.querySelector('[data-bar]')).toBe(bar);
     expect(resolver).toHaveBeenCalledTimes(2);
-    await act(async () => (view.el.querySelector('[aria-label="Refresh panels"]') as HTMLButtonElement).click());
+    await act(async () => ui.bar.onChange("service", ui.drill.vars.service ?? "checkout"));
     expect(resolver).toHaveBeenCalledTimes(2);
     expect(view.el.querySelector('[data-bar]')).toBe(bar);
   } finally { await view.cleanup(); }
@@ -117,7 +117,7 @@ it("uses the same resolved variables for a batch and drill", async () => {
   const view = await mount(f);
   try {
     expect(ui.drill.vars).toEqual({ service: "checkout" });
-    await act(async () => (view.el.querySelector('[aria-label="Refresh panels"]') as HTMLButtonElement).click());
+    await act(async () => ui.bar.onChange("service", ui.drill.vars.service ?? "checkout"));
     expect(view.onQuery.mock.lastCall![0].vars).toEqual(ui.drill.vars);
   } finally { await view.cleanup(); }
 });

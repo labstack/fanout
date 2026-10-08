@@ -1,6 +1,6 @@
-import { Alert, Box, Button, Group, Modal, Stack, Text } from "@mantine/core";
+import { Alert, Box, Modal, Stack, Text } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { panelFragment, type PanelFragment } from "../../../panels/fragment";
+import { panelFragment, fragmentTitle, type PanelFragment } from "../../../panels/fragment";
 import { resolvedVariables, interpolate } from "../../../panels/variables";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { QueryBody } from "./api";
@@ -13,9 +13,10 @@ import { TraceDetailView } from "./trace/detail";
 import { useVariableOptions, type VariableResolver } from "./use-variables";
 import { useBrushZoom } from "./use-brush-zoom";
 import { drillSelection, panelHandlers } from "./panel-handlers";
+import { fragmentPanelHeight } from "./layout";
 const unavailableOptions: VariableResolver = async () => { throw new Error("Variable options unavailable"); };
 
-export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVariables, height = 360 }: {
+export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVariables, height }: {
   fragment: PanelFragment; dark: boolean; drillClient: DrillClient; height?: number;
   onQuery(body: Omit<QueryBody, "panels">): Promise<PanelFragment>;
   resolveVariables?: VariableResolver;
@@ -77,11 +78,11 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={() => setView(panel.id)} traceLinks="button" />;
   const viewed = spec.panels.find(p => p.id === view);
   return <Stack gap="md" p="md">
-    <Group justify="space-between"><Text fw={600}>{spec.name}</Text><Button size="compact-sm" variant="default" aria-label="Refresh panels" onClick={() => void query()}>Refresh</Button></Group>
+    {spec.panels.length > 1 && <Text data-fragment-header fw={600}>{fragmentTitle(shown)}</Text>}
     <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVariable} />
     {options.error && <Alert color="bad">Variable options could not be loaded.</Alert>}
     {error && <Alert color="bad">{error}</Alert>}
-    {spec.panels.map(panel => <Box key={panel.id} h={height}>{panel.id !== view && card(panel, height)}</Box>)}
+    {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{panel.id !== view && card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
     <Modal opened={Boolean(viewed)} onClose={() => setView(undefined)} fullScreen aria-label={viewed?.title} closeButtonProps={{ "aria-label": "Close panel view" }}>
       {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140))}</Box>}

@@ -1,0 +1,339 @@
+{
+  "dashboard": {
+    "version": 1,
+    "name": "Log explorer",
+    "time": {
+      "from": "2026-10-07T18:45:00Z",
+      "to": "2026-10-07T19:45:00Z",
+      "refresh": "off"
+    },
+    "panels": [
+      {
+        "id": "volume",
+        "title": "Log volume",
+        "viz": "timeseries",
+        "width": 6,
+        "height": "m",
+        "query": {
+          "from": "logs",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "measures": [
+            "count()"
+          ],
+          "by": [
+            "severity"
+          ],
+          "bucket": "auto",
+          "limit": 400
+        },
+        "unit": "count"
+      },
+      {
+        "id": "events",
+        "title": "Log events",
+        "viz": "logs",
+        "width": 12,
+        "height": "l",
+        "query": {
+          "from": "logs",
+          "where": [
+            "namespace = 'shop'"
+          ],
+          "limit": 100
+        }
+      }
+    ]
+  },
+  "results": [
+    {
+      "annotation_scope": {
+        "services": [
+          {
+            "namespace": "shop",
+            "service": "checkout"
+          }
+        ],
+        "namespace_scoped": true
+      },
+      "id": "volume",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "time",
+            "type": "time",
+            "role": "time"
+          },
+          {
+            "name": "severity",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "count",
+            "type": "number",
+            "role": "measure",
+            "unit": "count"
+          }
+        ],
+        "values": [
+          [
+            1791400500000
+          ],
+          [
+            "ERROR"
+          ],
+          [
+            30
+          ]
+        ],
+        "rows": 1
+      },
+      "sql": "WITH base AS (SELECT * FROM (SELECT * REPLACE (regexp_replace(regexp_replace(regexp_replace(regexp_replace(body, '(?i)([?\u0026](?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)=)[^\u0026\\s''\"]+', '\\1[REDACTED]', 'g'), '(?i)(\\b(?:bearer|basic)\\s+)[A-Za-z0-9._~+/=-]+', '\\1[REDACTED]', 'g'), '(?i)(\\b(?:api[_-]?key|access[_-]?token|authorization|client[_-]?secret|password|passwd|secret|token)\\b\\s*[:=]\\s*)(?:\"[^\"]*\"|''[^'']*''|[^\\s,;\u0026]+(?:\\s+\\[REDACTED\\])?)', '\\1[REDACTED]', 'g'), '(?i)(\"(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"', '\\1\"[REDACTED]\"', 'g') AS body,regexp_replace(regexp_replace(regexp_replace(regexp_replace(body_template, '(?i)([?\u0026](?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)=)[^\u0026\\s''\"]+', '\\1[REDACTED]', 'g'), '(?i)(\\b(?:bearer|basic)\\s+)[A-Za-z0-9._~+/=-]+', '…",
+      "interval": "30s",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000,
+      "better": "higher"
+    },
+    {
+      "id": "events",
+      "status": "ok",
+      "frame": {
+        "columns": [
+          {
+            "name": "time",
+            "type": "time",
+            "role": "time"
+          },
+          {
+            "name": "severity",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "service",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "body",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "trace_id",
+            "type": "string",
+            "role": "dimension"
+          },
+          {
+            "name": "namespace",
+            "type": "string",
+            "role": "dimension"
+          }
+        ],
+        "values": [
+          [
+            1791400529000,
+            1791400528000,
+            1791400527000,
+            1791400526000,
+            1791400525000,
+            1791400524000,
+            1791400523000,
+            1791400522000,
+            1791400521000,
+            1791400520000,
+            1791400519000,
+            1791400518000,
+            1791400517000,
+            1791400516000,
+            1791400515000,
+            1791400514000,
+            1791400513000,
+            1791400512000,
+            1791400511000,
+            1791400510000,
+            1791400509000,
+            1791400508000,
+            1791400507000,
+            1791400506000,
+            1791400505000,
+            1791400504000,
+            1791400503000,
+            1791400502000,
+            1791400501000,
+            1791400500000
+          ],
+          [
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR",
+            "ERROR"
+          ],
+          [
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout",
+            "checkout"
+          ],
+          [
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout",
+            "timeout"
+          ],
+          [
+            "trace-29",
+            "trace-28",
+            "trace-27",
+            "trace-26",
+            "trace-25",
+            "trace-24",
+            "trace-23",
+            "trace-22",
+            "trace-21",
+            "trace-20",
+            "trace-19",
+            "trace-18",
+            "trace-17",
+            "trace-16",
+            "trace-15",
+            "trace-14",
+            "trace-13",
+            "trace-12",
+            "trace-11",
+            "trace-10",
+            "trace-9",
+            "trace-8",
+            "trace-7",
+            "trace-6",
+            "trace-5",
+            "trace-4",
+            "trace-3",
+            "trace-2",
+            "trace-1",
+            "trace-0"
+          ],
+          [
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop",
+            "shop"
+          ]
+        ],
+        "rows": 30
+      },
+      "sql": "WITH redacted AS (SELECT * REPLACE (regexp_replace(regexp_replace(regexp_replace(regexp_replace(body, '(?i)([?\u0026](?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)=)[^\u0026\\s''\"]+', '\\1[REDACTED]', 'g'), '(?i)(\\b(?:bearer|basic)\\s+)[A-Za-z0-9._~+/=-]+', '\\1[REDACTED]', 'g'), '(?i)(\\b(?:api[_-]?key|access[_-]?token|authorization|client[_-]?secret|password|passwd|secret|token)\\b\\s*[:=]\\s*)(?:\"[^\"]*\"|''[^'']*''|[^\\s,;\u0026]+(?:\\s+\\[REDACTED\\])?)', '\\1[REDACTED]', 'g'), '(?i)(\"(?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)\"\\s*:\\s*)\"(?:[^\"\\\\]|\\\\.)*\"', '\\1\"[REDACTED]\"', 'g') AS body,regexp_replace(regexp_replace(regexp_replace(regexp_replace(body_template, '(?i)([?\u0026](?:api[_-]?key|access[_-]?token|auth(?:orization)?|client[_-]?secret|password|passwd|secret|token)=)[^\u0026\\s''\"]+', '\\1[REDACTED]', 'g'), '(?i)(\\b(?:bearer|basic)\\s+)[A-Za-z0-9._~+/=-]+', '\\1[REDACTE…",
+      "elapsed_ms": 0,
+      "from_ms": 1791398700000,
+      "to_ms": 1791402300000
+    }
+  ]
+}
