@@ -25,12 +25,12 @@ vi.mock('echarts/components',()=>({AriaComponent:{},BrushComponent:{},DataZoomCo
 vi.mock('echarts/features',()=>({LabelLayout:{}}));
 vi.mock('echarts/renderers',()=>({CanvasRenderer:{}}));
 const panel:Panel={id:'p',title:'Latency',viz:'timeseries',unit:'ms',query:{from:'spans',measures:['count()'],by:['service']},drill:'traces',click:{set_variable:'service'}};
-const result:PanelResult={id:'p',status:'ok',elapsed_ms:0,from_ms:1000,to_ms:5000,frame:{
+const result:PanelResult={id:'p',status:'ok',elapsed_ms:0,interval:'1s',from_ms:1000,to_ms:5000,frame:{
   rows:4,columns:[{name:'time',type:'time',role:'time'},{name:'service',type:'string',role:'dimension'},{name:'count',type:'number',role:'measure',unit:'ms'}],
   values:[[2000,3000,2000,3000],['checkout · previous','checkout · previous','cart','cart'],[25,30,12,14]],
 }};
 const findButton=(el:ParentNode,text:string)=>[...el.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===text)!;
-async function press(el:HTMLElement,key:string,extra:KeyboardEventInit={}){await act(async()=>{el.focus();el.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra}));});}
+async function press(el:HTMLElement,key:string,extra:KeyboardEventInit={}){await act(async()=>el.focus());await act(async()=>{el.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra}));});}
 async function input(el:HTMLInputElement,value:string){await act(async()=>{
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(el,value);
   el.dispatchEvent(new InputEvent('input',{bubbles:true,data:value,inputType:'insertText'}));
@@ -45,11 +45,10 @@ it('explores with one virtual point tab stop, moves with focus/key events, and i
   try{
     await act(async()=>root.render(<MantineProvider><ChartKeyboard points={points} label="Latency" summary={p=>`${p.event.seriesName} · ${p.event.value}`} onClick={click} onHighlight={highlight}/></MantineProvider>));
     expect(el.querySelectorAll('input')).toHaveLength(0);
-    const explore=el.querySelector('button')!;
-    await act(async()=>{explore.focus();explore.click();});
-    const point=el.querySelector<HTMLElement>('[data-chart-point]')!;
+    const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
+    await act(async()=>point.focus());
     expect(document.activeElement).toBe(point);
-    expect(el.querySelectorAll('[data-chart-point][tabindex="0"]')).toHaveLength(1);
+    expect(el.querySelectorAll('[data-chart-plot][tabindex="0"]')).toHaveLength(1);
     await act(async()=>point.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
     expect(click).toHaveBeenCalledExactlyOnceWith(points[0].event);
     await act(async()=>point.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true})));
@@ -67,8 +66,8 @@ it.each([false,true])('uses real focus and ECharts highlight; Enter and mouse di
   const handlers=panelHandlers(panel,result,variable,selected);
   try{
     await act(async()=>root.render(<MantineProvider forceColorScheme={dark?'dark':'light'}><TimeseriesViz panel={panel} result={result} dark={dark} height={240} {...handlers}/></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());
-    const point=el.querySelector<HTMLElement>('[data-chart-point]')!;
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     const live=el.querySelector('[aria-live]')!;
     expect(live.textContent).toContain('checkout · previous');
     expect(live.textContent).toContain('1970-01-01T00:00:02.000Z');
@@ -81,15 +80,14 @@ it.each([false,true])('uses real focus and ECharts highlight; Enter and mouse di
     expect(selected).toHaveBeenCalledTimes(2);expect(selected.mock.lastCall![0]).toEqual(keyboard);
     expect(drillSelection(panel,result,keyboard,{namespace:'shop'})?.vars).toEqual({namespace:'shop',service:'checkout · previous'});
     expect(chart.dispatchAction).toHaveBeenCalledWith({type:'highlight',seriesIndex:0,dataIndex:0});
-    const select=el.querySelector('select')!;
-    await act(async()=>{select.value='1';select.dispatchEvent(new Event('change',{bubbles:true}));});
+    await press(point,'ArrowDown');
     await press(point,'Enter');expect(selected.mock.lastCall![0].dimensions).toEqual({service:'cart'});
-    await input(el.querySelector('input[type="number"]')!,'2');
+    await press(point,'ArrowRight');
     await press(point,'Enter');expect(selected.mock.lastCall![0].time).toBe(3000);
-    await act(async()=>findButton(el,'Close exploration').click());
+    await press(point,'Escape');
     expect(chart.dispatchAction).toHaveBeenCalledWith({type:'downplay',seriesIndex:1,dataIndex:1});
     expect(chart.dispatchAction).toHaveBeenCalledWith({type:'hideTip'});
-    expect(document.activeElement).toBe(findButton(el,'Explore chart'));
+    expect(document.activeElement).toBe(document.body);
   }finally{await act(async()=>root.unmount());el.remove();}
 });
 
@@ -98,17 +96,19 @@ it('extends and explicitly commits a UTC range once; rejects invalid ranges with
   chart.dispatchAction.mockClear();
   try{
     await act(async()=>root.render(<MantineProvider><TimeseriesViz panel={panel} result={result} dark={false} height={240} onZoom={zoom}/></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());
-    const point=el.querySelector<HTMLElement>('[data-chart-point]')!;
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     await press(point,'ArrowRight',{shiftKey:true});
     const start=el.querySelector<HTMLInputElement>('input[aria-label="Range start (UTC)"],input[id]')!;
     const fields=[...el.querySelectorAll<HTMLInputElement>('input')].filter(i=>i.type!=='number');
-    expect(start).toBeTruthy();expect(fields.map(i=>i.value)).toEqual(['1970-01-01T00:00:02.000Z','1970-01-01T00:00:03.000Z']);
+    expect(start).toBeTruthy();expect(fields.map(i=>i.value)).toEqual(['1970-01-01T00:00:02.000Z','1970-01-01T00:00:04.000Z']);
     expect(zoom).not.toHaveBeenCalled();
     await act(async()=>findButton(el,'Zoom to range').click());
-    expect(zoom).toHaveBeenCalledExactlyOnceWith(2000,3000);
+    expect(zoom).toHaveBeenCalledExactlyOnceWith(2000,4000);
+    await press(point,'ArrowLeft',{shiftKey:true});
+    const edited=[...el.querySelectorAll<HTMLInputElement>('input')];
     for(const [from,to] of [['invalid','invalid'],['1970-01-01T00:00:03Z','1970-01-01T00:00:02Z'],['1970-01-01T00:00:00Z','1970-01-01T00:00:03Z'],['1970-01-01T00:00:02Z','1970-01-01T00:00:06Z'],['1970-01-01T00:00:02','1970-01-01T00:00:03']]){
-      await input(fields[0],from);await input(fields[1],to);
+      await input(edited[0],from);await input(edited[1],to);
       await act(async()=>findButton(el,'Zoom to range').click());expect(el.querySelector('[role="alert"]')).not.toBeNull();
     }
     expect(zoom).toHaveBeenCalledOnce();
@@ -121,8 +121,8 @@ it('keeps the original range anchor across consecutive Shift arrows and contract
   const points=keyboardPoints([{name:'Requests',data:[[1000,1],[2000,2],[3000,3],[4000,4]]}]);
   try{
     await act(async()=>root.render(<MantineProvider><ChartKeyboard points={points} label="Requests" summary={p=>p.label} onHighlight={vi.fn()} onZoom={vi.fn()} bounds={{from:1000,to:5000}} pointWindow={p=>({from:Number((p.event.value as number[])[0]),to:Number((p.event.value as number[])[0])})}/></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());
-    const point=el.querySelector<HTMLElement>('[data-chart-point]')!;
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     await press(point,'ArrowRight',{shiftKey:true});await press(point,'ArrowRight',{shiftKey:true});
     const inputs=[...el.querySelectorAll<HTMLInputElement>('input')].filter(i=>i.type!=='number');
     expect(inputs.map(i=>i.value)).toEqual(['1970-01-01T00:00:01.000Z','1970-01-01T00:00:03.000Z']);
@@ -138,15 +138,15 @@ it('recomputes responsive displayed candidates, clamps selection without invokin
   const click=vi.fn(),option={series:[{name:'Visible',interactive:true,data:[1,2,3]}]},short={series:[{name:'Visible',interactive:true,data:[9]}]};
   try{
     const draw=(option:Record<string,unknown>)=>root.render(<MantineProvider><EChartCanvas option={option} optionForSize={()=>short} height={100} label="Displayed" onClick={click} keyboard={{}}/></MantineProvider>);
-    await act(async()=>draw(option));await act(async()=>findButton(el,'Explore chart').click());
-    const point=el.querySelector<HTMLElement>('[data-chart-point]')!;
+    await act(async()=>draw(option));await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     await press(point,'ArrowRight');await press(point,'ArrowRight');
     const canvas=el.querySelector<HTMLElement>('[role="img"]')!;
     Object.defineProperty(canvas,'clientWidth',{value:400});Object.defineProperty(canvas,'clientHeight',{value:100});
     await act(async()=>resize([],{} as ResizeObserver));
-    expect(el.querySelector('input')?.value).toBe('1');expect(point.textContent).toContain('9');expect(click).not.toHaveBeenCalled();
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('9');expect(click).not.toHaveBeenCalled();
     await act(async()=>draw({series:[]}));
-    expect(point.textContent).toContain('9'); // responsive compile still owns the displayed data
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('9'); // responsive compile still owns the displayed data
     await act(async()=>root.unmount());expect(chart.dispose).toHaveBeenCalled();
   }finally{el.remove();vi.unstubAllGlobals();}
 });
@@ -161,7 +161,7 @@ it.each(['bar','histogram','scatter','heatmap','state_timeline'] as const)('keyb
   const Chart=viz==='bar'?BarViz:AnalysisChart;
   try{
     await act(async()=>root.render(<MantineProvider><Chart panel={p} result={r} height={240} dark={false} onPoint={select}/></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());const point=el.querySelector<HTMLElement>('[data-chart-point]')!;
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     await press(point,'Enter');expect(select).toHaveBeenCalledOnce();
     const series=(chart.setOption.mock.lastCall![0].series as {data:unknown[];name:string}[])[0];
     const data=series.data[0];const value=typeof data==='object'?(data as {value:unknown}).value:data;
@@ -175,9 +175,9 @@ it('never offers previous/helper/Other/null or unsupported custom selections',as
   const series=[{name:'Other',interactive:true,data:[[2000,3]]},{name:'checkout · previous',interactive:false,data:[[2000,3]]},{name:'helper',interactive:false,data:[3]},{name:'empty',interactive:true,data:[[2000,null]]},{name:'empty bar',interactive:true,data:[{value:null,selection:{dimensions:{service:'cart'}}}]}];
   try{
     await act(async()=>root.render(<MantineProvider><EChartCanvas option={{series}} label="Rejected" height={100} onClick={select} keyboard={{canSelect:event=>Boolean(pointSelection(panel,result,event))}}/></MantineProvider>));
-    expect(findButton(el,'Explore chart').disabled).toBe(true);expect(select).not.toHaveBeenCalled();
+    const plot=el.querySelector<HTMLElement>('[data-chart-plot]')!;await press(plot,'Enter');expect(select).not.toHaveBeenCalled();
     await act(async()=>root.render(<MantineProvider><AnalysisChart panel={{...panel,viz:'scatter'}} result={{...result,frame:{rows:0,values:[],columns:[]}}} height={100} dark={false} onPoint={select}/></MantineProvider>));
-    expect(findButton(el,'Explore chart').disabled).toBe(true);expect(select).not.toHaveBeenCalled();
+    await press(el.querySelector<HTMLElement>('[data-chart-plot]')!,'Enter');expect(select).not.toHaveBeenCalled();
   }finally{await act(async()=>root.unmount());el.remove();}
 });
 
@@ -188,8 +188,8 @@ it('applies a click-only bar filter once through the shared panel-handler preced
   const variable=vi.fn(),point=vi.fn();const handlers=panelHandlers(p,r,variable,point);
   try{
     await act(async()=>root.render(<MantineProvider><BarViz panel={p} result={r} height={100} dark={false} {...handlers}/></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());
-    await press(el.querySelector<HTMLElement>('[data-chart-point]')!,'Enter');
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    await press(el.querySelector<HTMLElement>('[data-chart-plot]')!,'Enter');
     expect(variable).toHaveBeenCalledExactlyOnceWith('service','checkout');
     expect(point).toHaveBeenCalledExactlyOnceWith({dimensions:{service:'checkout'}});
   }finally{await act(async()=>root.unmount());el.remove();}
@@ -201,10 +201,10 @@ it('chat renders the same keyboard point/drill path and sends one scoped variabl
   const query=vi.fn().mockResolvedValue(f),exemplars=vi.fn().mockResolvedValue({traces:[]}),trace=vi.fn();
   try{
     await act(async()=>root.render(<MantineProvider><QueryClientProvider client={client}><FragmentView fragment={f} dark={false} onQuery={query} drillClient={{exemplars,trace}}/></QueryClientProvider></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());
-    for(const key of ['r','e','h'])await press(el.querySelector<HTMLElement>('[data-chart-point]')!,key);
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    for(const key of ['r','e','h'])await press(el.querySelector<HTMLElement>('[data-chart-plot]')!,key);
     expect(query).not.toHaveBeenCalled();expect(document.querySelector('[role="dialog"]')).toBeNull();
-    await press(el.querySelector<HTMLElement>('[data-chart-point]')!,'Enter');
+    await press(el.querySelector<HTMLElement>('[data-chart-plot]')!,'Enter');
     expect(query).toHaveBeenCalledOnce();expect(query.mock.lastCall![0].vars).toEqual({service:'checkout · previous'});
     expect(query.mock.lastCall![0].time).toEqual(f.dashboard.time);
     expect(exemplars.mock.lastCall![0]).toMatchObject({dimensions:{service:'checkout · previous'}});
@@ -217,11 +217,11 @@ it('chat keyboard range commits one complete batch, preserving comparison and th
   const query=vi.fn().mockResolvedValue(f);
   try{
     await act(async()=>root.render(<MantineProvider><QueryClientProvider client={client}><FragmentView fragment={f} dark={false} onQuery={query} drillClient={{exemplars:vi.fn(),trace:vi.fn()}}/></QueryClientProvider></MantineProvider>));
-    await act(async()=>findButton(el,'Explore chart').click());
-    await press(el.querySelector<HTMLElement>('[data-chart-point]')!,'ArrowRight',{shiftKey:true});
+    await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
+    await press(el.querySelector<HTMLElement>('[data-chart-plot]')!,'ArrowRight',{shiftKey:true});
     await act(async()=>findButton(el,'Zoom to range').click());
     expect(query).toHaveBeenCalledOnce();
-    expect(query.mock.lastCall![0]).toMatchObject({time:{from:'1970-01-01T00:00:02.000Z',to:'1970-01-01T00:00:03.000Z',compare:'previous_period',refresh:'off'}});
+    expect(query.mock.lastCall![0]).toMatchObject({time:{from:'1970-01-01T00:00:02.000Z',to:'1970-01-01T00:00:04.000Z',compare:'previous_period',refresh:'off'}});
     expect(query.mock.lastCall![0]).not.toHaveProperty('panels');
     expect(query.mock.lastCall![0].dashboard.panels).toEqual([panel]);
     await act(async()=>el.querySelector<HTMLButtonElement>('[aria-label="Reset Latency zoom"]')!.click());
@@ -240,5 +240,36 @@ it('retains existing row and waterfall Enter activation',async()=>{
     await act(async()=>root.render(<MantineProvider><Waterfall spans={traceFixture.data.spans} dark={false} onSpan={span}/></MantineProvider>));
     await press(el.querySelector<HTMLElement>('tbody tr')!,'Enter');
     expect(span).toHaveBeenCalledExactlyOnceWith(traceFixture.data.spans[0]);
+  }finally{await act(async()=>root.unmount());el.remove();}
+});
+
+it('cancels a chat host full-screen range before Escape exits and restores its plot focus',async()=>{
+  const el=document.createElement('div');document.body.append(el);const root=createRoot(el),client=new QueryClient();
+  const f=fixture();f.dashboard.panels=[panel];f.results=[result];
+  const display=vi.fn().mockResolvedValue(true),query=vi.fn().mockResolvedValue(f);
+  try{
+    await act(async()=>root.render(<MantineProvider><QueryClientProvider client={client}><FragmentView fragment={f} dark={false} hostDisplayMode="fullscreen" onDisplayMode={display} onQuery={query} drillClient={{exemplars:vi.fn(),trace:vi.fn()}}/></QueryClientProvider></MantineProvider>));
+    const original=el.querySelector<HTMLElement>('[data-chart-plot]')!;await press(original,'f');
+    expect(display).toHaveBeenCalledExactlyOnceWith('fullscreen');
+    const plot=el.querySelector<HTMLElement>('[data-fragment-fullscreen] [data-chart-plot]')!;
+    await press(plot,'ArrowRight',{shiftKey:true});await press(plot,'Escape');
+    expect(display).toHaveBeenCalledOnce();expect(el.textContent).not.toContain('Zoom to range');
+    await press(plot,'Escape');expect(display).toHaveBeenLastCalledWith('inline');
+    await vi.waitFor(()=>expect(document.activeElement).toBe(el.querySelector('[data-chart-plot]')));
+  }finally{await act(async()=>root.unmount());el.remove();client.clear();}
+});
+it('keeps real scatter rows in the compiled Other group reachable by mouse and keyboard',async()=>{
+  const el=document.createElement('div');document.body.append(el);const root=createRoot(el),select=vi.fn();chart.on.mockClear();
+  const p:Panel={...panel,viz:'scatter',query:{from:'spans',by:['endpoint','service'],measures:['avg(duration_ms)','count()']}};
+  const r:PanelResult={...result,frame:{rows:8,columns:[{name:'endpoint',type:'string',role:'dimension'},{name:'service',type:'string',role:'dimension'},{name:'x',type:'number',role:'measure'},{name:'y',type:'number',role:'measure'}],values:[['/a','/b','/c','/d','/e','/f','/g','/h'],['a','b','c','d','e','f','g','h'],[1,2,3,4,5,6,7,8],[10,9,8,7,6,5,4,3]]}};
+  try{
+    await act(async()=>root.render(<MantineProvider><AnalysisChart panel={p} result={r} height={200} dark={false} onPoint={select}/></MantineProvider>));
+    const plot=el.querySelector<HTMLElement>('[data-chart-plot]')!;
+    for(let i=0;i<6;i++)await press(plot,'ArrowDown');
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('Other (2)');await press(plot,'Enter');expect(select).toHaveBeenCalledOnce();
+    const series=(chart.setOption.mock.lastCall![0].series as {name:string;data:{value:unknown;selection:unknown}[]}[]);
+    const index=series.findIndex(s=>s.name==='Other (2)'),data=series[index].data[0];
+    chart.on.mock.calls.find(([name])=>name==='click')![1]({seriesIndex:index,seriesName:'Other (2)',value:data.value,data});
+    expect(select).toHaveBeenCalledTimes(2);expect(select.mock.calls[0][0]).toEqual(data.selection);expect(select.mock.lastCall![0]).toEqual(data.selection);
   }finally{await act(async()=>root.unmount());el.remove();}
 });

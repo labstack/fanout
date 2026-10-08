@@ -13,12 +13,21 @@ vi.mock("./api", async (original) => ({ ...await original<typeof import("./api")
 const record: DashboardRecord = { id: "board", name: "Current", description: "", version: 3, is_default: false, created_at: "2026-10-01T12:00:00Z", updated_at: "2026-10-08T12:00:00Z", spec: { version: 1, name: "Current", time: { range: "1h" }, panels: [{ id: "note", title: "Note", viz: "text", content: "Current content" }] } };
 const historic = (version: number): VersionRecord => ({ dashboard: { ...record, version, name: `Old ${version}`, spec: { ...record.spec, name: `Old ${version}`, panels: [{ ...record.spec.panels[0], content: `Historical content ${version}` }] } }, author_kind: "agent", author_id: "opaque", message: "Updated note", created_at: record.created_at, changes: [{ panel_id: "note", title: "Note", kind: "changed", fields: ["title"] }], layout_changed: true, dashboard_fields: ["name"], changes_available: true });
 let root: Root, client: QueryClient;
-let render: (opened?: boolean) => Promise<void>;
+let render: (opened?: boolean, ready?: () => void) => Promise<void>;
 let scheme: "light" | "dark";
 let currentVersion: number;
 let onRestored: ReturnType<typeof vi.fn<(record: DashboardRecord) => void>>, onClose: ReturnType<typeof vi.fn<() => void>>;
 const button = (label: string) => [...document.querySelectorAll("button")].find(b => b.textContent === label)!;
-const settle = async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); };
+const settle = async (ready?: () => void) => {
+  let idle = 0;
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    if (ready) { ready(); return; }
+    idle = client.isFetching() === 0 && client.isMutating() === 0 ? idle + 1 : 0;
+    expect(idle).toBeGreaterThanOrEqual(2);
+    expect(document.body.textContent).not.toMatch(/Loading (version|history)/);
+  });
+};
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 
 beforeEach(() => {
@@ -36,7 +45,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   onRestored = vi.fn(); onClose = vi.fn();
   const host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  render = async (opened = true) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); await settle(); };
+  render = async (opened = true, ready?: () => void) => { await act(async () => root.render(<MantineProvider theme={fanoutTheme} forceColorScheme={scheme}><QueryClientProvider client={client}><HistoryDrawer id="board" currentVersion={currentVersion} opened={opened} onClose={onClose} onRestored={onRestored} /></QueryClientProvider></MantineProvider>)); if (opened) await settle(ready); };
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
 
@@ -61,13 +70,13 @@ it("aborts prior selection and closing requests and never displays a late histor
   const first = deferred<VersionRecord>(), second = deferred<VersionRecord>();
   const signals: AbortSignal[] = [];
   api.getVersion.mockImplementation((_id, version, signal) => { signals.push(signal); return version === 3 ? first.promise : second.promise; });
-  await render(); expect(document.body.textContent).toContain("Loading version");
-  await act(async () => button("Version 2").click()); await settle(); expect(signals[0].aborted).toBe(true);
+  await render(true, () => expect(document.body.textContent).toContain("Loading version"));
+  await act(async () => button("Version 2").click()); await settle(() => expect(signals[0].aborted).toBe(true)); expect(signals[0].aborted).toBe(true);
   await act(async () => second.resolve(historic(2))); await settle();
   await act(async () => first.resolve(historic(3))); await settle();
   expect(document.body.textContent).toContain("Old 2"); expect(document.body.textContent).not.toContain("Old 3");
   api.getVersion.mockReturnValue(new Promise(() => {}));
-  await act(async () => button("Version 1").click()); await settle();
+  await act(async () => button("Version 1").click()); await settle(() => expect(api.getVersion.mock.calls.at(-1)?.[1]).toBe(1));
   await render(false); expect(signals[1].aborted).toBe(false);
   // The newly selected request is canceled on close as well.
   expect(api.getVersion.mock.calls.at(-1)?.[2].aborted).toBe(true);
@@ -82,9 +91,9 @@ it("submits one restore for a double click, retains the pending lock when reopen
   await render(); await act(async () => button("Version 1").click()); await settle();
   const restore = button("Restore version 1");
   await act(async () => { restore.click(); restore.click(); });
-  await settle();
+  await settle(() => expect(restore.disabled).toBe(true));
   expect(api.restoreVersion).toHaveBeenCalledTimes(1); expect(api.restoreVersion).toHaveBeenCalledWith("board", 1); expect(restore.disabled).toBe(true);
-  await render(false); await render(); expect(button("Restore version 1").disabled).toBe(true);
+  await render(false); await render(true, () => expect(button("Restore version 1")?.disabled).toBe(true));
   const restored = { ...record, version: 4, spec: historic(1).dashboard.spec };
   await act(async () => pending.resolve(restored)); await settle();
   expect(client.getQueryData(["dashboard", "board"])).toEqual(restored);
@@ -106,11 +115,11 @@ it.each([404, 409, 500])("keeps the current view on restore failure %s and retri
 
 it("shows list loading, empty and error states with a deliberate read retry", async () => {
   const pending = deferred<[]>(); api.listVersions.mockReturnValue(pending.promise);
-  await render(); expect(document.body.textContent).toContain("Loading history");
+  await render(true, () => expect(document.body.textContent).toContain("Loading history"));
   await act(async () => pending.resolve([])); await settle(); expect(document.body.textContent).toContain("No versions available");
   await render(false); client.removeQueries({ queryKey: ["dashboard-versions", "board"] });
   api.listVersions.mockRejectedValue(new Error("History failed")); await render(); expect(document.body.textContent).toContain("History failed");
-  api.listVersions.mockResolvedValue([]); await act(async () => button("Retry history").click()); await settle(); expect(document.body.textContent).toContain("No versions available");
+  api.listVersions.mockResolvedValue([]); await act(async () => button("Retry history").click()); await settle(() => expect(document.body.textContent).toContain("No versions available")); expect(document.body.textContent).toContain("No versions available");
 });
 
 it("shows not-found and pruned-predecessor states without invented changes", async () => {

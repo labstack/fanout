@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
@@ -18,6 +18,9 @@ import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
 import { useShortcuts } from "./use-shortcuts";
 import { ShortcutsHelp } from "./shortcuts-help";
+import { useViewer } from "../auth";
+import { useShortcutPreference } from "./shortcut-preference";
+import { usePanelViewFocus } from "./use-panel-view-focus";
 
 import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
@@ -60,6 +63,14 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const region = useRef<HTMLElement>(null);
+  const scope = useId();
+  const preference = useShortcutPreference(useViewer().id);
+  const viewFocus = usePanelViewFocus(region);
+  const [ranges, setRanges] = useState<Set<string>>(() => new Set());
+  const rangePending = useCallback((id: string, pending: boolean) => setRanges(previous => {
+    if (previous.has(id) === pending) return previous;
+    const next = new Set(previous); if (pending) next.add(id); else next.delete(id); return next;
+  }), []);
   const client = useQueryClient();
   const [restoreRefresh, setRestoreRefresh] = useState<number>();
   const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
@@ -85,7 +96,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   }, [viewport, spec]);
   const [visible, setVisible] = useState<string[]>(() => spec.panels.map((p) => p.id));
   const currentVisible = useMemo(() => visible.filter((panelId) => spec.panels.some((panel) => panel.id === panelId)), [visible, spec.panels]);
-  const data = usePanelResults({ dashboardId: id, version, spec, time, vars: resolvedVars, compare, widths, visible: currentVisible, refresh, enabled: options.ready });
+  const data = usePanelResults({ dashboardId: id, version, spec, time, vars: resolvedVars, compare, widths, visible: currentVisible, refresh: ranges.size ? "off" : refresh, enabled: options.ready });
   useEffect(() => {
     if (restoreRefresh !== version) return;
     // Run after both hooks have committed their observers to the restored keys.
@@ -106,10 +117,11 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   };
 
   const edit = () => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" });
+  const onView = (view?: string) => { if (view) viewFocus.remember(view); onSearch({ ...search, view }, view === undefined); };
   useShortcuts(region, {
     r: () => data.refetch(), e: edit, h: () => setHistoryOpen(true), "?": () => setHelpOpen(true),
-    f: target => { const panel = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (panel && spec.panels.some(p => p.id === panel)) onSearch({...search, view: panel}); },
-  }, historyOpen || helpOpen || Boolean(search.view || search.drill));
+    f: target => { if (search.view) { onView(); return; } const panel = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (panel && spec.panels.some(p => p.id === panel)) onView(panel); },
+  }, {modalOpen: historyOpen || helpOpen || Boolean(search.drill), fullscreenScope: search.view ? scope : undefined, enabled: preference.enabled});
   return <Box component="main" ref={region} aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="sm" mb="md">
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
@@ -144,8 +156,9 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
+    {ranges.size > 0 && <Text size="xs" c="dimmed">Paused while selecting</Text>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view }, view === undefined)} onVisible={setVisible}
+      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);
@@ -159,6 +172,6 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       const nextDrill = drill && !ids.has(drill.panel_id) ? undefined : search.drill;
       if (view !== search.view || nextDrill !== search.drill) onSearch({ ...search, view, drill: nextDrill }, true);
     }} />
-    <ShortcutsHelp opened={helpOpen} onClose={() => setHelpOpen(false)} />
+    <ShortcutsHelp opened={helpOpen} onClose={() => setHelpOpen(false)} fullscreen={Boolean(search.view)} enabled={preference.enabled} onEnabled={preference.change} />
   </Box>;
 }

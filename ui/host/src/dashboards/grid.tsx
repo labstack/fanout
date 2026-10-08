@@ -22,7 +22,8 @@ export type GridProps = {
   annotations?: AnnotationsResponse;
   canManage?: boolean; agentAvailable: boolean; onOpenChat(prompt?: string, options?: TurnOptions): void; onVariable(name: string, value: VarValue): void; onView(view?: string): void; onVisible(ids: string[]): void;
   onPoint?(panel: Panel, selection: Selection): void; onZoom?(from: number, to: number): void;
-  zoomed?: boolean; onZoomReset?(): void;
+  zoomed?: boolean; onZoomReset?(): void; onRangePending?(id: string, pending: boolean): void;
+  shortcutScope?: string; onShortcuts?(): void; overlayOpen?: boolean; returnViewFocus?(): HTMLElement | undefined;
 };
 
 let panelIdCounter = 0;
@@ -34,7 +35,7 @@ function newPanelId(panels: Panel[]): string {
   return id;
 }
 
-export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, canManage = false, onOpenChat, onVariable, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible }: GridProps) {
+export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, canManage = false, onOpenChat, onVariable, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible, onRangePending, shortcutScope, onShortcuts, overlayOpen, returnViewFocus }: GridProps) {
   const client = useQueryClient();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) }))); }, [spec]);
@@ -145,7 +146,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     menuRef={!fullscreen ? node => { if (node) menus.current.set(panel.id, node); else menus.current.delete(panel.id); } : undefined}
     compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
     {...panelHandlers(panel, results.get(panel.id), onVariable, onPoint ? selection => onPoint(panel, selection) : undefined)}
-    onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
+    onRangePending={pending => onRangePending?.(panel.id, pending)} onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true }) : undefined}
@@ -175,7 +176,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
       onDragStop={changeLayout} onResizeStop={changeLayout}>
       {spec.panels.map((panel) => { const g = visibleLayout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
-    <PanelFullscreen opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
+    <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.() ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
       {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
     </PanelFullscreen>
   </div>;

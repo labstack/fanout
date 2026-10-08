@@ -22,10 +22,12 @@ const groups = new Map<string, number>();
 type DisplaySeries = {name?: string; data?: readonly unknown[]; interactive?: boolean; type?: string; keyboard_unit?: string; keyboard_x_unit?: string; tooltip?: {valueFormatter?(value: number): string}};
 type DisplayAxis = {type?: string; data?: string[]};
 export function EChartCanvas({ option, optionForSize, height, label, onClick, onZoom, group, keyboard }: { option: EChartsCoreOption; optionForSize?: (size: ChartSize) => EChartsCoreOption; height: number | string; label: string; onClick?: (params: PointEvent) => void; onZoom?: (from: number, to: number) => void; group?: string;
-  keyboard?: {canSelect?(event: PointEvent): boolean; bounds?: {from: number; to: number}} }) {
+  keyboard?: {canSelect?(event: PointEvent): boolean; bounds?: {from: number; to: number}; interval?: string; onRangePending?(pending: boolean): void} }) {
   const ref = useRef<HTMLDivElement>(null);
   const chart = useRef<EChartsType | null>(null);
   const [displayed, setDisplayed] = useState(option);
+  const [active, setActive] = useState(false);
+  const activeRef = useRef(false);
   const displayedRef = useRef(option);
   const keyboardRef = useRef(keyboard); keyboardRef.current = keyboard;
   const highlighted = useRef<KeyboardPoint | undefined>(undefined);
@@ -42,17 +44,25 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const x = (Array.isArray(displayed.xAxis) ? displayed.xAxis[0] : displayed.xAxis) as DisplayAxis | undefined;
   const y = (Array.isArray(displayed.yAxis) ? displayed.yAxis[0] : displayed.yAxis) as DisplayAxis | undefined;
   const points = useMemo(() => {
-    if (!keyboard) return [];
+    if (!keyboard || !active) return [];
     const series = (Array.isArray(displayed.series) ? displayed.series : displayed.series ? [displayed.series] : []) as DisplaySeries[];
     const category = y?.type === "category" && series[0]?.type !== "custom" ? y : x?.type === "category" ? x : undefined;
-    return keyboardPoints(series).map(point => ({...point, event: {...point.event, name: point.event.name ?? category?.data?.[point.data_index]}}))
-      .filter(point => !keyboard.canSelect || keyboard.canSelect(point.event));
-  }, [displayed, keyboard?.canSelect]);
+    return keyboardPoints(series.map(s => ({...s, interactive: undefined}))).map(point => {
+      const value = Array.isArray(point.event.value) ? point.event.value : [];
+      return {...point, event: {...point.event, interactive: series[point.series_index]?.interactive, name: point.event.name ?? (series[point.series_index]?.type === "custom" ? y?.data?.[Number(value[1])] : category?.data?.[point.data_index])}};
+    }).filter(point => point.event.value != null && (!Array.isArray(point.event.value) || point.event.value.at(-1) != null));
+  }, [displayed, active]);
   const pointWindow = (point: KeyboardPoint) => {
     const selection = (point.event.data as {selection?: {time?: number; from?: string; to?: string}} | undefined)?.selection;
     const value = Array.isArray(point.event.value) ? point.event.value : [];
     const from = selection?.from ? Date.parse(selection.from) : selection?.time ?? (x?.type === "time" ? Number(value[0]) : NaN);
-    const to = selection?.to ? Date.parse(selection.to) : displaySeries[point.series_index]?.type === "custom" ? Number(value[3]) : from;
+    const interval = /^(\d+)(ms|s|m|h|d)$/.exec(keyboard?.interval ?? "");
+    const duration = interval ? Number(interval[1]) * ({ms:1,s:1000,m:60000,h:3600000,d:86400000}[interval[2] as "ms"|"s"|"m"|"h"|"d"]) : undefined;
+    const next = displaySeries[point.series_index]?.data?.[point.data_index + 1];
+    const nextValue = Array.isArray(next) ? next : (next as {value?: unknown[]} | undefined)?.value;
+    const nextTime = typeof nextValue?.[0] === "number" && nextValue[0] > from ? nextValue[0] : undefined;
+    const end = duration ? from + duration : nextTime ?? keyboard?.bounds?.to ?? from;
+    const to = selection?.to ? Date.parse(selection.to) : displaySeries[point.series_index]?.type === "custom" ? Number(value[3]) : Math.min(end, keyboard?.bounds?.to ?? end);
     return Number.isFinite(from) && Number.isFinite(to) ? {from, to} : undefined;
   };
   const summary = (point: KeyboardPoint) => {
@@ -106,7 +116,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     }
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
     displayedRef.current = compiled;
-    if (keyboardRef.current) setDisplayed(compiled);
+    if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
     if (import.meta.env.DEV) auditInput.current = { compiled, size };
   };
 
@@ -162,7 +172,11 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     };
   }, [group]);
 
-  return <><div ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />
-    {keyboard && <ChartKeyboard points={points} label={label} summary={summary} onClick={onClick} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow} />}
-  </>;
+  const canvas = <div ref={ref} role="img" aria-label={description} aria-hidden={keyboard ? true : undefined} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+  const series = (Array.isArray(option.series) ? option.series : option.series ? [option.series] : []) as DisplaySeries[];
+  const overview = label + ": " + series.length + " series" + (keyboard?.bounds ? "; " + new Date(keyboard.bounds.from).toISOString() + " – " + new Date(keyboard.bounds.to).toISOString() : "");
+  return keyboard ? <ChartKeyboard points={points} label={overview} summary={summary} onClick={onClick} canSelect={keyboard.canSelect} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow}
+    onRangePending={keyboard.onRangePending} onActiveChange={next => {
+      activeRef.current = next; setActive(next); if (next) setDisplayed(displayedRef.current);
+    }}>{canvas}</ChartKeyboard> : canvas;
 }

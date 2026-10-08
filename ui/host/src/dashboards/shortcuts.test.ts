@@ -12,6 +12,10 @@ it('accepts only the five unmodified dashboard keys and the question-mark chord'
   expect(shortcutKey(new KeyboardEvent('keydown',{key:'r'}),true)).toBeNull();
   const prevented=new KeyboardEvent('keydown',{key:'r',cancelable:true});prevented.preventDefault();expect(shortcutKey(prevented,false)).toBeNull();
 });
+it.each(['','plaintext-only'])('ignores contenteditable=%j',value=>{
+  const target=document.createElement('div');target.setAttribute('contenteditable',value);const event=new KeyboardEvent('keydown',{key:'r'});
+  Object.defineProperty(event,'target',{value:target});expect(shortcutKey(event,false)).toBeNull();
+});
 it.each(['input','textarea','select','[contenteditable="true"]','[role="textbox"]','[role="dialog"]','[role="menu"]'])('ignores %s and its descendants',selector=>{
   const parent=document.createElement(selector.startsWith('[')?'div':selector);
   if(selector.startsWith('[')){const [,key,value]=/\[(.+)="(.+)"\]/.exec(selector)!;parent.setAttribute(key,value);}
@@ -34,4 +38,18 @@ it('acts once only inside the active region, excludes fragments and overlays, an
     button.focus();button.dispatchEvent(new KeyboardEvent('keydown',{key:'f',bubbles:true}));expect(run).toHaveBeenCalledOnce();modal.remove();
     await act(async()=>root.unmount());button.dispatchEvent(new KeyboardEvent('keydown',{key:'r',bubbles:true}));expect(run).toHaveBeenCalledOnce();
   }finally{el.remove();}
+});
+it('allows only help, exit and refresh in its full-screen portal and blocks every key under another overlay',async()=>{
+  const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+  const run=vi.fn(),region={current:el};
+  function Host(){useShortcuts(region,{r:()=>run('r'),e:()=>run('e'),h:()=>run('h'),f:()=>run('f'),'?':()=>run('?')},{fullscreenScope:'board'});return createElement('button',{},'Inline');}
+  const modal=document.createElement('div');modal.setAttribute('role','dialog');modal.setAttribute('data-panel-fullscreen','');modal.setAttribute('data-shortcut-scope','board');
+  const target=document.createElement('button');modal.append(target);document.body.append(modal);
+  try{
+    await act(async()=>root.render(createElement(Host)));
+    target.focus();for(const key of ['r','e','h','f','?'])target.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+    expect(run.mock.calls.map(c=>c[0])).toEqual(['r','f','?']);
+    const help=document.createElement('div');help.setAttribute('role','dialog');document.body.append(help);
+    target.dispatchEvent(new KeyboardEvent('keydown',{key:'r',bubbles:true}));expect(run).toHaveBeenCalledTimes(3);help.remove();
+  }finally{await act(async()=>root.unmount());el.remove();modal.remove();}
 });

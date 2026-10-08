@@ -134,17 +134,19 @@ it("keeps a focused query MultiSelect and its dropdown open across option and fr
   const onQuery = vi.fn().mockImplementation(() => new Promise<PanelFragment>(resolve => { finish = resolve; }));
   const view = await mount(raw, false, onQuery, resolveVariables);
   try {
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    await vi.waitFor(async () => { await act(async () => {}); expect(view.el.querySelector('[aria-label="Dashboard variables"] input:not([type=hidden])')?.getAttribute("placeholder")).not.toBe("Loading…"); });
     const bar = view.el.querySelector('[aria-label="Dashboard variables"]');
     const input = bar!.querySelector<HTMLInputElement>("input:not([type=hidden])")!;
     await act(async () => { input.focus(); input.click(); });
     const choice = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent === "cart")!;
     expect(choice).toBeDefined();
-    await act(async () => { choice.click(); await new Promise(resolve => setTimeout(resolve, 20)); });
+    await act(async () => choice.click());
+    await vi.waitFor(() => expect(onQuery).toHaveBeenCalledOnce());
     expect(document.activeElement).toBe(input);
     expect(view.el.querySelector('[aria-label="Dashboard variables"]')).toBe(bar);
     expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
-    await act(async () => { finish(structuredClone(raw)); await new Promise(resolve => setTimeout(resolve, 20)); });
+    await act(async () => finish(structuredClone(raw)));
+    await vi.waitFor(async () => { await act(async () => {}); expect(resolveVariables).toHaveBeenCalledTimes(2); });
     expect(document.activeElement).toBe(input);
     expect(view.el.querySelector('[aria-label="Dashboard variables"]')).toBe(bar);
     expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
@@ -166,7 +168,8 @@ it.each(["service_map", "table"] as const)("names the %s dialog and returns focu
   expect(dialog.getAttribute("aria-label")).toBe(menu.getAttribute("aria-label")!.replace(/ menu$/, ""));
   expect(dialog.textContent).toContain(viz === "table" ? "/cart" : "checkout");
   await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Close panel view"]')!.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape",bubbles:true})));
-  await act(async () => { await new Promise(resolve => setTimeout(resolve,250)); });
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
+  await vi.waitFor(() => expect(document.activeElement).toBe(menu));
   expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(menu);expect(view.onQuery).not.toHaveBeenCalled();
  } finally { await view.cleanup(); }
 });

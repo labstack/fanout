@@ -82,7 +82,8 @@ it("keeps VariableBar mounted while query choices load through the adapter", asy
     expect(view.el.querySelector('[data-bar]')).not.toBeNull(); expect(view.onQuery).not.toHaveBeenCalled();
     expect(resolveVariables.mock.lastCall![0]).toEqual({ dashboard: f.dashboard, time: f.dashboard.time, vars: {} });
     expect(resolveVariables.mock.lastCall![1]).toBeInstanceOf(AbortSignal);
-    await act(async () => { finish({ service: [{ value: "checkout" }] }); await new Promise(resolve => setTimeout(resolve, 20)); });
+    await act(async () => finish({ service: [{ value: "checkout" }] }));
+    await vi.waitFor(async () => { await act(async () => {}); expect(ui.bar.options.service).toEqual([{value:"checkout"}]); });
     expect(view.el.querySelector('[data-bar]')).not.toBeNull(); expect(ui.bar.options.service).toEqual([{ value: "checkout" }]);
     await act(async () => ui.bar.onChange("service", ui.drill.vars.service ?? "checkout"));
     expect(view.onQuery.mock.lastCall![0].vars).toEqual({ service: "checkout" });

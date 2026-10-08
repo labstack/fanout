@@ -17,7 +17,8 @@ vi.mock("../auth", async (importOriginal) => ({
 
 const charts = vi.hoisted(() => ({ option: vi.fn() }));
 
-vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ option, label, onClick, onZoom }: { option: Record<string, unknown>; label: string; onClick?: (event: { name: string; seriesName: string; value: number[] }) => void; onZoom?: (from: number, to: number) => void }) => { charts.option(option); return <div data-chart={label}>
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ option, label, onClick, onZoom, keyboard }: { keyboard?: {onRangePending?(pending: boolean): void}; option: Record<string, unknown>; label: string; onClick?: (event: { name: string; seriesName: string; value: number[] }) => void; onZoom?: (from: number, to: number) => void }) => { charts.option(option); return <div data-chart={label}>
+  {keyboard?.onRangePending && <><button aria-label={"Begin range " + label} onClick={()=>keyboard.onRangePending!(true)}/><button aria-label={"Cancel range " + label} onClick={()=>keyboard.onRangePending!(false)}/></>}
   {onClick && <button aria-label={`Select ${label}`} onClick={() => onClick({ name: "cart", seriesName: "cart", value: [1000, 3] })} />}
   {onZoom && <button aria-label={`Zoom ${label}`} onClick={() => onZoom(1000, 9000)} />}
 </div>; } }));
@@ -51,25 +52,22 @@ let visibility: IntersectionObserverCallback;
 const cleanups: (() => void)[] = [];
 const defaultPanels = () => json({ results: [{ id: "requests", status: "ok", frame, elapsed_ms: 2 }, { id: "latency", status: "empty", diagnosis: "No spans match service = 'cart'.", elapsed_ms: 3 }] });
 const settle = async (client: QueryClient) => {
-  const deadline = Date.now() + 3000;
   let idleCycles = 0;
-  // Two idle notification cycles let React enable dependent queries and render
-  // their results; a momentarily idle QueryClient does not imply a ready DOM.
-  do {
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 5));
-    });
+  await vi.waitFor(async () => {
+    await act(async () => {});
     idleCycles = client.isFetching() === 0 && client.isMutating() === 0 ? idleCycles + 1 : 0;
-  }
-  while (idleCycles < 2 && Date.now() < deadline);
-  expect(idleCycles).toBe(2);
-  expect(client.isFetching()).toBe(0);
-  expect(client.isMutating()).toBe(0);
+    expect(idleCycles).toBeGreaterThanOrEqual(2);
+  }, {timeout: 3000, interval: 5});
 };
+async function key(target: HTMLElement, key: string, extra: KeyboardEventInit = {}) {
+  await act(async () => { target.focus(); target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra })); });
+}
+const closed = async () => vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   viewer.role = "viewer";
+  localStorage.clear();
   queryBodies = [];
   app.agentAvailable = true;
   app.openChat.mockClear();
@@ -130,45 +128,87 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
-  it("scopes refresh/layout/history/full-screen/help keys to focused dashboard controls", async () => {
-    const { host, client, onSearch } = await render();
-    const toolbar = host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!;
-    const key = async (target: HTMLElement, key: string, extra: KeyboardEventInit = {}) => {
-      await act(async () => { target.focus(); target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra })); });
-    };
-    const before = queryBodies.length;
-    await key(toolbar, "r"); await settle(client); expect(queryBodies).toHaveLength(before + 1);
-    await key(toolbar, "e"); expect(onSearch).toHaveBeenCalledExactlyOnceWith({ edit: "1" });
-    onSearch.mockClear();
-    await key(toolbar, "f"); expect(onSearch).not.toHaveBeenCalled();
-    const panel = host.querySelector<HTMLElement>('[data-panel="latency"][tabindex="0"]')!;
-    await key(panel, "f"); expect(onSearch).toHaveBeenCalledExactlyOnceWith({ view: "latency" });
-    onSearch.mockClear();
-    for (const extra of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }]) await key(panel, "e", extra);
+  it("opens help from body focus immediately after dashboard load", async () => {
+    await render();expect(document.activeElement).toBe(document.body);
+    await act(async()=>document.body.dispatchEvent(new KeyboardEvent("keydown",{key:"?",bubbles:true,cancelable:true})));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts");
+  });
+  it("keeps help and refresh active in full-screen, suppresses layout/history, and Escape closes only help",async()=>{
+    const {client,onSearch,rerender}=await render({view:'latency'});
+    const close=document.querySelector<HTMLElement>('[aria-label="Close panel view"]')!;
+    const before=queryBodies.length;await key(close,'r');await settle(client);expect(queryBodies).toHaveLength(before+1);
+    for(const letter of ['e','h'])await key(close,letter);expect(onSearch).not.toHaveBeenCalled();
+    await key(close,'?');expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+    const dialogs=document.querySelectorAll('[role="dialog"]'),help=dialogs[1];
+    expect(help.textContent).toContain('Exit full-screen');expect(help.textContent).not.toContain('Toggle layout mode');
+    await key(help.querySelector<HTMLElement>('button')!,'Escape');
+    await vi.waitFor(()=>expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1));expect(onSearch).not.toHaveBeenCalled();
+    await key(close,'f');expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:undefined},true);
+    await rerender(onSearch.mock.lastCall![0]);await closed();
+  });
+  it("uses a keyboard icon with an accessible shortcut tooltip", async () => {
+    const {host}=await render();const help=host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts (?)"]')!;
+    expect(help).not.toBeNull();expect(help.textContent).toBe("");expect(help.querySelector("svg")).not.toBeNull();
+  });
+  it("pauses the live batch timer while selecting and resumes the chosen interval on cancel",async()=>{
+    panelResponse=async()=>json({results:[{id:'latency',status:'ok',frame,elapsed_ms:1}]});
+    vi.useFakeTimers({toFake:['setInterval','clearInterval']});
+    try{
+      const {host,client}=await render();const before=queryBodies.length;
+      await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Begin range"]')!.click());
+      expect(host.textContent).toContain("Paused while selecting");
+      await act(async()=>vi.advanceTimersByTimeAsync(60000));await settle(client);expect(queryBodies).toHaveLength(before);
+      await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Cancel range"]')!.click());
+      expect(host.textContent).not.toContain("Paused while selecting");
+      await act(async()=>vi.advanceTimersByTimeAsync(30000));await settle(client);expect(queryBodies.length).toBeGreaterThan(before);
+    }finally{vi.useRealTimers();}
+  });
+  it("returns f to its original panel control through the shared View transition",async()=>{
+    const {host,onSearch,rerender}=await render();
+    const control=host.querySelector<HTMLButtonElement>('[data-panel="latency"] [data-panel-view="Data"]')!;
+    control.focus();await act(async()=>control.dispatchEvent(new KeyboardEvent('keydown',{key:'f',bubbles:true,cancelable:true})));
+    await rerender(onSearch.mock.lastCall![0]);
+    await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Close panel view"]')!.click());
+    await rerender(onSearch.mock.lastCall![0]);
+    await vi.waitFor(()=>expect(document.activeElement).toBe(control));
+  });
+  it("routes refresh, layout and focused-panel View through their visible controls", async () => {
+    const {host, client, onSearch}=await render();
+    const toolbar=host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!;
+    const before=queryBodies.length;await key(toolbar,"r");await settle(client);expect(queryBodies).toHaveLength(before+1);
+    await key(toolbar,"e");expect(onSearch).toHaveBeenCalledExactlyOnceWith({edit:"1"});onSearch.mockClear();
+    await key(toolbar,"f");expect(onSearch).not.toHaveBeenCalled();
+    await key(host.querySelector<HTMLElement>('[data-panel="latency"] [data-panel-view="Data"]')!,"f");
+    expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:"latency"},false);
+  });
+  it("ignores modified and repeated dashboard keys",async()=>{
+    const {host,onSearch}=await render();const panel=host.querySelector<HTMLElement>('[data-panel="latency"] [data-panel-view="Data"]')!;
+    for(const extra of [{ctrlKey:true},{metaKey:true},{altKey:true},{shiftKey:true},{repeat:true}])await key(panel,"e",extra);
     expect(onSearch).not.toHaveBeenCalled();
-    await key(toolbar, "h"); expect(document.querySelector('[role="dialog"]')?.textContent).toContain("History");
-    const close = document.querySelector<HTMLElement>('[role="dialog"] button')!;
-    await key(toolbar, "e"); expect(onSearch).not.toHaveBeenCalled();
-    await key(close, "Escape");
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
-    await key(toolbar, "?"); expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts");
-    const helpClose = document.querySelector<HTMLElement>('[role="dialog"] button')!;
-    await key(helpClose, "Tab", { shiftKey: true });
+  });
+  it("opens history by key and blocks dashboard actions behind the drawer",async()=>{
+    const {host,onSearch}=await render();const toolbar=host.querySelector<HTMLElement>('[aria-label="Refresh now"]')!;
+    await key(toolbar,"h");expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Version history");
+    await key(toolbar,"e");expect(onSearch).not.toHaveBeenCalled();
+    await key(document.querySelector<HTMLElement>('[role="dialog"] button')!,"Escape");await closed();
+  });
+  it("contains keyboard help focus and returns it to the shortcut opener",async()=>{
+    const {host}=await render();const toolbar=host.querySelector<HTMLElement>('[aria-label="Refresh now"]')!;
+    await key(toolbar,"?");expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts");
+    const close=document.querySelector<HTMLElement>('[role="dialog"] button')!;await key(close,"Tab",{shiftKey:true});
     expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
-    await key(helpClose, "Escape");
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
-    expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(document.activeElement).toBe(toolbar);
+    await key(close,"Escape");await closed();await vi.waitFor(()=>expect(document.activeElement).toBe(toolbar));
   });
   it("opens discoverable shortcut help and returns focus to its toolbar button", async () => {
     const { host } = await render();
-    const help = host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts"]')!;
-    expect(help.title).toBe("Keyboard shortcuts (?)");
+    const help = host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts (?)"]')!;
+    expect(help.querySelector("svg")).not.toBeNull();
     help.focus(); await act(async () => help.click());
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.textContent).toContain("Shift+Left/Right"); expect(dialog.textContent).toContain("Without a focused panel, f does nothing.");
     const close = dialog.querySelector<HTMLElement>("button")!;
     await act(async () => { close.focus(); close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); }); expect(document.activeElement).toBe(help);
+    await closed(); await vi.waitFor(() => expect(document.activeElement).toBe(help));
   });
   it("returns focus to History after Escape closes its drawer", async () => {
     const { client } = await render();
@@ -176,8 +216,7 @@ describe("DashboardPage", () => {
     history.focus(); await act(async () => history.click()); await settle(client);
     const close = document.querySelector<HTMLElement>('[role="dialog"] button')!;
     close.focus(); await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
-    expect(document.activeElement).toBe(history);
+    await closed(); await vi.waitFor(() => expect(document.activeElement).toBe(history));
   });
   it.each([true, false])("restores through history preserving URL time and variables and drops only missing panel state: %s", async removed => {
     const existing = fetchMock.getMockImplementation()!;
@@ -254,7 +293,7 @@ describe("DashboardPage", () => {
     } }] });
     const { host } = await render();
     await vi.waitFor(async()=>{
-      await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+      await act(async () => {});
       expect(host.querySelector("[data-service-viewport]")).not.toBeNull();
     },{interval:5,timeout:3000});
     const viewport = host.querySelector<HTMLElement>("[data-service-viewport]")!;
@@ -599,7 +638,7 @@ it("marks older panels stale after a failed refresh and clears stale on recovery
  // Network idle precedes React Query's scheduled render under CPU load.
  // A disabled loading button cannot accept the test's manual refresh.
  await vi.waitFor(async () => {
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  await act(async () => {});
   expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
   expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
  }, { interval: 5, timeout: 3000 });
@@ -628,7 +667,7 @@ it("keeps explicit None selected in the URL and outgoing request",async()=>{
 it("keeps only the failed panel stale when the next partial refresh succeeds",async()=>{
  const {host,client}=await render();
  await vi.waitFor(async()=>{
-  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+  await act(async () => {});
   expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
   expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
  },{interval:5,timeout:3000});
@@ -641,7 +680,7 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
  await act(async()=>{visibility([{target:hidden,isIntersecting:false} as IntersectionObserverEntry],{} as IntersectionObserver);});
  panelResponse=async()=>json({results:[{id:"latency",status:"empty",diagnosis:"still empty",elapsed_ms:2}]});
  await vi.waitFor(async()=>{
-  await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});
+  await act(async () => {});
   expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
  },{interval:5,timeout:3000});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);

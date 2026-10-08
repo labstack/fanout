@@ -62,7 +62,7 @@ it("returns focus to the grid menu on Escape and direct-link close", async () =>
   await act(async () => close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   expect(onView).toHaveBeenLastCalledWith(undefined);
   await draw(undefined);
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
   expect(document.activeElement).toBe(host.querySelector('[aria-label="Latency menu"]'));
   expect(document.querySelectorAll("[data-active-viz]")).toHaveLength(1);
 });
@@ -108,7 +108,7 @@ it.each(["Back", "Escape then Back"])("opens shared URL state (%s) without a que
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   cleanups.push(() => { root.unmount(); client.clear(); });
   await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></MantineProvider>));
-  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); expect(host.querySelector("[data-active-viz]")).not.toBeNull(); });
+  await vi.waitFor(async () => { await act(async () => {}); expect(host.querySelector("[data-active-viz]")).not.toBeNull(); });
   expect(queries).toBe(1);
   const menu = host.querySelector<HTMLButtonElement>('[aria-label="Latency menu"]')!;
   await act(async () => menu.click());
@@ -122,7 +122,7 @@ it.each(["Back", "Escape then Back"])("opens shared URL state (%s) without a que
   }
   await act(async () => history.back());
   await vi.waitFor(() => expect(router.state.location.search.view).toBeUndefined());
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
   expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(document.activeElement).toBe(menu);
   expect(router.state.location.search).toMatchObject({ from: "2026-10-08T00:00:00.123456789Z", to: "2026-10-08T01:00:00.987654321Z", compare: "1", vars: { service: "checkout" } });

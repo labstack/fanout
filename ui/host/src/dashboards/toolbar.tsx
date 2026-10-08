@@ -3,6 +3,7 @@ import { ArrowClockwise, CaretDown, Clock, ClockCounterClockwise, MagnifyingGlas
 import { useState } from "react";
 import type { DashboardTime } from "../../../panels/types";
 import { exactTimestamp } from "../../../format";
+import { ShortcutButton } from "./shortcut-button";
 import { ranges, refreshes } from "./search";
 
 const rangeLabel: Record<string, string> = { "5m": "Last 5 minutes", "15m": "Last 15 minutes", "1h": "Last hour", "3h": "Last 3 hours", "6h": "Last 6 hours", "12h": "Last 12 hours", "24h": "Last 24 hours", "2d": "Last 2 days", "7d": "Last 7 days", "30d": "Last 30 days" };
@@ -47,7 +48,7 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
     <Switch size="sm" label="Compare with previous period" checked={compare} onChange={(e) => onCompare(e.currentTarget.checked)} />
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>
     <Button variant="default" size="sm" leftSection={<ClockCounterClockwise size={15} />} onClick={onHistory}>History</Button>
-    {onShortcuts && <Button variant="default" size="sm" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={onShortcuts}>Keyboard shortcuts</Button>}
+    {onShortcuts && <ShortcutButton onClick={onShortcuts}/>}
     {updatedAt && <Text size="xs" c="dimmed" visibleFrom="md">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(updatedAt)}</Text>}
   </Group>;
 }

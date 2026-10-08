@@ -1,7 +1,9 @@
-import { Modal } from "@mantine/core";
+import { Group, Modal } from "@mantine/core";
+import { ShortcutButton } from "./shortcut-button";
 import { useEffect, useRef, type ReactNode } from "react";
 
-export function PanelFullscreen({ opened, onClose, title, children, returnFocusTo }: {
+export function PanelFullscreen({ opened, onClose, title, children, returnFocusTo, shortcutScope, onShortcuts, escapeEnabled = true }: {
+  shortcutScope?: string; onShortcuts?(): void; escapeEnabled?: boolean;
   opened: boolean; onClose(): void; title: string; children: ReactNode; returnFocusTo(): HTMLElement | undefined;
 }) {
   const wasOpen = useRef(false);
@@ -15,10 +17,10 @@ export function PanelFullscreen({ opened, onClose, title, children, returnFocusT
     const frame = requestAnimationFrame(() => restore.current()?.focus());
     return () => cancelAnimationFrame(frame);
   }, [opened]);
-  return <Modal.Root opened={opened} onClose={onClose} fullScreen trapFocus returnFocus={false} closeOnEscape onExitTransitionEnd={() => restore.current()?.focus()}>
+  return <Modal.Root opened={opened} onClose={onClose} fullScreen trapFocus returnFocus={false} closeOnEscape={escapeEnabled} onExitTransitionEnd={() => restore.current()?.focus()}>
     <Modal.Overlay />
-    <Modal.Content aria-label={title}>
-      <Modal.Header><Modal.CloseButton data-autofocus aria-label="Close panel view" /></Modal.Header>
+    <Modal.Content aria-label={title} data-panel-fullscreen data-shortcut-scope={shortcutScope}>
+      <Modal.Header><Group ml="auto" gap="xs">{onShortcuts && <ShortcutButton onClick={onShortcuts}/>}<Modal.CloseButton data-autofocus aria-label="Close panel view" /></Group></Modal.Header>
       <Modal.Body>{children}</Modal.Body>
     </Modal.Content>
   </Modal.Root>;

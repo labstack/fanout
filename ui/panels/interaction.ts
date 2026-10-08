@@ -14,10 +14,11 @@ export function panelTimeLabel(panel: Panel): string | undefined {
 }
 
 export function pointSelection(panel: Panel, result: PanelResult, event: ChartEvent): Selection | undefined {
-  if (event.interactive === false || (event.interactive !== true && event.seriesName?.endsWith(" · previous")) || isOtherSeries(event.seriesName) || isOtherSeries(event.name)) return undefined;
+  if (event.interactive === false || (event.interactive !== true && event.seriesName?.endsWith(" · previous"))) return undefined;
   if ((event.data as { value?: unknown } | undefined)?.value === null) return undefined;
   const embedded = (event.data as { selection?: Selection } | undefined)?.selection;
-  if (embedded) return embedded;
+  if (embedded) return Object.values(embedded.dimensions).some(isOtherSeries) ? undefined : embedded;
+  if (isOtherSeries(event.seriesName) || isOtherSeries(event.name)) return undefined;
   if (event.value === null || Array.isArray(event.value) && event.value.at(-1) == null) return undefined;
   const dimension = panel.query?.by?.[0] ?? result.frame?.columns.find(column => column.role === "dimension")?.name;
   const name = panel.viz === "timeseries" ? event.seriesName : event.name;
