@@ -201,9 +201,8 @@ describe("compile, more", () => {
 
   it("keeps a threshold above the data in view, and does not sample bars", () => {
     const p = { ...panel, thresholds: [{ value: 1500, status: "bad" as const }] };
-    const option = timeseriesOption(p, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { yAxis: { max: (r: { max: number }) => number } };
-    expect(option.yAxis.max({ max: 100 })).toBe(1500);
-    expect(option.yAxis.max({ max: 9000 })).toBe(9000);
+    const option = timeseriesOption(p, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { yAxis: { max: number } };
+    expect(option.yAxis.max).toBeGreaterThanOrEqual(1500);
     const bars = timeseriesOption({ ...p, options: { style: "bars" } }, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { series: S[] };
     expect(bars.series[0].sampling).toBeUndefined();
   });

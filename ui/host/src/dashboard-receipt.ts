@@ -29,7 +29,8 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
   if (start < 0) return null;
   const next = messages.findIndex((m, i) => i > start && m.role === "user");
   const turn = messages.slice(start + 1, next < 0 ? undefined : next);
-  const calls = turn.flatMap((m, i) => m.role === "assistant" ? (m.toolCalls ?? []).map(call => ({call,index:i})) : []);
+  const refused = new Set(turn.flatMap(m => m.role === "tool" && jsonObject(m.content)?.code === "answer_only" ? [m.toolCallId] : []));
+  const calls = turn.flatMap((m, i) => m.role === "assistant" ? (m.toolCalls ?? []).map(call => ({call,index:i})) : []).filter(({call}) => !refused.has(call.id));
   if (!calls.some(({call}) => mutationNames.has(call.function.name) || call.function.name === "preview_panels")) return null;
   const stages: BuildReceipt["stages"] = {schema:{state:"unobserved"},context:{state:"unobserved"},draft:{state:"unobserved"},validation:{state:"unobserved"},preview:{state:"unobserved"},save:{state:"unobserved"}};
   const receipt: BuildReceipt = {turn_id:turnID,stages,panels:[],problems:[],corrections:[],save_attempts:[],explanations:[],context_counts:{deploys:0,anomalies:0}};

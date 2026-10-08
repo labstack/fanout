@@ -630,3 +630,9 @@ it('replaces interrupted chat uncertainty with a later proven save',async()=>{
  try{expect(document.body.textContent).toContain('Saved v2');expect(document.body.textContent).not.toMatch(/interrupted|outcome unknown|tool calls? failed/);}
  finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });
+
+it("labels a structural answer-only refusal as read-only instead of save or tool failure",async()=>{
+ const root=await mount(value({messages:[user(),call("refused","create_dashboard"),result("refused",{error:"Read-only",code:"answer_only",isError:true},"Read-only")]}));
+ try { expect(document.body.textContent).toContain("Not saved: Explain is read-only");expect(document.body.textContent).not.toMatch(/Save failed|tool calls? failed/); }
+ finally { await act(async()=>root.unmount());document.body.innerHTML=""; }
+});

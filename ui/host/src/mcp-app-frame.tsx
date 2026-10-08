@@ -1,7 +1,7 @@
 import {mcpAppCSP} from "./mcp-app-csp";
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { Alert, Box, Center, Loader, Text, useComputedColorScheme } from "@mantine/core";
+import { Alert, Box, Button, Center, FocusTrap, Loader, Text, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { authorizedFetch } from "./auth";
@@ -155,6 +155,24 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   // The app reports its own size through the bridge; the floor only covers
   // the moment before the first report.
   const minimumHeight = 240;
+  const [displayMode, setDisplayMode] = useState<"inline" | "fullscreen">("inline");
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const modeRef = useRef(displayMode);
+  modeRef.current = displayMode;
+  const changeDisplayMode = (mode: "inline" | "fullscreen") => {
+    setDisplayMode(mode);
+    bridgeRef.current?.setHostContext({ theme: colorSchemeRef.current, displayMode: mode, availableDisplayModes: ["inline", "fullscreen"] });
+    if (mode === "inline") iframeRef.current?.focus();
+  };
+  useEffect(() => {
+    if (displayMode !== "fullscreen") return;
+    closeRef.current?.focus();
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); changeDisplayMode("inline"); } };
+    window.addEventListener("keydown", escape);
+    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", escape); };
+  }, [displayMode]);
   const [height, setHeight] = useState(minimumHeight);
   const [error, setError] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);
@@ -167,7 +185,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   colorSchemeRef.current = colorScheme;
 
   useEffect(() => {
-    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: "inline" });
+    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: modeRef.current, availableDisplayModes: ["inline", "fullscreen"] });
   }, [colorScheme]);
 
   useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resource_uri]);
@@ -175,6 +193,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   useEffect(() => {
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    setDisplayMode("inline");
     setHTML("");
     setError("");
     const scheduleReconnect = () => {
@@ -237,7 +256,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
         null,
         { name: "Fanout", version: "0.2.0" },
         { serverTools: {}, logging: {} },
-        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline" } },
+        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } },
       );
       const connection = connectionRef.current;
       if (!connection) throw new Error("MCP connection unavailable");
@@ -247,6 +266,11 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
         const visibility = record(record(tool?._meta)?.ui)?.visibility;
         if (!Array.isArray(visibility) || !visibility.includes("app") || /^(?:create|edit|replace|restore|delete)_/.test(params.name)) throw new Error("This tool is unavailable in the app");
         return mcpClient.callTool(params, { signal: extra.mcpReq.signal });
+      };
+      bridge.onrequestdisplaymode = async ({ mode }) => {
+        if (mode !== "inline" && mode !== "fullscreen") return { mode: modeRef.current };
+        changeDisplayMode(mode);
+        return { mode };
       };
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
@@ -270,5 +294,11 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
 
   if (error) return <Alert color="bad" m="md">{error}</Alert>;
   if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
-  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height }} onLoad={() => void connectBridge()} />;
+  // Keep the iframe in the same DOM position: reparenting or remounting reloads the app.
+  return <FocusTrap active={displayMode === "fullscreen"}><Box data-app-fullscreen={displayMode === "fullscreen" ? "" : undefined}
+    role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Fanout analysis view" : undefined}
+    bg="var(--mantine-color-body)" style={displayMode === "fullscreen" ? { position: "fixed", inset: 0, zIndex: 1000, display: "flex", flexDirection: "column" } : undefined}>
+    {displayMode === "fullscreen" && <Box p="xs" ta="right"><Button ref={closeRef} data-autofocus size="compact-sm" variant="default" aria-label="Close analysis view" onClick={() => changeDisplayMode("inline")}>Close</Button></Box>}
+    <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height: displayMode === "fullscreen" ? "100%" : height, ...(displayMode === "fullscreen" ? { flex: "1 1 0", minHeight: 0 } : {}) }} onLoad={() => void connectBridge()} />
+  </Box></FocusTrap>;
 }

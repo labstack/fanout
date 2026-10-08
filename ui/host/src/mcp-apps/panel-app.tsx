@@ -21,7 +21,8 @@ export function PanelApp() {
     <QueryClientProvider client={queryClient}><div ref={wrapper} data-app-content>
       {fragment && transport && host ? <>
         {failure && <Alert color="bad" m="md">{failure}</Alert>}
-        <FragmentView fragment={fragment} dark={dark} onQuery={transport.query} drillClient={transport.drill} resolveVariables={transport.resolveVariables} />
+        <FragmentView fragment={fragment} dark={dark} onQuery={transport.query} drillClient={transport.drill} resolveVariables={transport.resolveVariables} hostDisplayMode={host.displayMode ?? "inline"}
+          onDisplayMode={host.availableDisplayModes?.includes("fullscreen") ? async mode => (await app!.requestDisplayMode({ mode })).mode === mode : undefined} />
       </> : failure ? <Alert color="bad" m="md">{failure}</Alert> : <Center mih={180}><Loader size="sm" aria-label="Loading panel view" /></Center>}
     </div></QueryClientProvider>
   </MantineProvider>;

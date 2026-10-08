@@ -5,12 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const uri="ui://fanout/panels.html";
 const fragment={view:{kind:"query",key:"0".repeat(64)},dashboard:{version:1,name:"Fixture",panels:[{id:"text",title:"Text",viz:"text",content:"hello"}]},results:[{id:"text",status:"ok"}]};
 const content={resource_uri:uri,tool_name:"query_telemetry",tool_input:{},tool_result:fragment,is_error:false};
-const mcp=vi.hoisted(()=>({connect:vi.fn(),readResource:vi.fn(),listTools:vi.fn(),callTool:vi.fn(),close:vi.fn(),clients:[] as Array<{onclose?:()=>void}>,bridges:[] as Array<{oncalltool?:(params:{name:string},extra:{mcpReq:{signal:AbortSignal}})=>Promise<unknown>;onsizechange?:(size:{height:number})=>void}>,capabilities:[] as unknown[]}));
+const mcp=vi.hoisted(()=>({connect:vi.fn(),readResource:vi.fn(),listTools:vi.fn(),callTool:vi.fn(),close:vi.fn(),clients:[] as Array<{onclose?:()=>void}>,bridges:[] as Array<{oncalltool?:(params:{name:string},extra:{mcpReq:{signal:AbortSignal}})=>Promise<unknown>;onsizechange?:(size:{height:number})=>void}>,contexts:[] as unknown[],setHostContext:vi.fn(),capabilities:[] as unknown[]}));
 vi.mock("@modelcontextprotocol/client",()=>({Client:class {onclose?:()=>void;onerror?:()=>void;constructor(){mcp.clients.push(this);}connect=mcp.connect;readResource=mcp.readResource;listTools=mcp.listTools;callTool=mcp.callTool;close=mcp.close;},StreamableHTTPClientTransport:class {close=mcp.close;}}));
-vi.mock("@modelcontextprotocol/ext-apps/app-bridge",()=>({AppBridge:class {oninitialized?:()=>Promise<void>;oncalltool?:()=>Promise<unknown>;onsizechange?:()=>void;constructor(client:unknown,_info:unknown,capabilities:unknown){expect(client).toBeNull();mcp.bridges.push(this);mcp.capabilities.push(capabilities);}async connect(){await this.oninitialized?.();}async sendToolInput(){}async sendToolResult(){}async teardownResource(){}setHostContext(){}},PostMessageTransport:class {}}));
+vi.mock("@modelcontextprotocol/ext-apps/app-bridge",()=>({AppBridge:class {oninitialized?:()=>Promise<void>;oncalltool?:()=>Promise<unknown>;onsizechange?:()=>void;constructor(client:unknown,_info:unknown,capabilities:unknown,options:unknown){mcp.contexts.push(options);expect(client).toBeNull();mcp.bridges.push(this);mcp.capabilities.push(capabilities);}async connect(){await this.oninitialized?.();}async sendToolInput(){}async sendToolResult(){}async teardownResource(){}setHostContext=mcp.setHostContext;},PostMessageTransport:class {}}));
 let MCPAppFrame:ComponentType<{content:unknown}>;
 let mcpAppCSP:(meta:unknown)=>string;
-beforeEach(async()=>{await new Promise(r=>setTimeout(r,0));vi.resetModules();vi.clearAllMocks();mcp.clients.length=0;mcp.bridges.length=0;mcp.capabilities.length=0;
+beforeEach(async()=>{await new Promise(r=>setTimeout(r,0));vi.resetModules();vi.clearAllMocks();mcp.clients.length=0;mcp.bridges.length=0;mcp.capabilities.length=0;mcp.contexts.length=0;
  mcp.connect.mockResolvedValue(undefined);mcp.close.mockResolvedValue(undefined);mcp.callTool.mockResolvedValue({content:[]});
  mcp.readResource.mockImplementation(({uri})=>Promise.resolve({contents:[{uri,mimeType:"text/html;profile=mcp-app",text:"<!doctype html><html><head></head><body>app</body></html>",_meta:{ui:{csp:{}}}}],ttlMs:300000}));
  mcp.listTools.mockResolvedValue({tools:[{name:"query_panel_fragment",_meta:{ui:{visibility:["app"]}}},{name:"inspect_trace",_meta:{ui:{visibility:["model","app"]}}},{name:"create_dashboard"},{name:"replace_dashboard"},{name:"model_tool",_meta:{ui:{visibility:["model"]}}}]});
@@ -58,4 +58,20 @@ describe("MCPAppFrame",()=>{
  it.each([null,{}, {resourceUri:uri,toolName:"query_telemetry"},{...content,resource_uri:"ui://fanout/log-explorer.html"},{...content,tool_result:{data:{}}},{...content,tool_input:undefined}])("rejects invalid persisted activity without connecting (%s)",async value=>{const view=await mount([value]);expect(view.container.textContent).toContain("This view could not be loaded. Please try again.");expect(mcp.connect).not.toHaveBeenCalled();expect(mcp.readResource).not.toHaveBeenCalled();await view.unmount();});
  it.each(["uri","mime","empty","failure"])("evicts failed %s resource reads",async mode=>{if(mode==="failure")mcp.readResource.mockRejectedValueOnce(new Error("offline"));else mcp.readResource.mockResolvedValueOnce({contents:[{uri:mode==="uri"?"wrong":uri,mimeType:mode==="mime"?"text/html":"text/html;profile=mcp-app",text:mode==="empty"?"":"<html></html>"}]});let view=await mount();await vi.waitFor(()=>expect(view.container.textContent).toContain("This view could not be loaded"));await view.unmount();view=await mount();await vi.waitFor(()=>expect(view.container.querySelector("iframe")).not.toBeNull());expect(mcp.readResource).toHaveBeenCalledTimes(2);await view.unmount();});
  it("builds CSP only from safe declared sources and permits inline fonts and Blob workers",()=>{const policy=mcpAppCSP({ui:{csp:{connectDomains:["https://api.example.com","https://evil;script-src"],resourceDomains:["https://cdn.example.com"],frameDomains:["https://frames.example.com"]}}});expect(policy).toContain("connect-src https://api.example.com");expect(policy).toContain("font-src 'self' data: https://cdn.example.com");expect(policy).not.toContain("evil");expect(policy).toContain("worker-src blob:");expect(mcpAppCSP(undefined)).toContain("connect-src 'none'");});
+});
+
+it.each(["Close", "Escape", "app"])("negotiates a viewport overlay and restores the same iframe (%s)",async how=>{
+ const view=await mount();
+ try {
+  const frame=view.container.querySelector("iframe")!;await act(async()=>frame.dispatchEvent(new Event("load")));
+  expect(mcp.contexts[0]).toEqual({hostContext:{theme:"light",displayMode:"inline",availableDisplayModes:["inline","fullscreen"]}});
+  const bridge=mcp.bridges[0] as unknown as {onrequestdisplaymode(params:{mode:string}):Promise<{mode:string}>};
+  await act(async()=>{expect(await bridge.onrequestdisplaymode({mode:"fullscreen"})).toEqual({mode:"fullscreen"});});
+  const overlay=document.querySelector<HTMLElement>('[data-app-fullscreen]')!;
+  expect(overlay.style.position).toBe("fixed");expect(frame.style.height).toBe("100%");expect(overlay.getAttribute("aria-label")).toBe("Fanout analysis view");
+  expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+  await act(async()=>{ if(how==="app") await bridge.onrequestdisplaymode({mode:"inline"}); else if(how==="Close") overlay.querySelector<HTMLButtonElement>('[aria-label="Close analysis view"]')!.click(); else overlay.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})); });
+  expect(document.querySelector('[data-app-fullscreen]')).toBeNull();expect(view.container.querySelector("iframe")).toBe(frame);expect(frame.style.height).toBe("240px");expect(document.activeElement).toBe(frame);
+  expect(mcp.setHostContext).toHaveBeenLastCalledWith(expect.objectContaining({displayMode:"inline"}));
+ } finally {await view.unmount();}
 });

@@ -1,3 +1,5 @@
+import { LabelLayout } from "echarts/features";
+import { adaptValueAxis } from "../../../panels/units";
 import { BarChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "echarts/charts";
 import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
@@ -6,7 +8,7 @@ import { useEffect, useRef } from "react";
 import type { ChartSize } from "../../../panels/compile";
 import { registerAudit, chartAuditSnapshot } from "./chart-measurements-dev";
 
-use([CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent, ToolboxComponent]);
+use([LabelLayout, CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent, ToolboxComponent]);
 
 /* Dashboard panels draw on canvas: SVG stays smooth only to a few thousand
    points, and a dashboard of a dozen time series passes that. One instance
@@ -48,10 +50,9 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{height:number}}}}};
     const plotHeight=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect().height;
     if(plotHeight && compiled.yAxis) {
-      const splitNumber=Math.max(2,Math.floor(plotHeight/32));
-      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as {type?:string;splitNumber?:number}[];
-      if(axes.some(axis=>(axis.type==="value"||axis.type==="log")&&axis.splitNumber!==splitNumber)) {
-        const updated=axes.map(axis=>axis.type==="value"||axis.type==="log"?{...axis,splitNumber}:axis);
+      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
+      const updated=axes.map(axis=>adaptValueAxis(axis,plotHeight));
+      if(updated.some((axis,i)=>axis.splitNumber!==axes[i].splitNumber || axis.interval!==axes[i].interval)) {
         compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
         chart.current?.setOption({yAxis:compiled.yAxis});
       }

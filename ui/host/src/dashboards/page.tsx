@@ -19,7 +19,6 @@ import { VariableBar } from "./variable-bar";
 
 import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
-import { useViewer } from "../auth";
 import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
 const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
@@ -54,9 +53,8 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
 }
 
 function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
-  const viewer = useViewer();
-  // All three authenticated roles can manage their own dashboards (server capability).
-  const canManage = ["viewer", "operator", "admin"].includes(viewer.role);
+  // Loading this owner-scoped record proves manage-own capability on the server.
+  const canManage = true;
   const [historyOpen, setHistoryOpen] = useState(false);
   const client = useQueryClient();
   const [restoreRefresh, setRestoreRefresh] = useState<number>();
@@ -138,7 +136,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
+      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view }, view === undefined)} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);

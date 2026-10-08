@@ -46,7 +46,7 @@ function chatAppViews(messages: Message[]) {
   }
   finish(); return { views, duplicates };
 }
-type ToolFailure = {name:string;message:string};
+type ToolFailure = {name:string;message:string;readOnly:boolean};
 function toolFailures(messages: Message[]) {
   const groups = new Map<string, ToolFailure[]>();
   const calls = new Map<string, { assistant: string; name: string }>();
@@ -72,7 +72,7 @@ function toolFailures(messages: Message[]) {
       firstFailures.set(owner, first);
       const failures = groups.get(first) ?? [];
       const text = typeof payload?.error === "string" ? payload.error : typeof message.error === "string" && message.error ? message.error : "Tool execution failed";
-      failures.push({ name: call?.name ?? "Tool", message: text });
+      failures.push({ name: call?.name ?? "Tool", message: text, readOnly: payload?.code === "answer_only" });
       groups.set(first, failures);
     }
   }
@@ -80,11 +80,14 @@ function toolFailures(messages: Message[]) {
 }
 function ToolFailures({failures}:{failures:ToolFailure[]}) {
   const [expanded,setExpanded]=useState(false);
+  const failed = failures.filter(f => !f.readOnly);
   return <Box data-chat-anchor>
+    {failures.some(f => f.readOnly) && <Text size="sm" c="dimmed">Not saved: Explain is read-only</Text>}
+    {failed.length > 0 && <>
     <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)} style={{color:"var(--mantine-color-dimmed)"}}>
-      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failures.length} tool {failures.length === 1 ? "call" : "calls"} failed</span>
+      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failed.length} tool {failed.length === 1 ? "call" : "calls"} failed</span>
     </UnstyledButton>
-    {expanded && <Stack gap="xs" pl="md">{failures.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}
+    {expanded && <Stack gap="xs" pl="md">{failed.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}</>}
   </Box>;
 }
 function ChatAppView({ view }: { view: AppView }) {

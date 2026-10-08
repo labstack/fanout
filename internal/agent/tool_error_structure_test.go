@@ -18,7 +18,8 @@ type errorPathTools struct {
 	execute func(context.Context, ToolCall) (ToolExecution, error)
 }
 
-func (errorPathTools) Definitions() []ToolDef { return nil }
+func (errorPathTools) ReadOnly(name string) bool { return reviewedReadOnly(name, nil) }
+func (errorPathTools) Definitions() []ToolDef    { return nil }
 func (f errorPathTools) Execute(ctx context.Context, call ToolCall) (ToolExecution, error) {
 	return f.execute(ctx, call)
 }

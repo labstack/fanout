@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({ init: vi.fn(), registered: [] as unknown[], co
 vi.mock("echarts/core", () => ({ init: mocks.init, use: (components: unknown[]) => { mocks.registered = components; }, connect: mocks.connect, disconnect: mocks.disconnect }));
 vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
 vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: { id: "graphic" }, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
+vi.mock("echarts/features", () => ({ LabelLayout: { id: "label-layout" } }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
 
@@ -169,4 +170,13 @@ it("inspects rendered legend text bounds on demand", async () => {
  expect(window.__fanoutAudit!(chart.id)!.legend).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
  expect(window.__fanoutAudit!(chart.id)!.legendBottom).toBe(30);
  await act(async () => root.unmount()); container.remove(); window.history.replaceState({},"","/"); vi.unstubAllEnvs();
+});
+
+it("registers end-label collision management",()=>{expect(mocks.registered).toContainEqual({id:"label-layout"});});
+it("keeps nice duration intervals when adapting to native plot height",async()=>{
+ const instance=fresh();Object.assign(instance,{getModel:()=>({getComponent:()=>({coordinateSystem:{getRect:()=>({height:750})}})})});
+ const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
+ try {await act(async()=>root.render(<EChartCanvas option={{yAxis:{type:"value",fanout_unit:"ms",min:0,max:90000,interval:50000,splitNumber:2,axisLabel:{formatter:(v:number)=>v+"ms"}}}} height={800} label="Latency"/>));
+ const axis=instance.setOption.mock.lastCall![0].yAxis;expect(axis.interval).toBe(10000);expect(axis.splitNumber).toBe(9);
+ }finally {await act(async()=>root.unmount());container.remove();}
 });

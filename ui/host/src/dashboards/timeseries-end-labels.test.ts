@@ -13,7 +13,8 @@ describe("timeseries end labels", () => {
     for (const series of option.series as Series[]) {
       expect(series.lineStyle.width).toBe(2); expect(series.showSymbol).toBe(false);
       expect(series.endLabel).toMatchObject({ show: true, color: theme.muted, fontSize: 12, formatter: "{a}" });
-      expect(series.labelLayout).toEqual({ moveOverlap: "shiftY" });
+      expect(series.labelLayout).toEqual({ moveOverlap: "shiftY", hideOverlap: true });
+      expect(series.endLabel).toMatchObject({ lineHeight: 14, padding: [1, 0] });
     }
     expect((option.series as Series[])[0].markLine.data[0].label).toMatchObject({ formatter: "p99 budget 1.5 s", position: "insideStartTop", fontSize: 12 });
   });
@@ -34,4 +35,17 @@ describe("timeseries end labels", () => {
     expect(area.tooltip.formatter()).toContain("Slow · bad"); expect(area.tooltip.formatter()).toContain(new Date(800000).toISOString()); expect(area.tooltip.formatter()).toContain(new Date(2000000).toISOString());
     expect(area.itemStyle.opacity).toBeLessThanOrEqual(.12);
   });
+});
+
+it("reserves the measured longest label lane for three endpoints within two percent",()=>{
+ const clustered={...result,frame:{...result.frame!,values:[[0,3599999],[900,900],[901,901],[902,902]]}};
+ const o=timeseriesOption(panel,clustered,chartThemeFor(false),{width:1400,height:800,measureText:()=>120}) as any;
+ expect(o.grid.right).toBe(144);
+ for(const line of o.series){expect(line.endLabel.width).toBe(120);expect(line.endLabel.lineHeight).toBe(14);expect(line.labelLayout).toEqual({moveOverlap:"shiftY",hideOverlap:true});}
+ expect(o.legend.show).toBe(true);
+});
+
+it("drops lower-priority end labels when one padded line fits and retains the legend",()=>{
+ const o=timeseriesOption(panel,result,chartThemeFor(false),{width:1400,height:68}) as any;
+ expect(o.series.map((s:any)=>s.endLabel.show)).toEqual([true,false,false]);expect(o.legend.show).toBe(true);
 });

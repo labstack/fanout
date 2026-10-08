@@ -17,10 +17,11 @@ import { drillSelection, panelHandlers } from "./panel-handlers";
 import { fragmentPanelHeight } from "./layout";
 const unavailableOptions: VariableResolver = async () => { throw new Error("Variable options unavailable"); };
 
-export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVariables, height }: {
+export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVariables, height, hostDisplayMode, onDisplayMode }: {
   fragment: PanelFragment; dark: boolean; drillClient: DrillClient; height?: number;
   onQuery(body: Omit<QueryBody, "panels">): Promise<PanelFragment>;
   resolveVariables?: VariableResolver;
+  hostDisplayMode?: string; onDisplayMode?(mode: "inline" | "fullscreen"): Promise<boolean>;
 }) {
   const group = useId();
   const [shown, setShown] = useState(fragment);
@@ -33,6 +34,19 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
   const generation = useRef(0);
   const [target, setTarget] = useState<DrillTarget>();
   const [view, setView] = useState<string>();
+  const previousMode = useRef(hostDisplayMode);
+  useEffect(() => {
+    if (previousMode.current === "fullscreen" && hostDisplayMode === "inline") setView(undefined);
+    previousMode.current = hostDisplayMode;
+  }, [hostDisplayMode]);
+  const openView = async (id: string) => {
+    try { if (!onDisplayMode || await onDisplayMode("fullscreen")) setView(id); }
+    catch { setError("Full-screen could not be opened. Please try again."); }
+  };
+  const closeView = () => {
+    setView(undefined);
+    if (onDisplayMode) void onDisplayMode("inline").catch(() => setError("Full-screen could not be closed. Please try again."));
+  };
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const focusedPanel = useRef<string | undefined>(undefined);
   if (view) focusedPanel.current = view;
@@ -81,7 +95,7 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     group={group} height={cardHeight} loading={pending} staleAt={staleAt} editing={false} agentAvailable={false} vars={resolvedVars}
     range={panel.time?.range ?? time.range} compare={time.compare === "previous_period"} onVariable={setVariable}
     {...panelHandlers(panel, shown.results.find(r => r.id === panel.id), setVariable, selection => point(panel, selection))}
-    onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={() => setView(panel.id)} traceLinks="button" />;
+    onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={hostDisplayMode === undefined || onDisplayMode ? () => void openView(panel.id) : undefined} traceLinks="button" />;
   const viewed = spec.panels.find(p => p.id === view);
   return <Stack gap="md" p="md">
     {spec.panels.length > 1 && <Text data-fragment-header fw={600}>{fragmentTitle(shown)}</Text>}
@@ -90,7 +104,7 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     {error && <Alert color="bad">{error}</Alert>}
     {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
-    <PanelFullscreen opened={Boolean(viewed)} onClose={() => setView(undefined)} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} returnFocusTo={() => menus.current.get(focusedPanel.current ?? "")}>
+    <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} returnFocusTo={() => menus.current.get(focusedPanel.current ?? "")}>
       {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140), true)}</Box>}
     </PanelFullscreen>
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={target} onChange={setTarget} />

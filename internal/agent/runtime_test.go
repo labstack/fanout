@@ -63,6 +63,8 @@ type fakeTools struct {
 	calls     []ToolCall
 }
 
+func (f *fakeTools) ReadOnly(name string) bool { return reviewedReadOnly(name, nil) }
+
 func (f *fakeTools) Definitions() []ToolDef { return f.defs }
 
 func (f *fakeTools) Execute(_ context.Context, call ToolCall) (ToolExecution, error) {

@@ -181,11 +181,11 @@ async function menu(host: HTMLElement, title: string, item: string) {
 
 it("pins dashboard Explain to the executed panel window and keeps fix a separate edit", async () => {
   const observed = new Map(results);
-  observed.set("broken", { ...results.get("broken")!, from_ms: 0, to_ms: 3600000 });
-  const { host, props } = await render({ results: observed, time: { range: "1h" }, vars: { service: ["cart"] } });
+  observed.set("broken", { ...results.get("broken")!, from_ms: 0, to_ms: 3600000, diagnosis: "Observed diagnosis", previous: { columns: [], values: [], rows: 0, truncated: true }, frame: { columns: [], values: [], rows: 0, truncated: false, note: "Partial result" } });
+  const { host, props } = await render({ results: observed, time: { from: "2026-10-08T00:00:00.123456789Z", to: "2026-10-08T01:00:00.987654321Z" }, vars: { service: "$__all" }, staleAt: new Map([["broken", 42]]) });
   await menu(host, "Broken", "Explain in chat");
   const [prompt, options] = vi.mocked(props.onOpenChat).mock.calls[0];
-  for (const value of ["dashboard id d1", "version 2", "panel id broken", "1970-01-01T00:00:00.000Z", "1970-01-01T01:00:00.000Z", '"service":["cart"]', "Do not create, edit, replace or restore"]) expect(prompt).toContain(value);
+  for (const value of ["dashboard id d1", "version 2", "panel id broken", "1970-01-01T00:00:00.000Z", "1970-01-01T01:00:00.000Z", '"service":"$__all"', "2026-10-08T00:00:00.123456789Z", "2026-10-08T01:00:00.987654321Z", "Observed diagnosis", '"stale_since":42', '"truncated":true', "Partial result", "Do not create, edit, replace or restore"]) expect(prompt).toContain(value);
   expect(options).toEqual({ answer_only: true });
   expect(prompt).not.toContain("Please fix");
   const fix = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Ask Fanout to fix it")!;

@@ -130,7 +130,7 @@ it("never polls persisted chat answers even when the authored refresh is enabled
 it("keeps the grid card with only one active full-screen body and tracks viewport resize", async () => {
   const view = await mount(fixture()); const original = window.innerHeight;
   try {
-    await act(async () => ui.card.onView());
+    await act(async () => ui.card.onView!());
     expect(view.el.querySelector('[data-card]')?.getAttribute('data-suspended')).toBe('true');
     expect(document.body.querySelectorAll('[data-card]:not([data-suspended])')).toHaveLength(1);
     await act(async () => { window.innerHeight = 750; window.dispatchEvent(new Event("resize")); });

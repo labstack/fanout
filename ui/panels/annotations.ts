@@ -1,3 +1,4 @@
+import { adaptValueAxis } from "./units";
 import { escapeHTML } from "./escape";
 import type { ChartSize, ChartTheme } from "./compile";
 import type { Panel, PanelResult, VarValue } from "./types";
@@ -89,7 +90,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
     const chip = {type:"text",right:rightOffset,top:bandTop,annotation:true,style:{text:l.text,fill:theme.muted,backgroundColor:theme.surface,padding:[1,3],fontSize:11,fontFamily:theme.font,width,overflow:"truncate",stroke:theme.surface,lineWidth:3},tooltip:{formatter:()=>l.details}};
     rightOffset += width+6; return chip;
   });
-  const adaptAxis = (axis:Record<string,unknown>) => axis?.type === "value" || axis?.type === "log" ? {...axis,splitNumber:Math.max(2,Math.floor((size.height-top-Number(grid.bottom??8)-22)/32)),axisLabel:{...(axis.axisLabel as object),hideOverlap:true}} : axis;
+  const adaptAxis = (axis:Record<string,unknown>) => axis?.type === "value" || axis?.type === "log" ? {...axis,...adaptValueAxis(axis,size.height-top-Number(grid.bottom??8)-22),axisLabel:{...(axis.axisLabel as object),hideOverlap:true}} : axis;
   let axes = Array.isArray(option.yAxis) ? option.yAxis.map(adaptAxis) : option.yAxis ? adaptAxis(option.yAxis as Record<string,unknown>) : undefined;
   let trimmedSeries = series, graphics = [...(option.graphic as unknown[] ?? []),...chips];
   if(panel.viz === "state_timeline" && axes && !Array.isArray(axes)) {

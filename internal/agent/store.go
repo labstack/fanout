@@ -184,10 +184,6 @@ func threadTitle(messages []agtypes.Message) string {
 // connection so two concurrent first-runs on the same thread serialize
 // instead of racing into a unique-constraint error.
 func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) ([]agtypes.Message, error) {
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("encode run input: %w", err)
-	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open run connection: %w", err)
@@ -229,6 +225,48 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 			return nil, fmt.Errorf("decode stored messages: %w", err)
 		}
 		messages = mergeThreadMessages(stored, input.Messages)
+		// A retry cannot remove the mode of the run that introduced this user
+		// turn. Inspect immutable run inputs under the same write transaction.
+		userCount := func(items []agtypes.Message) int {
+			n := 0
+			for _, m := range items {
+				if m.Role == agtypes.RoleUser {
+					n++
+				}
+			}
+			return n
+		}
+		if userCount(messages) == userCount(stored) {
+			// Every retry persists its effective mode. The most recent run
+			// therefore carries the introducing run's restriction forward,
+			// including protocol messages with empty IDs.
+			var original string
+			err := conn.QueryRowContext(ctx, `SELECT input_json FROM agui_runs WHERE thread_id=? ORDER BY rowid DESC LIMIT 1`, input.ThreadID).Scan(&original)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("read original turn mode: %w", err)
+			}
+			if err == nil {
+				var previous agtypes.RunAgentInput
+				if err := json.Unmarshal([]byte(original), &previous); err != nil {
+					return nil, fmt.Errorf("decode original turn input: %w", err)
+				}
+				inherited, err := answerOnlyRequest(previous.ForwardedProps)
+				if err != nil {
+					return nil, err
+				}
+				if inherited {
+					props := map[string]any{}
+					if originalProps, ok := input.ForwardedProps.(map[string]any); ok {
+						for k, v := range originalProps {
+							props[k] = v
+						}
+					}
+					props["answer_only"] = true
+					input.ForwardedProps = props
+				}
+			}
+		}
+
 		messagesJSON, err := json.Marshal(messages)
 		if err != nil {
 			return nil, fmt.Errorf("encode messages: %w", err)
@@ -239,6 +277,10 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		); err != nil {
 			return nil, fmt.Errorf("update thread input: %w", err)
 		}
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("encode run input: %w", err)
 	}
 	var parent any
 	if input.ParentRunID != nil {
@@ -255,6 +297,13 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	}
 	committed = true
 	return messages, nil
+}
+
+// runAnswerOnly reads the effective mode persisted by StartRun after retry inheritance.
+func (s *Store) runAnswerOnly(ctx context.Context, runID string) (bool, error) {
+	var mode bool
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(json_extract(input_json,'$.forwardedProps.answer_only'),0) FROM agui_runs WHERE run_id=?`, runID).Scan(&mode)
+	return mode, err
 }
 
 // mergeThreadMessages returns the stored history with the request's new user

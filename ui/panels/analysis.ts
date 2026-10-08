@@ -7,7 +7,7 @@ import { frameRows } from "./rows";
 import { isOtherSeries, seriesGroups, sumPresent, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Cell, Panel, PanelResult } from "./types";
-import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, niceDurationInterval } from "./units";
+import { formatAxis, formatBucket, formatTimeAxis, formatTimestamp, formatValue, valueAxis, valueAxisTicks } from "./units";
 import { markStyle } from "./style";
 
 function spanMs(interval?: string): number {
@@ -61,7 +61,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     grid: { left: 70, right: 24, top: 30, bottom: 40, containLabel: true },
     tooltip: { trigger: "item", backgroundColor: theme.surface, borderColor: theme.border, textStyle: { color: theme.text,fontFamily:theme.font,fontSize:12 }, renderMode: "html", formatter: htmlTooltip(value => formatValue(panel.unit, value)) },
     legend: { show: false, textStyle: { color: theme.muted } },
-    xAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, yAxis: { type: "value",splitNumber:Math.max(2,Math.floor((size.height-92)/32)),axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, series: [] as unknown[],
+    xAxis: { type: "value",axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, yAxis: { type: "value",splitNumber:valueAxisTicks(size.height-92),axisLine:{show:false},axisTick:{show:false},axisLabel:{color:theme.muted,fontFamily:theme.font,fontSize:11},splitLine:{lineStyle:{color:theme.grid}} }, series: [] as unknown[],
   };
 
   if (panel.viz === "scatter") {
@@ -73,11 +73,10 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const yScale = panel.options?.y_scale ?? panel.options?.scale;
     const xUnit = panel.x_unit ?? measures[0]?.unit;
     const yUnit = panel.unit ?? measures[1]?.unit;
-    const axis = (unit: string | undefined, scale: string | undefined, measure: string) => {
+    const axis = (unit: string | undefined, scale: string | undefined, measure: string, pixels: number) => {
       const values = rows.map(row => row[measure]).filter((v): v is number => typeof v === "number" && Number.isFinite(v));
       const min = Math.min(0, ...values), max = Math.max(0, ...values);
-      const interval = scale === "log" ? undefined : niceDurationInterval(min, max, unit);
-      return { type: scale === "log" ? "log" : "value", ...(interval ? { interval, min: Math.floor(min / interval) * interval, max: Math.max(interval, Math.ceil(max / interval) * interval) } : {}),
+      return { type: scale === "log" ? "log" : "value", ...(scale === "log" ? {splitNumber:valueAxisTicks(pixels)} : valueAxis(min, max, unit, pixels)),
         axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, splitLine: { lineStyle: { color: theme.grid } }, axisLabel: { fontFamily: theme.font, fontSize: 11, color: theme.muted, formatter: formatAxis(unit), hideOverlap: true } };
     };
     return {
@@ -91,8 +90,8 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       } },
       legend: legendLayout.option,
       grid: { ...base.grid, top: legendLayout.option.show ? legendLayout.top + 20 : 28, left: 8, right: 16, bottom: 32 },
-      xAxis: { ...axis(xUnit, xScale, measures[0]?.name), name: measures[0]?.name ?? "x", nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
-      yAxis: { ...axis(yUnit, yScale, measures[1]?.name), splitNumber: Math.max(2,Math.floor((size.height-legendLayout.top-74)/32)), name: measures[1]?.name ?? "y", nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "bottom" } },
+      xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: measures[0]?.name ?? "x", nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
+      yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: measures[1]?.name ?? "y", nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "bottom" } },
       series: groups.map(({ name, items }, index) => ({
         type: "scatter", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
@@ -112,13 +111,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const labels = buckets.map(row => bucketLabel(row, bucketUnit));
     const names = seriesGroups([...new Set(rows.map(row => split ? String(row[split] ?? "") : "Count"))].map(name => ({ name })), panel);
     const legendLayout = wrappingLegend(names.map(g => g.name), size.width, names.length > 1 && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
-    return {
-      ...base,
-      legend: legendLayout.option,
-      grid: { ...base.grid, left:16,right:8,top:legendLayout.option.show ? legendLayout.top + 20 : 28,bottom:8 },
-      xAxis: { ...base.xAxis, type: "category", data: labels, splitLine:{show:false} },
-      yAxis: { ...base.yAxis, type: "value", name:"count",nameLocation:"end",nameGap:8,nameRotate:0,splitNumber:Math.max(2,Math.floor((size.height-(legendLayout.option.show ? legendLayout.top + 20 : 28)-30)/32)),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"right",verticalAlign:"bottom"} },
-      series: names.map(({ name, items }, index) => ({
+    const series = names.map(({ name, items }, index) => ({
         type: "bar", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: buckets.map(bucket => {
           const matches = rows.filter(row => (!split || items.some(item => item.name === String(row[split] ?? ""))) && bucketKey(row) === bucketKey(bucket));
@@ -126,7 +119,14 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
             dimensions: split ? { [panel.query?.by?.[0] ?? split]: name } : {}, bucket: bucketSelection(matches[0]),
           } };
         }),
-      })),
+      }));
+    return {
+      ...base,
+      legend: legendLayout.option,
+      grid: { ...base.grid, left:16,right:8,top:legendLayout.option.show ? legendLayout.top + 20 : 28,bottom:8 },
+      xAxis: { ...base.xAxis, type: "category", data: labels, splitLine:{show:false} },
+      yAxis: { ...base.yAxis, type: "value", name:"count",nameLocation:"end",nameGap:8,nameRotate:0,...valueAxis(0, Math.max(0, ...series.flatMap(s => s.data.map(d => d.value))), "count", size.height-(legendLayout.option.show ? legendLayout.top + 20 : 28)-30),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"right",verticalAlign:"bottom"} },
+      series,
     };
   }
 

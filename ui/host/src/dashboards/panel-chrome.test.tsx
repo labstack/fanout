@@ -33,7 +33,7 @@ it("puts the interaction hint in the subtitle and recovers the footer row",async
 });
 it.each([160,200,260])("adaptive y ticks use the plot budget at %ipx",height=>{
   const o=timeseriesOption(p,r,chartThemeFor(false),{width:500,height}) as any;
-  expect(o.yAxis.splitNumber).toBe(Math.max(2,Math.floor((height-o.grid.top-o.grid.bottom-22)/32)));
+  expect(o.yAxis.splitNumber).toBe(Math.max(3,Math.min(10,Math.round((height-o.grid.top-o.grid.bottom-22)/70)))-1);
   expect(o.yAxis.axisLabel.hideOverlap).toBe(true);
 });
 it("markers share free first-row legend space, otherwise reserve at most 18px",()=>{
@@ -81,4 +81,13 @@ it.each(["logs","traces","table","log_patterns"] as const)("%s notes follow the 
   const body=h.querySelector<HTMLElement>('[data-panel-body]')!,notes=h.querySelector<HTMLElement>('[data-panel-notes]')!;
   expect(body.contains(notes)).toBe(false);expect(body.nextElementSibling).toBe(notes);
   expect(body.style.isolation).toBe("isolate");expect(body.style.flexBasis).toBe("0px");expect(body.style.overflow).toBe("auto");expect(notes.style.flexShrink).toBe("0");
+});
+
+it.each(["ms","s","ns","count"])("uses nice capped ticks over 0–90 seconds (unit=%s)",unit=>{
+ const factor=unit==="ms"?1000:unit==="ns"?1e9:1;
+ const result={...r,frame:{...r.frame!,columns:[r.frame!.columns[0],{name:"duration",type:"number" as const,role:"measure" as const,unit}],values:[[0,60000],[0,90*factor]]}};
+ const axis=(plotHeight:number)=>{const o=timeseriesOption(p,result,chartThemeFor(false),{width:1200,height:plotHeight+42}) as any;return o.yAxis;};
+ const tall=axis(750),short=axis(200);
+ expect(tall.interval).toBe(10*factor);expect((tall.max-tall.min)/tall.interval+1).toBeLessThanOrEqual(10);
+ expect((short.max-short.min)/short.interval+1).toBe(3);expect(short.splitNumber).toBe(2);
 });

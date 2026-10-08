@@ -91,3 +91,27 @@ it("disables document autosizing and measures only an intrinsic content wrapper"
     expect(view.node.querySelector("[data-app-content]")).not.toBeNull();
   } finally { await view.cleanup(); }
 });
+
+it.each([false,true])("negotiates host fullscreen only when advertised (available=%s)",async available=>{
+ bridge.app.getHostContext=()=>({theme:"light",displayMode:"inline",availableDisplayModes:available?["inline","fullscreen"]:["inline"]});
+ bridge.app.requestDisplayMode=vi.fn().mockResolvedValue({mode:"fullscreen"});
+ const view=await mount();
+ try {
+  await act(async()=>bridge.app.ontoolresult!({structuredContent:fixture(),content:[]}));
+  const menu=view.node.querySelector<HTMLButtonElement>('[aria-label="Checkout logs menu"]')!;
+  await act(async()=>menu.click());
+  const open=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el=>el.textContent==="View");
+  if(!available){expect(open).toBeUndefined();expect(bridge.app.requestDisplayMode).not.toHaveBeenCalled();return;}
+  await act(async()=>open!.click());
+  expect(bridge.app.requestDisplayMode).toHaveBeenCalledWith({mode:"fullscreen"});
+  expect(document.querySelector('[role="dialog"]')?.getAttribute("aria-label")).toBe("Checkout logs");
+  await act(async()=>bridge.app.onhostcontextchanged!({displayMode:"fullscreen"}));
+  await act(async()=>bridge.app.onhostcontextchanged!({displayMode:"inline"}));
+  await act(async()=>{await new Promise(r=>setTimeout(r,250));});
+  expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(menu);
+  await act(async()=>menu.click());await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el=>el.textContent==="View")!.click());
+  await act(async()=>document.querySelector<HTMLButtonElement>('[aria-label="Close panel view"]')!.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+  expect(bridge.app.requestDisplayMode).toHaveBeenLastCalledWith({mode:"inline"});
+  expect(bridge.app.callServerTool).not.toHaveBeenCalled();
+ } finally {await view.cleanup();}
+});

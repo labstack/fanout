@@ -9,7 +9,7 @@ import { interpolate } from "../../../panels/variables";
 import { panelHandlers } from "./panel-handlers";
 import { PanelCard } from "./panel-card";
 import { PanelFullscreen } from "./panel-fullscreen";
-import { explainPrompt, type ExplainContext } from "./explain";
+import { explainPrompt, fixPrompt, type ExplainContext } from "./explain";
 import type { TurnOptions } from "../app-context";
 
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
@@ -135,7 +135,8 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const context = (panel: Panel): ExplainContext => ({
     dashboard_id: dashboardId, version, panel_id: panel.id, title: interpolate(panel.title, vars),
     from_ms: results.get(panel.id)?.from_ms, to_ms: results.get(panel.id)?.to_ms,
-    vars, error: results.get(panel.id)?.error,
+    vars, error: results.get(panel.id)?.error, status: results.get(panel.id)?.status, diagnosis: results.get(panel.id)?.diagnosis,
+    stale_since: staleAt.get(panel.id), truncated: results.has(panel.id) ? Boolean(results.get(panel.id)?.frame?.truncated || results.get(panel.id)?.previous?.truncated) : undefined, note: results.get(panel.id)?.frame?.note,
     // Authored absolute bounds retain their precision; the observed window is milliseconds.
     spec: { ...panel, dashboard_time: time },
   });
@@ -148,7 +149,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true }) : undefined}
-    onFix={dashboardId && canManage ? () => onOpenChat(`Please fix the panel ${JSON.stringify(interpolate(panel.title, vars))} (panel id ${panel.id}, dashboard id ${dashboardId}, version ${version}). Observed error: ${JSON.stringify(results.get(panel.id)?.error)}. Resolved variables: ${JSON.stringify(vars)}. This is an explicit dashboard edit request. Get the dashboard and correct only this panel.`) : undefined}
+    onFix={dashboardId && canManage ? () => onOpenChat(fixPrompt(context(panel))) : undefined}
     staleAt={staleAt.get(panel.id)} onDuplicate={canEdit && !fullscreen ? () => duplicate.mutate(panel) : undefined}
     onRemove={canEdit && !fullscreen ? () => remove.mutate(panel.id) : undefined} />;
 

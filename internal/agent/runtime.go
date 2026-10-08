@@ -44,6 +44,7 @@ const maxOutputTokens = 32000
 // toolExecutor is the tool surface the runtime needs; *ToolRegistry implements it.
 type toolExecutor interface {
 	Definitions() []ToolDef
+	ReadOnly(string) bool
 	Execute(context.Context, ToolCall) (ToolExecution, error)
 }
 
@@ -178,7 +179,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	if err := c.Bind(&input); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid AG-UI input")
 	}
-	answerOnly, err := answerOnlyRequest(input.ForwardedProps)
+	_, err := answerOnlyRequest(input.ForwardedProps)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -205,6 +206,11 @@ func (r *Runtime) Run(c *echo.Context) error {
 			return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start agent run").Wrap(err)
+	}
+
+	answerOnly, err := r.store.runAnswerOnly(c.Request().Context(), input.RunID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read run mode").Wrap(err)
 	}
 
 	response := c.Response()
@@ -525,12 +531,8 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 
 func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution ToolExecution, err error) {
 	if answerOnly, _ := ctx.Value(answerOnlyKey{}).(bool); answerOnly {
-		readOnly := reviewedReadOnly(call.Name, nil)
-		if classifier, ok := r.tools.(interface{ ReadOnly(string) bool }); ok {
-			readOnly = classifier.ReadOnly(call.Name)
-		}
-		if !readOnly {
-			return ToolExecution{Content: `{"error":"This explanation request is answer-only. Do not save changes; explain the observed evidence and suggest corrections in your answer."}`, IsError: true}, nil
+		if !r.tools.ReadOnly(call.Name) {
+			return ToolExecution{Content: `{"code":"answer_only","error":"This explanation request is answer-only. Do not save changes; explain the observed evidence and suggest corrections in your answer."}`, IsError: true}, nil
 		}
 	}
 	ctx = dashboard.TrackSave(ctx)

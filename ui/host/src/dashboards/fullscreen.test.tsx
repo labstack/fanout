@@ -86,7 +86,7 @@ it.each(["empty", "error"] as const)("preserves %s state and separate answer/edi
   }
 });
 
-it("opens shared URL state, pushes full-screen and closes with Back without a query or lost filters", async () => {
+it.each(["Back", "Escape then Back"])("opens shared URL state (%s) without a query or lost filters", async mode => {
   let queries = 0;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://localhost").pathname;
@@ -116,6 +116,10 @@ it("opens shared URL state, pushes full-screen and closes with Back without a qu
   await vi.waitFor(() => expect(router.state.location.search).toMatchObject({ view: "latency", compare: "1", vars: { service: "checkout" } }));
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   expect(queries).toBe(1);
+  if (mode === "Escape then Back") {
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close panel view"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    await vi.waitFor(() => expect(router.state.location.search.view).toBeUndefined());
+  }
   await act(async () => history.back());
   await vi.waitFor(() => expect(router.state.location.search.view).toBeUndefined());
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });

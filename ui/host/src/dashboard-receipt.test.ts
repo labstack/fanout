@@ -129,3 +129,7 @@ it.each(['create_dashboard','restore_dashboard_version'])('reads %s errors only 
   expect(receiptForTurn(JSON.parse(JSON.stringify(messages)),'u')?.stages.save.state).toBe('failed');
  }
 });
+
+it("omits a save receipt for structural answer-only refusals",()=>{
+ expect(receiptForTurn([user(),call("refused","create_dashboard"),result("refused",{error:"Read-only",isError:true,code:"answer_only"},"Read-only")],"u")).toBeNull();
+});

@@ -3,8 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"github.com/labstack/fanout/internal/dashboard"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,6 +58,9 @@ func TestAnswerOnlyAllowsReviewedAndAnnotatedReadsAndRefusesUnknownBehavior(t *t
 		}
 	}
 	result, err := runtime.executeTool(ctx, ToolCall{Name: "not_registered", Input: `{}`})
+	if !strings.Contains(result.Content, `"code":"answer_only"`) {
+		t.Fatal("refusal lacks policy code", result.Content)
+	}
 	if err != nil || !result.IsError {
 		t.Fatal("unknown tool permitted", result, err)
 	}
@@ -80,7 +86,11 @@ func TestAnswerOnlyRefusesWritesBeforeExecuteAndAllowsNextOrdinaryTurn(t *testin
 	runtime := NewRuntime(provider, tools, NewStore(database.DB))
 	run := func(id string, props any) string {
 		t.Helper()
-		raw, err := json.Marshal(agtypes.RunAgentInput{ThreadID: "explain", RunID: id, ForwardedProps: props, Messages: []agtypes.Message{{ID: id, Role: agtypes.RoleUser, Content: "Explain this error"}}})
+		messages := []agtypes.Message{{ID: id, Role: agtypes.RoleUser, Content: "Explain this error"}}
+		if strings.HasPrefix(id, "retry") {
+			messages = nil
+		}
+		raw, err := json.Marshal(agtypes.RunAgentInput{ThreadID: "explain", RunID: id, ForwardedProps: props, Messages: messages})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -114,6 +124,28 @@ func TestAnswerOnlyRefusesWritesBeforeExecuteAndAllowsNextOrdinaryTurn(t *testin
 		t.Fatal("answer-only created a version")
 	}
 	provider.got = nil
+	run("retry-omitted", nil)
+	if len(tools.calls) != 0 {
+		t.Fatal("retry lost persisted answer-only", tools.calls)
+	}
+	provider.got = nil
+	run("retry-false", map[string]any{"answer_only": false})
+	if len(tools.calls) != 0 {
+		t.Fatal("false retry lost persisted answer-only", tools.calls)
+	}
+	var persisted string
+	if err := database.DB.QueryRow(`SELECT input_json FROM agui_runs WHERE run_id='retry-false'`).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	var effective agtypes.RunAgentInput
+	if err := json.Unmarshal([]byte(persisted), &effective); err != nil {
+		t.Fatal(err)
+	}
+	flag, err := answerOnlyRequest(effective.ForwardedProps)
+	if err != nil || !flag {
+		t.Fatal("effective retry flag not persisted", persisted, err)
+	}
+	provider.got = nil
 	run("ordinary", nil)
 	if len(tools.calls) != len(names) {
 		t.Fatalf("ordinary turn retained answer-only mode: %+v", tools.calls)
@@ -135,6 +167,67 @@ func TestAnswerOnlyMalformedForwardedPropsRejectedBeforeStartRun(t *testing.T) {
 		httpErr, ok := err.(*echo.HTTPError)
 		if !ok || httpErr.Code != http.StatusBadRequest {
 			t.Fatalf("props=%+v err=%v", props, err)
+		}
+	}
+}
+
+func TestAnswerOnlyExecutorRequiresClassification(t *testing.T) {
+	if _, ok := reflect.TypeFor[toolExecutor]().MethodByName("ReadOnly"); !ok {
+		t.Fatal("executor classification must be mandatory")
+	}
+}
+func TestAnswerOnlyRealToolClassificationGolden(t *testing.T) {
+	registry, err := NewToolRegistry(t.Context(), fanoutmcp.NewWithIntelligence(registryQueries{}, &dashboard.Service{}, nil, registryIntelligence{}, "test").MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	expected := map[string]bool{
+		"create_dashboard": false, "edit_dashboard": false, "replace_dashboard": false, "restore_dashboard_version": false,
+		"get_observability_overview": true, "get_service_topology": true, "get_service_dependencies": true, "get_service_performance": true, "inspect_trace": true, "search_logs": true, "get_intelligence_snapshot": true, "get_telemetry_schema": true, "query_telemetry": true, "preview_panels": true, "list_dashboards": true, "get_dashboard": true, "list_dashboard_versions": true,
+	}
+	for _, tool := range registry.Definitions() {
+		want, ok := expected[tool.Name]
+		if !ok {
+			t.Fatalf("review new model-visible tool %s", tool.Name)
+		}
+		if got := registry.ReadOnly(tool.Name); got != want {
+			t.Fatalf("%s readonly=%v want=%v", tool.Name, got, want)
+		}
+		delete(expected, tool.Name)
+	}
+	if len(expected) > 0 {
+		t.Fatalf("missing reviewed tools: %v", expected)
+	}
+}
+
+func TestAnswerOnlyRetryInheritsForUserTurnsWithoutIDs(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test')`); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database.DB)
+	for _, step := range []struct {
+		run             string
+		newUser         bool
+		requested, want bool
+	}{
+		{"ordinary", true, false, false}, {"explain", true, true, true}, {"retry", false, false, true}, {"next", true, false, false}, {"next-retry", false, false, false},
+	} {
+		input := agtypes.RunAgentInput{ThreadID: "thread", RunID: step.run, ForwardedProps: map[string]any{"answer_only": step.requested}}
+		if step.newUser {
+			input.Messages = []agtypes.Message{{Role: agtypes.RoleUser, Content: "New user turn"}}
+		}
+		if _, err := store.StartRun(t.Context(), "owner", input); err != nil {
+			t.Fatal(err)
+		}
+		got, err := store.runAnswerOnly(t.Context(), step.run)
+		if err != nil || got != step.want {
+			t.Fatalf("%s: mode=%v want=%v error=%v", step.run, got, step.want, err)
 		}
 	}
 }

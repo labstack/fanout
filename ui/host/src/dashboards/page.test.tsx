@@ -9,9 +9,10 @@ import { DashboardPage } from "./page";
 import { demoFrame } from "../../tests/service-map-demo";
 import { assertServiceMapDOM } from "../../tests/service-map-collector";
 
+const viewer = vi.hoisted(() => ({ role: "viewer" }));
 vi.mock("../auth", async (importOriginal) => ({
   ...await importOriginal<typeof import("../auth")>(),
-  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: "viewer" }),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: viewer.role }),
 }));
 
 const charts = vi.hoisted(() => ({ option: vi.fn() }));
@@ -68,6 +69,7 @@ const settle = async (client: QueryClient) => {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  viewer.role = "viewer";
   queryBodies = [];
   app.agentAvailable = true;
   app.openChat.mockClear();
@@ -628,4 +630,12 @@ it("pushes drill and click variables atomically while preserving the captured pa
   const request = fetchMock.mock.calls.find(([url]) => String(url) === "/api/panels/exemplars")!;
   expect(JSON.parse(String(request[1]?.body))).toMatchObject({ kind: "traces", from: target.from, to: target.to, time: { from: target.window_from, to: target.window_to, refresh: "off" }, vars: { service: "cart" } });
   await vi.waitFor(() => expect(document.body.textContent).toContain("No exemplar traces match this selection."), { interval: 5, timeout: 3000 });
+});
+
+it("shows fix for a loaded owner-scoped dashboard without maintaining a client role table",async()=>{
+ viewer.role="future_authenticated_role";
+ panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"Observed invalid measure",elapsed_ms:1}]});
+ const {host}=await render();
+ const fix=[...host.querySelectorAll<HTMLButtonElement>("button")].find(el=>el.textContent==="Ask Fanout to fix it");
+ expect(fix).toBeDefined();await act(async()=>fix!.click());expect(app.openChat.mock.lastCall![0]).toContain("explicit dashboard edit request");
 });

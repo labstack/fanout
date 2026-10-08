@@ -5,7 +5,7 @@ import { toCategories, toSeries } from "./frame";
 import { hiddenSeriesNote, isOtherSeries, visibleSeries, wrappingLegend } from "./series";
 import { statusFor } from "./thresholds";
 import type { Frame, Panel, PanelResult, Status } from "./types";
-import { formatAxis, formatLabel, formatTimeAxis, formatValue } from "./units";
+import { formatAxis, formatLabel, formatTimeAxis, formatValue, valueAxis, valueAxisTicks } from "./units";
 import { lineStyle, markStyle } from "./style";
 
 export type ChartTheme = { dark: boolean; text: string; muted: string; grid: string; surface: string; border: string; status: { ok: string; warn: string; bad: string }; font: string };
@@ -53,14 +53,6 @@ function baseOption(theme: ChartTheme, unit?: string): Option {
   };
 }
 
-/** Keep a threshold above the data in view instead of clipping it. */
-function thresholdMax(panel: Panel): ((range: { max: number }) => number) | undefined {
-  const values = (panel.thresholds ?? []).map((t) => t.value);
-  if (values.length === 0) return undefined;
-  const highest = Math.max(...values);
-  return (range) => Math.max(range.max, highest);
-}
-
 function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
   return (panel.thresholds ?? []).map((t) => ({
     yAxis: t.value,
@@ -87,6 +79,11 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   const style = panel.options?.style ?? "line";
   const direct = current.length >= 2 && current.length <= 6 && visible.hidden === 0 && style !== "bars" && style !== "stacked";
   const endWidth = direct ? Math.min(size.width * .3, 180, Math.max(40, ...current.map(s => (size.measureText?.(s.name, `12px ${theme.font}`) ?? Array.from(s.name).length * 7.2) + 8))) : 0;
+  const legend = (panel.options?.legend ?? "auto") !== "hidden" && current.length > 1;
+  const legendLayout = wrappingLegend(current.map(s => s.name), size.width, legend, theme.text, theme.font, size.measureText);
+  const plotHeight = size.height - legendLayout.top - (visible.hidden ? 24 : 8) - 22;
+  // Preserve authored series priority when the plot cannot fit every padded label.
+  const labelCapacity = Math.max(0, Math.floor(plotHeight / 16));
   const period = result.shift_ms;
   const lines = current.map((s, i) => {
     const color = colorFor(s.name, i, theme);
@@ -96,8 +93,8 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
       type: style === "bars" || style === "stacked" ? "bar" : "line",
       data: s.points,
-      endLabel: direct ? { show: true, formatter: "{a}", color: theme.muted, fontFamily: theme.font, fontSize: 12, distance: 6, width: endWidth - 8, overflow: "truncate", ellipsis: "…" } : undefined,
-      labelLayout: { moveOverlap: "shiftY" },
+      endLabel: direct ? { show: i < labelCapacity, formatter: "{a}", color: theme.muted, fontFamily: theme.font, fontSize: 12, lineHeight: 14, padding: [1, 0], distance: 6, width: endWidth - 8, overflow: "truncate", ellipsis: "…" } : undefined,
+      labelLayout: { moveOverlap: "shiftY", hideOverlap: true },
       showSymbol: false,
       connectNulls: false,
       sampling: style === "bars" || style === "stacked" ? undefined : "lttb",
@@ -122,10 +119,20 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     lineStyle: { width: 1, type: "dashed", color: theme.muted },
     itemStyle: { color: theme.muted },
   })) : [];
-  const legend = (panel.options?.legend ?? "auto") !== "hidden" && current.length > 1;
-  const legendLayout = wrappingLegend(current.map(s => s.name), size.width, legend, theme.text, theme.font, size.measureText);
-  const plotHeight = size.height - legendLayout.top - (visible.hidden ? 24 : 8) - 22;
-  const axes = units.map((axisUnit, i) => ({ splitNumber: Math.max(2, Math.floor(plotHeight / 32)), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, max: i === 0 ? thresholdMax(panel) : undefined, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
+  const bounds = units.map((axisUnit, i) => {
+    const selected = [...current, ...previousSeries].filter(s => (s.unit ?? panel.unit) === axisUnit);
+    const values = selected.flatMap(s => s.points.flatMap(([, v]) => v === null ? [] : [v]));
+    if (style === "stacked") {
+      const sums = new Map<number, { positive: number; negative: number }>();
+      for (const s of current.filter(s => (s.unit ?? panel.unit) === axisUnit)) for (const [t, v] of s.points) {
+        const sum = sums.get(t) ?? { positive: 0, negative: 0 }; if (v !== null) { if (v > 0) sum.positive += v; else sum.negative += v; } sums.set(t, sum);
+      }
+      values.push(...[...sums.values()].flatMap(s => [s.positive, s.negative]));
+    }
+    if (i === 0) values.push(...(panel.thresholds ?? []).map(t => t.value));
+    return valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, plotHeight);
+  });
+  const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
@@ -175,7 +182,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
   const measure = (text: string) => size.measureText?.(text, `11px ${theme.font}`) ?? Array.from(text).length * 6.6;
   const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(measure)));
   const legendLayout = wrappingLegend(series.map(s => s.name), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
-  const axes = units.map((axisUnit, i) => ({ type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: (v: number) => formatLabel(axisUnit,v), hideOverlap: true } }));
+  const axes = units.map((axisUnit, i) => ({ ...valueAxis(Math.min(0, ...series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null))), Math.max(0, ...series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null))), axisUnit, size.width - categoryWidth - 80), type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: (v: number) => formatLabel(axisUnit,v), hideOverlap: true } }));
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => s.name === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },

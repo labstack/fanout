@@ -119,7 +119,7 @@ it("keeps performance siblings visible with only one focused visualization", asy
   try {
     await act(async () => view.el.querySelector<HTMLButtonElement>('[aria-label="p95 latency menu"]')!.click());
     await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
-    expect(view.el.querySelector('[data-panel="latency"]')?.textContent).toContain("Open in full-screen");
+    expect(view.el.querySelector('[data-panel="latency"]')?.textContent).toContain("Shown in full-screen");
     expect(view.el.querySelector('[data-panel="endpoints"]')?.textContent).toContain("/cart");
     expect(document.body.querySelectorAll('[data-panel="latency"]')).toHaveLength(2);
     expect(document.body.querySelectorAll('[data-panel]')).toHaveLength(5);
@@ -151,4 +151,22 @@ it("keeps a focused query MultiSelect and its dropdown open across option and fr
     expect(resolveVariables).toHaveBeenCalledTimes(2);
     expect(onQuery.mock.lastCall![0].vars).toEqual({ service: ["cart"] });
   } finally { await view.cleanup(); }
+});
+
+it.each(["service_map", "table"] as const)("names the %s dialog and returns focus on Escape without querying", async viz => {
+ const raw = presetFixture(viz === "table" ? "performance" : "topology");
+ const panel = raw.dashboard.panels.find(p => p.viz === viz)!;
+ raw.dashboard.panels = [panel]; raw.results = raw.results.filter(r => r.id === panel.id);
+ const view = await mount(raw);
+ try {
+  const menu = view.el.querySelector<HTMLButtonElement>('[aria-label$=" menu"]')!;
+  await act(async () => menu.click());
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.getAttribute("aria-label")).toBe(menu.getAttribute("aria-label")!.replace(/ menu$/, ""));
+  expect(dialog.textContent).toContain(viz === "table" ? "/cart" : "checkout");
+  await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Close panel view"]')!.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape",bubbles:true})));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve,250)); });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(menu);expect(view.onQuery).not.toHaveBeenCalled();
+ } finally { await view.cleanup(); }
 });
