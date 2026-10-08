@@ -130,6 +130,46 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1", waitForI
 }
 
 describe("DashboardPage", () => {
+  it("scopes refresh/layout/history/full-screen/help keys to focused dashboard controls", async () => {
+    const { host, client, onSearch } = await render();
+    const toolbar = host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!;
+    const key = async (target: HTMLElement, key: string, extra: KeyboardEventInit = {}) => {
+      await act(async () => { target.focus(); target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra })); });
+    };
+    const before = queryBodies.length;
+    await key(toolbar, "r"); await settle(client); expect(queryBodies).toHaveLength(before + 1);
+    await key(toolbar, "e"); expect(onSearch).toHaveBeenCalledExactlyOnceWith({ edit: "1" });
+    onSearch.mockClear();
+    await key(toolbar, "f"); expect(onSearch).not.toHaveBeenCalled();
+    const panel = host.querySelector<HTMLElement>('[data-panel="latency"][tabindex="0"]')!;
+    await key(panel, "f"); expect(onSearch).toHaveBeenCalledExactlyOnceWith({ view: "latency" });
+    onSearch.mockClear();
+    for (const extra of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }]) await key(panel, "e", extra);
+    expect(onSearch).not.toHaveBeenCalled();
+    await key(toolbar, "h"); expect(document.querySelector('[role="dialog"]')?.textContent).toContain("History");
+    const close = document.querySelector<HTMLElement>('[role="dialog"] button')!;
+    await key(toolbar, "e"); expect(onSearch).not.toHaveBeenCalled();
+    await key(close, "Escape");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+    await key(toolbar, "?"); expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts");
+    const helpClose = document.querySelector<HTMLElement>('[role="dialog"] button')!;
+    await key(helpClose, "Tab", { shiftKey: true });
+    expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
+    await key(helpClose, "Escape");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); });
+    expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(document.activeElement).toBe(toolbar);
+  });
+  it("opens discoverable shortcut help and returns focus to its toolbar button", async () => {
+    const { host } = await render();
+    const help = host.querySelector<HTMLButtonElement>('[aria-label="Keyboard shortcuts"]')!;
+    expect(help.title).toBe("Keyboard shortcuts (?)");
+    help.focus(); await act(async () => help.click());
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("Shift+Left/Right"); expect(dialog.textContent).toContain("Without a focused panel, f does nothing.");
+    const close = dialog.querySelector<HTMLElement>("button")!;
+    await act(async () => { close.focus(); close.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)); }); expect(document.activeElement).toBe(help);
+  });
   it("returns focus to History after Escape closes its drawer", async () => {
     const { client } = await render();
     const history = [...document.querySelectorAll("button")].find(button => button.textContent === "History")!;

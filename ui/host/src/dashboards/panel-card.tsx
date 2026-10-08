@@ -71,7 +71,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     const mutations=new MutationObserver(measure);mutations.observe(el,{childList:true,subtree:true,attributes:true,characterData:true});
     return ()=>{observer.disconnect();mutations.disconnect();};
   },[result,view,rows,scrolls,height,small,notes.length]);
-  return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={small}>
+  return <Paper ref={card} role="region" aria-label={title} tabIndex={suspended ? -1 : 0} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={small}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
         <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={small ? {overflowWrap:"anywhere"} : undefined}>{subtitle}</Text>

@@ -163,7 +163,7 @@ it("keeps an aria summary and Data table reachable for every chart", async () =>
     for (const viz of types) {
       const panel: Panel = { id: "p", title: viz, viz }, result = resultFor(viz);
       await act(async () => root.render(<MantineProvider><PanelCard key={viz} panel={panel} title="Window summary" result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={() => undefined} onCopyLink={() => undefined} onExplain={() => undefined} /></MantineProvider>));
-      const summary = container.querySelector(viz === "health" || viz === "service_map" || rowTypes.has(viz) ? '[role="region"]' : '[role="img"]');
+      const summary = container.querySelector(viz === "health" || viz === "service_map" || rowTypes.has(viz) ? '[data-panel-body] [role="region"]' : '[role="img"]');
       expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "Service health" : "Window summary");
       expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "services" : `${result.frame!.rows} rows`);
       await act(async () => container.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());

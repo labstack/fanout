@@ -12,9 +12,10 @@ function timeLabel(time: DashboardTime): string {
   return rangeLabel[time.range ?? "1h"] ?? time.range ?? "Last hour";
 }
 
-export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory }: {
+export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, onShortcuts }: {
   time: DashboardTime; refresh: string; compare: boolean; editing: boolean; fetching: boolean; updatedAt: number | null;
   onRange(range: string): void; onAbsolute(from: string, to: string): void; onZoomOut(): void; onRefresh(refresh: string): void; onRefreshNow(): void; onCompare(on: boolean): void; onEdit(): void; onHistory(): void;
+  onShortcuts?(): void;
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -46,6 +47,7 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
     <Switch size="sm" label="Compare with previous period" checked={compare} onChange={(e) => onCompare(e.currentTarget.checked)} />
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>
     <Button variant="default" size="sm" leftSection={<ClockCounterClockwise size={15} />} onClick={onHistory}>History</Button>
+    {onShortcuts && <Button variant="default" size="sm" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={onShortcuts}>Keyboard shortcuts</Button>}
     {updatedAt && <Text size="xs" c="dimmed" visibleFrom="md">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(updatedAt)}</Text>}
   </Group>;
 }

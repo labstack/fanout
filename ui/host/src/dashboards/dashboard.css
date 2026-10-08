@@ -57,3 +57,5 @@
 .dashboard-panel-padding {
   padding-inline: 16px;
 }
+
+.chart-keyboard-point:focus-visible, [data-panel] button:focus-visible, [data-panel] tr:focus-visible, [data-panel]:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }

@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
@@ -16,6 +16,8 @@ import { useBrushZoom } from "./use-brush-zoom";
 import { usePanelResults } from "./use-panel-results";
 import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
+import { useShortcuts } from "./use-shortcuts";
+import { ShortcutsHelp } from "./shortcuts-help";
 
 import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
@@ -56,6 +58,8 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   // Loading this owner-scoped record proves manage-own capability on the server.
   const canManage = true;
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const region = useRef<HTMLElement>(null);
   const client = useQueryClient();
   const [restoreRefresh, setRestoreRefresh] = useState<number>();
   const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
@@ -101,7 +105,12 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
     onSearch({ ...search, vars: next }, true);
   };
 
-  return <Box component="main" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
+  const edit = () => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" });
+  useShortcuts(region, {
+    r: () => data.refetch(), e: edit, h: () => setHistoryOpen(true), "?": () => setHelpOpen(true),
+    f: target => { const panel = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (panel && spec.panels.some(p => p.id === panel)) onSearch({...search, view: panel}); },
+  }, historyOpen || helpOpen || Boolean(search.view || search.drill));
+  return <Box component="main" ref={region} aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="sm" mb="md">
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
         <Box miw={0}>
@@ -121,7 +130,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
           }}
           onRefresh={setRefresh} onRefreshNow={data.refetch}
           onCompare={(on) => onSearch({ ...search, compare: on ? "1" : "0" }, true)}
-          onEdit={() => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" })} onHistory={() => setHistoryOpen(true)} />
+          onEdit={edit} onHistory={() => setHistoryOpen(true)} onShortcuts={() => setHelpOpen(true)} />
       </Group>
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
@@ -150,5 +159,6 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       const nextDrill = drill && !ids.has(drill.panel_id) ? undefined : search.drill;
       if (view !== search.view || nextDrill !== search.drill) onSearch({ ...search, view, drill: nextDrill }, true);
     }} />
+    <ShortcutsHelp opened={helpOpen} onClose={() => setHelpOpen(false)} />
   </Box>;
 }

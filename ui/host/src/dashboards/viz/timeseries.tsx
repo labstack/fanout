@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { chartThemeFor, timeseriesOption, type ChartSize } from "../../../../panels/compile";
 import { pointSelection } from "../../../../panels/interaction";
 import { withAnnotations } from "../../../../panels/annotations";
@@ -12,7 +12,8 @@ export function TimeseriesViz({ panel, title = panel.title, result, dark, height
     return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme, size) : compiled;
   }, [panel, result.frame, result.previous, result.shift_ms, result.from_ms, result.to_ms, result.annotation_scope, result.annotation_error, dark, annotations]);
   const option = useMemo(() => optionForSize({ width: 500, height }), [optionForSize, height]);
-  return <EChartCanvas option={option} optionForSize={optionForSize} height={height} label={`${title}: time series`} group={group} onZoom={onZoom} onClick={onPoint || onSelect ? event => {
+  const canSelect = useCallback((event: Parameters<typeof pointSelection>[2]) => Boolean(pointSelection(panel, result, event)), [panel, result]);
+  return <EChartCanvas keyboard={{canSelect, bounds: result.from_ms !== undefined && result.to_ms !== undefined ? {from: result.from_ms, to: result.to_ms} : undefined}} option={option} optionForSize={optionForSize} height={height} label={`${title}: time series`} group={group} onZoom={onZoom} onClick={onPoint || onSelect ? event => {
     const selection = pointSelection(panel, result, event);
     if (!selection) return;
     onPoint?.(selection);

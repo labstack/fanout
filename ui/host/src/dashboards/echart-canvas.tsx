@@ -4,8 +4,11 @@ import { BarChart, CustomChart, HeatmapChart, LineChart, ScatterChart } from "ec
 import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, ToolboxComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChartSize } from "../../../panels/compile";
+import { keyboardPoints, type KeyboardPoint, type PointEvent } from "../../../panels/keyboard";
+import { formatValue } from "../../../panels/units";
+import { ChartKeyboard } from "./chart-keyboard";
 import { registerAudit, chartAuditSnapshot } from "./chart-measurements-dev";
 
 use([LabelLayout, CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart, ScatterChart, GridComponent, GraphicComponent, LegendComponent, TooltipComponent, MarkAreaComponent, MarkLineComponent, VisualMapComponent, AriaComponent, BrushComponent, DataZoomComponent, ToolboxComponent]);
@@ -16,9 +19,53 @@ use([LabelLayout, CanvasRenderer, LineChart, BarChart, CustomChart, HeatmapChart
 /* Charts per connected group, so the last one out disconnects it. */
 const groups = new Map<string, number>();
 
-export function EChartCanvas({ option, optionForSize, height, label, onClick, onZoom, group }: { option: EChartsCoreOption; optionForSize?: (size: ChartSize) => EChartsCoreOption; height: number | string; label: string; onClick?: (params: { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }) => void; onZoom?: (from: number, to: number) => void; group?: string }) {
+type DisplaySeries = {name?: string; data?: readonly unknown[]; interactive?: boolean; type?: string; keyboard_unit?: string; keyboard_x_unit?: string; tooltip?: {valueFormatter?(value: number): string}};
+type DisplayAxis = {type?: string; data?: string[]};
+export function EChartCanvas({ option, optionForSize, height, label, onClick, onZoom, group, keyboard }: { option: EChartsCoreOption; optionForSize?: (size: ChartSize) => EChartsCoreOption; height: number | string; label: string; onClick?: (params: PointEvent) => void; onZoom?: (from: number, to: number) => void; group?: string;
+  keyboard?: {canSelect?(event: PointEvent): boolean; bounds?: {from: number; to: number}} }) {
   const ref = useRef<HTMLDivElement>(null);
   const chart = useRef<EChartsType | null>(null);
+  const [displayed, setDisplayed] = useState(option);
+  const displayedRef = useRef(option);
+  const keyboardRef = useRef(keyboard); keyboardRef.current = keyboard;
+  const highlighted = useRef<KeyboardPoint | undefined>(undefined);
+  const highlight = useCallback((point?: KeyboardPoint) => {
+    if (highlighted.current) chart.current?.dispatchAction({type: "downplay", seriesIndex: highlighted.current.series_index, dataIndex: highlighted.current.data_index});
+    chart.current?.dispatchAction({type: "hideTip"});
+    highlighted.current = point;
+    if (point) {
+      chart.current?.dispatchAction({type: "highlight", seriesIndex: point.series_index, dataIndex: point.data_index});
+      chart.current?.dispatchAction({type: "showTip", seriesIndex: point.series_index, dataIndex: point.data_index});
+    }
+  }, []);
+  const displaySeries = (Array.isArray(displayed.series) ? displayed.series : displayed.series ? [displayed.series] : []) as DisplaySeries[];
+  const x = (Array.isArray(displayed.xAxis) ? displayed.xAxis[0] : displayed.xAxis) as DisplayAxis | undefined;
+  const y = (Array.isArray(displayed.yAxis) ? displayed.yAxis[0] : displayed.yAxis) as DisplayAxis | undefined;
+  const points = useMemo(() => {
+    if (!keyboard) return [];
+    const series = (Array.isArray(displayed.series) ? displayed.series : displayed.series ? [displayed.series] : []) as DisplaySeries[];
+    const category = y?.type === "category" && series[0]?.type !== "custom" ? y : x?.type === "category" ? x : undefined;
+    return keyboardPoints(series).map(point => ({...point, event: {...point.event, name: point.event.name ?? category?.data?.[point.data_index]}}))
+      .filter(point => !keyboard.canSelect || keyboard.canSelect(point.event));
+  }, [displayed, keyboard?.canSelect]);
+  const pointWindow = (point: KeyboardPoint) => {
+    const selection = (point.event.data as {selection?: {time?: number; from?: string; to?: string}} | undefined)?.selection;
+    const value = Array.isArray(point.event.value) ? point.event.value : [];
+    const from = selection?.from ? Date.parse(selection.from) : selection?.time ?? (x?.type === "time" ? Number(value[0]) : NaN);
+    const to = selection?.to ? Date.parse(selection.to) : displaySeries[point.series_index]?.type === "custom" ? Number(value[3]) : from;
+    return Number.isFinite(from) && Number.isFinite(to) ? {from, to} : undefined;
+  };
+  const summary = (point: KeyboardPoint) => {
+    const series = displaySeries[point.series_index];
+    const value = Array.isArray(point.event.value) ? point.event.value : [point.event.value];
+    const custom = series?.type === "custom";
+    const at = pointWindow(point);
+    const category = custom ? y?.data?.[Number(value[1])] : point.event.name;
+    const numeric = custom ? value[2] : value.at(-1);
+    const formatted = typeof numeric === "number" ? series?.tooltip?.valueFormatter?.(numeric) ?? formatValue(series?.keyboard_unit, numeric) : String(numeric ?? "No value");
+    const scatter = series?.type === "scatter" ? `x: ${formatValue(series.keyboard_x_unit, Number(value[0]))} · y: ` : "";
+    return [point.event.seriesName ?? "Series", category, at ? new Date(at.from).toISOString() + (at.to !== at.from ? ` – ${new Date(at.to).toISOString()}` : "") : undefined, scatter + formatted].filter(Boolean).join(" · ");
+  };
   const selected = useRef<Record<string, boolean>>({});
   const click = useRef(onClick);
   click.current = onClick;
@@ -58,6 +105,8 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       }
     }
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
+    displayedRef.current = compiled;
+    if (keyboardRef.current) setDisplayed(compiled);
     if (import.meta.env.DEV) auditInput.current = { compiled, size };
   };
 
@@ -68,7 +117,12 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const removeAudit = import.meta.env.DEV && new URLSearchParams(location.search).get("__fanout_audit") === "1"
       ? registerAudit(ref.current, () => auditInput.current ? chartAuditSnapshot(instance, auditInput.current.compiled, auditInput.current.size) : undefined)
       : undefined;
-    instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown; data?: unknown; dataType?: string }));
+    instance.on("click", (params) => {
+      const event = params as PointEvent & {seriesIndex?: number; componentType?: string};
+      const series = (displayedRef.current.series ?? []) as DisplaySeries[];
+      const interactive = event.seriesIndex === undefined ? event.interactive : event.componentType && event.componentType !== "series" ? false : series[event.seriesIndex]?.interactive;
+      click.current?.({...event, ...(interactive === undefined ? {} : {interactive})});
+    });
     instance.on("brushEnd", (payload) => {
       const range = (payload as { areas?: { coordRange?: number[] }[] }).areas?.[0]?.coordRange;
       if (range?.length === 2 && Number.isFinite(range[0]) && Number.isFinite(range[1]) && range[0] < range[1]) {
@@ -82,7 +136,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     });
     const observer = new ResizeObserver(() => { instance.resize(); if (responsive.current) apply.current(); });
     observer.observe(ref.current);
-    return () => { observer.disconnect(); removeAudit?.(); instance.dispose(); chart.current = null; };
+    return () => { observer.disconnect(); removeAudit?.(); if (highlighted.current) highlight(undefined); instance.dispose(); chart.current = null; };
   }, []);
 
   useEffect(() => {
@@ -108,5 +162,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     };
   }, [group]);
 
-  return <div ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+  return <><div ref={ref} role="img" aria-label={description} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />
+    {keyboard && <ChartKeyboard points={points} label={label} summary={summary} onClick={onClick} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow} />}
+  </>;
 }

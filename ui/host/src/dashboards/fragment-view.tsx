@@ -1,4 +1,4 @@
-import { Alert, Box, Stack, Text } from "@mantine/core";
+import { Alert, Box, Button, Stack, Text } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { panelFragment, fragmentTitle, type PanelFragment } from "../../../panels/fragment";
 import { resolvedVariables, interpolate } from "../../../panels/variables";
@@ -15,6 +15,8 @@ import { useVariableOptions, type VariableResolver } from "./use-variables";
 import { useBrushZoom } from "./use-brush-zoom";
 import { drillSelection, panelHandlers } from "./panel-handlers";
 import { fragmentPanelHeight } from "./layout";
+import { useShortcuts } from "./use-shortcuts";
+import { ShortcutsHelp } from "./shortcuts-help";
 const unavailableOptions: VariableResolver = async () => { throw new Error("Variable options unavailable"); };
 
 export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVariables, height, hostDisplayMode, onDisplayMode }: {
@@ -34,6 +36,8 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
   const generation = useRef(0);
   const [target, setTarget] = useState<DrillTarget>();
   const [view, setView] = useState<string>();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const region = useRef<HTMLDivElement>(null);
   const previousMode = useRef(hostDisplayMode);
   useEffect(() => {
     if (previousMode.current === "fullscreen" && hostDisplayMode === "inline") setView(undefined);
@@ -65,7 +69,7 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     if (!hostFocused) return;
     // Keyboard events in a sandboxed iframe cannot reach the host's listener.
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); closeView(); }
+      if (event.key === "Escape" && !event.defaultPrevented && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey && !document.querySelector('[role="dialog"]')) { event.preventDefault(); closeView(); }
     };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
@@ -117,9 +121,14 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     {...panelHandlers(panel, shown.results.find(r => r.id === panel.id), setVariable, selection => point(panel, selection))}
     onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={hostDisplayMode === undefined || onDisplayMode ? () => void openView(panel.id) : undefined} traceLinks="button" />;
   const viewed = spec.panels.find(p => p.id === view);
-  return <Stack gap="md" p="md">
+  useShortcuts(region, {
+    "?": () => setHelpOpen(true),
+    f: target => { const id = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (id && spec.panels.some(p => p.id === id) && (hostDisplayMode === undefined || onDisplayMode)) void openView(id); },
+  }, helpOpen || Boolean(target || view), true);
+  return <Stack ref={region} data-dashboard-fragment gap="md" p="md">
     <Box hidden={hostFocused} style={hostFocused ? { display: "none" } : undefined}><Stack gap="md">
     {spec.panels.length > 1 && <Text data-fragment-header fw={600}>{fragmentTitle(shown)}</Text>}
+    <Button size="compact-xs" variant="subtle" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onClick={() => setHelpOpen(true)}>Keyboard shortcuts</Button>
     <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVariable} />
     {options.error && <Alert color="bad">Variable options could not be loaded.</Alert>}
     {error && <Alert color="bad">{error}</Alert>}
@@ -133,5 +142,6 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
       {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140), true)}</Box>}
     </PanelFullscreen>}
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={target} onChange={setTarget} />
+    <ShortcutsHelp opened={helpOpen} onClose={() => setHelpOpen(false)} dashboard={false} />
   </Stack>;
 }

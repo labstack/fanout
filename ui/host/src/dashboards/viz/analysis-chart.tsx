@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { analysisOption, analysisSummary } from "../../../../panels/analysis";
 import { chartThemeFor, type ChartSize } from "../../../../panels/compile";
 import type { Panel, PanelResult, Selection, VarValue } from "../../../../panels/types";
 import { withAnnotations, type AnnotationsResponse } from "../../../../panels/annotations";
+import { pointSelection } from "../../../../panels/interaction";
 import { EChartCanvas } from "../echart-canvas";
 
 export type AnalysisProps = {
@@ -19,9 +20,10 @@ export function AnalysisChart({ panel, title, result, dark, height, group, annot
   }, [panel, result.frame, result.interval, result.better, result.from_ms, result.to_ms, result.annotation_scope, result.annotation_error, dark, annotations]);
   const label = analysisSummary(title ? { ...panel, title } : panel, result);
   const option = useMemo(() => optionForSize({ width: 500, height }), [optionForSize, height]);
+  const canSelect = useCallback((event: Parameters<typeof pointSelection>[2]) => Boolean((event.data as {selection?: Selection} | undefined)?.selection && pointSelection(panel, result, event)), [panel, result]);
   const time = panel.viz === "heatmap" || panel.viz === "state_timeline";
-  return <EChartCanvas option={option} optionForSize={optionForSize} height={height} label={label} group={time ? group : undefined} onZoom={time ? onZoom : undefined} onClick={onPoint || onSelect ? event => {
-    const selection = (event.data as { selection?: Selection } | undefined)?.selection;
+  return <EChartCanvas keyboard={{canSelect, bounds: time && result.from_ms !== undefined && result.to_ms !== undefined ? {from: result.from_ms, to: result.to_ms} : undefined}} option={option} optionForSize={optionForSize} height={height} label={label} group={time ? group : undefined} onZoom={time ? onZoom : undefined} onClick={onPoint || onSelect ? event => {
+    const selection = canSelect(event) ? pointSelection(panel, result, event) : undefined;
     if (selection) {
       onPoint?.(selection);
       const value = Object.values(selection.dimensions)[0];

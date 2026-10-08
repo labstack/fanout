@@ -93,7 +93,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: measures[0]?.name ?? "x", nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
       yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: measures[1]?.name ?? "y", nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "bottom" } },
       series: groups.map(({ name, items }, index) => ({
-        type: "scatter", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
+        type: "scatter", name, interactive: true, keyboard_unit: yUnit, keyboard_x_unit: xUnit, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
           .filter(row => typeof row[measures[0]?.name] === "number" && typeof row[measures[1]?.name] === "number")
           .filter(row => (xScale !== "log" || Number(row[measures[0].name]) > 0) && (yScale !== "log" || Number(row[measures[1].name]) > 0))
@@ -112,7 +112,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     const names = seriesGroups([...new Set(rows.map(row => split ? String(row[split] ?? "") : "Count"))].map(name => ({ name })), panel);
     const legendLayout = wrappingLegend(names.map(g => g.name), size.width, names.length > 1 && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
     const series = names.map(({ name, items }, index) => ({
-        type: "bar", name, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
+        type: "bar", name, interactive: true, keyboard_unit: "count", itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: buckets.map(bucket => {
           const matches = rows.filter(row => (!split || items.some(item => item.name === String(row[split] ?? ""))) && bucketKey(row) === bucketKey(bucket));
           return { value: sumPresent(matches.map(row => typeof row.count === "number" ? row.count : null)) ?? 0, selection: {
@@ -189,7 +189,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
           { type: "text", x: -96 + 96 * Math.log10(count) / logCap, y: 0, style: { text: heatCountLabel(count), fill: theme.muted, fontSize: 11, fontFamily: theme.font, align: "center", verticalAlign: "bottom" } }],
       })) : hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
-        type: "custom", name: panel.title, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
+        type: "custom", name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; style: () => Record<string, unknown> }) => {
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);

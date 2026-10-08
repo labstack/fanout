@@ -95,6 +95,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     const color = colorFor(s.name, i, theme);
     return {
       name: s.name,
+      interactive: true,
       yAxisIndex: units.indexOf(s.unit ?? panel.unit),
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
       type: style === "bars" || style === "stacked" ? "bar" : "line",
@@ -115,6 +116,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   });
   const previous = period !== undefined ? previousSeries.map((s) => ({
     name: `${s.name} · previous`,
+    interactive: false,
     yAxisIndex: units.indexOf(s.unit ?? panel.unit),
     tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
     type: "line",
@@ -198,6 +200,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
     xAxis: axes.length === 1 ? axes[0] : axes,
     series: series.map((s, i) => ({
       name: s.name,
+      interactive: true,
       xAxisIndex: units.indexOf(s.unit ?? panel.unit),
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
       type: "bar",
