@@ -1,4 +1,4 @@
-import { Accordion, Alert, Badge, Box, Button, Code, Drawer, Group, Loader, Paper, ScrollArea, Stack, Text, Title } from "@mantine/core";
+import { Accordion, Alert, Badge, Box, Button, Code, Drawer, Group, Loader, Paper, ScrollArea, Stack, Text, Title, VisuallyHidden } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { exactTimestamp } from "../../../format";
@@ -105,7 +105,7 @@ function HistoryContent({ id, opened, currentVersion, selected, onSelect, pendin
         </Stack>
       </ScrollArea>}
     </Box>
-    <Text size="xs" c="dimmed" role="status" aria-live="polite">{version === undefined ? "Select a version." : detail.isFetching ? `Loading version ${version}…` : detail.error ? `Version ${version} unavailable.` : `Version ${version} ready.`}</Text>
+    <VisuallyHidden role="status" aria-live="polite">{version === undefined ? "Select a version." : detail.isFetching ? `Loading version ${version}…` : detail.error ? `Version ${version} unavailable.` : `Version ${version} ready.`}</VisuallyHidden>
     <Box mih={280} aria-busy={detail.isFetching}>
       {version !== undefined && detail.isPending && <Group gap="xs" role="status"><Loader size="sm" /><Text size="sm">Loading version…</Text></Group>}
       {detail.error && <Alert color="bad" title={detail.error instanceof ApiError && detail.error.status === 404 ? "This version is no longer available" : "Version unavailable"}>
