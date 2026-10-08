@@ -316,7 +316,8 @@ go-deadcode:
 
 # Run every script test, including failure injection, as part of CI.
 script-tests:
-    bun test scripts/*.test.ts
+    bun test scripts/*.test.ts scripts/dashboard-eval
+    bun scripts/dashboard-eval/main.ts --mock
 
 # Test names describe behavior; specification scenarios such as S8 are allowed.
 test-names-check:

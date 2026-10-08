@@ -210,7 +210,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
 	truncated, runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 	if runErr != nil {
-		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", runErr)
+		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", clientErrorMessage(runErr))
 	}
 
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
@@ -276,6 +276,12 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			return emitter.emit(events.NewTextMessageContentEvent(messageID, delta))
 		}
 		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
+			// Reported snapshots replace earlier counts for this call. Never use
+			// tool text or assistant narration to infer token usage.
+			if event.Usage != nil {
+				copy := *event.Usage
+				usage = &copy
+			}
 			switch event.Type {
 			case EventError:
 				return fmt.Errorf("%w: %s", errProvider, event.Error)
@@ -288,15 +294,39 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			case EventStop:
 				stopReason = event.StopReason
 				providerItems = event.ProviderItems
-				usage = event.Usage
 			}
 			return nil
 		})
 		if ctx.Err() != nil {
 			streamErr = ctx.Err()
 		}
+		provider, model := runtimeUsageIdentity(r.provider)
+		status := "completed"
+		if streamErr != nil {
+			status = "error"
+		} else if stoppedAtTokenLimit(stopReason) || stopReason == "incomplete" || stopReason == "content_filter" {
+			status = "incomplete"
+		}
+		var reported any
+		if usage != nil {
+			reported = map[string]int{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "reasoning_tokens": usage.ReasoningTokens, "cache_read_tokens": usage.CacheReadTokens, "cache_write_tokens": usage.CacheWriteTokens}
+		}
+		usageEvent := events.NewCustomEvent("model_call_usage", events.WithValue(map[string]any{
+			"run_id": runID, "step": step + 1, "provider": provider, "model": model, "status": status, "usage": reported,
+		}))
+		// Even a disconnected client must leave the authoritative record in
+		// the persisted run events. The structured log is the controller's
+		// recovery source when SSE could not deliver it.
+		if err := emitter.emit(usageEvent); err != nil {
+			if raw, marshalErr := usageEvent.ToJSON(); marshalErr == nil {
+				emitter.events = append(emitter.events, raw)
+			}
+			if streamErr == nil {
+				streamErr = err
+			}
+		}
 		if streamErr == nil {
-			logFields := []any{"thread_id", threadID, "run_id", runID, "stop_reason", stopReason}
+			logFields := []any{"thread_id", threadID, "run_id", runID, "step", step + 1, "provider", provider, "model", model, "status", status, "stop_reason", stopReason}
 			if usage != nil {
 				logFields = append(logFields, "input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens, "reasoning_tokens", usage.ReasoningTokens, "cache_read_tokens", usage.CacheReadTokens, "cache_write_tokens", usage.CacheWriteTokens)
 			}
@@ -319,6 +349,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 					streamErr = appendText("The model refused to answer this request.")
 				}
 			}
+		}
+		if streamErr != nil {
+			slog.Info("llm stream failed", "thread_id", threadID, "run_id", runID, "step", step+1, "provider", provider, "model", model, "status", status, "usage", reported)
 		}
 		if textStarted {
 			if err := emitter.emit(events.NewTextMessageEndEvent(messageID)); err != nil && streamErr == nil {
@@ -413,6 +446,19 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		}
 	}
 	return truncated, r.fail(threadID, runID, fmt.Errorf("%w: exceeded %d tool steps", errStepLimit, r.maxSteps), emitter)
+}
+
+func runtimeUsageIdentity(provider Provider) (string, string) {
+	switch p := provider.(type) {
+	case *openAIProvider:
+		return "openai", p.model
+	case *anthropicProvider:
+		return "anthropic", p.model
+	case interface{ usageIdentity() (string, string) }:
+		return p.usageIdentity()
+	default:
+		return "unknown", "unknown"
+	}
 }
 
 // fail reports the failure to the client with a sanitized message and returns

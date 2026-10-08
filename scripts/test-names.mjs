@@ -5,7 +5,7 @@ import { basename, join, relative, resolve } from "node:path";
 const root = resolve(process.argv[2] ?? ".");
 const roundTitle = /\b(?:[VPQHFWIRBNM]\d+[a-d]?|[Tt]ask\s+\d+|[Ff]inal\d+|[Ff]ix\d+|[Rr]ound\d+|[Pp]review[-_ ]part\d*)\b/;
 const roundFile = /(?:^|[-_])(?:[vpqhfwirbnm]\d+[a-z]*|task[-_ ]?\d+|final\w*|fix\d*|round\d+|preview[-_]part\d*)(?:[-_.]|$)/i;
-const roundGoName = /^(?:Test|Benchmark|Example)(?:[VPQHFWIRBNM]\d+|Task\d+|Final|Fix|Round\d+|PreviewPart\d+)/;
+const roundGoName = /^(?:Test|Benchmark|Example)(?:[VPQHFWIRBNM]\d+|Task\d+|Final\b|Fix\b|Round\d+|PreviewPart\d+)/;
 let failures = 0;
 function reject(file, line, kind, value) {
   console.error(`${relative(root, file)}:${line}: review identifier in ${kind}: ${value}`);

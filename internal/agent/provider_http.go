@@ -226,6 +226,11 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 			if event.Response.Usage != nil {
 				usage := event.Response.Usage
 				stop.Usage = &TokenUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.OutputTokensDetails.ReasoningTokens, CacheReadTokens: usage.InputTokensDetails.CachedTokens}
+				// Preserve reported counts even if decoding terminal output fails
+				// or a later tool callback aborts this call.
+				if err := cb(StreamEvent{Type: EventUsage, Usage: stop.Usage}); err != nil {
+					return err
+				}
 			}
 			// The terminal output fills gaps when item-done events are absent;
 			// retain item-done bytes verbatim when both are present.
@@ -295,7 +300,11 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 			} else if event.Message != "" {
 				message = event.Message
 			}
-			return cb(StreamEvent{Type: EventError, Error: message})
+			var usage *TokenUsage
+			if u := event.Response.Usage; u != nil {
+				usage = &TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens, CacheReadTokens: u.InputTokensDetails.CachedTokens}
+			}
+			return cb(StreamEvent{Type: EventError, Error: message, Usage: usage})
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -438,6 +447,12 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 		switch event.Type {
 		case "message_start":
 			mergeUsage(event.Message.Usage)
+			if usage != nil {
+				copy := *usage
+				if err := cb(StreamEvent{Type: EventUsage, Usage: &copy}); err != nil {
+					return err
+				}
+			}
 		case "content_block_start":
 			if event.ContentBlock.Type == "tool_use" {
 				currentID, currentName = event.ContentBlock.ID, event.ContentBlock.Name
@@ -471,7 +486,7 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			if event.Error != nil && event.Error.Message != "" {
 				message = event.Error.Message
 			}
-			return cb(StreamEvent{Type: EventError, Error: message})
+			return cb(StreamEvent{Type: EventError, Error: message, Usage: usage})
 		}
 	}
 	if err := scanner.Err(); err != nil {
