@@ -165,7 +165,7 @@ it("replaces the subtitle interaction hint without covering the legend and uses 
   expect(subtitle.textContent).toContain('click for exemplar traces');
   const plot=el.querySelector<HTMLElement>('[data-chart-plot]')!;await act(async()=>plot.focus());
   const hint=el.querySelector<HTMLElement>('[data-chart-hint]')!;
-  expect(subtitle.contains(hint)).toBe(true);expect(hint.textContent).toContain('←→ points · ↑↓ series · Enter drill · Shift+←→ range');
+  expect(subtitle.contains(hint)).toBe(true);expect(hint.textContent).toBe('←→ points · ↑↓ series · Enter drill · Shift+←→ range');
   expect(plot.querySelector('[data-chart-hint]')).toBeNull();expect(plot.querySelector('[data-chart-readout]')).toBeNull();
   await key(plot,'ArrowRight');expect(chart.dispatchAction).toHaveBeenCalledWith({type:'showTip',seriesIndex:0,dataIndex:1});
   expect(plot.querySelector('[aria-live]')?.textContent).toContain('1970-01-01T00:00:02.000Z');

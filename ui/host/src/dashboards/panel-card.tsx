@@ -50,7 +50,6 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const constants = logConstants(panel,result?.frame);
   const source = constants.length ? [...new Set(constants.map(c => c.value))].join(" · ") : panel.sql ? "sql" : panel.query?.from ?? (panel.viz === "service_map" || panel.viz === "health" ? "spans" : panel.viz === "log_patterns" ? "logs" : "spec");
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${source}${hint ? ` · ${hint}` : ""}`;
-  const focusedSubtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${source} · ${keyboardHint}`;
   const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
@@ -79,10 +78,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={small}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
-        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={keyboardHint ? focusedSubtitle : subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
+        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
             {/* Preserve the subtitle's measured line box, including narrow cards. */}
             <span aria-hidden={keyboardHint ? true : undefined} style={{visibility: keyboardHint ? "hidden" : undefined}}>{subtitle}</span>
-            {keyboardHint && <span data-chart-hint id={hintId} style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{focusedSubtitle}</span>}
+            {keyboardHint && <span data-chart-hint id={hintId} style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{keyboardHint}</span>}
           </Text>
           {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={11} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
         </Box>
