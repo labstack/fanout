@@ -74,15 +74,16 @@ describe("compile", () => {
   const panel = { id: "latency", title: "Latency", viz: "timeseries", unit: "ms", thresholds: [{ value: 1500, status: "bad", label: "budget" }] } as Panel;
   const result: PanelResult = { id: "latency", status: "ok", frame: series, previous: series, elapsed_ms: 3, shift_ms: 1000 };
 
-  it("keeps twelve series in a scroll legend clear of the plot", () => {
+  it("shows six of twelve series with a note in a wrapping legend clear of the plot", () => {
     const measures: Frame["columns"] = Array.from({ length: 12 }, (_, i) => ({ name: `measure_${i}`, type: "number", role: "measure", unit: "count" }));
     const values = measures.map(() => [1]);
     const many: Frame = { columns: [series.columns[0], ...measures], values: [[1000], ...values], rows: 1 };
     const time = timeseriesOption(panel, { ...result, frame: many, previous: undefined }, theme);
     const bar = barOption({ ...panel, viz: "bar" }, { ...many, columns: [{ name: "route", type: "string", role: "dimension" }, ...measures], values: [["/cart"], ...values] }, theme);
-    for (const option of [time, bar] as { legend: { type: string; top: number; itemHeight: number }; grid: { top: number }; series: unknown[] }[]) {
-      expect(option.series).toHaveLength(12);
-      expect(option.legend.type).toBe("scroll");
+    for (const option of [time, bar] as { legend: { type: string; top: number; itemHeight: number }; grid: { top: number }; series: unknown[]; graphic: { style: { text: string } }[] }[]) {
+      expect(option.series).toHaveLength(6);
+      expect(option.graphic[0].style.text).toBe("6 more series not shown");
+      expect(option.legend.type).toBe("plain");
       expect(option.grid.top).toBeGreaterThanOrEqual(option.legend.top + option.legend.itemHeight + 20);
     }
   });
@@ -121,8 +122,8 @@ describe("compile", () => {
     const bar = barOption({ id: "b", title: "b", viz: "bar" } as Panel, frame, theme) as { yAxis: { data: string[]; inverse: boolean } };
     expect(bar.yAxis.data).toEqual(["/a", "/b"]);
     expect(bar.yAxis.inverse).toBe(true);
-    const gauge = gaugeOption({ id: "g", title: "g", viz: "gauge", min: 0, max: 50, unit: "count" } as Panel, 42, theme) as { series: { min: number; max: number }[] };
-    expect(gauge.series[0].max).toBe(50);
+    const gauge = gaugeOption({ id: "g", title: "g", viz: "gauge", min: 0, max: 50, unit: "count" } as Panel, 42, theme) as { graphic: {type:string;style?:{text:string}}[] };
+    expect(gauge.graphic.filter(g=>g.type === "text").map(g=>g.style?.text)).toContain("50");
   });
 });
 
@@ -211,9 +212,8 @@ describe("compile, more", () => {
     expect(gaugeBands(higher, 0, 100, theme)).toEqual([[0.25, theme.status.bad], [0.5, theme.status.warn], [1, theme.status.ok]]);
     const lower = { ...base, better: "lower" as const, max: 3000, thresholds: [{ value: 750, status: "warn" as const }, { value: 2000, status: "bad" as const }] };
     expect(gaugeBands(lower, 0, 3000, theme)).toEqual([[0.25, theme.status.ok], [2000 / 3000, theme.status.warn], [1, theme.status.bad]]);
-    // The value's own band matches the stat colour.
-    const option = gaugeOption(higher, 75, theme) as { series: { axisLine: { lineStyle: { color: [number, string][] } } }[] };
-    const bands = option.series[0].axisLine.lineStyle.color;
-    expect(bands.find(([end]) => end >= 0.75)?.[1]).toBe(theme.status[statusFor(75, higher.thresholds, "higher")!]);
+    const option = gaugeOption(higher, 75, theme) as { graphic: {id?:string;style:{fill:string}}[] };
+    const color = theme.status[statusFor(75, higher.thresholds, "higher")!];
+    expect(option.graphic.find(g => g.id === "gauge-fill")!.style.fill).toBe(color);
   });
 });

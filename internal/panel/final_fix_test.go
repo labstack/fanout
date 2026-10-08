@@ -128,7 +128,7 @@ func TestFinalFixSeriesRowCap(t *testing.T) {
 	duck, repo := newTestEngine(t)
 	spans := shopSpans()
 	base := spans[0]
-	for i := range 3000 {
+	for i := range 4000 {
 		sp := base
 		sp.SpanID = fmt.Sprintf("extra%d", i)
 		sp.TraceID = sp.SpanID

@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
@@ -34,6 +35,7 @@ func newPanelServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	executor := panel.NewExecutor(duck, 30)
+	executor.SetRollupReader(observability.New(duck, duck, 30))
 	return New(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, "test")
 }
 
@@ -92,5 +94,59 @@ func TestDashboardToolScopes(t *testing.T) {
 		if RequiredToolScope(name) != "" {
 			t.Errorf("%s needs only telemetry:read", name)
 		}
+	}
+}
+
+func TestM2ItemsSpecGuide(t *testing.T) {
+	for _, phrase := range []string{
+		"Scatter supports options.x_scale and options.y_scale (log or linear)",
+		"distinct x_unit for x and unit for y",
+		"Rows returned use the count unit",
+		"SQL panels cannot use scatter or state_timeline",
+		"Items rank by volume (row count) for top N",
+		"Previous-period comparison is not drawn for scatter or state_timeline",
+	} {
+		if !strings.Contains(specGuide, phrase) {
+			t.Errorf("spec guide missing %q", phrase)
+		}
+	}
+}
+
+func TestM2RowsFixSpecGuide(t *testing.T) {
+	for _, phrase := range []string{
+		"Row panel types are logs, log_patterns and traces.",
+		"Logs and traces take no measures, by or bucket.",
+		"Patterns use count() by body_template.",
+		"Redaction applies before filtering, grouping, display and drill-down.",
+		"Row panels cannot use SQL.",
+		`"erroring" means slowest erroring traces: filter to erroring traces, then rank by root duration.`,
+		"Trace candidate ranking is approximate when filters exclude the root span, as with exemplars.",
+	} {
+		if !strings.Contains(specGuide, phrase) {
+			t.Errorf("guide missing %q", phrase)
+		}
+	}
+	if strings.Contains(specGuide, "bucket auto or a supported interval") {
+		t.Error("row guide repeats bucket schema")
+	}
+}
+
+func TestM4SeriesGuide(t *testing.T) {
+	for _, phrase := range []string{"Structured panels: the server computes Other", "SQL panels: series past six are left out, with a note", "state_timeline defaults to 8 rows, maximum 20"} {
+		if !strings.Contains(specGuide, phrase) {
+			t.Errorf("guide missing %q", phrase)
+		}
+	}
+}
+
+func TestI4RankingGuide(t *testing.T) {
+	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N)") {
+		t.Fatal("missing ranking semantics")
+	}
+}
+
+func TestQ4ConfidenceGuide(t *testing.T) {
+	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
+		t.Fatal("missing confidence semantics")
 	}
 }

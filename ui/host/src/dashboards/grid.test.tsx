@@ -1,12 +1,13 @@
+import { statusInk } from "../../../panels/style";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const charts = vi.hoisted(() => ({ calls: [] as { label: string; option: Record<string, unknown>; height: number; group?: string }[] }));
-vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, group, onClick }: { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void }) => {
-  charts.calls.push({ label, option, height, group });
+const charts = vi.hoisted(() => ({ calls: [] as { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void; onZoom?: (from: number, to: number) => void }[] }));
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, group, onClick, onZoom }: { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void; onZoom?: (from: number, to: number) => void }) => {
+  charts.calls.push({ label, option, height, group, onClick, onZoom });
   return <button data-chart={label} onClick={() => onClick?.({ name: "cart", seriesName: "cart" })}>{label}</button>;
 } }));
 
@@ -38,7 +39,12 @@ const cleanups: (() => void)[] = [];
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   charts.calls = [];
-  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: Element) { this.callback([{ target, contentRect: { width: 1200 } } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+    unobserve() {}
+    disconnect() {}
+  });
   vi.stubGlobal("IntersectionObserver", class { observe() {} unobserve() {} disconnect() {} });
 });
 afterEach(async () => { await act(async () => { cleanups.splice(0).forEach((cleanup) => cleanup()); }); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
@@ -64,7 +70,7 @@ describe("PanelGrid", () => {
     const { host } = await render();
     expect(host.textContent).toContain("140");
     expect(host.textContent).toContain("Degraded");
-    expect(host.textContent).toContain("+100%");
+    expect(host.textContent).not.toContain("+100%"); // Comparison is off.
     expect(host.textContent).toContain("/cart");
     expect(host.textContent).toContain("900ms");
     expect(host.textContent).toContain("Could not convert");
@@ -77,6 +83,25 @@ describe("PanelGrid", () => {
     expect(props.onVariable).toHaveBeenCalledWith("service", "cart");
   });
 
+  it("links and zooms only time charts, and wires point actions only for actionable panels", async () => {
+    const onPoint = vi.fn(); const onZoom = vi.fn();
+    const panels: DashboardSpec["panels"] = ["timeseries", "heatmap", "state_timeline", "histogram", "scatter", "bar"].map(viz => ({ id: viz, title: viz, viz: viz as DashboardSpec["panels"][number]["viz"], query: { from: "spans", measures: ["count()"], by: ["service"] } }));
+    panels.push({ ...panels[5], id: "click", title: "Click", click: { set_variable: "service" }, time: { range: "15m", shift: "1h" } });
+    panels.push({ ...panels[5], id: "drill", title: "Drill", drill: "traces" });
+    const r = results.get("requests")!;
+    const data = new Map(panels.map(p => [p.id, { ...r, id: p.id }]));
+    const { host } = await render({ spec: { ...spec, panels }, results: data, onPoint, onZoom });
+    for (const call of charts.calls) {
+      const time = ["timeseries", "heatmap", "state_timeline"].some(viz => call.label.startsWith(`${viz}:`));
+      expect(call.group).toBe(time ? "dashboard-d1" : undefined);
+      expect(call.onZoom).toBe(time ? onZoom : undefined);
+      expect(Boolean(call.onClick)).toBe(call.label.startsWith("Click:") || call.label.startsWith("Drill:"));
+    }
+    expect(host.querySelector('[data-panel="click"] [role="status"]')?.textContent).toBe("Range 15m · Shifted 1h");
+    charts.calls.find(call => call.label.startsWith("Click:"))!.onClick!({ name: "cart", seriesName: "cart" });
+    expect(onPoint).toHaveBeenCalledWith(panels[6], { time: undefined, dimensions: { service: "cart" } });
+  });
+
   it("renders gauge and successful time series with stable chart options and the server shift", async () => {
     const time = results.get("requests")!;
     const extraSpec: DashboardSpec = { ...spec, panels: [
@@ -86,7 +111,7 @@ describe("PanelGrid", () => {
     ] };
     const extraResults = new Map(results);
     extraResults.set("gauge", { ...time, id: "gauge" });
-    extraResults.set("series", { ...time, frame: { ...time.frame!, columns: [...time.frame!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.frame!.values, ["cart", "cart"]] }, id: "series", shift_ms: 1234 });
+    extraResults.set("series", { ...time, previous: { ...time.previous!, columns: [...time.previous!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.previous!.values, ["cart", "cart"]] }, frame: { ...time.frame!, columns: [...time.frame!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.frame!.values, ["cart", "cart"]] }, id: "series", shift_ms: 1234 });
     const { host, props, rerender } = await render({ spec: extraSpec, results: extraResults });
     expect(host.querySelector('[data-chart="Gauge: gauge"]')).not.toBeNull();
     expect(host.querySelector('[data-chart="Series: time series"]')).not.toBeNull();
@@ -106,7 +131,7 @@ describe("PanelGrid", () => {
     const { host, props } = await render({ spec: table });
     const values = () => [...host.querySelectorAll("tbody tr")].map((row) => row.textContent);
     expect(values()).toEqual(["/cart900ms", "/quote40.0ms"]);
-    expect(host.querySelector("tbody tr:first-child td:nth-child(2) p")!.getAttribute("style")).toContain("warn");
+    expect(host.querySelector("tbody tr:first-child td:nth-child(2) p")!.getAttribute("style")).toContain(statusInk("warn",false));
     await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
     await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
     expect(values()).toEqual(["/quote40.0ms", "/cart900ms"]);
@@ -114,18 +139,12 @@ describe("PanelGrid", () => {
     expect(props.onVariable).toHaveBeenCalledWith("service", "/quote");
   });
 
-  it("opens inspect with Data, Query, Spec and Timing tabs from the panel menu", async () => {
-    const { host } = await render();
-    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Requests menu"]')!.click(); });
-    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === "Inspect")!.click(); });
-    expect(document.body.textContent).toContain("Inspect · Requests");
-    expect([...document.querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(["Data", "Query", "Spec", "Timing"]);
-    expect(document.body.querySelector('[role="tabpanel"]')!.textContent).toContain("1970-01-01T00:00:00.001Z");
-    for (const [tab, content] of [["Query", "SELECT 1"], ["Spec", '"id": "requests"'], ["Timing", "Ran in 4 ms, 2 rows."]]) {
-      await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === tab)!.click(); });
-      const selected = document.querySelector('[role="tab"][aria-selected="true"]')!;
-      expect(document.getElementById(selected.getAttribute("aria-controls")!)!.textContent).toContain(content);
-    }
+  it("opens Data and Spec within the card with query and timing", async () => {
+    const { host } = await render(); const card = host.querySelector('[data-panel="requests"]')!;
+    await act(async () => card.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!.click());
+    for (const value of ["1970-01-01T00:00:00.001Z", "SELECT 1", "Ran in 4 ms, 2 rows."]) expect(card.textContent).toContain(value);
+    await act(async () => card.querySelector<HTMLButtonElement>('[data-panel-view="Spec"]')!.click());
+    expect(card.querySelector('pre')!.textContent).toContain('"id": "requests"');
   });
 
   it("opens and closes the full-screen panel through URL view callbacks", async () => {
@@ -195,15 +214,15 @@ it("resizes the full-screen chart, renders its title once and names close button
   const { host, rerender } = await render({ view: "by_service" });
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.querySelector('.mantine-Modal-title')).toBeNull();
-  expect(dialog.querySelectorAll('.mantine-Text-root')).toHaveLength(1);
+  expect(dialog.querySelectorAll('[data-panel-title]')).toHaveLength(1);
   expect(dialog.querySelector('[aria-label="Close panel view"]')).not.toBeNull();
   const height = charts.calls.at(-1)!.height;
   vi.stubGlobal("innerHeight", window.innerHeight + 200);
   await act(async () => { window.dispatchEvent(new Event("resize")); });
   expect(charts.calls.at(-1)!.height).toBe(height + 200);
   await rerender({ view: undefined });
-  await menu(host, "Requests", "Inspect");
-  expect(document.querySelector('[aria-label="Close inspect"]')).not.toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-panel="requests"] [data-panel-view="Data"]')!.click());
+  expect(host.querySelector('[data-panel="requests"] table')).not.toBeNull();
 });
 
 

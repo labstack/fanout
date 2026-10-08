@@ -19,9 +19,10 @@ type Parser interface {
 
 // Checked is what the database-backed checks produced.
 type Checked struct {
-	Filters    map[string][]Filter  // panel id → filters
-	VarFilters map[string][]Filter  // variable name → filters
-	Measures   map[string][]Measure // panel id → measures
+	AnnotationFilters map[string][]AnnotationFilter // panel id → projected annotation filters
+	Filters           map[string][]Filter           // panel id → filters
+	VarFilters        map[string][]Filter           // variable name → filters
+	Measures          map[string][]Measure          // panel id → measures
 }
 
 // isOperational reports whether err is the engine's or the caller's failure
@@ -41,7 +42,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 	if len(problems) > 0 {
 		return nil, problems, nil
 	}
-	checked := &Checked{Filters: map[string][]Filter{}, VarFilters: map[string][]Filter{}, Measures: map[string][]Measure{}}
+	checked := &Checked{AnnotationFilters: map[string][]AnnotationFilter{}, Filters: map[string][]Filter{}, VarFilters: map[string][]Filter{}, Measures: map[string][]Measure{}}
 	earlier := map[string]Variable{}
 	for i, v := range d.Variables {
 		if v.Kind == "query" {
@@ -82,7 +83,51 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 					continue
 				}
 				checked.Filters[p.ID] = append(checked.Filters[p.ID], f)
+				if err := checkDeployScope(ctx, parser, p, f); err != nil {
+					if isOperational(err) {
+						return nil, nil, err
+					}
+					problems.addHint(path+".options.split", SafeError(err), "use standalone service and optional namespace equalities")
+				}
+
+				if p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" {
+					projected, err := projectAnnotationFilter(ctx, parser, sig, earlier, f)
+					if err != nil {
+						if isOperational(err) {
+							return nil, nil, err
+						}
+						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), SafeError(err), "use a supported service or namespace predicate")
+					} else if projected != nil {
+						checked.AnnotationFilters[p.ID] = append(checked.AnnotationFilters[p.ID], *projected)
+					}
+				}
+
+				if p.Viz == "health" || p.Viz == "service_map" {
+					sample := Scope{Vars: map[string]Value{}}
+					for name := range earlier {
+						sample.Vars[name] = Value{Values: []string{"check"}}
+					}
+					if _, _, err := rollupFilterValue(ctx, parser, f, sample); err != nil {
+						if isOperational(err) {
+							return nil, nil, err
+						}
+						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), SafeError(err), "use namespace or service equality with a literal or single-value variable")
+					}
+				}
+
 			}
+			if p.Options != nil && p.Options.Split == "deploy" {
+				found := false
+				for _, f := range checked.Filters[p.ID] {
+					if f.EqField == "service" {
+						found = true
+					}
+				}
+				if !found {
+					problems.addHint(path+".options.split", "deploy split requires a service equality filter", "add service = 'name' or service = $service")
+				}
+			}
+
 		case p.SQL != "":
 			if err := checkSQLPanel(ctx, parser, p, earlier); err != nil {
 				if isOperational(err) {

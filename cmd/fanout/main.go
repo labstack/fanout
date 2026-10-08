@@ -28,6 +28,7 @@ import (
 
 	"github.com/labstack/fanout/internal/agent"
 	"github.com/labstack/fanout/internal/alert"
+	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
@@ -266,8 +267,10 @@ func main() {
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := panel.NewExecutor(q, cfg.RetentionDays)
+	panels.SetRollupReader(queries)
 	api.RegisterPanelRoutes(e, panels)
-	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
+	api.RegisterAnnotationRoutes(e, annotations.New(q))
+	api.NewObservabilityHandler(queries, cfg.RetentionDays).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB, panels)
 	api.RegisterDashboardRoutes(e, dashboards)

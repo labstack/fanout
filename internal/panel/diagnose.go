@@ -21,12 +21,26 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 	if p.Query == nil {
 		return "The query returned no rows for this time range."
 	}
+	if p.Viz == "traces" && p.Query.Sort == "errors" {
+		return "No erroring traces in this range"
+	}
 	sig, _ := lookupSignal(p.Query.From)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
 	active := make([]Filter, 0, len(filters))
 	for _, f := range filters {
 		if !scope.dropped(f) {
 			active = append(active, f)
+		}
+	}
+	if (p.Viz == "logs" || p.Viz == "log_patterns") && p.Options != nil && p.Options.Highlight != "" {
+		// The highlight is applied separately from the structured filters. Only
+		// blame it when those active filters would otherwise return log rows.
+		n, err := e.count(ctx, sig, active, scope)
+		if err != nil {
+			return ""
+		}
+		if n > 0 {
+			return fmt.Sprintf("No logs contain %q in this range", p.Options.Highlight)
 		}
 	}
 	total, err := e.count(ctx, sig, nil, scope)
@@ -64,7 +78,7 @@ func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, sco
 	if err != nil {
 		return 0, err
 	}
-	rows, err := e.engine.QueryContext(ctx, "SELECT count(*) FROM "+sig.name+" WHERE "+where, args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT count(*) FROM "+structuredSource(sig.name)+" WHERE "+where, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -88,7 +102,7 @@ func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string,
 		return ""
 	}
 	expr := ref.stringSQL()
-	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5", expr, sig.name, where, expr), args...)
+	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5", expr, structuredSource(sig.name), where, expr), args...)
 	if err != nil {
 		return ""
 	}

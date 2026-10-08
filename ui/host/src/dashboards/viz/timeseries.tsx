@@ -1,10 +1,22 @@
 import { useMemo } from "react";
-import { chartThemeFor, timeseriesOption } from "../../../../panels/compile";
-import type { Panel, PanelResult } from "../../../../panels/types";
+import { chartThemeFor, timeseriesOption, type ChartSize } from "../../../../panels/compile";
+import { pointSelection } from "../../../../panels/interaction";
+import { withAnnotations } from "../../../../panels/annotations";
 import { EChartCanvas } from "../echart-canvas";
+import type { AnalysisProps } from "./analysis-chart";
 
-export function TimeseriesViz({ panel, title = panel.title, result, dark, height, group, onSelect }: { panel: Panel; title?: string; result: PanelResult; dark: boolean; height: number; group: string; onSelect?: (value: string) => void }) {
-  const option = useMemo(() => timeseriesOption(panel, result, chartThemeFor(dark)), [panel, result.frame, result.previous, result.shift_ms, dark]);
-  const select = onSelect && result.frame!.columns.some((column) => column.role === "dimension") ? (params: { seriesName?: string }) => { if (params.seriesName && !params.seriesName.endsWith(" · previous") && params.seriesName !== "Other") onSelect(params.seriesName); } : undefined;
-  return <EChartCanvas option={option} height={height} label={`${title}: time series`} group={group} onClick={select} />;
+export function TimeseriesViz({ panel, title = panel.title, result, dark, height, group, annotations, vars, onSelect, onPoint, onZoom }: AnalysisProps) {
+  const optionForSize = useMemo(() => (size: ChartSize) => {
+    const theme = chartThemeFor(dark);
+    const compiled = timeseriesOption(panel, result, theme, size);
+    return annotations ? withAnnotations(compiled, panel, result, annotations, vars ?? {}, theme, size) : compiled;
+  }, [panel, result.frame, result.previous, result.shift_ms, result.from_ms, result.to_ms, result.annotation_scope, result.annotation_error, dark, annotations]);
+  const option = useMemo(() => optionForSize({ width: 500, height }), [optionForSize, height]);
+  return <EChartCanvas option={option} optionForSize={optionForSize} height={height} label={`${title}: time series`} group={group} onZoom={onZoom} onClick={onPoint || onSelect ? event => {
+    const selection = pointSelection(panel, result, event);
+    if (!selection) return;
+    onPoint?.(selection);
+    const first = Object.values(selection.dimensions)[0];
+    if (first !== undefined) onSelect?.(first);
+  } : undefined} />;
 }

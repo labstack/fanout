@@ -22,12 +22,17 @@ type ObservabilityQueries interface {
 }
 
 type ObservabilityHandler struct {
-	queries ObservabilityQueries
-	now     func() time.Time
+	queries   ObservabilityQueries
+	now       func() time.Time
+	maxWindow time.Duration
 }
 
-func NewObservabilityHandler(queries ObservabilityQueries) *ObservabilityHandler {
-	return &ObservabilityHandler{queries: queries, now: time.Now}
+func NewObservabilityHandler(queries ObservabilityQueries, retentionDays int) *ObservabilityHandler {
+	maximum := 30 * 24 * time.Hour
+	if retentionDays > 0 {
+		maximum = time.Duration(retentionDays) * 24 * time.Hour
+	}
+	return &ObservabilityHandler{queries: queries, now: time.Now, maxWindow: maximum}
 }
 
 // observabilityDeadline bounds one dashboard query.
@@ -149,11 +154,30 @@ func (h *ObservabilityHandler) request(c *echo.Context) (observability.Scope, in
 		limit = parsed
 	}
 	end := h.now().UTC()
-	return observability.Scope{
-		Namespace: c.QueryParam("namespace"),
-		Start:     end.Add(-window),
-		End:       end,
-	}, limit, nil
+	start := end.Add(-window)
+	from, to := strings.TrimSpace(c.QueryParam("from")), strings.TrimSpace(c.QueryParam("to"))
+	if from != "" || to != "" {
+		if from == "" || to == "" {
+			return observability.Scope{}, 0, echo.NewHTTPError(http.StatusBadRequest, "from and to must both be RFC 3339 timestamps")
+		}
+		var err error
+		start, err = time.Parse(time.RFC3339Nano, from)
+		if err != nil {
+			return observability.Scope{}, 0, echo.NewHTTPError(http.StatusBadRequest, "from must be RFC 3339")
+		}
+		end, err = time.Parse(time.RFC3339Nano, to)
+		if err != nil {
+			return observability.Scope{}, 0, echo.NewHTTPError(http.StatusBadRequest, "to must be RFC 3339")
+		}
+		maximum := h.maxWindow
+		if maximum <= 0 {
+			maximum = 30 * 24 * time.Hour
+		}
+		if !start.Before(end) || end.Sub(start) > maximum {
+			return observability.Scope{}, 0, echo.NewHTTPError(http.StatusBadRequest, "absolute window must be positive and bounded by retention")
+		}
+	}
+	return observability.Scope{Namespace: c.QueryParam("namespace"), Start: start.UTC(), End: end.UTC()}, limit, nil
 }
 
 func (h *ObservabilityHandler) dependencies(c *echo.Context) error {

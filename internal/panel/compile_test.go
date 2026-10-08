@@ -40,7 +40,7 @@ func TestCompileTimeseriesBindsVariables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + ` AND ((service = CAST(? AS VARCHAR))) AND ((kind = 'SPAN_KIND_SERVER'))) SELECT epoch_ms(time_bucket(INTERVAL '60 seconds', "start_time"::TIMESTAMP_NS))::BIGINT AS "_t", quantile_cont("duration_ms", 0.5)::DOUBLE AS "p50", quantile_cont("duration_ms", 0.95)::DOUBLE AS "p95" FROM base GROUP BY time_bucket(INTERVAL '60 seconds', "start_time"::TIMESTAMP_NS) ORDER BY "_t" LIMIT 18000`
+	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + ` AND ((service = CAST(? AS VARCHAR))) AND ((kind = 'SPAN_KIND_SERVER'))) SELECT epoch_ms(time_bucket(INTERVAL '60 seconds', "start_time"::TIMESTAMP_NS))::BIGINT AS "_t", quantile_cont("duration_ms", 0.5)::DOUBLE AS "p50", quantile_cont("duration_ms", 0.95)::DOUBLE AS "p95" FROM base GROUP BY time_bucket(INTERVAL '60 seconds', "start_time"::TIMESTAMP_NS) ORDER BY "_t" LIMIT 14000`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}
@@ -63,8 +63,8 @@ func TestCompileGroupedSeriesFoldsIntoOther(t *testing.T) {
 		t.Fatal(err)
 	}
 	bucket := `time_bucket(INTERVAL '300 seconds', "start_time"::TIMESTAMP_NS)`
-	other := `CASE WHEN "service" IN (SELECT d FROM top) THEN "service" ELSE 'Other' END`
-	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + `), top AS (SELECT "service" AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT 3) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "service", count(*) / 300.0 AS "rate" FROM base GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 8000`
+	other := `CASE WHEN coalesce("service", '') IN (SELECT d FROM top) THEN "service" ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END`
+	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + `), candidates AS (SELECT coalesce("service", '') AS d, count(*) / 3600.0 AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 3) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "service", count(*) / 300.0 AS "rate" FROM base GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 8000`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}
@@ -111,8 +111,8 @@ func TestCompileShareAndLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	bucket := `time_bucket(INTERVAL '60 seconds', "time"::TIMESTAMP_NS)`
-	other := `CASE WHEN "severity" IN (SELECT d FROM top) THEN "severity" ELSE 'Other' END`
-	want := `WITH base AS (SELECT * FROM logs WHERE "time" >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND "time" < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS), top AS (SELECT "severity" AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT 8) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "severity", 100.0 * count(*) / sum(count(*)) OVER (PARTITION BY ` + bucket + `) AS "share" FROM base GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 18000`
+	other := `CASE WHEN coalesce("severity", '') IN (SELECT d FROM top) THEN "severity" ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END`
+	want := `WITH base AS (SELECT * FROM (` + redactedLogSource() + `) WHERE "time" >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND "time" < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS), candidates AS (SELECT coalesce("severity", '') AS d, 100.0 * count(*) / sum(count(*)) OVER () AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 6) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "severity", 100.0 * count(*) / sum(count(*)) OVER (PARTITION BY ` + bucket + `) AS "share" FROM base GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 14000`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}

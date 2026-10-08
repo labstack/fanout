@@ -11,6 +11,6 @@ function DashboardDetail() {
   const { dashboardId } = Route.useParams();
   const search = parseSearch(Route.useSearch() as Record<string, unknown>);
   const navigate = useNavigate();
-  const go = (id: string, next: DashboardSearch, replace?: boolean) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: toSearchParams(next), replace });
+  const go = (id: string, next: DashboardSearch, replace?: boolean) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: toSearchParams(next), replace, resetScroll: id !== dashboardId });
   return <DashboardPage dashboardId={dashboardId} search={search} onSearch={(next, replace) => go(dashboardId, next, replace)} onOpen={(id, replace) => go(id, {}, replace)} />;
 }

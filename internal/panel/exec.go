@@ -39,16 +39,20 @@ type RunRequest struct {
 }
 
 type Result struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Frame     *Frame `json:"frame,omitempty"`
-	Previous  *Frame `json:"previous,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Diagnosis string `json:"diagnosis,omitempty"`
-	SQL       string `json:"sql,omitempty"`
-	Interval  string `json:"interval,omitempty"`
-	ElapsedMS int64  `json:"elapsed_ms"`
-	Better    string `json:"better,omitempty"`
+	AnnotationScope *AnnotationMatch `json:"annotation_scope,omitempty"`
+	AnnotationError string           `json:"annotation_error,omitempty"`
+	ID              string           `json:"id"`
+	Status          string           `json:"status"`
+	Frame           *Frame           `json:"frame,omitempty"`
+	Previous        *Frame           `json:"previous,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	Diagnosis       string           `json:"diagnosis,omitempty"`
+	SQL             string           `json:"sql,omitempty"`
+	Interval        string           `json:"interval,omitempty"`
+	ElapsedMS       int64            `json:"elapsed_ms"`
+	FromMS          int64            `json:"from_ms"`
+	ToMS            int64            `json:"to_ms"`
+	Better          string           `json:"better,omitempty"`
 	// ShiftMS is how far Previous sits behind Frame, so a client can overlay it
 	// without guessing from the first populated bucket.
 	ShiftMS int64 `json:"shift_ms,omitempty"`
@@ -56,6 +60,7 @@ type Result struct {
 
 type Executor struct {
 	engine       Engine
+	rollups      RollupReader
 	maxWindow    time.Duration
 	now          func() time.Time
 	timeout      time.Duration
@@ -123,6 +128,7 @@ func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
 // failure in its own result, so one broken panel cannot blank a dashboard.
 func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 	caller := ctx
+	now := e.now()
 	d := req.Dashboard
 	Normalize(&d)
 	if len(req.Panels) > len(d.Panels) {
@@ -178,7 +184,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			return nil, problems
 		}
 	}
-	start, end, err := resolveWindow(t, nil, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, nil, now, e.maxWindow)
 	if err != nil {
 		return nil, Problems{{Path: "time", Message: err.Error()}}
 	}
@@ -197,7 +203,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			if ctx.Err() != nil {
 				return nil
 			}
-			result := e.runPanel(ctx, p, checked, t, vars, req.Widths[p.ID], compare)
+			result := e.runPanel(ctx, p, checked, t, now, vars, req.Widths[p.ID], compare)
 			if ctx.Err() == context.DeadlineExceeded {
 				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, ElapsedMS: result.ElapsedMS}
 			}
@@ -251,15 +257,66 @@ func limitBatchFrames(results []Result) {
 				for j := range f.Values {
 					f.Values[j] = f.Values[j][start : start+rows]
 				}
+				for name, series := range f.Trends {
+					f.Trends[name] = series[start : start+rows]
+				}
 				f.Rows = rows
 				f.Truncated = true
 			}
 			remaining -= rows * len(f.Columns)
+			// Pattern trends are JSON arrays in a fixed row projection. Count
+			// their points just like structured table trends, not as one cell.
+			if f.Trend != nil {
+				for column, c := range f.Columns {
+					if c.Name != "trend" || c.Type != "json" {
+						continue
+					}
+					for row, value := range f.Values[column] {
+						var points []float64
+						text, ok := value.(string)
+						if !ok || json.Unmarshal([]byte(text), &points) != nil {
+							continue
+						}
+						if len(points) > remaining {
+							f.Values[column][row] = "[]"
+							f.Truncated = true
+							f.addNote("Some pattern trends were omitted to stay within the response budget.")
+							continue
+						}
+						remaining -= len(points)
+					}
+				}
+			}
+			if f.Health != nil {
+				points := min(len(f.Health.ErrorTrend), remaining)
+				if points < len(f.Health.ErrorTrend) {
+					f.Health.ErrorTrend = f.Health.ErrorTrend[len(f.Health.ErrorTrend)-points:]
+					f.Truncated = true
+					f.addNote("Health error trend was truncated to stay within the response budget.")
+				}
+				remaining -= points
+			}
+			names := make([]string, 0, len(f.Trends))
+			for name := range f.Trends {
+				names = append(names, name)
+			}
+			slices.Sort(names)
+			for _, name := range names {
+				for row, series := range f.Trends[name] {
+					if len(series) > remaining {
+						f.Trends[name][row] = nil
+						f.Truncated = true
+						f.addNote("Some row trends were omitted to stay within the response budget.")
+						continue
+					}
+					remaining -= len(series)
+				}
+			}
 		}
 	}
 }
 
-func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t Time, vars map[string]Value, width int, compare bool) (res Result) {
+func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t Time, now time.Time, vars map[string]Value, width int, compare bool) (res Result) {
 	parent := ctx
 	started := time.Now()
 	res = Result{ID: p.ID, Status: StatusOK}
@@ -270,10 +327,11 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if p.Viz == "text" {
 		return res
 	}
-	start, end, err := resolveWindow(t, p.Time, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, p.Time, now, e.maxWindow)
 	if err != nil {
 		return failed(res, err, parent.Err() == nil)
 	}
+	res.FromMS, res.ToMS = start.UnixMilli(), end.UnixMilli()
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	reduces := vizSpecs[p.Viz].reduces
@@ -281,6 +339,8 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	switch {
 	case reduces:
 		interval = AutoInterval(end.Sub(start), 240)
+	case p.Query != nil && p.Query.Bucket == "auto" && (p.Viz == "heatmap" || p.Viz == "state_timeline"):
+		interval = autoCellInterval(end.Sub(start), width)
 	case p.Query != nil:
 		interval = bucketInterval(p.Query.Bucket, end.Sub(start), width)
 	default:
@@ -293,8 +353,20 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		return failed(res, err, parent.Err() == nil)
 	}
 	res.Frame, res.SQL = frame, sqlText
+	// Trend failures are recorded on the frame and preserve the main table.
+	_ = e.attachTableTrends(ctx, p, checked, scope, frame)
+	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline") {
+		res.AnnotationScope, err = e.annotationScope(ctx, p, checked.AnnotationFilters[p.ID], scope)
+		if err != nil {
+			res.AnnotationError = "Annotation scope is unavailable."
+		}
+	}
+
 	if interval > 0 && (reduces || p.Query == nil || p.Query.Bucket != "") {
 		res.Interval = formatInterval(interval)
+	}
+	if frame.Trend != nil {
+		res.Interval = formatInterval(time.Duration(frame.Trend.StepMS) * time.Millisecond)
 	}
 	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
@@ -344,6 +416,13 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
+	if p.Options != nil && p.Options.Split == "deploy" {
+		return e.runDeploySplit(ctx, p, checked, scope)
+	}
+
+	if p.Viz == "health" || p.Viz == "service_map" {
+		return e.runRollupPanel(ctx, p, checked.Filters[p.ID], scope)
+	}
 	if p.Query != nil {
 		compiled, err := compileQuery(p, checked.Measures[p.ID], checked.Filters[p.ID], scope)
 		if err != nil {
@@ -357,9 +436,27 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		if scope.Interval > 0 {
 			rowLimit = 0 // Buckets are already bounded by interval and top-N.
 		}
+		if p.Viz == "heatmap" || p.Viz == "histogram" || p.Viz == "scatter" || p.Viz == "state_timeline" {
+			rowLimit = distributionRows(p, len(compiled.Columns))
+			if p.Viz == "scatter" {
+				rowLimit = min(rowLimit, 1000)
+			}
+		}
+		if p.Viz == "logs" || p.Viz == "traces" {
+			rowLimit = rowLimitForPanel(p)
+		}
+		if p.Viz == "log_patterns" {
+			rowLimit = patternLimit(p)
+		}
 		frame, err := scanFrame(rows, compiled.Columns, rowLimit)
 		if frame != nil {
-			frame.bucketed = scope.Interval > 0
+			frame.bucketed = scope.Interval > 0 && len(compiled.Columns) > 0 && compiled.Columns[0].Role == "time"
+			if compiled.TrendInterval > 0 {
+				frame.Trend = &Trend{StartMS: compiled.TrendStart.UnixMilli(), StepMS: compiled.TrendInterval.Milliseconds()}
+			}
+		}
+		if err == nil && (p.Viz == "heatmap" || p.Viz == "state_timeline") {
+			boundAnalysisFrame(frame)
 		}
 		return frame, compiled.SQL, err
 	}

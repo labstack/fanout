@@ -8,7 +8,42 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
 )
+
+func TestDiagnosisHighlightOnlyWhenActiveFiltersMatch(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, nil, []telemetry.Log{{ServiceName: "checkout", Namespace: "shop", Body: "request accepted", BodyTemplate: "request accepted", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n}})
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	for _, viz := range []string{"logs", "log_patterns"} {
+		t.Run(viz, func(t *testing.T) {
+			p := Panel{ID: "logs", Title: "Logs", Viz: viz, Options: &Options{Highlight: "error"}, Query: &Query{From: "logs", Where: []string{"service = 'missing'"}}}
+			if viz == "log_patterns" {
+				p.Query.Measures = []string{"count()"}
+				p.Query.By = []string{"body_template"}
+				p.Query.Bucket = "auto"
+			}
+			d := Dashboard{Name: "Diagnosis", Time: Time{Range: "1h"}, Panels: []Panel{p}}
+			got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "match service = 'missing'") || strings.Contains(r.Diagnosis, "No logs contain") {
+				t.Errorf("filter-caused empty result blames highlight: %+v", r)
+			}
+			d.Panels[0].Query.Where = []string{"service = 'checkout'"}
+			got, err = e.Run(t.Context(), RunRequest{Dashboard: d})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r := got[0]; r.Status != StatusEmpty || r.Diagnosis != `No logs contain "error" in this range` {
+				t.Errorf("highlight-caused emptiness not diagnosed: %+v", r)
+			}
+		})
+	}
+}
 
 func TestDiagnosisNamesOnlyEmptyingRouteFilter(t *testing.T) {
 	engine, repo := newTestEngine(t)

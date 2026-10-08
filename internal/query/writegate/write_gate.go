@@ -20,6 +20,8 @@ const (
 	WriteRollupService WriteOperation = "rollup_service"
 	WriteReadCache     WriteOperation = "read_cache"
 	WriteRollupEdge    WriteOperation = "rollup_edge"
+	WriteRollupVersion WriteOperation = "rollup_version"
+	WriteAnomalyLog    WriteOperation = "anomaly_log"
 	WriteMaintenance   WriteOperation = "maintenance"
 )
 

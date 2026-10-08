@@ -117,7 +117,7 @@ func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
 		AddRow("checkout", int64(1000), 0.08, 80.0, 2200.0, int64(20), int64(10)).
 		AddRow("catalog", int64(500), 0.0, 25.0, 100.0, int64(4), int64(2))
 	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
-		WithArgs(start, end, "prod", "prod", 100).
+		WithArgs(start, end, "prod", "prod", "", "", 100).
 		WillReturnRows(rows)
 
 	result, err := svc.Overview(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, 0)
@@ -146,7 +146,7 @@ func TestOverviewReportsEmptyWindowAsUnknownNotHealthy(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
-		WithArgs(start, end, "nonexistent", "nonexistent", 100).
+		WithArgs(start, end, "nonexistent", "nonexistent", "", "", 100).
 		WillReturnRows(sqlmock.NewRows([]string{"service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}))
 
 	result, err := svc.Overview(context.Background(), Scope{Namespace: "nonexistent", Start: start, End: end}, 0)
@@ -172,12 +172,12 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
-		WithArgs(start, end, "prod", "prod", 50).
+		WithArgs(start, end, "prod", "prod", "", "", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
 			AddRow("checkout", int64(10), 0.0, 20.0, 40.0, int64(1), int64(1)).
 			AddRow("postgres", int64(10), 0.0, 10.0, 20.0, int64(0), int64(0)))
 	mock.ExpectQuery(regexp.QuoteMeta(topologyEdgesQuery)).
-		WithArgs(start, end, "prod", "prod", 50).
+		WithArgs(start, end, "prod", "prod", "", "", "", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "edge_type", "calls", "average_ms", "error_rate"}).
 			AddRow("checkout", "postgres", "call", int64(10), 12.5, 0.0))
 

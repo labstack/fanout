@@ -1,10 +1,11 @@
+import { performanceAxisTooltip, performanceHeatTooltip } from "../../panels/tooltips";
 import { HeatmapChart, LineChart } from "echarts/charts";
 import { Badge, Paper, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
-import { chartTheme, healthColor, seriesColor, statusHex } from "../../chart";
+import { chartTheme, healthColor, seriesSlot, statusHex } from "../../chart";
 import { typeScale } from "../../tokens";
 import type { Endpoint, Performance, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
@@ -43,7 +44,7 @@ function ActivityView({ data, dark, window }: { data: Performance; dark: boolean
   const labels = data.points.map((point) => point.time);
   return <Stack px={{ base: "md", sm: "lg" }} pb="md">
     <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(totals.spans)} /><Metric label="P95 latency" value={duration(totals.p95_ms)} color={totals.p95_ms >= 750 ? "warn" : "ok"} /><Metric label="Error rate" value={percent(totals.error_rate)} color={totals.error_rate >= .01 ? "bad" : "ok"} /></SimpleGrid>
-    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesColor("operations", dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesColor("logs", dark) }]} />
+    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesSlot(0, dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesSlot(1, dark) }]} />
     <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" window={window} series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn, axis: "duration" }, { name: "Error rate", data: data.points.map((point) => point.error_rate), color: statusHex(dark).bad, axis: "percent" }]} />
   </Stack>;
 }
@@ -82,7 +83,7 @@ function PerformanceChart({ labels, title, series, dark, window }: { labels: str
       tooltip: {
         trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro },
         formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValueLabel: string }>) =>
-          [params[0]?.axisValueLabel, ...params.map((entry) => `${entry.marker}${entry.seriesName}: ${axisFormat[unitOf(entry.seriesName)](entry.value)}`)].join("<br/>"),
+          performanceAxisTooltip(params, (value, name) => axisFormat[unitOf(name)](value)),
       },
       xAxis: { type: "category", data: labels.map((value) => timelineTimestamp(value, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true } },
       yAxis: axes.map((kind, index) => ({
@@ -111,7 +112,7 @@ function HeatmapView({ data, dark, window }: { data: Performance; dark: boolean;
   }, [data.heatmap]);
   if (model.services.length === 0) return <EmptyState tall icon={<GridFour size={20} weight="duotone" />} title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
   const colors = chartTheme(dark);
-  const option = { grid: { left: 105, right: 20, top: 20, bottom: 78 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` }, xAxis: { type: "category", data: model.times.map((time) => timelineTimestamp(time, window)), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: typeScale.micro }, axisLine: { lineStyle: { color: colors.border } } }, // The scale sat on top of the time labels and said "600000" with no unit
+  const option = { grid: { left: 105, right: 20, top: 20, bottom: 78 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro }, formatter: (params: { data: [number, number, number] }) => performanceHeatTooltip(model.services[params.data[1]], duration(params.data[2])) }, xAxis: { type: "category", data: model.times.map((time) => timelineTimestamp(time, window)), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: typeScale.micro }, axisLine: { lineStyle: { color: colors.border } } }, // The scale sat on top of the time labels and said "600000" with no unit
       // — a number the reader had to guess the meaning of. It has its own band
       // now, and reads in the same units as every other latency in the product.
       visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, itemWidth: 12, itemHeight: 90, text: ["slower", "faster"], textGap: 8, formatter: (value: number) => duration(value), textStyle: { color: colors.muted, fontSize: typeScale.micro }, inRange: { color: [colors.grid, statusHex(dark).warn, statusHex(dark).bad] } }, series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])) }] };

@@ -73,6 +73,14 @@ func TestNormalizeFillsDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeServiceMapLargeDefault(t *testing.T) {
+	d := Dashboard{Name: "Map", Panels: []Panel{{ID: "map", Title: "Map", Viz: "service_map", Query: &Query{From: "spans"}}}}
+	Normalize(&d)
+	if d.Panels[0].Height != "l" {
+		t.Fatalf("service map height=%q", d.Panels[0].Height)
+	}
+}
+
 func TestValidateReportsPathsAndHints(t *testing.T) {
 	cases := []struct {
 		name, mutate, path, contains string
@@ -135,5 +143,41 @@ func TestProblemsError(t *testing.T) {
 	err := Problems{{Path: "a", Message: "bad", Hint: "did you mean b?"}}
 	if err.Error() != "a: bad (did you mean b?)" {
 		t.Fatal(err.Error())
+	}
+}
+
+func TestM2VizOrder(t *testing.T) {
+	if len(vizOrder) != 15 {
+		t.Fatalf("vizOrder has %d types, want 15", len(vizOrder))
+	}
+	seen := map[string]bool{}
+	for _, viz := range vizOrder {
+		if seen[viz] {
+			t.Fatalf("duplicate %s", viz)
+		}
+		seen[viz] = true
+		if _, ok := vizSpecs[viz]; !ok {
+			t.Fatalf("unregistered %s", viz)
+		}
+	}
+}
+
+func TestFinalFixGroupedPanelsRequireOneMeasure(t *testing.T) {
+	for _, tc := range []struct {
+		viz string
+		by  []string
+	}{
+		{"timeseries", []string{"service"}}, {"bar", []string{"service", "operation"}},
+	} {
+		t.Run(tc.viz, func(t *testing.T) {
+			d := Dashboard{Name: "Grouped", Panels: []Panel{{ID: "p", Title: "P", Viz: tc.viz, Query: &Query{From: "spans", By: tc.by, Measures: []string{"p50(duration_ms)", "p95(duration_ms)"}}}}}
+			Normalize(&d)
+			for _, p := range Validate(&d) {
+				if p.Path == "panels[0].query.measures" && p.Message == "grouped panels show one measure" && p.Hint == "use one panel per measure, or remove by" {
+					return
+				}
+			}
+			t.Fatal("missing grouped measure problem")
+		})
 	}
 }

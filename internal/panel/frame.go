@@ -5,21 +5,34 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"time"
 
+	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
 // Frame is a columnar query result: one array of values per column.
 type Frame struct {
-	Columns   []Column `json:"columns"`
-	Values    [][]any  `json:"values"`
-	Rows      int      `json:"rows"`
-	Totals    []any    `json:"totals,omitempty"`
-	Truncated bool     `json:"truncated,omitempty"`
+	Periods   map[string]Time    `json:"periods,omitempty"`
+	Trends    map[string][][]any `json:"trends,omitempty"`
+	Note      string             `json:"note,omitempty"`
+	Health    *HealthFrame       `json:"health,omitempty"`
+	Columns   []Column           `json:"columns"`
+	Values    [][]any            `json:"values"`
+	Rows      int                `json:"rows"`
+	Totals    []any              `json:"totals,omitempty"`
+	Truncated bool               `json:"truncated,omitempty"`
+	Trend     *Trend             `json:"trend,omitempty"`
 	// Only structured time buckets are exempt from the row cap. A SQL time
 	// column is still subject to the SQL panel cap.
 	bucketed bool
+}
+
+// Trend locates each point in a row panel's dense trend array.
+type Trend struct {
+	StartMS int64 `json:"start_ms"`
+	StepMS  int64 `json:"step_ms"`
 }
 
 const (
@@ -33,6 +46,16 @@ func newFrame(columns []Column) *Frame {
 		f.Values[i] = []any{}
 	}
 	return f
+}
+
+func (f *Frame) addNote(note string) {
+	if strings.Contains(f.Note, note) {
+		return
+	}
+	if f.Note != "" {
+		f.Note += " "
+	}
+	f.Note += note
 }
 
 // scanFrame reads a compiled query whose column types are known.
@@ -223,4 +246,13 @@ func totalsOf(f *Frame) []any {
 		out[i] = f.Values[i][0]
 	}
 	return out
+}
+
+type HealthFrame struct {
+	Health       string                     `json:"health"`
+	Counts       observability.HealthCounts `json:"counts"`
+	TotalSpans   int64                      `json:"total_spans"`
+	ErrorRate    float64                    `json:"error_rate"`
+	ServiceCount int                        `json:"service_count"`
+	ErrorTrend   []float64                  `json:"error_trend"`
 }

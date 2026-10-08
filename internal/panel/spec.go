@@ -51,12 +51,13 @@ type Panel struct {
 	ID          string      `json:"id" jsonschema:"Stable identifier: lowercase letters, digits and underscores; edits address panels by id"`
 	Title       string      `json:"title" jsonschema:"Panel title, at most 80 characters; may reference $variables"`
 	Description string      `json:"description,omitempty" jsonschema:"Help text, at most 280 characters"`
-	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table or text"`
+	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap, histogram, scatter, state_timeline, logs, log_patterns, traces, service_map or health; log_patterns returns body_template, count, trend, dominant severity (frequency then higher severity) and top service"`
 	Width       int         `json:"width,omitempty" jsonschema:"Grid columns from 1 to 12; default depends on viz"`
 	Height      string      `json:"height,omitempty" jsonschema:"s, m or l; default depends on viz"`
 	Query       *Query      `json:"query,omitempty" jsonschema:"Structured query; exactly one of query or sql, except text panels"`
 	SQL         string      `json:"sql,omitempty" jsonschema:"One read-only SELECT over spans, logs, metrics, service_rollup or edge_rollup; must use $__window(time_column)"`
 	Unit        string      `json:"unit,omitempty" jsonschema:"ms, s, ns, percent, ratio, count, per_second, per_minute, bytes or none; inferred when omitted"`
+	XUnit       string      `json:"x_unit,omitempty" jsonschema:"scatter x axis unit; unit describes y"`
 	Reduce      string      `json:"reduce,omitempty" jsonschema:"stat and gauge: window (default), last, mean, min, max or sum"`
 	Thresholds  []Threshold `json:"thresholds,omitempty" jsonschema:"Up to 4 status boundaries"`
 	Better      string      `json:"better,omitempty" jsonschema:"lower or higher; inferred for known measures"`
@@ -73,17 +74,18 @@ type Panel struct {
 type Query struct {
 	From      string     `json:"from" jsonschema:"spans, logs or metrics"`
 	Where     []string   `json:"where,omitempty" jsonschema:"Filter expressions joined by AND, e.g. service = $service or attributes['http.route'] = '/cart'"`
-	Measures  []string   `json:"measures" jsonschema:"1 to 6 of fn(field) [as alias]: count(), rate(), error_rate(), share(), avg, min, max, sum, last, p50, p75, p90, p95, p99, quantile(field, q), count_distinct(field)"`
+	Measures  []string   `json:"measures,omitempty" jsonschema:"Fixed logs, traces, service_map and health take no measures; other queries take 1 to 6 of fn(field) [as alias]: count(), rate(), error_rate(), share(), avg, min, max, sum, last, p50, p75, p90, p95, p99, quantile(field, q), count_distinct(field)"`
 	By        []string   `json:"by,omitempty" jsonschema:"Up to 3 grouping fields: columns or attributes['key']"`
 	Bucket    string     `json:"bucket,omitempty" jsonschema:"auto or 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d; required for timeseries"`
 	Histogram *Histogram `json:"histogram,omitempty" jsonschema:"heatmap and histogram panels (milestone 2)"`
-	Sort      string     `json:"sort,omitempty" jsonschema:"Measure alias to order by, descending; prefix + for ascending"`
-	Limit     int        `json:"limit,omitempty" jsonschema:"Row limit, at most 1000"`
+	Sort      string     `json:"sort,omitempty" jsonschema:"Measure alias descending (+ ascending); logs: time or +time; traces: duration_ms, errors or +start; log_patterns: count"`
+	Limit     int        `json:"limit,omitempty" jsonschema:"Row limit, at most 1000; logs and traces default 1000; log_patterns default 20, capped at 50; health and service_map default 400, capped at 400"`
 }
 
 type Histogram struct {
-	Field   string `json:"field"`
-	Buckets string `json:"buckets,omitempty"`
+	Temporality string `json:"temporality,omitempty" jsonschema:"metric histograms: cumulative (also unknown/default) or delta; cumulative uses last minus first per bound, clamped at zero; a series whose counter resets mid-window contributes 0 for that window"`
+	Field       string `json:"field" jsonschema:"spans duration_ms with log2 buckets or metrics value with explicit buckets; negative span durations clamp to [0,1), +Inf goes to overflow, NaN is excluded because it is not a measurement"`
+	Buckets     string `json:"buckets,omitempty"`
 }
 
 type Threshold struct {
@@ -93,10 +95,23 @@ type Threshold struct {
 }
 
 type Options struct {
-	Style  string `json:"style,omitempty" jsonschema:"timeseries: line, area, bars or stacked (additive measures only)"`
-	Scale  string `json:"scale,omitempty" jsonschema:"linear or log"`
-	Top    int    `json:"top,omitempty" jsonschema:"Series limit; the rest become Other; default 8"`
-	Legend string `json:"legend,omitempty" jsonschema:"auto or hidden"`
+	Split   string         `json:"split,omitempty" jsonschema:"bar: deploy, comparing before and since the latest deploy"`
+	Columns []ColumnFormat `json:"columns,omitempty" jsonschema:"table column formats"`
+
+	Highlight string `json:"highlight,omitempty" jsonschema:"logs and log_patterns: literal redacted-body search, at most 200 characters"`
+	Style     string `json:"style,omitempty" jsonschema:"timeseries: line, area, bars or stacked (additive measures only)"`
+	Scale     string `json:"scale,omitempty" jsonschema:"linear or log"`
+	Top       int    `json:"top,omitempty" jsonschema:"Categorical series default/max 6; structured series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N); error rates also require 20 requests for eligible ranking; SQL series past six are left out with a note; noncategorical rows default 8 max 20"`
+	Legend    string `json:"legend,omitempty" jsonschema:"auto or hidden"`
+	XScale    string `json:"x_scale,omitempty" jsonschema:"scatter x axis: linear or log"`
+	YScale    string `json:"y_scale,omitempty" jsonschema:"scatter y axis: linear or log"`
+}
+
+type ColumnFormat struct {
+	Field    string `json:"field"`
+	Format   string `json:"format" jsonschema:"unit, bar, status, sparkline, trace_link, service_link or log_template"`
+	Unit     string `json:"unit,omitempty"`
+	Variable string `json:"variable,omitempty" jsonschema:"service_link: query or custom variable to select"`
 }
 
 type Click struct {
@@ -115,10 +130,30 @@ type Grid struct {
 	H int `json:"h"`
 }
 
-// Top is the series limit for a grouped time series.
-func (p *Panel) Top() int {
-	if p.Options != nil && p.Options.Top > 0 {
-		return min(p.Options.Top, 20)
+// categoricalSeries reports whether top controls categorical colour slots.
+func (p *Panel) categoricalSeries() bool {
+	switch p.Viz {
+	case "timeseries":
+		return true
+	case "bar":
+		return p.Query != nil && (len(p.Query.By) == 2 || len(p.Query.Measures) > 1)
+	case "scatter":
+		return p.Query != nil && len(p.Query.By) == 2
+	case "histogram":
+		return p.Query != nil && len(p.Query.By) == 1
+	default:
+		return false
 	}
-	return 8
+}
+
+// Top limits categorical series or independently coloured item rows.
+func (p *Panel) Top() int {
+	maximum, fallback := 20, 8
+	if p.categoricalSeries() {
+		maximum, fallback = 6, 6
+	}
+	if p.Options != nil && p.Options.Top > 0 {
+		return min(p.Options.Top, maximum)
+	}
+	return fallback
 }

@@ -16,6 +16,7 @@ const (
 	RollupService   RollupComponent = "service"
 	RollupReadCache RollupComponent = "read_cache"
 	RollupEdge      RollupComponent = "edge"
+	RollupVersion   RollupComponent = "version"
 )
 
 type RollupResult string
@@ -554,7 +555,7 @@ func UpdateQueueDepth(signal string, depth int) {
 
 func validateRollupComponent(component RollupComponent) {
 	switch component {
-	case RollupService, RollupReadCache, RollupEdge:
+	case RollupService, RollupReadCache, RollupEdge, RollupVersion:
 		return
 	default:
 		panic("metrics: invalid rollup component: " + string(component))

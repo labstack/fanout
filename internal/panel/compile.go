@@ -71,9 +71,11 @@ type Column struct {
 
 // Compiled is one statement ready to run.
 type Compiled struct {
-	SQL     string
-	Args    []any
-	Columns []Column
+	SQL           string
+	Args          []any
+	Columns       []Column
+	TrendInterval time.Duration
+	TrendStart    time.Time
 }
 
 // dropped reports whether a filter references a variable set to
@@ -136,6 +138,16 @@ func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, erro
 // selected as "_t" and named "time" in the frame, so it never collides with a
 // signal's own time column.
 func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
+	if p.Viz == "logs" || p.Viz == "log_patterns" || p.Viz == "traces" {
+		return compileRows(p, filters, scope)
+	}
+	if p.Viz == "heatmap" || p.Viz == "histogram" {
+		return compileDistribution(p, filters, scope)
+	}
+	if p.Viz == "scatter" || p.Viz == "state_timeline" {
+		return compileItems(p, measures, filters, scope)
+	}
+
 	q := p.Query
 	sig, ok := lookupSignal(q.From)
 	if !ok {
@@ -163,13 +175,18 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		columns = append(columns, Column{Name: "time", Type: "time", Role: "time"})
 	}
 	top := 0
+	foldDimension := -1
 	if bucket != "" && len(dims) == 1 {
 		top = p.Top()
+		foldDimension = 0
+	} else if p.Viz == "bar" && len(dims) == 2 {
+		top = p.Top()
+		foldDimension = 1
 	}
 	for i, d := range dims {
 		expr := d.stringSQL()
-		if top > 0 && i == 0 {
-			expr = fmt.Sprintf("CASE WHEN %s IN (SELECT d FROM top) THEN %s ELSE 'Other' END", expr, expr)
+		if top > 0 && i == foldDimension {
+			expr = fmt.Sprintf("CASE WHEN coalesce(%s, '') IN (SELECT d FROM top) THEN %s ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END", expr, expr)
 		}
 		selects = append(selects, fmt.Sprintf("coalesce(%s, '') AS %s", expr, quoteIdent(d.alias())))
 		groups = append(groups, expr)
@@ -192,9 +209,37 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: unit})
 	}
 	var b strings.Builder
-	b.WriteString("WITH base AS (SELECT * FROM " + sig.name + " WHERE " + where + ")")
+	b.WriteString("WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")")
 	if top > 0 {
-		fmt.Fprintf(&b, ", top AS (SELECT %s AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT %d)", dims[0].stringSQL(), top)
+		// Rank over the complete panel window, before bucket aggregation. Volume
+		// measures retain largest-first semantics even when higher is better.
+		direction := "DESC"
+		first := measures[0]
+		rankPanel, rankQuery := *p, *p.Query
+		rankQuery.Measures = []string{first.Text}
+		rankPanel.Query = &rankQuery
+		better := p.Better
+		if better == "" {
+			better = inferBetter(&rankPanel)
+		}
+		if !first.Additive && first.Func != "share" && better == "higher" {
+			direction = "ASC"
+		}
+		value := measureSQL(first, sig, scope.End.Sub(scope.Start).Seconds(), "")
+		samples, extra := "count(*)", ""
+		order := "value " + direction + " NULLS LAST, n DESC, d"
+		switch first.Func {
+		case "error_rate":
+			// The common 20-sample floor prevents tiny request series from
+			// displacing supported failures (even 1/2 has a 9.45% bound).
+			extra = ", sum(" + errorCase(sig) + ") AS errors, " + wilsonLowerSQL() + " AS confidence"
+			order = "(n >= 20) DESC, CASE WHEN n >= 20 THEN confidence END DESC NULLS LAST, n DESC, d"
+		case "p50", "p75", "p90", "p95", "p99", "quantile", "avg", "max", "min":
+			// Count actual numeric samples, not rows with missing values.
+			samples = "count(" + first.Field.numberSQL() + ")"
+			order = "(n >= 20) DESC, CASE WHEN n >= 20 THEN value END " + direction + " NULLS LAST, n DESC, d"
+		}
+		fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
 	}
 	b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM base")
 	if len(groups) > 0 {
@@ -211,10 +256,7 @@ func measureSQL(m Measure, sig *signal, seconds float64, partition string) strin
 	case "rate":
 		return "count(*) / " + sqlFloat(seconds)
 	case "error_rate":
-		if sig.name == "logs" {
-			return "100.0 * avg(CASE WHEN upper(severity) IN ('ERROR', 'FATAL', 'CRITICAL') OR severity_number >= 17 THEN 1.0 ELSE 0.0 END)"
-		}
-		return "100.0 * avg(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END)"
+		return "100.0 * avg(" + errorCase(sig) + ")"
 	case "share":
 		return fmt.Sprintf("100.0 * count(*) / sum(count(*)) OVER (%s)", partition)
 	case "avg", "min", "max", "sum":
@@ -226,6 +268,20 @@ func measureSQL(m Measure, sig *signal, seconds float64, partition string) strin
 	default:
 		return fmt.Sprintf("quantile_cont(%s, %s)::DOUBLE", m.Field.numberSQL(), strconv.FormatFloat(m.Q, 'f', -1, 64))
 	}
+}
+
+// Both displayed rates and ranking use exactly the same error definition.
+func errorCase(sig *signal) string {
+	if sig.name == "logs" {
+		return "CASE WHEN upper(severity) IN ('ERROR', 'FATAL', 'CRITICAL') OR severity_number >= 17 THEN 1.0 ELSE 0.0 END"
+	}
+	return "CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END"
+}
+
+// Wilson's 95% lower bound (z=1.96), using candidate aggregate aliases.
+// Floating point divisors prevent integer division and n*n overflow.
+func wilsonLowerSQL() string {
+	return "greatest(0.0, (errors / n + 3.8416 / (2.0 * n) - 1.96 * sqrt((errors / n) * (1.0 - errors / n) / n + 3.8416 / (4.0 * n * n))) / (1.0 + 3.8416 / n))"
 }
 
 func sqlFloat(v float64) string {

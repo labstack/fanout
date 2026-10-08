@@ -135,3 +135,20 @@ func TestFinalFixPanelBatchHTTPKeepsPartialResults(t *testing.T) {
 		t.Fatalf("partial batch %d %s", rec.Code, rec.Body)
 	}
 }
+
+func (f *fakePanels) Exemplars(context.Context, panel.ExemplarRequest) (panel.ExemplarResponse, error) {
+	return panel.ExemplarResponse{Traces: []panel.Exemplar{}}, nil
+}
+func TestM2ExemplarRoutePolicy(t *testing.T) {
+	rec := servePanels(t, &fakePanels{}, http.MethodPost, "/api/panels/exemplars", `{"dashboard":{"name":"Inline","panels":[]},"panel_id":"latency","from":"2026-10-01T12:00:00Z","to":"2026-10-01T12:05:00Z","dimensions":{}}`)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"traces":[]`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	policy, ok := classifyRoute(http.MethodPost, "/api/panels/exemplars")
+	if !ok || policy.capability != ReadTelemetry {
+		t.Fatalf("policy: %+v %v", policy, ok)
+	}
+	if _, ok := classifyRoute(http.MethodGet, "/api/panels/exemplars"); ok {
+		t.Fatal("GET accepted")
+	}
+}

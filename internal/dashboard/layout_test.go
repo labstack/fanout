@@ -7,6 +7,16 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 )
 
+func TestServiceMapDefaultLayoutLarge(t *testing.T) {
+	for _, pack := range []func([]panel.Panel){Pack, PackMissing} {
+		panels := []panel.Panel{{ID: "map", Viz: "service_map", Width: 12}}
+		pack(panels)
+		if panels[0].Grid.H != 10 {
+			t.Fatalf("service map rows=%d", panels[0].Grid.H)
+		}
+	}
+}
+
 func TestPackFillsGapsWithoutStretching(t *testing.T) {
 	panels := []panel.Panel{
 		{ID: "a", Width: 3, Height: "s"},

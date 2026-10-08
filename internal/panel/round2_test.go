@@ -29,7 +29,7 @@ func TestRound2SeriesKeepsNewestBucket(t *testing.T) {
 	commit(t, repo, spans, nil)
 	e := NewExecutor(duck, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	d := Dashboard{Name: "Series", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "series", Title: "Series", Viz: "timeseries", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Bucket: "30s"}, Options: &Options{Top: 20}}}}
+	d := Dashboard{Name: "Series", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "series", Title: "Series", Viz: "timeseries", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Bucket: "30s"}, Options: &Options{Top: 6}}}}
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestRound2SeriesKeepsNewestBucket(t *testing.T) {
 	if f == nil {
 		t.Fatalf("missing frame: %+v", results[0])
 	}
-	if f.Rows != 1080 || f.Truncated {
+	if f.Rows != 840 || f.Truncated {
 		t.Fatalf("rows=%d truncated=%v", f.Rows, f.Truncated)
 	}
 	if got := f.Values[0][f.Rows-1]; got != fixtureStart.Add(time.Hour-30*time.Second).UnixMilli() {

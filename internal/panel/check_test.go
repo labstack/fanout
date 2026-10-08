@@ -109,3 +109,29 @@ func TestCheckReturnsOperationalErrorsNotProblems(t *testing.T) {
 		t.Fatalf("err = %v, problems = %v", err, problems)
 	}
 }
+
+func TestFinalFixSQLCTEsCannotShadowTelemetry(t *testing.T) {
+	engine, _ := newTestEngine(t)
+	for _, name := range []string{"logs", "spans", "metrics", "service_rollup", "edge_rollup", "LOGS", "safe"} {
+		t.Run(name, func(t *testing.T) {
+			d := Dashboard{Name: "CTE", Panels: []Panel{{ID: "p", Title: "P", Viz: "table", SQL: "WITH " + name + " AS (SELECT * FROM logs WHERE $__window(time)) SELECT count(*) FROM " + name}}}
+			Normalize(&d)
+			_, problems, err := Check(t.Context(), engine, &d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name == "safe" {
+				if len(problems) > 0 {
+					t.Fatalf("normal CTE rejected: %v", problems)
+				}
+				return
+			}
+			for _, p := range problems {
+				if p.Path == "panels[0].sql" && p.Message == "CTE names must not shadow telemetry relations" {
+					return
+				}
+			}
+			t.Fatalf("shadow accepted: %v", problems)
+		})
+	}
+}

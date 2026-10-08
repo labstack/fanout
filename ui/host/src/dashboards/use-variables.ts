@@ -5,9 +5,9 @@ import { resolveVariables } from "./api";
 
 /** internal/panel/variables.go chooseValue precedence, with stale URL choices
  * filtered against options once available. Text values are free-form. */
-export function currentValue(variable: Variable, vars: Record<string, VarValue>, options?: { value: string }[]): VarValue {
+export function currentValue(variable: Variable, vars: Record<string, VarValue>, options?: { value: string }[] | null): VarValue {
   if (variable.kind === "constant") return variable.value ?? "";
-  const opts = variable.kind === "custom" ? variable.options?.map((value) => ({ value })) ?? [] : options;
+  const opts = variable.kind === "custom" ? variable.options?.map((value) => ({ value })) ?? [] : options === null ? [] : options;
   const supplied = vars[variable.name];
   const given = !variable.multi && Array.isArray(supplied) && supplied.length === 0 ? undefined : supplied;
   if (given === ALL) {
@@ -30,7 +30,10 @@ export function useVariableOptions(dashboardId: string, _version: number, spec: 
   const hasVariables = (spec.variables?.length ?? 0) > 0;
   const query = useQuery({
     queryKey: ["variables", dashboardId, panelContent(spec), time, vars],
-    queryFn: ({ signal }) => resolveVariables({ dashboard: spec, time, vars }, signal),
+    queryFn: async ({ signal }) => {
+      const options = await resolveVariables({ dashboard: spec, time, vars }, signal);
+      return Object.fromEntries((spec.variables ?? []).map(variable => [variable.name, options[variable.name] ?? []]));
+    },
     enabled: hasVariables,
     retry: retryQuery,
     staleTime: 60_000,

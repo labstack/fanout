@@ -201,3 +201,16 @@ body,
   font-family: var(--mantine-font-family-monospace);
   font-size: 12px;
 }
+
+/* Route and viewport changes must settle before the next paint. Editing keeps
+   react-grid-layout's drag/resize transitions. */
+.dashboard-grid:not(.dashboard-grid-editing) {
+  transition: none;
+}
+.dashboard-grid:not(.dashboard-grid-editing) > .react-grid-item {
+  transition: none;
+}
+
+.dashboard-panel-padding {
+  padding-inline: 16px;
+}

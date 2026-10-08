@@ -10,8 +10,9 @@ import (
 // file as security-sensitive.
 //
 // Coverage boundary: redaction is applied ONLY to log body fields on the
-// read path — Logs entries, trace-correlated logs, and the SQL-side search
-// filter built from these same patterns (see redactLogBodySQL). Span
+// read path — Logs entries, trace-correlated logs, panel reads (structured and
+// SQL), variable options, empty-panel diagnosis, exemplars, and the SQL-side
+// search filter built from these same patterns (see redactLogBodySQL). Span
 // status_message, span/log attributes, and all on-disk data are NOT
 // redacted.
 //
@@ -100,3 +101,6 @@ func redactLogBodySQL(column string) string {
 	}
 	return expr
 }
+
+// RedactLogBodySQL shares the existing read-path expression with panel projections.
+func RedactLogBodySQL(column string) string { return redactLogBodySQL(column) }

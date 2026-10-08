@@ -25,14 +25,10 @@ export function statusHex(dark: boolean) {
   return { ok: ok[shade], warn: warn[shade], bad: bad[shade], info: info[shade] };
 }
 
-/** One colour per service or metric, where the colour identifies rather than
- *  grades. Hashed so a service keeps its colour between renders, and drawn from
- *  a palette with no health hue in it. */
-export function seriesColor(name: string, dark: boolean) {
+/** Fixed chart-order identity slots. Overflow is muted, never cycled. */
+export function seriesSlot(index: number, dark: boolean) {
   const palette = series[dark ? "dark" : "light"];
-  let hash = 0;
-  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  return palette[Math.abs(hash) % palette.length];
+  return palette[index] ?? chartTheme(dark).muted;
 }
 
 /** A node's shape says what its colour says.

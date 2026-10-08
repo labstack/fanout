@@ -1,3 +1,4 @@
+import { parseDrill } from "./drill-state";
 import type { DashboardSpec, DashboardTime, VarValue } from "../../../panels/types";
 
 export const ranges = ["5m", "15m", "1h", "3h", "6h", "12h", "24h", "2d", "7d", "30d"] as const;
@@ -6,7 +7,7 @@ export const refreshes = ["off", "10s", "30s", "1m", "5m"] as const;
 /** Everything about a dashboard view that belongs in the address bar, so a
  *  link reproduces what its sender saw (#232 item 12). Unrecognised values
  *  are dropped rather than rejected: a stale link still opens the dashboard. */
-export type DashboardSearch = { range?: string; from?: string; to?: string; compare?: "0" | "1"; view?: string; edit?: "1"; vars?: Record<string, VarValue> };
+export type DashboardSearch = { drill?: string; range?: string; from?: string; to?: string; compare?: "0" | "1"; view?: string; edit?: "1"; vars?: Record<string, VarValue> };
 
 const isInstant = (value: unknown): value is string => {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}[Tt](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value) || Number.isNaN(Date.parse(value))) return false;
@@ -41,11 +42,14 @@ export function parseSearch(raw: Record<string, unknown>): DashboardSearch {
     }
   }
   if (Object.keys(vars).length > 0) out.vars = vars;
+  const drill = parseDrill(raw.drill);
+  if (drill) out.drill = JSON.stringify(drill);
   return out;
 }
 
 export function toSearchParams(search: DashboardSearch): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  if (search.drill) out.drill = search.drill;
   if (search.range) out.range = search.range;
   if (search.from && search.to) { out.from = search.from; out.to = search.to; }
   if (search.compare) out.compare = search.compare;

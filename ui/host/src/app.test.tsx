@@ -1,4 +1,6 @@
 import { MantineProvider } from "@mantine/core";
+import type { AgentSubscriber, Message } from "@ag-ui/client";
+import { QueryClient } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,14 +10,15 @@ declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
 }
 
-const agentMocks = vi.hoisted(() => ({ runAgent: vi.fn(async () => undefined), abortRun: vi.fn(), instances: [] as Array<{ threadId: string }> }));
+const agentMocks = vi.hoisted(() => ({ runAgent: vi.fn(async () => undefined), abortRun: vi.fn(), instances: [] as Array<{ threadId: string; subscriber?: AgentSubscriber }> }));
 
 vi.mock("@ag-ui/client", () => ({
   HttpAgent: class {
     threadId: string;
+    subscriber?: AgentSubscriber;
     messages: Array<{ id: string; role: string; content?: string }> = [];
     constructor(options: { threadId: string }) { this.threadId = options.threadId; agentMocks.instances.push(this); }
-    subscribe() { return { unsubscribe: () => undefined }; }
+    subscribe(subscriber: AgentSubscriber) { this.subscriber = subscriber; return { unsubscribe: () => undefined }; }
     setMessages(messages: Array<{ id: string; role: string; content?: string }>) { this.messages = messages; }
     addMessage(message: { id: string; role: string; content?: string }) { this.messages = [...this.messages, message]; }
     runAgent = agentMocks.runAgent;
@@ -73,9 +76,79 @@ describe("Session", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
     viewerMock.current = defaultViewer;
+  });
+
+  it.each(["create_dashboard", "edit_dashboard", "replace_dashboard"])("refreshes the rail and links the saved dashboard at the streamed %s result", async (name) => {
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const rootRoute = createRootRoute({ component: App });
+    const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
+    const detail = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards/$dashboardId", component: () => <div>Saved dashboard</div> });
+    const router = createRouter({ routeTree: rootRoute.addChildren([chat, detail]) });
+    const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+    try {
+      await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+      await vi.waitFor(() => expect(document.querySelector("textarea")).not.toBeNull());
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/dashboards")).toBe(true));
+      fetchMock.mockImplementation(async (input) => {
+        const url = new URL(String(input), "http://localhost");
+        if (url.pathname === "/api/dashboards") return json({ dashboards: [{ id: "saved-1", name: "Cart errors", version: 2, panel_count: 2 }] });
+        if (url.pathname === "/api/agent/threads") return json({ threads: [], nextCursor: "" });
+        return json({ message: "not found" }, 404);
+      });
+      const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, warnings: ["One panel is empty"] });
+      const messages = [
+        { id: "before", role: "assistant", content: "Saving it now", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
+        { id: "result", role: "tool", toolCallId: "call-1", content },
+        { id: "after", role: "assistant", content: "All done" },
+      ] as Message[];
+      const subscriber = agentMocks.instances.at(-1)!.subscriber!;
+      await act(async () => {
+        await subscriber.onToolCallResultEvent?.({ event: { type: "TOOL_CALL_RESULT", messageId: "result", toolCallId: "call-1", content }, messages } as unknown as Parameters<NonNullable<AgentSubscriber["onToolCallResultEvent"]>>[0]);
+        await subscriber.onEvent?.({ messages } as unknown as Parameters<NonNullable<AgentSubscriber["onEvent"]>>[0]);
+      });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboards"] });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ["dashboard", "saved-1"] });
+      await vi.waitFor(() => expect(host.querySelector('nav a[href="/dashboards/saved-1"]')).not.toBeNull());
+      const link = host.querySelector<HTMLAnchorElement>('.chat-scroll a[href="/dashboards/saved-1"]');
+      expect(link?.textContent).toBe("Open dashboard");
+      expect(link?.closest("[data-dashboard-result]")?.textContent).toContain(`${name === "create_dashboard" ? "Created" : "Updated"}Cart errors`);
+      const transcript = host.querySelector('[role="log"]')!.textContent!;
+      expect(transcript.indexOf("Saving it now")).toBeLessThan(transcript.indexOf("Open dashboard"));
+      expect(transcript.indexOf("Open dashboard")).toBeLessThan(transcript.indexOf("All done"));
+      await act(async () => link!.click());
+      await vi.waitFor(() => expect(router.state.location.pathname).toBe("/dashboards/saved-1"));
+    } finally { await act(async () => root.unmount()); }
+  });
+
+  it.each([
+    ["get_dashboard", JSON.stringify({ dashboard: { id: "read-1", name: "Read only" } })],
+    ["create_dashboard", JSON.stringify({ error: "Save failed" })],
+    ["edit_dashboard", "not JSON"],
+  ])("ignores unrelated or unsuccessful tool results (%s)", async (name, content) => {
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+    const rootRoute = createRootRoute({ component: App });
+    const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
+    const router = createRouter({ routeTree: rootRoute.addChildren([chat]) });
+    const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+    try {
+      await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+      await vi.waitFor(() => expect(document.querySelector("textarea")).not.toBeNull());
+      const messages = [
+        { id: "call", role: "assistant", content: "", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
+        { id: "result", role: "tool", toolCallId: "call-1", content },
+      ] as Message[];
+      const subscriber = agentMocks.instances.at(-1)!.subscriber!;
+      await act(async () => {
+        await subscriber.onToolCallResultEvent?.({ event: { type: "TOOL_CALL_RESULT", messageId: "result", toolCallId: "call-1", content }, messages } as unknown as Parameters<NonNullable<AgentSubscriber["onToolCallResultEvent"]>>[0]);
+        await subscriber.onEvent?.({ messages } as unknown as Parameters<NonNullable<AgentSubscriber["onEvent"]>>[0]);
+      });
+      expect(invalidate).not.toHaveBeenCalled();
+      expect(host.querySelector("[data-dashboard-result]")).toBeNull();
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("opens a rail dashboard and clears the previous dashboard variable state", async () => {

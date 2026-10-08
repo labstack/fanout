@@ -89,13 +89,12 @@ export const chart = {
   light: { text: "#4a5058", muted: "#6b7280", grid: "#eceef0", surface: "#fcfcfc", border: "#a4abb4" },
 } as const;
 
-/** Categorical series — one color per service or metric, where the color
- *  identifies rather than grades. Drawn from the brand mark's own ribbons, and
- *  kept clear of green, amber and red so a series is never mistaken for a
- *  health reading. */
+/** Categorical identity comes from fixed-order slots, never a name hash or a
+ *  cycling palette. Status keeps its own icons, shapes and labels, so a series
+ *  hue is never read as health. These six slots are dataviz-validator approved. */
 export const series = {
-  dark: ["#66d0ee", "#a97ce0", "#5fe8ce", "#cb55e8", "#41b6f8", "#d2a6ff"],
-  light: ["#2b93b5", "#7c4dcc", "#1a9c86", "#a12fbf", "#2f7fd4", "#9163d6"],
+  dark: ["#3987e5", "#d95926", "#199e70", "#9085e9", "#c98500", "#d55181"],
+  light: ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7", "#eda100", "#e87ba4"],
 } as const;
 
 /** Light-scheme ground and dark-scheme ground, for the browser UI outside the

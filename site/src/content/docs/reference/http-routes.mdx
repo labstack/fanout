@@ -75,6 +75,7 @@ Capabilities map to roles in [roles](/reference/roles).
 | `POST` | `/api/alerting/rules/:id/test` | `alerts:manage` |
 | `GET` | `/api/alerts` | `telemetry:read` |
 | `GET` | `/api/alerts/summary` | `telemetry:read` |
+| `POST` | `/api/annotations` | `telemetry:read` |
 | `POST` | `/api/auth/code/send` | none |
 | `POST` | `/api/auth/code/verify` | none |
 | `POST` | `/api/auth/link/verify` | none |
@@ -102,6 +103,7 @@ Capabilities map to roles in [roles](/reference/roles).
 | `GET` | `/api/observability/services/dependencies` | `telemetry:read` |
 | `GET` | `/api/observability/topology` | `telemetry:read` |
 | `GET` | `/api/observability/trace` | `telemetry:read` |
+| `POST` | `/api/panels/exemplars` | `telemetry:read` |
 | `POST` | `/api/panels/query` | `telemetry:read` |
 | `GET` | `/api/settings/ingest` | `ingest:read-metadata` |
 | `POST` | `/api/settings/ingest/token/rotate` | `ingest:manage` |

@@ -54,3 +54,55 @@ export function formatAxis(unit?: string): (value: number) => string {
     return formatValue(unit, value);
   };
 }
+
+/** Readable chart/table labels use a space before duration units. */
+export function formatLabel(unit: string | undefined, value: number | null): string {
+  return formatAxis(unit)(value ?? NaN).replace(/(?<=\d)(ms|ns|s|m|h)\b/g, " $1");
+}
+
+/** Choose 1/2/5 duration steps in milliseconds, seconds, minutes or hours. */
+export function niceDurationInterval(min: number, max: number, unit?: string): number | undefined {
+  const factor = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "ns" ? 1e-6 : undefined;
+  if (factor === undefined || !Number.isFinite(min) || !Number.isFinite(max)) return undefined;
+  const target = Math.max((max - min) * factor / 6, Number.EPSILON);
+  const steps = [1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 36000000].flatMap(base => [1, 2, 5].map(n => base * n)).sort((a, b) => a - b);
+  const step = steps.find(step => step >= target) ?? [1, 2, 5, 10].map(n => n * 10 ** Math.floor(Math.log10(target / 3600000)) * 3600000).find(step => step >= target)!;
+  return step / factor;
+}
+
+/** Use one duration scale for both ends of a bucket. */
+export function formatBucket(lower: number | null, upper: number | null, unit?: string): string {
+  let bound = (value: number) => formatValue(unit, value);
+  let suffix = "";
+  if (unit === "ms" || unit === "s" || unit === "ns") {
+    const ms = unit === "s" ? 1000 : unit === "ns" ? 1e-6 : 1;
+    const magnitude = Math.abs((lower ?? upper ?? 0) * ms);
+    const scale = magnitude >= 60000 ? 60000 : magnitude >= 1000 ? 1000 : 1;
+    suffix = scale === 60000 ? " min" : scale === 1000 ? " s" : " ms";
+    const digits = scale === 60000 ? 1 : scale === 1000 ? (magnitude < 10000 ? 1 : 0) : 2;
+    const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: digits });
+    bound = value => formatter.format(value * ms / scale);
+  }
+  if (upper === null && lower !== null) return `≥${bound(lower)}${suffix}`;
+  if ((lower === null || lower === 0) && upper !== null) return `<${bound(upper)}${suffix}`;
+  return `${lower === null ? "−∞" : bound(lower)}–${upper === null ? "∞" : bound(upper)}${suffix}`;
+}
+
+/** ECharts otherwise abbreviates midnight to a bare day number. */
+export function formatTimeAxis(value: number): string {
+  const date = new Date(value);
+  return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0
+    ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+}
+
+/** Compact table timestamps in the viewer's locale and local time zone. */
+export function formatTimestamp(value: number, now = new Date(), locale?: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const parts = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" as const } : {}), hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
+  // Retain locale field order, but remove verbose punctuation between date/time.
+  const dateParts = parts.filter(p => ["month", "day", "year"].includes(p.type)).map(p => p.value);
+  const timeParts = parts.filter(p => ["hour", "minute", "second"].includes(p.type)).map(p => p.value);
+  return `${dateParts.join(" ")} ${timeParts.join(":")}`;
+}

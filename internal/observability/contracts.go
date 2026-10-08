@@ -16,6 +16,7 @@ const (
 // reads it from a query param, so any caller — including models — may select
 // any namespace. Do not rely on it for access control.
 type Scope struct {
+	Service   string    `json:"service,omitempty"`
 	Namespace string    `json:"namespace"`
 	Start     time.Time `json:"start"`
 	End       time.Time `json:"end"`

@@ -23,6 +23,7 @@ type ResolveRequest struct {
 // variable, resolving them in order so a variable that filters on an earlier
 // one sees that variable's current value.
 func (e *Executor) ResolveVariables(ctx context.Context, req ResolveRequest) (map[string][]Option, error) {
+	now := e.now()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	d := req.Dashboard
@@ -35,7 +36,7 @@ func (e *Executor) ResolveVariables(ctx context.Context, req ResolveRequest) (ma
 	if req.Time != nil {
 		t = *req.Time
 	}
-	start, end, err := resolveWindow(t, nil, e.now(), e.maxWindow)
+	start, end, err := resolveWindow(t, nil, now, e.maxWindow)
 	if err != nil {
 		return nil, Problems{{Path: "time", Message: err.Error()}}
 	}
@@ -103,12 +104,12 @@ func (e *Executor) optionsFor(ctx context.Context, v Variable, checked *Checked,
 		}
 		expr := ref.stringSQL()
 		ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end})
-		rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL AND %s <> '' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 500", expr, sig.name, where, expr, expr), args...)
+		rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL AND %s <> '' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 500", expr, structuredSource(sig.name), where, expr, expr), args...)
 		if err != nil {
 			return nil, fmt.Errorf("list values for $%s: %w", v.Name, err)
 		}
 		defer rows.Close()
-		var out []Option
+		out := []Option{}
 		for rows.Next() {
 			var o Option
 			if err := rows.Scan(&o.Value, &o.Count); err != nil {
