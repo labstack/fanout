@@ -151,7 +151,7 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
       try {built=buildEdit(before.spec,input);}catch {incomplete=true;break;}
       const r=await turn({id:`edit-${index+1}`,prompt:built.prompt},target.thread_id);
       const after=r.saved_record;
-      const diff=after?compareEdit(before.spec,after.spec,built.expected,input.operation):{passed:false,changed_ids:[],expected_ids:changedPanels(before.spec.panels,built.expected.panels,['add','remove','move'].includes(input.operation)),layout_changed:false,expected_diff:{before:before.spec,after:built.expected},actual_diff:null};
+      const diff=after?compareEdit(before.spec,after.spec,built.expected,input.operation):{passed:false,changed_ids:[],expected_ids:changedPanels(before.spec.panels,built.expected.panels),layout_changed:false,expected_diff:{before:before.spec,after:built.expected},actual_diff:null};
       const metadata=(record:ObjectValue)=>Object.fromEntries(Object.entries(record).filter(([k])=>!['spec','version','updated_at'].includes(k)));
       const savedOK=after&&after.id===before.id&&after.version===before.version+1&&stable(metadata(before))===stable(metadata(after));
       edits.push({...diff,passed:Boolean(diff.passed&&savedOK&&r.checked&&r.valid&&r.complete&&!r.incomplete&&r.checks.length===r.panels.length),operation:input.operation,run_id:r.run_id,prompt_sha:r.prompt_sha,saved:after,version_evidence:r.version_evidence,checks:r.checks,terminal_events:r.terminal_events,calls:r.calls,cost_usd:r.cost_usd});

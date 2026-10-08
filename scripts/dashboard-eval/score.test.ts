@@ -29,8 +29,8 @@ it('distinguishes unsaved timeout, saved invalid spec and incomplete validation'
 });
 it('detects unrelated changes, deletion, addition and reordering in field arrays', () => {
   const a=[{id:'a',query:{by:['service','namespace']}},{id:'b',title:'B'}];
-  expect(changedPanels(a,[{...a[0],query:{by:['namespace','service']}},a[1]],false)).toEqual(['a']);
-  expect(changedPanels(a,[{...a[0]},{id:'c'}],false)).toEqual(['b','c']);
+  expect(changedPanels(a,[{...a[0],query:{by:['namespace','service']}},a[1]])).toEqual(['a']);
+  expect(changedPanels(a,[{...a[0]},{id:'c'}])).toEqual(['b','c']);
 });
 const spec=()=>({version:1,name:'Mock',time:{range:'1h'},variables:[],annotations:[],panels:[{id:'a',title:'A',width:4,height:2,grid:{x:0,y:0}},{id:'b',title:'B',grid:{x:4,y:0}}]});
 it('records packed remove grids once without a neighbor authored chip', () => {
@@ -38,6 +38,15 @@ it('records packed remove grids once without a neighbor authored chip', () => {
   const after=structuredClone(expected);after.panels[0].grid={x:0,y:0};
   expect(compareEdit(before,after,expected,'remove')).toMatchObject({passed:true,changed_ids:['a'],expected_ids:['a'],layout_changed:true});
   after.panels[0].width=8;expect(compareEdit(before,after,expected,'remove').passed).toBe(false);
+});
+it('keeps physical layout out of authored chips while rejecting unrelated packing', () => {
+  const before=spec(),expected=spec();expected.panels[0].title='New';
+  const after=structuredClone(expected);after.panels[1].grid={x:0,y:0};
+  expect(compareEdit(before,after,expected,'title')).toMatchObject({passed:false,changed_ids:['a'],expected_ids:['a'],layout_changed:true});
+});
+it('reports relative survivor order without giving inserted neighbors chips', () => {
+  const before=spec(),expected=spec();expected.panels.reverse();
+  expect(compareEdit(before,expected,expected,'move')).toMatchObject({passed:true,changed_ids:['a','b'],expected_ids:['a','b']});
 });
 it('rejects title no-ops, unrelated grids, order, metadata and authored changes', () => {
   const before=spec(),expected=spec();expected.panels[0].title='New';

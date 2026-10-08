@@ -42,6 +42,13 @@ type Record struct {
 	UpdatedAt   string          `json:"updated_at"`
 }
 
+// Mutation identifies exactly one committed save and its successful optimistic base.
+type Mutation struct {
+	Record      Record
+	Before      panel.Dashboard
+	BaseVersion int
+}
+
 type Summary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -102,9 +109,13 @@ func (s *Service) get(ctx context.Context, ownerID, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	return decodeRecord(row)
+}
+
+func decodeRecord(row generated.Dashboard) (Record, error) {
 	record := Record{ID: row.ID, Name: row.Name, Description: row.Description, IsDefault: row.IsDefault == 1, Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 	if err := json.Unmarshal([]byte(row.SpecJson), &record.Spec); err != nil {
-		return Record{}, fmt.Errorf("decode dashboard %s: %w", id, err)
+		return Record{}, fmt.Errorf("decode dashboard %s: %w", row.ID, err)
 	}
 	return record, nil
 }
@@ -129,20 +140,30 @@ func (s *Service) prepare(ctx context.Context, spec *panel.Dashboard, repack boo
 }
 
 func (s *Service) Create(ctx context.Context, ownerID string, spec panel.Dashboard, author Author) (Record, error) {
+	mutation, err := s.CreateWithChanges(ctx, ownerID, spec, author)
+	return mutation.Record, err
+}
+
+func (s *Service) CreateWithChanges(ctx context.Context, ownerID string, spec panel.Dashboard, author Author) (Mutation, error) {
+	var err error
+	spec, err = clone(spec)
+	if err != nil {
+		return Mutation{}, err
+	}
 	if err := s.prepare(ctx, &spec, false); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	id, err := appid.New()
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := generated.New(tx)
@@ -150,24 +171,37 @@ func (s *Service) Create(ctx context.Context, ownerID string, spec panel.Dashboa
 	affected, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: id, OwnerID: ownerID, Name: spec.Name, Description: spec.Description, Version: 1, SpecJson: string(raw), PanelCount: int64(len(spec.Panels)), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		if isUnique(err) {
-			return Record{}, ErrConflict
+			return Mutation{}, ErrConflict
 		}
-		return Record{}, err
+		return Mutation{}, err
 	}
 	if affected == 0 {
-		return Record{}, panel.Problems{{Path: "dashboards", Message: "at most 500 dashboards per owner; delete a dashboard before creating another"}}
+		return Mutation{}, panel.Problems{{Path: "dashboards", Message: "at most 500 dashboards per owner; delete a dashboard before creating another"}}
 	}
 	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: 1, SpecJson: string(raw), AuthorKind: author.Kind, AuthorID: author.ID, Message: "Created", CreatedAt: now}); err != nil {
-		return Record{}, err
+		return Mutation{}, err
+	}
+	row, err := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: ownerID})
+	if err != nil {
+		return Mutation{}, err
+	}
+	record, err := decodeRecord(row)
+	if err != nil {
+		return Mutation{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
-	return s.get(ctx, ownerID, id)
+	return Mutation{Record: record}, nil
 }
 
 // Replace stores a whole new spec. baseVersion 0 means "the latest".
 func (s *Service) Replace(ctx context.Context, ownerID, id string, spec panel.Dashboard, baseVersion int, author Author, message string) (Record, error) {
+	mutation, err := s.ReplaceWithChanges(ctx, ownerID, id, spec, baseVersion, author, message)
+	return mutation.Record, err
+}
+
+func (s *Service) ReplaceWithChanges(ctx context.Context, ownerID, id string, spec panel.Dashboard, baseVersion int, author Author, message string) (Mutation, error) {
 	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
 		replacement, err := clone(spec)
 		if err != nil {
@@ -206,6 +240,11 @@ func (s *Service) Replace(ctx context.Context, ownerID, id string, spec panel.Da
 
 // Edit applies typed operations atomically. baseVersion 0 means "the latest".
 func (s *Service) Edit(ctx context.Context, ownerID, id string, ops []Operation, baseVersion int, author Author, message string) (Record, error) {
+	mutation, err := s.EditWithChanges(ctx, ownerID, id, ops, baseVersion, author, message)
+	return mutation.Record, err
+}
+
+func (s *Service) EditWithChanges(ctx context.Context, ownerID, id string, ops []Operation, baseVersion int, author Author, message string) (Mutation, error) {
 	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
 		return Apply(current, ops)
 	})
@@ -226,53 +265,58 @@ func (s *Service) Restore(ctx context.Context, ownerID, id string, version int, 
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 		return Record{}, err
 	}
-	return s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
+	mutation, err := s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
 		return spec, false, nil
 	})
+	return mutation.Record, err
 }
 
 // update reads, changes, validates and writes with an optimistic version
 // check. With baseVersion 0 a concurrent write is retried once on the newer
 // version; with an explicit baseVersion it fails with ErrStale instead of
 // overwriting what someone else saved.
-func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Record, error) {
+func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Mutation, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		current, err := s.get(ctx, ownerID, id)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		if baseVersion != 0 && current.Version != baseVersion {
-			return Record{}, ErrStale
+			return Mutation{}, ErrStale
+		}
+		before, err := clone(current.Spec)
+		if err != nil {
+			return Mutation{}, err
 		}
 		next, repack, err := change(current.Spec)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		if err := s.prepare(ctx, &next, repack); err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		raw, err := json.Marshal(next)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
-		written, err := s.write(ctx, ownerID, id, current.Version, next, string(raw), author, message)
+		record, written, err := s.write(ctx, ownerID, id, current.Version, next, string(raw), author, message)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		if written {
-			return s.get(ctx, ownerID, id)
+			return Mutation{Record: record, Before: before, BaseVersion: current.Version}, nil
 		}
 		if baseVersion != 0 {
-			return Record{}, ErrStale
+			return Mutation{}, ErrStale
 		}
 	}
-	return Record{}, ErrStale
+	return Mutation{}, ErrStale
 }
 
-func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec panel.Dashboard, raw string, author Author, message string) (bool, error) {
+func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec panel.Dashboard, raw string, author Author, message string) (Record, bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return Record{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := generated.New(tx)
@@ -281,20 +325,31 @@ func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec 
 	affected, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: spec.Name, Description: spec.Description, NextVersion: next, SpecJson: raw, PanelCount: int64(len(spec.Panels)), UpdatedAt: now, ID: id, OwnerID: ownerID, BaseVersion: int64(base)})
 	if err != nil {
 		if isUnique(err) {
-			return false, ErrConflict
+			return Record{}, false, ErrConflict
 		}
-		return false, err
+		return Record{}, false, err
 	}
 	if affected == 0 {
-		return false, nil
+		return Record{}, false, nil
 	}
 	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: next, SpecJson: raw, AuthorKind: author.Kind, AuthorID: author.ID, Message: strings.TrimSpace(message), CreatedAt: now}); err != nil {
-		return false, err
+		return Record{}, false, err
 	}
 	if err := q.PruneDashboardVersions(ctx, generated.PruneDashboardVersionsParams{DashboardID: id, KeepFrom: next - keepVersions + 1}); err != nil {
-		return false, err
+		return Record{}, false, err
 	}
-	return true, tx.Commit()
+	row, err := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: ownerID})
+	if err != nil {
+		return Record{}, false, err
+	}
+	record, err := decodeRecord(row)
+	if err != nil {
+		return Record{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Record{}, false, err
+	}
+	return record, true, nil
 }
 
 func (s *Service) Delete(ctx context.Context, ownerID, id string) error {

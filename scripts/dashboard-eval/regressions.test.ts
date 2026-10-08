@@ -10,6 +10,14 @@ const roots:string[]=[];
 afterEach(()=>roots.splice(0).forEach(r=>rmSync(r,{recursive:true,force:true})));
 const ledger=():transport.Ledger=>({schema:1,rates:[{provider:'mock',model:'mock-no-provider',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:1,output:1,cache_read:0,cache_write:0}],calls:[],prompts:[]});
 const usage=(id:string,status='completed')=>({run_id:id,step:1,provider:'mock',model:'mock-no-provider',status,usage:{input_tokens:100000,output_tokens:0,cache_read_tokens:0,cache_write_tokens:0,reasoning_tokens:0}});
+it('preserves structured save receipts from the Go golden generator',()=>{
+ const g=golden(),out=g.saved_output,r=out.receipt;
+ expect(out.dashboard).toEqual(g.saved_record);
+ expect(r).toMatchObject({base_version:0,version:1,layout_changed:true,save_check:{checked:true,elapsed_ms:0}});
+ expect(r.changes.map((p:any)=>({panel_id:p.panel_id,kind:p.kind}))).toEqual(g.saved_spec.panels.map((p:any)=>({panel_id:p.id,kind:'added'})));
+ expect(r.save_check.panels.map((p:any)=>p.id)).toEqual(g.saved_spec.panels.map((p:any)=>p.id));
+ expect(r.save_check.panels.every((p:any)=>p.status==='ok'&&p.rows===1&&p.elapsed_ms===0)).toBe(true);
+});
 it('scores executor text results without inventing a frame',()=>{
  const g=golden(),p=g.saved_spec.panels.find((p:any)=>p.viz==='text'),r=g.results.find((r:any)=>r.id===p.id);
  expect(r.status).toBe('ok');expect(r.frame).toBeUndefined();expect(panelPass(p,[{...r,rows:0}])).toBe(true);

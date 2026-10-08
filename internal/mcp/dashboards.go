@@ -41,8 +41,34 @@ type dashboardListOutput struct {
 }
 
 type dashboardOutput struct {
-	Dashboard dashboard.Record `json:"dashboard"`
-	Warnings  []string         `json:"warnings,omitempty"`
+	Dashboard dashboard.Record  `json:"dashboard"`
+	Warnings  []string          `json:"warnings,omitempty"`
+	Receipt   *dashboardReceipt `json:"receipt,omitempty"`
+}
+
+type savedPanelCheck struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Rows      int    `json:"rows"`
+	Diagnosis string `json:"diagnosis,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+}
+
+type saveCheck struct {
+	Checked   bool              `json:"checked"`
+	Reason    string            `json:"reason,omitempty"`
+	ElapsedMS int64             `json:"elapsed_ms"`
+	Panels    []savedPanelCheck `json:"panels"`
+}
+
+type dashboardReceipt struct {
+	BaseVersion     int                     `json:"base_version"`
+	Version         int                     `json:"version"`
+	Changes         []dashboard.PanelChange `json:"changes"`
+	LayoutChanged   bool                    `json:"layout_changed"`
+	DashboardFields []string                `json:"dashboard_fields,omitempty"`
+	SaveCheck       saveCheck               `json:"save_check"`
 }
 
 const (
@@ -52,6 +78,8 @@ const (
 	replaceDashboardTool
 	editDashboardTool
 )
+
+const saveReceiptGuide = "Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows/elapsed_ms result per saved panel. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. "
 
 // Registration and transport authorization use the same dashboard tool catalog.
 var dashboardTools = [...]mcp.Tool{
@@ -67,17 +95,17 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "create_dashboard", Title: "Create dashboard",
-		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. " + specGuide,
+		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. " + saveReceiptGuide + specGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "replace_dashboard", Title: "Replace dashboard",
-		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. See create_dashboard for the spec guide.",
+		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: true, OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "edit_dashboard", Title: "Edit dashboard",
-		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. See create_dashboard for the spec guide.",
+		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 }
@@ -137,7 +165,7 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	record, err := s.dashboards.Create(ctx, owner, input.Dashboard, agentAuthor(owner))
+	record, err := s.dashboards.CreateWithChanges(ctx, owner, input.Dashboard, agentAuthor(owner))
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
@@ -149,7 +177,7 @@ func (s *Server) dashboardReplace(ctx context.Context, req *mcp.CallToolRequest,
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	record, err := s.dashboards.Replace(ctx, owner, strings.TrimSpace(input.ID), input.Dashboard, input.BaseVersion, agentAuthor(owner), input.Message)
+	record, err := s.dashboards.ReplaceWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Dashboard, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
@@ -161,7 +189,7 @@ func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	record, err := s.dashboards.Edit(ctx, owner, strings.TrimSpace(input.ID), input.Operations, input.BaseVersion, agentAuthor(owner), input.Message)
+	record, err := s.dashboards.EditWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Operations, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
@@ -173,35 +201,89 @@ func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, in
 // unchecked, and the result says so, rather than holding the answer.
 const saveCheckBudget = 8 * time.Second
 
-func (s *Server) saved(ctx context.Context, verb string, record dashboard.Record) (*mcp.CallToolResult, dashboardOutput, error) {
-	out := dashboardOutput{Dashboard: record}
-	unchecked := ""
-	if s.panels != nil {
+func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Mutation) (*mcp.CallToolResult, dashboardOutput, error) {
+	record := mutation.Record
+	diff := dashboard.Changes(mutation.Before, record.Spec)
+	out := dashboardOutput{Dashboard: record, Receipt: &dashboardReceipt{
+		BaseVersion: mutation.BaseVersion, Version: record.Version, Changes: diff.Panels,
+		LayoutChanged: diff.LayoutChanged, DashboardFields: diff.DashboardFields,
+	}}
+	start := time.Now()
+	check := saveCheck{Panels: make([]savedPanelCheck, len(record.Spec.Panels))}
+	for i, p := range record.Spec.Panels {
+		check.Panels[i] = savedPanelCheck{ID: p.ID, Status: "not_run"}
+	}
+	if s.panels == nil {
+		check.Reason = "panels are unavailable"
+	} else {
 		checkCtx, cancel := context.WithTimeout(ctx, saveCheckBudget)
 		results, err := s.panels.Run(checkCtx, panel.RunRequest{Dashboard: record.Spec})
+		if err == nil {
+			err = checkCtx.Err()
+		}
 		cancel()
 		if err != nil {
-			reason := panel.SafeError(err)
+			check.Reason = panel.SafeError(err)
 			if errors.Is(err, context.DeadlineExceeded) {
-				reason = fmt.Sprintf("the check took longer than %d seconds", int(saveCheckBudget/time.Second))
+				check.Reason = fmt.Sprintf("the check took longer than %d seconds", int(saveCheckBudget/time.Second))
 			}
-			unchecked = " Panels were not checked: " + reason + "."
 		} else {
+			byID := map[string][]panel.Result{}
+			expected := map[string]bool{}
+			for _, p := range record.Spec.Panels {
+				expected[p.ID] = true
+			}
+			complete := len(results) == len(record.Spec.Panels)
 			for _, r := range results {
+				byID[r.ID] = append(byID[r.ID], r)
+				if !expected[r.ID] {
+					complete = false
+				}
+			}
+			for i, p := range record.Spec.Panels {
+				matches := byID[p.ID]
+				if len(matches) != 1 {
+					complete = false
+					continue
+				}
+				r := matches[0]
+				if r.Status != panel.StatusOK && r.Status != panel.StatusEmpty && r.Status != panel.StatusError {
+					complete = false
+					continue
+				}
+				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: r.Diagnosis, ElapsedMS: r.ElapsedMS}
+				if r.Frame != nil {
+					c.Rows = r.Frame.Rows
+				} else if r.Status == panel.StatusOK && p.Viz == "text" && strings.TrimSpace(p.Content) != "" {
+					c.Rows = 1
+				}
+				if r.Error != "" {
+					c.Error = panel.SafeError(errors.New(r.Error))
+				}
+				check.Panels[i] = c
 				switch r.Status {
 				case panel.StatusEmpty:
-					out.Warnings = append(out.Warnings, fmt.Sprintf("%s is empty: %s", r.ID, r.Diagnosis))
+					out.Warnings = append(out.Warnings, fmt.Sprintf("%s is empty: %s", r.ID, c.Diagnosis))
 				case panel.StatusError:
-					out.Warnings = append(out.Warnings, fmt.Sprintf("%s failed: %s", r.ID, r.Error))
+					out.Warnings = append(out.Warnings, fmt.Sprintf("%s failed: %s", r.ID, c.Error))
 				}
+			}
+			check.Checked = complete
+			if !complete {
+				check.Reason = "the check did not return exactly one completed result for every saved panel"
 			}
 		}
 	}
+	check.ElapsedMS = time.Since(start).Milliseconds()
+	out.Receipt.SaveCheck = check
 	text := fmt.Sprintf("%s %q, version %d, with %d panels.", verb, record.Name, record.Version, len(record.Spec.Panels))
 	if len(out.Warnings) > 0 {
 		text += " Needs attention: " + strings.Join(out.Warnings, " ") + " Fix these with edit_dashboard or tell the user why they are empty."
 	}
-	return summary(text + unchecked), out, nil
+	if !check.Checked {
+		text += " Panels were not checked: " + check.Reason + "."
+	}
+	return summary(text), out, nil
 }
 
 // dashboardOwner resolves the authenticated owner for a dashboard tool call.

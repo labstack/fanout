@@ -113,6 +113,11 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	record["id"] = "golden_board"
 	record["created_at"] = "2026-10-01T12:00:00Z"
 	record["updated_at"] = "2026-10-01T12:00:00Z"
+	var savedOutput map[string]any
+	if err := json.Unmarshal([]byte(execution.Content), &savedOutput); err != nil {
+		t.Fatal(err)
+	}
+	evalStableSave(savedOutput)
 	wire := func(terminal StreamEvent) string {
 		terminal.Usage = &TokenUsage{InputTokens: 2, OutputTokens: 1}
 		wireSpec := authored
@@ -160,7 +165,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	if !strings.Contains(failure, `"type":"RUN_ERROR"`) || strings.Contains(failure, "private provider body") {
 		t.Fatal("run error shape")
 	}
-	value := map[string]any{"authored_spec": authoredJSON, "saved_record": record, "saved_spec": created.Spec, "add_panel": addedJSON, "stat_add_panel": statJSON, "stat_added_spec": statEdited.Spec, "added_spec": edited.Spec, "results": results, "added_results": addedResults, "incomplete_sse": incomplete, "error_sse": failure}
+	value := map[string]any{"authored_spec": authoredJSON, "saved_record": record, "saved_output": savedOutput, "saved_spec": created.Spec, "add_panel": addedJSON, "stat_add_panel": statJSON, "stat_added_spec": statEdited.Spec, "added_spec": edited.Spec, "results": results, "added_results": addedResults, "incomplete_sse": incomplete, "error_sse": failure}
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -225,11 +230,7 @@ func evalStableSSE(t *testing.T, wire string) string {
 			if err := json.Unmarshal([]byte(e["content"].(string)), &content); err != nil {
 				t.Fatal(err)
 			}
-			if record, ok := content["dashboard"].(map[string]any); ok {
-				record["id"] = "golden_board"
-				record["created_at"] = "2026-10-01T12:00:00Z"
-				record["updated_at"] = "2026-10-01T12:00:00Z"
-			}
+			evalStableSave(content)
 			raw, err := json.Marshal(content)
 			if err != nil {
 				t.Fatal(err)
@@ -243,4 +244,22 @@ func evalStableSSE(t *testing.T, wire string) string {
 		out.WriteString("data: " + string(raw) + "\n\n")
 	}
 	return out.String()
+}
+
+func evalStableSave(content map[string]any) {
+	if record, ok := content["dashboard"].(map[string]any); ok {
+		record["id"] = "golden_board"
+		record["created_at"] = "2026-10-01T12:00:00Z"
+		record["updated_at"] = "2026-10-01T12:00:00Z"
+	}
+	if receipt, ok := content["receipt"].(map[string]any); ok {
+		if check, ok := receipt["save_check"].(map[string]any); ok {
+			check["elapsed_ms"] = 0
+			if panels, ok := check["panels"].([]any); ok {
+				for _, p := range panels {
+					p.(map[string]any)["elapsed_ms"] = 0
+				}
+			}
+		}
+	}
 }

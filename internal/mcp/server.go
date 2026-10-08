@@ -80,12 +80,21 @@ type LogsInput struct {
 	Limit     int        `json:"limit,omitempty" jsonschema:"Maximum log entries to return, from 1 to 500"`
 }
 
+// panelExecutor keeps execution injectable while production uses the pinned engine.
+type panelExecutor interface {
+	Run(context.Context, panel.RunRequest) ([]panel.Result, error)
+	Validate(context.Context, *panel.Dashboard) error
+	Schema(context.Context, panel.SchemaRequest) (*panel.Schema, error)
+	Exemplars(context.Context, panel.ExemplarRequest) (panel.ExemplarResponse, error)
+	ResolveVariables(context.Context, panel.ResolveRequest) (map[string][]panel.Option, error)
+}
+
 type Server struct {
 	mcp          *mcp.Server
 	queries      Observability
 	intelligence IntelligenceSnapshots
 	dashboards   *dashboard.Service
-	panels       *panel.Executor
+	panels       panelExecutor
 	now          func() time.Time
 	limitTools   map[string]bool
 }
@@ -111,9 +120,11 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 		queries:      queries,
 		intelligence: snapshots,
 		dashboards:   dashboards,
-		panels:       panels,
 		now:          time.Now,
 		limitTools:   make(map[string]bool),
+	}
+	if panels != nil {
+		s.panels = panels
 	}
 	s.registerTools()
 	s.registerPanelTools()

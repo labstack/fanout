@@ -17,7 +17,7 @@ type cancelValidator struct{}
 
 func (cancelValidator) Validate(ctx context.Context, _ *panel.Dashboard) error { return ctx.Err() }
 
-func newToolServer(t *testing.T, validator dashboard.Validator, panels *panel.Executor) *Server {
+func newToolServer(t *testing.T, validator dashboard.Validator, panels panelExecutor) *Server {
 	t.Helper()
 	database, err := controlstore.NewSQLite(":memory:")
 	if err != nil {
@@ -29,7 +29,9 @@ func newToolServer(t *testing.T, validator dashboard.Validator, panels *panel.Ex
 			t.Fatal(err)
 		}
 	}
-	return NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, validator), panels, nil, "test")
+	s := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, validator), nil, nil, "test")
+	s.panels = panels
+	return s
 }
 
 func requestFor(owner string) *mcp.CallToolRequest {

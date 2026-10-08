@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,6 +17,17 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestPreviewReportsTotalAndExecutedPanelTimings(t *testing.T) {
+	s := newPanelServer(t)
+	s.panels = receiptExecutor{panelExecutor: s.panels, run: func(_ context.Context, req panel.RunRequest) ([]panel.Result, error) {
+		return []panel.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
+	}}
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
+	if err != nil || out.ElapsedMS < 0 || len(out.Panels) != 1 || out.Panels[0].ElapsedMS != 37 || out.Panels[0].Status != "ok" {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+}
 
 func newPanelServer(t *testing.T) *Server {
 	return panelServerFixture(t, false)
@@ -95,6 +107,9 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	}
 	if out.Panels[0].Status != "not_run" {
 		t.Fatalf("a valid panel is not run while another is invalid: %+v", out.Panels[0])
+	}
+	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != 0 || out.Panels[1].ElapsedMS != 0 {
+		t.Fatalf("invalid/not_run timing = %+v", out)
 	}
 	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}})
 	if err != nil || out.Panels[0].Status != "empty" || out.Panels[0].Diagnosis == "" {
