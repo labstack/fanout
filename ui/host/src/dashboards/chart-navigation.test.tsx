@@ -17,7 +17,7 @@ vi.mock("echarts/features",()=>({LabelLayout:{}}));
 vi.mock("echarts/renderers",()=>({CanvasRenderer:{}}));
 const option={xAxis:{type:"time"},series:[{name:"checkout",type:"line",interactive:true,data:[[1000,1],[2000,2],[3000,3],[4000,4]]}]};
 const cleanups:(()=>void)[]=[];
-afterEach(async()=>{await act(async()=>cleanups.splice(0).forEach(fn=>fn()));document.body.innerHTML="";vi.restoreAllMocks();vi.unstubAllGlobals();chart.on.mockClear();});
+afterEach(async()=>{await act(async()=>cleanups.splice(0).forEach(fn=>fn()));document.body.innerHTML="";vi.restoreAllMocks();vi.unstubAllGlobals();vi.useRealTimers();chart.on.mockClear();chart.dispatchAction.mockClear();chart.setOption.mockClear();});
 async function key(target:HTMLElement,key:string,extra:KeyboardEventInit={}) {
   await act(async()=>target.focus());
   await act(async()=>target.dispatchEvent(new KeyboardEvent("keydown",{key,bubbles:true,cancelable:true,...extra})));
@@ -68,8 +68,7 @@ it("retains point and range identities through a refresh and resize between pres
   await view.draw(shifted,{from:500,to:6000});
   expect(view.surface().querySelector('[aria-live]')?.textContent).toContain("00:00:02.000Z");
   await key(plot,"ArrowRight",{shiftKey:true});
-  expect([...view.surface().querySelectorAll<HTMLInputElement>("input")].filter(i=>i.type!=="number").map(i=>i.value))
-    .toEqual(["1970-01-01T00:00:01.000Z","1970-01-01T00:00:04.000Z"]);
+  expect(view.surface().querySelector<HTMLElement>('[data-chart-range-label]')?.title).toBe("1970-01-01T00:00:01.000Z – 1970-01-01T00:00:04.000Z");
 });
 it("matches a timestamp when changing series with gaps",async()=>{
   const view=await mount({...option,series:[...option.series,{name:"cart",type:"line",interactive:true,data:[[1000,8],[3000,9]]}]}),plot=await view.focus();
@@ -108,4 +107,50 @@ it("offers a single-key toggle and omits host-composer claims from fragment help
   expect(document.body.textContent).not.toContain("global /");
   expect(document.body.textContent).toContain("Single-key shortcuts");
   expect(document.body.textContent).not.toContain("Explore chart");
+});
+
+it("keeps the plot height identical when unfocused, focused and range-pending",async()=>{
+  const view=await mount(),plot=view.el.querySelector<HTMLElement>('[data-chart-plot]')!,canvas=plot.querySelector<HTMLElement>('[role="img"]')!;
+  // happy-dom has no layout engine: nonzero computed heights plus absolute
+  // descendants verify the size contract rather than comparing zero DOMRects.
+  const heights=[Number.parseFloat(getComputedStyle(plot).height)];
+  await view.focus();heights.push(Number.parseFloat(getComputedStyle(plot).height));
+  await key(plot,'ArrowRight',{shiftKey:true});heights.push(Number.parseFloat(getComputedStyle(plot).height));
+  expect(heights).toEqual([200,200,200]);
+  expect(getComputedStyle(canvas).position).toBe('absolute');expect(getComputedStyle(canvas).height).toBe('100%');
+  const overlay=plot.querySelector<HTMLElement>('[data-chart-overlay]')!;
+  expect(overlay).not.toBeNull();expect(getComputedStyle(overlay).position).toBe('absolute');
+  for(const element of overlay.querySelectorAll<HTMLElement>('[data-chart-hint],[data-chart-readout],[data-chart-range-bar]'))expect(getComputedStyle(element).position).toBe('absolute');
+  expect(overlay.querySelector('[data-chart-hint]')).not.toBeNull();expect(overlay.querySelector('[data-chart-readout]')).not.toBeNull();expect(overlay.querySelector('[data-chart-range-bar]')).not.toBeNull();
+});
+it("draws and updates the pending range with the native mouse brush band without zooming",async()=>{
+  const view=await mount(),plot=await view.focus();
+  const brush=chart.setOption.mock.calls.find(([option])=>option.brush)?.[0].brush;
+  expect(brush).toMatchObject({xAxisIndex:0,brushMode:'single'});
+  const areas=()=>chart.dispatchAction.mock.calls.filter(([action])=>action.type==='brush').at(-1)?.[0].areas;
+  await key(plot,'ArrowRight',{shiftKey:true});expect(areas()).toEqual([{brushType:'lineX',xAxisIndex:0,coordRange:[1000,3000]}]);
+  expect(chart.dispatchAction).toHaveBeenLastCalledWith({type:'brush',areas:areas()},{silent:true});
+  await key(plot,'ArrowRight',{shiftKey:true});expect(areas()[0].coordRange).toEqual([1000,4000]);
+  await key(plot,'ArrowLeft',{shiftKey:true});expect(areas()[0].coordRange).toEqual([1000,3000]);expect(view.zoom).not.toHaveBeenCalled();
+  await view.draw({...option},{from:0,to:5000});expect(areas()[0].coordRange).toEqual([1000,3000]);
+  await key(plot,'Escape');expect(areas()).toEqual([]);expect(view.zoom).not.toHaveBeenCalled();
+  await key(plot,'ArrowLeft',{shiftKey:true});
+  await act(async()=>[...view.el.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Zoom to range')!.click());
+  expect(view.zoom).toHaveBeenCalledOnce();expect(areas()).toEqual([]);
+});
+it("clears the keyboard preview when a mouse brush commits through the same zoom callback",async()=>{
+  const view=await mount(),plot=await view.focus();await key(plot,'ArrowRight',{shiftKey:true});
+  const end=chart.on.mock.calls.find(([name])=>name==='brushEnd')![1];
+  await act(async()=>end({areas:[{coordRange:[1000,4000]}]}));
+  expect(view.zoom).toHaveBeenCalledExactlyOnceWith(1000,4000);expect(view.el.textContent).not.toContain('Zoom to range');
+});
+it.each([['2026-10-08','18:46:00 – 18:48:30 UTC · 2m 30s'],['2026-10-07','2026-10-07 18:46:00 – 18:48:30 UTC · 2m 30s']])("shows a compact range label with full ISO in its title for %s",async(date,label)=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-08T20:00:00Z'));
+  const from=Date.parse(date+'T18:46:00Z'),next={...option,series:[{...option.series[0],data:[[from,1],[from+30000,2],[from+150000,3],[from+180000,4]]}]};
+  const view=await mount(next);await view.draw(next,{from,to:from+210000});const plot=await view.focus();await key(plot,'ArrowRight',{shiftKey:true});
+  expect(view.el.querySelectorAll('input')).toHaveLength(0);
+  const range=view.el.querySelector<HTMLElement>('[data-chart-range-label]')!;
+  expect(range?.textContent).toBe(label);expect(range.title).toBe(new Date(from).toISOString()+' – '+new Date(from+150000).toISOString());
+  expect(view.el.textContent).not.toContain('Paused while selecting');
+  expect([...view.el.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['Zoom to range','Cancel']);
 });

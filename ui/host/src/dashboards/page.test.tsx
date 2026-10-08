@@ -157,6 +157,9 @@ describe("DashboardPage", () => {
       const {host,client}=await render();const before=queryBodies.length;
       await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Begin range"]')!.click());
       expect(host.textContent).toContain("Paused while selecting");
+      const notes=host.querySelectorAll('[data-range-paused]');expect(notes).toHaveLength(1);
+      expect(notes[0].closest('[data-refresh-controls]')).not.toBeNull();
+      expect(host.textContent?.match(/Paused while selecting/g)).toHaveLength(1);
       await act(async()=>vi.advanceTimersByTimeAsync(60000));await settle(client);expect(queryBodies).toHaveLength(before);
       await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Cancel range"]')!.click());
       expect(host.textContent).not.toContain("Paused while selecting");

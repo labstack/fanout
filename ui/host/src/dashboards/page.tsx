@@ -129,7 +129,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
           <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
           {spec.description && <Text c="dimmed" size="sm" mt={2}>{spec.description}</Text>}
         </Box>
-        <Toolbar time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
+        <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
           onRange={(range) => { resetBrush(); onSearch({ ...search, range, from: undefined, to: undefined }); }}
           onAbsolute={(from, to) => { resetBrush(); onSearch({ ...search, range: undefined, from, to }); }}
           onZoomOut={() => {
@@ -156,7 +156,6 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
-    {ranges.size > 0 && <Text size="xs" c="dimmed">Paused while selecting</Text>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
       canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
       onPoint={(panel, selection) => {

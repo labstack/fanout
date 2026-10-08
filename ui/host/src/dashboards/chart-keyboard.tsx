@@ -1,5 +1,6 @@
-import { Box, Button, Group, Text, TextInput, VisuallyHidden } from "@mantine/core";
+import { Box, Button, Group, Text, VisuallyHidden } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { duration } from "../../../format";
 import type { KeyboardPoint, PointEvent } from "../../../panels/keyboard";
 
 // Identity excludes values, rendered indices and object identity: updates may
@@ -9,24 +10,35 @@ function pointIdentity(point: KeyboardPoint): string {
   const value = point.event.value;
   return JSON.stringify([point.event.seriesName, point.event.name, selection?.from ?? selection?.time ?? (Array.isArray(value) ? value[0] : undefined), selection?.dimensions, selection?.bucket]);
 }
-type Range = {anchor: string; from: string; to: string; edited?: boolean};
+type Range = {anchor: string; from: string; to: string};
+type Window = {from: number; to: number};
 
-/** A single plot tab stop; controls occupy space only for a pending range. */
-export function ChartKeyboard({ points, label, summary, children, onClick, canSelect, onHighlight, onActiveChange, onRangePending, onZoom, bounds, pointWindow }: {
+function rangeLabel(range: Range): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const fromDate = range.from.slice(0, 10), toDate = range.to.slice(0, 10);
+  const clock = (value: string) => value.slice(11, -1).replace(/\.000$/, "");
+  const from = (fromDate === today ? "" : fromDate + " ") + clock(range.from);
+  const to = (toDate !== fromDate && toDate !== today ? toDate + " " : "") + clock(range.to);
+  return `${from} – ${to} UTC · ${duration(Date.parse(range.to) - Date.parse(range.from))}`;
+}
+const surface = {background: "color-mix(in srgb, var(--mantine-color-body) 92%, transparent)", border: "1px solid var(--mantine-color-default-border)", borderRadius: "var(--mantine-radius-sm)", padding: "2px 6px"};
+
+/** A single plot tab stop; keyboard chrome never participates in plot layout. */
+export function ChartKeyboard({ points, label, summary, children, onClick, canSelect, onHighlight, onActiveChange, onRangePending, onRangeChange, rangeReset, height = "100%", onZoom, bounds, pointWindow }: {
   points: readonly KeyboardPoint[]; label: string; summary(point: KeyboardPoint): string; children?: ReactNode;
   onClick?(event: PointEvent): void; canSelect?(event: PointEvent): boolean; onHighlight(point?: KeyboardPoint): void;
   onActiveChange?(active: boolean): void; onRangePending?(pending: boolean): void;
+  onRangeChange?(range?: Window): void; rangeReset?: number; height?: number | string;
   onZoom?(from: number, to: number): void; bounds?: {from: number; to: number};
   pointWindow?(point: KeyboardPoint): {from: number; to: number} | undefined;
 }) {
   const [focused, setFocused] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string>();
   const [pending, setPending] = useState<Range | null>(null);
-  const [error, setError] = useState<string>();
   const plot = useRef<HTMLDivElement>(null);
   const hintId = useId();
-  const callbacks = useRef({onHighlight, onActiveChange, onRangePending});
-  callbacks.current = {onHighlight, onActiveChange, onRangePending};
+  const callbacks = useRef({onHighlight, onActiveChange, onRangePending, onRangeChange});
+  callbacks.current = {onHighlight, onActiveChange, onRangePending, onRangeChange};
   const identities = useMemo(() => new Map(points.map(point => [pointIdentity(point), point])), [points]);
   const current = selectedKey ? identities.get(selectedKey) ?? points[0] : points[0];
   const rangeAvailable = Boolean(onZoom && bounds && Number.isFinite(bounds.from) && Number.isFinite(bounds.to) && bounds.from < bounds.to);
@@ -40,12 +52,14 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
   useEffect(() => {
     if (!pending) return;
     const from = Date.parse(pending.from), to = Date.parse(pending.to);
-    if (points.length && !identities.has(pending.anchor) || !pending.edited && bounds && (Number.isFinite(from) && from < bounds.from || Number.isFinite(to) && to > bounds.to)) {
-      setPending(null); setError(undefined);
+    if (points.length && !identities.has(pending.anchor) || bounds && (Number.isFinite(from) && from < bounds.from || Number.isFinite(to) && to > bounds.to)) {
+      setPending(null);
     }
   }, [identities, points.length, bounds?.from, bounds?.to, pending]);
   useEffect(() => { callbacks.current.onRangePending?.(Boolean(pending)); }, [Boolean(pending)]);
-  useEffect(() => () => { callbacks.current.onHighlight(undefined); callbacks.current.onRangePending?.(false); }, []);
+  useEffect(() => { callbacks.current.onRangeChange?.(pending ? {from: Date.parse(pending.from), to: Date.parse(pending.to)} : undefined); }, [pending]);
+  useEffect(() => { setPending(null); }, [rangeReset]);
+  useEffect(() => () => { callbacks.current.onHighlight(undefined); callbacks.current.onRangePending?.(false); callbacks.current.onRangeChange?.(undefined); }, []);
   const choose = (next: KeyboardPoint | undefined, extend = false) => {
     if (!next) return;
     if (extend && rangeAvailable && current) {
@@ -53,8 +67,8 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
       const first = identities.get(anchor);
       const a = first && pointWindow?.(first), b = pointWindow?.(next);
       if (a && b) {
-        setPending({anchor, from: new Date(Math.max(bounds!.from, Math.min(a.from, b.from))).toISOString(), to: new Date(Math.min(bounds!.to, Math.max(a.to, b.to))).toISOString()});
-        setError(undefined);
+        const from = Math.max(bounds!.from, Math.min(a.from, b.from)), to = Math.min(bounds!.to, Math.max(a.to, b.to));
+        if (Number.isFinite(from) && Number.isFinite(to) && from < to) setPending({anchor, from: new Date(from).toISOString(), to: new Date(to).toISOString()});
       }
     }
     setSelectedKey(pointIdentity(next));
@@ -72,11 +86,11 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     }, undefined) : undefined;
     choose(exact ?? nearest ?? candidates[0]);
   };
-  const cancel = () => { setPending(null); setError(undefined); plot.current?.focus(); };
+  const cancel = () => { setPending(null); plot.current?.focus(); };
   const hint = rangeAvailable ? "←→ points · ↑↓ series · Enter drill · Shift+←→ range" : "←→ points · ↑↓ series · Enter drill";
   return <Box ref={plot} data-chart-plot tabIndex={0} role="group" aria-label={label} aria-describedby={focused ? hintId : undefined}
     data-mantine-stop-propagation={pending ? "true" : undefined} className="chart-keyboard-point"
-    style={{position: "relative", display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, minWidth: 0}}
+    style={{position: "relative", height, width: "100%", flex: "1 1 auto", minHeight: 0, minWidth: 0}}
     onFocus={event => { callbacks.current.onActiveChange?.(true); setFocused(event.target === event.currentTarget); }}
     onBlur={event => {
       setFocused(false);
@@ -102,25 +116,19 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
       }
     }}>
     {children}
-    {focused && <Box aria-hidden="true" style={{position:"absolute",bottom:pending ? undefined : 0,top:pending ? 0 : undefined,left:4,right:4,pointerEvents:"none",background:"var(--mantine-color-body)",padding:"2px 4px"}}>
-      <Text id={hintId} size="xs" c="dimmed">{hint}</Text>
-      {current && <Text size="xs">{summary(current)}</Text>}
-    </Box>}
-    <VisuallyHidden aria-live="polite" aria-atomic="true">{focused && current ? summary(current) : ""}</VisuallyHidden>
-    {pending && rangeAvailable && <Box style={{flexShrink:0,maxHeight:"55%",overflow:"auto"}}>
-      <Text size="xs" c="dimmed">Paused while selecting</Text>
-      <Group gap={6} align="end">
-        <TextInput size="xs" label="Range start (UTC)" data-mantine-stop-propagation="true" value={pending.from} onChange={e => { setPending({...pending,from:e.currentTarget.value,edited:true}); setError(undefined); }} />
-        <TextInput size="xs" label="Range end (UTC)" data-mantine-stop-propagation="true" value={pending.to} onChange={e => { setPending({...pending,to:e.currentTarget.value,edited:true}); setError(undefined); }} />
+    <Box data-chart-overlay style={{position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", overflow: "hidden"}}>
+      {focused && <>
+        <Text data-chart-hint id={hintId} aria-hidden="true" title={hint} truncate size="xs" c="dimmed" style={{...surface, position: "absolute", top: 4, left: 4, maxWidth: "calc(100% - 8px)"}}>{hint}</Text>
+        {current && <Text data-chart-readout aria-hidden="true" title={summary(current)} size="xs" truncate style={{...surface, position: "absolute", top: 30, right: 4, maxWidth: "calc(100% - 8px)"}}>{summary(current)}</Text>}
+      </>}
+      {pending && rangeAvailable && <Group data-chart-range-bar gap={6} style={{...surface, position: "absolute", bottom: 4, left: 4, right: 4, maxHeight: "100%", overflow: "auto", pointerEvents: "auto"}}>
+        <Text data-chart-range-label size="xs" title={pending.from + " – " + pending.to} truncate style={{flex: "1 1 140px", minWidth: 0}}>{rangeLabel(pending)}</Text>
         <Button size="compact-xs" data-mantine-stop-propagation="true" onClick={() => {
-          const start = /(?:Z|[+-]\d{2}:\d{2})$/.test(pending.from) ? Date.parse(pending.from) : NaN;
-          const end = /(?:Z|[+-]\d{2}:\d{2})$/.test(pending.to) ? Date.parse(pending.to) : NaN;
-          if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end || start < bounds!.from || end > bounds!.to) { setError("Enter UTC times within the observed window, with start before end."); return; }
-          onZoom!(start,end); cancel();
+          onZoom!(Date.parse(pending.from), Date.parse(pending.to)); cancel();
         }}>Zoom to range</Button>
-        <Button size="compact-xs" variant="subtle" data-mantine-stop-propagation="true" onClick={cancel}>Cancel range</Button>
-      </Group>
-      {error && <Text size="xs" c="bad" role="alert">{error}</Text>}
-    </Box>}
+        <Button size="compact-xs" variant="subtle" data-mantine-stop-propagation="true" onClick={cancel}>Cancel</Button>
+      </Group>}
+    </Box>
+    <VisuallyHidden aria-live="polite" aria-atomic="true">{focused && current ? summary(current) : ""}</VisuallyHidden>
   </Box>;
 }

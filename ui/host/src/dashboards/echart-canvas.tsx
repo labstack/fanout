@@ -82,6 +82,18 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
   const zoom = useRef(onZoom);
   zoom.current = onZoom;
   const zoomEnabled = Boolean(onZoom);
+  const brushRange = useRef<{from: number; to: number} | undefined>(undefined);
+  const [rangeReset, setRangeReset] = useState(0);
+  const paintRange = useCallback(() => {
+    const range = brushRange.current;
+    // Use the same native translucent covers as a mouse lineX brush. Silent
+    // preview updates never emit brushEnd or invoke the shared zoom callback.
+    chart.current?.dispatchAction({type: "brush", areas: range ? [{brushType: "lineX", xAxisIndex: 0, coordRange: [range.from, range.to]}] : []}, {silent: true});
+  }, []);
+  const previewRange = useCallback((range?: {from: number; to: number}) => {
+    if (brushRange.current?.from === range?.from && brushRange.current?.to === range?.to) return;
+    brushRange.current = range; paintRange();
+  }, [paintRange]);
   const description = zoomEnabled ? `${label} Brush across the chart to zoom to that range.` : label;
   const apply = useRef<() => void>(() => undefined);
   const auditInput = useRef<{ compiled: EChartsCoreOption; size: ChartSize } | null>(null);
@@ -115,6 +127,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       }
     }
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
+    if (zoom.current && brushRange.current) paintRange();
     displayedRef.current = compiled;
     if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
     if (import.meta.env.DEV) auditInput.current = { compiled, size };
@@ -137,6 +150,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       const range = (payload as { areas?: { coordRange?: number[] }[] }).areas?.[0]?.coordRange;
       if (range?.length === 2 && Number.isFinite(range[0]) && Number.isFinite(range[1]) && range[0] < range[1]) {
         zoom.current?.(range[0], range[1]);
+        if (brushRange.current) { brushRange.current = undefined; setRangeReset(previous => previous + 1); }
         instance.dispatchAction({ type: "brush", areas: [] }, { silent: true });
         if (zoom.current) instance.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
       }
@@ -172,10 +186,10 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     };
   }, [group]);
 
-  const canvas = <div ref={ref} role="img" aria-label={description} aria-hidden={keyboard ? true : undefined} style={{ height, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+  const canvas = <div ref={ref} role="img" aria-label={description} aria-hidden={keyboard ? true : undefined} style={{ height: keyboard ? "100%" : height, position: keyboard ? "absolute" : undefined, inset: keyboard ? 0 : undefined, zIndex: keyboard ? 0 : undefined, flex: "1 1 auto", minHeight: 0, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
   const series = (Array.isArray(option.series) ? option.series : option.series ? [option.series] : []) as DisplaySeries[];
   const overview = label + ": " + series.length + " series" + (keyboard?.bounds ? "; " + new Date(keyboard.bounds.from).toISOString() + " – " + new Date(keyboard.bounds.to).toISOString() : "");
-  return keyboard ? <ChartKeyboard points={points} label={overview} summary={summary} onClick={onClick} canSelect={keyboard.canSelect} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow}
+  return keyboard ? <ChartKeyboard height={height} rangeReset={rangeReset} onRangeChange={previewRange} points={points} label={overview} summary={summary} onClick={onClick} canSelect={keyboard.canSelect} onHighlight={highlight} onZoom={onZoom} bounds={keyboard.bounds} pointWindow={pointWindow}
     onRangePending={keyboard.onRangePending} onActiveChange={next => {
       activeRef.current = next; setActive(next); if (next) setDisplayed(displayedRef.current);
     }}>{canvas}</ChartKeyboard> : canvas;

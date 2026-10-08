@@ -13,10 +13,10 @@ function timeLabel(time: DashboardTime): string {
   return rangeLabel[time.range ?? "1h"] ?? time.range ?? "Last hour";
 }
 
-export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, onShortcuts }: {
+export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, onRange, onAbsolute, onZoomOut, onRefresh, onRefreshNow, onCompare, onEdit, onHistory, onShortcuts, selecting = false }: {
   time: DashboardTime; refresh: string; compare: boolean; editing: boolean; fetching: boolean; updatedAt: number | null;
   onRange(range: string): void; onAbsolute(from: string, to: string): void; onZoomOut(): void; onRefresh(refresh: string): void; onRefreshNow(): void; onCompare(on: boolean): void; onEdit(): void; onHistory(): void;
-  onShortcuts?(): void;
+  onShortcuts?(): void; selecting?: boolean;
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -41,9 +41,10 @@ export function Toolbar({ time, refresh, compare, editing, fetching, updatedAt, 
       </Menu.Dropdown>
     </Menu>
     <Tooltip label="Zoom out"><Button variant="default" size="sm" px={10} aria-label="Zoom out" onClick={onZoomOut}><MagnifyingGlassMinus size={15} /></Button></Tooltip>
-    <Group gap={4} wrap="nowrap">
+    <Group data-refresh-controls gap={4} wrap="nowrap" style={{position: "relative"}}>
       <Tooltip label={updatedAt ? `Updated ${exactTimestamp(updatedAt)}` : "Refresh now"}><Button variant="default" size="sm" px={10} aria-label="Refresh now" loading={fetching} onClick={onRefreshNow}><ArrowClockwise size={15} /></Button></Tooltip>
       <SegmentedControl size="xs" aria-label="Auto refresh" value={refresh} onChange={onRefresh} data={refreshes.map((r) => ({ value: r, label: r === "off" ? "Off" : r }))} />
+      {selecting && <Text data-range-paused size="xs" c="dimmed" role="status" style={{position: "absolute", top: "100%", left: 0, whiteSpace: "nowrap", zIndex: 1, pointerEvents: "none", background: "color-mix(in srgb, var(--mantine-color-body) 92%, transparent)"}}>Paused while selecting</Text>}
     </Group>
     <Switch size="sm" label="Compare with previous period" checked={compare} onChange={(e) => onCompare(e.currentTarget.checked)} />
     <Button variant={editing ? "filled" : "default"} size="sm" leftSection={<PencilSimple size={15} />} onClick={onEdit}>{editing ? "Done" : "Edit layout"}</Button>

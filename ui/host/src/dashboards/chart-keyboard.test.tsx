@@ -31,11 +31,6 @@ const result:PanelResult={id:'p',status:'ok',elapsed_ms:0,interval:'1s',from_ms:
 }};
 const findButton=(el:ParentNode,text:string)=>[...el.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===text)!;
 async function press(el:HTMLElement,key:string,extra:KeyboardEventInit={}){await act(async()=>el.focus());await act(async()=>{el.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true,cancelable:true,...extra}));});}
-async function input(el:HTMLInputElement,value:string){await act(async()=>{
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(el,value);
-  el.dispatchEvent(new InputEvent('input',{bubbles:true,data:value,inputType:'insertText'}));
-  el.dispatchEvent(new Event('change',{bubbles:true}));
-});}
 
 it('explores with one virtual point tab stop, moves with focus/key events, and invokes the existing callback once',async()=>{
   const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
@@ -91,7 +86,7 @@ it.each([false,true])('uses real focus and ECharts highlight; Enter and mouse di
   }finally{await act(async()=>root.unmount());el.remove();}
 });
 
-it('extends and explicitly commits a UTC range once; rejects invalid ranges without local dataZoom',async()=>{
+it('extends and explicitly commits a compact UTC range once without local dataZoom',async()=>{
   const el=document.createElement('div');document.body.append(el);const root=createRoot(el);const zoom=vi.fn();
   chart.dispatchAction.mockClear();
   try{
@@ -99,18 +94,15 @@ it('extends and explicitly commits a UTC range once; rejects invalid ranges with
     await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
     const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     await press(point,'ArrowRight',{shiftKey:true});
-    const start=el.querySelector<HTMLInputElement>('input[aria-label="Range start (UTC)"],input[id]')!;
-    const fields=[...el.querySelectorAll<HTMLInputElement>('input')].filter(i=>i.type!=='number');
-    expect(start).toBeTruthy();expect(fields.map(i=>i.value)).toEqual(['1970-01-01T00:00:02.000Z','1970-01-01T00:00:04.000Z']);
+    expect(el.querySelectorAll('input')).toHaveLength(0);
+    expect(el.querySelector<HTMLElement>('[data-chart-range-label]')?.title).toBe('1970-01-01T00:00:02.000Z – 1970-01-01T00:00:04.000Z');
     expect(zoom).not.toHaveBeenCalled();
     await act(async()=>findButton(el,'Zoom to range').click());
     expect(zoom).toHaveBeenCalledExactlyOnceWith(2000,4000);
     await press(point,'ArrowLeft',{shiftKey:true});
-    const edited=[...el.querySelectorAll<HTMLInputElement>('input')];
-    for(const [from,to] of [['invalid','invalid'],['1970-01-01T00:00:03Z','1970-01-01T00:00:02Z'],['1970-01-01T00:00:00Z','1970-01-01T00:00:03Z'],['1970-01-01T00:00:02Z','1970-01-01T00:00:06Z'],['1970-01-01T00:00:02','1970-01-01T00:00:03']]){
-      await input(edited[0],from);await input(edited[1],to);
-      await act(async()=>findButton(el,'Zoom to range').click());expect(el.querySelector('[role="alert"]')).not.toBeNull();
-    }
+    await act(async()=>findButton(el,'Cancel').click());
+    expect(el.querySelector('[data-chart-range-label]')).toBeNull();
+    expect(document.activeElement).toBe(point);
     expect(zoom).toHaveBeenCalledOnce();
     expect(chart.dispatchAction.mock.calls.some(([action])=>action.type==='dataZoom')).toBe(false);
   }finally{await act(async()=>root.unmount());el.remove();}
@@ -124,10 +116,9 @@ it('keeps the original range anchor across consecutive Shift arrows and contract
     await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
     const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
     await press(point,'ArrowRight',{shiftKey:true});await press(point,'ArrowRight',{shiftKey:true});
-    const inputs=[...el.querySelectorAll<HTMLInputElement>('input')].filter(i=>i.type!=='number');
-    expect(inputs.map(i=>i.value)).toEqual(['1970-01-01T00:00:01.000Z','1970-01-01T00:00:03.000Z']);
+    expect(el.querySelector<HTMLElement>('[data-chart-range-label]')?.title).toBe('1970-01-01T00:00:01.000Z – 1970-01-01T00:00:03.000Z');
     await press(point,'ArrowLeft',{shiftKey:true});
-    expect(inputs.map(i=>i.value)).toEqual(['1970-01-01T00:00:01.000Z','1970-01-01T00:00:02.000Z']);
+    expect(el.querySelector<HTMLElement>('[data-chart-range-label]')?.title).toBe('1970-01-01T00:00:01.000Z – 1970-01-01T00:00:02.000Z');
   }finally{await act(async()=>root.unmount());el.remove();}
 });
 
