@@ -5,3 +5,4 @@ CREATE TABLE dashboard_origins (
     message_id TEXT NOT NULL,
     request_excerpt TEXT NOT NULL
 );
+CREATE INDEX dashboard_origins_thread_id ON dashboard_origins (thread_id);
