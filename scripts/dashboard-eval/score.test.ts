@@ -46,7 +46,22 @@ it('keeps physical layout out of authored chips while rejecting unrelated packin
 });
 it('reports relative survivor order without giving inserted neighbors chips', () => {
   const before=spec(),expected=spec();expected.panels.reverse();
-  expect(compareEdit(before,expected,expected,'move')).toMatchObject({passed:true,changed_ids:['a','b'],expected_ids:['a','b']});
+  expect(compareEdit(before,expected,expected,'move')).toMatchObject({passed:true,changed_ids:['a'],expected_ids:['a']});
+});
+it('reports only panels outside the longest common order with deterministic ties', () => {
+  const before=['a','b','c','d','e'].map(id=>({id,title:id}));
+  for(const [order,ids] of [
+    [['b','c','d','e','a'],['a']],
+    [['e','a','b','c','d'],['e']],
+    [['b','a','c','d','e'],['a']],
+    [['a','b','c','d','e'],[]],
+    [['e','a','c','d'],['b','e']],
+    [['a','c','d','e'],['b']],
+    [['a','new','b','c','d','e'],['new']],
+  ]) {
+    const after=order.map(id=>({id,title:id}));
+    expect(changedPanels(before,after)).toEqual(ids);
+  }
 });
 it('rejects title no-ops, unrelated grids, order, metadata and authored changes', () => {
   const before=spec(),expected=spec();expected.panels[0].title='New';

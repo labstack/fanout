@@ -26,7 +26,6 @@ type PreviewInput struct {
 }
 
 type PanelPreview struct {
-	ElapsedMS int64           `json:"elapsed_ms"`
 	ID        string          `json:"id"`
 	Status    string          `json:"status" jsonschema:"ok, empty, error, invalid or not_run"`
 	Rows      int             `json:"rows,omitempty"`
@@ -36,6 +35,7 @@ type PanelPreview struct {
 	Diagnosis string          `json:"diagnosis,omitempty"`
 	Error     string          `json:"error,omitempty"`
 	Problems  []panel.Problem `json:"problems,omitempty"`
+	ElapsedMS *int64          `json:"elapsed_ms,omitempty" jsonschema:"Execution duration in milliseconds; omitted for invalid or not_run panels"`
 }
 
 type PreviewOutput struct {
@@ -62,7 +62,7 @@ func (s *Server) registerPanelTools() {
 	}, s.telemetrySchema)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "preview_panels", Title: "Preview panels",
-		Description: "Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels were not executed. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.",
+		Description: "Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels omit elapsed_ms because they were not executed. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.",
 		Annotations: readOnly,
 	}, s.previewPanels)
 }
@@ -128,7 +128,7 @@ func (s *Server) previewPanels(ctx context.Context, _ *mcp.CallToolRequest, inpu
 		return nil, PreviewOutput{}, safePanelToolError(err)
 	}
 	for i, r := range results {
-		preview := PanelPreview{ElapsedMS: r.ElapsedMS, ID: r.ID, Status: r.Status, Interval: r.Interval, Diagnosis: r.Diagnosis, Error: r.Error}
+		preview := PanelPreview{ElapsedMS: &r.ElapsedMS, ID: r.ID, Status: r.Status, Interval: r.Interval, Diagnosis: r.Diagnosis, Error: r.Error}
 		if r.Frame != nil {
 			preview.Rows = r.Frame.Rows
 			for _, c := range r.Frame.Columns {

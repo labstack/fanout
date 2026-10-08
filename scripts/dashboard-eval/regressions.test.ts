@@ -13,10 +13,21 @@ const usage=(id:string,status='completed')=>({run_id:id,step:1,provider:'mock',m
 it('preserves structured save receipts from the Go golden generator',()=>{
  const g=golden(),out=g.saved_output,r=out.receipt;
  expect(out.dashboard).toEqual(g.saved_record);
- expect(r).toMatchObject({base_version:0,version:1,layout_changed:true,save_check:{checked:true,elapsed_ms:0}});
+ expect(r).toMatchObject({base_version:0,version:1,layout_changed:false,save_check:{checked:true,elapsed_ms:0}});
+ expect(r.dashboard_fields).toBeUndefined();
  expect(r.changes.map((p:any)=>({panel_id:p.panel_id,kind:p.kind}))).toEqual(g.saved_spec.panels.map((p:any)=>({panel_id:p.id,kind:'added'})));
  expect(r.save_check.panels.map((p:any)=>p.id)).toEqual(g.saved_spec.panels.map((p:any)=>p.id));
  expect(r.save_check.panels.every((p:any)=>p.status==='ok'&&p.rows===1&&p.elapsed_ms===0)).toBe(true);
+});
+it('keeps real edit receipts for authored fields, order and packed layout',()=>{
+ const g=golden(),out=g.edited_output;
+ expect(out).toBeDefined();
+ expect(out.receipt).toMatchObject({base_version:3,version:4,layout_changed:true,save_check:{checked:true,elapsed_ms:0}});
+ expect(out.receipt.changes).toEqual([
+  {panel_id:'actual_latency',title:'Updated latency',kind:'changed',fields:['title'],position_changed:true},
+  {panel_id:'added_stat',title:'Added stat',kind:'removed'},
+ ]);
+ expect(out.receipt.save_check.panels.map((p:any)=>p.id)).toEqual(out.dashboard.spec.panels.map((p:any)=>p.id));
 });
 it('scores executor text results without inventing a frame',()=>{
  const g=golden(),p=g.saved_spec.panels.find((p:any)=>p.viz==='text'),r=g.results.find((r:any)=>r.id===p.id);

@@ -49,10 +49,10 @@ type dashboardOutput struct {
 type savedPanelCheck struct {
 	ID        string `json:"id"`
 	Status    string `json:"status"`
-	Rows      int    `json:"rows"`
+	Rows      int    `json:"rows" jsonschema:"Executed rows or nonempty text content; not a measurement when status is not_run"`
 	Diagnosis string `json:"diagnosis,omitempty"`
 	Error     string `json:"error,omitempty"`
-	ElapsedMS int64  `json:"elapsed_ms"`
+	ElapsedMS *int64 `json:"elapsed_ms,omitempty" jsonschema:"Execution duration in milliseconds; omitted when the panel did not run"`
 }
 
 type saveCheck struct {
@@ -79,7 +79,7 @@ const (
 	editDashboardTool
 )
 
-const saveReceiptGuide = "Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows/elapsed_ms result per saved panel. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. "
+const saveReceiptGuide = "Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run. "
 
 // Registration and transport authorization use the same dashboard tool catalog.
 var dashboardTools = [...]mcp.Tool{
@@ -204,6 +204,10 @@ const saveCheckBudget = 8 * time.Second
 func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Mutation) (*mcp.CallToolResult, dashboardOutput, error) {
 	record := mutation.Record
 	diff := dashboard.Changes(mutation.Before, record.Spec)
+	if mutation.BaseVersion == 0 {
+		diff.LayoutChanged = false
+		diff.DashboardFields = nil
+	}
 	out := dashboardOutput{Dashboard: record, Receipt: &dashboardReceipt{
 		BaseVersion: mutation.BaseVersion, Version: record.Version, Changes: diff.Panels,
 		LayoutChanged: diff.LayoutChanged, DashboardFields: diff.DashboardFields,
@@ -251,14 +255,14 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 					complete = false
 					continue
 				}
-				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: r.Diagnosis, ElapsedMS: r.ElapsedMS}
+				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: r.Diagnosis, ElapsedMS: &r.ElapsedMS}
 				if r.Frame != nil {
 					c.Rows = r.Frame.Rows
 				} else if r.Status == panel.StatusOK && p.Viz == "text" && strings.TrimSpace(p.Content) != "" {
 					c.Rows = 1
 				}
 				if r.Error != "" {
-					c.Error = panel.SafeError(errors.New(r.Error))
+					c.Error = panel.RedactPaths(r.Error)
 				}
 				check.Panels[i] = c
 				switch r.Status {

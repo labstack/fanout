@@ -38,9 +38,16 @@ export function stable(value:unknown):string {
 export function changedPanels(before:{id:string}[],after:{id:string}[]):string[] {
   const strip=(p:{id:string})=>Object.fromEntries(Object.entries(p).filter(([key])=>key!=='grid'));
   const a=new Map(before.map(p=>[p.id,stable(strip(p))])),b=new Map(after.map(p=>[p.id,stable(strip(p))]));
-  const oldOrder=new Map(before.filter(p=>b.has(p.id)).map((p,i)=>[p.id,i]));
-  const nextOrder=new Map(after.filter(p=>a.has(p.id)).map((p,i)=>[p.id,i]));
-  return [...new Set([...a.keys(),...b.keys()])].filter(id=>a.get(id)!==b.get(id) || oldOrder.get(id)!==nextOrder.get(id)).sort();
+  const oldOrder=before.filter(p=>b.has(p.id)).map(p=>p.id),nextOrder=after.filter(p=>a.has(p.id)).map(p=>p.id);
+  const lengths=Array.from({length:oldOrder.length+1},()=>Array(nextOrder.length+1).fill(0));
+  for(let i=oldOrder.length-1;i>=0;i--)for(let j=nextOrder.length-1;j>=0;j--)lengths[i][j]=oldOrder[i]===nextOrder[j]?1+lengths[i+1][j+1]:Math.max(lengths[i+1][j],lengths[i][j+1]);
+  const retained=new Set<string>();
+  // Independently recompute the LCS, retaining earlier after-indices on ties.
+  for(let i=0,j=0;i<oldOrder.length&&j<nextOrder.length;){
+    if(oldOrder[i]===nextOrder[j]){retained.add(oldOrder[i]);i++;j++;}
+    else if(lengths[i+1][j]>=lengths[i][j+1])i++;else j++;
+  }
+  return [...new Set([...a.keys(),...b.keys()])].filter(id=>a.get(id)!==b.get(id) || a.has(id)&&b.has(id)&&!retained.has(id)).sort();
 }
 export type Spec = Record<string, any> & {panels:({id:string}&Record<string,any>)[]};
 export type Operation = 'title'|'threshold'|'add'|'remove'|'unit'|'move';

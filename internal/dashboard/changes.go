@@ -46,8 +46,11 @@ type ChangeSet struct {
 }
 
 // Changes compares normalized committed snapshots. Physical packing is reported
-// once; authored fields and relative order of surviving panels get panel chips.
+// once; authored fields and only panels outside the longest common surviving
+// order get panel chips. Normalization applies to copies for diffing only.
 func Changes(before, after panel.Dashboard) ChangeSet {
+	before = normalizedForDiff(before)
+	after = normalizedForDiff(after)
 	old := map[string]panel.Panel{}
 	for _, p := range before.Panels {
 		old[p.ID] = p
@@ -56,18 +59,18 @@ func Changes(before, after panel.Dashboard) ChangeSet {
 	for _, p := range after.Panels {
 		nextIDs[p.ID] = true
 	}
-	oldOrder := map[string]int{}
-	nextOrder := map[string]int{}
+	beforeOrder, afterOrder := []string{}, []string{}
 	for _, p := range before.Panels {
 		if nextIDs[p.ID] {
-			oldOrder[p.ID] = len(oldOrder)
+			beforeOrder = append(beforeOrder, p.ID)
 		}
 	}
 	for _, p := range after.Panels {
 		if _, ok := old[p.ID]; ok {
-			nextOrder[p.ID] = len(nextOrder)
+			afterOrder = append(afterOrder, p.ID)
 		}
 	}
+	retained := retainedOrder(beforeOrder, afterOrder)
 	seen := map[string]bool{}
 	out := []PanelChange{}
 	layout := false
@@ -85,7 +88,7 @@ func Changes(before, after panel.Dashboard) ChangeSet {
 		prior.Grid = nil
 		p.Grid = nil
 		fields := changedFields(prior, p)
-		position := oldOrder[p.ID] != nextOrder[p.ID]
+		position := !retained[p.ID]
 		if len(fields) > 0 || position {
 			out = append(out, PanelChange{PanelID: p.ID, Title: p.Title, Kind: "changed", Fields: fields, PositionChanged: position})
 		}
@@ -98,7 +101,13 @@ func Changes(before, after panel.Dashboard) ChangeSet {
 	}
 	before.Panels = nil
 	after.Panels = nil
-	return ChangeSet{Panels: out, LayoutChanged: layout, DashboardFields: changedFields(before, after)}
+	fields := []string{}
+	for _, field := range changedFields(before, after) {
+		if field != "version" {
+			fields = append(fields, field)
+		}
+	}
+	return ChangeSet{Panels: out, LayoutChanged: layout, DashboardFields: fields}
 }
 
 func mustJSON(v any) []byte {
@@ -107,4 +116,44 @@ func mustJSON(v any) []byte {
 		panic(err)
 	}
 	return b
+}
+
+func normalizedForDiff(spec panel.Dashboard) panel.Dashboard {
+	copy, err := clone(spec)
+	if err != nil {
+		panic(err)
+	}
+	panel.Normalize(&copy)
+	return copy
+}
+
+// On equal-length choices retain the earlier after-index. This picks the
+// same minimal moved set deterministically, including an ambiguous two-panel swap.
+func retainedOrder(before, after []string) map[string]bool {
+	lengths := make([][]int, len(before)+1)
+	for i := range lengths {
+		lengths[i] = make([]int, len(after)+1)
+	}
+	for i := len(before) - 1; i >= 0; i-- {
+		for j := len(after) - 1; j >= 0; j-- {
+			if before[i] == after[j] {
+				lengths[i][j] = 1 + lengths[i+1][j+1]
+			} else {
+				lengths[i][j] = max(lengths[i+1][j], lengths[i][j+1])
+			}
+		}
+	}
+	retained := map[string]bool{}
+	for i, j := 0, 0; i < len(before) && j < len(after); {
+		if before[i] == after[j] {
+			retained[before[i]] = true
+			i++
+			j++
+		} else if lengths[i+1][j] >= lengths[i][j+1] {
+			i++
+		} else {
+			j++
+		}
+	}
+	return retained
 }

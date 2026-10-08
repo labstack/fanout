@@ -24,7 +24,7 @@ func TestPreviewReportsTotalAndExecutedPanelTimings(t *testing.T) {
 		return []panel.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
 	}}
 	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
-	if err != nil || out.ElapsedMS < 0 || len(out.Panels) != 1 || out.Panels[0].ElapsedMS != 37 || out.Panels[0].Status != "ok" {
+	if err != nil || out.ElapsedMS < 0 || len(out.Panels) != 1 || (out.Panels[0].ElapsedMS == nil || *out.Panels[0].ElapsedMS != 37) || out.Panels[0].Status != "ok" {
 		t.Fatalf("out=%+v err=%v", out, err)
 	}
 }
@@ -108,7 +108,7 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.Panels[0].Status != "not_run" {
 		t.Fatalf("a valid panel is not run while another is invalid: %+v", out.Panels[0])
 	}
-	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != 0 || out.Panels[1].ElapsedMS != 0 {
+	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
 		t.Fatalf("invalid/not_run timing = %+v", out)
 	}
 	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}})

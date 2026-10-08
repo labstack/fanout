@@ -59,7 +59,7 @@ func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
 			if strings.Contains(check.Reason, "/private/") || strings.Contains(check.Panels[0].Error, "/private/") {
 				t.Fatal("private path in receipt")
 			}
-			if tc.name == "failing_panel" && (check.Panels[0].Status != "error" || check.Panels[0].ElapsedMS != 17 || len(out.Warnings) != 1) {
+			if tc.name == "failing_panel" && (check.Panels[0].Status != "error" || *check.Panels[0].ElapsedMS != 17 || len(out.Warnings) != 1) {
 				t.Fatal(out)
 			}
 			versions, err := s.dashboards.Versions(t.Context(), "owner", out.Dashboard.ID)
@@ -98,7 +98,7 @@ func TestSaveCheckMatchesEverySavedIDRatherThanResultOrder(t *testing.T) {
 			if check.Checked == duplicate || check.Panels[0].ID != "notes" || check.Panels[1].ID != "b" {
 				t.Fatal(check)
 			}
-			if !duplicate && (check.Panels[0].ElapsedMS != 31 || check.Panels[1].ElapsedMS != 19 || check.Panels[1].Rows != 0 || check.Panels[1].Status != "empty") {
+			if !duplicate && (*check.Panels[0].ElapsedMS != 31 || *check.Panels[1].ElapsedMS != 19 || check.Panels[1].Rows != 0 || check.Panels[1].Status != "empty") {
 				t.Fatal(check)
 			}
 			if duplicate && (check.Panels[0].Status != "not_run" || check.Panels[1].Status != "not_run" || check.Reason == "") {
@@ -189,7 +189,7 @@ func TestConcurrentSaveReceiptIdentifiesItsOwnCommittedVersion(t *testing.T) {
 	}
 	first := <-done
 	r := first.out.Receipt
-	if first.err != nil || first.out.Dashboard.Version != 2 || first.out.Dashboard.Spec.Panels[0].Content != "first" || r.BaseVersion != 1 || r.Version != 2 || !r.SaveCheck.Checked || r.SaveCheck.Panels[0].ElapsedMS != 23 || len(r.Changes) != 1 || len(r.Changes[0].Fields) != 1 || r.Changes[0].Fields[0] != "content" {
+	if first.err != nil || first.out.Dashboard.Version != 2 || first.out.Dashboard.Spec.Panels[0].Content != "first" || r.BaseVersion != 1 || r.Version != 2 || !r.SaveCheck.Checked || *r.SaveCheck.Panels[0].ElapsedMS != 23 || len(r.Changes) != 1 || len(r.Changes[0].Fields) != 1 || r.Changes[0].Fields[0] != "content" {
 		t.Fatalf("first=%+v receipt=%+v", first, r)
 	}
 }
@@ -230,7 +230,7 @@ func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 		t.Fatalf("receipt=%+v", r)
 	}
 	for i, p := range r.SaveCheck.Panels {
-		if p.ID != out.Dashboard.Spec.Panels[i].ID || p.ElapsedMS < 0 {
+		if p.ID != out.Dashboard.Spec.Panels[i].ID || *p.ElapsedMS < 0 {
 			t.Fatal(p)
 		}
 	}
@@ -250,7 +250,7 @@ func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
 	_, preview, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: spec.Panels})
-	if err != nil || preview.ElapsedMS < 0 || len(preview.Panels) != 2 || preview.Panels[0].ElapsedMS < 0 {
+	if err != nil || preview.ElapsedMS < 0 || len(preview.Panels) != 2 || *preview.Panels[0].ElapsedMS < 0 {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
 }

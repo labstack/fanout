@@ -92,6 +92,26 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	editInput, err := json.Marshal(map[string]any{
+		"id": created.ID, "base_version": statEdited.Version, "message": "Reword, move and remove fixture panels",
+		"operations": []dashboard.Operation{
+			{Op: "update_panel", ID: "actual_latency", Set: map[string]any{"title": "Updated latency"}},
+			{Op: "move_panel", ID: "actual_latency", After: "actual_text"},
+			{Op: "remove_panel", ID: "added_stat"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	editExecution, err := tools.Execute(ctx, ToolCall{ID: "edit", Name: "edit_dashboard", Input: string(editInput)})
+	if err != nil || editExecution.IsError {
+		t.Fatalf("edit_dashboard: %+v %v", editExecution, err)
+	}
+	var editedOutput map[string]any
+	if err := json.Unmarshal([]byte(editExecution.Content), &editedOutput); err != nil {
+		t.Fatal(err)
+	}
+	evalStableSave(editedOutput)
 	results, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: created.Spec})
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +185,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	if !strings.Contains(failure, `"type":"RUN_ERROR"`) || strings.Contains(failure, "private provider body") {
 		t.Fatal("run error shape")
 	}
-	value := map[string]any{"authored_spec": authoredJSON, "saved_record": record, "saved_output": savedOutput, "saved_spec": created.Spec, "add_panel": addedJSON, "stat_add_panel": statJSON, "stat_added_spec": statEdited.Spec, "added_spec": edited.Spec, "results": results, "added_results": addedResults, "incomplete_sse": incomplete, "error_sse": failure}
+	value := map[string]any{"authored_spec": authoredJSON, "saved_record": record, "saved_output": savedOutput, "edited_output": editedOutput, "saved_spec": created.Spec, "add_panel": addedJSON, "stat_add_panel": statJSON, "stat_added_spec": statEdited.Spec, "added_spec": edited.Spec, "results": results, "added_results": addedResults, "incomplete_sse": incomplete, "error_sse": failure}
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		t.Fatal(err)
