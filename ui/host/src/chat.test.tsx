@@ -9,6 +9,7 @@ import App from "./App";
 import { ChatPage } from "./chat";
 import { saved as receiptFixture, build as receiptBuild, user, call, result } from "../tests/dashboard-receipts";
 import { fixture } from "../tests/fixtures";
+import { toolError } from "../tests/tool-errors";
 vi.mock("./mcp-app-frame", () => ({ default: () => <div data-app-frame>Panel frame</div> }));
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
@@ -62,6 +63,23 @@ async function reasoning(emit: (event: Record<string, unknown>) => Promise<void>
 
 describe("provisional answer stream", () => {
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+  it("shows escaped structured tool errors while the SSE run is live", async () => {
+    const { root, emit, close } = await mountStreamChat();
+    try {
+      await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
+      await emit({ type: "TOOL_CALL_START", toolCallId: "failed", toolCallName: "query_telemetry", parentMessageId: "step" });
+      await emit({ type: "TOOL_CALL_ARGS", toolCallId: "failed", delta: "{}" });
+      await emit({ type: "TOOL_CALL_END", toolCallId: "failed" });
+      await emit({ type: "TOOL_CALL_RESULT", toolCallId: "failed", messageId: "result", content: toolError("failed", "escaped", true).content });
+      await vi.waitFor(() => expect(button("1 tool call failed")).toBeTruthy());
+      await act(async () => button("1 tool call failed")!.click());
+      expect(button("1 tool call failed")!.closest("[data-chat-anchor]")!.textContent).toContain("<img src=x onerror=alert(1)>");
+      expect(button("1 tool call failed")!.closest("[data-chat-anchor]")!.textContent).not.toMatch(/isError|\{|\}/);
+      expect(document.querySelector("img")).toBeNull();
+      await emit({ type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });
+      await close();
+    } finally { await act(async () => root.unmount()); }
+  });
   it("keeps running after the last tool receipt until final text arrives", async () => {
     const { root, emit, close } = await mountStreamChat();
     try {
@@ -240,14 +258,14 @@ function button(text: string) {
 }
 it("groups recovered tool failures quietly and expands escaped names/messages",async()=>{
  const messages=[{id:"a",role:"assistant",content:"",toolCalls:[{id:"c1",type:"function",function:{name:"query_telemetry",arguments:"{}"}},{id:"c2",type:"function",function:{name:"edit_dashboard",arguments:"{}"}}]},
- {id:"e1",role:"tool",toolCallId:"c1",content:"<img src=x onerror=alert(1)>",error:"tool error"},{id:"e2",role:"tool",toolCallId:"c2",content:"Invalid panel",error:"tool error"},{id:"done",role:"assistant",content:"Recovered answer"}] as Message[];
+ toolError('c1','escaped'),toolError('c2','invalid_panel'),{id:"done",role:"assistant",content:"Recovered answer"}] as Message[];
  const root=await mount(value({messages}));try {
  expect(document.querySelector('[role="alert"]')).toBeNull();const toggle=button("2 tool calls failed")!;expect(toggle).toBeTruthy();expect(toggle.getAttribute("aria-expanded")).toBe("false");expect(document.body.textContent).not.toContain("Invalid panel");
  await act(async()=>toggle.click());expect(document.body.textContent).toContain("query_telemetry");expect(document.body.textContent).toContain("edit_dashboard");expect(document.body.textContent).toContain("<img src=x onerror=alert(1)>");expect(document.querySelector("img")).toBeNull();
  }finally{await act(async()=>root.unmount());}
 });
 it("keeps a single recovered failure quiet and preserves the run-error alert",async()=>{
- const messages=[{id:"t",role:"tool",toolCallId:"c",content:"Temporary failure",error:"tool error"},{id:"answer",role:"assistant",content:"Answer"}] as Message[];
+ const messages=[toolError('c','temporary'),{id:"answer",role:"assistant",content:"Answer"}] as Message[];
  for(const error of ["","Provider unavailable"]) {const root=await mount(value({messages,error}));try {expect(button("1 tool call failed")).toBeTruthy();expect(document.querySelectorAll('[role="alert"]')).toHaveLength(error?1:0);if(error)expect(document.querySelector('[role="alert"]')?.textContent).toContain(error);}finally{await act(async()=>root.unmount());}}
 });
 it("uses server view keys and kinds even when tool names and specifications differ",async()=>{
@@ -330,7 +348,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
 });
 
 it("shows app tool errors and old string activities without throwing", async () => {
-  const messages = [{ id: "error", role: "tool", toolCallId: "call", content: "Invalid telemetry window", error: "Invalid telemetry window" }, { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
+  const messages = [toolError('call','invalid_window'), { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
   const root = await mount(value({ messages }));
   await act(async()=>button("1 tool call failed")!.click());
   expect(document.body.textContent).toContain("Invalid telemetry window");
@@ -527,14 +545,24 @@ it("groups failed calls by assistant message within one user turn",async()=>{
  const messages=[{id:"u",role:"user",content:"Help"},
  {id:"a1",role:"assistant",content:"",toolCalls:[{id:"c1",type:"function",function:{name:"query_telemetry",arguments:"{}"}}]},
  {id:"a2",role:"assistant",content:"",toolCalls:[{id:"c2",type:"function",function:{name:"search_logs",arguments:"{}"}},{id:"c3",type:"function",function:{name:"search_logs",arguments:"{}"}}]},
- {id:"f1",role:"tool",toolCallId:"c1",content:"first failure",error:"error"},
- {id:"f2",role:"tool",toolCallId:"c2",content:"second failure",error:"error"},
- {id:"f3",role:"tool",toolCallId:"c3",content:"third failure",error:"error"}] as Message[];
+ toolError('c1','first'),toolError('c2','second'),toolError('c3','third')] as Message[];
  const root=await mount(value({messages}));try {
  expect(button("1 tool call failed")).toBeTruthy();expect(button("2 tool calls failed")).toBeTruthy();
  await act(async()=>button("1 tool call failed")!.click());expect(document.body.textContent).toContain("first failure");expect(document.body.textContent).not.toContain("second failure");
  await act(async()=>button("2 tool calls failed")!.click());expect(document.body.textContent).toContain("second failure");expect(document.body.textContent).toContain("third failure");
  }finally{await act(async()=>root.unmount());}
+});
+
+it.each(['live','reloaded'])('shows the same escaped plain tool error during %s chat',async mode=>{
+ const messages=[user(),call('failed','query_telemetry'),toolError('failed','escaped',mode==='live')];
+ const root=await mount(value({messages:mode==='reloaded'?JSON.parse(JSON.stringify(messages)):messages}));
+ try {
+  expect(button('1 tool call failed')).toBeTruthy();
+  await act(async()=>button('1 tool call failed')!.click());
+  expect(document.body.textContent).toContain('<img src=x onerror=alert(1)>');
+  expect(document.querySelector('img')).toBeNull();
+  expect(button('1 tool call failed')!.closest('[data-chat-anchor]')!.textContent).not.toMatch(/isError|\{|\}/);
+ } finally {await act(async()=>root.unmount());document.body.innerHTML='';}
 });
 
 it("reconstructs one receipt per build turn with no final card or narrated tool inventory",async()=>{

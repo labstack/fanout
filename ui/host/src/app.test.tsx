@@ -87,7 +87,7 @@ describe("Session", () => {
     viewerMock.current = defaultViewer;
   });
 
-  it.each(["create_dashboard", "edit_dashboard", "replace_dashboard"])("refreshes the rail and links the saved dashboard at the streamed %s result", async (name) => {
+  it.each(["create_dashboard", "edit_dashboard", "replace_dashboard", "restore_dashboard_version"])("refreshes the rail and links the saved dashboard at the streamed %s result", async (name) => {
     const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
     const rootRoute = createRootRoute({ component: App });
     const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });

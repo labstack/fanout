@@ -12,7 +12,7 @@ import { exactTimestamp } from "../../format";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { fragmentTitle } from "../../panels/fragment";
 import { interruptedResult } from "./dashboard-receipt";
-import { mutationNames } from "./dashboard-tool-result";
+import { jsonObject, mutationNames } from "./dashboard-tool-result";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
@@ -62,14 +62,17 @@ function toolFailures(messages: Message[]) {
       assistant = message.id;
       for (const call of message.toolCalls ?? []) calls.set(call.id, { assistant, name: call.function.name });
     }
-    if (message.role === "tool" && message.error) {
+    if (message.role === "tool") {
+      const payload = jsonObject(message.content);
+      if (!message.error && !payload?.error && payload?.isError !== true) continue;
       const call = calls.get(message.toolCallId);
       if(call && mutationNames.has(call.name) && interruptedResult(message)) continue;
       const owner = call?.assistant ?? assistant;
       const first = firstFailures.get(owner) ?? message.id;
       firstFailures.set(owner, first);
       const failures = groups.get(first) ?? [];
-      failures.push({ name: call?.name ?? "Tool", message: String(message.content || message.error) });
+      const text = typeof payload?.error === "string" ? payload.error : typeof message.error === "string" && message.error ? message.error : "Tool execution failed";
+      failures.push({ name: call?.name ?? "Tool", message: text });
       groups.set(first, failures);
     }
   }

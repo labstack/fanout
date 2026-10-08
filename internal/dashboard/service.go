@@ -209,6 +209,7 @@ func (s *Service) CreateWithChanges(ctx context.Context, ownerID string, spec pa
 	if err := tx.Commit(); err != nil {
 		return Mutation{}, err
 	}
+	MarkSaveCommitted(ctx)
 	return Mutation{Record: record}, nil
 }
 
@@ -280,7 +281,7 @@ func (s *Service) RestoreWithChanges(ctx context.Context, ownerID, id string, ve
 	}
 	raw, err := generated.New(s.db).GetDashboardVersion(ctx, generated.GetDashboardVersionParams{DashboardID: id, Version: int64(version)})
 	if errors.Is(err, sql.ErrNoRows) {
-		return Mutation{}, ErrNotFound
+		return Mutation{}, versionNotFoundError{id: id, version: version}
 	}
 	if err != nil {
 		return Mutation{}, err
@@ -372,6 +373,7 @@ func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec 
 	if err := tx.Commit(); err != nil {
 		return Record{}, false, err
 	}
+	MarkSaveCommitted(ctx)
 	return record, true, nil
 }
 

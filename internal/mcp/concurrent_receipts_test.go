@@ -89,7 +89,7 @@ func TestConcurrentFileBackedSaveReceiptsNameOnlyTheirOwnEdit(t *testing.T) {
 					if !strings.Contains(a.err.Error(), "the dashboard changed since you read it") {
 						t.Errorf("loser %d: unexpected error %v", i, a.err)
 					}
-					if a.out.Receipt != nil || a.out.Dashboard.ID != "" {
+					if a.out.Receipt != nil || a.out.Dashboard != nil {
 						t.Errorf("loser %d has receipt %+v", i, a.out)
 					}
 					continue

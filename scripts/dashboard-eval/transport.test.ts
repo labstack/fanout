@@ -3,6 +3,11 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, type Ledger } from './transport';
+import { mutatingTools } from './tool-catalog';
+it('matches the server registered mutating tools exactly',()=>{
+ const server=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
+ expect([...mutatingTools].sort()).toEqual(server.mutating_tools);
+});
 const servers: ReturnType<typeof Bun.serve>[]=[];
 const roots:string[]=[];
 afterEach(()=>{servers.splice(0).forEach(s=>s.stop(true));roots.splice(0).forEach(r=>rmSync(r,{recursive:true,force:true}));});
@@ -22,6 +27,11 @@ it('rejects duplicate tool IDs and error mutations',async()=>{
   const s=await readSSE(response(frame(start)+frame({...result,isError:true})+frame(finish)),new AbortController().signal);expect(findSaved(s)).toBeNull();
   const unknown=await readSSE(response(frame(start)+frame({...result,isError:undefined})+frame(finish)),new AbortController().signal);expect(findSaved(unknown)).toBeNull();
   expect(findSaved(unknown,[{role:'tool',toolCallId:'save',error:'failed'}])).toBeNull();
+});
+it('uses the final committed restore after an earlier edit',async()=>{
+ const restored={...saved,version:3};
+ const s=await readSSE(response(frame({...start,toolCallName:'edit_dashboard'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'restore',toolCallName:'restore_dashboard_version'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'restore',content:JSON.stringify({dashboard:restored}),isError:false})+frame(finish)),new AbortController().signal);
+ expect(findSaved(s)?.record).toEqual(restored);expect(findSaved(s)?.tool_id).toBe('restore');
 });
 it('records missing terminal, truncation, RUN_ERROR and socket failure as incomplete',async()=>{
   const g=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));

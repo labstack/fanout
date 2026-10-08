@@ -62,9 +62,11 @@ type dashboardListOutput struct {
 }
 
 type dashboardOutput struct {
-	Dashboard dashboard.Record  `json:"dashboard"`
+	Dashboard *dashboard.Record `json:"dashboard,omitempty"`
 	Warnings  []string          `json:"warnings,omitempty"`
 	Receipt   *dashboardReceipt `json:"receipt,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	ErrorCode string            `json:"error_code,omitempty"`
 }
 
 type savedPanelCheck struct {
@@ -138,7 +140,7 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "restore_dashboard_version", Title: "Restore dashboard version",
-		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. " + saveReceiptGuide,
+		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. A missing or pruned target returns error_code dashboard_version_not_found; list_dashboard_versions shows retained versions. " + saveReceiptGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 }
@@ -196,7 +198,7 @@ func (s *Server) dashboardGet(ctx context.Context, req *mcp.CallToolRequest, inp
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Loaded %q, version %d, with %d panels.", record.Name, record.Version, len(record.Spec.Panels))), dashboardOutput{Dashboard: record}, nil
+	return summary(fmt.Sprintf("Loaded %q, version %d, with %d panels.", record.Name, record.Version, len(record.Spec.Panels))), dashboardOutput{Dashboard: &record}, nil
 }
 
 func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, input DashboardCreateInput) (*mcp.CallToolResult, dashboardOutput, error) {
@@ -273,6 +275,11 @@ func (s *Server) dashboardRestore(ctx context.Context, req *mcp.CallToolRequest,
 	}
 	mutation, err := s.dashboards.RestoreWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Version, agentAuthor(owner))
 	if err != nil {
+		if errors.Is(err, dashboard.ErrVersionNotFound) {
+			result := summary(err.Error())
+			result.IsError = true
+			return result, dashboardOutput{Error: err.Error(), ErrorCode: dashboard.VersionNotFoundCode}, nil
+		}
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
 	return s.saved(ctx, "Restored", mutation)
@@ -286,7 +293,7 @@ const saveCheckBudget = 8 * time.Second
 func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Mutation) (*mcp.CallToolResult, dashboardOutput, error) {
 	record := mutation.Record
 	diff := dashboard.Changes(mutation.Before, record.Spec)
-	out := dashboardOutput{Dashboard: record, Receipt: &dashboardReceipt{
+	out := dashboardOutput{Dashboard: &record, Receipt: &dashboardReceipt{
 		BaseVersion: mutation.BaseVersion, Version: record.Version, Changes: diff.Panels,
 		LayoutChanged: diff.LayoutChanged, DashboardFields: diff.DashboardFields,
 	}}

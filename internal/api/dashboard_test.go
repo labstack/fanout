@@ -90,6 +90,10 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"version":3`) {
 		t.Fatalf("restore %d %s", rec.Code, rec.Body)
 	}
+	rec = call(http.MethodPost, "/api/dashboards/"+created.ID+"/versions/9/restore", "", ownerCookie)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "version 9 of dashboard "+created.ID+" does not exist") || !strings.Contains(rec.Body.String(), `"error_code":"dashboard_version_not_found"`) {
+		t.Fatalf("missing version %d %s", rec.Code, rec.Body)
+	}
 	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie); rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("unconfirmed delete = %d", rec.Code)
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -452,6 +453,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				slog.Warn("agent tool execution failed", "thread_id", threadID, "run_id", runID, "tool", call.Name, "err", err)
 				execution = ToolExecution{Content: fmt.Sprintf(`{"error":%q}`, err.Error()), IsError: true}
 			}
+			messageError := errorString(execution.IsError)
 			if execution.IsError {
 				// AG-UI's live result event carries content, not Message.Error.
 				// Keep the error structural on that path as well as on reload.
@@ -460,6 +462,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 					payload = map[string]any{"error": execution.Content}
 				}
 				payload["isError"] = true
+				if payload["error"] == "interrupted" {
+					messageError = "interrupted"
+				}
 				raw, marshalErr := json.Marshal(payload)
 				if marshalErr != nil {
 					return truncated, marshalErr
@@ -473,7 +478,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if err := emitter.emit(events.NewToolCallResultEvent(toolMessageID, call.ID, execution.Content)); err != nil {
 				return truncated, err
 			}
-			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: errorString(execution.IsError)})
+			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: messageError})
 			conversation = append(conversation, ProviderMessage{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: call.ID, Content: execution.Content, IsError: execution.IsError}})
 			if execution.AppResourceURI != "" && !execution.IsError {
 				view := fragmentView(execution.Structured)
@@ -514,11 +519,17 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 }
 
 func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution ToolExecution, err error) {
+	ctx = dashboard.TrackSave(ctx)
 	defer func() {
 		if value := recover(); value != nil {
-			slog.Error("agent tool panicked", "tool", call.Name, "panic", value)
-			execution = ToolExecution{}
-			err = errors.New("tool execution failed")
+			slog.Error("agent tool panicked", "tool", call.Name, "panic", value, "stack", string(debug.Stack()))
+			if dashboard.SaveCommitted(ctx) {
+				execution = ToolExecution{Content: `{"error":"interrupted"}`, IsError: true}
+				err = nil
+			} else {
+				execution = ToolExecution{}
+				err = errors.New("tool execution failed")
+			}
 		}
 	}()
 	return r.tools.Execute(ctx, call)

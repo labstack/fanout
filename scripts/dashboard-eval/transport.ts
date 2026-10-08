@@ -1,11 +1,11 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, relative, resolve, sep, parse } from 'node:path';
 import { stable, type Check, type Spec } from './score';
+import { mutatingTools } from './tool-catalog';
 
 export type ObjectValue = Record<string, any>;
 export type Tool = {id:string;name:string;args:string;result:any;is_error:boolean|null;ended:boolean;elapsed_ms:number};
 export type StreamState = {tools:Tool[];terminal:'RUN_FINISHED'|'RUN_ERROR'|null;incomplete:boolean;truncated:boolean;error_code:string|null;usage:CallUsage[];started_at:string;finished_at:string|null; configuration?:{provider:string;model:string}};
-const mutations=new Set(['create_dashboard','edit_dashboard','replace_dashboard']);
 const decode=(v:any)=>{if(typeof v!=='string')return v;try{return JSON.parse(v)}catch{return null}};
 export function originURL(origin:string):URL {
   const url=new URL(origin);
@@ -111,7 +111,7 @@ export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:O
     if(matches.length===1)t.is_error=t.is_error===true||Boolean(matches[0].error);
     if(matches.length>1)t.is_error=true;
   }
-  const saves=state.tools.filter(t=>mutations.has(t.name)&&t.is_error===false&&t.result?.dashboard?.id&&Number.isInteger(t.result.dashboard.version)&&t.result.dashboard.spec?.panels);
+  const saves=state.tools.filter(t=>mutatingTools.has(t.name)&&t.is_error===false&&t.result?.dashboard?.id&&Number.isInteger(t.result.dashboard.version)&&t.result.dashboard.spec?.panels);
   if(!saves.length)return null;
   // Multiple writes to different dashboards are ambiguous even if the last one looks right.
   if(new Set(saves.map(t=>t.result.dashboard.id)).size!==1)return null;

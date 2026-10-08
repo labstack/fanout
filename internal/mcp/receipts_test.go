@@ -137,7 +137,7 @@ func TestFailedMutationsReturnNoReceiptOrVersion(t *testing.T) {
 		{ID: created.Dashboard.ID, BaseVersion: 2, Operations: []dashboard.Operation{{Op: "rename", Name: "Stale"}}},
 	} {
 		_, out, err := s.dashboardEdit(t.Context(), ownerRequest(), input)
-		if err == nil || out.Receipt != nil || out.Dashboard.ID != "" {
+		if err == nil || out.Receipt != nil || out.Dashboard != nil {
 			t.Fatalf("failed save=%+v err=%v", out, err)
 		}
 	}
@@ -148,7 +148,7 @@ func TestFailedMutationsReturnNoReceiptOrVersion(t *testing.T) {
 	bad := textDashboard("Invalid")
 	bad.Panels[0].Viz = "unknown"
 	_, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: bad})
-	if err == nil || out.Receipt != nil || out.Dashboard.ID != "" {
+	if err == nil || out.Receipt != nil || out.Dashboard != nil {
 		t.Fatalf("failed create=%+v err=%v", out, err)
 	}
 }

@@ -29,6 +29,7 @@ type ToolRegistry struct {
 	serverSession *mcp.ServerSession
 	definitions   []ToolDef
 	apps          map[string]string
+	mutations     map[string]bool
 }
 
 func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, error) {
@@ -53,12 +54,15 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 		serverSession.Close()
 		return nil, fmt.Errorf("list MCP tools: %w", err)
 	}
-	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}}
+	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}, mutations: map[string]bool{}}
 	for _, tool := range listed.Tools {
 		if fanoutmcp.AppOnly(tool.Meta) {
 			continue
 		}
 		registry.definitions = append(registry.definitions, ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		if fanoutmcp.RequiredToolScope(tool.Name) == dashboard.OAuthScope && tool.Annotations != nil && !tool.Annotations.ReadOnlyHint {
+			registry.mutations[tool.Name] = true
+		}
 		if resourceURI := appResourceURI(tool.Meta); resourceURI != "" {
 			registry.apps[tool.Name] = resourceURI
 		}
@@ -106,6 +110,9 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 	result, err := r.session.CallTool(ctx, params)
 	if err != nil {
 		return ToolExecution{}, fmt.Errorf("call MCP tool %s: %w", call.Name, err)
+	}
+	if r.mutations[call.Name] && !result.IsError {
+		dashboard.MarkSaveCommitted(ctx)
 	}
 	content, err := r.modelContent(call.Name, result)
 	if err != nil {

@@ -1,9 +1,13 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
@@ -11,6 +15,107 @@ import (
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type restoreConflictValidator struct {
+	armed   atomic.Bool
+	attempt atomic.Int32
+	entered chan int
+	release chan struct{}
+}
+
+func (v *restoreConflictValidator) Validate(ctx context.Context, d *panel.Dashboard) error {
+	if v.armed.Load() && d.Panels[0].Content == "hello" {
+		attempt := int(v.attempt.Add(1))
+		if attempt <= 2 {
+			select {
+			case v.entered <- attempt:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			select {
+			case <-v.release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return (structural{}).Validate(ctx, d)
+}
+
+func TestRestoreLosesTwoContestedBasesWithoutReceipt(t *testing.T) {
+	for _, transport := range []string{"service", "mcp"} {
+		t.Run(transport, func(t *testing.T) {
+			v := &restoreConflictValidator{entered: make(chan int), release: make(chan struct{})}
+			s := newToolServer(t, v, nil)
+			_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Two conflicts")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.dashboards.Edit(t.Context(), "owner", created.Dashboard.ID, []dashboard.Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": "latest"}}}, 1, agentAuthor("owner"), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			v.armed.Store(true)
+			type answer struct {
+				receipt *dashboardReceipt
+				err     error
+			}
+			done := make(chan answer, 1)
+			go func() {
+				if transport == "service" {
+					m, err := s.dashboards.RestoreWithChanges(t.Context(), "owner", created.Dashboard.ID, 1, agentAuthor("owner"))
+					if m.Record.ID != "" {
+						t.Error("losing restore returned a record")
+					}
+					done <- answer{err: err}
+					return
+				}
+				_, out, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 1})
+				done <- answer{out.Receipt, err}
+			}()
+			for attempt := 1; attempt <= 2; attempt++ {
+				select {
+				case actual := <-v.entered:
+					if actual != attempt {
+						t.Fatal(actual)
+					}
+				case early := <-done:
+					t.Fatalf("restore stopped before retry %d: %+v", attempt, early)
+				case <-t.Context().Done():
+					t.Fatal(t.Context().Err())
+				}
+				results := make(chan error, 2)
+				for writer := 0; writer < 2; writer++ {
+					go func() {
+						_, err := s.dashboards.Edit(t.Context(), "owner", created.Dashboard.ID, []dashboard.Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": fmt.Sprintf("writer %d/%d", attempt, writer)}}}, attempt+1, agentAuthor("owner"), "")
+						results <- err
+					}()
+				}
+				wins := 0
+				for range 2 {
+					err := <-results
+					if err == nil {
+						wins++
+					} else if !errors.Is(err, dashboard.ErrStale) {
+						t.Fatal(err)
+					}
+				}
+				if wins != 1 {
+					t.Fatalf("base %d winners=%d", attempt+1, wins)
+				}
+				v.release <- struct{}{}
+			}
+			result := <-done
+			if result.receipt != nil || result.err == nil || transport == "service" && !errors.Is(result.err, dashboard.ErrStale) || transport == "mcp" && !strings.Contains(result.err.Error(), "the dashboard changed since you read it") {
+				t.Fatalf("restore=%+v", result)
+			}
+			versions, err := s.dashboards.Versions(t.Context(), "owner", created.Dashboard.ID)
+			if err != nil || len(versions) != 4 || versions[0].Version != 4 {
+				t.Fatal(versions, err)
+			}
+		})
+	}
+}
 
 func TestDashboardHistoryToolsAppendRestoreVersion(t *testing.T) {
 	s := newPanelServer(t)
@@ -123,7 +228,8 @@ func TestDashboardHistoryRejectsInvalidMissingAndPrunedVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, version := range []int{-1, 0, 2} {
-		if _, _, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: version}); err == nil {
+		result, _, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: version})
+		if err == nil && (result == nil || !result.IsError) {
 			t.Fatalf("restored invalid version %d", version)
 		}
 	}
@@ -138,12 +244,34 @@ func TestDashboardHistoryRejectsInvalidMissingAndPrunedVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 1}); err == nil || err.Error() != "dashboard not found" {
-		t.Fatalf("pruned restore=%v", err)
+	if _, err := s.dashboards.Restore(t.Context(), "owner", created.Dashboard.ID, 1, dashboard.Author{Kind: "agent", ID: "owner"}); err == nil || err.Error() != fmt.Sprintf("version 1 of dashboard %s does not exist", created.Dashboard.ID) {
+		t.Fatalf("pruned version error=%v", err)
+	}
+	result, out, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 1})
+	if err != nil || !result.IsError || out.Error != fmt.Sprintf("version 1 of dashboard %s does not exist", created.Dashboard.ID) || out.ErrorCode != "dashboard_version_not_found" || out.Dashboard != nil || out.Receipt != nil {
+		t.Fatalf("pruned version result=%+v output=%+v err=%v", result, out, err)
 	}
 	_, history, err := s.dashboardVersions(t.Context(), ownerRequest(), DashboardIDInput{ID: created.Dashboard.ID})
 	if err != nil || len(history.Versions) != 100 || history.Versions[0].Version != 101 || history.Versions[99].Version != 2 {
 		t.Fatalf("history=%+v %v", history, err)
+	}
+}
+
+func TestMissingDashboardVersionHasDistinctErrorCode(t *testing.T) {
+	s := newToolServer(t, structural{}, nil)
+	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Missing version")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := connectTestClient(t, s, nil)
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "restore_dashboard_version", Arguments: map[string]any{"id": created.Dashboard.ID, "version": 9}, Meta: mcp.Meta{dashboard.OwnerMetaKey: "owner"}})
+	if err != nil || !result.IsError {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	raw, _ := json.Marshal(result.StructuredContent)
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil || payload["error"] != fmt.Sprintf("version 9 of dashboard %s does not exist", created.Dashboard.ID) || payload["error_code"] != "dashboard_version_not_found" || payload["receipt"] != nil || payload["dashboard"] != nil {
+		t.Fatalf("missing version payload=%s", raw)
 	}
 }
 

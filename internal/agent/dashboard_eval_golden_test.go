@@ -2,9 +2,11 @@ package agent
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -186,6 +188,22 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal("run error shape")
 	}
 	value := map[string]any{"authored_spec": authoredJSON, "saved_record": record, "saved_output": savedOutput, "edited_output": editedOutput, "saved_spec": created.Spec, "add_panel": addedJSON, "stat_add_panel": statJSON, "stat_added_spec": statEdited.Spec, "added_spec": edited.Spec, "results": results, "added_results": addedResults, "incomplete_sse": incomplete, "error_sse": failure}
+	listed, err := tools.session.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutations := []string{}
+	for _, tool := range listed.Tools {
+		if tool.Annotations == nil {
+			t.Fatalf("missing annotations: %s", tool.Name)
+		}
+		if !tool.Annotations.ReadOnlyHint {
+			mutations = append(mutations, tool.Name)
+		}
+	}
+	sort.Strings(mutations)
+	value["mutating_tools"] = mutations
+	value["tool_errors"] = evalToolErrors(t)
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +225,29 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	if !bytes.Equal(raw, checked) {
 		t.Fatal("dashboard eval goldens stale; run just dashboard-eval-generate")
 	}
+}
+
+// These host fixtures are emitted by the real runtime, including the live
+// content-only event and the persisted Message.Error flag.
+func evalToolErrors(t *testing.T) map[string]any {
+	t.Helper()
+	out := map[string]any{}
+	for key, text := range map[string]string{"escaped": "<img src=x onerror=alert(1)>", "invalid_panel": "Invalid panel", "invalid_window": "Invalid telemetry window", "temporary": "Temporary failure", "first": "first failure", "second": "second failure", "third": "third failure"} {
+		call := ToolCall{ID: "failed", Name: "query_telemetry", Input: `{}`}
+		provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &call}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
+		runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: text, IsError: true}}, nil)
+		messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Query"}}
+		emitter, _ := newTestEmitter()
+		if _, err := runtime.execute(context.Background(), "thread", "run", &messages, emitter); err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range messages {
+			if message.Role == agtypes.RoleTool {
+				out[key] = map[string]any{"content": message.Content, "error": message.Error}
+			}
+		}
+	}
+	return out
 }
 func evalObject(t *testing.T, v any) map[string]any {
 	t.Helper()

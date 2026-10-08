@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -140,11 +141,20 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 func recoverToolPanic(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
 		if method == "tools/call" {
+			ctx = dashboard.TrackSave(ctx)
+			name := ""
+			if call, ok := req.(*mcp.CallToolRequest); ok && call.Params != nil {
+				name = call.Params.Name
+			}
 			defer func() {
 				if value := recover(); value != nil {
-					slog.Error("MCP tool panicked", "panic", value)
+					slog.Error("MCP tool panicked", "tool", name, "panic", value, "stack", string(debug.Stack()))
 					failure := summary("tool execution failed")
 					failure.IsError = true
+					if dashboard.SaveCommitted(ctx) {
+						failure.Content = []mcp.Content{&mcp.TextContent{Text: `{"error":"interrupted"}`}}
+						failure.StructuredContent = map[string]any{"error": "interrupted"}
+					}
 					result, err = failure, nil
 				}
 			}()
