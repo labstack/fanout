@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Check, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
@@ -89,7 +89,14 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       <Menu position="bottom-end" withinPortal>
         <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}><DotsThree size={18} weight="bold" /></ActionIcon></Menu.Target>
         <Menu.Dropdown>
-          {(small || panel.viz === "text") && <>{(panel.viz === "text" ? ["Chart","Spec"] : ["Chart","Data","Spec"]).map(mode=><Menu.Item key={mode} renderRoot={props=><button {...props} role="menuitemradio"/>} aria-checked={view===mode} data-panel-view={mode} rightSection={view===mode ? <Check size={14} aria-hidden/> : undefined} onClick={()=>setView(mode)}>{mode}</Menu.Item>)}<Menu.Divider/></>}
+          {(small || panel.viz === "text") && <>
+            <Menu.RadioGroup value={view} onChange={setView}>
+              <Box role="group" aria-label={`${title} view`}>
+                {(panel.viz === "text" ? ["Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode}>{mode}</Menu.RadioItem>)}
+              </Box>
+            </Menu.RadioGroup>
+            <Menu.Divider />
+          </>}
           <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>
           {agentAvailable && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
           <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>

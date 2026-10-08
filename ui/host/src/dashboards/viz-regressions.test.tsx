@@ -50,6 +50,44 @@ async function render(node: ReactNode) {
 }
 
 describe("visualization regressions", () => {
+  it.each(["stat", "gauge"] as const)("switches folded %s views through a checked menu radio group at 300 px", async viz => {
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, right: 300, top: 0, bottom: 200, width: 300, height: 200, toJSON() {} });
+    try {
+      const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Calls" result={result} loading={false} height={200} group="d" editing={false} agentAvailable onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+      const open = async () => {
+        await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Calls menu"]')!.click());
+        await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+      };
+      await open();
+      const choices = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+      expect(choices().map(item => item.textContent)).toEqual(["Chart", "Data", "Spec"]);
+      expect(choices().map(item => item.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+      expect(document.querySelector('[role="group"][aria-label="Calls view"]')?.contains(choices()[0])).toBe(true);
+      const items = [...document.querySelectorAll('[data-menu-item]')].map(item => item.textContent);
+      expect(items).toEqual(["Chart", "Data", "Spec", "View", "Explain in chat", "Copy link"]);
+      await act(async () => choices()[1].click());
+      expect(host.querySelector('[data-panel-data]')).not.toBeNull();
+      await open();
+      expect(choices().map(item => item.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+      await act(async () => choices()[2].click());
+      expect(host.querySelector('[data-panel-spec]')).not.toBeNull();
+      await open();
+      await act(async () => choices()[0].click());
+      expect(host.querySelector('[data-panel-data]')).toBeNull();
+      expect(host.querySelector('[data-panel-spec]')).toBeNull();
+    } finally { measure.mockRestore(); }
+  });
+
+  it("offers only Spec in the text panel view menu", async () => {
+    const { host } = await render(<PanelCard panel={{ ...panel, viz: "text", content: "Text content" }} title="Note" loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Note menu"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull());
+    const choices = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+    expect(choices.map(item => item.textContent)).toEqual(["Spec"]);
+    await act(async () => choices[0].click());
+    expect(host.querySelector('[data-panel-spec]')).not.toBeNull();
+  });
+
   it.each(["bar", "timeseries", "gauge", "heatmap", "histogram", "scatter", "state_timeline", "service_map"] as const)("fits %s into the flex body including the split note", async (viz) => {
     const { host } = await render(<PanelCard panel={{ ...panel, viz }} title="Chart" result={{ ...result, frame: { ...frame, note: "Split at 2026-10-06T19:30:58.554969Z · cart 2.3.0" } }} loading={false} height={300} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
     const canvas = host.querySelector<HTMLElement>(viz === 'service_map' ? '[data-service-viewport]' : '[role="img"]')!;
