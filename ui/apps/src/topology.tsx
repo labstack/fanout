@@ -1,4 +1,4 @@
-import { topologyMatrixTooltip } from "./tooltips";
+import { topologyMatrixTooltip } from "../../panels/tooltips";
 import { GraphChart, HeatmapChart, SankeyChart } from "echarts/charts";
 import { Button, Paper, Stack, Table, Text } from "@mantine/core";
 import { FlowArrow, MagnifyingGlass, ShareNetwork } from "@phosphor-icons/react";

@@ -150,6 +150,11 @@ ui-lint:
 ui-test:
     cd ui/host && bun run test
 
+# Workspaces share only package-free UI modules, never each other's source.
+ui-boundaries-check:
+    bun test scripts/ui-boundaries.test.ts
+    bun scripts/ui-boundaries.mjs
+
 # Audit both independent browser dependency graphs. Security overrides live in
 # each package.json so installs, local checks, and CI all resolve the same fixes.
 #
@@ -322,7 +327,7 @@ social-card:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: fmt-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
+check: fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:

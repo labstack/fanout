@@ -3,7 +3,7 @@ import { analysisOption } from "../../../panels/analysis";
 import { withAnnotations } from "../../../panels/annotations";
 import { barOption, chartThemeFor, timeseriesOption } from "../../../panels/compile";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
-import { performanceAxisTooltip, performanceHeatTooltip, topologyMatrixTooltip } from "../../../apps/src/tooltips";
+import { performanceAxisTooltip, performanceHeatTooltip, topologyMatrixTooltip } from "../../../panels/tooltips";
 
 const attack = '<img src=x onerror=alert(1)>';
 const theme = chartThemeFor(false);

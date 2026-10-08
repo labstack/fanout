@@ -1,4 +1,4 @@
-import { performanceAxisTooltip, performanceHeatTooltip } from "./tooltips";
+import { performanceAxisTooltip, performanceHeatTooltip } from "../../panels/tooltips";
 import { HeatmapChart, LineChart } from "echarts/charts";
 import { Badge, Paper, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";

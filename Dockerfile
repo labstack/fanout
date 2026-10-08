@@ -7,6 +7,7 @@ WORKDIR /app
 COPY ui/apps/package.json ui/apps/bun.lock ./ui/apps/
 RUN cd ui/apps && bun install --frozen-lockfile
 COPY ui/*.ts ./ui/
+COPY ui/panels/ ./ui/panels/
 COPY ui/apps/ ./ui/apps/
 COPY internal/mcp/apps/ ./internal/mcp/apps/
 RUN cd ui/apps && bun run build
