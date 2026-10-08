@@ -13,7 +13,7 @@ import { Viz } from "./viz";
 export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onZoomReset, zoomed, onView, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
-  onSelect?: (value: string) => void; onView(): void; onCopyLink(): void; onExplain(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
+  onSelect?: (value: string) => void; onView(): void; onCopyLink?: () => void; onExplain?: () => void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
   zoomed?: boolean; onZoomReset?: () => void;
 }) {
@@ -99,7 +99,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           </>}
           <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>
           {agentAvailable && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
-          <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>
+          {onCopyLink && <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>}
           {onDuplicate && <Menu.Item leftSection={<Copy size={14} />} onClick={onDuplicate}>Duplicate</Menu.Item>}
           {onRemove && <><Menu.Divider /><Menu.Item color="bad" leftSection={<Trash size={14} />} onClick={onRemove}>Remove panel</Menu.Item></>}
         </Menu.Dropdown>

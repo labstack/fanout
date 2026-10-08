@@ -119,7 +119,7 @@ it("aborts an obsolete selection and keeps the next selection visible", async ()
   const render = (active?: DrillTarget) => (
     <MantineProvider>
       <QueryClientProvider client={client}>
-        <DrillDrawer
+        <DrillDrawer client={wire}
           spec={spec}
           time={spec.time}
           vars={{}}
@@ -220,7 +220,7 @@ it("renders the existing waterfall and correlated logs with visible truncation",
     root.render(
       <MantineProvider>
         <QueryClientProvider client={client}>
-          <DrillDrawer
+          <DrillDrawer client={wire}
             spec={spec}
             time={spec.time}
             vars={{}}
@@ -255,7 +255,7 @@ async function mountDrawer(active: DrillTarget = target) {
   const root = createRoot(node); const change = vi.fn();
   const render = async (next?: DrillTarget) => act(async () => {
     root.render(<MantineProvider><QueryClientProvider client={client}>
-      <DrillDrawer spec={spec} time={spec.time} vars={{}} target={next} onChange={change} />
+      <DrillDrawer client={wire} spec={spec} time={spec.time} vars={{}} target={next} onChange={change} />
     </QueryClientProvider></MantineProvider>);
   });
   // The dashboard keeps the drawer mounted while closed before a selection opens it.

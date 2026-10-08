@@ -1,4 +1,3 @@
-// @ts-expect-error Tests run in Node; the browser project intentionally omits Node typings.
 import { readFileSync } from "node:fs";
 import { MantineProvider } from "@mantine/core";
 import { act, useState } from "react";

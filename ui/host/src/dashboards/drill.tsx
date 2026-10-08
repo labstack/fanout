@@ -2,23 +2,23 @@ import {
   Alert,
   Button,
   Drawer,
-  Group,
   Loader,
   Stack,
   Text,
   useComputedColorScheme,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { TraceLogs, Waterfall } from "./trace/trace-components";
+import { TraceDetailView } from "./trace/detail";
 import type {
   DashboardSpec,
   DashboardTime,
   VarValue,
 } from "../../../panels/types";
-import { getTrace, queryExemplars } from "./api";
+import type { DrillClient } from "./drill-client";
 import type { DrillTarget } from "./drill-state";
 import { LogsViz } from "./viz/logs";
 export type DrillProps = {
+  client: DrillClient;
   spec: DashboardSpec;
   time: DashboardTime;
   vars: Record<string, VarValue>;
@@ -26,6 +26,7 @@ export type DrillProps = {
   onChange(target?: DrillTarget): void;
 };
 export function DrillDrawer({
+  client,
   spec,
   time,
   vars,
@@ -38,7 +39,7 @@ export function DrillDrawer({
   const exemplars = useQuery({
     queryKey: ["exemplars", spec, target, vars],
     queryFn: ({ signal }) =>
-      queryExemplars(
+      client.exemplars(
         {
           dashboard: spec,
           panel_id: target!.panel_id,
@@ -61,7 +62,7 @@ export function DrillDrawer({
   });
   const trace = useQuery({
     queryKey: ["drill-trace", target],
-    queryFn: ({ signal }) => getTrace(target!, signal),
+    queryFn: ({ signal }) => client.trace(target!, signal),
     enabled: Boolean(target?.trace_id),
     retry: false,
   });
@@ -136,34 +137,7 @@ export function DrillDrawer({
           )}
         </Stack>
       )}
-      {trace.data && (
-        <Stack gap="sm">
-          <Group>
-            <Text fw={600}>{trace.data.data.trace_id}</Text>
-            <Text c={trace.data.data.has_error ? "bad" : "dimmed"}>
-              {trace.data.data.has_error ? "■ Error" : "● OK"}
-            </Text>
-          </Group>
-          {trace.data.data.spans.length ? (
-            <Waterfall
-              spans={trace.data.data.spans}
-              dark={dark}
-            />
-          ) : (
-            <Text c="dimmed">No spans were found for this trace.</Text>
-          )}
-          <Text fw={600}>Correlated logs</Text>
-          <TraceLogs entries={trace.data.data.logs} />
-          {trace.data.data.truncated && (
-            <Alert color="warn">
-              This trace is truncated: {trace.data.data.spans.length} of{" "}
-              {trace.data.data.span_count} spans,{" "}
-              {trace.data.data.services.length} of{" "}
-              {trace.data.data.service_count} services.
-            </Alert>
-          )}
-        </Stack>
-      )}
+      {trace.data && <TraceDetailView result={trace.data} dark={dark} />}
     </Drawer>
   );
 }

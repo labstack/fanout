@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp } from "../app-context";
-import { ApiError, dashboardsKey, getDashboard, listDashboards } from "./api";
+import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
 import { makeDrill, parseDrill } from "./drill-state";
@@ -12,8 +12,12 @@ import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
 import { useBrushZoom } from "./use-brush-zoom";
 import { usePanelResults } from "./use-panel-results";
-import { currentValue, useVariableOptions } from "./use-variables";
+import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
+
+import { currentValue } from "../../../panels/variables";
+import type { DrillClient } from "./drill-client";
+const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
 
 const zoomOut: Record<string, string> = { "5m": "15m", "15m": "1h", "1h": "3h", "3h": "6h", "6h": "12h", "12h": "24h", "24h": "2d", "2d": "7d", "7d": "30d", "30d": "30d" };
 
@@ -135,6 +139,6 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         const vars = variable && first !== undefined ? { ...search.vars, [variable]: first } : search.vars;
         onSearch({ ...search, vars, drill: JSON.stringify(target) }, false);
       }} />
-    <DrillDrawer spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
+    <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
   </Box>;
 }

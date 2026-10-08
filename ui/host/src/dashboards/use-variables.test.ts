@@ -5,7 +5,7 @@ import { useVariableOptions } from "./use-variables";
 import type { DashboardSpec } from "../../../panels/types";
 import { describe, expect, it, vi } from "vitest";
 import { ALL, type Variable } from "../../../panels/types";
-import { currentValue } from "./variable-bar";
+import { currentValue } from "../../../panels/variables";
 
 const variable: Variable = { name: "service", kind: "query" };
 const options = [{ value: "checkout" }, { value: "cart" }];

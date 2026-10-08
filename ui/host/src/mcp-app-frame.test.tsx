@@ -196,4 +196,12 @@ describe("MCPAppFrame", () => {
     const policy = mcpAppCSP({ ui: { csp: { resourceDomains: ["https://cdn.example.com"] } } });
     expect(policy).toContain("font-src 'self' data: https://cdn.example.com");
   });
+
+  it("permits only Blob workers while default app connections remain disabled", () => {
+    const policy = mcpAppCSP(undefined);
+    expect(policy).toContain("worker-src blob:");
+    expect(policy).toContain("connect-src 'none'");
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).not.toMatch(/worker-src[^;]*(?:data:|https?:|'self')/);
+  });
 });

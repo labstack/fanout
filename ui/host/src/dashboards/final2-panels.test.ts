@@ -1,5 +1,4 @@
 import { expect, it } from "vitest";
-// @ts-expect-error Node-only test helpers; browser TS config excludes Node globals.
 import { readFileSync, existsSync } from "node:fs";
 import { chartThemeFor, gaugeOption, timeseriesOption } from "../../../panels/compile";
 import { withAnnotations } from "../../../panels/annotations";

@@ -141,6 +141,7 @@ export function mcpAppCSP(meta: unknown): string {
   const resourceSuffix = resources.length ? ` ${resources.join(" ")}` : "";
   const directives = [
     "default-src 'none'",
+    "worker-src blob:",
     `script-src 'self' 'unsafe-inline'${resourceSuffix}`,
     `style-src 'self' 'unsafe-inline'${resourceSuffix}`,
     `img-src 'self' data:${resourceSuffix}`,

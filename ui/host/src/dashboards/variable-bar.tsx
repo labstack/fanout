@@ -1,7 +1,6 @@
 import { Group, MultiSelect, Select, Text, TextInput } from "@mantine/core";
 import { ALL, type Variable, type VarValue } from "../../../panels/types";
-import { currentValue } from "./use-variables";
-export { currentValue } from "./use-variables";
+import { currentValue } from "../../../panels/variables";
 
 export function VariableBar({ variables, vars, options, onChange }: {
   variables: Variable[]; vars: Record<string, VarValue>; options: Record<string, { value: string; count?: number }[]>; onChange(name: string, value: VarValue | undefined): void;

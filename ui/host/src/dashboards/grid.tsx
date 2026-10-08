@@ -23,8 +23,8 @@ export type GridProps = {
   zoomed?: boolean; onZoomReset?(): void;
 };
 
-export const interpolate = (text: string, vars: Record<string, VarValue>) =>
-  text.replace(/\$([a-z][a-z0-9_]*)/g, (match, name: string) => { const v = vars[name]; return v === undefined ? match : v === "$__all" ? "all" : Array.isArray(v) ? v.join(", ") : v; });
+export { interpolate } from "../../../panels/variables";
+import { interpolate } from "../../../panels/variables";
 
 let panelIdCounter = 0;
 export function newPanelId(panels: Panel[]): string {

@@ -6,6 +6,7 @@ import { healthGlyph, serviceMapModel } from "../../../../panels/rollups";
 import { formatValue } from "../../../../panels/units";
 import { brand, fonts } from "../../../../tokens";
 import type { AnalysisProps } from "./analysis-chart";
+import ServiceMapWorker from "./service-map.worker?worker&inline";
 
 import { fitServiceMap, layoutServiceMapRaw, nodeMetrics, serviceCardLabels, serviceMapStructure, type MapLayout } from "./service-map-layout";
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
@@ -46,12 +47,13 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     setLayoutError(undefined);
     if (model.nodes.length <= 60) {setCached({topology:structure.topology,layout:layoutServiceMapRaw(model,size,structure.widths),model});return;}
     let worker: Worker;
-    try { worker = new Worker(new URL("./service-map.worker.ts", import.meta.url), {type:"module"}); }
+    try { worker = new ServiceMapWorker(); }
     catch { setLayoutError("Service layout unavailable"); return; }
     let active=true;
     worker.onmessage = (event: MessageEvent<MapLayout>) => {if(active)setCached({topology:structure.topology,layout:event.data,model});};
     worker.onerror = () => {if(active)setLayoutError("Service layout unavailable");};
-    worker.postMessage({model,size:{width:size.width,height:size.height},widths:structure.widths});
+    try { worker.postMessage({model,size:{width:size.width,height:size.height},widths:structure.widths}); }
+    catch { active=false; worker.terminate(); setLayoutError("Service layout unavailable"); return; }
     return () => {active=false;worker.terminate();};
   },[structure.key,measured,compactRequired]);
   const graph = useMemo(() => cached ? fitServiceMap(cached.layout,cached.topology===structure.topology?model:cached.model,size) : {nodes:[],edges:[],scale:1,compact:true,folded:false,initialScrollY:0,contentWidth:size.width,contentHeight:size.height,uncalledLabel:undefined},[cached,model,size,structure.key]);

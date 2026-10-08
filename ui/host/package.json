@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc --noEmit && bun --bun vite build",
+    "build:host": "bun --bun vite build",
+    "build:apps": "bun --bun vite build --config vite.apps.config.ts",
     "build:watch": "bun --bun vite build --watch",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "lint": "tsc --noEmit",
@@ -40,7 +42,8 @@
     "happy-dom": "20.14.5",
     "typescript": "7.0.2",
     "vite": "8.3.1",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "vite-plugin-singlefile": "2.3.3"
   },
   "overrides": {
     "@hono/node-server": "1.19.15",

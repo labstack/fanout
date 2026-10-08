@@ -1,5 +1,4 @@
 import { expect, it } from "vitest";
-// @ts-expect-error Node-only test helpers; browser TS config excludes Node globals.
 import { readFileSync } from "node:fs";
 const source = (file: string): string => readFileSync(`src/dashboards/${file}`, "utf8");
 it("removes the test-only map layout boundary and misleading zoom state", () => {
