@@ -13,7 +13,7 @@ const heat: PanelResult = { id: "h", status: "ok", elapsed_ms: 1, interval: "1m"
   values: [[0,0,0],[0,25,3200],[25,50,null],[1,10,100]], rows: 3,
 } };
 
-it.each([false,true])("V4: discrete full-height heat cells and single-hue inline ramp, dark=%s", dark => {
+it.each([false,true])("discrete full-height heat cells and single-hue inline ramp, dark=%s", dark => {
   const theme = chartThemeFor(dark);
   const option = analysisOption({id:"h",title:"Heat",viz:"heatmap"},heat,theme) as any;
   const cell = option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:"#fff"})});
@@ -26,7 +26,7 @@ it.each([false,true])("V4: discrete full-height heat cells and single-hue inline
   expect(option.yAxis.data).toEqual(["<25 ms","25–50 ms","≥3.2 s"]);
 });
 
-it("V4: duration buckets retain decimal seconds and open bounds", () => {
+it("duration buckets retain decimal seconds and open bounds", () => {
   expect(formatBucket(null,25,"ms")).toBe("<25 ms");
   expect(formatBucket(800,1600,"ms")).toBe("800–1,600 ms");
   expect(formatBucket(1600,3200,"ms")).toBe("1.6–3.2 s");
@@ -35,7 +35,7 @@ it("V4: duration buckets retain decimal seconds and open bounds", () => {
 
 const path = "/oteldemo.CartService/some/long/path/to/EmptyCart";
 const bars: Frame = {columns:[{name:"route",type:"string",role:"dimension"},{name:"latency",type:"number",role:"measure",unit:"ms"}],values:[[path,"/checkout"],[1450,330]],rows:2};
-it.each([false,true])("V5: adaptive bar labels and bounded middle-ellipsis, dark=%s", dark => {
+it.each([false,true])("adaptive bar labels and bounded middle-ellipsis, dark=%s", dark => {
   const theme = chartThemeFor(dark);
   const option = barOption({id:"b",title:"Bars",viz:"bar"},bars,theme,{width:300,height:220,measureText:t=>t.length*7}) as any;
   expect(option.yAxis.axisLabel.width).toBeLessThanOrEqual(120);
@@ -48,7 +48,7 @@ it.each([false,true])("V5: adaptive bar labels and bounded middle-ellipsis, dark
   expect(option.series[0].label.formatter({value:330})).toBe("330 ms");
   expect([0,300,1200].map(option.xAxis.axisLabel.formatter)).toEqual(["0 ms","300 ms","1.2 s"]);
 });
-it.each([false,true])("V5: deploy split uses a thinner grey before and labelled slot-zero since, dark=%s", dark => {
+it.each([false,true])("deploy split uses a thinner grey before and labelled slot-zero since, dark=%s", dark => {
   const frame: Frame = {...bars,columns:[bars.columns[0],{name:"period",type:"string",role:"dimension"},bars.columns[1]],values:[[path,path],["Before deploy","Since deploy"],[50,1450]],rows:2,periods:{"Before deploy":{from:"2026-10-07T00:00:00Z",to:"2026-10-07T00:30:00Z"},"Since deploy":{from:"2026-10-07T00:30:00Z",to:"2026-10-07T01:00:00Z"}}};
   const theme = chartThemeFor(dark), option = barOption({id:"b",title:"Split",viz:"bar"},frame,theme) as any;
   expect(option.legend.left).toBe(0);
@@ -59,7 +59,7 @@ it.each([false,true])("V5: deploy split uses a thinner grey before and labelled 
   expect(option.series[1].data[0].selection.from).toBe(frame.periods!["Since deploy"].from);
 });
 
-it.each([false,true])("V8: every axis is muted mono 11–12, gauges respect the micro floor, dark=%s", dark=>{
+it.each([false,true])("every axis is muted mono 11–12, gauges respect the micro floor, dark=%s", dark=>{
  const theme=chartThemeFor(dark);
  const scatter:PanelResult={...heat,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"x",type:"number",role:"measure",unit:"count"},{name:"y",type:"number",role:"measure",unit:"ms"}],values:[["s"],[3],[80]],rows:1}};
  const options=[barOption({id:"b",title:"Bars",viz:"bar"},bars,theme),timeseriesOption({id:"t",title:"Time",viz:"timeseries"},heat,theme),...(["heatmap","histogram","state_timeline","scatter"] as const).map(viz=>analysisOption({id:"a",title:"Analysis",viz},viz==="scatter"?scatter:heat,theme))] as any[];
@@ -73,7 +73,7 @@ it.each([false,true])("V8: every axis is muted mono 11–12, gauges respect the 
 });
 
 const contrast=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
-it.each([false,true])("V9: all categorical marks have 3:1 fill or outline without changing palette, dark=%s",dark=>{
+it.each([false,true])("all categorical marks have 3:1 fill or outline without changing palette, dark=%s",dark=>{
  const theme=chartThemeFor(dark);
  expect(contrast(theme.muted,theme.surface)).toBeGreaterThanOrEqual(4.5);expect(contrast(theme.text,theme.surface)).toBeGreaterThanOrEqual(4.5);
  const f:Frame={columns:[bars.columns[0],...Array.from({length:6},(_,i)=>({name:`m${i}`,type:"number" as const,role:"measure" as const}))],values:[["s"],...[1,2,3,4,5,6].map(n=>[n])],rows:1};
@@ -90,7 +90,7 @@ it.each([false,true])("V9: all categorical marks have 3:1 fill or outline withou
  expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
 });
 
-it.each([false,true])("V9: threshold/anomaly text stays readable over the warm tint, dark=%s",dark=>{
+it.each([false,true])("threshold/anomaly text stays readable over the warm tint, dark=%s",dark=>{
  const theme=chartThemeFor(dark),panel={id:"t",title:"Time",viz:"timeseries" as const,thresholds:[{value:1,status:"warn" as const,label:"Budget"}]};
  const result={...heat,from_ms:0,to_ms:120000};
  const base=timeseriesOption(panel,result,theme) as any;

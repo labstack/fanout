@@ -37,8 +37,8 @@ type Config struct {
 	MaintenanceInterval time.Duration `koanf:"storage.maintenance_interval" env:"FANOUT_MAINTENANCE_INTERVAL" default:"1h"`
 	// RollupSkipToLatest, set once at boot, advances the service and edge rollup
 	// watermarks to the current max ingested timestamp. Existing history is not
-	// aggregated into those analytical rollups. Completed-batch endpoint, log,
-	// and trace caches still rebuild all retained history in bounded passes;
+	// aggregated into those analytical rollups. Completed-batch trace caches
+	// still rebuild all retained history in bounded passes;
 	// uncached files remain immediately queryable. Useful for large pre-seeded
 	// datasets (benchmarks, restores); off in normal operation.
 	RollupSkipToLatest bool   `koanf:"storage.rollup_skip_to_latest" env:"FANOUT_ROLLUP_SKIP_TO_LATEST" default:"false"`

@@ -17,5 +17,3 @@ func New() (string, error) {
 func MustNew() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
-
-// IsV7 reports whether value is a canonical UUIDv7 string.

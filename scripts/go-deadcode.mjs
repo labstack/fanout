@@ -2,9 +2,20 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
-// The module's tool directive pins deadcode; every command main is a root,
-// while exported code referenced solely by tests remains unreachable.
-const result = spawnSync("bash", ["scripts/with-duckdb.sh", "go", "tool", "deadcode", "-test=false", "-json", "./cmd/..."], {encoding:"utf8", maxBuffer:32*1024*1024});
+// Discover every production main, including internal commands and future mains.
+// Test-support packages such as query/querytest are not executable roots.
+function run(args) {
+  return spawnSync("bash", ["scripts/with-duckdb.sh", ...args], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+}
+const listed = run(["go", "list", "-f", '{{if eq .Name "main"}}{{.ImportPath}}{{end}}', "./..."]);
+if (listed.error || listed.status !== 0) {
+  console.error(listed.error?.message ?? listed.stderr);
+  process.exit(listed.status || 1);
+}
+const roots = [...new Set(listed.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean))].sort();
+if (!roots.length) { console.error("No production main packages found"); process.exit(1); }
+console.log("Production deadcode roots:\n" + roots.join("\n"));
+const result = run(["go", "tool", "deadcode", "-test=false", "-json", ...roots]);
 if (result.error) { console.error(result.error.message); process.exit(1); }
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.status !== 0) { if(result.stdout) process.stdout.write(result.stdout); process.exit(result.status ?? 1); }

@@ -1,3 +1,5 @@
+import { PanelGrid } from "./grid";
+import { rowHeight } from "./layout";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, type ReactNode } from "react";
@@ -12,8 +14,6 @@ vi.mock("react-grid-layout", () => ({
   verticalCompactor: {},
   Responsive: (props: GridOptions) => { grid.current = props; return <div>{props.children}</div>; },
 }));
-import { PanelGrid } from "./grid";
-import { rowHeight } from "./layout";
 
 const spec: DashboardSpec = { version: 1, name: "Notes", time: { range: "1h" }, panels: [
   { id: "note", title: "Note", viz: "text", content: "Hello", grid: { x: 3, y: 0, w: 6, h: 3 } },
@@ -64,7 +64,7 @@ async function render(editing = true, dashboardSpec = spec) {
 }
 
 describe("dashboard layout editing", () => {
-  it("P3a defaults service maps without a saved grid to large rows, preserving explicit sizes",async()=>{
+  it("defaults service maps without a saved grid to large rows, preserving explicit sizes",async()=>{
     await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map"}]});
     expect(grid.current!.layouts.lg[0].h).toBe(10);
     await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map",height:"s"}]});

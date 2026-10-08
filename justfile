@@ -150,7 +150,6 @@ ui-test:
 
 # Shared UI modules remain package-free.
 ui-boundaries-check:
-    bun test scripts/ui-boundaries.test.ts scripts/ui-compare.test.ts
     bun scripts/ui-boundaries.mjs
 
 # Audit the one locked browser graph. GHSA-vfj7-8cjw-p6xm reaches host
@@ -303,7 +302,7 @@ social-card:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
+check: script-tests test-names-check go-deadcode ui-deadcode fmt-check ui-boundaries-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:
@@ -314,3 +313,11 @@ ui-deadcode:
 
 go-deadcode:
     node scripts/go-deadcode.mjs
+
+# Run every script test, including failure injection, as part of CI.
+script-tests:
+    bun test scripts/*.test.ts
+
+# Test names describe behavior; specification scenarios such as S8 are allowed.
+test-names-check:
+    node scripts/test-names.mjs

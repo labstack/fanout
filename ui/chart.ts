@@ -50,14 +50,3 @@ export function healthSymbol(health: string) {
 export function healthBorderType(health: string) {
   return health === "unknown" ? "dashed" : "solid";
 }
-
-/** ECharts sizes a symbol by its bounding box, and the shapes do not fill one
- *  equally: a diamond covers half of it against a circle's ~0.79 and a rounded
- *  square's ~0.95. Sized naively the unhealthy node drew a third smaller than a
- *  healthy one — and shrank its click target with it — which is the opposite of
- *  what the shape is for. The scale evens the drawn area out.
- *
- *  It multiplies the capped size rather than being capped with it: clamping
- *  the product puts every busy service back on the same bounding box, which is
- *  where the diamond loses a third of its area again. The node a map is
- *  shouting about is allowed to be the biggest thing on it. */

@@ -5,6 +5,10 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSearch } from "./search";
 import type { AnnotationsResponse } from "../../../panels/annotations";
+import { DashboardPage } from "./page";
+import { demoFrame } from "../../tests/service-map-demo";
+import { assertServiceMapDOM } from "../../tests/service-map-collector";
+
 const charts = vi.hoisted(() => ({ option: vi.fn() }));
 
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ option, label, onClick, onZoom }: { option: Record<string, unknown>; label: string; onClick?: (event: { name: string; seriesName: string; value: number[] }) => void; onZoom?: (from: number, to: number) => void }) => { charts.option(option); return <div data-chart={label}>
@@ -17,9 +21,6 @@ vi.mock("../app-context", async (importOriginal) => ({
   useFanoutApp: () => app,
 }));
 
-import { DashboardPage } from "./page";
-import { demoFrame } from "../../tests/service-map-demo";
-import { assertServiceMapDOM } from "../../tests/service-map-collector";
 
 const spec = {
   version: 1, name: "Checkout", description: "Money path", time: { range: "1h", refresh: "30s" },

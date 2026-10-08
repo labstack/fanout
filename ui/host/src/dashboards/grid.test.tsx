@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PanelGrid } from "./grid";
+import { warn } from "../../../tokens";
+import type { DashboardSpec, PanelResult } from "../../../panels/types";
 
 const charts = vi.hoisted(() => ({ calls: [] as { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void; onZoom?: (from: number, to: number) => void }[] }));
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, group, onClick, onZoom }: { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void; onZoom?: (from: number, to: number) => void }) => {
@@ -11,9 +14,6 @@ vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, grou
   return <button data-chart={label} onClick={() => onClick?.({ name: "cart", seriesName: "cart" })}>{label}</button>;
 } }));
 
-import { PanelGrid } from "./grid";
-import { warn } from "../../../tokens";
-import type { DashboardSpec, PanelResult } from "../../../panels/types";
 
 const spec: DashboardSpec = {
   version: 1, name: "Shop", time: { range: "1h" },

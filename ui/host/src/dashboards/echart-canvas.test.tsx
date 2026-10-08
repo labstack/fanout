@@ -1,6 +1,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { EChartCanvas } from "./echart-canvas";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn(), registered: [] as unknown[], connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
 
@@ -9,7 +10,6 @@ vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {},
 vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: { id: "graphic" }, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
-import { EChartCanvas } from "./echart-canvas";
 
 function fresh() {
   const instance = { setOption: vi.fn(), dispatchAction: vi.fn(), dispose: vi.fn(), on: vi.fn(), resize: vi.fn(), group: "" };

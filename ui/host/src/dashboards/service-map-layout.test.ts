@@ -4,7 +4,7 @@ import { chartThemeFor } from "../../../panels/compile";
 import { relativeLuminance } from "../../../theme";
 import { seriesSlot } from "../../../chart";
 
-it.each([false, true])("Q1: heat counts use distinct monotonic quantile colours and omit zero (%s)", dark => {
+it.each([false, true])("heat counts use distinct monotonic quantile colours and omit zero (%s)", dark => {
   const theme = chartThemeFor(dark);
   const counts = [0, 1, 10, 100, 1000, 3000];
   const result = { id: "h", status: "ok" as const, elapsed_ms: 1, interval: "1m", frame: {
@@ -30,7 +30,7 @@ it.each([false, true])("Q1: heat counts use distinct monotonic quantile colours 
   expect(option.series[0].data[1].value[2]).toBe(10);
 });
 
-it.each([false,true])("Q1: a window of only singleton cells stays dim (%s)",dark=>{
+it.each([false,true])("a window of only singleton cells stays dim (%s)",dark=>{
  const theme=chartThemeFor(dark),result={id:"h",status:"ok" as const,elapsed_ms:1,frame:{columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[0],[1]],rows:1}};
  const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},result,theme) as any;
  const cell=option.series[0].renderItem({}, {value:(i:number)=>[0,0,1,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:seriesSlot(0,dark)})});

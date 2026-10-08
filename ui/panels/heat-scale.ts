@@ -1,3 +1,4 @@
+/** Sequential ramps have strictly ordered luminance, with a readable high end. */
 import type { ChartTheme } from "./compile";
 export function heatRamp(theme: ChartTheme): string[] {
   return theme.dark ? ["#0f2a43", "#164267", "#1e5a8a", "#2879ae", "#399aca", "#57b8e3", "#7dd3fc"]

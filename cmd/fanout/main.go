@@ -112,8 +112,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Initialize query cache with app context (cleanup goroutine stops on cancel)
-
 	// Error channel for goroutine failures
 	errCh := make(chan error, 4)
 

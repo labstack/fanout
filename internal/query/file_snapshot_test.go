@@ -576,7 +576,7 @@ func TestReadCacheRowBudgetAndOversizedFileProgress(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "oversized", Spans: old}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "newest", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "newest", Spans: []telemetry.Span{{TraceID: "newest", StartUnixNanos: 2, EndUnixNanos: 3, IngestedAt: 2}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
@@ -596,5 +596,36 @@ func TestReadCacheRowBudgetAndOversizedFileProgress(t *testing.T) {
 	var count int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_parts WHERE batch_id='oversized'`).Scan(&count); err != nil || count != len(old) {
 		t.Fatalf("oversized count=%d: %v", count, err)
+	}
+}
+
+func TestTraceBackfillBudgetsSpanRowsAndReportsOnlyTraceWork(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	logs := make([]telemetry.Log, readCacheRowBudget)
+	for i := range logs {
+		logs[i] = telemetry.Log{TimeUnixNanos: 2, IngestedAt: 2}
+	}
+	for _, b := range []telemetrystore.Batch{
+		{ID: "older-trace", Spans: []telemetry.Span{{TraceID: "older", StartUnixNanos: 1, EndUnixNanos: 2, IngestedAt: 1}}},
+		{ID: "log-heavy-trace", Spans: []telemetry.Span{{TraceID: "mixed", StartUnixNanos: 2, EndUnixNanos: 3, IngestedAt: 2}}, Logs: logs},
+		{ID: "log-only", Logs: []telemetry.Log{{TimeUnixNanos: 3, IngestedAt: 3}}},
+	} {
+		if err := repo.Commit(t.Context(), b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	markers, err := batchMarkers(t.Context(), d.DB)
+	if err != nil || !markers["older-trace"] || !markers["log-heavy-trace"] {
+		t.Fatalf("logs consumed trace row budget: %v %v", markers, err)
+	}
+	var count int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_parts`).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("trace parts=%d %v", count, err)
+	}
+	if got := metricFamily(t, "fanout_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 2 {
+		t.Fatalf("pending trace gauge=%v want 2", got)
 	}
 }

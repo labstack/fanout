@@ -3,7 +3,7 @@ import { useDebouncedValue } from "@mantine/hooks";
 import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { threadHistoryQueryKey } from "./api";
+import { getJSON, threadHistoryQueryKey } from "./api";
 import { authorizedFetch } from "./auth";
 import { dashboardsKey, dashboardsStaleTime, listDashboards } from "./dashboards/api";
 
@@ -63,7 +63,12 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
   // dashboards" while that service was live, traced and logged — the search
   // looked only at what the user had already named. The catalogue is fetched
   // only once someone is actually searching.
-  const schema = useQuery({queryKey:["telemetry-schema","1h"],queryFn:async()=>{ const response=await authorizedFetch("/api/telemetry/schema?window=1h"); if(!response.ok) throw new Error("Service search failed"); return response.json() as Promise<{services:Array<{value:string;count?:number}>}>; },enabled:Boolean(query)&&Boolean(onInvestigateService),staleTime:60_000});
+  const schema = useQuery({
+    queryKey: ["telemetry-schema", "1h"],
+    queryFn: () => getJSON<{ services: Array<{ value: string; count?: number }> }>("/api/telemetry/schema?window=1h"),
+    enabled: Boolean(query) && Boolean(onInvestigateService),
+    staleTime: 60_000,
+  });
   const matchingServices = useMemo(() => {
     if (!query) return [];
     const needle = query.toLowerCase();
@@ -120,7 +125,8 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
-        {query && onInvestigateService && <Stack gap={4}>
+        {query && onInvestigateService && schema.isLoading && <Center py="md"><Loader size="xs" /></Center>}
+        {query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
           {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
           {schema.isSuccess && matchingServices.length === 0 && <Text c="dimmed" size="sm" px="sm">No matching services</Text>}

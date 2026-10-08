@@ -26,7 +26,7 @@ it.each([false,true])("native gauge text never overlaps in meter layouts at 1100
   }finally{chart.dispose();el.remove();}
  }
 });
-it.each([false,true])("P3c/P3d native labels are horizontal and above the actual plot, away from x ticks (%s)",dark=>{
+it.each([false,true])("native labels are horizontal and above the actual plot, away from x ticks (%s)",dark=>{
  const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:500,height:248});
  try {
   const panel={id:"t",title:"Latency",viz:"timeseries" as const},theme=chartThemeFor(dark);
@@ -58,7 +58,7 @@ it.each([false,true])("measures actual SVG renderer heat gaps/scale and bar labe
  } finally {chart.dispose();el.remove();}
 });
 
-it.each([false,true])("Q1 native renderer keeps five heat intensities and excludes empty cells (%s)",dark=>{
+it.each([false,true])("native renderer keeps five heat intensities and excludes empty cells (%s)",dark=>{
  const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:600,height:248});
  try {
   const counts=[0,1,10,100,1000,3000];
@@ -72,7 +72,7 @@ it.each([false,true])("Q1 native renderer keeps five heat intensities and exclud
  }finally{chart.dispose();el.remove();}
 });
 
-it.each([false,true])("F1/F2/F5 native small gauges and m-height plots have unclipped, nonoverlapping labels (%s)",dark=>{
+it.each([false,true])("native small gauges and m-height plots have unclipped, nonoverlapping labels (%s)",dark=>{
  const overlaps=(a:{left:number;top:number;right:number;bottom:number},b:typeof a)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;
  const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",width:238,height:56});
  const theme=chartThemeFor(dark);

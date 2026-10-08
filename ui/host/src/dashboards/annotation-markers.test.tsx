@@ -32,7 +32,7 @@ function markers(data: PanelResult = result, viz: Panel["viz"] = "timeseries", a
 }
 
 describe("annotation scope and windows", () => {
-  it("P3c/P3d reserve the top lane without mutating the base", () => {
+  it("reserve the top lane without mutating the base", () => {
     const option = {grid:{top:12,left:8,right:16,bottom:8},series:[{type:"line"}]};
     const got = withAnnotations(option,panel,result,history,{},theme) as {grid:{top:number};toolbox?:unknown;series:{markLine:{data:{label:{position:string;distance:number;rotate:number;verticalAlign:string}}[]}}[]};
     expect(got.toolbox).toBeUndefined();

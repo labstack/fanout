@@ -150,7 +150,7 @@ func TestItemsSpecGuide(t *testing.T) {
 	}
 }
 
-func TestSpecGuide(t *testing.T) {
+func TestSpecGuideExplainsRowPanelQueriesRedactionAndRanking(t *testing.T) {
 	for _, phrase := range []string{
 		"Row panel types are logs, log_patterns and traces.",
 		"Logs and traces take no measures, by or bucket.",

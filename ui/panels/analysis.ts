@@ -1,3 +1,4 @@
+import { heatRamp, heatStep } from "./heat-scale";
 import { escapeHTML, htmlTooltip, tooltipLines, type TooltipPoint } from "./escape";
 import { seriesSlot } from "../chart";
 import type { ChartSize, ChartTheme } from "./compile";
@@ -20,8 +21,6 @@ const bucketKey = (row: Record<string, Cell>) => `${row.bucket_lower}:${row.buck
 const bucketSelection = (row: Record<string, Cell> | undefined) => typeof row?.bucket_lower === "number"
   ? { lower: row.bucket_lower, upper: typeof row.bucket_upper === "number" ? row.bucket_upper : undefined } : undefined;
 
-/** Sequential ramps have strictly ordered luminance, with a readable high end. */
-import { heatRamp, heatStep } from "./heat-scale";
 const heatCountLabel = (count: number) => count >= 1000 && count < 1e6 && count % 1000 === 0 ? `${count / 1000}k` : formatValue("count", count);
 
 /** State runs merge only touching buckets of the same row and status. */

@@ -7,12 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {  type Frame, type Panel, type PanelResult } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { warn, bad, ok } from "../../../tokens";
-
-const mocks = vi.hoisted(() => ({ init: vi.fn() }));
-vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
-vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: {}, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
-vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 import { BarViz } from "./viz/bar";
 import { TimeseriesViz } from "./viz/timeseries";
 import { GaugeViz } from "./viz/gauge";
@@ -25,6 +19,13 @@ import { Viz } from "./viz";
 import { ApiError } from "./api";
 import { retryQuery } from "./query-policy";
 import { PanelData } from "./inspect";
+import { makeDrill, parseDrill } from "./drill-state";
+
+const mocks = vi.hoisted(() => ({ init: vi.fn() }));
+vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: {}, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
+vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
 const frame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "count", type: "number", role: "measure" }], values: [[1, 2], [20, 40]], rows: 2, totals: [null, 120] };
 const panel: Panel = { id: "p", title: "For $service", viz: "stat", reduce: "window" };
@@ -318,7 +319,6 @@ describe("visualization regressions", () => {
   });
 });
 
-import { makeDrill, parseDrill } from "./drill-state";
 it("grouped bar clicks carry both telemetry dimensions", async () => {
  const p: Panel = {...panel,viz:"bar",drill:"traces",query:{from:"spans",by:["service","operation"],measures:["count()"]}};
  const r: PanelResult = {...result,from_ms:100000,to_ms:500000,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"operation",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[["checkout"],["PlaceOrder"],[9]],rows:1}};

@@ -140,10 +140,6 @@ const macroAttr = `
 CREATE OR REPLACE MACRO attr(attributes, key) AS
   variant_extract(attributes, key);`
 
-// CreateTables creates mutable telemetry tables for query-kernel tests and
-// benchmarks. Production startup never calls this function: telemetry is
-// exposed exclusively through CreateParquetViews.
-
 // CreateCacheTables creates only DuckDB's rebuildable query accelerators. The
 // production telemetry rows themselves live in immutable Parquet batches.
 func CreateCacheTables(db *sql.DB) error {

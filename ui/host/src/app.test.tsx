@@ -5,6 +5,10 @@ import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tan
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import App from "./App";
+import { ChatPage } from "./chat";
+import { createDashboardPrompt } from "./app-context";
+import { parseSearch, toSearchParams } from "./dashboards/search";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -38,10 +42,6 @@ vi.mock("./auth", () => ({
   clearSession: vi.fn(),
 }));
 
-import App from "./App";
-import { ChatPage } from "./chat";
-import { createDashboardPrompt } from "./app-context";
-import { parseSearch, toSearchParams } from "./dashboards/search";
 
 const fetchMock = vi.fn<typeof fetch>();
 

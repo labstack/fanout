@@ -18,7 +18,6 @@ describe("status encoding", () => {
   });
 
   it("preserves unknown health without inferring a verdict from traffic", () => {
-    // Slow with no errors: the latency is the problem, and only the latency.
     const healthColumn=demoFrame.columns.findIndex(c=>c.name==="health");
     const f=structuredClone(demoFrame);f.values[healthColumn]=f.values[healthColumn].map(()=>"unknown");
     expect(serviceMapModel(f).nodes.every(n=>n.health==="unknown")).toBe(true);
@@ -27,8 +26,6 @@ describe("status encoding", () => {
 });
 
 describe("map symbols", () => {
-  // ECharts sizes by bounding box, so a diamond drew a third less area than a
-  // circle at the same size — the unhealthy node was the smallest on the map.
   it("keeps card hit targets equal across health states", () => {
     const widths=[];
     for(const health of ["healthy","degraded","unhealthy"]) {

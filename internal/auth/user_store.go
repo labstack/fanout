@@ -83,8 +83,7 @@ func toUser(u generated.User) User {
 	}
 }
 
-// Create adds a new user.
-
+// CreateWithAudit adds a new user.
 func (s *UserStore) CreateWithAudit(email, name string, role Role, event AuditEvent) (User, error) {
 	return s.create(email, name, role, &event)
 }
@@ -176,8 +175,7 @@ func (s *UserStore) List() ([]User, error) {
 	return users, nil
 }
 
-// Update modifies a user's fields. Email, role, or active-state changes revoke every browser session.
-
+// UpdateWithAudit modifies a user's fields. Email, role, or active-state changes revoke every browser session.
 func (s *UserStore) UpdateWithAudit(id string, email, name *string, role *Role, active *bool, event AuditEvent) (User, error) {
 	return s.update(id, email, name, role, active, &event)
 }
@@ -283,8 +281,7 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 	return toUser(u), nil
 }
 
-// Delete removes a user and all of its browser sessions by ID.
-
+// DeleteWithAudit removes a user and all of its browser sessions by ID.
 func (s *UserStore) DeleteWithAudit(id string, event AuditEvent) error {
 	return s.delete(id, &event)
 }
@@ -375,8 +372,7 @@ func (s *UserStore) CountActiveAdmins() (int64, error) {
 	return s.q.CountActiveAdmins(context.Background())
 }
 
-// RevokeAllSessions invalidates and removes every browser session for a user.
-
+// RevokeAllSessionsWithAudit invalidates and removes every browser session for a user.
 func (s *UserStore) RevokeAllSessionsWithAudit(id string, event AuditEvent) error {
 	return s.revokeAllSessions(id, &event)
 }
@@ -430,9 +426,8 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	return nil
 }
 
-// CreateFirstAdmin atomically creates the first admin user.
+// CreateFirstAdminWithAudit atomically creates the first admin user.
 // Returns ErrSetupComplete if users already exist (race-safe).
-
 func (s *UserStore) CreateFirstAdminWithAudit(email, name string, event AuditEvent) (User, error) {
 	return s.createFirstAdmin(email, name, &event)
 }

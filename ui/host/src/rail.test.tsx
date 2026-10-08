@@ -246,6 +246,27 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  it("keeps the service catalogue loading until its matching rows are ready", async () => {
+    let resolveSchema!: (response: Response) => void;
+    const schemaResponse = new Promise<Response>((resolve) => { resolveSchema = resolve; });
+    fetchMock.mockImplementation(async (input, init) => String(input).includes("/api/telemetry/schema") ? schemaResponse : respond(input, init));
+    const { root, render } = mount();
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+      await act(async () => setValue(document.querySelector('input[aria-label="Search chats, dashboards and services"]')!, "payments"));
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/telemetry/schema"))).toBe(true));
+      expect(document.body.textContent).not.toContain("Services");
+      expect(document.body.textContent).not.toContain("No matching services");
+      await act(async () => resolveSchema(json({ services: [{ value: "payments", count: 8 }] })));
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Services"));
+      expect([...document.querySelectorAll(".rail-row")].some(row => row.textContent?.trim() === "payments")).toBe(true);
+    } finally {
+      resolveSchema(json({ services: [] }));
+      await act(async () => root.unmount());
+    }
+  });
+
   it("does not ask for the service catalogue until someone searches", async () => {
     const { root, render } = mount();
     await act(async () => render());

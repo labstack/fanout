@@ -1,3 +1,6 @@
+import type { Frame } from "../../../panels/types";
+import * as mapLayout from "./viz/service-map-layout";
+import * as serviceMapExports from "./viz/service-map";
 import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -146,9 +149,6 @@ describe("shared map interactions", () => {
   });
 });
 
-import type { Frame } from "../../../panels/types";
-import * as mapLayout from "./viz/service-map-layout";
-import {readFileSync} from "node:fs";
 const calls = vi.hoisted(() => ({ layout: vi.fn() }));
 vi.mock("@dagrejs/dagre", async importOriginal => {
   const actual = await importOriginal<typeof import("@dagrejs/dagre")>();
@@ -371,21 +371,16 @@ it("preserves zero error in the full-card metric pair", () => {
 
 });
 
-describe("service map production instrumentation",()=>{
-const source = (file: string): string => readFileSync(`src/dashboards/${file}`, "utf8");
-it("removes the test-only map layout boundary and misleading zoom state", () => {
-  expect(source("viz/service-map-layout.ts")).not.toMatch(/export function layoutServiceMap\(/);
-  expect(source("viz/service-map.tsx")).not.toMatch(/export \{|zoomed/);
-  expect(source("panel-card.tsx")).not.toContain("mapView?.zoomed");
-});
-it("removes map geometry test instrumentation from production", () => {
-  expect(/data-(pan-y|text-width)/.test(source("viz/service-map.tsx"))).toBe(false);
-});
-it("removes obsolete map zoom exercises, duplicate assertions and chart mock keys", () => {
-  const map = source("service-map.test.tsx").split('describe("service map production instrumentation"')[0];
-  expect(map).not.toMatch(/ctrlKey|const zoom = 1/);
-  expect(map).not.toMatch(/expect\(viewport.scrollLeft\)\.toBe\(0\);expect\(viewport.scrollLeft\)/);
-  expect(source("viz-regressions.test.tsx")).not.toMatch(/GaugeChart|GraphChart/);
-});
-
+describe("service map production instrumentation", () => {
+  it("exposes the renderer and active layout API without a parallel layout boundary", () => {
+    expect(Object.keys(serviceMapExports)).toEqual(["ServiceMapViz"]);
+    expect(Object.keys(mapLayout)).not.toContain("layoutServiceMap");
+  });
+  it("renders map geometry without test-only attributes", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host); cleanups.push(() => root.unmount());
+    await act(async () => root.render(<MantineProvider><ServiceMapViz panel={{ id: "map", title: "Map", viz: "service_map" }} result={{ id: "map", status: "ok", elapsed_ms: 1, frame: demoFrame }} dark={false} height={300} /></MantineProvider>));
+    expect(host.querySelectorAll("[data-service-node]").length).toBeGreaterThan(0);
+    expect(host.querySelector("[data-pan-y], [data-text-width]")).toBeNull();
+  });
 });

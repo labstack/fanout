@@ -49,8 +49,6 @@ func NewEngine(
 	}
 }
 
-// Store exposes the underlying store for MCP tools.
-
 // RemoveRule removes a compiled program so it is not evaluated on future ticks.
 func (e *Engine) RemoveRule(ruleID string) {
 	e.mu.Lock()
@@ -80,8 +78,6 @@ func (e *Engine) Run(ctx context.Context) {
 		}
 	}
 }
-
-// BuildEnvForService returns the AlertEnv for a single service (for MCP test action).
 
 // BuildAllEnvs returns all current AlertEnvs keyed by service name.
 func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]AlertEnv {
@@ -528,6 +524,7 @@ func abs(f float64) float64 {
 	return f
 }
 
+// RecompileRule compiles an expression and replaces the rule used on future evaluation ticks.
 func (e *Engine) RecompileRule(ruleID, expression string) error {
 	prog, err := CompileExpression(expression)
 	if err != nil {

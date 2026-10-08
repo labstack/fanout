@@ -62,7 +62,7 @@ describe("panel rendering", () => {
     expect(JSON.parse(host.querySelector("output")!.textContent!)).toEqual({ range: "24h", vars: { service: "payment" } });
     expect(host.querySelector('[aria-label="Reset Requests zoom"]')).toBeNull();
   });
-  it.each([false, true])("P3c restores the horizontal W3 lane with clustered surface chips (dark=%s)", dark => {
+  it.each([false, true])("renders the horizontal annotation lane with clustered surface chips (dark=%s)", dark => {
     const theme = chartThemeFor(dark);
     const deploys = [1000, 1001, 400000].map(at => ({ service: "cart", namespace: "", version: "a-very-long-version-name", at: new Date(at).toISOString() }));
     const got = withAnnotations(timeseriesOption(panel, result, theme), panel, result, { deploys, anomalies: [] }, {}, theme, { width: 270, height: 248 });

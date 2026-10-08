@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/queryrows"
 )
 
 func TestRollupPanelsReuseServices(t *testing.T) {
@@ -76,11 +78,7 @@ func TestRollupPanelsAggregateContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := reader.HealthErrorTrend(t.Context(), scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: p}
+	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: []float64{10, 0}}
 	if got[0].Frame == nil || !reflect.DeepEqual(got[0].Frame.Health, want) {
 		t.Fatalf("health aggregate got %+v want %+v", got, want)
 	}
@@ -203,5 +201,36 @@ func TestRollupPanelsRejectUnrepresentableFilters(t *testing.T) {
 		if !errors.As(err, &got) || !slices.Contains(got, want) {
 			t.Fatalf("%s: got %v want %+v", tc.where, err, want)
 		}
+	}
+}
+
+type countingHealthReadDB struct {
+	observability.DB
+	reads int
+}
+
+func (db *countingHealthReadDB) QueryContext(ctx context.Context, sql string, args ...any) (queryrows.Rows, error) {
+	db.reads++
+	return db.DB.QueryContext(ctx, sql, args...)
+}
+func TestHealthPanelReadsOnlySummaryAndTrendForScopedRollups(t *testing.T) {
+	engine, _ := newTestEngine(t)
+	at := fixtureStart
+	if _, err := engine.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',10,10,50,100,.1,2,3),('shop',?,'checkout',30,30,70,200,0,4,5),('other',?,'checkout',100,100,1,1,1,0,0),('shop',?,'payment',100,100,1,1,1,0,0)`, at, at.Add(10*time.Minute), at, at); err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingHealthReadDB{DB: engine}
+	executor := NewExecutor(engine, 30)
+	executor.SetRollupReader(observability.New(counter, engine, 30))
+	executor.now = func() time.Time { return at.Add(time.Hour) }
+	out, err := executor.Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Health", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "health", Title: "Health", Viz: "health", Query: &Query{From: "spans", Where: []string{"namespace='shop'", "service='checkout'"}}}}}})
+	if err != nil || len(out) != 1 || out[0].Status != "ok" {
+		t.Fatalf("health panel: %+v %v", out, err)
+	}
+	if counter.reads != 2 {
+		t.Fatalf("health panel issued %d reads; want summary and trend only", counter.reads)
+	}
+	if !reflect.DeepEqual(out[0].Frame.Health.ErrorTrend, []float64{10, 0}) || out[0].Frame.Health.ErrorRate != 2.5 {
+		t.Fatalf("scoped health percentages: %+v", out[0].Frame.Health)
 	}
 }

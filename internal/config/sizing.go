@@ -332,7 +332,6 @@ type cgroupMount struct {
 // and walks toward the controller mount, taking the tightest finite limit. A
 // service such as systemd's fanout.service normally lives below the mount root;
 // reading only /sys/fs/cgroup/memory.max would inspect the host, not the service.
-
 func detectCgroupMemoryLimitDetailed(cgroupPath, mountInfoPath string) (uint64, bool, error) {
 	if _, err := os.ReadFile(cgroupPath); err != nil {
 		return 0, false, fmt.Errorf("read cgroup membership: %w", err)

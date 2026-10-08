@@ -3,6 +3,15 @@ import { makeDrill, parseDrill } from "./drill-state";
 import { router } from "../router";
 import { parseSearch, toSearchParams } from "./search";
 import type { Panel, PanelResult } from "../../../panels/types";
+import { MantineProvider } from "@mantine/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { DrillDrawer } from "./drill";
+import type { DashboardSpec } from "../../../panels/types";
+import type { DrillTarget } from "./drill-state";
+import { TableViz } from "./viz/table";
+
 const panel: Panel = {
   id: "p",
   title: "P",
@@ -65,13 +74,6 @@ describe("drill URL", () => {
   });
 });
 
-import { MantineProvider } from "@mantine/core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { DrillDrawer } from "./drill";
-import type { DashboardSpec } from "../../../panels/types";
-import type { DrillTarget } from "./drill-state";
 const hostAPI = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
 const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
 vi.mock("./api", () => ({
@@ -342,7 +344,6 @@ it("shows an empty trace and its empty correlated logs", async () => {
   } finally { await drawer.cleanup(); }
 });
 
-import { TableViz } from "./viz/table";
 it("drills configured trace-link rows with their namespace after sorting, without making empty rows actionable", async () => {
   const node = document.createElement("div");
   document.body.append(node);

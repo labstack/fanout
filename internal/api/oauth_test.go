@@ -578,6 +578,53 @@ func TestMCPOAuthTokenEndpointEnforcesScopeByGrantType(t *testing.T) {
 	decodeTokens(t, serve(t, e, http.MethodPost, "/oauth/token", refresh.Encode(), formHeaders))
 }
 
+func TestMCPOAuthRetiredRefreshGrantsPromptReauthorizationAndRevokeFamily(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := auth.NewOAuthStore(s.db.DB)
+	handler, err := NewMCPAuthorization(store, s.users, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Register(s.e)
+	user, err := s.users.CreateWithAudit("retired-refresh@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := registerOAuthClient(t, s.e)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, auth.MCPScopeTelemetryRead, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce a persisted grant from before the scope rename, without
+	// accepting retired names in any issuance or authorization path.
+	if _, err := s.db.DB.Exec(`UPDATE oauth_tokens SET scope = 'fanout:read' WHERE user_id = ?`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"grant_type": {"refresh_token"}, "client_id": {client.ClientID},
+		"refresh_token": {pair.RefreshToken}, "resource": {testMCPResource},
+	}
+	for attempt := range 2 {
+		rec := serve(t, s.e, http.MethodPost, "/oauth/token", form.Encode(), formHeaders)
+		var body struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusBadRequest || body.Error != "invalid_grant" {
+			t.Fatalf("retired refresh attempt %d = %d %s, want 400 invalid_grant", attempt, rec.Code, rec.Body.String())
+		}
+	}
+	var active int
+	if err := s.db.DB.QueryRow(`SELECT count(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`, user.ID).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("retired token family has %d active tokens, want 0", active)
+	}
+}
+
 func TestMCPOAuthTokenExchangeRejectsWrongPKCEVerifier(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
 	cookie := oauthSessionCookie(t, e, users, "pkce@example.com")

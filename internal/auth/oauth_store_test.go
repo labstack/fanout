@@ -65,10 +65,13 @@ func TestOAuthStoreRejectsRetiredStoredGrants(t *testing.T) {
 	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
 		t.Fatalf("retired access grant=%v", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthScope) {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {
 		t.Fatalf("retired refresh grant=%v", err)
 	}
-
+	var active int
+	if err := sqlite.DB.QueryRow(`SELECT count(*) FROM oauth_tokens WHERE revoked_at IS NULL`).Scan(&active); err != nil || active != 0 {
+		t.Fatalf("retired token family remained active: %d %v", active, err)
+	}
 }
 
 func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {

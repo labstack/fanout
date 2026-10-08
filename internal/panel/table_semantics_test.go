@@ -24,7 +24,7 @@ func (e *countingTableTrendEngine) QueryContext(ctx context.Context, text string
 	return e.Engine.QueryContext(ctx, text, args...)
 }
 
-func TestOneTrendQuery(t *testing.T) {
+func TestTableSparklinesShareOneQueryAcrossRowsAndMeasures(t *testing.T) {
 	e := newFixtureExecutor(t)
 	counter := &countingTableTrendEngine{Engine: e.engine}
 	e.engine = counter

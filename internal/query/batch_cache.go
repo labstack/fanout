@@ -162,7 +162,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	sort.SliceStable(batches, func(i, j int) bool { return newestBatchEvent(batches[i]) < newestBatchEvent(batches[j]) })
 	pendingCount := 0
 	for _, b := range batches {
-		if !markers[b.ID] {
+		if !markers[b.ID] && b.Spans > 0 {
 			pendingCount++
 		}
 	}
@@ -171,7 +171,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	pendingRows := 0
 	for i := len(batches) - 1; i >= 0; i-- {
 		if !markers[batches[i].ID] {
-			rows := batches[i].Spans + batches[i].Logs
+			rows := batches[i].Spans
 			// A complete file is indivisible. Admit one oversized file to make
 			// progress, otherwise bound new work by rows as well as file count.
 			if len(pending) > 0 && pendingRows+rows > readCacheRowBudget {
@@ -308,9 +308,8 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 	}
 	var cachedIDs []string
 	var cached, uncached []telemetry.BatchMetadata
-	signal := "spans"
 	for _, b := range batches {
-		if !overlapping(b, signal, w) {
+		if !overlapping(b, "spans", w) {
 			continue
 		}
 		if markers[b.ID] {
@@ -320,50 +319,47 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 			uncached = append(uncached, b)
 		}
 	}
-	switch w.Kind {
-	case queryrows.TraceCandidateRead:
-		// Use the incremental candidate index, repairing changed retired traces
-		// and ambiguous scopes from active batch parts. Compaction keeps it usable.
-		scope := "batch_id IN (" + idsSQL(cachedIDs) + ")"
-		if w.Namespace != "" {
-			scope += " AND namespace=" + sqlLiteral(w.Namespace)
-		}
-		if w.Service != "" {
-			scope += " AND service=" + sqlLiteral(w.Service)
-		}
-		index, err := d.traceCandidateSource(ctx, db, batches, markers, w)
-		if err != nil {
-			return err
-		}
-		full := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
-		partial := "SELECT * FROM (" + index + ") WHERE NOT (" + full + ") AND " + fmt.Sprintf("max_start>=%d AND min_start<%d", w.Start.UnixNano(), w.End.UnixNano())
-		projection := "namespace,service,trace_id,start_time,start_unix_nano,end_unix_nano,status"
-		tail := "SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", uncached, batches)) + ") WHERE " + windowPredicate("start_time", w)
-		// Only files whose scoped trace parts straddle a boundary require raw rows.
-		var partialFiles []telemetry.BatchMetadata
-		for _, b := range cached {
-			bounds, _ := batchTime(b, "spans")
-			if !bounds.Known || bounds.MinNanos < w.Start.UnixNano() || bounds.MaxNanos >= w.End.UnixNano() {
-				partialFiles = append(partialFiles, b)
-			}
-		}
-		interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
-		if len(partialFiles) > 0 {
-			tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
-			// A partial trace may also have in-window contributions in other batches.
-			// Include these parts as candidates; boundary rows merge them in the kernel.
-			sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`
-		} else {
-			// Every overlapping cached file lies inside the window, so a partial
-			// trace's other spans are in files outside it. Its in-window parts are
-			// still a candidate; the kernel needs one row per trace, and partial
-			// traces are disjoint from the fully contained index rows.
-			sources["trace_candidates"] = "SELECT trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
-				` UNION ALL SELECT trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
-				` AND trace_id IN (SELECT trace_id FROM (` + partial + `)) GROUP BY trace_id`
-		}
-		sources["trace_tail"] = tail
+	// Use the incremental candidate index, repairing changed retired traces
+	// and ambiguous scopes from active batch parts. Compaction keeps it usable.
+	scope := "batch_id IN (" + idsSQL(cachedIDs) + ")"
+	if w.Namespace != "" {
+		scope += " AND namespace=" + sqlLiteral(w.Namespace)
 	}
+	if w.Service != "" {
+		scope += " AND service=" + sqlLiteral(w.Service)
+	}
+	index, err := d.traceCandidateSource(ctx, db, batches, markers, w)
+	if err != nil {
+		return err
+	}
+	full := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
+	partial := "SELECT * FROM (" + index + ") WHERE NOT (" + full + ") AND " + fmt.Sprintf("max_start>=%d AND min_start<%d", w.Start.UnixNano(), w.End.UnixNano())
+	projection := "namespace,service,trace_id,start_time,start_unix_nano,end_unix_nano,status"
+	tail := "SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", uncached, batches)) + ") WHERE " + windowPredicate("start_time", w)
+	// Only files whose scoped trace parts straddle a boundary require raw rows.
+	var partialFiles []telemetry.BatchMetadata
+	for _, b := range cached {
+		bounds, _ := batchTime(b, "spans")
+		if !bounds.Known || bounds.MinNanos < w.Start.UnixNano() || bounds.MaxNanos >= w.End.UnixNano() {
+			partialFiles = append(partialFiles, b)
+		}
+	}
+	interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
+	if len(partialFiles) > 0 {
+		tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
+		// A partial trace may also have in-window contributions in other batches.
+		// Include these parts as candidates; boundary rows merge them in the kernel.
+		sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`
+	} else {
+		// Every overlapping cached file lies inside the window, so a partial
+		// trace's other spans are in files outside it. Its in-window parts are
+		// still a candidate; the kernel needs one row per trace, and partial
+		// traces are disjoint from the fully contained index rows.
+		sources["trace_candidates"] = "SELECT trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
+			` UNION ALL SELECT trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
+			` AND trace_id IN (SELECT trace_id FROM (` + partial + `)) GROUP BY trace_id`
+	}
+	sources["trace_tail"] = tail
 	return nil
 }
 

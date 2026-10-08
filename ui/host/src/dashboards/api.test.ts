@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DrillTarget } from "./drill-state";
+import type { DashboardSpec } from "../../../panels/types";
+import { ApiError, getTrace, queryExemplars, queryAnnotations, getDashboard, queryPanels, patchDashboard, replaceDashboard } from "./api";
 
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock("../auth", () => ({ authorizedFetch: fetchMock }));
 
-import type { DrillTarget } from "./drill-state";
-import type { DashboardSpec } from "../../../panels/types";
-import { ApiError, getTrace, queryExemplars, queryAnnotations, getDashboard, queryPanels, patchDashboard, replaceDashboard } from "./api";
 
 const spec = { version: 1, name: "n", time: {}, panels: [] } as DashboardSpec;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

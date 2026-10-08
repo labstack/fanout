@@ -2,6 +2,7 @@ import { act, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DashboardSearch } from "./search";
+import "../routes/dashboards.$dashboardId";
 
 const mocks = vi.hoisted(() => ({ navigate: vi.fn(), component: undefined as ComponentType | undefined }));
 vi.mock("@tanstack/react-router", () => ({
@@ -20,7 +21,6 @@ vi.mock("./page", () => ({
     <button onClick={() => onOpen("checkout")}>Another dashboard</button>
   </>,
 }));
-import "../routes/dashboards.$dashboardId";
 
 afterEach(() => { mocks.navigate.mockClear(); document.body.innerHTML = ""; });
 it("preserves scroll for drill, variable, brush and panel-view search updates", async () => {

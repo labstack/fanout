@@ -20,8 +20,8 @@ async function render(p = panel, dark = false) {
   await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><PanelCard panel={p} title={p.title} result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} /></MantineProvider>));
   return host;
 }
-describe("preview V1", () => {
-  it.each([false,true])("P3b moves views to a checked menu at 300px without truncating the subtitle (%s)",async dark=>{
+describe("headline panel views", () => {
+  it.each([false,true])("moves views to a checked menu at 300px without truncating the subtitle (%s)",async dark=>{
     const observer=globalThis.ResizeObserver;
     vi.stubGlobal("ResizeObserver",class {constructor(private callback:ResizeObserverCallback){}observe(target:Element){this.callback([{target,contentRect:{width:300}} as ResizeObserverEntry],this as unknown as ResizeObserver);}disconnect(){}unobserve(){}});
     try {
@@ -67,7 +67,7 @@ describe("preview V1", () => {
   });
 });
 
-describe("preview V2", () => {
+describe("headline panel values", () => {
   it("honours comparison off and health/threshold badge labels", async () => {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
     const health = { health: "unhealthy", counts: { healthy: 0, degraded: 0, unhealthy: 1 }, total_spans: 1, error_rate: 10, service_count: 1, error_trend: [] };

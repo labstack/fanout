@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-func TestCandidateBound(t *testing.T) {
+func TestRowPanelCandidatesAreBounded(t *testing.T) {
 	for _, tc := range []struct{ sort, order string }{{"", "max(duration_ms) DESC"}, {"+start", "min(start_time) ASC"}, {"errors", "max(duration_ms) DESC"}} {
 		for _, limit := range []int{2, 1000, 2000} {
 			p := Panel{Viz: "traces", Query: &Query{From: "spans", Sort: tc.sort, Limit: limit}}
@@ -31,7 +31,7 @@ func TestCandidateBound(t *testing.T) {
 	}
 }
 
-func TestProblems(t *testing.T) {
+func TestRowPanelsReportValidationProblems(t *testing.T) {
 	base := func(viz string) Panel {
 		p := Panel{ID: "p", Title: "Rows", Viz: viz, Query: &Query{From: "logs"}}
 		if viz == "traces" {
@@ -222,7 +222,7 @@ func TestErroringRootRanking(t *testing.T) {
 	}
 }
 
-func TestTrendMetadata(t *testing.T) {
+func TestRowPanelTrendsExposeResolvedIntervalAndLookback(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{Body: "pattern", BodyTemplate: "pattern", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n}})
@@ -368,7 +368,7 @@ func TestRowsExecuteAndRedact(t *testing.T) {
 		t.Fatalf("unredacted search: %+v %v", got, err)
 	}
 }
-func TestRowsCap(t *testing.T) {
+func TestLogRowPanelsCapNewestRows(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	logs := make([]telemetry.Log, 1002)
 	for i := range logs {

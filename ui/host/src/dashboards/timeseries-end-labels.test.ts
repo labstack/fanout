@@ -6,7 +6,7 @@ import type { Panel, PanelResult } from "../../../panels/types";
 const panel: Panel = { id: "x", title: "Latency", viz: "timeseries", unit: "ms", thresholds: [{ value: 1500, status: "bad", label: "p99 budget" }] };
 const result: PanelResult = { id: "x", status: "ok", elapsed_ms: 1, from_ms: 0, to_ms: 3600000, frame: { columns: [{ name: "time", type: "time", role: "time" }, ...["p50", "p95", "p99"].map(name => ({ name, type: "number" as const, role: "measure" as const, unit: "ms" }))], values: [[0, 3599999], [500, 500], [700, 700], [701, 701]], rows: 2 } };
 type Series = { endLabel?: { show: boolean; formatter: string; color: string; fontSize: number }; labelLayout: { moveOverlap: string }; lineStyle: { width: number }; showSymbol: boolean; markLine: { data: { xAxis?: number; label: { show: boolean; formatter: string; rotate?: number; position: string; textBorderColor?: string; fontSize: number } }[] }; markArea: { data: { label: { show: boolean; formatter: string; position: string }; tooltip: { formatter(): string }; itemStyle: { opacity: number } }[][] } };
-describe("preview V3", () => {
+describe("timeseries end labels", () => {
   it.each([false, true])("uses collision-managed direct end labels and formatted threshold labels (%s)", dark => {
     const theme = chartThemeFor(dark); const option = timeseriesOption(panel, result, theme);
     expect((option.grid as { right: number }).right).toBeGreaterThanOrEqual(48);

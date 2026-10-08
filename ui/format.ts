@@ -45,22 +45,6 @@ export function duration(value: number): string {
   return restMinutes === 0 ? `${hours}h` : `${hours}h ${restMinutes}m`;
 }
 
-
-
-
-
-/** The viewer's time zone, abbreviated the way their locale writes it.
- *
- *  Every timestamp in the product is rendered in the browser's zone and none
- *  of them said so, which is a real ambiguity when the reader is looking at an
- *  incident with someone in another office, or at a server that logs in UTC.
- *
- *  `when` matters: an abbreviation is a property of an instant, not of a zone.
- *  A table of rows from before a daylight-saving change headed "PST" when its
- *  rows read PDT is a worse answer than no heading at all, so a caller labels
- *  the rows it is actually showing. */
-
-
 /** The whole instant — date, seconds and zone — for the title of a timestamp
  *  that is displayed shortened. Takes whatever the caller holds, so nobody has
  *  to round-trip an epoch through toISOString, which throws on a bad value

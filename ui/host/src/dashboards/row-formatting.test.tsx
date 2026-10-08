@@ -5,13 +5,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fanoutThemeConfig } from "../../../theme";
 import { chartThemeFor } from "../../../panels/compile";
 import { relativeLuminance } from "../../../theme";
-const contrastRatio=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
 import { PanelCard } from "./panel-card";
 import { TableViz } from "./viz/table";
 import { RowPanel } from "./viz/row-panel";
 import { StateTimelineViz } from "./viz/state-timeline";
 import { ok, warn, bad } from "../../../tokens";
+
+const contrastRatio=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
 vi.mock("./echart-canvas",()=>({EChartCanvas:()=>null}));
 let host: HTMLDivElement, root: Root;
 beforeEach(()=>{vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);host=document.createElement("div");document.body.append(host);root=createRoot(host);});
@@ -38,7 +39,7 @@ it.each([false,true])("collector sync: state legend labels reach 4.5:1 in both t
   expect(contrastRatio(hex,chartThemeFor(dark).surface)).toBeGreaterThanOrEqual(4.5);
  }
 });
-it.each([false,true])("V6: highlight chip explains soft marks and constant namespace in subtitle, dark=%s", async dark=>{
+it.each([false,true])("highlight chip explains soft marks and constant namespace in subtitle, dark=%s", async dark=>{
  await mount(<PanelCard panel={panel} title={panel.title} result={result} loading={false} height={350} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}}/>,dark);
  expect(host.querySelector("[data-highlight-term]")?.textContent).toBe("highlight: error");
  expect(host.querySelector("[data-panel-subtitle]")?.textContent).toBe("logs · otel-demo");
@@ -48,7 +49,7 @@ it.each([false,true])("V6: highlight chip explains soft marks and constant names
  expect(mark.textContent).toBe("ERROR"); expect(mark.style.background).toContain(dark?"0.22":"0.3");
  expect(mark.style.color).toBe("inherit"); expect(mark.style.borderRadius).toBe("3px");
 });
-it.each([false,true])("V6: log body owns remaining width, clamps then expands; trace first16/full title, dark=%s",async dark=>{
+it.each([false,true])("log body owns remaining width, clamps then expands; trace first16/full title, dark=%s",async dark=>{
  await mount(<RowPanel panel={panel} result={result} height={350} dark={dark}/>,dark);
  const row=host.querySelector<HTMLTableRowElement>("tbody tr")!;
  const text=row.querySelector<HTMLElement>("[data-row-text]")!;
@@ -59,7 +60,7 @@ it.each([false,true])("V6: log body owns remaining width, clamps then expands; t
  await act(async()=>row.click()); expect(row.dataset.rowExpanded).toBe("true"); expect(text.style.maxHeight).toBe("");
  await act(async()=>row.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}))); expect(row.dataset.rowExpanded).toBe("false");
 });
-it.each([false,true])("V6: templates use five accent chips, numeric dimensions align, trace links clip, dark=%s",async dark=>{
+it.each([false,true])("templates use five accent chips, numeric dimensions align, trace links clip, dark=%s",async dark=>{
  const p:Panel={id:"t",title:"Table",viz:"table",options:{columns:[{field:"template",format:"log_template"},{field:"duration",format:"bar",unit:"ms"},{field:"trace",format:"trace_link"}]}};
  const f:Frame={columns:[{name:"template",type:"string",role:"dimension"},{name:"duration",type:"number",role:"measure",unit:"ms"},{name:"attempts",type:"number",role:"dimension"},{name:"trace",type:"string",role:"dimension"}],values:[[body],[1450],[3],[id]],rows:1};
  await mount(<TableViz panel={p} result={{...result,frame:f}} height={350}/>,dark);
@@ -69,12 +70,12 @@ it.each([false,true])("V6: templates use five accent chips, numeric dimensions a
  expect(cells[2].querySelector<HTMLElement>("p")?.style.fontFamily).toContain("monospace");
  expect(cells[3].textContent).toBe(id.slice(0,16)); expect(cells[3].querySelector("[title]")?.getAttribute("title")).toBe(id);
 });
-it("V6: empty/mixed/null constants are retained and severity is never hidden",async()=>{
+it("empty/mixed/null constants are retained and severity is never hidden",async()=>{
  await mount(<RowPanel panel={panel} result={{...result,frame:{...frame,values:[...frame.values.slice(0,5),["otel-demo",null]]}}} height={350} dark={false}/>,false);
  expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("namespace");
 });
 
-it.each([false,true])("V7: pattern severity, chips, service, count and area trend in preview order, dark=%s",async dark=>{
+it.each([false,true])("pattern severity, chips, service, count and area trend in preview order, dark=%s",async dark=>{
  const p:Panel={id:"p",title:"Patterns",viz:"log_patterns",query:{from:"logs",by:["body_template"],measures:["count()"]}};
  const f:Frame={columns:[{name:"body_template",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure",unit:"count"},{name:"trend",type:"json",role:"dimension"},{name:"severity",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"}],values:[["failed <*> <num>","warning <str>","info <time>"],[12,8,3],["[1,3,8]","[1,2,5]","[1,1,1]"],["ERROR","WARN","INFO"],["payments","checkout","frontend"]],rows:3,trend:{start_ms:0,step_ms:60000}};
  await mount(<RowPanel panel={p} result={{...result,frame:f}} height={350} dark={dark}/>,dark);
@@ -85,7 +86,7 @@ it.each([false,true])("V7: pattern severity, chips, service, count and area tren
  expect(host.querySelector('svg[aria-label="Pattern count trend"] title')?.textContent).toBe("1970-01-01T00:00:00.000Z: 1");
 });
 
-it.each([false,true])("V9: formatted status badges use readable text and soft backgrounds, dark=%s",async dark=>{
+it.each([false,true])("formatted status badges use readable text and soft backgrounds, dark=%s",async dark=>{
  const p:Panel={id:"p",title:"Health",viz:"table",options:{columns:[{field:"health",format:"status"}]}};
  await mount(<TableViz panel={p} result={{...result,frame:{columns:[{name:"health",type:"string",role:"dimension"}],values:[["unhealthy","degraded"]],rows:2}}} height={200}/>,dark);
  for(const badge of host.querySelectorAll<HTMLElement>(".mantine-Badge-root")) {
@@ -94,7 +95,7 @@ it.each([false,true])("V9: formatted status badges use readable text and soft ba
  }
 });
 
-it.each([false,true])("V9: semantic table ink reaches 4.5:1, severity badge uses text tokens, dark=%s",async dark=>{
+it.each([false,true])("semantic table ink reaches 4.5:1, severity badge uses text tokens, dark=%s",async dark=>{
  const p:Panel={id:"p",title:"Counts",viz:"table",thresholds:[{value:10,status:"warn"},{value:20,status:"bad"}],better:"lower"};
  await mount(<TableViz panel={p} result={{...result,frame:{columns:[{name:"n",type:"number",role:"measure"}],values:[[12]],rows:1}}} height={200}/>,dark);
  const ink=host.querySelector<HTMLElement>("tbody p")!.style.color;
@@ -106,7 +107,7 @@ it.each([false,true])("V9: semantic table ink reaches 4.5:1, severity badge uses
  expect(badge.style.background).toContain("0.14");
 });
 
-it.each([false,true])("Q2: short OTLP labels, full titles and isolated service/count columns (%s)",async dark=>{
+it.each([false,true])("short OTLP labels, full titles and isolated service/count columns (%s)",async dark=>{
  const severities=["TRACE4","DEBUG2","INFO3","WARN4","ERROR2","FATAL3","UNSPECIFIED","surprise","SEVERITY_NUMBER_INFO2","17"];
  const labels=["TRACE","DEBUG","INFO","WARN","ERROR","FATAL","—","—","INFO","ERROR"];
  const services=severities.map((_,i)=>"product-catalog-with-a-very-long-service-name-"+i);
@@ -125,7 +126,7 @@ it.each([false,true])("Q2: short OTLP labels, full titles and isolated service/c
  expect(host.querySelector<HTMLTableColElement>('col[data-field="count"]')?.style.width).toBe("140px");
 });
 
-it.each([false,true])("Q3: one padded muted footer stacks distinct data notes outside scrolling rows (%s)",async dark=>{
+it.each([false,true])("one padded muted footer stacks distinct data notes outside scrolling rows (%s)",async dark=>{
  const p:Panel={id:"t",title:"Traces",viz:"traces",drill:"traces"};
  const note="Service is All; showing the unsplit whole-window frame.";
  const r:PanelResult={...result,frame:{...frame,truncated:true,note},annotation_error:note,annotation_scope:{limited:true,services:[]}};
@@ -139,7 +140,7 @@ it.each([false,true])("Q3: one padded muted footer stacks distinct data notes ou
  expect(host.textContent).not.toContain("Showing 2 rows.");
 });
 
-it("Q3: SQL sparkline feedback does not repeat as a footer",async()=>{
+it("SQL sparkline feedback does not repeat as a footer",async()=>{
  const p:Panel={id:"t",title:"Table",viz:"table",sql:"SELECT 1 AS n",options:{columns:[{field:"n",format:"sparkline"}]}};
  await mount(<PanelCard panel={p} title={p.title} result={{...result,frame:{columns:[{name:"n",type:"number",role:"measure"}],values:[[1]],rows:1}}} loading={false} height={350} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}}/>,false);
  expect(host.textContent?.split("Sparkline requires an array column")).toHaveLength(2);

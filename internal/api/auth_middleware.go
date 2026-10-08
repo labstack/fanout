@@ -84,6 +84,9 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg c
 				if routePathKnown(path) {
 					return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
 				}
+				// Echo may match the trace parameter to an empty or multi-segment ID.
+				// classifyRoute rejects those resource paths; this router match is a 404,
+				// while a genuinely unclassified registered route remains a security error.
 				routePath := c.RouteInfo().Path
 				if isProtectedPath(path) && (routePath == "" || routePath == "/*" || routePath == "/api/traces/:id") {
 					return echo.NewHTTPError(http.StatusNotFound, "not found")
