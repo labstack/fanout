@@ -1,3 +1,4 @@
+import { within } from "@testing-library/dom";
 import { readFileSync } from "node:fs";
 import { MantineProvider } from "@mantine/core";
 import { act, useState } from "react";
@@ -165,7 +166,7 @@ it("lets long Markdown scroll and keeps query error actions available in short c
  const error = await render(<PanelCard {...props} panel={panel} result={{ ...result, status: "error", error: "Detailed failure ".repeat(100) }} />);
  expect(error.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
  expect(error.querySelector<HTMLElement>("[data-panel-error]")!.style.maxHeight).toBe("100%");
- await act(async () => error.querySelector<HTMLButtonElement>('[aria-label="Content menu"]')!.click());
+ await act(async () => within(error).getByRole("button", {name: /^Content menu/}).click());
  const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === "Ask Fanout to fix it")!;
  await act(async () => action.click()); expect(fix).toHaveBeenCalledOnce();
 });

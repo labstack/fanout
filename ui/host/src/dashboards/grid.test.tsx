@@ -1,3 +1,4 @@
+import { within } from "@testing-library/dom";
 import { statusInk } from "../../../panels/style";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -175,7 +176,7 @@ describe("PanelGrid", () => {
 
 
 async function menu(host: HTMLElement, title: string, item: string) {
-  await act(async () => { host.querySelector<HTMLButtonElement>(`[aria-label="${title} menu"]`)!.click(); });
+  await act(async () => { within(host).getByRole("button", {name: name => name === title + " menu" || name.startsWith(title + " menu. ")}).click(); });
   await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === item)!.click(); });
 }
 

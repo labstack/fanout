@@ -1,3 +1,4 @@
+import { within } from "@testing-library/dom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -64,12 +65,12 @@ it.each(["empty", "error", "ok"] as const)("hides chat mutations and unsaved Cop
   const view = await mount(raw);
   const forbidden = /Explain|Ask Fanout to fix it|Duplicate|Remove panel|Copy link/;
   try {
-    await act(async () => (view.el.querySelector('[aria-label="Checkout logs menu"]') as HTMLButtonElement).click());
+    await act(async () => within(view.el).getByRole("button", {name: /^Checkout logs menu/}).click());
     expect(document.body.textContent).not.toMatch(forbidden);
     const open = [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!;
     await act(async () => open.click());
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-    await act(async () => (document.body.querySelector('[role="dialog"] [aria-label="Checkout logs menu"]') as HTMLButtonElement).click());
+    await act(async () => within(document.body.querySelector<HTMLElement>('[role="dialog"]')!).getByRole("button", {name: /^Checkout logs menu/}).click());
     expect(document.body.textContent).not.toMatch(forbidden);
     expect(view.onQuery).not.toHaveBeenCalled();
   } finally { await view.cleanup(); }

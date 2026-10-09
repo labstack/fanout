@@ -1,3 +1,4 @@
+import { within } from "@testing-library/dom";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
@@ -76,7 +77,7 @@ it.each(["empty", "error"] as const)("preserves %s state and separate answer/edi
   const { onOpenChat } = await mount("latency", false, { ...result, status, diagnosis: "No rows here", error: "Invalid measure" });
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.textContent).toContain(status === "empty" ? "No rows here" : "Invalid measure");
-  await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Latency menu"]')!.click());
+  await act(async () => within(dialog as HTMLElement).getByRole("button", {name: /^Latency menu/}).click());
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "Explain in chat")!.click());
   expect(onOpenChat.mock.calls[0][1]).toEqual({ answer_only: true });
   expect(onOpenChat.mock.calls[0][0]).not.toContain("Please fix");

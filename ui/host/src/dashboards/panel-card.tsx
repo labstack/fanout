@@ -1,11 +1,12 @@
-import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+import { useMergedRef } from "@mantine/hooks";
+import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, VisuallyHidden, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { logConstants } from "../../../panels/rows";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
@@ -55,6 +56,14 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
   const refreshError = result?.frame && result.error;
+  const retryable = Boolean(result?.request_error?.length);
+  const fixable = Boolean(result?.error) && !retryable;
+  const refreshDescription = refreshError ? `Refresh failed: ${refreshError}.${staleAt ? ` Showing data from ${relativeTime(staleAt, now)}.` : ""}` : undefined;
+  const refreshDescriptionId = useId();
+  const tooltipTarget = useRef<HTMLButtonElement>(null);
+  const buttonRef = useMergedRef(menuRef, tooltipTarget);
+  const [menuFocused, setMenuFocused] = useState(false);
+  const [menuHovered, setMenuHovered] = useState(false);
   const notes = [...new Set([
     staleAt && !refreshError ? `Stale: last updated ${relativeTime(staleAt, now)}` : undefined,
     result?.frame?.truncated || result?.previous?.truncated ? "Truncated: showing limited data" : undefined,
@@ -104,7 +113,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal>
-        <Menu.Target><ActionIcon ref={menuRef} variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}>{refreshError ? <Tooltip label={`Refresh failed: ${refreshError}`}><Box component="span" role="img" aria-label={`Refresh failed: ${refreshError}`} title={`Refresh failed: ${refreshError}`} style={{display:"flex",color:"var(--mantine-color-warn-filled)"}}><WarningCircle size={18} weight="fill" /></Box></Tooltip> : <DotsThree size={18} weight="bold" />}</ActionIcon></Menu.Target>
+        <Menu.Target><ActionIcon ref={buttonRef} variant="subtle" color="gray" size="sm" aria-label={`${title} menu${refreshDescription ? `. ${refreshDescription}` : ""}`} aria-describedby={refreshDescription ? refreshDescriptionId : undefined} onFocus={() => setMenuFocused(true)} onBlur={() => setMenuFocused(false)} onMouseEnter={() => setMenuHovered(true)} onMouseLeave={() => setMenuHovered(false)}>{refreshError ? <WarningCircle size={18} weight="fill" color="var(--mantine-color-warn-filled)" /> : <DotsThree size={18} weight="bold" />}</ActionIcon></Menu.Target>
+        <Tooltip target={tooltipTarget} label={refreshDescription} opened={Boolean(refreshError) && (menuFocused || menuHovered)} />
         <Menu.Dropdown>
           {(small || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
@@ -114,8 +124,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
             </Menu.RadioGroup>
             <Menu.Divider />
           </>}
-          {refreshError && onRetry && <Menu.Item disabled={loading} onClick={onRetry}>Retry</Menu.Item>}
-          {(refreshError || result?.status === "error" && compactError) && agentAvailable && onFix && !result?.request_error && <Menu.Item onClick={onFix}>Ask Fanout to fix it</Menu.Item>}
+          {refreshError && retryable && onRetry && <Menu.Item disabled={loading} onClick={onRetry}>Retry</Menu.Item>}
+          {fixable && agentAvailable && onFix && <Menu.Item onClick={onFix}>Ask Fanout to fix it</Menu.Item>}
           {onView && <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>}
           {agentAvailable && onExplain && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
           {onCopyLink && <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>}
@@ -131,8 +141,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
           {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
           <Text data-panel-error-message title={result.error} size="xs" c="dimmed" ta={compactError ? "left" : "center"} style={{minWidth:0, minHeight:0, overflow:"hidden", ...(compactError ? {flex:"1 1 0px", whiteSpace:"nowrap", textOverflow:"ellipsis"} : {overflowWrap:"anywhere", flex:"0 1 auto"})}}>{compactError ? `This panel failed: ${result.error ?? "Request failed"}` : result.error}</Text>
-          {onRetry && <Button size="compact-xs" variant="light" style={{flexShrink:0}} disabled={loading} onClick={onRetry}>Retry</Button>}
-          {!compactError && agentAvailable && onFix && !result.request_error && <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>}
+          {retryable && onRetry && <Button size="compact-xs" variant="light" style={{flexShrink:0}} disabled={loading} onClick={onRetry}>Retry</Button>}
+          {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>}
         </Box>
         : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
@@ -143,6 +153,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, background: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
     </Box>}
+    {refreshDescription && <VisuallyHidden id={refreshDescriptionId}>{refreshDescription}</VisuallyHidden>}
     {fade&&<Box data-panel-scroll-fade aria-hidden="true" style={{position:"absolute",left:16,right:16,bottom:fade.bottom,height:16,pointerEvents:"none",zIndex:1,background:"linear-gradient(to bottom, transparent, var(--mantine-color-body))"}}/>}
   </Paper>;
 }

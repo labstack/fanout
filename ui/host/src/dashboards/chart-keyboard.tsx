@@ -43,7 +43,6 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
   const [pending, setPending] = useState<Range | null>(null);
   const plot = useRef<HTMLDivElement>(null);
   const pointerFocus = useRef(false);
-  const firstNavigation = useRef<{key: string; shift: boolean} | undefined>(undefined);
   useEffect(() => {
     const keyboardFocus = (event: KeyboardEvent) => { if (event.key === "Tab") pointerFocus.current = false; };
     document.addEventListener("keydown", keyboardFocus, true);
@@ -119,11 +118,6 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     else if (!shift && (key === "ArrowUp" || key === "ArrowDown")) moveSeries(key === "ArrowUp" ? -1 : 1);
     else if (!shift && (key === "Home" || key === "End")) choose(key === "Home" ? peers[0] : peers.at(-1));
   };
-  useEffect(() => {
-    if (!focused || !firstNavigation.current) return;
-    const navigation = firstNavigation.current; firstNavigation.current = undefined;
-    navigate(navigation.key, navigation.shift);
-  }, [points, focused]);
   const cancel = () => { setPending(null); plot.current?.focus(); };
   const hint = rangeAvailable ? "←→ points · ↑↓ series · Enter drill · Shift+←→ range" : "←→ points · ↑↓ series · Enter drill";
   useLayoutEffect(() => {
@@ -148,7 +142,6 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     style={{position: "relative", height, width: "100%", flex: "1 1 auto", minHeight: 0, minWidth: 0}}
     onPointerDownCapture={event => {
       if (rangeBar.current?.contains(event.target as Node)) return;
-      firstNavigation.current = undefined;
       pointerFocus.current = true; setFocused(false);
       if (focused) callbacks.current.onHighlight(undefined);
       callbacks.current.onActiveChange?.(false);
@@ -158,7 +151,6 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
       callbacks.current.onActiveChange?.(true); setFocused(true);
     }}
     onBlur={event => {
-      firstNavigation.current = undefined;
       if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
       setFocused(false);
       setPending(null); setAnnouncement(""); callbacks.current.onHighlight(undefined); callbacks.current.onActiveChange?.(false);
@@ -176,7 +168,7 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
       const navigation = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key);
       if (navigation && !focused) {
         pointerFocus.current = false; setFocused(true); callbacks.current.onActiveChange?.(true);
-        if (!current) { firstNavigation.current = {key: event.key, shift: event.shiftKey}; event.preventDefault(); return; }
+        if (!current) { event.preventDefault(); return; }
       }
       if (event.key === "Enter" && focused && !event.shiftKey && current && onClick && (!canSelect || canSelect(current.event))) { event.preventDefault(); onClick(current.event); }
       else if (navigation && (!event.shiftKey || event.key === "ArrowLeft" || event.key === "ArrowRight")) {

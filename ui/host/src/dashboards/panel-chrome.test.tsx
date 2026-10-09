@@ -1,19 +1,22 @@
 import { MantineProvider } from "@mantine/core";
 import { act } from "react";
+import { within } from "@testing-library/dom";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { gaugeOption, chartThemeFor, timeseriesOption } from "../../../panels/compile";
 import { analysisOption } from "../../../panels/analysis";
 import { heatRamp } from "../../../panels/heat-scale";
 import { withAnnotations } from "../../../panels/annotations";
 import { relativeLuminance } from "../../../theme";
 import { PanelCard } from "./panel-card";
+import type { PanelDisplayResult } from "./panel-result";
 import type { Panel, PanelResult } from "../../../panels/types";
 
 vi.mock("./echart-canvas", () => ({ EChartCanvas: ({label,height}: {label:string;height:number|string}) => <div data-plot-budget role="img" aria-label={label} style={{height}}/> }));
 const p:Panel={id:"p",title:"Panel",viz:"timeseries",query:{from:"spans"},drill:"traces"};
 const r:PanelResult={id:"p",status:"ok",elapsed_ms:1,from_ms:0,to_ms:600000,interval:"1m",frame:{columns:[{name:"time",type:"time",role:"time"},{name:"calls",type:"number",role:"measure"}],values:[[0,60000],[1,2]],rows:2}};
 const cleanup:(()=>void)[]=[];
+beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 afterEach(async()=>{await act(async()=>cleanup.splice(0).forEach(fn=>fn()));vi.restoreAllMocks();document.body.innerHTML="";});
 async function render(panel:Panel=p,result:PanelResult=r,onSelect:((value:string)=>void)|undefined=undefined,vars?:Record<string,string>,onVariable?: (name:string,value:string)=>void) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
@@ -96,7 +99,7 @@ it.each(["ms","s","ns","count"])("uses nice capped ticks over 0–90 seconds (un
 it("keeps the chart body and plot budget identical after a transient refresh failure", async () => {
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
   const retry=vi.fn();
-  const draw=async(result:PanelResult,staleAt?:number)=>act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={true} onRetry={retry}/></MantineProvider>));
+  const draw=async(result:PanelDisplayResult,staleAt?:number)=>act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={true} onRetry={retry}/></MantineProvider>));
   await draw(r);
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
   const before=body.previousElementSibling;
@@ -104,16 +107,16 @@ it("keeps the chart body and plot budget identical after a transient refresh fai
   const headerChildren=titleGroup.childElementCount;
   const plotHeight=host.querySelector<HTMLElement>('[data-plot-budget]')!.style.height;
   const style=body.getAttribute("style");
-  await draw({...r,error:"Disconnected"},Date.now()-60000);
+  await draw({...r,error:"Disconnected",request_error:[p.id]},Date.now()-60000);
   expect(body.previousElementSibling).toBe(before);
   expect(titleGroup.childElementCount).toBe(headerChildren);
   expect(body.getAttribute("style")).toBe(style);
   expect(host.querySelector<HTMLElement>('[data-plot-budget]')!.style.height).toBe(plotHeight);
   expect(plotHeight).toBe("212px");
   expect(host.querySelector('[data-panel-notes]')).toBeNull();
-  const indicator=host.querySelector<HTMLElement>('[aria-label="Refresh failed: Disconnected"]');
+  const indicator=within(host).getByRole("button", {name: /Refresh failed: Disconnected/});
   expect(indicator).not.toBeNull();expect(body.contains(indicator)).toBe(false);
-  const menu=host.querySelector<HTMLButtonElement>('[aria-label="Panel menu"]')!;
+  const menu=within(host).getByRole("button", {name: /Panel menu/});
   await act(async()=>menu.click());
   const button=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==="Retry")!;
   expect(button).toBeDefined();await act(async()=>button.click());expect(retry).toHaveBeenCalledOnce();
@@ -125,7 +128,7 @@ it.each([120,300])("bounds the full error state inside a %ipx body with inline R
   vi.stubGlobal("ResizeObserver",class { record:{callback:ResizeObserverCallback;elements:Element[]}; constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);} observe(el:Element){this.record.elements.push(el);} disconnect(){} });
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
   const message="Server unavailable "+"very long details ".repeat(100),retry=vi.fn();
-  await act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message}} loading={false} height={388} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
+  await act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
   const observer=observers.find(o=>o.elements.includes(body));
   expect(observer).toBeDefined();
@@ -153,4 +156,29 @@ it.each(["heatmap","state_timeline"] as const)("renders %s with literal styles a
   expect(visual).toHaveBeenCalledExactlyOnceWith("color");
   expect(rect.style).toEqual({fill:viz==="heatmap"?heatRamp(theme)[0]:theme.status.ok,stroke:undefined,lineWidth:0});
   expect(rect.shape.height).toBe(viz==="heatmap"?19:13);
+});
+
+it("exposes the refresh failure on the menu button and opens its tooltip on keyboard focus", async () => {
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
+  await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={Date.now() - 60000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+  const menu = within(host).getByRole("button", {name: /Refresh failed: Disconnected/});
+  expect(within(host).getByRole("button", {name: /Refresh failed/, description: /Refresh failed: Disconnected/})).toBe(menu);
+  await act(async () => menu.focus());
+  await vi.waitFor(() => expect(within(document.body).getByRole("tooltip").textContent).toContain("Refresh failed: Disconnected"), {timeout: 3000, interval: 5});
+});
+
+it("updates the failed frame's age in the menu name, description and focused tooltip", async () => {
+  vi.useFakeTimers();
+  try {
+    const now = Date.parse("2026-10-08T12:00:00Z"); vi.setSystemTime(now);
+    const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
+    await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={now - 90_000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+    const menu = within(host).getByRole("button", {name: /Refresh failed.*Showing data from 1 minute ago/});
+    expect(within(host).getByRole("button", {name: /Refresh failed/, description: /Showing data from 1 minute ago/})).toBe(menu);
+    await act(async () => menu.focus());
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(within(host).getByRole("button", {name: /Refresh failed.*Showing data from 2 minutes ago/, description: /Showing data from 2 minutes ago/})).toBe(menu);
+    expect(within(document.body).getByRole("tooltip").textContent).toContain("Showing data from 2 minutes ago");
+    expect(host.querySelector('[data-panel-notes]')).toBeNull();
+  } finally {vi.useRealTimers();}
 });
