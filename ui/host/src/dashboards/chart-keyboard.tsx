@@ -58,21 +58,22 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
   const selectedPoint = useRef<KeyboardPoint | undefined>(undefined);
   const location = (point: KeyboardPoint) => pointWindow?.(point)?.from ?? point.event.name ?? (Array.isArray(point.event.value) ? point.event.value[0] : undefined);
   const saved = selectedPoint.current;
-  const candidates = saved ? points.filter(point => point.event.seriesName === saved.event.seriesName) : points;
+  const savedSeries = saved ? points.filter(point => point.event.seriesName === saved.event.seriesName) : points;
+  const candidates = savedSeries.length ? savedSeries : points;
   const at = saved && location(saved);
   const nearest = typeof at === "number" ? candidates.reduce<KeyboardPoint | undefined>((best, point) => {
     const next = location(point), old = best && location(best);
     return typeof next === "number" && (!best || typeof old !== "number" || Math.abs(next - at) < Math.abs(old - at)) ? point : best;
   }, undefined) : candidates.find(point => location(point) === at);
-  const current = selectedKey ? identities.get(selectedKey) ?? nearest ?? candidates[0] : points[0];
+  const current = selectedKey ? identities.get(selectedKey) ?? nearest ?? candidates[0] ?? points[0] : points[0];
   const rangeAvailable = Boolean(onZoom && bounds && Number.isFinite(bounds.from) && Number.isFinite(bounds.to) && bounds.from < bounds.to);
   const series = useMemo(() => [...new Set(points.map(point => point.event.seriesName))], [points]);
   const peers = useMemo(() => points.filter(point => point.event.seriesName === current?.event.seriesName), [points, current?.event.seriesName]);
   const position = current ? peers.indexOf(current) : -1;
   useEffect(() => {
-    if (current && (!selectedKey || identities.has(selectedKey))) {
+    if (current && (!selectedKey || identities.has(selectedKey) || !savedSeries.length)) {
       selectedPoint.current = current;
-      if (!selectedKey) setSelectedKey(pointIdentity(current));
+      if (!selectedKey || !savedSeries.length) setSelectedKey(pointIdentity(current));
     }
     if (focused) callbacks.current.onHighlight(current);
   }, [current, selectedKey, focused]);
@@ -119,10 +120,10 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     else if (!shift && (key === "Home" || key === "End")) choose(key === "Home" ? peers[0] : peers.at(-1));
   };
   useEffect(() => {
-    if (!current || !firstNavigation.current) return;
+    if (!focused || !firstNavigation.current) return;
     const navigation = firstNavigation.current; firstNavigation.current = undefined;
     navigate(navigation.key, navigation.shift);
-  }, [current]);
+  }, [points, focused]);
   const cancel = () => { setPending(null); plot.current?.focus(); };
   const hint = rangeAvailable ? "←→ points · ↑↓ series · Enter drill · Shift+←→ range" : "←→ points · ↑↓ series · Enter drill";
   useLayoutEffect(() => {
@@ -147,6 +148,7 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     style={{position: "relative", height, width: "100%", flex: "1 1 auto", minHeight: 0, minWidth: 0}}
     onPointerDownCapture={event => {
       if (rangeBar.current?.contains(event.target as Node)) return;
+      firstNavigation.current = undefined;
       pointerFocus.current = true; setFocused(false);
       if (focused) callbacks.current.onHighlight(undefined);
       callbacks.current.onActiveChange?.(false);
@@ -156,8 +158,10 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
       callbacks.current.onActiveChange?.(true); setFocused(true);
     }}
     onBlur={event => {
+      firstNavigation.current = undefined;
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
       setFocused(false);
-      if (!rangeBar.current?.contains(event.relatedTarget as Node | null)) { setPending(null); setAnnouncement(""); callbacks.current.onHighlight(undefined); callbacks.current.onActiveChange?.(false); }
+      setPending(null); setAnnouncement(""); callbacks.current.onHighlight(undefined); callbacks.current.onActiveChange?.(false);
     }}
     onKeyDown={event => {
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;

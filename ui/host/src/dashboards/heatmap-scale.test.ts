@@ -13,7 +13,7 @@ function option(counts: (number | null)[], dark = false) {
 }
 function fill(o: any, count: number) {
   const series = o.series[0], point = series.data.find((d: any) => d.value[2] === count);
-  return series.renderItem({}, { value: (i: number) => point.value[i], coord: (v: number[]) => [v[0] / 1000, 20], size: () => [60, 20], style: () => ({}) }).style.fill;
+  return series.renderItem({}, { value: (i: number) => point.value[i], coord: (v: number[]) => [v[0] / 1000, 20], size: () => [60, 20], visual: () => "#fff" }).style.fill;
 }
 
 it("maps decades to distinct monotonic log steps with cap 3,000", () => {

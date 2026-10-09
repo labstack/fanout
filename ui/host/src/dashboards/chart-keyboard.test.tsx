@@ -137,8 +137,11 @@ it('recomputes responsive displayed candidates, clamps selection without invokin
     Object.defineProperty(canvas,'clientWidth',{value:400});Object.defineProperty(canvas,'clientHeight',{value:100});
     await act(async()=>resize([],{} as ResizeObserver));
     expect(el.querySelector('[aria-live]')?.textContent).toContain('3');expect(click).not.toHaveBeenCalled();
+    await press(point,'End');await press(point,'Enter');
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('9');
+    expect(click.mock.lastCall![0].value).toBe(9);
     await act(async()=>draw({series:[]}));
-    expect(el.querySelector('[aria-live]')?.textContent).toContain('3'); // responsive compile still owns the displayed data
+    await press(point,'Enter');expect(click.mock.lastCall![0].value).toBe(9); // responsive compile still owns the displayed data
     await act(async()=>root.unmount());expect(chart.dispose).toHaveBeenCalled();
   }finally{el.remove();vi.unstubAllGlobals();}
 });

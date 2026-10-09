@@ -130,10 +130,10 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     {spec.panels.map(panel => <Box key={panel.id} h={height ?? fragmentPanelHeight(panel)}>{card(panel, height ?? fragmentPanelHeight(panel))}</Box>)}
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
     </Stack></Box>
-    {hostFocused && viewed && <Box data-fragment-fullscreen data-shortcut-scope={group} role="region" aria-label={interpolate(viewed.title, resolvedVars)} tabIndex={-1} ref={focusedRegion} h="calc(100vh - 32px)">
+    {hostFocused && viewed && <Box data-fragment-fullscreen role="region" aria-label={interpolate(viewed.title, resolvedVars)} tabIndex={-1} ref={focusedRegion} h="calc(100vh - 32px)">
       {card(viewed, Math.max(40, windowHeight - 80), true)}
     </Box>}
-    {hostDisplayMode !== "fullscreen" && <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} shortcutScope={group} escapeEnabled={!target} returnFocusTo={() => viewFocus.restore(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "")}>
+    {hostDisplayMode !== "fullscreen" && <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} escapeEnabled={!target} returnFocusTo={() => viewFocus.restore(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "")}>
       {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140), true)}</Box>}
     </PanelFullscreen>}
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={target} onChange={setTarget} />

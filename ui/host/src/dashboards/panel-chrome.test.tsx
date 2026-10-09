@@ -10,7 +10,7 @@ import { relativeLuminance } from "../../../theme";
 import { PanelCard } from "./panel-card";
 import type { Panel, PanelResult } from "../../../panels/types";
 
-vi.mock("./echart-canvas", () => ({ EChartCanvas: ({label}: {label:string}) => <div role="img" aria-label={label}/> }));
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({label,height}: {label:string;height:number|string}) => <div data-plot-budget role="img" aria-label={label} style={{height}}/> }));
 const p:Panel={id:"p",title:"Panel",viz:"timeseries",query:{from:"spans"},drill:"traces"};
 const r:PanelResult={id:"p",status:"ok",elapsed_ms:1,from_ms:0,to_ms:600000,interval:"1m",frame:{columns:[{name:"time",type:"time",role:"time"},{name:"calls",type:"number",role:"measure"}],values:[[0,60000],[1,2]],rows:2}};
 const cleanup:(()=>void)[]=[];
@@ -63,7 +63,7 @@ it.each([false,true])("retains seven monotonic colours while skewed counts encod
   const counts=[0,...Array.from({length:69},(_,i)=>i+1),1000000000],theme=chartThemeFor(dark);
   const frame={columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[counts.map((_,i)=>i*60000),counts],rows:counts.length};
   const o=analysisOption({...p,viz:"heatmap"},{...r,frame},theme) as any;
-  const fills=o.series[0].data.map((d:any)=>o.series[0].renderItem({}, {value:(i:number)=>d.value[i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({})}).style.fill);
+  const fills=o.series[0].data.map((d:any)=>o.series[0].renderItem({}, {value:(i:number)=>d.value[i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],visual:()=>"#fff"}).style.fill);
   expect(new Set(fills).size).toBe(3);
   const ramp=heatRamp(theme);expect(ramp).toHaveLength(7);
   const l=ramp.map(relativeLuminance);expect(l.every((v,i)=>!i||(dark?v>l[i-1]:v<l[i-1]))).toBe(true);
@@ -90,4 +90,67 @@ it.each(["ms","s","ns","count"])("uses nice capped ticks over 0–90 seconds (un
  const tall=axis(750),short=axis(200);
  expect(tall.interval).toBe(10*factor);expect((tall.max-tall.min)/tall.interval+1).toBeLessThanOrEqual(10);
  expect((short.max-short.min)/short.interval+1).toBe(3);expect(short.splitNumber).toBe(2);
+});
+
+
+it("keeps the chart body and plot budget identical after a transient refresh failure", async () => {
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
+  const retry=vi.fn();
+  const draw=async(result:PanelResult,staleAt?:number)=>act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={true} onRetry={retry}/></MantineProvider>));
+  await draw(r);
+  const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
+  const before=body.previousElementSibling;
+  const titleGroup=host.querySelector('[data-panel-title]')!.parentElement!.parentElement!;
+  const headerChildren=titleGroup.childElementCount;
+  const plotHeight=host.querySelector<HTMLElement>('[data-plot-budget]')!.style.height;
+  const style=body.getAttribute("style");
+  await draw({...r,error:"Disconnected"},Date.now()-60000);
+  expect(body.previousElementSibling).toBe(before);
+  expect(titleGroup.childElementCount).toBe(headerChildren);
+  expect(body.getAttribute("style")).toBe(style);
+  expect(host.querySelector<HTMLElement>('[data-plot-budget]')!.style.height).toBe(plotHeight);
+  expect(plotHeight).toBe("212px");
+  expect(host.querySelector('[data-panel-notes]')).toBeNull();
+  const indicator=host.querySelector<HTMLElement>('[aria-label="Refresh failed: Disconnected"]');
+  expect(indicator).not.toBeNull();expect(body.contains(indicator)).toBe(false);
+  const menu=host.querySelector<HTMLButtonElement>('[aria-label="Panel menu"]')!;
+  await act(async()=>menu.click());
+  const button=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==="Retry")!;
+  expect(button).toBeDefined();await act(async()=>button.click());expect(retry).toHaveBeenCalledOnce();
+});
+
+
+it.each([120,300])("bounds the full error state inside a %ipx body with inline Retry in short cards",async height=>{
+  const observers:{callback:ResizeObserverCallback;elements:Element[]}[]=[];
+  vi.stubGlobal("ResizeObserver",class { record:{callback:ResizeObserverCallback;elements:Element[]}; constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);} observe(el:Element){this.record.elements.push(el);} disconnect(){} });
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
+  const message="Server unavailable "+"very long details ".repeat(100),retry=vi.fn();
+  await act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message}} loading={false} height={388} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
+  const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
+  const observer=observers.find(o=>o.elements.includes(body));
+  expect(observer).toBeDefined();
+  await act(async()=>observer!.callback([{target:body,contentRect:{height,width:300}} as unknown as ResizeObserverEntry],{} as ResizeObserver));
+  const state=host.querySelector<HTMLElement>('[data-panel-error]')!;
+  expect(state).not.toBeNull();expect(body.contains(state)).toBe(true);
+  expect(state.style.height).toBe("100%");expect(state.style.maxHeight).toBe("100%");expect(state.style.minHeight).toBe("0");expect(state.style.overflow).toBe("hidden");
+  expect(state.style.flexDirection).toBe(height<160?"row":"column");
+  const text=state.querySelector<HTMLElement>('[data-panel-error-message]')!;
+  expect(text.title).toBe(message);expect(text.style.minWidth).toBe("0");expect(text.style.overflow).toBe("hidden");
+  if(height<160)expect(text.style.whiteSpace).toBe("nowrap");
+  const button=[...state.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==="Retry")!;
+  expect(button.style.flexShrink).toBe("0");await act(async()=>button.click());expect(retry).toHaveBeenCalledOnce();
+  vi.unstubAllGlobals();
+});
+
+
+it.each(["heatmap","state_timeline"] as const)("renders %s with literal styles and visual color without the deprecated api.style",viz=>{
+  const theme=chartThemeFor(false);
+  const frame={columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"service",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const}],values:[[0],["cart"],[1]],rows:1};
+  const option=analysisOption({...p,viz},{...r,frame},theme) as any;
+  const datum=option.series[0].data[0];
+  const visual=vi.fn((key:string)=>{expect(key).toBe("color");return theme.status.ok;});
+  const rect=option.series[0].renderItem({}, {value:(i:number)=>datum.value[i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],visual});
+  expect(visual).toHaveBeenCalledExactlyOnceWith("color");
+  expect(rect.style).toEqual({fill:viz==="heatmap"?heatRamp(theme)[0]:theme.status.ok,stroke:undefined,lineWidth:0});
+  expect(rect.shape.height).toBe(viz==="heatmap"?19:13);
 });

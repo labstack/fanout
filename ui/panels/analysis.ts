@@ -190,13 +190,13 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       })) : hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
         type: "custom", name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
-        renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; style: () => Record<string, unknown> }) => {
+        renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; visual: (key: "color") => string }) => {
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);
           const height = Math.abs(api.size([0, 1])[1]) * (heat ? 1 : .65);
           const gap = heat && Math.abs(right[0]-left[0]) >= 8 ? 1 : 0;
           if (heat && !(api.value(2) > 0)) return undefined;
-          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { ...api.style(), stroke: undefined, lineWidth: 0, ...(heat ? { fill: ramp[heatStep(api.value(2), cap)] } : {}) } };
+          return { type: "rect", shape: { x: left[0] + gap/2, y: left[1] - height / 2 + gap/2, width: Math.max(0, right[0] - left[0] - gap), height: Math.max(0, height - gap), r: heat ? 0 : Math.min(3, height / 4) }, style: { fill: api.visual("color"), stroke: undefined, lineWidth: 0, ...(heat ? { fill: ramp[heatStep(api.value(2), cap)] } : {}) } };
         },
       }],
     };

@@ -249,7 +249,58 @@ it("cancels a range when focus leaves the plot and resumes refresh, but retains 
   const zoom=[...view.el.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Zoom to range")!;
   await act(async()=>zoom.focus());expect(view.el.querySelector('[data-chart-range-label]')).not.toBeNull();
   expect(view.pending).toHaveBeenLastCalledWith(true);
+  await act(async()=>plot.focus());
+  expect(view.el.querySelector('[data-chart-range-label]')).not.toBeNull();
+  const cancel=[...view.el.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Cancel")!;
+  await act(async()=>cancel.focus()); await act(async()=>plot.focus());
+  expect(view.el.querySelector('[data-chart-range-label]')).not.toBeNull();
+  await key(plot,"ArrowRight",{shiftKey:true});
+  expect(view.el.querySelector<HTMLElement>('[data-chart-range-label]')!.title).toContain('00:00:04.000Z');
   const outside=document.createElement("button");document.body.append(outside);
   await act(async()=>outside.focus());expect(view.el.querySelector('[data-chart-range-label]')).toBeNull();
   expect(view.pending).toHaveBeenLastCalledWith(false);
+});
+
+
+it.each(["refresh", "variable change", "range change", "comparison off"])("rebases a vanished series by time and keeps every navigation key working after %s", async trigger => {
+  const removed = trigger === "comparison off" ? "checkout · previous" : "cart";
+  const initial = {...option, series: [...option.series, {...option.series[0], name: removed}]};
+  const view = await mount(initial), plot = await view.focus();
+  await key(plot, "ArrowDown"); await key(plot, "End"); await key(plot, "Enter");
+  expect(view.click.mock.lastCall![0].seriesName).toBe(removed);
+  const remaining = {...option, series: [{...option.series[0], data: [[1000,11],[3500,35],[4500,45]]}]};
+  await view.draw(remaining, trigger === "range change" ? {from:500,to:5500} : undefined);
+  expect(document.activeElement).toBe(plot);
+  await key(plot, "Enter"); expect(view.click.mock.lastCall![0].value).toEqual([3500,35]);
+  for (const [keyName, value] of [["ArrowRight",45],["ArrowLeft",35],["Home",11],["End",45],["ArrowUp",45],["ArrowDown",45]] as const) {
+    await key(plot, keyName); await key(plot, "Enter");
+    expect(view.click.mock.lastCall![0].seriesName).toBe("checkout");
+    expect(view.click.mock.lastCall![0].value[1]).toBe(value);
+  }
+});
+
+
+it.each(["blur", "pointerdown", "stay focused"])("discards navigation on an empty chart without replay after %s", async next => {
+  const empty = {...option, series: [{...option.series[0], data: [[1000,null],[2000,null]]}]};
+  const view = await mount(empty as unknown as typeof option);
+  const plot = view.el.querySelector<HTMLElement>("[data-chart-plot]")!;
+  await act(async () => { plot.dispatchEvent(new Event("pointerdown", {bubbles:true})); plot.focus(); });
+  await key(plot, "End");
+  if (next === "blur") await act(async () => plot.blur());
+  if (next === "pointerdown") await act(async () => plot.dispatchEvent(new Event("pointerdown", {bubbles:true})));
+  await view.draw(option);
+  await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", {key:"Tab",bubbles:true})); if (next === "pointerdown") plot.blur(); plot.focus(); });
+  expect(view.el.querySelector("[aria-live]")!.textContent).toBe("");
+  await key(plot, "Enter"); expect(view.click.mock.lastCall![0].value).toEqual([1000,1]);
+});
+
+
+it("rebases a vanished categorical series to the matching category, or the first point when no category remains",async()=>{
+  const initial={xAxis:{type:"category",data:["small","medium","large"]},series:[{name:"checkout",type:"bar",interactive:true,data:[11,22,33]},{name:"cart",type:"bar",interactive:true,data:[1,2,3]}]};
+  const view=await mount(initial as unknown as typeof option),plot=await view.focus();
+  await key(plot,"ArrowDown");await key(plot,"End");
+  await view.draw({xAxis:{type:"category",data:["small","large"]},series:[{name:"checkout",type:"bar",interactive:true,data:[11,33]}]} as unknown as typeof option);
+  await key(plot,"Enter");expect(view.click.mock.lastCall![0]).toMatchObject({seriesName:"checkout",name:"large",value:33});
+  await view.draw({xAxis:{type:"category",data:["unknown"]},series:[{name:"other",type:"bar",interactive:true,data:[99]}]} as unknown as typeof option);
+  await key(plot,"Enter");expect(view.click.mock.lastCall![0]).toMatchObject({seriesName:"other",name:"unknown",value:99});
 });

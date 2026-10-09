@@ -24,9 +24,9 @@ it.each(['input','textarea','select','[contenteditable="true"]','[role="textbox"
   let result: string|null='not checked';parent.addEventListener('keydown',e=>{result=shortcutKey(e,false);});target.dispatchEvent(event);
   expect(result).toBeNull();
 });
-it('acts once only inside the active region, excludes fragments and overlays, and removes its listener',async()=>{
+it('acts once only inside the active dashboard region, excludes sibling surfaces and overlays, and removes its listener',async()=>{
   const el=document.createElement('div');document.body.append(el);const root=createRoot(el);const run=vi.fn();
-  function Host(){const region=useRef<HTMLDivElement>(null);useShortcuts(region,{r:run,f:run});return createElement('div',{ref:region},createElement('button',{},'Panel'),createElement('div',{'data-dashboard-fragment':true},createElement('button',{},'Chat panel')));}
+  function Host(){const region=useRef<HTMLDivElement>(null);useShortcuts(region,{r:run,f:run});return createElement('div',{},createElement('div',{ref:region},createElement('button',{},'Panel')),createElement('div',{'data-dashboard-fragment':true},createElement('button',{},'Chat panel')));}
   try{
     await act(async()=>root.render(createElement(Host)));
     const button=el.querySelector('button')!;button.focus();

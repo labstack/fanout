@@ -1,6 +1,7 @@
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
-import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
+import type { Panel, Selection, VarValue } from "../../../panels/types";
+import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { logConstants } from "../../../panels/rows";
@@ -12,7 +13,7 @@ import { ChartHintContext, compactHint } from "./chart-keyboard";
 import { Viz } from "./viz";
 
 export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, staleAt, traceLinks, suspended = false, menuRef }: {
-  compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
+  compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button";
   onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   suspended?: boolean; menuRef?: Ref<HTMLButtonElement>;
@@ -53,13 +54,21 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);
   const note = formatPanelNote(result?.frame?.note);
+  const refreshError = result?.frame && result.error;
   const notes = [...new Set([
-    staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : undefined,
+    staleAt && !refreshError ? `Stale: last updated ${relativeTime(staleAt, now)}` : undefined,
     result?.frame?.truncated || result?.previous?.truncated ? "Truncated: showing limited data" : undefined,
     note, result?.annotation_error,
     result?.annotation_scope?.limited ? "Annotation service scope is limited." : undefined,
   ].filter((text): text is string => Boolean(text)))];
   const body = useRef<HTMLDivElement>(null);
+  const [measuredBodyHeight, setMeasuredBodyHeight] = useState<number>();
+  const compactError = (measuredBodyHeight ?? bodyHeight) < 160;
+  useLayoutEffect(() => {
+    const el = body.current; if (!el) return;
+    const observer = new ResizeObserver(([entry]) => { if (entry) setMeasuredBodyHeight(entry.contentRect.height); });
+    observer.observe(el); return () => observer.disconnect();
+  }, []);
   const [fade, setFade] = useState<{bottom:number}>();
   useLayoutEffect(()=>{
     const el=body.current, parent=card.current;if(!el||!parent)return;
@@ -95,7 +104,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
       <Menu position="bottom-end" withinPortal>
-        <Menu.Target><ActionIcon ref={menuRef} variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}><DotsThree size={18} weight="bold" /></ActionIcon></Menu.Target>
+        <Menu.Target><ActionIcon ref={menuRef} variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}>{refreshError ? <Tooltip label={`Refresh failed: ${refreshError}`}><Box component="span" role="img" aria-label={`Refresh failed: ${refreshError}`} title={`Refresh failed: ${refreshError}`} style={{display:"flex",color:"var(--mantine-color-warn-filled)"}}><WarningCircle size={18} weight="fill" /></Box></Tooltip> : <DotsThree size={18} weight="bold" />}</ActionIcon></Menu.Target>
         <Menu.Dropdown>
           {(small || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
@@ -105,6 +114,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
             </Menu.RadioGroup>
             <Menu.Divider />
           </>}
+          {refreshError && onRetry && <Menu.Item disabled={loading} onClick={onRetry}>Retry</Menu.Item>}
+          {(refreshError || result?.status === "error" && compactError) && agentAvailable && onFix && !result?.request_error && <Menu.Item onClick={onFix}>Ask Fanout to fix it</Menu.Item>}
           {onView && <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>}
           {agentAvailable && onExplain && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
           {onCopyLink && <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>}
@@ -114,15 +125,15 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Menu>
       </Group>
     </Group>
-    {result?.error && result.status !== "error" && <Group px={16} pt={8} gap="xs"><Stack gap={4} style={{flex: 1, minWidth: 0}}><Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group><Text size="xs" c="dimmed" style={{overflowWrap: "anywhere"}}>{result.error}</Text></Stack>{onRetry && <Button size="compact-xs" variant="light" disabled={loading} onClick={onRetry}>Retry</Button>}</Group>}
     <Box ref={body} data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
       {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
-        : result?.status === "error" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
-          <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
-          <Text size="xs" c="dimmed" ta="center" style={{ overflowWrap: "anywhere" }}>{result.error}</Text>
-          {onRetry && <Button size="compact-xs" variant="light" disabled={loading} onClick={onRetry}>Retry</Button>}
-          {agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
-        </Stack></Center>
+        : result?.status === "error" ? <Box data-panel-error title={result.error} style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
+          <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
+          {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
+          <Text data-panel-error-message title={result.error} size="xs" c="dimmed" ta={compactError ? "left" : "center"} style={{minWidth:0, minHeight:0, overflow:"hidden", ...(compactError ? {flex:"1 1 0px", whiteSpace:"nowrap", textOverflow:"ellipsis"} : {overflowWrap:"anywhere", flex:"0 1 auto"})}}>{compactError ? `This panel failed: ${result.error ?? "Request failed"}` : result.error}</Text>
+          {onRetry && <Button size="compact-xs" variant="light" style={{flexShrink:0}} disabled={loading} onClick={onRetry}>Retry</Button>}
+          {!compactError && agentAvailable && onFix && !result.request_error && <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>}
+        </Box>
         : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>

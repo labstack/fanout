@@ -14,7 +14,7 @@ const frame = (columns:number, bands=1) => {
 };
 for(const dark of [false,true])for(const width of [1,6,7.99,8,12])it(`gaps depend on actual cell width ${width}px, dark=${dark}`,()=>{
  const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},frame(72),chartThemeFor(dark)) as any;
- const cell=option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,1200000][i],coord:(v:number[])=>[v[0]===0?0:width,20],size:()=>[width,10],style:()=>({})});
+ const cell=option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,1200000][i],coord:(v:number[])=>[v[0]===0?0:width,20],size:()=>[width,10],visual:()=>"#fff"});
  const gap=width>=8?1:0;
  expect(cell.shape).toMatchObject({x:gap/2,y:15+gap/2,width:width-gap,height:10-gap});
  expect(option.visualMap.dimension).toBe(5);expect(cell.style.stroke).toBeUndefined();

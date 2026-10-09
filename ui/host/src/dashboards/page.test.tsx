@@ -654,10 +654,10 @@ it("marks older panels stale after a failed refresh and clears stale on recovery
  panelResponse=async()=>json({message:"Refresh failed"},400);
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
  await vi.waitFor(() => expect(host.textContent).toContain("Panels could not be loaded"), { interval: 5, timeout: 3000 });await vi.waitFor(() => expect(host.textContent).toContain("120"), { interval: 5, timeout: 3000 });
- await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("Stale: last updated"), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"] [aria-label^="Refresh failed:"]')).not.toBeNull(), { interval: 5, timeout: 3000 });
  panelResponse=async()=>defaultPanels();
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
- await vi.waitFor(() => expect(host.textContent).not.toContain("Stale: last updated"), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"] [aria-label^="Refresh failed:"]')).toBeNull(), { interval: 5, timeout: 3000 });
 });
 
 it("never retries a 504 panel batch",async()=>{
@@ -682,7 +682,7 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
  },{interval:5,timeout:3000});
  panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"DuckDB failed",elapsed_ms:3},{id:"latency",status:"empty",diagnosis:"empty",elapsed_ms:2}]});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
- await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("Stale: last updated"), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"] [aria-label^="Refresh failed:"]')).not.toBeNull(), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120"), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.textContent).toContain("Panels could not be loaded"), { interval: 5, timeout: 3000 });
  const hidden=host.querySelector('.react-grid-item[data-panel="requests"]')!;
@@ -693,7 +693,7 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
   expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
  },{interval:5,timeout:3000});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
- await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("Stale: last updated"), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"] [aria-label^="Refresh failed:"]')).not.toBeNull(), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.querySelector('[data-panel="latency"]')!.textContent).not.toContain("Stale:"), { interval: 5, timeout: 3000 });
 });
 

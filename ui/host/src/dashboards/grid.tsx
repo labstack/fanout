@@ -21,7 +21,7 @@ export type GridProps = {
   fetchingIds?: string[]; staleAt?: Map<string, number>; time?: DashboardTime; onEditExit?(): void;
   annotations?: AnnotationsResponse;
   canManage?: boolean; agentAvailable: boolean; onOpenChat(prompt?: string, options?: TurnOptions): void; onVariable(name: string, value: VarValue): void; onView(view?: string): void; onVisible(ids: string[]): void;
-  onRetry?(): void;
+  onRetry?(panelId: string): void;
   onPoint?(panel: Panel, selection: Selection): void; onZoom?(from: number, to: number): void;
   zoomed?: boolean; onZoomReset?(): void; onRangePending?(id: string, pending: boolean): void;
   shortcutScope?: string; onShortcuts?(): void; overlayOpen?: boolean; returnViewFocus?(panel?: string): HTMLElement | undefined;
@@ -148,7 +148,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
     {...panelHandlers(panel, results.get(panel.id), onVariable, onPoint ? selection => onPoint(panel, selection) : undefined)}
     onRangePending={pending => onRangePending?.(panel.id, pending)} onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
-    onRetry={onRetry}
+    onRetry={onRetry ? () => onRetry(panel.id) : undefined}
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true }) : undefined}

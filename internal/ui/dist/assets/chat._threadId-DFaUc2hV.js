@@ -1,0 +1,1 @@
+import{t as e}from"./chat-BUx5Dts3.js";var t=e;export{t as component};

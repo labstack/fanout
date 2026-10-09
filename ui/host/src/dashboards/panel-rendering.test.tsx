@@ -80,7 +80,7 @@ describe("panel rendering", () => {
     const selection = (series.data[0] as unknown as { selection: Selection }).selection;
     expect(makeDrill({ ...panel, viz: "state_timeline", drill: "traces" }, result, selection)).toMatchObject({ from: new Date(0).toISOString(), to: new Date(120000).toISOString() });
     expect(series.data[2].itemStyle.color).not.toBe(chartThemeFor(true).muted);
-    const rect = series.renderItem({}, { value: (i: number) => series.data[0].value[i], coord: (v: number[]) => v, size: () => [0, 20], style: () => ({ fill: "green" }) });
+    const rect = series.renderItem({}, { value: (i: number) => series.data[0].value[i], coord: (v: number[]) => v, size: () => [0, 20], visual: () => "green" });
     expect(rect.type).toBe("rect"); expect(rect.shape.height).toBe(13); expect(rect.shape.r).toBeGreaterThan(0);
     expect(rect.style).toHaveProperty("stroke", undefined); expect(series).not.toHaveProperty("symbol"); expect(got.series).toHaveLength(1);
   });
@@ -157,15 +157,16 @@ it("wraps six names plus Other into a plain legend and reserves both rows", () =
  expect((options[0].grid as { top: number }).top).toBeGreaterThan((options[1].grid as { top: number }).top);
 });
 
-it("lets long Markdown and long errors scroll to their final action", async () => {
+it("lets long Markdown scroll and keeps query error actions available in short cards", async () => {
  const fix = vi.fn();
  const props = { title: "Content", loading: false, height: 140, group: "g", editing: false, agentAvailable: true, onView: vi.fn(), onCopyLink: vi.fn(), onFix: fix };
  const markdown = await render(<PanelCard {...props} panel={{ ...panel, viz: "text", content: "Long paragraph\n\n".repeat(100) }} />);
  expect(markdown.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
  const error = await render(<PanelCard {...props} panel={panel} result={{ ...result, status: "error", error: "Detailed failure ".repeat(100) }} />);
  expect(error.querySelector<HTMLElement>("[data-panel-body]")!.style.overflow).toBe("auto");
- const action = [...error.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Ask Fanout to fix it")!;
- expect(action.closest<HTMLElement>(".mantine-Center-root")!.style.height).not.toBe("100%");
+ expect(error.querySelector<HTMLElement>("[data-panel-error]")!.style.maxHeight).toBe("100%");
+ await act(async () => error.querySelector<HTMLButtonElement>('[aria-label="Content menu"]')!.click());
+ const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === "Ask Fanout to fix it")!;
  await act(async () => action.click()); expect(fix).toHaveBeenCalledOnce();
 });
 

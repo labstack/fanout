@@ -278,7 +278,7 @@ it("renders timeline states as rounded segments and distinguishes unknown cells"
   type Shape = { type: string; style: { lineDash?: number[] }; shape: Record<string, unknown>; children?: Shape[] };
   const option = analysisOption(panel, { ...resultFor("state_timeline"), interval: "1s", frame }, chartThemeFor(false)) as { series: { data: { value: number[] }[]; renderItem: (params: unknown, api: unknown) => Shape }[] };
   const series = option.series[0];
-  const shapes = series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], style: () => ({}) }));
+  const shapes = series.data.map(point => series.renderItem({}, { value: (index: number) => point.value[index], coord: (value: number[]) => value, size: () => [1, 20], visual: () => "#fff" }));
   expect(shapes.map(shape => shape.type)).toEqual(["rect", "rect", "rect", "rect"]);
   expect(shapes.every(shape => !shape.children && !shape.style.lineDash && shape.shape.r === 3)).toBe(true);
   expect(series.data.map(point => point.value[4])).toEqual([0, 1, 2, 3]);

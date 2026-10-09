@@ -16,7 +16,7 @@ const heat: PanelResult = { id: "h", status: "ok", elapsed_ms: 1, interval: "1m"
 it.each([false,true])("discrete full-height heat cells and single-hue inline ramp, dark=%s", dark => {
   const theme = chartThemeFor(dark);
   const option = analysisOption({id:"h",title:"Heat",viz:"heatmap"},heat,theme) as any;
-  const cell = option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:"#fff"})});
+  const cell = option.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],visual:()=>"#fff"});
   // Q1 uses a surface gap without a uniform identity-colour outline.
   expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
   expect(option.visualMap.inRange.color).toHaveLength(7);
@@ -85,7 +85,7 @@ it.each([false,true])("all categorical marks have 3:1 fill or outline without ch
   if(paint!==s.itemStyle.color) expect(s.itemStyle.borderWidth).toBeGreaterThanOrEqual(1);
  }
  const heatOption=analysisOption({id:"h",title:"Heat",viz:"heatmap"},heat,theme) as any;
- const cell=heatOption.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],style:()=>({fill:theme.surface})});
+ const cell=heatOption.series[0].renderItem({}, {value:(i:number)=>[0,0,10,60000][i],coord:(v:number[])=>[v[0]/1000,20],size:()=>[60,20],visual:()=>theme.surface});
  expect(cell.style.lineWidth).toBe(0);expect(cell.style.stroke).toBeUndefined();
  expect(cell.shape).toMatchObject({x:.5,y:10.5,width:59,height:19});
 });

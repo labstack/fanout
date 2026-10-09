@@ -66,7 +66,7 @@ async function mountVisibility(visible: string[], spec = visibilitySpec, renderP
   let current!: ReturnType<typeof usePanelResults>;
   function Host({ visible }: { visible: string[] }) {
     current = usePanelResults({ dashboardId: "d", version: 1, spec, time: spec.time, vars: {}, compare: false, widths: {}, visible, refresh: "off" });
-    return renderPanels ? <MantineProvider>{spec.panels.filter(p => visible.includes(p.id)).map(panel => <PanelCard key={panel.id} panel={panel} title={panel.title} result={current.results.get(panel.id)} loading={current.fetchingIds.includes(panel.id)} height={200} group="g" editing={false} agentAvailable={false} onRetry={()=>current.retry()} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}} />)}</MantineProvider> : null;
+    return renderPanels ? <MantineProvider>{spec.panels.filter(p => visible.includes(p.id)).map(panel => <PanelCard key={panel.id} panel={panel} title={panel.title} result={current.results.get(panel.id)} loading={current.fetchingIds.includes(panel.id)} height={200} group="g" editing={false} agentAvailable={true} onFix={()=>{}} onRetry={()=>current.retry(panel.id)} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}} />)}</MantineProvider> : null;
   }
   const show = async (visible: string[]) => {
     await act(async () => root.render(<QueryClientProvider client={client}><Host visible={visible} /></QueryClientProvider>));
@@ -258,7 +258,8 @@ it.each([new Error("Network disconnected"),new DOMException("Request aborted","A
       expect(host.current.fetching).toBe(false);expect(host.current.error?.message).toBe(error.message);
       for(const id of ["a","b"]){
         const card=host.node.querySelector(`[data-panel="${id}"]`)!;
-        expect(card.textContent).toContain("This panel failed");expect(card.textContent).toContain(error.message);
+        expect(card.textContent).toContain("This panel failed");expect(card.querySelector<HTMLElement>('[data-panel-error]')!.title).toBe(error.message);
+        expect(card.textContent).not.toContain("Ask Fanout to fix it");
         expect([...card.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
       }
       expect(host.node.querySelector('[aria-label="Loading panel"],[aria-label="Refreshing"]')).toBeNull();
@@ -280,9 +281,104 @@ it("shows a retryable panel error while preserving the last successful frame as 
     wire.panels.mockRejectedValue(new Error("Refresh disconnected"));await act(async()=>host.current.refetch());
     await waitForHook(()=>{
       expect(host.current.fetching).toBe(false);expect(host.current.staleAt.has("loaded")).toBe(true);
-      expect(host.node.textContent).toContain("This panel failed");expect(host.node.textContent).toContain("Refresh disconnected");
+      expect(host.node.querySelector('[aria-label="Refresh failed: Refresh disconnected"]')).not.toBeNull();
       expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
-      expect([...host.node.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
     });
+    await act(async()=>host.node.querySelector<HTMLButtonElement>('[aria-label="loaded menu"]')!.click());
+    expect([...document.querySelectorAll('[role="menuitem"]')].some(button=>button.textContent==="Retry")).toBe(true);
   }finally{await host.dispose();}
+});
+
+
+it("loads a newly visible panel normally after a different lazy batch failed", async () => {
+  wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockRejectedValue(new Error("Offline"));
+  const host = await mountVisibility(["loaded"], visibilitySpec, true);
+  try {
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.has("loaded")).toBe(true); });
+    await host.show(["a"]);
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.error).toBe("Offline"); });
+    wire.panels.mockResolvedValue([resultFor("c")]);
+    await host.show(["c"]);
+    await waitForHook(() => { expect(wire.panels.mock.lastCall![0].panels).toEqual(["c"]); expect(host.current.fetching).toBe(false); expect(host.current.results.get("c")?.status).toBe("ok"); });
+    expect(host.node.querySelector('[aria-label="Loading panel"]')).toBeNull();
+    expect(host.current.results.get("a")?.error).toBe("Offline");
+  } finally { await host.dispose(); }
+});
+
+
+it.each(["Invalid measure","Query execution failed"])("retries only failed transport panels, excluding a returned panel error: %s", async message => {
+  const queryError = {id:"loaded",elapsed_ms:0,status:"error" as const,error:message};
+  wire.panels.mockResolvedValueOnce([queryError]).mockRejectedValue(new Error("Offline"));
+  const host = await mountVisibility(["loaded"], visibilitySpec, true);
+  try {
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("loaded")?.error).toBe(message); });
+    await act(async()=>host.node.querySelector<HTMLButtonElement>('[aria-label="loaded menu"]')!.click());
+    expect(document.body.textContent).toContain("Ask Fanout to fix it");
+    const before = wire.panels.mock.calls.length;
+    await act(async () => host.current.retry());
+    expect(wire.panels).toHaveBeenCalledTimes(before);
+    await host.show(["loaded","a","b"]);
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.error).toBe("Offline"); });
+    wire.panels.mockImplementation((body:QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+    await act(async () => host.current.retry());
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok"); });
+    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
+    expect(host.current.results.get("loaded")).toEqual(queryError);
+  } finally { await host.dispose(); }
+});
+
+it.each([false,true])("queues a transport Retry during an unrelated lazy batch and sends its exact panels after settlement (unrelated failure=%s)", async failure => {
+  wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockRejectedValue(new Error("Offline"));
+  const host = await mountVisibility(["loaded"]);
+  try {
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.has("loaded")).toBe(true); });
+    await host.show(["a","b"]);
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.error).toBe("Offline"); });
+    const pending = deferred<PanelResult[]>();
+    wire.panels.mockImplementation((body:QueryBody) => body.panels!.includes("c") ? pending.promise.then(results => { if(failure)throw new ApiError("Unrelated failure",504);return results; }) : Promise.resolve(body.panels!.map(resultFor)));
+    await host.show(["c"]);
+    await waitForHook(() => expect(host.current.fetchingIds).toEqual(["c"]));
+    const before = wire.panels.mock.calls.length;
+    await act(async () => {host.current.retry();host.current.retry();});
+    expect(wire.panels).toHaveBeenCalledTimes(before);
+    await act(async () => pending.resolve([resultFor("c")]));
+    await waitForHook(() => { expect(wire.panels).toHaveBeenCalledTimes(before+1); expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok"); });
+    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
+  } finally { await host.dispose(); }
+});
+
+
+it("retries the clicked transport batch without re-requesting a different failed batch", async () => {
+  wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockRejectedValue(new Error("Offline"));
+  const host=await mountVisibility(["loaded"],visibilitySpec,true);
+  try {
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.has("loaded")).toBe(true);});
+    await host.show(["a","b"]);
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("a")?.error).toBe("Offline");});
+    await host.show(["a","b","c"]);
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("c")?.error).toBe("Offline");});
+    wire.panels.mockImplementation((body:QueryBody)=>Promise.resolve(body.panels!.map(resultFor)));
+    const retry=[...host.node.querySelectorAll<HTMLButtonElement>('[data-panel="a"] button')].find(button=>button.textContent==="Retry")!;
+    await act(async()=>retry.click());
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("a")?.status).toBe("ok");});
+    expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
+    expect(host.current.results.get("c")?.error).toBe("Offline");
+  } finally {await host.dispose();}
+});
+
+it("restores query error actions when a transport retry returns a panel error while keeping the successful frame",async()=>{
+  wire.panels.mockResolvedValue([resultFor("loaded")]);
+  const host=await mountVisibility(["loaded"],visibilitySpec,true);
+  try {
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("loaded")?.frame).toBeDefined();});
+    wire.panels.mockRejectedValue(new Error("Offline"));await act(async()=>host.current.refetch());
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("loaded")?.error).toBe("Offline");});
+    wire.panels.mockResolvedValue([{id:"loaded",status:"error",elapsed_ms:0,error:"Invalid query"}]);
+    await act(async()=>host.current.retry());
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("loaded")?.error).toBe("Invalid query");});
+    expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
+    await act(async()=>host.node.querySelector<HTMLButtonElement>('[aria-label="loaded menu"]')!.click());
+    expect(document.body.textContent).toContain("Ask Fanout to fix it");
+    const before=wire.panels.mock.calls.length;await act(async()=>host.current.retry());expect(wire.panels).toHaveBeenCalledTimes(before);
+  } finally {await host.dispose();}
 });

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DashboardSpec, DashboardTime, PanelResult, VarValue } from "../../../panels/types";
+import type { PanelDisplayResult } from "./panel-result";
 import { retryPanelQuery } from "./query-policy";
 import { panelResultsKey } from "./query-keys";
 import { refreshDashboard } from "./refresh";
@@ -33,6 +34,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   // A manual refresh pressed while a partial lazy batch is in flight runs once
   // that batch settles; during a full refresh it is already covered.
   const queuedRefresh = useRef(false);
+  const queuedRetry = useRef<{key: string; ids: Set<string>} | null>(null);
   const requested = useRef<{ key: string; ids: Set<string> }>({ key, ids: new Set() });
   const [keptAnnotations, setKeptAnnotations] = useState<{key:string;annotations?:AnnotationsResponse;annotation_error?:string}>({key});
   const [kept, setKept] = useState<Snapshot>({ key, results: new Map(), updated: new Map(), stale: new Set(), receivedAt: 0 });
@@ -57,7 +59,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
           .map(id => ({id,status:"error",elapsed_ms:0,error:"No result was returned for this panel; refresh to retry."}));
         return {...data,results:[...data.results,...missing],hasTimePanels:spec.panels.some(p => sent.includes(p.id) && ["timeseries","heatmap","state_timeline"].includes(p.viz))};
       }).catch(error => {
-        failedBatch.current = {key, ids: sent.filter(id => spec.panels.find(panel => panel.id === id)?.viz !== "text"), error: error instanceof Error ? error.message : String(error)};
+        if (!signal.aborted) failedBatch.current = {key, ids: sent.filter(id => spec.panels.find(panel => panel.id === id)?.viz !== "text"), error: error instanceof Error ? error.message : String(error)};
         throw error;
       });
     },
@@ -84,8 +86,8 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   // A panel scrolled into view that has never loaded under this key is
   // fetched now, including when visibility changed during the previous batch.
   useEffect(() => {
-    // Leave failed or incomplete batches to the retry policy or an explicit refresh.
-    if (!canQuery || query.isFetching || query.error || queuedRefresh.current || lazyBatch.current?.key === key) return;
+    // Never repeat attempted panels, but an older failure cannot block new panels.
+    if (!canQuery || query.isFetching || queuedRefresh.current || queuedRetry.current?.key === key || lazyBatch.current?.key === key) return;
     const attempted = requested.current.key === key ? requested.current.ids : new Set<string>();
     const missing = [...new Set(ids.filter((id) => !results.has(id) && !attempted.has(id) && spec.panels.find((p) => p.id === id)?.viz !== "text"))].sort();
     if (!missing.length) return;
@@ -96,36 +98,55 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     });
   }, [visible, canQuery, key, query.isFetching, query.error, query.refetch, results, spec.panels]);
   useEffect(() => {
-    if (query.isFetching || !queuedRefresh.current) return;
+    if (query.isFetching || queuedRetry.current?.key === key || !queuedRefresh.current) return;
     queuedRefresh.current = false;
     lazyBatch.current = null;
     if (canQuery && !knownEmpty) void query.refetch({ cancelRefetch: false });
-  }, [query.isFetching, canQuery, knownEmpty, query.refetch]);
-  const retry = () => {
-    if (!canQuery || query.isFetching) return;
-    const failed = spec.panels.filter(panel => panel.viz !== "text" && results.get(panel.id)?.error).map(panel => panel.id).sort();
-    if (!failed.length) return;
-    const batch = {key, ids: failed}; lazyBatch.current = batch;
+  }, [query.isFetching, key, canQuery, knownEmpty, query.refetch]);
+  const sendRetry = (ids: string[]) => {
+    const batch = {key, ids}; lazyBatch.current = batch;
     void query.refetch({cancelRefetch: false}).finally(() => { if (lazyBatch.current === batch) lazyBatch.current = null; });
+  };
+  useEffect(() => {
+    if (query.isFetching || !queuedRetry.current) return;
+    const queued = queuedRetry.current; queuedRetry.current = null;
+    if (queued.key !== key || !canQuery) return;
+    const ids = [...queued.ids].filter(id => spec.panels.some(panel => panel.id === id && panel.viz !== "text") && results.get(id)?.request_error).sort();
+    if (ids.length) sendRetry(ids);
+  }, [query.isFetching, key, canQuery, results, spec.panels]);
+  const retry = (panelId?: string) => {
+    if (!canQuery) return;
+    const batchIds = panelId ? results.get(panelId)?.request_error ?? [] : [...results.values()].flatMap(result => result.request_error ?? []);
+    const failed = [...new Set(batchIds)].filter(id => spec.panels.some(panel => panel.id === id && panel.viz !== "text") && results.get(id)?.request_error).sort();
+    if (!failed.length) return;
+    if (query.isFetching) {
+      if (queuedRetry.current?.key !== key) queuedRetry.current = {key, ids: new Set()};
+      for (const id of failed) queuedRetry.current.ids.add(id);
+      return;
+    }
+    sendRetry(failed);
   };
   return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
 }
 
-type Snapshot = { key: string; results: Map<string, PanelResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number };
+type Snapshot = { key: string; results: Map<string, PanelDisplayResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number };
 function merge(previous: Snapshot, key: string, data: PanelResult[] | undefined, at: number, failed?: {ids: string[]; error: string}): Snapshot {
   const next: Snapshot = previous.key === key
     ? { key, results: new Map(previous.results), updated: new Map(previous.updated), stale: new Set(previous.stale), receivedAt: previous.receivedAt }
     : { key, results: new Map(), updated: new Map(), stale: new Set(), receivedAt: 0 };
   for (const result of data && at !== next.receivedAt ? data : []) {
-    if (result.status === "error" && next.results.get(result.id)?.frame) next.stale.add(result.id);
+    if (result.status === "error" && next.results.get(result.id)?.frame) {
+      next.stale.add(result.id);
+      next.results.set(result.id, {...next.results.get(result.id)!, error: result.error, request_error: undefined});
+    }
     else { next.results.set(result.id, result); next.updated.set(result.id, at); next.stale.delete(result.id); }
   }
   if (data) next.receivedAt = at;
   for (const id of failed?.ids ?? []) {
     const previous = next.results.get(id);
     if (previous?.frame) {
-      next.stale.add(id); next.results.set(id, {...previous, error: failed!.error});
-    } else next.results.set(id, {id, status: "error", elapsed_ms: 0, error: failed!.error});
+      next.stale.add(id); next.results.set(id, {...previous, error: failed!.error, request_error: failed!.ids});
+    } else next.results.set(id, {id, status: "error", elapsed_ms: 0, error: failed!.error, request_error: failed!.ids});
   }
   return next;
 }

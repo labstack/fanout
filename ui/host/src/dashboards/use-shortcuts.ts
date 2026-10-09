@@ -10,12 +10,11 @@ export function useShortcuts(region: RefObject<HTMLElement | null>, actions: Par
       const root = region.current, target = event.target;
       const {actions, options} = latest.current;
       if (!root || !(target instanceof Element) || options.enabled === false) return;
-      const fullscreen = options.fullscreenScope ? [...document.querySelectorAll<HTMLElement>("[data-shortcut-scope]")].find(el => el.dataset.shortcutScope === options.fullscreenScope && (el.hasAttribute("data-panel-fullscreen") || el.hasAttribute("data-fragment-fullscreen"))) : undefined;
+      const fullscreen = options.fullscreenScope ? [...document.querySelectorAll<HTMLElement>("[data-shortcut-scope]")].find(el => el.dataset.shortcutScope === options.fullscreenScope && el.hasAttribute("data-panel-fullscreen")) : undefined;
       const within = root.contains(target) && root.contains(document.activeElement);
       const fromBody = target === document.body && document.activeElement === document.body;
       const fromFullscreen = fullscreen?.contains(target) && fullscreen.contains(document.activeElement);
       if (!within && !fromBody && !fromFullscreen) return;
-      if (target.closest("[data-dashboard-fragment]") && !fromFullscreen) return;
       const blocked = options.modalOpen || [...document.querySelectorAll('[role="dialog"]')].some(dialog => dialog !== fullscreen);
       const key = shortcutKey(event, Boolean(blocked), Boolean(fullscreen));
       if (!key || fullscreen && !["r", "f", "?"].includes(key)) return;
