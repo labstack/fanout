@@ -20,6 +20,7 @@ const (
 )
 
 var heightRows = map[string]int{"s": 3, "m": 6, "l": 10}
+var minimumRows = map[string]int{"stat": 4}
 
 func firstFit(placed []panel.Grid, w, h int) (int, int) {
 	for y := 0; ; y++ {
@@ -56,7 +57,9 @@ func needsPack(panels []panel.Panel) bool {
 // PackMissing preserves every valid, non-overlapping supplied grid and packs
 // only panels without usable coordinates around them.
 func PackMissing(panels []panel.Panel) {
-	snapRowBands(panels, packMissing(panels))
+	packed := packMissing(panels)
+	snapRowBands(panels, packed)
+	fillRowBands(panels, packed)
 }
 
 func packMissing(panels []panel.Panel) []int {
@@ -81,10 +84,14 @@ func packMissing(panels []panel.Panel) []int {
 		h := heightRows[panels[i].Height]
 		if h == 0 {
 			h = heightRows["m"]
+			if panels[i].Viz == "stat" {
+				h = heightRows["s"]
+			}
 			if panels[i].Viz == "service_map" {
 				h = heightRows["l"]
 			}
 		}
+		h = max(h, minimumRows[panels[i].Viz])
 		x, y := firstFit(placed, w, h)
 		g := panel.Grid{X: x, Y: y, W: w, H: h}
 		panels[i].Grid = &g
@@ -116,6 +123,60 @@ func snapRowBands(panels []panel.Panel, packed []int) {
 	}
 }
 
+// Fill only newly packed bands whose entire trailing rectangle is free.
+// Share spare columns evenly, giving the leftmost panels the remainder.
+func fillRowBands(panels []panel.Panel, packed []int) {
+	slices.SortFunc(packed, func(a, b int) int {
+		ga, gb := panels[a].Grid, panels[b].Grid
+		return cmp.Or(cmp.Compare(ga.Y, gb.Y), cmp.Compare(ga.X, gb.X))
+	})
+	for start, end := 0, 0; start < len(packed); start = end {
+		y, right, height := panels[packed[start]].Grid.Y, 0, 0
+		for end = start; end < len(packed) && panels[packed[end]].Grid.Y == y; end++ {
+			g := panels[packed[end]].Grid
+			right, height = max(right, g.X+g.W), max(height, g.H)
+		}
+		spare := columns - right
+		if spare == 0 {
+			continue
+		}
+		band := packed[start:end]
+		placed := make([]panel.Grid, 0, len(panels))
+		for _, p := range panels {
+			placed = append(placed, *p.Grid)
+		}
+		if !fits(placed, right, y, spare, height) {
+			continue
+		}
+		// Remove this band's old rectangles before checking the new positions.
+		for _, i := range band {
+			placed[i] = panel.Grid{}
+		}
+		widened := make([]panel.Grid, 0, len(band))
+		shift := 0
+		for j, i := range band {
+			g := *panels[i].Grid
+			add := spare / len(band)
+			if j < spare%len(band) {
+				add++
+			}
+			g.X += shift
+			g.W += add
+			if !fits(placed, g.X, g.Y, g.W, g.H) {
+				break
+			}
+			widened = append(widened, g)
+			placed = append(placed, g)
+			shift += add
+		}
+		if len(widened) == len(band) {
+			for j, i := range band {
+				*panels[i].Grid = widened[j]
+			}
+		}
+	}
+}
+
 // Compact repairs unusable grids, then closes vertical gaps without changing
 // usable columns or dimensions. Work depends on panel count, never grid Y.
 func Compact(panels []panel.Panel) {
@@ -141,4 +202,5 @@ func Compact(panels []panel.Panel) {
 		placed = slices.Insert(placed, at, g)
 	}
 	snapRowBands(panels, packed)
+	fillRowBands(panels, packed)
 }

@@ -70,10 +70,11 @@ describe("dashboard layout editing", () => {
     await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map",height:"s"}]});
     expect(grid.current!.layouts.lg[0].h).toBe(3);
   });
-  it("gives short stat cards four visible rows for chrome, value, delta and 40px sparkline without changing the spec", async () => {
+  it("preserves authored stat heights without browser inflation or a resize minimum", async () => {
     const dashboard: DashboardSpec = { ...spec, panels: [{ ...spec.panels[0], viz: "stat", grid: { x: 0, y: 0, w: 3, h: 3 } }] };
     await render(false, dashboard);
-    expect(grid.current!.layouts.lg[0]).toMatchObject({ h: 4, minH: 4 });
+    expect(grid.current!.layouts.lg[0]).toMatchObject({ h: 3 });
+    expect(grid.current!.layouts.lg[0].minH).toBeUndefined();
     expect(dashboard.panels[0].grid?.h).toBe(3); expect(fetchMock).not.toHaveBeenCalled();
   });
   it("waits for a visible container width and follows its resizing after a route transition", async () => {
