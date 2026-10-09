@@ -62,6 +62,9 @@ Open the URL, create the administrator, and **save the ingest token shown after
 setup**. The raw token is displayed once; Fanout stores only its hash and cannot
 show it again.
 
+The setup form sends `email`, `display_name`, and `setup_token` to
+`POST /api/auth/setup`. The first administrator starts with status `active`.
+
 The warning in the banner is not boilerplate. The URL carries a credential that
 creates an administrator, and container logs are routinely shipped somewhere
 else. Treat a leaked setup URL as an unclaimed admin account and restart with a

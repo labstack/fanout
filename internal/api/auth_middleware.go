@@ -175,7 +175,7 @@ func authenticateSession(c *echo.Context, users *auth.UserStore, sessions *auth.
 	case err != nil:
 		slog.Error("auth user lookup failed", "user_id", userID, "err", err)
 		return auth.User{}, echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
-	case !user.Active || user.AuthVersion != sessions.AuthVersion(ctx):
+	case user.Status != auth.UserStatusActive || user.AuthVersion != sessions.AuthVersion(ctx):
 		if destroyErr := sessions.Destroy(ctx); destroyErr != nil {
 			slog.Error("auth revoked-session destroy failed", "user_id", userID, "err", destroyErr)
 		}
@@ -314,6 +314,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 			return routePolicy{}, false
 		}
 		allowed := action == "" && (method == http.MethodPatch || method == http.MethodDelete) ||
+			(action == "role" || action == "status") && method == http.MethodPatch ||
 			action == "access/revoke" && method == http.MethodPost
 		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, allowed
 	case path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||

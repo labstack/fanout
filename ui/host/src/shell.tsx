@@ -92,7 +92,7 @@ export default function Shell({ children }: { children: ReactNode }) {
 function AccountMenu({ onError }: { onError: (message: string) => void }) {
   const navigate = useNavigate();
   const viewer = useViewer();
-  const label = viewer.name.trim() || viewer.email.trim() || "?";
+  const label = viewer.display_name.trim() || viewer.email.trim() || "?";
   const initial = label.charAt(0).toUpperCase();
   return <Menu position="bottom-end" withinPortal shadow="md">
     <Menu.Target>

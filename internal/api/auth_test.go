@@ -178,6 +178,9 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
 		{http.MethodPost, "/api/settings/ingest/token/rotate", routePolicyCapability, ManageIngest},
 		{http.MethodPost, "/api/users/user-1/access/revoke", routePolicyCapability, ManageUsers},
+		{http.MethodPatch, "/api/users/user-1", routePolicyCapability, ManageUsers},
+		{http.MethodPatch, "/api/users/user-1/role", routePolicyCapability, ManageUsers},
+		{http.MethodPatch, "/api/users/user-1/status", routePolicyCapability, ManageUsers},
 		{http.MethodGet, "/debug/pprof/heap", routePolicyCapability, ReadOperations},
 		{http.MethodGet, "/metrics", routePolicyServiceCredential, ReadOperations},
 		{http.MethodPost, "/oauth/token", routePolicyProtocol, ""},
@@ -327,7 +330,7 @@ func TestSessionAuthDBFailureReturns500(t *testing.T) {
 	}
 }
 
-func TestRoleChangeAndDeactivationRevokeSessions(t *testing.T) {
+func TestRoleChangeAndSuspensionRevokeSessions(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		change func(*auth.UserStore, auth.User) error
@@ -337,9 +340,9 @@ func TestRoleChangeAndDeactivationRevokeSessions(t *testing.T) {
 			_, err := users.UpdateWithAudit(user.ID, nil, nil, &role, nil, auth.AuditEvent{EventType: "user.updated", Outcome: "success"})
 			return err
 		}},
-		{name: "inactive", change: func(users *auth.UserStore, user auth.User) error {
-			active := false
-			_, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &active, auth.AuditEvent{EventType: "user.updated", Outcome: "success"})
+		{name: "suspended", change: func(users *auth.UserStore, user auth.User) error {
+			status := auth.UserStatusSuspended
+			_, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &status, auth.AuditEvent{EventType: "user.updated", Outcome: "success"})
 			return err
 		}},
 	} {
@@ -445,12 +448,12 @@ func TestLogoutDeletesServerSession(t *testing.T) {
 func TestStartDoesNotRevealAccountState(t *testing.T) {
 	smtp := auth.SMTPConfig{Host: "smtp.example.com", Port: 587, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local"}, smtp)
-	inactive, _ := s.users.CreateWithAudit("inactive@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
-	active := false
-	if _, err := s.users.UpdateWithAudit(inactive.ID, nil, nil, nil, &active, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+	suspended, _ := s.users.CreateWithAudit("suspended@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	status := auth.UserStatusSuspended
+	if _, err := s.users.UpdateWithAudit(suspended.ID, nil, nil, nil, &status, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
+	for _, email := range []string{"missing@example.com", "suspended@example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/code/send", strings.NewReader(`{"email":"`+email+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -546,7 +549,7 @@ func TestLocalSelfSignupCreatesVerifiedViewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByEmail: %v", err)
 	}
-	if user.Role != auth.RoleViewer || !user.Active {
+	if user.Role != auth.RoleViewer || user.Status != auth.UserStatusActive {
 		t.Fatalf("self-signup user = %#v, want active viewer", user)
 	}
 	firstCookie(t, rec, "fanout_session")
@@ -578,33 +581,33 @@ func TestLocalSelfSignupCannotPreemptFirstAdminOrReactivateUser(t *testing.T) {
 		}
 	})
 
-	t.Run("inactive user", func(t *testing.T) {
+	t.Run("suspended user", func(t *testing.T) {
 		s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, auth.SMTPConfig{})
 		if _, err := s.users.CreateWithAudit("admin@example.com", "", auth.RoleAdmin, auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 			t.Fatalf("Create admin: %v", err)
 		}
-		viewer, err := s.users.CreateWithAudit("inactive@example.com", "", auth.RoleViewer, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+		viewer, err := s.users.CreateWithAudit("suspended@example.com", "", auth.RoleViewer, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 		if err != nil {
 			t.Fatalf("Create viewer: %v", err)
 		}
-		active := false
-		if _, err := s.users.UpdateWithAudit(viewer.ID, nil, nil, nil, &active, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
-			t.Fatalf("deactivate: %v", err)
+		status := auth.UserStatusSuspended
+		if _, err := s.users.UpdateWithAudit(viewer.ID, nil, nil, nil, &status, auth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+			t.Fatalf("suspend: %v", err)
 		}
 		code, err := s.codes.Create(viewer.Email)
 		if err != nil {
 			t.Fatalf("Create code: %v", err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"inactive@example.com","code":"`+code+`"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"suspended@example.com","code":"`+code+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("inactive verify = %d %s, want 401", rec.Code, rec.Body.String())
+			t.Fatalf("suspended verify = %d %s, want 401", rec.Code, rec.Body.String())
 		}
 		got, err := s.users.GetByEmail(viewer.Email)
-		if err != nil || got.Active {
-			t.Fatalf("inactive user was reactivated: user=%#v err=%v", got, err)
+		if err != nil || got.Status == auth.UserStatusActive {
+			t.Fatalf("suspended user was reactivated: user=%#v err=%v", got, err)
 		}
 	})
 }
@@ -640,7 +643,7 @@ func TestSetupLifecycleAndIngestToken(t *testing.T) {
 		t.Fatalf("bad setup = %d", badRec.Code)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","display_name":"First Admin","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
@@ -660,7 +663,7 @@ func TestSetupLifecycleAndIngestToken(t *testing.T) {
 	if body["ingest_header_name"] != "Authorization" {
 		t.Fatalf("ingest header name = %q", body["ingest_header_name"])
 	}
-	if user, err := s.users.GetByEmail("admin@example.com"); err != nil || user.Role != auth.RoleAdmin {
+	if user, err := s.users.GetByEmail("admin@example.com"); err != nil || user.Role != auth.RoleAdmin || user.DisplayName != "First Admin" || user.Status != auth.UserStatusActive {
 		t.Fatalf("admin = %+v err=%v", user, err)
 	}
 	if got := s.setup.Verify(s.setupToken); got != auth.SetupStatusUnset {

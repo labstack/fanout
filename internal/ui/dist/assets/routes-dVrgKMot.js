@@ -1,0 +1,1 @@
+import{vt as e}from"./brand-oskFJPNW.js";import{n as t,u as n}from"./auth-BLat7TXI.js";var r=e();function i(){let{agent_available:e}=t();return e?(0,r.jsx)(n,{to:`/chat`,replace:!0}):(0,r.jsx)(n,{to:`/dashboards`,replace:!0})}export{i as component};

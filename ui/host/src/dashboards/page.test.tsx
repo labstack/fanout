@@ -13,7 +13,7 @@ import { assertServiceMapDOM } from "../../tests/service-map-collector";
 const viewer = vi.hoisted(() => ({ role: "viewer" }));
 vi.mock("../auth", async (importOriginal) => ({
   ...await importOriginal<typeof import("../auth")>(),
-  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: viewer.role }),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", display_name: "Viewer", status: "active" as const, role: viewer.role }),
 }));
 
 const charts = vi.hoisted(() => ({ option: vi.fn() }));

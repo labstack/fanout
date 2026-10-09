@@ -11,7 +11,7 @@ import (
 )
 
 const countActiveAdmins = `-- name: CountActiveAdmins :one
-SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1
+SELECT COUNT(*) FROM users WHERE role = 'admin' AND status = 'active'
 `
 
 func (q *Queries) CountActiveAdmins(ctx context.Context) (int64, error) {
@@ -33,25 +33,25 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, email, name, role, created_at, updated_at)
+INSERT INTO users (id, email, display_name, role, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at
+RETURNING id, email, display_name, role, auth_version, logged_in_at, created_at, updated_at, status
 `
 
 type CreateUserParams struct {
-	ID        string         `json:"id"`
-	Email     string         `json:"email"`
-	Name      sql.NullString `json:"name"`
-	Role      string         `json:"role"`
-	CreatedAt string         `json:"created_at"`
-	UpdatedAt string         `json:"updated_at"`
+	ID          string         `json:"id"`
+	Email       string         `json:"email"`
+	DisplayName sql.NullString `json:"display_name"`
+	Role        string         `json:"role"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, createUser,
 		arg.ID,
 		arg.Email,
-		arg.Name,
+		arg.DisplayName,
 		arg.Role,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -60,13 +60,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.Name,
+		&i.DisplayName,
 		&i.Role,
-		&i.Active,
 		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
 	)
 	return i, err
 }
@@ -80,7 +80,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id string) (sql.Result, error)
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at FROM users WHERE email = ?
+SELECT id, email, display_name, role, auth_version, logged_in_at, created_at, updated_at, status FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -89,19 +89,19 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.Name,
+		&i.DisplayName,
 		&i.Role,
-		&i.Active,
 		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at FROM users WHERE id = ?
+SELECT id, email, display_name, role, auth_version, logged_in_at, created_at, updated_at, status FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -110,13 +110,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.Name,
+		&i.DisplayName,
 		&i.Role,
-		&i.Active,
 		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
 	)
 	return i, err
 }
@@ -136,7 +136,7 @@ func (q *Queries) IncrementUserAuthVersion(ctx context.Context, arg IncrementUse
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at FROM users ORDER BY created_at DESC
+SELECT id, email, display_name, role, auth_version, logged_in_at, created_at, updated_at, status FROM users ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -151,13 +151,13 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.Email,
-			&i.Name,
+			&i.DisplayName,
 			&i.Role,
-			&i.Active,
 			&i.AuthVersion,
 			&i.LoggedInAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
 		); err != nil {
 			return nil, err
 		}
@@ -188,26 +188,26 @@ func (q *Queries) TouchLogin(ctx context.Context, arg TouchLoginParams) error {
 }
 
 const updateUser = `-- name: UpdateUser :one
-UPDATE users SET email = ?, name = ?, role = ?, active = ?, updated_at = ?
+UPDATE users SET email = ?, display_name = ?, role = ?, status = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at
+RETURNING id, email, display_name, role, auth_version, logged_in_at, created_at, updated_at, status
 `
 
 type UpdateUserParams struct {
-	Email     string         `json:"email"`
-	Name      sql.NullString `json:"name"`
-	Role      string         `json:"role"`
-	Active    int64          `json:"active"`
-	UpdatedAt string         `json:"updated_at"`
-	ID        string         `json:"id"`
+	Email       string         `json:"email"`
+	DisplayName sql.NullString `json:"display_name"`
+	Role        string         `json:"role"`
+	Status      string         `json:"status"`
+	UpdatedAt   string         `json:"updated_at"`
+	ID          string         `json:"id"`
 }
 
 func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
 	row := q.db.QueryRowContext(ctx, updateUser,
 		arg.Email,
-		arg.Name,
+		arg.DisplayName,
 		arg.Role,
-		arg.Active,
+		arg.Status,
 		arg.UpdatedAt,
 		arg.ID,
 	)
@@ -215,13 +215,13 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.Name,
+		&i.DisplayName,
 		&i.Role,
-		&i.Active,
 		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
 	)
 	return i, err
 }

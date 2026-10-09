@@ -30,8 +30,8 @@ vi.mock("@ag-ui/client", () => ({
   },
 }));
 
-const defaultViewer = { id: "viewer-1", email: "v@example.com", name: "Vee", role: "admin" };
-const viewerMock = vi.hoisted(() => ({ current: { id: "viewer-1", email: "v@example.com", name: "Vee", role: "admin" } }));
+const defaultViewer = { id: "viewer-1", email: "v@example.com", display_name: "Vee", status: "active" as const, role: "admin" };
+const viewerMock = vi.hoisted(() => ({ current: { id: "viewer-1", email: "v@example.com", display_name: "Vee", status: "active" as const, role: "admin" } }));
 
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
@@ -366,7 +366,7 @@ describe("Session", () => {
   });
 
   it("falls back to the email initial when the viewer's name is only whitespace", async () => {
-    viewerMock.current = { id: "viewer-1", email: "v@example.com", name: "   ", role: "admin" };
+    viewerMock.current = { id: "viewer-1", email: "v@example.com", display_name: "   ", status: "active" as const, role: "admin" };
     const rootRoute = createRootRoute({ component: App });
     const chatIndex = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
     const router = createRouter({ routeTree: rootRoute.addChildren([chatIndex]) });

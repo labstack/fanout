@@ -114,6 +114,8 @@ resources and protocol-defined contracts keep their own semantics.
   Each segment should have a domain, resource, or action meaning; do not
   mechanically split compound words. Colon actions are conventions in other
   API ecosystems.
+- User profile PATCH uses `/api/users/{id}` with `email` and `display_name`;
+  role and status PATCH use `/api/users/{id}/role` and `/api/users/{id}/status`.
 - Equivalent authentication flows use `/api/auth/me`, `/api/auth/code/send`,
   `/api/auth/code/verify`, and `POST /api/auth/logout`. Flow selection, passkeys,
   account linking, and sign-in link verification are distinct operations.

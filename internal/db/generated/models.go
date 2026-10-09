@@ -161,13 +161,13 @@ type Setting struct {
 type User struct {
 	ID          string         `json:"id"`
 	Email       string         `json:"email"`
-	Name        sql.NullString `json:"name"`
+	DisplayName sql.NullString `json:"display_name"`
 	Role        string         `json:"role"`
-	Active      int64          `json:"active"`
 	AuthVersion int64          `json:"auth_version"`
 	LoggedInAt  sql.NullString `json:"logged_in_at"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
+	Status      string         `json:"status"`
 }
 
 type UserIdentity struct {

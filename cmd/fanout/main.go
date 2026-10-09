@@ -554,8 +554,8 @@ func createLoginLink(cfg config.Config, rawEmail string, output io.Writer) error
 	if err != nil {
 		return err
 	}
-	if !user.Active {
-		return fmt.Errorf("user %s is inactive", email)
+	if user.Status != auth.UserStatusActive {
+		return fmt.Errorf("user %s is suspended", email)
 	}
 	token, err := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret).CreateLoginLink(email)
 	if err != nil {

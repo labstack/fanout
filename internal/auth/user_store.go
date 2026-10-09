@@ -38,6 +38,17 @@ func ValidRole(role string) bool {
 	}
 }
 
+type UserStatus string
+
+const (
+	UserStatusActive    UserStatus = "active"
+	UserStatusSuspended UserStatus = "suspended"
+)
+
+func ValidUserStatus(status string) bool {
+	return UserStatus(status) == UserStatusActive || UserStatus(status) == UserStatusSuspended
+}
+
 const userTimestampLayout = "2006-01-02T15:04:05.000Z07:00"
 
 func userTimestamp(at time.Time) string {
@@ -46,15 +57,15 @@ func userTimestamp(at time.Time) string {
 
 // User represents an authenticated user.
 type User struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	Name        string `json:"name,omitempty"`
-	Role        Role   `json:"role"`
-	Active      bool   `json:"active"`
-	AuthVersion int64  `json:"-"`
-	LoggedInAt  string `json:"logged_in_at,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID          string     `json:"id"`
+	Email       string     `json:"email"`
+	DisplayName string     `json:"display_name"`
+	Role        Role       `json:"role"`
+	Status      UserStatus `json:"status"`
+	AuthVersion int64      `json:"-"`
+	LoggedInAt  string     `json:"logged_in_at,omitempty"`
+	CreatedAt   string     `json:"created_at"`
+	UpdatedAt   string     `json:"updated_at"`
 }
 
 // UserStore provides CRUD operations for users.
@@ -73,9 +84,9 @@ func toUser(u generated.User) User {
 	return User{
 		ID:          u.ID,
 		Email:       u.Email,
-		Name:        u.Name.String,
+		DisplayName: u.DisplayName.String,
 		Role:        Role(u.Role),
-		Active:      u.Active == 1,
+		Status:      UserStatus(u.Status),
 		AuthVersion: u.AuthVersion,
 		LoggedInAt:  u.LoggedInAt.String,
 		CreatedAt:   u.CreatedAt,
@@ -84,15 +95,15 @@ func toUser(u generated.User) User {
 }
 
 // CreateWithAudit adds a new user.
-func (s *UserStore) CreateWithAudit(email, name string, role Role, event AuditEvent) (User, error) {
-	return s.create(email, name, role, &event)
+func (s *UserStore) CreateWithAudit(email, displayName string, role Role, event AuditEvent) (User, error) {
+	return s.create(email, displayName, role, &event)
 }
 
-func (s *UserStore) create(email, name string, role Role, event *AuditEvent) (User, error) {
+func (s *UserStore) create(email, displayName string, role Role, event *AuditEvent) (User, error) {
 	if !ValidRole(string(role)) {
 		return User{}, fmt.Errorf("auth: invalid role %q", role)
 	}
-	params, err := newCreateUserParams(email, name, role)
+	params, err := newCreateUserParams(email, displayName, role)
 	if err != nil {
 		return User{}, err
 	}
@@ -175,12 +186,12 @@ func (s *UserStore) List() ([]User, error) {
 	return users, nil
 }
 
-// UpdateWithAudit modifies a user's fields. Email, role, or active-state changes revoke every browser session.
-func (s *UserStore) UpdateWithAudit(id string, email, name *string, role *Role, active *bool, event AuditEvent) (User, error) {
-	return s.update(id, email, name, role, active, &event)
+// UpdateWithAudit modifies a user's fields. Email, role, or status changes revoke every browser session.
+func (s *UserStore) UpdateWithAudit(id string, email, displayName *string, role *Role, status *UserStatus, event AuditEvent) (User, error) {
+	return s.update(id, email, displayName, role, status, &event)
 }
 
-func (s *UserStore) update(id string, email, name *string, role *Role, active *bool, event *AuditEvent) (User, error) {
+func (s *UserStore) update(id string, email, displayName *string, role *Role, status *UserStatus, event *AuditEvent) (User, error) {
 	ctx, cancel := DetachedWriteContext(context.Background())
 	defer cancel()
 	conn, err := s.db.Conn(ctx)
@@ -213,8 +224,8 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 	if email != nil {
 		existing.Email = *email
 	}
-	if name != nil {
-		existing.Name = *name
+	if displayName != nil {
+		existing.DisplayName = *displayName
 	}
 	if role != nil {
 		if !ValidRole(string(*role)) {
@@ -222,10 +233,13 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 		}
 		existing.Role = *role
 	}
-	if active != nil {
-		existing.Active = *active
+	if status != nil {
+		if !ValidUserStatus(string(*status)) {
+			return User{}, fmt.Errorf("auth: invalid status %q", *status)
+		}
+		existing.Status = *status
 	}
-	if row.Role == "admin" && row.Active == 1 && (!existing.Active || existing.Role != "admin") {
+	if row.Role == "admin" && row.Status == string(UserStatusActive) && (existing.Status != UserStatusActive || existing.Role != "admin") {
 		admins, err := q.CountActiveAdmins(ctx)
 		if err != nil {
 			return User{}, fmt.Errorf("auth: count active admins: %w", err)
@@ -235,18 +249,14 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 		}
 	}
 
-	activeInt := int64(0)
-	if existing.Active {
-		activeInt = 1
-	}
 	now := userTimestamp(time.Now())
 	u, err := q.UpdateUser(ctx, generated.UpdateUserParams{
-		Email:     existing.Email,
-		Name:      sql.NullString{String: existing.Name, Valid: existing.Name != ""},
-		Role:      string(existing.Role),
-		Active:    activeInt,
-		UpdatedAt: now,
-		ID:        id,
+		Email:       existing.Email,
+		DisplayName: sql.NullString{String: existing.DisplayName, Valid: existing.DisplayName != ""},
+		Role:        string(existing.Role),
+		Status:      string(existing.Status),
+		UpdatedAt:   now,
+		ID:          id,
 	})
 	if err != nil {
 		if appstore.IsUniqueConstraint(err) {
@@ -254,7 +264,7 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 		}
 		return User{}, fmt.Errorf("auth: update user: %w", err)
 	}
-	securityChanged := before.Email != existing.Email || before.Role != existing.Role || before.Active != existing.Active
+	securityChanged := before.Email != existing.Email || before.Role != existing.Role || before.Status != existing.Status
 	if securityChanged {
 		if err := q.IncrementUserAuthVersion(ctx, generated.IncrementUserAuthVersionParams{UpdatedAt: now, ID: id}); err != nil {
 			return User{}, fmt.Errorf("auth: increment auth version: %w", err)
@@ -313,7 +323,7 @@ func (s *UserStore) delete(id string, event *AuditEvent) error {
 	if err != nil {
 		return fmt.Errorf("auth: get user by id: %w", err)
 	}
-	if row.Role == "admin" && row.Active == 1 {
+	if row.Role == "admin" && row.Status == string(UserStatusActive) {
 		admins, err := q.CountActiveAdmins(ctx)
 		if err != nil {
 			return fmt.Errorf("auth: count active admins: %w", err)
@@ -428,11 +438,11 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 
 // CreateFirstAdminWithAudit atomically creates the first admin user.
 // Returns ErrSetupComplete if users already exist (race-safe).
-func (s *UserStore) CreateFirstAdminWithAudit(email, name string, event AuditEvent) (User, error) {
-	return s.createFirstAdmin(email, name, &event)
+func (s *UserStore) CreateFirstAdminWithAudit(email, displayName string, event AuditEvent) (User, error) {
+	return s.createFirstAdmin(email, displayName, &event)
 }
 
-func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (User, error) {
+func (s *UserStore) createFirstAdmin(email, displayName string, event *AuditEvent) (User, error) {
 	ctx := context.Background()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -459,7 +469,7 @@ func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (Use
 		return User{}, ErrSetupComplete
 	}
 
-	params, err := newCreateUserParams(email, name, RoleAdmin)
+	params, err := newCreateUserParams(email, displayName, RoleAdmin)
 	if err != nil {
 		return User{}, err
 	}
@@ -484,18 +494,18 @@ func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (Use
 // ErrSetupComplete is returned when setup is attempted but users already exist.
 var ErrSetupComplete = errors.New("setup already complete")
 
-func newCreateUserParams(email, name string, role Role) (generated.CreateUserParams, error) {
+func newCreateUserParams(email, displayName string, role Role) (generated.CreateUserParams, error) {
 	id, err := appid.New()
 	if err != nil {
 		return generated.CreateUserParams{}, fmt.Errorf("auth: generate user id: %w", err)
 	}
 	now := userTimestamp(time.Now())
 	return generated.CreateUserParams{
-		ID:        id,
-		Email:     email,
-		Name:      sql.NullString{String: name, Valid: name != ""},
-		Role:      string(role),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          id,
+		Email:       email,
+		DisplayName: sql.NullString{String: displayName, Valid: displayName != ""},
+		Role:        string(role),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}, nil
 }

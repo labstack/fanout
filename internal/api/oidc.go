@@ -181,8 +181,8 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 		slog.Warn("OIDC login denied", "issuer", idToken.Issuer, "subject", claims.Subject, "err", err)
 		return h.oidcDenied(c, err.Error())
 	}
-	if !user.Active {
-		return h.oidcDenied(c, "user is inactive")
+	if user.Status != appauth.UserStatusActive {
+		return h.oidcDenied(c, "user is suspended")
 	}
 	if err := h.identities.TouchLogin(ctx, identity.ID); err != nil {
 		slog.Error("OIDC identity login timestamp update failed", "identity_id", identity.ID, "err", err)
@@ -279,8 +279,8 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	if err != nil {
 		return appauth.User{}, appauth.UserIdentity{}, err
 	}
-	if !user.Active {
-		return appauth.User{}, appauth.UserIdentity{}, errors.New("user is inactive")
+	if user.Status != appauth.UserStatusActive {
+		return appauth.User{}, appauth.UserIdentity{}, errors.New("user is suspended")
 	}
 	linked, err := h.identities.CountForUser(ctx, user.ID)
 	if err != nil {
@@ -365,10 +365,10 @@ func (h *OIDCHandler) roleMappingConfigured() bool {
 // login. The role change, auth version increment, session revocation, and audit
 // event are one transaction inside UpdateWithAudit.
 func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, claims oidcClaims, source requestSource) (appauth.User, error) {
-	// A deactivated account is denied by the caller. Reconciling it anyway
+	// A suspended account is denied by the caller. Reconciling it anyway
 	// would rewrite its role, revoke sessions, and write an audit event on
 	// every rejected login attempt.
-	if !h.roleMappingConfigured() || !user.Active {
+	if !h.roleMappingConfigured() || user.Status != appauth.UserStatusActive {
 		return user, nil
 	}
 	mapped := h.provisionRole(claims.Groups)

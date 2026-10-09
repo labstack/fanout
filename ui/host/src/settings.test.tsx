@@ -9,7 +9,7 @@ const fetchMock = vi.fn<typeof fetch>();
 let role = "admin";
 
 vi.mock("./auth", () => ({
-  useViewer: () => ({ id: "u1", email: "v@labstack.com", name: "V", role }),
+  useViewer: () => ({ id: "u1", email: "v@labstack.com", display_name: "V", status: "active" as const, role }),
   authorizedFetch: (url: string, init?: RequestInit) => fetchMock(url, init),
 }));
 

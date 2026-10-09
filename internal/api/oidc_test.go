@@ -80,7 +80,7 @@ func TestOIDCWildcardDomainAllowsVerifiedViewerProvisioning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verified visitor was not provisioned: %v", err)
 	}
-	if user.Role != appauth.RoleViewer {
+	if user.Role != appauth.RoleViewer || user.Status != appauth.UserStatusActive || user.DisplayName != "" {
 		t.Fatalf("provisioned role = %q, want viewer", user.Role)
 	}
 	claims.EmailVerified = new(bool)
@@ -434,17 +434,17 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 		t.Fatal("second identity linked to an already-linked user")
 	}
 
-	inactive, err := users.CreateWithAudit("inactive-oidc@example.com", "", "viewer", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	suspended, err := users.CreateWithAudit("suspended-oidc@example.com", "", "viewer", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	active := false
-	if _, err := users.UpdateWithAudit(inactive.ID, nil, nil, nil, &active, appauth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+	status := appauth.UserStatusSuspended
+	if _, err := users.UpdateWithAudit(suspended.ID, nil, nil, nil, &status, appauth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
-	inactiveClaims := oidcClaims{Subject: "inactive-subject", Email: inactive.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", inactiveClaims, requestSource{}); err == nil {
-		t.Fatal("inactive user was linked")
+	suspendedClaims := oidcClaims{Subject: "suspended-subject", Email: suspended.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", suspendedClaims, requestSource{}); err == nil {
+		t.Fatal("suspended user was linked")
 	}
 }
 
@@ -620,7 +620,7 @@ func TestResolveUserReportsUnusableEmailClaimDistinctly(t *testing.T) {
 	}
 }
 
-func TestResolveUserSkipsRoleReconciliationForInactiveUser(t *testing.T) {
+func TestResolveUserSkipsRoleReconciliationForSuspendedUser(t *testing.T) {
 	cfg := config.Config{
 		OIDCEmailVerification: "required",
 		OIDCAllowedGroups:     "trusted",
@@ -631,8 +631,8 @@ func TestResolveUserSkipsRoleReconciliationForInactiveUser(t *testing.T) {
 	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
-	inactive := false
-	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &inactive, appauth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+	status := appauth.UserStatusSuspended
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &status, appauth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -645,7 +645,7 @@ func TestResolveUserSkipsRoleReconciliationForInactiveUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	if stored.Role != appauth.RoleAdmin {
-		t.Fatalf("role = %q, want admin: a denied login by a deactivated account must not rewrite its role", stored.Role)
+		t.Fatalf("role = %q, want admin: a denied login by a suspended account must not rewrite its role", stored.Role)
 	}
 }
 
