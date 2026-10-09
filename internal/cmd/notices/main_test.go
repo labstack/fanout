@@ -84,7 +84,9 @@ func TestCollectNPMIncludesPinnedDeadCodeBuildTool(t *testing.T) {
 	tool := filepath.Join(workspace, "node_modules/knip")
 	writeTestFile(t, filepath.Join(tool, "package.json"), `{"name":"knip","version":"6.38.0","license":"ISC","dependencies":{"parser":"1.0.0"}}`)
 	parser := filepath.Join(workspace, "node_modules/parser")
-	writeTestFile(t, filepath.Join(parser, "package.json"), `{"name":"parser","version":"1.0.0","license":"MIT"}`)
+	writeTestFile(t, filepath.Join(parser, "package.json"), `{"name":"parser","version":"1.0.0","license":"MIT","optionalDependencies":{"parser-binding-darwin-arm64":"1.0.0"}}`)
+	binding := filepath.Join(workspace, "node_modules/parser-binding-darwin-arm64")
+	writeTestFile(t, filepath.Join(binding, "package.json"), `{"name":"parser-binding-darwin-arm64","version":"1.0.0","license":"MIT","os":["darwin"],"cpu":["arm64"]}`)
 	all := map[string]component{}
 	if err := collectNPM(root, workspace, all); err != nil {
 		t.Fatal(err)

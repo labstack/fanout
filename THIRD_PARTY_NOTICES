@@ -101,9 +101,7 @@ COMPONENT INVENTORY
 - npm: @modelcontextprotocol/client 2.2.0 (declared license: MIT)
 - npm: @modelcontextprotocol/core 2.2.0 (declared license: MIT)
 - npm: @modelcontextprotocol/ext-apps 2.0.3 (declared license: MIT)
-- npm: @oxc-parser/binding-darwin-arm64 0.150.0 (declared license: MIT); no license file was present in the installed package
 - npm: @oxc-project/types 0.150.0 (declared license: MIT)
-- npm: @oxc-resolver/binding-darwin-arm64 11.24.2 (declared license: MIT); no license file was present in the installed package
 - npm: @phosphor-icons/react 2.1.10 (declared license: MIT)
 - npm: @protobuf-ts/protoc 2.11.1 (declared license: Apache-2.0)
 - npm: @standard-schema/spec 1.1.0 (declared license: MIT)

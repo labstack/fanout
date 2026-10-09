@@ -56,6 +56,8 @@ type npmPackage struct {
 	PeerDependenciesMeta map[string]struct {
 		Optional bool `json:"optional"`
 	} `json:"peerDependenciesMeta"`
+	OS  []string `json:"os"`
+	CPU []string `json:"cpu"`
 }
 
 type noticeGroup struct {
@@ -235,6 +237,12 @@ func collectNPM(root, workspace string, all map[string]component) error {
 		}
 		if pkg.Name == "" || pkg.Version == "" {
 			return fmt.Errorf("%s has incomplete package metadata", realDir)
+		}
+		// An optional package pinned to an OS or CPU is whichever native binary
+		// the installing machine selected, so listing it would make the notices
+		// differ between a developer's machine and CI.
+		if next.optional && (len(pkg.OS) > 0 || len(pkg.CPU) > 0) {
+			continue
 		}
 		id := "npm: " + pkg.Name + " " + pkg.Version
 		docs, err := licenseDocuments(realDir)
