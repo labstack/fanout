@@ -11,6 +11,9 @@ const SpecVersion = 1
 // AllValue selects All for a variable that offers it.
 const AllValue = "$__all"
 
+// MaxPanels is the most panels one dashboard may hold.
+const MaxPanels = 40
+
 type Dashboard struct {
 	Version     int          `json:"version,omitempty" jsonschema:"Spec version; omit or 1"`
 	Name        string       `json:"name" jsonschema:"Short unique dashboard name, at most 80 characters"`

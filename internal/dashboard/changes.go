@@ -136,6 +136,10 @@ func normalizedForDiff(spec panel.Dashboard) panel.Dashboard {
 // On equal-length choices retain the earlier after-index. This picks the
 // same minimal moved set deterministically, including an ambiguous two-panel swap.
 func retainedOrder(before, after []string) map[string]bool {
+	// Saved specs hold at most panel.MaxPanels panels, which bounds the table.
+	if len(before) > panel.MaxPanels || len(after) > panel.MaxPanels {
+		return map[string]bool{}
+	}
 	lengths := make([][]int, len(before)+1)
 	for i := range lengths {
 		lengths[i] = make([]int, len(after)+1)

@@ -34,7 +34,7 @@ it("builds the real app graph into one self-contained HTML artifact", async () =
     await build({ configFile: resolve("vite.apps.config.ts"), build: { outDir: dir } });
     expect(readdirSync(dir)).toEqual(["panels.html"]);
     const html = readFileSync(resolve(dir, "panels.html"), "utf8");
-    const markup = html.replace(/(<script\b[^>]*>)[\s\S]*?<\/script>/g, "$1</script>").replace(/(<style\b[^>]*>)[\s\S]*?<\/style>/g, "$1</style>");
+    const markup = html.replace(/(<script\b[^>]*>)[\s\S]*?<\/script[^>]*>/gi, "$1</script>").replace(/(<style\b[^>]*>)[\s\S]*?<\/style>/g, "$1</style>");
     expect(/<script[^>]+src=|<link[^>]+(?:stylesheet|modulepreload)/.test(markup)).toBe(false);
     expect(/(?:src|href)=["']https?:/.test(markup)).toBe(false);
     expect(html).not.toContain("data:text/javascript");

@@ -28,7 +28,14 @@ func suggest(word string, candidates []string) string {
 	return "did you mean " + best + "?"
 }
 
+// maxSuggestLength bounds suggestion work. Longer names are reported as
+// too distant, since no field name is that long.
+const maxSuggestLength = 128
+
 func editDistance(a, b string) int {
+	if len(a) > maxSuggestLength || len(b) > maxSuggestLength {
+		return max(len(a), len(b))
+	}
 	previous := make([]int, len(b)+1)
 	current := make([]int, len(b)+1)
 	for j := range previous {

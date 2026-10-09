@@ -53,7 +53,7 @@ function scan(file) {
   }
   const plugins = ["typescript", ...(/\.[jt]sx$/.test(file) ? ["jsx"] : [])];
   if (file.endsWith(".html")) {
-    for (const match of source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
+    for (const match of source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi)) {
       const src = /\bsrc=["']([^"']+)["']/.exec(match[1]);
       if (src) check(file, src[1], match.index, source);
       if (match[2].trim()) visit(parse(match[2], { sourceType: "unambiguous", plugins, createImportExpressions: true }));
