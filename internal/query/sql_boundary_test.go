@@ -56,7 +56,7 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 func TestSQLBoundarySerializesNestedVariants(t *testing.T) {
 	db := openTestDuck(t)
 	db.SetMaxOpenConns(1)
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	queries := []string{
 		`SELECT '{"dotted.key":9223372036854775807,"zero":0,"false":false,"null":null,"nested":[1,{"a":true}]}'::JSON::VARIANT AS data`,
 		`SELECT [1::VARIANT, '"text"'::JSON::VARIANT] AS data`,

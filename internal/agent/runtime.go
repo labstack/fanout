@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -25,13 +26,15 @@ import (
 
 const systemPrompt = `You are Fanout's observability assistant. When a view is attached to your reply it is the picture: never draw diagrams, trees, or charts in text, never use code fences to draw boxes, arrows, or trees, and never add a table or list that restates what an attached view already shows; your prose adds only what the view omits. Use get_observability_overview first for broad health questions, get_intelligence_snapshot for the latest precomputed anomalies and recurring log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for activity/latency/endpoints/comparisons, inspect_trace for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You build and change the user's dashboards. Build one whenever the user asks for an overview, asks why something is slow, failing or changing, asks to compare, break down or track telemetry, or asks for anything they would want to look at again; answer a single factual question with a view instead. To build one, read get_telemetry_schema, draft a complete spec of panels that answer the request, run preview_panels, fix every invalid panel, replace or explain every empty one, and only then call create_dashboard. Cover every part of the request: when a part has no data, keep its panel and say why in the panel description instead of dropping it. Title each panel with exactly what it measures. Prefer a few precise panels over many vague ones: headline stats first, then the time series that explain them, then a table of the worst offenders. After saving, reply in two or three sentences with what the dashboard shows and what stands out. Use filter values exactly as the schema lists them. To change a dashboard, get_dashboard first and use edit_dashboard so unrelated panels stay as they are; replace only when the user asks for a redesign. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.` + dashboardAnalysisGuidance
 
-const dashboardAnalysisGuidance = ` For analysis dashboards, use only the types the question needs; do not fill a dashboard with all of them. Use heatmap for latency changes, histogram for distributions, scatter for relationships, state_timeline for threshold states, logs for events, log_patterns for repeated messages, traces for slow or erroring traces, service_map for dependencies, and health for service health. Use drill for span or log evidence; keep checked filters. Include annotations for change investigations; deploys and detector findings do not prove causes. Use a deploy split for scoped before/since comparisons; retain missing-deploy explanations. A definition, explanation, or single fact is an answer intent; do not create or replace a dashboard for it. Preserve every requested facet and explain absent telemetry without inventing it. In replies, never name schema fields to the user.`
+const dashboardAnalysisGuidance = ` For analysis dashboards, use only the types the question needs; do not fill a dashboard with all of them. Use heatmap for latency changes, histogram for distributions, scatter for relationships, state_timeline for threshold states, logs for events, log_patterns for repeated messages, traces for slow or erroring traces, service_map for dependencies, and health for service health. Use drill for span or log evidence; keep checked filters. Include annotations for change investigations; deploys and detector findings do not prove causes. Use a deploy split for scoped before/since comparisons; retain missing-deploy explanations. A definition, explanation, or single fact is an answer intent; do not create or replace a dashboard for it. Preserve every requested facet and explain absent telemetry without inventing it. Saved panels must keep working as new telemetry arrives: never filter on trace, span or request IDs or other values copied from one result; show recent evidence with a traces panel and drill to its logs. In replies, never name schema fields to the user. Explain in chat is answer intent: use the observed absolute panel window and resolved variables, explain errors and suggest corrections without creating, editing, replacing or restoring dashboards.`
 
 // Error categories used to pick a client-safe RUN_ERROR message; the raw
 // error (which can include provider response bodies) stays server-side.
 var (
-	errProvider  = errors.New("model provider error")
-	errStepLimit = errors.New("agent step limit exceeded")
+	errProvider       = errors.New("model provider error")
+	errStepLimit      = errors.New("agent step limit exceeded")
+	errTimeLimit      = errors.New("agent time limit exceeded")
+	errAnswerDelivery = errors.New("completed answer delivery failed")
 )
 
 // maxOutputTokens leaves room for a complete dashboard spec in one tool call
@@ -41,6 +44,7 @@ const maxOutputTokens = 32000
 // toolExecutor is the tool surface the runtime needs; *ToolRegistry implements it.
 type toolExecutor interface {
 	Definitions() []ToolDef
+	ReadOnly(string) bool
 	Execute(context.Context, ToolCall) (ToolExecution, error)
 }
 
@@ -175,6 +179,10 @@ func (r *Runtime) Run(c *echo.Context) error {
 	if err := c.Bind(&input); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid AG-UI input")
 	}
+	_, err := answerOnlyRequest(input.ForwardedProps)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	if input.ThreadID == "" {
 		threadID, err := appid.New()
 		if err != nil {
@@ -200,6 +208,11 @@ func (r *Runtime) Run(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start agent run").Wrap(err)
 	}
 
+	answerOnly, err := r.store.runAnswerOnly(c.Request().Context(), input.RunID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to read run mode").Wrap(err)
+	}
+
 	response := c.Response()
 	response.Header().Set(echo.HeaderContentType, "text/event-stream")
 	response.Header().Set(echo.HeaderCacheControl, "no-cache, no-transform")
@@ -208,9 +221,13 @@ func (r *Runtime) Run(c *echo.Context) error {
 	emitter := &eventEmitter{ctx: c.Request().Context(), writer: response, sse: sse.NewSSEWriter()}
 	messages := append([]agtypes.Message(nil), seed...)
 	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
+	runCtx = context.WithValue(runCtx, answerOnlyKey{}, answerOnly)
+	if origin, ok := buildOriginForSeed(input.ThreadID, seed); ok {
+		runCtx = dashboard.WithBuildOrigin(runCtx, origin)
+	}
 	truncated, runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 	if runErr != nil {
-		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", runErr)
+		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", serverErrorMessage(runErr))
 	}
 
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
@@ -223,22 +240,37 @@ func (r *Runtime) Run(c *echo.Context) error {
 	return nil
 }
 
-func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (bool, error) {
+func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (truncated bool, runErr error) {
+	type appView struct {
+		id    string
+		kind  string
+		index int
+	}
+	seenAppViews := map[string]appView{}
 	caller := ctx
+	// A user abort can race with a failed SSE write on any exit path.
+	defer func() {
+		if caller.Err() != nil {
+			runErr = caller.Err()
+		}
+	}()
 	timeout := r.runTimeout
 	if timeout == 0 {
 		timeout = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	truncated := false
 	deadlineError := func(err error) error {
 		if caller.Err() == nil && ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("%w: 5-minute time limit reached", errStepLimit)
+			return fmt.Errorf("%w: exceeded %s", errTimeLimit, timeout)
 		}
 		return err
 	}
 	if err := emitter.emit(events.NewRunStartedEvent(threadID, runID)); err != nil {
+		return truncated, err
+	}
+	provider, model := runtimeUsageIdentity(r.provider)
+	if err := emitter.emit(events.NewCustomEvent("model_configuration", events.WithValue(map[string]any{"provider": provider, "model": model}))); err != nil {
 		return truncated, err
 	}
 	conversation := providerMessages(*messages)
@@ -255,89 +287,159 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		var stopReason string
 		var providerItems []json.RawMessage
 		var usage *TokenUsage
-		textStarted := false
-		appendText := func(delta string) error {
-			if delta == "" {
-				return nil
-			}
-			if !textStarted {
-				if err := emitter.emit(events.NewTextMessageStartEvent(messageID, events.WithRole("assistant"))); err != nil {
-					return err
-				}
-				textStarted = true
-			}
-			text.WriteString(delta)
-			return emitter.emit(events.NewTextMessageContentEvent(messageID, delta))
-		}
+		var servedModel string
+		reasoningID := messageID + "-reasoning"
+		reasoningStarted := false
+		toolStep := false
 		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
+			if event.Model != "" {
+				servedModel = event.Model
+			}
+			// Reported snapshots replace earlier counts for this call. Never use
+			// tool text or assistant narration to infer token usage.
+			if event.Usage != nil {
+				copy := *event.Usage
+				usage = &copy
+			}
 			switch event.Type {
 			case EventError:
 				return fmt.Errorf("%w: %s", errProvider, event.Error)
 			case EventText:
-				return appendText(event.Delta)
+				text.WriteString(event.Delta)
+				if event.Delta == "" {
+					return nil
+				}
+				if !reasoningStarted {
+					if err := emitter.emitProvisional(events.NewReasoningStartEvent(reasoningID)); err != nil {
+						return err
+					}
+					if err := emitter.emitProvisional(events.NewReasoningMessageStartEvent(reasoningID, "reasoning")); err != nil {
+						return err
+					}
+					reasoningStarted = true
+				}
+				return emitter.emitProvisional(events.NewReasoningMessageContentEvent(reasoningID, event.Delta))
 			case EventToolUse:
 				if event.ToolCall != nil {
+					toolStep = true
 					toolCalls = append(toolCalls, *event.ToolCall)
 				}
 			case EventStop:
+				toolStep = toolStep || event.ToolStep
 				stopReason = event.StopReason
 				providerItems = event.ProviderItems
-				usage = event.Usage
 			}
 			return nil
 		})
 		if ctx.Err() != nil {
 			streamErr = ctx.Err()
 		}
+		var deliveryErr error
+		if reasoningStarted {
+			deliveryErr = emitter.emitProvisional(events.NewReasoningMessageEndEvent(reasoningID))
+			if err := emitter.emitProvisional(events.NewReasoningEndEvent(reasoningID)); deliveryErr == nil {
+				deliveryErr = err
+			}
+		}
+		provider, model := runtimeUsageIdentity(r.provider)
+		if servedModel != "" {
+			model = servedModel
+		}
+		status := "completed"
+		if streamErr != nil {
+			status = "error"
+		} else if stoppedAtTokenLimit(stopReason) || stopReason == "incomplete" || stopReason == "content_filter" {
+			status = "incomplete"
+		}
+		var reported any
+		if usage != nil {
+			reported = map[string]int{"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens, "reasoning_tokens": usage.ReasoningTokens, "cache_read_tokens": usage.CacheReadTokens, "cache_write_tokens": usage.CacheWriteTokens}
+		}
+		usageEvent := events.NewCustomEvent("model_call_usage", events.WithValue(map[string]any{
+			"run_id": runID, "step": step + 1, "provider": provider, "model": model, "status": status, "usage": reported,
+		}))
+		// Even a disconnected client must leave the authoritative record in
+		// the persisted run events. The structured log is the controller's
+		// recovery source when SSE could not deliver it.
+		if err := emitter.emit(usageEvent); err != nil {
+			if raw, marshalErr := usageEvent.ToJSON(); marshalErr == nil {
+				emitter.events = append(emitter.events, raw)
+			}
+			if deliveryErr == nil {
+				deliveryErr = err
+			}
+		}
 		if streamErr == nil {
-			logFields := []any{"thread_id", threadID, "run_id", runID, "stop_reason", stopReason}
+			logFields := []any{"thread_id", threadID, "run_id", runID, "step", step + 1, "provider", provider, "model", model, "status", status, "stop_reason", stopReason}
 			if usage != nil {
 				logFields = append(logFields, "input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens, "reasoning_tokens", usage.ReasoningTokens, "cache_read_tokens", usage.CacheReadTokens, "cache_write_tokens", usage.CacheWriteTokens)
 			}
 			if stoppedAtTokenLimit(stopReason) || stopReason == "incomplete" || stopReason == "content_filter" {
 				truncated = true
 				toolCalls = nil
+				if toolStep {
+					text.Reset()
+				}
 				slog.Warn("agent response truncated", logFields...)
 				notice := "The response was cut off before it finished."
-				if textStarted {
+				if text.Len() > 0 {
 					if stoppedAtTokenLimit(stopReason) {
 						notice = "\n\n[Response truncated: output limit reached.]"
 					} else {
 						notice = "\n\n" + notice
 					}
 				}
-				streamErr = appendText(notice)
+				text.WriteString(notice)
 			} else {
 				slog.Info("llm stream complete", logFields...)
-				if stopReason == "refusal" && !textStarted {
-					streamErr = appendText("The model refused to answer this request.")
+				if stopReason == "refusal" && text.Len() == 0 {
+					text.WriteString("The model refused to answer this request.")
 				}
 			}
 		}
-		if textStarted {
-			if err := emitter.emit(events.NewTextMessageEndEvent(messageID)); err != nil && streamErr == nil {
-				streamErr = err
-			}
+		if streamErr != nil {
+			slog.Info("llm stream failed", "thread_id", threadID, "run_id", runID, "step", step+1, "provider", provider, "model", model, "status", status, "usage", reported)
 		}
 		if streamErr != nil {
 			return truncated, r.fail(threadID, runID, deadlineError(streamErr), emitter)
+		}
+		if len(toolCalls) > 0 && deliveryErr != nil {
+			return truncated, r.fail(threadID, runID, deliveryErr, emitter)
+		}
+		providerText := text.String()
+		transcriptText := ""
+		if len(toolCalls) == 0 {
+			transcriptText = providerText
 		}
 
 		agCalls := make([]agtypes.ToolCall, len(toolCalls))
 		for i, call := range toolCalls {
 			agCalls[i] = agtypes.ToolCall{ID: call.ID, Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: call.Name, Arguments: call.Input}}
 		}
-		if text.Len() > 0 || len(agCalls) > 0 {
-			*messages = append(*messages, agtypes.Message{ID: messageID, Role: agtypes.RoleAssistant, Content: text.String(), ToolCalls: agCalls})
+		if transcriptText != "" || len(agCalls) > 0 {
+			*messages = append(*messages, agtypes.Message{ID: messageID, Role: agtypes.RoleAssistant, Content: transcriptText, ToolCalls: agCalls})
 		}
-		// Opaque reasoning belongs to this run's provider conversation, not
-		// the persisted AG-UI history or client events.
-		if text.Len() > 0 || len(toolCalls) > 0 || len(providerItems) > 0 {
-			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: text.String(), ToolCalls: toolCalls, ProviderItems: providerItems})
+		// Tool narration and opaque reasoning belong to this run's provider
+		// conversation, not persisted AG-UI history or committed answer events.
+		if providerText != "" || len(toolCalls) > 0 || len(providerItems) > 0 {
+			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: providerText, ToolCalls: toolCalls, ProviderItems: providerItems})
 		}
 		if len(toolCalls) == 0 {
+			// The server owns the completed answer even if the client disconnects.
+			deliveryFailure := func(err error) error {
+				if transcriptText != "" {
+					err = fmt.Errorf("%w: %w", errAnswerDelivery, err)
+				}
+				return r.fail(threadID, runID, err, emitter)
+			}
+			if deliveryErr != nil {
+				return truncated, deliveryFailure(deliveryErr)
+			}
+			if err := emitFinalText(emitter, messageID, transcriptText); err != nil {
+				return truncated, deliveryFailure(err)
+			}
 			if err := emitter.emit(events.NewRunFinishedEventWithOptions(threadID, runID, events.WithSuccessOutcome())); err != nil {
-				return truncated, err
+				return truncated, deliveryFailure(err)
 			}
 			return truncated, nil
 		}
@@ -352,7 +454,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if err := emitter.emit(events.NewToolCallEndEvent(call.ID)); err != nil {
 				return truncated, err
 			}
-			execution, err := r.tools.Execute(ctx, call)
+			execution, err := r.executeTool(ctx, call)
 			if ctx.Err() != nil {
 				return truncated, r.fail(threadID, runID, deadlineError(ctx.Err()), emitter)
 			}
@@ -362,6 +464,24 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				slog.Warn("agent tool execution failed", "thread_id", threadID, "run_id", runID, "tool", call.Name, "err", err)
 				execution = ToolExecution{Content: fmt.Sprintf(`{"error":%q}`, err.Error()), IsError: true}
 			}
+			messageError := errorString(execution.IsError)
+			if execution.IsError {
+				// AG-UI's live result event carries content, not Message.Error.
+				// Keep the error structural on that path as well as on reload.
+				var payload map[string]any
+				if json.Unmarshal([]byte(execution.Content), &payload) != nil || payload == nil {
+					payload = map[string]any{"error": execution.Content}
+				}
+				payload["isError"] = true
+				if payload["error"] == "interrupted" {
+					messageError = "interrupted"
+				}
+				raw, marshalErr := json.Marshal(payload)
+				if marshalErr != nil {
+					return truncated, marshalErr
+				}
+				execution.Content = string(raw)
+			}
 			toolMessageID, err := appid.New()
 			if err != nil {
 				return truncated, err
@@ -369,50 +489,155 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if err := emitter.emit(events.NewToolCallResultEvent(toolMessageID, call.ID, execution.Content)); err != nil {
 				return truncated, err
 			}
-			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: errorString(execution.IsError)})
+			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: messageError})
 			conversation = append(conversation, ProviderMessage{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: call.ID, Content: execution.Content, IsError: execution.IsError}})
-			if execution.AppResourceURI != "" {
-				activityID, err := appid.New()
-				if err != nil {
-					return truncated, err
+			if execution.AppResourceURI != "" && !execution.IsError {
+				view := fragmentView(execution.Structured)
+				previous, seen := seenAppViews[view.Key]
+				if view.Key != "" && seen && previous.kind == "preset" && view.Kind != "preset" {
+					continue
 				}
-				content := map[string]any{"resourceUri": execution.AppResourceURI, "toolName": call.Name, "toolInput": json.RawMessage(call.Input), "toolResult": execution.Structured, "isError": execution.IsError}
-				if content["toolResult"] == nil {
-					content["toolResult"] = execution.Content
+				activityID := previous.id
+				if !seen || view.Key == "" {
+					var err error
+					activityID, err = appid.New()
+					if err != nil {
+						return truncated, err
+					}
+				}
+				content := map[string]any{"resource_uri": execution.AppResourceURI, "tool_name": call.Name, "tool_input": json.RawMessage(call.Input), "tool_result": execution.Structured, "is_error": execution.IsError}
+				if content["tool_result"] == nil {
+					content["tool_result"] = execution.Content
 				}
 				if err := emitter.emit(events.NewActivitySnapshotEvent(activityID, "mcp-app", content)); err != nil {
 					return truncated, err
 				}
-				*messages = append(*messages, agtypes.Message{ID: activityID, Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: content})
+				message := agtypes.Message{ID: activityID, Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: content}
+				index := len(*messages)
+				if seen && view.Key != "" {
+					index = previous.index
+					(*messages)[index] = message
+				} else {
+					*messages = append(*messages, message)
+				}
+				if view.Key != "" {
+					seenAppViews[view.Key] = appView{activityID, view.Kind, index}
+				}
 			}
 		}
 	}
 	return truncated, r.fail(threadID, runID, fmt.Errorf("%w: exceeded %d tool steps", errStepLimit, r.maxSteps), emitter)
 }
 
+func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution ToolExecution, err error) {
+	if answerOnly, _ := ctx.Value(answerOnlyKey{}).(bool); answerOnly {
+		if !r.tools.ReadOnly(call.Name) {
+			return ToolExecution{Content: `{"code":"answer_only","error":"This explanation request is answer-only. Do not save changes; explain the observed evidence and suggest corrections in your answer."}`, IsError: true}, nil
+		}
+	}
+	ctx = dashboard.TrackSave(ctx)
+	defer func() {
+		if value := recover(); value != nil {
+			slog.Error("agent tool panicked", "tool", call.Name, "panic", value, "stack", string(debug.Stack()))
+			if dashboard.SaveCommitted(ctx) {
+				execution = ToolExecution{Content: `{"error":"interrupted"}`, IsError: true}
+				err = nil
+			} else {
+				execution = ToolExecution{}
+				err = errors.New("tool execution failed")
+			}
+		}
+	}()
+	return r.tools.Execute(ctx, call)
+}
+
+type answerOnlyKey struct{}
+
+func answerOnlyRequest(props any) (bool, error) {
+	if props == nil {
+		return false, nil
+	}
+	fields, ok := props.(map[string]any)
+	if !ok {
+		return false, errors.New("forwardedProps must be an object")
+	}
+	value, exists := fields["answer_only"]
+	if !exists {
+		return false, nil
+	}
+	answerOnly, ok := value.(bool)
+	if !ok {
+		return false, errors.New("forwardedProps.answer_only must be a boolean")
+	}
+	return answerOnly, nil
+}
+
+func emitFinalText(emitter *eventEmitter, messageID, text string) error {
+	if text == "" {
+		return nil
+	}
+	if err := emitter.emit(events.NewTextMessageStartEvent(messageID, events.WithRole("assistant"))); err != nil {
+		return err
+	}
+	if err := emitter.emit(events.NewTextMessageContentEvent(messageID, text)); err != nil {
+		return err
+	}
+	return emitter.emit(events.NewTextMessageEndEvent(messageID))
+}
+
+func runtimeUsageIdentity(provider Provider) (string, string) {
+	switch p := provider.(type) {
+	case *openAIProvider:
+		return "openai", p.model
+	case *anthropicProvider:
+		return "anthropic", p.model
+	case interface{ usageIdentity() (string, string) }:
+		return p.usageIdentity()
+	default:
+		return "unknown", "unknown"
+	}
+}
+
 // fail reports the failure to the client with a sanitized message and returns
 // the raw error for server-side logging and persistence.
 func (r *Runtime) fail(threadID, runID string, err error, emitter *eventEmitter) error {
-	if emitErr := emitter.emit(events.NewRunErrorEvent(clientErrorMessage(err), events.WithRunID(runID))); emitErr != nil {
+	if emitErr := emitter.emit(events.NewRunErrorEvent(clientErrorMessage(err), events.WithErrorCode(clientErrorCode(err)), events.WithRunID(runID))); emitErr != nil {
 		slog.Error("agent RUN_ERROR emit failed", "thread_id", threadID, "run_id", runID, "err", emitErr)
 	}
 	return err
 }
 
-// clientErrorMessage maps a run error to a short message safe for the wire.
-// Provider API responses can contain internal details and never leave the server.
-func clientErrorMessage(err error) string {
+// clientErrorCode classifies a run error into the stable code sent with RUN_ERROR.
+func clientErrorCode(err error) string {
 	var apiErr *APIError
 	switch {
 	case errors.As(err, &apiErr), errors.Is(err, errProvider):
-		return "model provider unavailable"
+		return "provider_unavailable"
+	case errors.Is(err, errTimeLimit):
+		return "time_limit"
 	case errors.Is(err, errStepLimit):
-		if strings.Contains(err.Error(), "5-minute") {
-			return "The agent reached its 5-minute time limit. Try a smaller request."
-		}
-		return "step limit exceeded"
+		return "step_limit"
+	case errors.Is(err, context.Canceled):
+		return "abort"
 	default:
-		return "agent run failed"
+		return "run_failed"
+	}
+}
+
+// clientErrorMessage maps a run error to a short message safe for the wire.
+// Provider API responses can contain internal details and never leave the server.
+func clientErrorMessage(err error) string {
+	switch clientErrorCode(err) {
+	case "provider_unavailable":
+		return "Fanout could not reach the model provider. Please try again."
+	case "step_limit":
+		return "Fanout reached its step limit before finishing. Try a narrower question."
+	case "time_limit":
+		return "Fanout reached its 5-minute time limit. Try a smaller request."
+	case "abort":
+		return "Stopped"
+	default:
+		return "Fanout could not complete this analysis. Please try again."
 	}
 }
 
@@ -469,6 +694,11 @@ type eventEmitter struct {
 	events [][]byte
 }
 
+// Provisional text is live-only; neither run events nor thread history retain it.
+func (e *eventEmitter) emitProvisional(event events.Event) error {
+	return e.sse.WriteEvent(e.ctx, e.writer, event)
+}
+
 func (e *eventEmitter) emit(event events.Event) error {
 	if err := e.sse.WriteEvent(e.ctx, e.writer, event); err != nil {
 		return err
@@ -479,4 +709,32 @@ func (e *eventEmitter) emit(event events.Event) error {
 	}
 	e.events = append(e.events, raw)
 	return nil
+}
+
+// Provider/API errors may contain response bodies. Operational errors retain
+// their detail in the server log while the wire message stays sanitized.
+func serverErrorMessage(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) || errors.Is(err, errProvider) {
+		return clientErrorMessage(err)
+	}
+	return err.Error()
+}
+
+// The authoritative seed, not provider narration or browser history, owns the request.
+func buildOriginForSeed(threadID string, seed []agtypes.Message) (dashboard.BuildOrigin, bool) {
+	for i := len(seed) - 1; i >= 0; i-- {
+		if seed[i].Role != agtypes.RoleUser {
+			continue
+		}
+		if strings.TrimSpace(seed[i].ID) == "" {
+			return dashboard.BuildOrigin{}, false
+		}
+		excerpt := []rune(messageText(seed[i].Content))
+		if len(excerpt) > 280 {
+			excerpt = excerpt[:280]
+		}
+		return dashboard.BuildOrigin{ThreadID: threadID, MessageID: seed[i].ID, RequestExcerpt: string(excerpt)}, true
+	}
+	return dashboard.BuildOrigin{}, false
 }

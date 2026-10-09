@@ -23,6 +23,7 @@ func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
 	e.PATCH("/api/dashboards/:id", h.edit, own)
 	e.DELETE("/api/dashboards/:id", h.delete, own)
 	e.GET("/api/dashboards/:id/versions", h.versions, own)
+	e.GET("/api/dashboards/:id/versions/:version", h.version, own)
 	e.POST("/api/dashboards/:id/versions/:version/restore", h.restore, own)
 }
 
@@ -160,11 +161,31 @@ func (h *DashboardHandler) restore(c *echo.Context) error {
 	return c.JSON(http.StatusOK, record)
 }
 
+func (h *DashboardHandler) version(c *echo.Context) error {
+	owner, err := RequestOwner(c)
+	if err != nil {
+		return err
+	}
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version < 1 {
+		return echo.NewHTTPError(http.StatusBadRequest, "version must be a positive integer")
+	}
+	record, err := h.dashboards.VersionRecord(c.Request().Context(), owner, c.Param("id"), version)
+	if err != nil {
+		return dashboardError(c, err)
+	}
+	return c.JSON(http.StatusOK, record)
+}
+
 func dashboardError(c *echo.Context, err error) error {
 	if handled, writeErr := writeProblems(c, err); handled {
 		return writeErr
 	}
 	switch {
+	case errors.Is(err, dashboard.ErrAlreadyCurrent):
+		return c.JSON(http.StatusConflict, map[string]any{"message": err.Error(), "error_code": dashboard.AlreadyCurrentCode})
+	case errors.Is(err, dashboard.ErrVersionNotFound):
+		return c.JSON(http.StatusNotFound, map[string]any{"message": err.Error(), "error_code": dashboard.VersionNotFoundCode})
 	case errors.Is(err, dashboard.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "dashboard not found")
 	case errors.Is(err, dashboard.ErrConflict):

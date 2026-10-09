@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorizedFetch, browserViewerFromMe, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { ApiError } from "./dashboards/api";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -83,14 +84,14 @@ describe("authorizedFetch", () => {
     expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 
-  it("clears legacy state and announces a rejected session without retrying", async () => {
+  it("announces a rejected session without retrying", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
     fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
     const response = await authorizedFetch("/api/data");
     expect(response.status).toBe(401);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
     expect(unauthorized).toHaveBeenCalledTimes(1);
     window.removeEventListener(unauthorizedEvent, unauthorized);
   });
@@ -100,6 +101,8 @@ describe("authorizedFetch", () => {
     window.addEventListener(unauthorizedEvent, unauthorized);
     fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
     await expect(authorizedFetch("/api/data")).rejects.toThrow("insufficient permissions");
+    fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
+    await expect(authorizedFetch("/api/panels/query")).rejects.toEqual(new ApiError("insufficient permissions", 403));
     fetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect((await authorizedFetch("/api/data")).status).toBe(503);
     expect(unauthorized).not.toHaveBeenCalled();
@@ -111,7 +114,7 @@ describe("authorizedFetch", () => {
     window.addEventListener(unauthorizedEvent, unauthorized);
     fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
     await expect(logout()).resolves.toBeUndefined();
-    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
     expect(unauthorized).toHaveBeenCalledTimes(1);
     expect(window.location.pathname).toBe("/");
     window.removeEventListener(unauthorizedEvent, unauthorized);

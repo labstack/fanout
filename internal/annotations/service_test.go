@@ -25,7 +25,7 @@ func (emptyAnnotationRows) Columns() ([]string, error) { return nil, nil }
 func (emptyAnnotationRows) Err() error                 { return nil }
 func (emptyAnnotationRows) Next() bool                 { return false }
 func (emptyAnnotationRows) Scan(...any) error          { return nil }
-func TestM2FixEmptyNamespaceUsesDefault(t *testing.T) {
+func TestEmptyNamespaceUsesDefault(t *testing.T) {
 	for _, namespace := range []string{"", "explicit"} {
 		t.Run(namespace, func(t *testing.T) {
 			db := &defaultAnnotationDB{}
@@ -72,7 +72,7 @@ func (db *recordingAnnotationDB) WithReadTransaction(ctx context.Context, read f
 	defer func() { db.inTransaction = false; db.ends++ }()
 	return read(db)
 }
-func TestFinalFixAnnotationsReadOneTransaction(t *testing.T) {
+func TestAnnotationsReadOneTransaction(t *testing.T) {
 	now := time.Now().UTC()
 	for _, failAt := range []int{0, 1, 2, 3} {
 		db := &recordingAnnotationDB{failAt: failAt}

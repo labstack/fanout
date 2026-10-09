@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/labstack/fanout/internal/panel"
@@ -21,6 +23,153 @@ func (structural) Validate(_ context.Context, d *panel.Dashboard) error {
 		return problems
 	}
 	return nil
+}
+
+type blockingValidator struct {
+	entered chan struct{}
+	release chan struct{}
+	blocked atomic.Bool
+}
+
+func (v *blockingValidator) Validate(ctx context.Context, d *panel.Dashboard) error {
+	if d.Panels[0].Content == "first writer" && v.blocked.CompareAndSwap(false, true) {
+		close(v.entered)
+		select {
+		case <-v.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return (structural{}).Validate(ctx, d)
+}
+
+func TestMutationUsesSuccessfulOptimisticBase(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		t.Run(map[bool]string{false: "retry", true: "stale"}[explicit], func(t *testing.T) {
+			s := newTestService(t)
+			created, err := s.Create(t.Context(), "owner", textSpec("Concurrent"), agent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v := &blockingValidator{entered: make(chan struct{}), release: make(chan struct{})}
+			s.validator = v
+			type answer struct {
+				mutation Mutation
+				err      error
+			}
+			done := make(chan answer, 1)
+			base := 0
+			if explicit {
+				base = 1
+			}
+			go func() {
+				m, e := s.EditWithChanges(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": "first writer"}}}, base, agent, "")
+				done <- answer{m, e}
+			}()
+			<-v.entered
+			second, err := s.EditWithChanges(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"title": "Second writer"}}}, 1, agent, "")
+			close(v.release)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := <-done
+			if explicit {
+				if !errors.Is(first.err, ErrStale) || first.mutation.Record.ID != "" {
+					t.Fatalf("stale=%+v", first)
+				}
+			} else {
+				m := first.mutation
+				if first.err != nil || m.BaseVersion != 2 || m.Record.Version != 3 || m.Before.Panels[0].Title != "Second writer" || m.Before.Panels[0].Content != "hello" || m.Record.Spec.Panels[0].Title != "Second writer" {
+					t.Fatalf("retry=%+v", first)
+				}
+				diff := Changes(m.Before, m.Record.Spec)
+				if len(diff.Panels) != 1 || len(diff.Panels[0].Fields) != 1 || diff.Panels[0].Fields[0] != "content" {
+					t.Fatal(diff)
+				}
+			}
+			if second.BaseVersion != 1 || second.Record.Version != 2 || second.Record.Spec.Panels[0].Content != "hello" {
+				t.Fatal(second)
+			}
+			versions, err := s.Versions(t.Context(), "owner", created.ID)
+			want := 3
+			if explicit {
+				want = 2
+			}
+			if err != nil || len(versions) != want {
+				t.Fatalf("versions=%+v err=%v", versions, err)
+			}
+		})
+	}
+}
+
+func TestRestoreMutationUsesSuccessfulOptimisticBase(t *testing.T) {
+	s := newTestService(t)
+	spec := textSpec("Restore race")
+	spec.Panels[0].Content = "first writer"
+	created, err := s.Create(t.Context(), "owner", spec, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Edit(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": "second writer"}}}, 1, agent, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &blockingValidator{entered: make(chan struct{}), release: make(chan struct{})}
+	s.validator = v
+	type answer struct {
+		mutation Mutation
+		err      error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		mutation, err := s.RestoreWithChanges(t.Context(), "owner", created.ID, 1, agent)
+		done <- answer{mutation, err}
+	}()
+	<-v.entered
+	concurrent, err := s.EditWithChanges(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"title": "Concurrent title"}}}, 2, agent, "")
+	close(v.release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := <-done
+	m := result.mutation
+	if result.err != nil || m.BaseVersion != 3 || m.Record.Version != 4 || !reflect.DeepEqual(m.Before, concurrent.Record.Spec) || m.Record.Spec.Panels[0].Title != created.Spec.Panels[0].Title || m.Record.Spec.Panels[0].Content != "first writer" {
+		t.Fatalf("restore retry=%+v", result)
+	}
+	diff := Changes(m.Before, m.Record.Spec)
+	if len(diff.Panels) != 1 || len(diff.Panels[0].Fields) != 2 || diff.Panels[0].Fields[0] != "content" || diff.Panels[0].Fields[1] != "title" {
+		t.Fatal(diff)
+	}
+	versions, err := s.Versions(t.Context(), "owner", created.ID)
+	if err != nil || len(versions) != 4 || versions[0].Message != "Restored version 1" {
+		t.Fatalf("versions=%+v err=%v", versions, err)
+	}
+}
+
+func TestMutationBeforeDoesNotShareNestedFields(t *testing.T) {
+	s := newTestService(t)
+	spec := threePanels()
+	spec.Panels[0].Thresholds = []panel.Threshold{{Value: 10, Status: "warn"}}
+	created, err := s.CreateWithChanges(t.Context(), "owner", spec, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.BaseVersion != 0 || !created.Record.IsDefault || len(created.Before.Panels) != 0 || spec.Panels[0].Grid != nil {
+		t.Fatalf("create=%+v input=%+v", created, spec)
+	}
+	m, err := s.update(t.Context(), "owner", created.Record.ID, 1, 0, agent, "", func(d panel.Dashboard) (panel.Dashboard, bool, error) {
+		d.Panels[0].Title = "Updated"
+		d.Panels[0].Thresholds[0].Value = 20
+		d.Panels[0].Grid.X++
+		return d, false, nil
+	})
+	if err != nil || m.Before.Panels[0].Title != "A" || m.Before.Panels[0].Thresholds[0].Value != 10 || m.Before.Panels[0].Grid.X != 0 {
+		t.Fatalf("mutation=%+v err=%v", m, err)
+	}
+	m.Record.Spec.Panels[0].Thresholds[0].Value = 30
+	if m.Before.Panels[0].Thresholds[0].Value != 10 {
+		t.Fatal("shared threshold")
+	}
 }
 
 func newTestService(t *testing.T) *Service {

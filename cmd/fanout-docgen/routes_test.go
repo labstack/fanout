@@ -14,6 +14,22 @@ import (
 // exactly the regression #188 was about.
 var routeDirs = []string{"../../internal/api", "../../internal/agent", "../../cmd/fanout"}
 
+func TestHistoricalDashboardReadIsDocumentedAsOwnerCapability(t *testing.T) {
+	routes, err := collectRoutes(routeDirs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range routes {
+		if route.Path == "/api/dashboards/:id/versions/:version" && route.Method == "GET" {
+			if route.Capability != "dashboards:manage-own" {
+				t.Fatalf("historical read capability = %q", route.Capability)
+			}
+			return
+		}
+	}
+	t.Fatal("historical dashboard read is missing from generated routes")
+}
+
 // The bug this guards: routes registered on an *echo.Group carry relative
 // paths, and classifyRoute's SPA catch-all reports any non-/api/ path as
 // public — so five telemetry endpoints were published as requiring no
@@ -37,15 +53,15 @@ func TestCollectRoutesResolvesGroupPrefixes(t *testing.T) {
 
 	var found bool
 	for _, r := range routes {
-		if r.Path == "/api/observability/overview" {
+		if r.Path == "/api/traces/:id" {
 			found = true
 			if r.Capability != "telemetry:read" {
-				t.Errorf("observability overview requires %q, want telemetry:read", r.Capability)
+				t.Errorf("trace read requires %q, want telemetry:read", r.Capability)
 			}
 		}
 	}
 	if !found {
-		t.Error("the observability group's routes are missing from the reference entirely")
+		t.Error("the trace routes are missing from the reference entirely")
 	}
 }
 

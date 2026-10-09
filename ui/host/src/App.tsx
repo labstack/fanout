@@ -1,9 +1,10 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
+import type { ReasoningMessageContentEvent, ReasoningMessageStartEvent } from "@ag-ui/core";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { threadHistoryQueryKey } from "./api";
-import { activityLabel, FanoutAppContext } from "./app-context";
+import { activityLabel, FanoutAppContext, runErrorMessage, type FanoutAppContextValue, type TurnOptions } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
 import { createID } from "./id";
 import { dashboardsKey } from "./dashboards/api";
@@ -27,21 +28,32 @@ function Session() {
   const [threadMissing, setThreadMissing] = useState(false);
   const [running, setRunning] = useState(false);
   const [activity, setActivity] = useState("");
+  const [provisional, setProvisional] = useState<FanoutAppContextValue["provisional"]>(null);
+  const provisionalRef = useRef<FanoutAppContextValue["provisional"]>(null);
+  const [stopped, setStopped] = useState(false);
+  const stoppingRef = useRef(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   // Bumped by the Retry button on a thread that failed to load. It is a
   // dependency of the session effect, so a bump asks the server again.
   const [reloadCount, setReloadCount] = useState(0);
-  const pendingPromptRef = useRef("");
+  const pendingPromptRef = useRef<{ text: string; options?: TurnOptions } | null>(null);
+  const turnOptionsRef = useRef<TurnOptions>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // A turn can hold several tool calls at once, and each one ends separately.
-  // Counting them keeps the activity line on the work still in flight instead
+  // Tracking them keeps the activity line on the work still in flight instead
   // of blanking it the moment the first call returns.
-  const toolCallsRef = useRef(0);
+  const toolCallsRef = useRef(new Map<string, string>());
   const agent = useMemo(() => new HttpAgent({ url: "/api/agent/runs", threadId: threadID, fetch: (url, init) => authorizedFetch(url, init) }), [threadID]);
   const ready = !agentAvailable || loadedThreadID === threadID;
 
-  function clearActivity() { toolCallsRef.current = 0; setActivity(""); }
+  function clearActivity() { toolCallsRef.current.clear(); setActivity(""); provisionalRef.current = null; setProvisional(null); }
+  const transcript = (next: readonly Message[]) => next.filter(message => message.role !== "reasoning");
+  function provisionalStatus() {
+    const first = provisionalRef.current?.text.split(/(?<=[.!?])\s/)[0]?.trim().replace(/[.!?]+$/, "");
+    return first ? first + "…" : "";
+  }
+  function isAbort(cause: unknown) { return stoppingRef.current || cause instanceof Error && cause.name === "AbortError"; }
 
   // Keyed on the thread, not on the route. Naming a draft moves the same
   // conversation from /chat to /chat/<id>; restarting the session there would
@@ -50,10 +62,13 @@ function Session() {
   useEffect(() => {
     let active = true;
     setMessages([]);
+    turnOptionsRef.current = {};
     setMessageTimes({});
     setLoadedThreadID("");
     setThreadMissing(false);
     setRunning(false);
+    stoppingRef.current = false;
+    setStopped(false);
     clearActivity();
     setError("");
     if (!agentAvailable) { setLoadedThreadID(threadID); return; }
@@ -69,28 +84,65 @@ function Session() {
       }).then((thread) => {
         if (!active) return;
         if (thread === null) { setThreadMissing(true); setLoadedThreadID(threadID); return; }
-        agent.setMessages(thread.messages ?? []);
-        setMessages([...(thread.messages ?? [])]);
+        agent.setMessages(transcript(thread.messages ?? []));
+        setMessages(transcript(thread.messages ?? []));
         setLoadedThreadID(threadID);
       }).catch(() => {
         if (!active) return;
-        pendingPromptRef.current = "";
+        pendingPromptRef.current = null;
         setError("This chat could not be restored. Start a new chat or try again.");
       });
     }
     const subscription = agent.subscribe({
-      onEvent: ({ messages: next }) => setMessages([...next] as Message[]),
-      onRunInitialized: () => { setRunning(true); setError(""); },
-      onToolCallStartEvent: ({ event }: { event: { toolCallName: string } }) => { toolCallsRef.current += 1; setActivity(activityLabel(event.toolCallName)); },
-      onToolCallEndEvent: () => { toolCallsRef.current = Math.max(0, toolCallsRef.current - 1); if (toolCallsRef.current === 0) setActivity(""); },
+      // Intercept native reasoning events before the default reducer can
+      // put provisional text in agent.messages.
+      onEvent: ({ event, messages: next }) => {
+        switch (event.type) {
+          case "REASONING_MESSAGE_START": {
+            const start = event as ReasoningMessageStartEvent;
+            provisionalRef.current = { id: start.messageId, text: "", collapsed: false };
+            setProvisional(provisionalRef.current);
+            setActivity("");
+            return { stopPropagation: true };
+          }
+          case "REASONING_MESSAGE_CONTENT": {
+            const content = event as ReasoningMessageContentEvent;
+            const text = { id: content.messageId, text: (provisionalRef.current?.text ?? "") + content.delta, collapsed: false };
+            provisionalRef.current = text;
+            setProvisional(text);
+            return { stopPropagation: true };
+          }
+          case "REASONING_START": case "REASONING_MESSAGE_END": case "REASONING_END":
+            return { stopPropagation: true };
+          default: setMessages(transcript(next));
+        }
+      },
+      onMessagesChanged: ({ messages: next }) => setMessages(transcript(next)),
+      onRunInitialized: () => { stoppingRef.current = false; setStopped(false); setRunning(true); setError(""); },
+      onTextMessageContentEvent: ({ event }) => { if (event.delta) {provisionalRef.current = null;setProvisional(null);setActivity("");} },
+      onToolCallStartEvent: ({ event }) => {
+        toolCallsRef.current.set(event.toolCallId, activityLabel(event.toolCallName));
+        setActivity(activityLabel(event.toolCallName));
+        if (provisionalRef.current) {provisionalRef.current = {...provisionalRef.current, collapsed: true};setProvisional(provisionalRef.current);}
+      },
       onToolCallResultEvent: ({ event, messages: next }) => {
+        toolCallsRef.current.delete(event.toolCallId);
+        setActivity([...toolCallsRef.current.values()].at(-1) ?? provisionalStatus());
+        // Only a committed server receipt may refresh the dashboard/rail cache.
         const saved = dashboardToolResult(event.toolCallId, event.content, next);
         if (!saved) return;
         void queryClient.invalidateQueries({ queryKey: dashboardsKey });
         void queryClient.invalidateQueries({ queryKey: ["dashboard", saved.id] });
+        void queryClient.invalidateQueries({ queryKey: ["dashboard-versions", saved.id] });
+      },
+      onRunErrorEvent: ({ event }) => {
+        if (event.code === "abort" || stoppingRef.current) {setError("");setStopped(true);}
+        else {console.warn("Agent run error", event.code);setError(runErrorMessage(event.code));}
+        setRunning(false);
+        clearActivity();
       },
       onRunFinalized: ({ messages: next }) => {
-        const finished = [...next] as Message[];
+        const finished = transcript(next);
         setMessages(finished);
         setMessageTimes((times) => {
           const stamped = { ...times };
@@ -103,8 +155,8 @@ function Session() {
         void queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
       },
       onRunFailed: (failure) => {
-        console.error("Agent run failed", failure);
-        setError("Fanout could not complete this analysis.");
+        if (isAbort(failure.error)) {setError("");setStopped(true);}
+        else {console.error("Agent run failed", failure);setError(runErrorMessage());}
         setRunning(false);
         clearActivity();
         // A run that did not finish may have persisted nothing, so stop
@@ -136,18 +188,19 @@ function Session() {
   async function run() {
     setRunning(true);
     setError("");
-    try { await agent.runAgent(); } catch (cause) {
-      console.error("Agent run failed", cause);
-      setError("Fanout could not complete this analysis.");
+    try { await agent.runAgent({ forwardedProps: { ...turnOptionsRef.current } }); } catch (cause) {
+      if (isAbort(cause)) {setError("");setStopped(true);}
+      else {console.error("Agent run failed", cause);setError(runErrorMessage());}
       setRunning(false);
       clearActivity();
       draftsRef.current.delete(threadID);
     }
   }
 
-  async function send(text: string) {
+  async function send(text: string, options?: TurnOptions) {
     const content = text.trim();
     if (!agentAvailable || !content || running || !ready || threadMissing) return;
+    turnOptionsRef.current = { ...options };
     if (!routeThreadID) {
       draftsRef.current.add(threadID);
       void navigate({ to: "/chat/$threadId", params: { threadId: threadID }, replace: true });
@@ -163,32 +216,35 @@ function Session() {
   useEffect(() => {
     const prompt = pendingPromptRef.current;
     if (!ready || !routeThreadID || !prompt) return;
-    pendingPromptRef.current = "";
-    void send(prompt);
+    pendingPromptRef.current = null;
+    void send(prompt.text, prompt.options);
   }, [ready, routeThreadID, threadID]);
 
   function submit(event: FormEvent) { event.preventDefault(); void send(input); }
-  function stop() { agent.abortRun(); setRunning(false); clearActivity(); draftsRef.current.delete(threadID); }
+  function stop() { stoppingRef.current = true;setError("");setStopped(true);agent.abortRun(); setRunning(false); clearActivity(); draftsRef.current.delete(threadID); }
   function retry() { if (!running && agent.messages.some((message) => message.role === "user")) void run(); }
-  function openChat(prompt?: string) {
+  function openChat(prompt?: string, options?: TurnOptions) {
     if (!agentAvailable) return;
     const nextThreadID = createID();
     draftsRef.current.add(nextThreadID);
-    pendingPromptRef.current = prompt ?? "";
+    pendingPromptRef.current = prompt ? { text: prompt, options: { ...options } } : null;
     void navigate({ to: "/chat/$threadId", params: { threadId: nextThreadID } });
   }
   function newThread() {
     agent.abortRun();
-    pendingPromptRef.current = "";
+    pendingPromptRef.current = null;
+    turnOptionsRef.current = {};
     setDraftID(createID());
     void navigate({ to: "/chat" });
   }
   function selectThread(selectedThreadID: string) {
+    pendingPromptRef.current = null;
+    turnOptionsRef.current = {};
     void navigate({ to: "/chat/$threadId", params: { threadId: selectedThreadID } });
   }
   function reloadThread() { setReloadCount((n) => n + 1); }
 
-  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
+  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, provisional, stopped, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
     <Shell><Outlet /></Shell>
   </FanoutAppContext.Provider>;
 }

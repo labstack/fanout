@@ -16,7 +16,7 @@ import { LogsViz } from "./logs";
 import { LogPatternsViz } from "./log-patterns";
 import { TracesViz } from "./traces";
 
-export function Viz(props: { panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; onMapView?: (view: MapView) => void; compare?: boolean; range?: string; onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void }) {
+export function Viz(props: { traceLinks?: "button"; panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; onMapView?: (view: MapView) => void; compare?: boolean; range?: string; onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onRangePending?(pending: boolean): void; onZoom?: (from: number, to: number) => void }) {
   const { panel, title, result, dark, height, group, onSelect, onPoint, onVariable, onZoom } = props;
   if (panel.viz === "text") return <TextViz panel={panel} />;
   if (!result?.frame) return null;
@@ -26,7 +26,7 @@ export function Viz(props: { panel: Panel; title?: string; result?: PanelResult;
     case "gauge": return <GaugeViz panel={panel} title={title} result={result} dark={dark} height={height} />;
     case "timeseries": return <TimeseriesViz {...next} />;
     case "bar": return <BarViz panel={panel} title={title} result={result} dark={dark} height={height} onSelect={onSelect} onPoint={onPoint} />;
-    case "table": return <TableViz panel={panel} result={result} height={height} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} />;
+    case "table": return <TableViz traceLinks={props.traceLinks} panel={panel} result={result} height={height} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} />;
     case "heatmap": return <HeatmapViz {...next} />;
     case "histogram": return <HistogramViz {...next} />;
     case "scatter": return <ScatterViz {...next} />;

@@ -312,6 +312,16 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 		committed = true
 		return OAuthTokenPair{}, ErrInvalidOAuthGrant
 	}
+	if _, ok := CanonicalMCPOAuthScope(record.Scope); !ok {
+		if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE family_id = ?`, now, record.FamilyID); err != nil {
+			return OAuthTokenPair{}, fmt.Errorf("oauth: revoke retired grant family: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return OAuthTokenPair{}, fmt.Errorf("oauth: commit retired grant revocation: %w", err)
+		}
+		committed = true
+		return OAuthTokenPair{}, ErrInvalidOAuthGrant
+	}
 	rotationScope, ok := ResolveMCPRefreshScope(record.Scope, requestedScope)
 	if !ok {
 		return OAuthTokenPair{}, ErrInvalidOAuthScope

@@ -291,11 +291,11 @@ just test       # Go tests
 just ui         # rebuild the embedded browser assets
 ```
 
-The browser workspaces build **into** `internal/ui/dist` and
+The `ui/host` workspace builds the SPA and MCP app **into** `internal/ui/dist` and
 `internal/mcp/apps`, and those outputs are committed because `go:embed` needs
 them present in a source checkout. The binary is therefore only ever as fresh
-as the last UI build, so `just ui-check` rebuilds both workspaces and fails if
-the committed bytes no longer match. It is part of `just check` and runs in CI.
+as the last UI build. `just ui-check` compares temporary builds of both outputs
+and fails if the embedded bytes no longer match. It is part of `just check` and runs in CI.
 
 [Lefthook](https://lefthook.dev) runs formatting and linting on commit and the
 full gate on push; `just install` wires it up. The pre-push hook is a
@@ -307,8 +307,7 @@ the same `just check` unconditionally, and that is what actually enforces it.
 ```text
 cmd/fanout/        process composition and the single entry point
 internal/          ingest, storage, query, agent, MCP, auth, alerts
-ui/host/           React AG-UI browser host (build-time)
-ui/apps/           portable React MCP Apps (build-time)
+ui/host/           React browser host and shared MCP app renderer (build-time)
 docs/diagrams/     d2 sources and rendered SVG
 ```
 

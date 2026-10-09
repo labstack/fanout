@@ -1,6 +1,7 @@
 import { Anchor, Badge, Text } from "@mantine/core";
 import { useCallback, useMemo, type CSSProperties } from "react";
 import { makeDrill } from "../drill-state";
+import { drillHref } from "../search";
 import { rowModel } from "../../../../panels/rows";
 import type { AnalysisProps } from "./analysis-chart";
 import { TableViz, type TableCellProps } from "./table";
@@ -24,14 +25,18 @@ function severityLabel(value: unknown): string {
 
 export function RowPanel(props: AnalysisProps) {
   const model = useMemo(() => rowModel(props.panel, props.result), [props.panel, props.result]);
+  const patternEvents = model.rows.reduce((total, row) => total + (typeof row.count === "number" && Number.isFinite(row.count) && row.count >= 0 ? row.count : 0), 0);
   const cell = useCallback(({ column, value, rowIndex }: TableCellProps) => {
     const selection = model.selection(model.rows[rowIndex]);
     const name = column.name;
     if (name === "trace_id" && value) {
       const target = makeDrill(props.panel, props.result, selection);
       if (!target) return <Text size="sm" ff="monospace" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`}>{String(value).slice(0,16)}</Text>;
-      const url = new URL(window.location.href); url.searchParams.set("drill", JSON.stringify(target));
-      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={url.toString()} onClick={event => {
+      if (props.traceLinks === "button") return <Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" onClick={event => {
+        event.stopPropagation(); props.onPoint?.(selection);
+      }}>{String(value).slice(0,16)}</Anchor>;
+      const href = drillHref(window.location.href, target);
+      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={href} onClick={event => {
         if (props.onPoint && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
           event.preventDefault(); event.stopPropagation(); props.onPoint(selection);
         }
@@ -70,8 +75,11 @@ export function RowPanel(props: AnalysisProps) {
       </svg>;
     }
     return undefined;
-  }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, model]);
+  }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, props.traceLinks, model]);
   return <div role="region" aria-label={`${props.title ?? props.panel.title}: ${model.rows.length} rows`}>
-    <TableViz panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
+    <TableViz foldConstants={props.foldConstants} traceLinks={props.traceLinks} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
+    {props.panel.viz === "log_patterns" && <Text data-pattern-summary c="dimmed" fz={12} style={{marginTop:8,flexShrink:0}}>
+      {model.rows.length} {model.rows.length === 1 ? "pattern" : "patterns"} · {patternEvents.toLocaleString()} {patternEvents === 1 ? "event" : "events"} in the window{props.result.frame?.truncated ? " (shown)" : ""}
+    </Text>}
   </div>;
 }

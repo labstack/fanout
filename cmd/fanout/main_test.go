@@ -167,7 +167,7 @@ func TestCreateLoginLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
 	}
-	user, err := auth.NewUserStore(sqlite.DB).Create("admin@example.com", "Admin", "admin")
+	user, err := auth.NewUserStore(sqlite.DB).CreateWithAudit("admin@example.com", "Admin", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 // a negative MaxRows must not panic and must fall back to the default.
 func TestExecuteSQL_NonPositiveMaxRows(t *testing.T) {
 	db := openTestDuck(t)
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	for _, mr := range []int{-1, 0, -1000} {
 		resp := d.ExecuteSQL(context.Background(), SQLRequest{Query: "SELECT 1 AS x", MaxRows: mr})
 		if resp.Error != "" {
@@ -23,7 +23,7 @@ func TestExecuteSQL_NonPositiveMaxRows(t *testing.T) {
 
 func TestExecuteSQL_CapsRowsAtMaxRows(t *testing.T) {
 	db := openTestDuck(t)
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	resp := d.ExecuteSQL(context.Background(), SQLRequest{Query: "SELECT n FROM range(50) AS t(n)", MaxRows: 5})
 	if resp.Error != "" {
 		t.Fatalf("unexpected error: %s", resp.Error)
@@ -35,7 +35,7 @@ func TestExecuteSQL_CapsRowsAtMaxRows(t *testing.T) {
 
 func TestExecuteSQLCapsWithoutChangingInnerLimitOrOrder(t *testing.T) {
 	db := openTestDuck(t)
-	d := &Duck{DB: db}
+	d := &Duck{DB: db, writeDB: db}
 	for _, q := range []string{
 		"SELECT n FROM range(100) AS t(n) ORDER BY n DESC;",
 		"WITH t AS (SELECT n FROM range(100) AS r(n) ORDER BY n DESC LIMIT 7) SELECT n FROM t ORDER BY n DESC",

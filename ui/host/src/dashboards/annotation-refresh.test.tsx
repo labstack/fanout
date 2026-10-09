@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mock = vi.hoisted(() => ({ panels: vi.fn(), annotations: vi.fn() }));
-vi.mock("./api", () => ({ queryPanels: mock.panels, queryAnnotations: mock.annotations }));
 import { refreshDashboard } from "./refresh";
 import type { QueryBody } from "./api";
+
+const mock = vi.hoisted(() => ({ panels: vi.fn(), annotations: vi.fn() }));
+vi.mock("./api", () => ({ queryPanels: mock.panels, queryAnnotations: mock.annotations }));
 const body: QueryBody = { dashboard: { version: 1, name: "D", time: { range: "1h" }, panels: [{ id: "a", title: "A", viz: "timeseries", query: { from: "spans", measures: ["count()"] } }, { id: "b", title: "B", viz: "timeseries", time: { shift: "1d" }, query: { from: "spans", measures: ["count()"] } }] }, time: { range: "1h" }, vars: { service: "checkout" } };
 beforeEach(() => vi.resetAllMocks());
 describe("S8 annotations", () => {

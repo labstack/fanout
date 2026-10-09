@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
 )
@@ -46,6 +47,7 @@ type Result struct {
 	Frame           *Frame           `json:"frame,omitempty"`
 	Previous        *Frame           `json:"previous,omitempty"`
 	Error           string           `json:"error,omitempty"`
+	Retryable       bool             `json:"retryable,omitempty"`
 	Diagnosis       string           `json:"diagnosis,omitempty"`
 	SQL             string           `json:"sql,omitempty"`
 	Interval        string           `json:"interval,omitempty"`
@@ -157,7 +159,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 	defer cancel()
 	results := make([]Result, len(targets))
 	for i, p := range targets {
-		results[i] = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError}
+		results[i] = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Retryable: true}
 	}
 	batchError := func(err error) ([]Result, error) {
 		if caller.Err() != nil {
@@ -205,7 +207,8 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			}
 			result := e.runPanel(ctx, p, checked, t, now, vars, req.Widths[p.ID], compare)
 			if ctx.Err() == context.DeadlineExceeded {
-				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, ElapsedMS: result.ElapsedMS}
+				// runPanel already logged the interrupted query; the overwrite adds no log line.
+				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Retryable: true, ElapsedMS: result.ElapsedMS}
 			}
 			results[i] = result
 			return nil
@@ -221,6 +224,9 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 
 // BatchDeadlineError is shared by HTTP and MCP batch callers.
 const BatchDeadlineError = "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard."
+
+// QueryTimeoutError describes the executor's per-panel time limit.
+const QueryTimeoutError = "The query took longer than 10 seconds. Narrow the time range or add filters."
 
 // Allocate the response budget in panel order, independently of completion
 // order, so concurrent refreshes retain the same portion of their frames.
@@ -329,7 +335,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	}
 	start, end, err := resolveWindow(t, p.Time, now, e.maxWindow)
 	if err != nil {
-		return failed(res, err, parent.Err() == nil)
+		return failed(res, err, parent.Err())
 	}
 	res.FromMS, res.ToMS = start.UnixMilli(), end.UnixMilli()
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
@@ -350,7 +356,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	frame, sqlText, err := e.runScope(ctx, p, checked, scope)
 	if err != nil {
 		res.SQL = sqlText
-		return failed(res, err, parent.Err() == nil)
+		return failed(res, err, parent.Err())
 	}
 	res.Frame, res.SQL = frame, sqlText
 	// Trend failures are recorded on the frame and preserve the main table.
@@ -371,7 +377,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
 		if err != nil {
-			return failed(res, err, parent.Err() == nil)
+			return failed(res, err, parent.Err())
 		}
 		frame.Totals = totals
 	}
@@ -499,12 +505,30 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 	return frame, query, err
 }
 
-func failed(res Result, err error, ownTimeout bool) Result {
+// stopped is the batch context's error: nil while the panel's own timeout
+// governs, context.Canceled when the caller went away.
+func failed(res Result, err error, stopped error) Result {
+	ownTimeout := stopped == nil
 	res.Status = StatusError
-	slog.Error("panel query failed", "panel_id", res.ID, "error", err)
+	res.Retryable = false
+	var engineError *duckdb.Error
+	isEngine := errors.As(err, &engineError)
+	if isEngine {
+		switch engineError.Type {
+		case duckdb.ErrorTypeOutOfMemory, duckdb.ErrorTypeIO, duckdb.ErrorTypeInterrupt:
+			res.Retryable = true
+		}
+	}
+	// The engine reports a caller's cancellation as a bare interrupt. That is
+	// expected navigation; unrelated failures and deadlines still need a log.
+	interrupted := errors.Is(err, context.Canceled) || isEngine && engineError.Type == duckdb.ErrorTypeInterrupt
+	if !errors.Is(stopped, context.Canceled) || !interrupted {
+		slog.Error("panel query failed", "panel_id", res.ID, "error", err)
+	}
 	switch {
 	case ownTimeout && errors.Is(err, context.DeadlineExceeded):
-		res.Error = "The query took longer than 10 seconds. Narrow the time range or add filters."
+		res.Error = QueryTimeoutError
+		res.Retryable = true
 	default:
 		message := RedactPaths(err.Error())
 		if len(message) > 500 {

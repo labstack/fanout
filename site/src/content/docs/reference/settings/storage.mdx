@@ -47,4 +47,4 @@ Controls Parquet retention and compaction, and query-cache checkpointing.
 
 ### `storage.rollup_skip_to_latest`
 
-RollupSkipToLatest, set once at boot, advances the service and edge rollup watermarks to the current max ingested timestamp. Existing history is not aggregated into those analytical rollups. Completed-batch endpoint, log, and trace caches still rebuild all retained history in bounded passes; uncached files remain immediately queryable. Useful for large pre-seeded datasets (benchmarks, restores); off in normal operation.
+RollupSkipToLatest, set once at boot, advances the service and edge rollup watermarks to the current max ingested timestamp. Existing history is not aggregated into those analytical rollups. Completed-batch trace caches still rebuild all retained history in bounded passes; uncached files remain immediately queryable. Useful for large pre-seeded datasets (benchmarks, restores); off in normal operation.

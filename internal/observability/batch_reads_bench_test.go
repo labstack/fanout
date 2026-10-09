@@ -111,9 +111,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	narrow := Scope{Start: at.Add(-20 * time.Minute), End: at.Add(time.Second), Namespace: "prod"}
 	for _, scope := range []Scope{broad, narrow} {
 		for name, method := range map[string]func(*Service) error{
-			"endpoints": func(s *Service) error { _, _, err := s.queryEndpoints(t.Context(), scope, "", 100); return err },
-			"trace":     func(s *Service) error { _, err := s.Trace(t.Context(), scope, "", "", 100); return err },
-			"logs":      func(s *Service) error { _, err := s.Logs(t.Context(), scope, "", "", "", 100); return err },
+			"trace": func(s *Service) error { _, err := s.Trace(t.Context(), scope, "", "", 100); return err },
 		} {
 			for _, implementation := range []struct {
 				name    string

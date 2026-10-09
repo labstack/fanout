@@ -1,8 +1,16 @@
 -- name: ListDashboards :many
-SELECT id, name, description, is_default, version, panel_count, updated_at
-FROM dashboards
-WHERE owner_id = ?
-ORDER BY is_default DESC, updated_at DESC;
+SELECT d.id, d.name, d.description, d.is_default, d.version, d.panel_count, d.updated_at,
+       o.thread_id AS origin_thread_id, o.message_id AS origin_message_id, o.request_excerpt AS origin_request_excerpt
+FROM dashboards d
+LEFT JOIN dashboard_origins o ON o.dashboard_id = d.id
+WHERE d.owner_id = ?
+ORDER BY d.is_default DESC, d.updated_at DESC;
+
+-- name: InsertDashboardOrigin :execrows
+INSERT INTO dashboard_origins (dashboard_id, thread_id, message_id, request_excerpt)
+SELECT sqlc.arg(dashboard_id), sqlc.arg(thread_id), sqlc.arg(message_id), sqlc.arg(request_excerpt)
+WHERE EXISTS (SELECT 1 FROM agui_threads t WHERE t.thread_id = sqlc.arg(thread_id) AND t.owner_id = sqlc.arg(owner_id))
+  AND EXISTS (SELECT 1 FROM dashboards d WHERE d.id = sqlc.arg(dashboard_id) AND d.owner_id = sqlc.arg(owner_id));
 
 -- name: CountDashboards :one
 SELECT COUNT(*) FROM dashboards WHERE owner_id = ?;
@@ -48,6 +56,15 @@ LIMIT 100;
 
 -- name: GetDashboardVersion :one
 SELECT spec_json FROM dashboard_versions WHERE dashboard_id = ? AND version = ?;
+
+-- name: GetDashboardVersionRecord :one
+SELECT d.id, d.is_default, d.created_at AS dashboard_created_at,
+       v.version, v.spec_json, v.author_kind, v.author_id, v.message,
+       v.created_at AS version_created_at
+FROM dashboard_versions v JOIN dashboards d ON d.id = v.dashboard_id
+WHERE d.id = sqlc.arg(dashboard_id)
+  AND d.owner_id = sqlc.arg(owner_id)
+  AND v.version = sqlc.arg(version);
 
 -- name: PruneDashboardVersions :exec
 DELETE FROM dashboard_versions

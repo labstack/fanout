@@ -1,0 +1,6 @@
+import type { Message } from "@ag-ui/client";
+export const user = (id = 'u'): Message => ({id, role:'user', content:'Build'});
+export const call = (id:string,name:string,input:unknown = {}):Message => ({id:`a-${id}`,role:'assistant',content:'',toolCalls:[{id,type:'function',function:{name,arguments:JSON.stringify(input)}}]});
+export const result = (id:string,payload:unknown,error?:string):Message => ({id:`r-${id}`,role:'tool',toolCallId:id,content:JSON.stringify(payload),...(error?{error}:{})});
+export const saved = {dashboard:{id:'board',name:'<img src=x onerror=alert(1)>',version:2},receipt:{base_version:1,version:2,changes:[{panel_id:'latency',title:'Latency',kind:'changed',fields:['thresholds']}],layout_changed:true,save_check:{checked:true,elapsed_ms:1200,panels:[{id:'latency',status:'ok',rows:2,elapsed_ms:1000}]}}};
+export const build = ():Message[] => [user(),call('schema','get_telemetry_schema'),result('schema',{}),call('bad','preview_panels',{panels:[{id:'latency'}]}),result('bad',{elapsed_ms:10,panels:[{id:'latency',status:'invalid',problems:[{path:'panels[0].query.measures[0]',message:'Unknown field'}]}]}),call('good','preview_panels',{panels:[{id:'latency'}]}),result('good',{elapsed_ms:200,panels:[{id:'latency',status:'ok',rows:2,elapsed_ms:190}]}),call('save','edit_dashboard'),result('save',saved)];

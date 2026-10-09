@@ -42,14 +42,22 @@ type Record struct {
 	UpdatedAt   string          `json:"updated_at"`
 }
 
+// Mutation identifies exactly one committed save and its successful optimistic base.
+type Mutation struct {
+	Record      Record
+	Before      panel.Dashboard
+	BaseVersion int
+}
+
 type Summary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	IsDefault   bool   `json:"is_default"`
-	Version     int    `json:"version"`
-	PanelCount  int    `json:"panel_count"`
-	UpdatedAt   string `json:"updated_at"`
+	Origin      *BuildOrigin `json:"origin,omitempty"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	IsDefault   bool         `json:"is_default"`
+	Version     int          `json:"version"`
+	PanelCount  int          `json:"panel_count"`
+	UpdatedAt   string       `json:"updated_at"`
 }
 
 type VersionInfo struct {
@@ -58,6 +66,72 @@ type VersionInfo struct {
 	AuthorID   string `json:"author_id,omitempty"`
 	Message    string `json:"message,omitempty"`
 	CreatedAt  string `json:"created_at"`
+}
+
+type VersionRecord struct {
+	Dashboard        Record        `json:"dashboard"`
+	AuthorKind       string        `json:"author_kind"`
+	AuthorID         string        `json:"author_id,omitempty"`
+	Message          string        `json:"message,omitempty"`
+	CreatedAt        string        `json:"created_at"`
+	Changes          []PanelChange `json:"changes"`
+	LayoutChanged    bool          `json:"layout_changed"`
+	DashboardFields  []string      `json:"dashboard_fields"`
+	ChangesAvailable bool          `json:"changes_available"`
+}
+
+// VersionRecord reads immutable historical content and its shared save diff.
+// IsDefault describes the current owned board; UpdatedAt is the version time.
+func (s *Service) VersionRecord(ctx context.Context, owner, id string, version int) (VersionRecord, error) {
+	if version <= 0 {
+		return VersionRecord{}, ErrNotFound
+	}
+	// Pin both rows so concurrent pruning cannot change predecessor availability.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return VersionRecord{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := generated.New(tx)
+	r, err := q.GetDashboardVersionRecord(ctx, generated.GetDashboardVersionRecordParams{DashboardID: id, OwnerID: owner, Version: int64(version)})
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, ownerErr := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: owner}); ownerErr != nil {
+			if errors.Is(ownerErr, sql.ErrNoRows) {
+				return VersionRecord{}, ErrNotFound
+			}
+			return VersionRecord{}, ownerErr
+		}
+		return VersionRecord{}, versionNotFoundError{id: id, version: version}
+	}
+	if err != nil {
+		return VersionRecord{}, err
+	}
+	var spec panel.Dashboard
+	if err := json.Unmarshal([]byte(r.SpecJson), &spec); err != nil {
+		return VersionRecord{}, err
+	}
+	record := Record{ID: r.ID, Name: spec.Name, Description: spec.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), Spec: spec, CreatedAt: r.DashboardCreatedAt, UpdatedAt: r.VersionCreatedAt}
+	out := VersionRecord{Dashboard: record, AuthorKind: r.AuthorKind, AuthorID: r.AuthorID, Message: r.Message, CreatedAt: r.VersionCreatedAt, Changes: []PanelChange{}, DashboardFields: []string{}}
+	before := panel.Dashboard{}
+	if version > 1 {
+		prior, err := q.GetDashboardVersionRecord(ctx, generated.GetDashboardVersionRecordParams{DashboardID: id, OwnerID: owner, Version: int64(version - 1)})
+		if errors.Is(err, sql.ErrNoRows) {
+			return out, nil
+		}
+		if err != nil {
+			return VersionRecord{}, err
+		}
+		if err := json.Unmarshal([]byte(prior.SpecJson), &before); err != nil {
+			return VersionRecord{}, err
+		}
+	}
+	diff := Changes(before, spec)
+	out.Changes, out.LayoutChanged = diff.Panels, diff.LayoutChanged
+	if diff.DashboardFields != nil {
+		out.DashboardFields = diff.DashboardFields
+	}
+	out.ChangesAvailable = true
+	return out, nil
 }
 
 type Service struct {
@@ -82,7 +156,11 @@ func (s *Service) List(ctx context.Context, ownerID string) ([]Summary, error) {
 	}
 	out := make([]Summary, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, Summary{ID: r.ID, Name: r.Name, Description: r.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), PanelCount: int(r.PanelCount), UpdatedAt: r.UpdatedAt})
+		item := Summary{ID: r.ID, Name: r.Name, Description: r.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), PanelCount: int(r.PanelCount), UpdatedAt: r.UpdatedAt}
+		if r.OriginThreadID.Valid {
+			item.Origin = &BuildOrigin{ThreadID: r.OriginThreadID.String, MessageID: r.OriginMessageID.String, RequestExcerpt: r.OriginRequestExcerpt.String}
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -102,9 +180,13 @@ func (s *Service) get(ctx context.Context, ownerID, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	return decodeRecord(row)
+}
+
+func decodeRecord(row generated.Dashboard) (Record, error) {
 	record := Record{ID: row.ID, Name: row.Name, Description: row.Description, IsDefault: row.IsDefault == 1, Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 	if err := json.Unmarshal([]byte(row.SpecJson), &record.Spec); err != nil {
-		return Record{}, fmt.Errorf("decode dashboard %s: %w", id, err)
+		return Record{}, fmt.Errorf("decode dashboard %s: %w", row.ID, err)
 	}
 	return record, nil
 }
@@ -129,20 +211,30 @@ func (s *Service) prepare(ctx context.Context, spec *panel.Dashboard, repack boo
 }
 
 func (s *Service) Create(ctx context.Context, ownerID string, spec panel.Dashboard, author Author) (Record, error) {
+	mutation, err := s.CreateWithChanges(ctx, ownerID, spec, author)
+	return mutation.Record, err
+}
+
+func (s *Service) CreateWithChanges(ctx context.Context, ownerID string, spec panel.Dashboard, author Author) (Mutation, error) {
+	var err error
+	spec, err = clone(spec)
+	if err != nil {
+		return Mutation{}, err
+	}
 	if err := s.prepare(ctx, &spec, false); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	id, err := appid.New()
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := generated.New(tx)
@@ -150,25 +242,51 @@ func (s *Service) Create(ctx context.Context, ownerID string, spec panel.Dashboa
 	affected, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: id, OwnerID: ownerID, Name: spec.Name, Description: spec.Description, Version: 1, SpecJson: string(raw), PanelCount: int64(len(spec.Panels)), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		if isUnique(err) {
-			return Record{}, ErrConflict
+			return Mutation{}, ErrConflict
 		}
-		return Record{}, err
+		return Mutation{}, err
 	}
 	if affected == 0 {
-		return Record{}, panel.Problems{{Path: "dashboards", Message: "at most 500 dashboards per owner; delete a dashboard before creating another"}}
+		return Mutation{}, panel.Problems{{Path: "dashboards", Message: "at most 500 dashboards per owner; delete a dashboard before creating another"}}
+	}
+	if origin, ok := BuildOriginFromContext(ctx); ok {
+		if strings.TrimSpace(origin.ThreadID) == "" || strings.TrimSpace(origin.MessageID) == "" {
+			return Mutation{}, errors.New("invalid dashboard build origin")
+		}
+		rows, err := q.InsertDashboardOrigin(ctx, generated.InsertDashboardOriginParams{DashboardID: id, ThreadID: origin.ThreadID, MessageID: origin.MessageID, RequestExcerpt: origin.RequestExcerpt, OwnerID: ownerID})
+		if err != nil {
+			return Mutation{}, err
+		}
+		if rows != 1 {
+			return Mutation{}, errors.New("dashboard build origin thread is not owned by the dashboard owner")
+		}
 	}
 	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: 1, SpecJson: string(raw), AuthorKind: author.Kind, AuthorID: author.ID, Message: "Created", CreatedAt: now}); err != nil {
-		return Record{}, err
+		return Mutation{}, err
+	}
+	row, err := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: ownerID})
+	if err != nil {
+		return Mutation{}, err
+	}
+	record, err := decodeRecord(row)
+	if err != nil {
+		return Mutation{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
-	return s.get(ctx, ownerID, id)
+	MarkSaveCommitted(ctx)
+	return Mutation{Record: record}, nil
 }
 
 // Replace stores a whole new spec. baseVersion 0 means "the latest".
 func (s *Service) Replace(ctx context.Context, ownerID, id string, spec panel.Dashboard, baseVersion int, author Author, message string) (Record, error) {
-	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
+	mutation, err := s.ReplaceWithChanges(ctx, ownerID, id, spec, baseVersion, author, message)
+	return mutation.Record, err
+}
+
+func (s *Service) ReplaceWithChanges(ctx context.Context, ownerID, id string, spec panel.Dashboard, baseVersion int, author Author, message string) (Mutation, error) {
+	return s.update(ctx, ownerID, id, baseVersion, 0, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
 		replacement, err := clone(spec)
 		if err != nil {
 			return panel.Dashboard{}, false, err
@@ -206,27 +324,43 @@ func (s *Service) Replace(ctx context.Context, ownerID, id string, spec panel.Da
 
 // Edit applies typed operations atomically. baseVersion 0 means "the latest".
 func (s *Service) Edit(ctx context.Context, ownerID, id string, ops []Operation, baseVersion int, author Author, message string) (Record, error) {
-	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
+	mutation, err := s.EditWithChanges(ctx, ownerID, id, ops, baseVersion, author, message)
+	return mutation.Record, err
+}
+
+func (s *Service) EditWithChanges(ctx context.Context, ownerID, id string, ops []Operation, baseVersion int, author Author, message string) (Mutation, error) {
+	return s.update(ctx, ownerID, id, baseVersion, 0, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
 		return Apply(current, ops)
 	})
 }
 
 func (s *Service) Restore(ctx context.Context, ownerID, id string, version int, author Author) (Record, error) {
-	if _, err := s.get(ctx, ownerID, id); err != nil {
-		return Record{}, err
+	mutation, err := s.RestoreWithChanges(ctx, ownerID, id, version, author)
+	return mutation.Record, err
+}
+
+// RestoreWithChanges appends a historical spec as a new save against the latest
+// optimistic base, retaining the committed snapshots for the shared diff.
+func (s *Service) RestoreWithChanges(ctx context.Context, ownerID, id string, version int, author Author) (Mutation, error) {
+	current, err := s.get(ctx, ownerID, id)
+	if err != nil {
+		return Mutation{}, err
+	}
+	if current.Version == version {
+		return Mutation{}, ErrAlreadyCurrent
 	}
 	raw, err := generated.New(s.db).GetDashboardVersion(ctx, generated.GetDashboardVersionParams{DashboardID: id, Version: int64(version)})
 	if errors.Is(err, sql.ErrNoRows) {
-		return Record{}, ErrNotFound
+		return Mutation{}, versionNotFoundError{id: id, version: version}
 	}
 	if err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
 	var spec panel.Dashboard
 	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
-		return Record{}, err
+		return Mutation{}, err
 	}
-	return s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
+	return s.update(ctx, ownerID, id, 0, version, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
 		return spec, false, nil
 	})
 }
@@ -235,44 +369,51 @@ func (s *Service) Restore(ctx context.Context, ownerID, id string, version int, 
 // check. With baseVersion 0 a concurrent write is retried once on the newer
 // version; with an explicit baseVersion it fails with ErrStale instead of
 // overwriting what someone else saved.
-func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Record, error) {
+func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion, restoreVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Mutation, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		current, err := s.get(ctx, ownerID, id)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
+		}
+		if restoreVersion > 0 && current.Version == restoreVersion {
+			return Mutation{}, ErrAlreadyCurrent
 		}
 		if baseVersion != 0 && current.Version != baseVersion {
-			return Record{}, ErrStale
+			return Mutation{}, ErrStale
+		}
+		before, err := clone(current.Spec)
+		if err != nil {
+			return Mutation{}, err
 		}
 		next, repack, err := change(current.Spec)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		if err := s.prepare(ctx, &next, repack); err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		raw, err := json.Marshal(next)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
-		written, err := s.write(ctx, ownerID, id, current.Version, next, string(raw), author, message)
+		record, written, err := s.write(ctx, ownerID, id, current.Version, next, string(raw), author, message)
 		if err != nil {
-			return Record{}, err
+			return Mutation{}, err
 		}
 		if written {
-			return s.get(ctx, ownerID, id)
+			return Mutation{Record: record, Before: before, BaseVersion: current.Version}, nil
 		}
 		if baseVersion != 0 {
-			return Record{}, ErrStale
+			return Mutation{}, ErrStale
 		}
 	}
-	return Record{}, ErrStale
+	return Mutation{}, ErrStale
 }
 
-func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec panel.Dashboard, raw string, author Author, message string) (bool, error) {
+func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec panel.Dashboard, raw string, author Author, message string) (Record, bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return Record{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	q := generated.New(tx)
@@ -281,20 +422,32 @@ func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec 
 	affected, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: spec.Name, Description: spec.Description, NextVersion: next, SpecJson: raw, PanelCount: int64(len(spec.Panels)), UpdatedAt: now, ID: id, OwnerID: ownerID, BaseVersion: int64(base)})
 	if err != nil {
 		if isUnique(err) {
-			return false, ErrConflict
+			return Record{}, false, ErrConflict
 		}
-		return false, err
+		return Record{}, false, err
 	}
 	if affected == 0 {
-		return false, nil
+		return Record{}, false, nil
 	}
 	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: next, SpecJson: raw, AuthorKind: author.Kind, AuthorID: author.ID, Message: strings.TrimSpace(message), CreatedAt: now}); err != nil {
-		return false, err
+		return Record{}, false, err
 	}
 	if err := q.PruneDashboardVersions(ctx, generated.PruneDashboardVersionsParams{DashboardID: id, KeepFrom: next - keepVersions + 1}); err != nil {
-		return false, err
+		return Record{}, false, err
 	}
-	return true, tx.Commit()
+	row, err := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: ownerID})
+	if err != nil {
+		return Record{}, false, err
+	}
+	record, err := decodeRecord(row)
+	if err != nil {
+		return Record{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Record{}, false, err
+	}
+	MarkSaveCommitted(ctx)
+	return record, true, nil
 }
 
 func (s *Service) Delete(ctx context.Context, ownerID, id string) error {
@@ -343,7 +496,7 @@ func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	if err != nil || count > 0 {
 		return err
 	}
-	_, err = s.Create(ctx, ownerID, DefaultSpec(), Author{Kind: "system"})
+	_, err = s.Create(WithBuildOrigin(ctx, BuildOrigin{}), ownerID, DefaultSpec(), Author{Kind: "system"})
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

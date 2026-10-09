@@ -17,7 +17,7 @@ import (
 
 // readCacheVersion covers both schema and aggregation semantics. These tables
 // are disposable; a mismatch rebuilds them together from immutable Parquet.
-const readCacheVersion = 3
+const readCacheVersion = 4
 
 const (
 	readCacheBatchLimit = 64
@@ -71,9 +71,7 @@ func createBatchCaches(db *sql.DB) error {
 	}
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
-		createReadEndpointTable,
 		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR PRIMARY KEY,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
-		`CREATE TABLE IF NOT EXISTS read_logs (batch_id VARCHAR, bucket TIMESTAMP_NS, namespace VARCHAR, service VARCHAR, severity VARCHAR, count BIGINT)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -164,7 +162,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	sort.SliceStable(batches, func(i, j int) bool { return newestBatchEvent(batches[i]) < newestBatchEvent(batches[j]) })
 	pendingCount := 0
 	for _, b := range batches {
-		if !markers[b.ID] {
+		if !markers[b.ID] && b.Spans > 0 {
 			pendingCount++
 		}
 	}
@@ -173,7 +171,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	pendingRows := 0
 	for i := len(batches) - 1; i >= 0; i-- {
 		if !markers[batches[i].ID] {
-			rows := batches[i].Spans + batches[i].Logs
+			rows := batches[i].Spans
 			// A complete file is indivisible. Admit one oversized file to make
 			// progress, otherwise bound new work by rows as well as file count.
 			if len(pending) > 0 && pendingRows+rows > readCacheRowBudget {
@@ -221,7 +219,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		}
 	}
 	if len(stale) > 0 {
-		for _, table := range []string{"read_endpoints", "read_logs", "read_trace_parts", "read_batches"} {
+		for _, table := range []string{"read_trace_parts", "read_batches"} {
 			if err := exec("DELETE FROM " + table + " WHERE batch_id IN (" + idsSQL(stale) + ")"); err != nil {
 				return 0, err
 			}
@@ -240,7 +238,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			return 0, err
 		}
 	}
-	// Bind each signal once for the whole pass. Materialize minute counts, new
+	// Bind spans once for the whole pass. Materialize new
 	// batch parts and one indexed candidate per trace. The temporary parts table
 	// feeds both inserts without rereading Parquet or scanning retained parts.
 	source := func(signal string) string {
@@ -261,10 +259,6 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__fanout_filename")+" AS batch_id,\n", 1)
 	}
 	if spans := source("spans"); spans != "" {
-		kernel := strings.Replace(endpointBatchSelect, "SELECT\n", "SELECT s.batch_id,\n", 1) + "FROM (" + spans + ") s GROUP BY 1,2,3,4,5,6"
-		if err := exec(`INSERT INTO read_endpoints ` + kernel); err != nil {
-			return 0, fmt.Errorf("cache endpoints: %w", err)
-		}
 		if err := exec(`CREATE OR REPLACE TEMP TABLE cache_new_trace_parts AS SELECT batch_id,coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,trace_id,
    min(start_unix_nano) AS min_start,max(start_unix_nano) AS max_start,max(end_unix_nano) AS max_end,max(CASE WHEN upper(status) IN ('ERROR','STATUS_CODE_ERROR') THEN 1 ELSE 0 END) AS has_error
    FROM (` + spans + `) WHERE trace_id<>'' GROUP BY 1,2,3,4`); err != nil {
@@ -287,11 +281,6 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			return 0, err
 		}
 	}
-	if logs := source("logs"); logs != "" {
-		if err := exec(`INSERT INTO read_logs SELECT batch_id,date_trunc('minute',time::TIMESTAMP_NS),coalesce(namespace,''),coalesce(service,''),coalesce(severity,''),count(*) FROM (` + logs + `) GROUP BY 1,2,3,4,5`); err != nil {
-			return 0, err
-		}
-	}
 	if len(batches) > 0 {
 		var values []string
 		for _, b := range batches {
@@ -306,16 +295,6 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 	}
 	return written, nil
 }
-func minuteInterior(w queryrows.Window) (time.Time, time.Time) {
-	start := w.Start.Truncate(time.Minute)
-	if !start.Equal(w.Start) {
-		start = start.Add(time.Minute)
-	}
-	return start, w.End.Truncate(time.Minute)
-}
-func timeNanosLiteral(t time.Time) string {
-	return "make_timestamp_ns(" + fmt.Sprint(t.UnixNano()) + ")"
-}
 func timeLiteral(t time.Time) string {
 	return "make_timestamp_ns(" + fmt.Sprint(t.UnixNano()) + ")::TIMESTAMPTZ_NS"
 }
@@ -329,12 +308,8 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 	}
 	var cachedIDs []string
 	var cached, uncached []telemetry.BatchMetadata
-	signal := "spans"
-	if w.Kind == queryrows.LogHistogramRead {
-		signal = "logs"
-	}
 	for _, b := range batches {
-		if !overlapping(b, signal, w) {
+		if !overlapping(b, "spans", w) {
 			continue
 		}
 		if markers[b.ID] {
@@ -344,124 +319,49 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 			uncached = append(uncached, b)
 		}
 	}
-	switch w.Kind {
-	case queryrows.EndpointRead, queryrows.LogHistogramRead:
-		start, end := minuteInterior(w)
-		column := "start_time"
-		projection := "namespace,service,start_time,http_method,http_route,operation,duration_ms,status"
-		if signal == "logs" {
-			column = "time"
-			projection = "namespace,service,time,coalesce(severity,'') AS severity,1::BIGINT AS count"
-		}
-		raw := "SELECT " + projection + " FROM (" + cleanSource(signal, d.snapshotSource(signal, uncached, batches)) + ") WHERE " + windowPredicate(column, w)
-		// Footer pruning selects only the two clipped boundary minutes. Aligned
-		// windows need no cached raw files; very short windows read their full range.
-		var boundary []telemetry.BatchMetadata
-		var containedIDs, clippedIDs []string
-		for _, b := range cached {
-			bounds, _ := batchTime(b, signal)
-			if bounds.Known && bounds.MinNanos >= w.Start.UnixNano() && bounds.MaxNanos < w.End.UnixNano() {
-				// Even a clipped minute is exact when all events in the completed file
-				// are inside the window. This avoids rereading the hot current minute.
-				containedIDs = append(containedIDs, b.ID)
-				continue
-			}
-			clippedIDs = append(clippedIDs, b.ID)
-			left := w
-			left.End = start
-			right := w
-			right.Start = end
-			if left.Start.Before(left.End) && overlapping(b, signal, left) || right.Start.Before(right.End) && overlapping(b, signal, right) {
-				boundary = append(boundary, b)
-			}
-		}
-		clipped := "SELECT " + projection + " FROM (" + cleanSource(signal, d.snapshotSource(signal, boundary, batches)) + ") WHERE " + windowPredicate(column, w) + " AND (" + column + "<" + timeLiteral(start) + " OR " + column + ">=" + timeLiteral(end) + ")"
-		if signal == "spans" {
-			sources["endpoint_tail"] = raw + " UNION ALL " + clipped
-			sources["endpoint_minutes"] = "SELECT * EXCLUDE(batch_id) FROM read_endpoints WHERE batch_id IN (" + idsSQL(containedIDs) + ") OR (batch_id IN (" + idsSQL(clippedIDs) + ") AND bucket>=" + timeNanosLiteral(start) + " AND bucket<" + timeNanosLiteral(end) + ")"
-		} else {
-			sources["log_tail"] = raw + " UNION ALL " + clipped
-			sources["log_minutes"] = "SELECT * EXCLUDE(batch_id) FROM read_logs WHERE batch_id IN (" + idsSQL(containedIDs) + ") OR (batch_id IN (" + idsSQL(clippedIDs) + ") AND bucket>=" + timeNanosLiteral(start) + " AND bucket<" + timeNanosLiteral(end) + ")"
-		}
-	case queryrows.TraceCandidateRead:
-		// Use the incremental candidate index, repairing changed retired traces
-		// and ambiguous scopes from active batch parts. Compaction keeps it usable.
-		scope := "batch_id IN (" + idsSQL(cachedIDs) + ")"
-		if w.Namespace != "" {
-			scope += " AND namespace=" + sqlLiteral(w.Namespace)
-		}
-		if w.Service != "" {
-			scope += " AND service=" + sqlLiteral(w.Service)
-		}
-		index, err := d.traceCandidateSource(ctx, db, batches, markers, w)
-		if err != nil {
-			return err
-		}
-		full := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
-		partial := "SELECT * FROM (" + index + ") WHERE NOT (" + full + ") AND " + fmt.Sprintf("max_start>=%d AND min_start<%d", w.Start.UnixNano(), w.End.UnixNano())
-		projection := "namespace,service,trace_id,start_time,start_unix_nano,end_unix_nano,status"
-		tail := "SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", uncached, batches)) + ") WHERE " + windowPredicate("start_time", w)
-		// Only files whose scoped trace parts straddle a boundary require raw rows.
-		var partialFiles []telemetry.BatchMetadata
-		for _, b := range cached {
-			bounds, _ := batchTime(b, "spans")
-			if !bounds.Known || bounds.MinNanos < w.Start.UnixNano() || bounds.MaxNanos >= w.End.UnixNano() {
-				partialFiles = append(partialFiles, b)
-			}
-		}
-		interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
-		if len(partialFiles) > 0 {
-			tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
-			// A partial trace may also have in-window contributions in other batches.
-			// Include these parts as candidates; boundary rows merge them in the kernel.
-			sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`
-		} else {
-			// Every overlapping cached file lies inside the window, so a partial
-			// trace's other spans are in files outside it. Its in-window parts are
-			// still a candidate; the kernel needs one row per trace, and partial
-			// traces are disjoint from the fully contained index rows.
-			sources["trace_candidates"] = "SELECT trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
-				` UNION ALL SELECT trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
-				` AND trace_id IN (SELECT trace_id FROM (` + partial + `)) GROUP BY trace_id`
-		}
-		sources["trace_tail"] = tail
+	// Use the incremental candidate index, repairing changed retired traces
+	// and ambiguous scopes from active batch parts. Compaction keeps it usable.
+	scope := "batch_id IN (" + idsSQL(cachedIDs) + ")"
+	if w.Namespace != "" {
+		scope += " AND namespace=" + sqlLiteral(w.Namespace)
 	}
+	if w.Service != "" {
+		scope += " AND service=" + sqlLiteral(w.Service)
+	}
+	index, err := d.traceCandidateSource(ctx, db, batches, markers, w)
+	if err != nil {
+		return err
+	}
+	full := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
+	partial := "SELECT * FROM (" + index + ") WHERE NOT (" + full + ") AND " + fmt.Sprintf("max_start>=%d AND min_start<%d", w.Start.UnixNano(), w.End.UnixNano())
+	projection := "namespace,service,trace_id,start_time,start_unix_nano,end_unix_nano,status"
+	tail := "SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", uncached, batches)) + ") WHERE " + windowPredicate("start_time", w)
+	// Only files whose scoped trace parts straddle a boundary require raw rows.
+	var partialFiles []telemetry.BatchMetadata
+	for _, b := range cached {
+		bounds, _ := batchTime(b, "spans")
+		if !bounds.Known || bounds.MinNanos < w.Start.UnixNano() || bounds.MaxNanos >= w.End.UnixNano() {
+			partialFiles = append(partialFiles, b)
+		}
+	}
+	interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
+	if len(partialFiles) > 0 {
+		tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
+		// A partial trace may also have in-window contributions in other batches.
+		// Include these parts as candidates; boundary rows merge them in the kernel.
+		sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`
+	} else {
+		// Every overlapping cached file lies inside the window, so a partial
+		// trace's other spans are in files outside it. Its in-window parts are
+		// still a candidate; the kernel needs one row per trace, and partial
+		// traces are disjoint from the fully contained index rows.
+		sources["trace_candidates"] = "SELECT trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
+			` UNION ALL SELECT trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
+			` AND trace_id IN (SELECT trace_id FROM (` + partial + `)) GROUP BY trace_id`
+	}
+	sources["trace_tail"] = tail
 	return nil
 }
-
-// Endpoint latency is stored as a mergeable fixed-boundary histogram. Unlike
-// averaging minute p95 values, summing these bin counts preserves the latency
-// distribution across arbitrary query windows. Bounds include Fanout's health
-// thresholds (750ms and 2s) and cap the overflow bucket at five minutes.
-const endpointBatchSelect = `SELECT
-  s.namespace,
-  date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
-  COALESCE(s.service, '') AS service,
-  COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
-  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
-  COUNT(*) AS calls,
-  COUNT(*) FILTER (WHERE upper(s.status) IN ('ERROR', 'STATUS_CODE_ERROR')) AS error_count,
-  COUNT(s.duration_ms) AS duration_count,
-  struct_pack(
-    le_0_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.1),
-    le_0_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.5),
-    le_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 1),
-    le_2_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 2.5),
-    le_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 5),
-    le_10 := COUNT(*) FILTER (WHERE s.duration_ms <= 10),
-    le_25 := COUNT(*) FILTER (WHERE s.duration_ms <= 25),
-    le_50 := COUNT(*) FILTER (WHERE s.duration_ms <= 50),
-    le_100 := COUNT(*) FILTER (WHERE s.duration_ms <= 100),
-    le_250 := COUNT(*) FILTER (WHERE s.duration_ms <= 250),
-    le_500 := COUNT(*) FILTER (WHERE s.duration_ms <= 500),
-    le_750 := COUNT(*) FILTER (WHERE s.duration_ms <= 750),
-    le_1000 := COUNT(*) FILTER (WHERE s.duration_ms <= 1000),
-    le_2000 := COUNT(*) FILTER (WHERE s.duration_ms <= 2000),
-    le_5000 := COUNT(*) FILTER (WHERE s.duration_ms <= 5000),
-    le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
-    le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
-  ) AS duration_buckets
-`
 
 func newestBatchEvent(b telemetry.BatchMetadata) int64 {
 	newest := int64(-1 << 63)
@@ -528,13 +428,7 @@ func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []s
 		return nil
 	}
 	where := " WHERE batch_id IN (" + idsSQL(inputs) + ")"
-	var bins []string
-	for _, name := range []string{"le_0_1", "le_0_5", "le_1", "le_2_5", "le_5", "le_10", "le_25", "le_50", "le_100", "le_250", "le_500", "le_750", "le_1000", "le_2000", "le_5000", "le_30000", "le_300000"} {
-		bins = append(bins, name+" := sum(duration_buckets."+name+")::UBIGINT")
-	}
 	for _, stmt := range []string{
-		`INSERT INTO read_endpoints SELECT ` + sqlLiteral(output) + `,namespace,bucket,service,method,path,sum(calls)::BIGINT,sum(error_count)::BIGINT,sum(duration_count)::BIGINT,struct_pack(` + strings.Join(bins, ",") + `) FROM read_endpoints` + where + ` GROUP BY 2,3,4,5,6`,
-		`INSERT INTO read_logs SELECT ` + sqlLiteral(output) + `,bucket,namespace,service,severity,sum(count)::BIGINT FROM read_logs` + where + ` GROUP BY 2,3,4,5`,
 		`INSERT INTO read_trace_parts SELECT ` + sqlLiteral(output) + `,namespace,service,trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts` + where + ` GROUP BY 2,3,4`,
 		`INSERT INTO read_batches(batch_id) VALUES (` + sqlLiteral(output) + `)`,
 		`UPDATE read_batches SET replacement_id=` + sqlLiteral(output) + where,

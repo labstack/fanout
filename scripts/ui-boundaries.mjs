@@ -12,7 +12,7 @@ let failures = 0;
 
 function workspace(file) {
   const first = relative(ui, file).split(sep)[0];
-  return first === "host" || first === "apps" ? first : "shared";
+  return first === "host" ? "host" : "shared";
 }
 
 function check(file, specifier, offset, source) {
@@ -22,11 +22,7 @@ function check(file, specifier, offset, source) {
   const destination = target ? workspace(target) : null;
   const outsideShared = target && (relative(ui, target).startsWith("..") ||
     destination !== "shared" || relative(ui, target).split(sep).includes("node_modules"));
-  const other = owner === "host" ? "apps" : "host";
-  const crossesWorkspace = owner !== "shared" && (destination === other ||
-    specifier === `@fanout/${other === "apps" ? "ui-apps" : "web"}` ||
-    specifier.startsWith(`@fanout/${other === "apps" ? "ui-apps" : "web"}/`));
-  if ((owner === "shared" && (!local || outsideShared)) || crossesWorkspace) {
+  if (owner === "shared" && (!local || outsideShared)) {
     const line = source.slice(0, offset).split("\n").length;
     console.error(`${relative(root, file)}:${line}: forbidden ${owner} import ${JSON.stringify(specifier)}`);
     failures++;
@@ -57,7 +53,7 @@ function scan(file) {
   }
   const plugins = ["typescript", ...(/\.[jt]sx$/.test(file) ? ["jsx"] : [])];
   if (file.endsWith(".html")) {
-    for (const match of source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
+    for (const match of source.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script[^>]*>/gi)) {
       const src = /\bsrc=["']([^"']+)["']/.exec(match[1]);
       if (src) check(file, src[1], match.index, source);
       if (match[2].trim()) visit(parse(match[2], { sourceType: "unambiguous", plugins, createImportExpressions: true }));

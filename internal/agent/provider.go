@@ -22,11 +22,13 @@ const (
 	EventToolUse                  // model requested a tool call
 	EventStop                     // generation stopped
 	EventError                    // provider error
+	EventUsage                    // nonterminal provider-reported usage snapshot
 )
 
 // Provider streams model completions. The provider must:
 //   - Emit zero or more EventText events with text deltas
 //   - Emit zero or more EventToolUse events (ToolCall must be non-nil)
+//   - Emit EventUsage snapshots when counts arrive before terminal processing
 //   - Emit exactly one EventStop OR EventError as the final event
 //   - EventError is terminal: the provider must return after emitting it
 //   - Stop streaming if the callback returns a non-nil error
@@ -75,8 +77,10 @@ type StreamEvent struct {
 	Delta         string            // text token (EventText)
 	ToolCall      *ToolCall         // completed tool call (EventToolUse)
 	StopReason    string            // e.g. "end_turn", "tool_calls", "length", "max_tokens" (EventStop)
+	ToolStep      bool              // a tool call was begun, including an unfinished call (EventStop)
 	Error         string            // error message (EventError)
-	Usage         *TokenUsage       // token counts (EventStop)
+	Model         string            // model reported by the provider response
+	Usage         *TokenUsage       // provider-reported token snapshot, including failed calls
 	ProviderItems []json.RawMessage `json:"-"` // opaque continuation items (EventStop)
 }
 

@@ -97,10 +97,6 @@ export const series = {
   light: ["#2a78d6", "#eb6834", "#1baf7a", "#4a3aa7", "#eda100", "#e87ba4"],
 } as const;
 
-/** Light-scheme ground and dark-scheme ground, for the browser UI outside the
- *  document — the address bar and the tab strip. */
-export const ground = { light: "#fcfcfc", dark: "#0b0e14" } as const;
-
 /** The small-text sizes this product sets by hand, in pixels.
  *
  *  A survey of one screen found fifteen size-and-weight pairs, including a 9px

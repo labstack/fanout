@@ -4,7 +4,15 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	duckdb "github.com/duckdb/duckdb-go/v2"
 )
+
+type interruptingParser struct{ Parser }
+
+func (interruptingParser) PrepareTelemetrySQL(context.Context, string, string, int) (string, []bool, error) {
+	return "", nil, &duckdb.Error{Type: duckdb.ErrorTypeInterrupt, Msg: "INTERRUPT Error: Interrupted!"}
+}
 
 func TestCheckCollectsFiltersAndSQLProblems(t *testing.T) {
 	d, _ := newTestEngine(t)
@@ -110,7 +118,17 @@ func TestCheckReturnsOperationalErrorsNotProblems(t *testing.T) {
 	}
 }
 
-func TestFinalFixSQLCTEsCannotShadowTelemetry(t *testing.T) {
+func TestCheckReturnsEngineInterruptAsOperationalError(t *testing.T) {
+	d, _ := newTestEngine(t)
+	spec := decode(t, specExample)
+	Normalize(&spec)
+	_, problems, err := Check(t.Context(), interruptingParser{d}, &spec)
+	if err == nil || len(problems) != 0 {
+		t.Fatalf("err = %v, problems = %v", err, problems)
+	}
+}
+
+func TestSQLCTEsCannotShadowTelemetry(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	for _, name := range []string{"logs", "spans", "metrics", "service_rollup", "edge_rollup", "LOGS", "safe"} {
 		t.Run(name, func(t *testing.T) {

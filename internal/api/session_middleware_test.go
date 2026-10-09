@@ -37,7 +37,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	users := auth.NewUserStore(db.DB)
-	user, err := users.Create("admin@example.com", "", "admin")
+	user, err := users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 		t.Fatalf("invalid metrics credential = %d, want 401", recorder.Code)
 	}
 
-	viewer, err := users.Create("viewer@example.com", "", "viewer")
+	viewer, err := users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create viewer: %v", err)
 	}

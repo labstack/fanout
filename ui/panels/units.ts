@@ -60,14 +60,35 @@ export function formatLabel(unit: string | undefined, value: number | null): str
   return formatAxis(unit)(value ?? NaN).replace(/(?<=\d)(ms|ns|s|m|h)\b/g, " $1");
 }
 
-/** Choose 1/2/5 duration steps in milliseconds, seconds, minutes or hours. */
-export function niceDurationInterval(min: number, max: number, unit?: string): number | undefined {
+/** Value axes use about one tick per 70 pixels, including both endpoints. */
+export function valueAxisTicks(pixels: number): number {
+  return Math.max(3, Math.min(10, Math.round(pixels / 70))) - 1;
+}
+function niceStep(target: number, unit?: string): number {
   const factor = unit === "ms" ? 1 : unit === "s" ? 1000 : unit === "ns" ? 1e-6 : undefined;
-  if (factor === undefined || !Number.isFinite(min) || !Number.isFinite(max)) return undefined;
-  const target = Math.max((max - min) * factor / 6, Number.EPSILON);
+  const ceil125 = (n: number) => {
+    const base = 10 ** Math.floor(Math.log10(n));
+    return [1, 2, 5, 10].map(k => k * base).find(step => step >= n)!;
+  };
+  if (factor === undefined) return ceil125(target);
+  const ms = target * factor;
   const steps = [1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 36000000].flatMap(base => [1, 2, 5].map(n => base * n)).sort((a, b) => a - b);
-  const step = steps.find(step => step >= target) ?? [1, 2, 5, 10].map(n => n * 10 ** Math.floor(Math.log10(target / 3600000)) * 3600000).find(step => step >= target)!;
-  return step / factor;
+  return (ms < 1 ? ceil125(ms) : steps.find(step => step >= ms) ?? ceil125(ms / 3600000) * 3600000) / factor;
+}
+export function valueAxis(min: number, max: number, unit: string | undefined, pixels: number) {
+  min = Number.isFinite(min) ? Math.min(0, min) : 0;
+  max = Number.isFinite(max) ? Math.max(0, max) : 1;
+  if (max === min) max = min + 1;
+  const splitNumber = valueAxisTicks(pixels);
+  let interval = niceStep(Math.max(max - min, Number.EPSILON) / splitNumber, unit);
+  // Rounding the bounds must not introduce more ticks than the pixel budget.
+  while (Math.ceil(max / interval) - Math.floor(min / interval) > splitNumber) interval = niceStep(interval * 1.01, unit);
+  return { min: Math.floor(min / interval) * interval, max: Math.ceil(max / interval) * interval, interval, splitNumber, fanout_unit: unit };
+}
+/** Recompute after the native plot or annotation band changes its height. */
+export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): Record<string, unknown> {
+  if (axis.type !== "value" && axis.type !== "log") return axis;
+  return { ...axis, ...(axis.type === "value" && typeof axis.min === "number" && typeof axis.max === "number" ? valueAxis(axis.min, axis.max, typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined, pixels) : { splitNumber: valueAxisTicks(pixels) }) };
 }
 
 /** Use one duration scale for both ends of a bucket. */

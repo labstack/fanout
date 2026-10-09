@@ -32,6 +32,8 @@ type ToolDoc struct {
 	Name        string
 	Title       string
 	Description string
+	AppOnly     bool
+	ResourceURI string
 
 	// ReadOnly is the server's own readOnlyHint.
 	ReadOnly bool
@@ -93,7 +95,9 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 		connected <- connection{session: session, err: err}
 	}()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-docgen", Version: "docgen"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-docgen", Version: "docgen"}, &mcp.ClientOptions{
+		Capabilities: &mcp.ClientCapabilities{Extensions: map[string]any{mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}}}},
+	})
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		// The goroutine may still have produced a session. Closing it here is the
@@ -132,10 +136,14 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 			Name:        tool.Name,
 			Title:       tool.Title,
 			Description: tool.Description,
+			AppOnly:     appOnly(tool.Meta),
 			// Absent hints default to true per the MCP spec. Reading them as
 			// false would publish a mutating tool as safe.
 			Destructive: true,
 			OpenWorld:   true,
+		}
+		if ui, ok := tool.Meta["ui"].(map[string]any); ok {
+			doc.ResourceURI, _ = ui["resourceUri"].(string)
 		}
 		if a := tool.Annotations; a != nil {
 			doc.ReadOnly = a.ReadOnlyHint

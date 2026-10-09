@@ -1,0 +1,8 @@
+latency: status=ok rows=1 truncated=false
+  time=2026-10-07T19:15:00Z, p95=100 ms
+errors: status=ok rows=1 truncated=false
+  time=2026-10-07T19:15:00Z, error_rate=100%
+requests: status=ok rows=1 truncated=false
+  time=2026-10-07T19:15:00Z, rate=1/s
+endpoints: status=ok rows=1 truncated=false
+  http_route=/cart, p95=100 ms

@@ -54,7 +54,7 @@ func TestOIDCWildcardDomainAllowsVerifiedViewerProvisioning(t *testing.T) {
 	}
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
-	if _, err := users.Create("seed-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("seed-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	handler := &OIDCHandler{
@@ -96,7 +96,7 @@ func TestOIDCWildcardDomainRejectsUnverifiedEmail(t *testing.T) {
 	}
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
-	if _, err := users.Create("seed-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("seed-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	handler := &OIDCHandler{
@@ -192,7 +192,7 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	}
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
-	user, err := users.Create("admin@example.com", "", "admin")
+	user, err := users.CreateWithAudit("admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -343,7 +343,7 @@ func runRejectedOIDCCallback(t *testing.T, mutate func(jwt.MapClaims), badKey, k
 	if knownEmail {
 		seedEmail = "candidate@example.com"
 	}
-	if _, err := users.Create(seedEmail, "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit(seedEmail, "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	sessions := appauth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
@@ -408,7 +408,7 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
 	identities := appauth.NewIdentityStore(db.DB)
-	user, err := users.Create("existing@example.com", "", "admin")
+	user, err := users.CreateWithAudit("existing@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,12 +434,12 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 		t.Fatal("second identity linked to an already-linked user")
 	}
 
-	inactive, err := users.Create("inactive-oidc@example.com", "", "viewer")
+	inactive, err := users.CreateWithAudit("inactive-oidc@example.com", "", "viewer", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	active := false
-	if _, err := users.Update(inactive.ID, nil, nil, nil, &active); err != nil {
+	if _, err := users.UpdateWithAudit(inactive.ID, nil, nil, nil, &active, appauth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	inactiveClaims := oidcClaims{Subject: "inactive-subject", Email: inactive.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
@@ -459,7 +459,7 @@ func linkedOIDCFixture(t *testing.T, cfg config.Config, role appauth.Role, linkG
 	t.Cleanup(func() { db.Close() })
 	users := appauth.NewUserStore(db.DB)
 	identities := appauth.NewIdentityStore(db.DB)
-	user, err := users.Create("person@example.com", "", role)
+	user, err := users.CreateWithAudit("person@example.com", "", role, appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestResolveUserDowngradesRoleWhenIdPAdminGroupRemoved(t *testing.T) {
 	}
 	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
 	// A second admin keeps the last-active-admin invariant from blocking the downgrade.
-	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -536,7 +536,7 @@ func TestResolveUserDeniesGroupOverageWhenGroupPolicyConfigured(t *testing.T) {
 		OIDCDefaultRole:       "viewer",
 	}
 	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
-	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -587,7 +587,7 @@ func TestResolveUserAppliesAllowPolicyWhenLinkingExistingUser(t *testing.T) {
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
 	identities := appauth.NewIdentityStore(db.DB)
-	user, err := users.Create("contractor@other.test", "", "viewer")
+	user, err := users.CreateWithAudit("contractor@other.test", "", "viewer", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,11 +628,11 @@ func TestResolveUserSkipsRoleReconciliationForInactiveUser(t *testing.T) {
 		OIDCDefaultRole:       "viewer",
 	}
 	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
-	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	inactive := false
-	if _, err := users.Update(user.ID, nil, nil, nil, &inactive); err != nil {
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &inactive, appauth.AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -683,11 +683,11 @@ func TestResolveUserReconcilesRoleOnTheLinkingLogin(t *testing.T) {
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
 	identities := appauth.NewIdentityStore(db.DB)
-	user, err := users.Create("promoted@example.com", "", "admin")
+	user, err := users.CreateWithAudit("promoted@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	handler := &OIDCHandler{
@@ -717,7 +717,7 @@ func TestResolveUserDoesNotProvisionWhenGroupsAreUnreadable(t *testing.T) {
 	}
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
-	if _, err := users.Create("seed-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("seed-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	handler := &OIDCHandler{
@@ -753,11 +753,11 @@ func TestReconciledRoleChangeIsAttributableToItsSource(t *testing.T) {
 	defer db.Close()
 	users := appauth.NewUserStore(db.DB)
 	identities := appauth.NewIdentityStore(db.DB)
-	user, err := users.Create("attributed@example.com", "", "admin")
+	user, err := users.CreateWithAudit("attributed@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+	if _, err := users.CreateWithAudit("other-admin@example.com", "", "admin", appauth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 		t.Fatal(err)
 	}
 	handler := &OIDCHandler{

@@ -1,4 +1,5 @@
-import { parseDrill } from "./drill-state";
+import { parseDrill, type DrillTarget } from "./drill-state";
+import { parseSearch as decodeSearch, stringifySearch } from "../search-encoding";
 import type { DashboardSpec, DashboardTime, VarValue } from "../../../panels/types";
 
 export const ranges = ["5m", "15m", "1h", "3h", "6h", "12h", "24h", "2d", "7d", "30d"] as const;
@@ -33,9 +34,12 @@ export function parseSearch(raw: Record<string, unknown>): DashboardSearch {
     if (!key.startsWith("var-")) continue;
     const name = key.slice(4);
     if (!/^[a-z][a-z0-9_]{0,39}$/.test(name)) continue;
-    if (Array.isArray(value)) {
-      const items = value.map(primitiveString);
-      if (items.every((v) => v !== undefined)) vars[name] = items;
+    if (value !== null && typeof value === "object") {
+      // Query variables resolve at most 500 options (custom lists at most 200).
+      if (!Array.isArray(value) && Object.keys(value).length === 1 && Object.hasOwn(value, "values")) {
+        const items = (value as { values: unknown }).values;
+        if (Array.isArray(items) && items.length <= 500 && items.every((item): item is string => typeof item === "string")) vars[name] = items;
+      }
     } else {
       const scalar = primitiveString(value);
       if (scalar !== undefined) vars[name] = scalar;
@@ -49,14 +53,22 @@ export function parseSearch(raw: Record<string, unknown>): DashboardSearch {
 
 export function toSearchParams(search: DashboardSearch): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (search.drill) out.drill = search.drill;
+  if (search.drill) out.drill = JSON.parse(search.drill);
   if (search.range) out.range = search.range;
   if (search.from && search.to) { out.from = search.from; out.to = search.to; }
   if (search.compare) out.compare = search.compare;
   if (search.view) out.view = search.view;
   if (search.edit) out.edit = search.edit;
-  for (const [name, value] of Object.entries(search.vars ?? {})) out[`var-${name}`] = value;
+  for (const [name, value] of Object.entries(search.vars ?? {})) out[`var-${name}`] = Array.isArray(value) ? { values: value } : value;
   return out;
+}
+
+/** Build trace links with the same canonical search state and codec as the router. */
+export function drillHref(href: string, target: DrillTarget): string {
+  const url = new URL(href);
+  const search = {...parseSearch(decodeSearch(url.search)), drill: JSON.stringify(target)};
+  url.search = stringifySearch(toSearchParams(search));
+  return url.href;
 }
 
 export function effectiveTime(spec: DashboardSpec, search: DashboardSearch): DashboardTime {

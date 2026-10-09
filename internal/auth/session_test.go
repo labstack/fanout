@@ -25,7 +25,7 @@ func newSessionTestStore(t *testing.T) (*appstore.SQLite, *BrowserSessions) {
 func TestSessionHashAddressesSCSCommittedRow(t *testing.T) {
 	db, sessions := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("session@example.com", "", "admin")
+	user, err := users.CreateWithAudit("session@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSessionHashAddressesSCSCommittedRow(t *testing.T) {
 func TestSessionCookieSecurityModes(t *testing.T) {
 	db, _ := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("cookie@example.com", "", "admin")
+	user, err := users.CreateWithAudit("cookie@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestSessionWriteWaitsForSQLiteBusyWindow(t *testing.T) {
 func TestRoleChangeRevokesSessionsAndIncrementsAuthVersion(t *testing.T) {
 	db, sessions := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("role@example.com", "", "viewer")
+	user, err := users.CreateWithAudit("role@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRoleChangeRevokesSessionsAndIncrementsAuthVersion(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 	role := RoleOperator
-	updated, err := users.Update(user.ID, nil, nil, &role, nil)
+	updated, err := users.UpdateWithAudit(user.ID, nil, nil, &role, nil, AuditEvent{EventType: "user.updated", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestEnforceActivityFailsClosedWithoutMetadata(t *testing.T) {
 func TestEnforceActivityExpiresIdleSessionAndCheckpointsActivity(t *testing.T) {
 	db, sessions := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("activity@example.com", "", "admin")
+	user, err := users.CreateWithAudit("activity@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestEnforceActivityExpiresIdleSessionAndCheckpointsActivity(t *testing.T) {
 func TestEnforceActivityRejectsAbsoluteExpiry(t *testing.T) {
 	db, sessions := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("absolute@example.com", "", "admin")
+	user, err := users.CreateWithAudit("absolute@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestEnforceActivityRejectsAbsoluteExpiry(t *testing.T) {
 func TestBeginOIDCSessionReplacesAuthenticatedSession(t *testing.T) {
 	db, sessions := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("reauth@example.com", "", "admin")
+	user, err := users.CreateWithAudit("reauth@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestOIDCFlowValuesAreSingleUse(t *testing.T) {
 func TestSessionCommitFailureSuppressesHandlerSuccessBody(t *testing.T) {
 	db, sessions := newSessionTestStore(t)
 	users := NewUserStore(db.DB)
-	user, err := users.Create("commit-failure@example.com", "", "admin")
+	user, err := users.CreateWithAudit("commit-failure@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}

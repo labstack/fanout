@@ -13,7 +13,7 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func TestM2DistributionCounts(t *testing.T) {
+func TestDistributionCounts(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = []Panel{{ID: "h", Title: "Latency distribution", Viz: "histogram", Query: &Query{From: "spans", Where: []string{"service = $service"}, Measures: []string{"count()"}, Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}}}
@@ -51,7 +51,7 @@ func TestM2DistributionCounts(t *testing.T) {
 		t.Fatalf("weighted overflow: %+v", got)
 	}
 }
-func TestM2MetricHistogramTemporality(t *testing.T) {
+func TestMetricHistogramTemporality(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	metrics := []telemetry.Metric{}
 	for scrape, counts := range []string{"[10,20,30]", "[12,23,34]", "[15,27,40]"} {
@@ -101,7 +101,7 @@ func TestM2MetricHistogramTemporality(t *testing.T) {
 		t.Fatalf("reset: %+v %v", got, err)
 	}
 }
-func TestM2DistributionBudget(t *testing.T) {
+func TestDistributionBudget(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := []telemetry.Span{}
 	for m := range 1440 {
@@ -162,7 +162,7 @@ func TestM2DistributionBudget(t *testing.T) {
 	}
 
 }
-func TestM2DistributionValidation(t *testing.T) {
+func TestDistributionValidation(t *testing.T) {
 	cases := []struct {
 		p    Panel
 		want Problem
@@ -186,7 +186,7 @@ func TestM2DistributionValidation(t *testing.T) {
 	}
 }
 
-func TestM2DistributionMalformedHistogram(t *testing.T) {
+func TestDistributionMalformedHistogram(t *testing.T) {
 	for _, tc := range []struct{ name, bounds, counts string }{
 		{"invalid_bounds", "not json", "[100,200]"},
 		{"invalid_counts", "[10]", "not json"},
@@ -219,7 +219,7 @@ func TestM2DistributionMalformedHistogram(t *testing.T) {
 	}
 }
 
-func TestM2DistributionSpanBoundaries(t *testing.T) {
+func TestDistributionSpanBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
 		durations            []float64
@@ -254,7 +254,7 @@ func TestM2DistributionSpanBoundaries(t *testing.T) {
 	}
 }
 
-func TestM2DistributionSpanOther(t *testing.T) {
+func TestDistributionSpanOther(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	var spans []telemetry.Span
 	for i, service := range []string{"a", "a", "a", "b", "b", "c"} {
@@ -275,7 +275,7 @@ func TestM2DistributionSpanOther(t *testing.T) {
 	}
 }
 
-func TestM2DistributionSchemaDescriptions(t *testing.T) {
+func TestDistributionSchemaDescriptions(t *testing.T) {
 	for _, tc := range []struct{ field, phrase string }{
 		{"Field", "NaN is excluded"},
 		{"Temporality", "last minus first"},
@@ -288,7 +288,7 @@ func TestM2DistributionSchemaDescriptions(t *testing.T) {
 	}
 }
 
-func TestM2MetricHistogramHeatmap(t *testing.T) {
+func TestMetricHistogramHeatmap(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	var metrics []telemetry.Metric
 	for i, counts := range []string{"[10,20]", "[12,24]", "[15,30]", "[18,36]"} {
@@ -333,7 +333,7 @@ func TestM2MetricHistogramHeatmap(t *testing.T) {
 	}
 }
 
-func TestM2MetricHistogramSeriesIdentity(t *testing.T) {
+func TestMetricHistogramSeriesIdentity(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	base := telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Unit: "ms", HistBoundsJSON: "[10]"}
 	series := []telemetry.Metric{base, base, base, base, base, base, base, base}
@@ -369,7 +369,7 @@ func TestM2MetricHistogramSeriesIdentity(t *testing.T) {
 	}
 }
 
-func TestM2DistributionTemporalityValidation(t *testing.T) {
+func TestDistributionTemporalityValidation(t *testing.T) {
 	for _, tc := range []struct{ from, field, buckets, temporality string }{
 		{"spans", "duration_ms", "log2", "delta"},
 		{"spans", "duration_ms", "log2", "cumulative"},
@@ -384,7 +384,7 @@ func TestM2DistributionTemporalityValidation(t *testing.T) {
 	}
 }
 
-func TestM2DistributionTimePointBound(t *testing.T) {
+func TestDistributionTimePointBound(t *testing.T) {
 	f := newFrame([]Column{{Name: "time", Type: "time", Role: "time"}, {Name: "count", Type: "number", Role: "measure"}})
 	for i := maxSeriesPoints; i >= 0; i-- {
 		for b := range 2 {

@@ -112,9 +112,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Initialize query cache with app context (cleanup goroutine stops on cancel)
-	query.InitQueryCache(ctx)
-
 	// Error channel for goroutine failures
 	errCh := make(chan error, 4)
 
@@ -270,7 +267,7 @@ func main() {
 	panels.SetRollupReader(queries)
 	api.RegisterPanelRoutes(e, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
-	api.NewObservabilityHandler(queries, cfg.RetentionDays).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
+	api.RegisterTraceRoutes(e, queries, cfg.RetentionDays)
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB, panels)
 	api.RegisterDashboardRoutes(e, dashboards)

@@ -8,23 +8,15 @@ import (
 )
 
 const (
-	mcpAppMIME        = "text/html;profile=mcp-app"
-	overviewAppURI    = "ui://fanout/observability-overview.html"
-	topologyAppURI    = "ui://fanout/service-topology.html"
-	performanceAppURI = "ui://fanout/service-performance.html"
-	traceAppURI       = "ui://fanout/trace-detail.html"
-	logsAppURI        = "ui://fanout/log-explorer.html"
+	mcpAppMIME   = "text/html;profile=mcp-app"
+	panelsAppURI = "ui://fanout/panels.html"
 )
 
 //go:embed apps/*.html
 var appFiles embed.FS
 
 func (s *Server) registerAppResources() {
-	s.addAppResource("Observability overview", overviewAppURI, "apps/overview.html")
-	s.addAppResource("Service topology", topologyAppURI, "apps/topology.html")
-	s.addAppResource("Service performance", performanceAppURI, "apps/performance.html")
-	s.addAppResource("Trace detail", traceAppURI, "apps/trace.html")
-	s.addAppResource("Log explorer", logsAppURI, "apps/logs.html")
+	s.addAppResource("Telemetry panels", panelsAppURI, "apps/panels.html")
 }
 
 func (s *Server) addAppResource(name, uri, path string) {

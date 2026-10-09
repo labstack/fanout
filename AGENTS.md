@@ -32,16 +32,16 @@
 - Dashboard file snapshots use each signal's actual event-time footer bounds,
   including signed nanoseconds. Unknown statistics include the file. Never
   substitute ingestion time or prune public arbitrary SQL from a dashboard scope.
-- Endpoint histograms, log counts, and notable-trace candidates acknowledge
+- Notable-trace candidates acknowledge
   complete immutable batch IDs transactionally. Query cache markers and rows in
   one read transaction under the pinned file snapshot; uncached active files
   remain immediately visible. Compaction and retention must invalidate retired
   contributions without double counting or losing late publications.
 - Version disposable read-cache schema and semantics together; mismatches rebuild
-  all private read tables. Cache minute aggregates, per-batch trace bounds,
+  all private read tables. Cache per-batch trace bounds,
   and one incremental candidate per trace, never individual event copies or
   four globally rewritten scope indexes. Mixed trace scopes use batch parts. Exact
-  clipped minutes read footer-pruned Parquet, and compaction derives complete
+  scoped boundaries read footer-pruned Parquet, and compaction derives complete
   output contributions from cached inputs. Body search matches redacted text.
   Analytical service/edge watermark lag is separate. Completed-batch writes
   have their own gate and write-pool slot; analytical writes use disjoint tables.

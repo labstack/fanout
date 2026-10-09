@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/panel"
 	controlstore "github.com/labstack/fanout/internal/store"
+	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -17,7 +18,7 @@ type cancelValidator struct{}
 
 func (cancelValidator) Validate(ctx context.Context, _ *panel.Dashboard) error { return ctx.Err() }
 
-func newToolServer(t *testing.T, validator dashboard.Validator, panels *panel.Executor) *Server {
+func newToolServer(t *testing.T, validator dashboard.Validator, panels panelExecutor) *Server {
 	t.Helper()
 	database, err := controlstore.NewSQLite(":memory:")
 	if err != nil {
@@ -29,7 +30,9 @@ func newToolServer(t *testing.T, validator dashboard.Validator, panels *panel.Ex
 			t.Fatal(err)
 		}
 	}
-	return New(&fakeObservability{}, dashboard.New(database.DB, validator), panels, "test")
+	s := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, validator), nil, nil, "test")
+	s.panels = panels
+	return s
 }
 
 func requestFor(owner string) *mcp.CallToolRequest {
@@ -174,5 +177,113 @@ func TestSaveReportsPanelsItCouldNotCheck(t *testing.T) {
 	}
 	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "Panels were not checked:") {
 		t.Fatalf("summary hides the failed check: %q", text)
+	}
+}
+
+func TestBuildOriginMetadataTrustBoundary(t *testing.T) {
+	s := newToolServer(t, structural{}, nil)
+	origin := dashboard.BuildOrigin{ThreadID: "missing", MessageID: "user", RequestExcerpt: "Spoof"}
+	req := requestFor("owner")
+	req.Params.Meta[dashboard.BuildOriginMetaKey] = origin
+	if _, _, err := s.dashboardCreate(t.Context(), req, DashboardCreateInput{Dashboard: textDashboard("Invalid local")}); err == nil {
+		t.Fatal("nonowned local origin silently ignored")
+	}
+	req.Extra = &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}
+	// Even an in-process context origin must be stripped at a remote boundary.
+	_, out, err := s.dashboardCreate(dashboard.WithBuildOrigin(t.Context(), origin), req, DashboardCreateInput{Dashboard: textDashboard("Remote")})
+	if err != nil || out.Dashboard.ID == "" {
+		t.Fatal(out, err)
+	}
+	list, err := s.dashboards.List(t.Context(), "owner")
+	if err != nil || len(list) != 1 || list[0].Origin != nil {
+		t.Fatalf("remote fabricated provenance: %+v %v", list, err)
+	}
+}
+
+func TestInProcessCreatePersistsInjectedOrigin(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test'); INSERT INTO agui_threads(thread_id,owner_id) VALUES ('source','owner')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
+	session := connectTestClient(t, s, nil)
+	origin := dashboard.BuildOrigin{ThreadID: "source", MessageID: "request", RequestExcerpt: "Build volume"}
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "create_dashboard", Arguments: map[string]any{"dashboard": textDashboard("Local origin")}, Meta: mcp.Meta{dashboard.OwnerMetaKey: "owner", dashboard.BuildOriginMetaKey: origin}})
+	if err != nil || result.IsError {
+		t.Fatal(result, err)
+	}
+	list, err := s.dashboards.List(t.Context(), "owner")
+	if err != nil || len(list) != 1 || list[0].Origin == nil || *list[0].Origin != origin {
+		t.Fatalf("origin=%+v %v", list, err)
+	}
+}
+
+func TestDashboardMCPResultsExcludePrivateBuildProvenance(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test'); INSERT INTO agui_threads(thread_id,owner_id) VALUES ('private-thread','owner')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := dashboard.New(database.DB, structural{})
+	origin := dashboard.BuildOrigin{ThreadID: "private-thread", MessageID: "private-message", RequestExcerpt: "PRIVATE REQUEST"}
+	board, err := service.Create(dashboard.WithBuildOrigin(t.Context(), origin), "owner", textDashboard("Private"), dashboard.Author{Kind: "agent", ID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewWithIntelligence(&fakeObservability{}, service, nil, nil, "test")
+	for _, remote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "in_process", true: "remote"}[remote], func(t *testing.T) {
+			req := requestFor("owner")
+			if remote {
+				req.Extra = &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}
+			}
+			_, list, err := s.dashboardList(t.Context(), req, struct{}{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, get, err := s.dashboardGet(t.Context(), req, DashboardIDInput{ID: board.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, edited, err := s.dashboardEdit(t.Context(), req, DashboardEditInput{ID: board.ID, Operations: []dashboard.Operation{{Op: "rename", Name: "Private"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, versions, err := s.dashboardVersions(t.Context(), req, DashboardIDInput{ID: board.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, restored, err := s.dashboardRestore(t.Context(), req, DashboardRestoreInput{ID: board.ID, Version: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, out := range []any{list, get, edited, versions, restored} {
+				raw, err := json.Marshal(out)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, private := range []string{"origin", "thread_id", "message_id", "request_excerpt", "PRIVATE REQUEST", "private-thread", "private-message"} {
+					if strings.Contains(string(raw), private) {
+						t.Fatalf("private %s leaked: %s", private, raw)
+					}
+				}
+			}
+		})
+	}
+}
+func TestOAuthIdentityCannotFallBackToInjectedOwnerMetadata(t *testing.T) {
+	req := requestFor("owner")
+	req.Extra = &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{Scopes: []string{dashboard.OAuthScope}}}
+	if _, err := dashboardOwner(req); err == nil {
+		t.Fatal("empty OAuth identity accepted owner metadata")
 	}
 }

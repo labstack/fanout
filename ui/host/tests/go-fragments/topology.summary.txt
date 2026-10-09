@@ -1,0 +1,2 @@
+services: status=ok rows=2 truncated=false
+  kind=edge, caller=checkout, callee=payment, edge_type=call, calls=30 count, average_ms=100 ms, error_rate=10%

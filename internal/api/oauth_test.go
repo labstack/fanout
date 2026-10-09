@@ -107,7 +107,7 @@ func TestMCPRejectsUnexpectedHostBeforeAuthentication(t *testing.T) {
 
 func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
-	user, err := users.Create("owner@example.com", "Owner", "admin")
+	user, err := users.CreateWithAudit("owner@example.com", "Owner", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if role := mcp.Header().Get("X-Test-MCP-Role"); role != "" {
 		t.Fatalf("delegated MCP context exposed account role %q", role)
 	}
-	if err := users.RevokeAllSessions(user.ID); err != nil {
+	if err := users.RevokeAllSessionsWithAudit(user.ID, auth.AuditEvent{EventType: "session.revoked", Outcome: "success"}); err != nil {
 		t.Fatalf("logout everywhere: %v", err)
 	}
 	replayed := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + access})
@@ -249,7 +249,7 @@ func TestMCPOAuthRejectsUnknownBearerAndAdvertisesDiscovery(t *testing.T) {
 
 func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
-	user, err := users.Create("browser-mcp@example.com", "Browser MCP", "viewer")
+	user, err := users.CreateWithAudit("browser-mcp@example.com", "Browser MCP", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestMCPOAuthConsentUsesSchemeSourceForIPv6Redirect(t *testing.T) {
 	const redirect = "http://[::1]:5000/callback"
 
 	e, users, _ := newOAuthTestServer(t)
-	user, err := users.Create("ipv6-owner@example.com", "IPv6 Owner", "admin")
+	user, err := users.CreateWithAudit("ipv6-owner@example.com", "IPv6 Owner", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -400,7 +400,7 @@ func oauthCookieForUser(t *testing.T, e *echo.Echo, user auth.User) *http.Cookie
 
 func oauthSessionCookie(t *testing.T, e *echo.Echo, users *auth.UserStore, email string) *http.Cookie {
 	t.Helper()
-	user, err := users.Create(email, "", "admin")
+	user, err := users.CreateWithAudit(email, "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -491,13 +491,13 @@ func decodeTokens(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 
 // --- HTTP-layer negative-path and scope tests ---------------------------------
 
-func TestMCPOAuthScopePolicyCanonicalizesLegacyNames(t *testing.T) {
+func TestMCPOAuthScopePolicyRejectsRetiredNames(t *testing.T) {
 	legacy := "fanout:dashboard fanout:read fanout:dashboard"
-	if !validMCPScopes(strings.Fields(legacy)) {
-		t.Fatal("legacy scope aliases were rejected")
+	if validMCPScopes(strings.Fields(legacy)) {
+		t.Fatal("retired scope aliases were accepted")
 	}
 	want := mcpReadScope + " " + auth.MCPScopeDashboardManage
-	if got := authorizationScope(legacy); got != want {
+	if got := authorizationScope(legacy); got != "" {
 		t.Fatalf("canonical scope = %q, want %q", got, want)
 	}
 	if !userCanUseMCPScopes(auth.User{Role: auth.RoleViewer}, want) {
@@ -576,6 +576,53 @@ func TestMCPOAuthTokenEndpointEnforcesScopeByGrantType(t *testing.T) {
 	// An invalid scope request must not consume the refresh token.
 	refresh.Set("scope", mcpReadScope)
 	decodeTokens(t, serve(t, e, http.MethodPost, "/oauth/token", refresh.Encode(), formHeaders))
+}
+
+func TestMCPOAuthRetiredRefreshGrantsPromptReauthorizationAndRevokeFamily(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := auth.NewOAuthStore(s.db.DB)
+	handler, err := NewMCPAuthorization(store, s.users, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Register(s.e)
+	user, err := s.users.CreateWithAudit("retired-refresh@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := registerOAuthClient(t, s.e)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, auth.MCPScopeTelemetryRead, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce a persisted grant from before the scope rename, without
+	// accepting retired names in any issuance or authorization path.
+	if _, err := s.db.DB.Exec(`UPDATE oauth_tokens SET scope = 'fanout:read' WHERE user_id = ?`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{
+		"grant_type": {"refresh_token"}, "client_id": {client.ClientID},
+		"refresh_token": {pair.RefreshToken}, "resource": {testMCPResource},
+	}
+	for attempt := range 2 {
+		rec := serve(t, s.e, http.MethodPost, "/oauth/token", form.Encode(), formHeaders)
+		var body struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusBadRequest || body.Error != "invalid_grant" {
+			t.Fatalf("retired refresh attempt %d = %d %s, want 400 invalid_grant", attempt, rec.Code, rec.Body.String())
+		}
+	}
+	var active int
+	if err := s.db.DB.QueryRow(`SELECT count(*) FROM oauth_tokens WHERE user_id = ? AND revoked_at IS NULL`, user.ID).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 0 {
+		t.Fatalf("retired token family has %d active tokens, want 0", active)
+	}
 }
 
 func TestMCPOAuthTokenExchangeRejectsWrongPKCEVerifier(t *testing.T) {
@@ -705,7 +752,7 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	}
 	// Every renamed dashboard operation must still require the dashboard grant,
 	// before the protocol handler is reached or input validation can run.
-	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard", "list_dashboard_versions", "restore_dashboard_version"} {
 		t.Run(name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":{}}}`, name)
 			rejected := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{

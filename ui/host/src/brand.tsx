@@ -30,7 +30,7 @@ export function BrandMark({ size = "regular" }: { size?: BrandSize }) {
 // Keep the ribbon paths and gradients in sync with ui/host/public/favicon.svg
 // and the server-rendered mark in internal/brand; the favicon additionally
 // carries a drop-shadow filter that this component omits.
-export function FanoutMark() {
+function FanoutMark() {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const top = `fo-top-${uid}`;
   const mid = `fo-mid-${uid}`;

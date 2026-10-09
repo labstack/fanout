@@ -1,12 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import { brushRange } from "../../../panels/interaction";
-import type { DashboardSearch } from "./search";
+import type { DashboardTime } from "../../../panels/types";
+type BrushTime = Pick<DashboardTime, "range" | "from" | "to">;
 
-export function useBrushZoom(search: DashboardSearch, onSearch: (next: DashboardSearch, replace?: boolean) => void) {
+export function useBrushZoom<T extends BrushTime>(search: T, onSearch: (next: T, replace?: boolean) => void) {
   const scope = JSON.stringify([search.range, search.from, search.to]);
   const current = useRef({ search, onSearch, scope });
   const last = useRef("");
-  const restore = useRef<Pick<DashboardSearch, "range" | "from" | "to"> | undefined>(undefined);
+  const restore = useRef<BrushTime | undefined>(undefined);
   const [zoomed, setZoomed] = useState(false);
   if (current.current.scope !== scope) {
     if (last.current !== `${search.from}/${search.to}`) {

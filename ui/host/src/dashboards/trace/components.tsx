@@ -1,4 +1,3 @@
-// Adapted from ui/apps/src/components.tsx. Keep Bun workspace boundaries; consolidate in M3.
 import { Button, Center, Group, Text, ThemeIcon, Box } from "@mantine/core";
 import { useEffect, useState, type ReactNode } from "react";
 export function EmptyState({

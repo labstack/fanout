@@ -6,6 +6,9 @@ import type { Panel, PanelResult } from "../../../../panels/types";
 import { bad } from "../../../../tokens";
 import { RowPanel } from "./row-panel";
 import { TableViz } from "./table";
+import { router } from "../../router";
+import { makeDrill } from "../drill-state";
+import { parseSearch, toSearchParams } from "../search";
 
 // Observe the renderer prop while keeping the real table and cells mounted.
 vi.mock("./table", async (importOriginal) => {
@@ -36,6 +39,23 @@ const render = async (panel: Panel, result: PanelResult) => {
   await act(async () => root.render(<MantineProvider theme={{ colors: { bad: [...bad] } }}><RowPanel panel={panel} result={result} dark={false} height={200} /></MantineProvider>));
 };
 const marks = () => [...container.querySelectorAll("tbody mark")].map(mark => mark.textContent);
+
+it.each(["rows", "formatted table"])("builds a %s trace href byte-identical to the router URL", async surface => {
+  const previous = window.location.href;
+  window.history.replaceState(null, "", "/dashboards/d?range=6h&var-q=%22timeout%22&var-service=%7B%22values%22%3A%5B%5D%7D");
+  try {
+    const p: Panel = {id: "p", title: "Traces", viz: surface === "rows" ? "traces" : "table", options: surface === "rows" ? undefined : {columns: [{field: "trace_id", format: "trace_link"}]}};
+    const result = {...resultFor("trace_id", "0123456789abcdef"), from_ms: 0, to_ms: 60000};
+    const target = makeDrill(p, result, {trace_id: "0123456789abcdef", dimensions: {}})!;
+    const search = {...parseSearch(router.options.parseSearch!(window.location.search)), drill: JSON.stringify(target)};
+    const expected = router.buildLocation({to: "/dashboards/$dashboardId", params: {dashboardId: "d"}, search: toSearchParams(search)});
+    if (surface === "rows") await render(p, result);
+    else await act(async () => root.render(<MantineProvider><TableViz panel={p} result={result} height={200} /></MantineProvider>));
+    const link = container.querySelector<HTMLAnchorElement>("a[href]");
+    expect(link).not.toBeNull();
+    expect(link!.href).toBe(new URL(expected.href, window.location.origin).href);
+  } finally { window.history.replaceState(null, "", previous); }
+});
 
 it("clips trace IDs to a fixed width while retaining the full accessible ID", async () => {
   const id = "0123456789abcdef0123456789abcdef";
@@ -103,4 +123,14 @@ it("highlights log pattern body templates while preserving monospace text", asyn
   expect(container.querySelector<HTMLElement>("[data-row-text] span")?.style.fontSize).toBe("12px");
   await render({ ...panel, viz: "log_patterns", options: { highlight: "cafe" } }, resultFor("body_template", "FAILED <*> café"));
   expect(marks()).toEqual([]);
+});
+
+
+it.each([[[37],"1 pattern · 37 events in the window"],[[37,5],"2 patterns · 42 events in the window"]] as const)("places the pattern/event summary directly after the table (%j)",async(counts,text)=>{
+  await render({...panel,viz:"log_patterns"},{id:"p",status:"ok",elapsed_ms:1,frame:{columns:[{name:"body_template",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[counts.map(()=>"feature flag: False"),[...counts]],rows:counts.length}});
+  const table=container.querySelector("table")!,summary=container.querySelector<HTMLElement>("[data-pattern-summary]")!;
+  expect(summary?.textContent).toBe(text);
+  expect(table.parentElement!.nextElementSibling).toBe(summary);
+  expect(summary.style.position).not.toBe("absolute");expect(summary.style.marginTop).toBe("8px");
+  expect(summary.style.flexShrink).toBe("0");
 });

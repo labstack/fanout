@@ -138,27 +138,24 @@ footer, including negative timestamps. Files without complete statistics remain
 eligible. Late-arriving telemetry is selected by its event time, independently of
 its ingestion timestamp. Arbitrary SQL retains access to all active files.
 
-Endpoints merge fixed-boundary duration histograms for completed minutes with
-Parquet rows from the two clipped boundary minutes. A complete file whose
-event bounds lie entirely inside the window contributes its cached counts
-even for a clipped minute. Log histograms merge minute counts by namespace,
-service, and original severity; text searches count rows whose redacted body
-matches. Notable-trace selection keeps one indexed candidate per trace, updated
+Endpoint panels and log counts scan footer-pruned Parquet for the exact
+requested window. Text searches match the redacted body.
+Notable-trace selection keeps one indexed candidate per trace, updated
 from new batches. A candidate records whether its namespace and service are unambiguous;
 mixed scopes use exact per-batch contributions for the requested scope. Error
 priority, duration, and trace-ID tie ordering are preserved. Boundary trace
 parts are recomputed from Parquet.
 
 These caches acknowledge complete batch IDs rather than an ingestion watermark.
-A batch's aggregates, trace bounds, and acknowledgement commit in one transaction.
+A batch's trace bounds, candidate updates, and acknowledgement commit in one transaction.
 A read pins active files and reads cache rows and acknowledgements from one
 DuckDB transaction. Newly published uncached files are read directly, so cache
 backfill does not delay visibility. Retired batch contributions are excluded by
 active ID even before cleanup; they cannot invalidate unrelated traces.
-Compaction derives the output aggregates from complete cached inputs. If an input
+Compaction derives the output trace contributions from complete cached inputs. If an input
 is not yet cached, the output remains directly queryable until its own backfill.
 
-The private cache stores minute aggregates, per-batch trace parts, and one
+The private cache stores per-batch trace parts and one
 incremental candidate per trace. It does not copy every span or log timestamp
 or maintain four global trace indexes. Complete cached compaction replacements
 preserve candidate bounds without recomputation. Retention and incomplete
@@ -167,7 +164,7 @@ A semantic version covers the cache schema and aggregation rules; a version
 change atomically discards all private
 read tables and rebuilds from authoritative format-3 Parquet. The background
 worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
-backlog independently of the service and edge rollups' safety window.
+trace backlog independently of the service and edge rollups' safety window.
 Completed-batch and analytical writers use separate gates and two connections
 outside the read pool. They modify disjoint tables; maintenance holds both gates
 for checkpointing. Trace reads avoid materializing every retained candidate into
@@ -179,7 +176,7 @@ use a glob with a captured-batch-ID filter, which excludes files published after
 snapshot capture. Only signals referenced by a query are bound.
 
 `storage.rollup_skip_to_latest` skips historical service and edge aggregation.
-Completed-batch endpoint, log, and trace caches still rebuild retained history
+Completed-batch trace caches still rebuild retained history
 in bounded passes; uncached files remain immediately queryable.
 
 ## Rollups lag deliberately

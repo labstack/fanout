@@ -11,7 +11,7 @@ import (
 type RollupReader interface {
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
-	Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error)
+	HealthErrorTrend(context.Context, observability.Scope) ([]float64, error)
 }
 
 func (e *Executor) SetRollupReader(reader RollupReader) { e.rollups = reader }
@@ -101,14 +101,11 @@ func (e *Executor) runRollupPanel(ctx context.Context, p *Panel, filters []Filte
 		}
 		f := newFrame(healthColumns())
 		f.Truncated = len(result.Data.Services) == limit
-		performance, err := e.rollups.Performance(ctx, request, observability.PerformanceOptions{Service: request.Service, Limit: 1})
+		trend, err := e.rollups.HealthErrorTrend(ctx, request)
 		if err != nil {
 			return nil, "", err
 		}
-		f.Health = &HealthFrame{Health: string(result.Data.Health), Counts: result.Data.Counts, TotalSpans: result.Data.TotalSpans, ErrorRate: result.Data.ErrorRate * 100, ServiceCount: result.Data.ServiceCount, ErrorTrend: []float64{}}
-		for _, point := range performance.Data.Points {
-			f.Health.ErrorTrend = append(f.Health.ErrorTrend, point.ErrorRate*100)
-		}
+		f.Health = &HealthFrame{Health: string(result.Data.Health), Counts: result.Data.Counts, TotalSpans: result.Data.TotalSpans, ErrorRate: result.Data.ErrorRate * 100, ServiceCount: result.Data.ServiceCount, ErrorTrend: trend}
 		for _, s := range result.Data.Services {
 			appendPanelRow(f, s.Service, string(s.Health), float64(s.Spans), s.ErrorRate*100, s.P50MS, s.P95MS, float64(s.LogCount), float64(s.MetricCount))
 		}

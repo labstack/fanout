@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { duration } from "../../../format";
-import { barOption, chartThemeFor, gaugeBands, gaugeOption, timeseriesOption } from "../../../panels/compile";
-import { reduce, statValue, toCategories, toSeries } from "../../../panels/frame";
+import { barOption, chartThemeFor, gaugeOption, timeseriesOption } from "../../../panels/compile";
+import { statValue, toCategories, toSeries } from "../../../panels/frame";
 import { statusFor } from "../../../panels/thresholds";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
 import { formatAxis, formatValue } from "../../../panels/units";
@@ -139,6 +139,8 @@ describe("units, more", () => {
   });
 });
 
+const reduce=(values:(number|null)[],reducer:string)=>statValue({id:"p",title:"Value",viz:"stat",reduce:reducer as Panel["reduce"]},{columns:[{name:"value",type:"number",role:"measure"}],values:[values],rows:values.length});
+
 describe("reducers", () => {
   const values = [3, null, 1, 5, null];
   it("reduces ignoring nulls", () => {
@@ -199,9 +201,8 @@ describe("compile, more", () => {
 
   it("keeps a threshold above the data in view, and does not sample bars", () => {
     const p = { ...panel, thresholds: [{ value: 1500, status: "bad" as const }] };
-    const option = timeseriesOption(p, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { yAxis: { max: (r: { max: number }) => number } };
-    expect(option.yAxis.max({ max: 100 })).toBe(1500);
-    expect(option.yAxis.max({ max: 9000 })).toBe(9000);
+    const option = timeseriesOption(p, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { yAxis: { max: number } };
+    expect(option.yAxis.max).toBeGreaterThanOrEqual(1500);
     const bars = timeseriesOption({ ...p, options: { style: "bars" } }, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { series: S[] };
     expect(bars.series[0].sampling).toBeUndefined();
   });
@@ -209,9 +210,9 @@ describe("compile, more", () => {
   it("builds gauge bands from statusFor in both directions", () => {
     const base = { id: "g", title: "g", viz: "gauge", min: 0, max: 100 } as Panel;
     const higher = { ...base, better: "higher" as const, thresholds: [{ value: 25, status: "bad" as const }, { value: 50, status: "warn" as const }] };
-    expect(gaugeBands(higher, 0, 100, theme)).toEqual([[0.25, theme.status.bad], [0.5, theme.status.warn], [1, theme.status.ok]]);
+    for(const [value,color] of [[12,theme.status.bad],[37,theme.status.warn],[75,theme.status.ok]] as const) expect((gaugeOption(higher,value,theme) as any).graphic.find((g:any)=>g.id==="gauge-fill").style.fill).toBe(color);
     const lower = { ...base, better: "lower" as const, max: 3000, thresholds: [{ value: 750, status: "warn" as const }, { value: 2000, status: "bad" as const }] };
-    expect(gaugeBands(lower, 0, 3000, theme)).toEqual([[0.25, theme.status.ok], [2000 / 3000, theme.status.warn], [1, theme.status.bad]]);
+    for(const [value,color] of [[100,theme.status.ok],[1000,theme.status.warn],[2500,theme.status.bad]] as const) expect((gaugeOption(lower,value,theme) as any).graphic.find((g:any)=>g.id==="gauge-fill").style.fill).toBe(color);
     const option = gaugeOption(higher, 75, theme) as { graphic: {id?:string;style:{fill:string}}[] };
     const color = theme.status[statusFor(75, higher.thresholds, "higher")!];
     expect(option.graphic.find(g => g.id === "gauge-fill")!.style.fill).toBe(color);

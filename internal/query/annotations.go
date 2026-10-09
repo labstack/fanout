@@ -79,7 +79,13 @@ func createAnnotationTables(db *sql.DB) error {
 		"namespace", "service", "kind", "start_time", "end_time", "title", "severity")
 }
 
-func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retErr error) {
+const versionRollupWaitBudget = 20 * time.Second
+
+func (d *Duck) RefreshVersionRollup(ctx context.Context) (int64, error) {
+	return d.refreshVersionRollup(ctx, versionRollupWaitBudget)
+}
+
+func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duration) (processed int64, retErr error) {
 	if d.repository == nil {
 		return 0, nil
 	}
@@ -98,15 +104,18 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (processed int64, retEr
 			slog.Warn("version rollup pass timed out", "err", retErr)
 		}
 	}()
-	unlock, err := d.writeGate.LockContext(ctx, writegate.WriteRollupVersion)
+	waitCtx, cancelWait := context.WithTimeout(ctx, waitBudget)
+	defer cancelWait()
+	unlock, err := d.writeGate.LockContext(waitCtx, writegate.WriteRollupVersion)
 	if err != nil {
 		return 0, err
 	}
 	defer unlock()
-	if err := d.lockRollupParquetRead(ctx); err != nil {
+	if err := d.lockRollupParquetRead(waitCtx); err != nil {
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
+	cancelWait()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	rows, err := d.writer().QueryContext(ctx, `SELECT batch_id FROM version_rollup_batches`)

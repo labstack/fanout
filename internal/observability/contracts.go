@@ -3,11 +3,9 @@ package observability
 import "time"
 
 const (
-	OverviewSchema    = "fanout.overview.result@1"
-	TopologySchema    = "fanout.topology.result@1"
-	PerformanceSchema = "fanout.performance.result@1"
-	TraceSchema       = "fanout.trace.result@1"
-	LogsSchema        = "fanout.logs.result@1"
+	OverviewSchema = "fanout.overview.result@1"
+	TopologySchema = "fanout.topology.result@1"
+	TraceSchema    = "fanout.trace.result@1"
 )
 
 // Scope is the mandatory boundary for every telemetry query. Namespace is a
@@ -95,74 +93,6 @@ type Topology struct {
 	Edges []Edge          `json:"edges"`
 }
 
-type PerformancePoint struct {
-	Time        time.Time `json:"time"`
-	Spans       int64     `json:"spans"`
-	ErrorRate   float64   `json:"error_rate"`
-	P50MS       float64   `json:"p50_ms"`
-	P95MS       float64   `json:"p95_ms"`
-	LogCount    int64     `json:"log_count"`
-	MetricCount int64     `json:"metric_count"`
-}
-
-type Endpoint struct {
-	Method    string  `json:"method"`
-	Path      string  `json:"path"`
-	Calls     int64   `json:"calls"`
-	P50MS     float64 `json:"p50_ms"`
-	P95MS     float64 `json:"p95_ms"`
-	P99MS     float64 `json:"p99_ms"`
-	ErrorRate float64 `json:"error_rate"`
-	Health    Health  `json:"health"`
-}
-
-type HeatmapPoint struct {
-	Time    time.Time `json:"time"`
-	Service string    `json:"service"`
-	P95MS   float64   `json:"p95_ms"`
-}
-
-// Direction mirrors the closed union in ui/contracts.ts
-// ("improvement" | "regression" | "stable"); keep the two in sync.
-type Direction string
-
-const (
-	DirectionImprovement Direction = "improvement"
-	DirectionRegression  Direction = "regression"
-	DirectionStable      Direction = "stable"
-)
-
-type ComparisonMetric struct {
-	Label       string    `json:"label"`
-	Unit        string    `json:"unit"`
-	Before      float64   `json:"before"`
-	After       float64   `json:"after"`
-	ChangePct   float64   `json:"change_pct"`
-	Direction   Direction `json:"direction"`
-	Significant bool      `json:"significant"`
-}
-
-// PerformanceTotals covers the whole requested window, so a headline figure
-// agrees with the window the view is labelled with. Points are per-bucket and
-// the last one is still filling, so reading a headline off it reports a
-// fraction of the traffic and whatever latency the final seconds happened to
-// see.
-type PerformanceTotals struct {
-	Spans     int64   `json:"spans"`
-	ErrorRate float64 `json:"error_rate"`
-	P50MS     float64 `json:"p50_ms"`
-	P95MS     float64 `json:"p95_ms"`
-}
-
-type Performance struct {
-	Service    string             `json:"service,omitempty"`
-	Totals     PerformanceTotals  `json:"totals"`
-	Points     []PerformancePoint `json:"points"`
-	Endpoints  []Endpoint         `json:"endpoints"`
-	Heatmap    []HeatmapPoint     `json:"heatmap"`
-	Comparison []ComparisonMetric `json:"comparison"`
-}
-
 type TraceSpan struct {
 	SpanID        string    `json:"span_id"`
 	ParentSpanID  string    `json:"parent_span_id,omitempty"`
@@ -196,15 +126,4 @@ type TraceDetail struct {
 	SpanCount    int  `json:"span_count"`
 	ServiceCount int  `json:"service_count"`
 	Truncated    bool `json:"truncated"`
-}
-
-type LogBucket struct {
-	Time     time.Time `json:"time"`
-	Severity string    `json:"severity"`
-	Count    int64     `json:"count"`
-}
-
-type Logs struct {
-	Entries []LogEntry  `json:"entries"`
-	Buckets []LogBucket `json:"buckets"`
 }

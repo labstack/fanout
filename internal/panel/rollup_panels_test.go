@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -9,9 +10,10 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/queryrows"
 )
 
-func TestM2RollupPanelsReuseServices(t *testing.T) {
+func TestRollupPanelsReuseServices(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	_, err := engine.DB.Exec(`INSERT INTO service_rollup(namespace,bucket,service,spans,served_spans,p50_ms,p95_ms,error_rate,log_count,metric_count) VALUES ('shop',?,'checkout',10,10,50,100,.1,2,3),('shop',?,'payment',20,20,20,40,0,1,1)`, at, at)
@@ -55,7 +57,7 @@ func TestM2RollupPanelsReuseServices(t *testing.T) {
 	}
 }
 
-func TestM2RollupPanelsAggregateContract(t *testing.T) {
+func TestRollupPanelsAggregateContract(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	_, err := engine.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',10,10,50,100,.1,2,3),('shop',?,'checkout',30,30,70,200,0,4,5),('shop',?,'payment',20,20,20,40,0,1,1)`, at, at.Add(10*time.Minute), at)
@@ -76,14 +78,7 @@ func TestM2RollupPanelsAggregateContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := reader.Performance(t.Context(), scope, observability.PerformanceOptions{Service: "checkout", Limit: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: []float64{}}
-	for _, point := range p.Data.Points {
-		want.ErrorTrend = append(want.ErrorTrend, point.ErrorRate*100)
-	}
+	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: []float64{10, 0}}
 	if got[0].Frame == nil || !reflect.DeepEqual(got[0].Frame.Health, want) {
 		t.Fatalf("health aggregate got %+v want %+v", got, want)
 	}
@@ -92,7 +87,7 @@ func TestM2RollupPanelsAggregateContract(t *testing.T) {
 	}
 }
 
-func TestM2RollupPanelsRejectCastSemantics(t *testing.T) {
+func TestRollupPanelsRejectCastSemantics(t *testing.T) {
 	e := newFixtureExecutor(t)
 	for _, where := range []string{"CAST(service AS BOOLEAN) = CAST('true' AS BOOLEAN)", "service = CAST('checkout' AS BOOLEAN)"} {
 		d := Dashboard{Name: "Cast", Panels: []Panel{{ID: "h", Title: "H", Viz: "health", Query: &Query{From: "spans", Where: []string{where}}}}}
@@ -102,7 +97,7 @@ func TestM2RollupPanelsRejectCastSemantics(t *testing.T) {
 	}
 }
 
-func TestM2RollupPanelsRejectNormalizedEquality(t *testing.T) {
+func TestRollupPanelsRejectNormalizedEquality(t *testing.T) {
 	e := newFixtureExecutor(t)
 	scope := Scope{Vars: map[string]Value{"s": {Values: []string{" checkout "}}}}
 	for _, where := range []string{"namespace = ' shop '", "service = ' checkout '", "service = $s"} {
@@ -112,7 +107,7 @@ func TestM2RollupPanelsRejectNormalizedEquality(t *testing.T) {
 	}
 }
 
-func TestM2RollupPanelsScopesAndSelection(t *testing.T) {
+func TestRollupPanelsScopesAndSelection(t *testing.T) {
 	e := newFixtureExecutor(t)
 	for _, viz := range []string{"health", "service_map"} {
 		p := Panel{ID: "p", Title: "P", Viz: viz, Query: &Query{From: "spans"}}
@@ -141,7 +136,7 @@ func TestM2RollupPanelsScopesAndSelection(t *testing.T) {
 	}
 }
 
-func TestM2RollupPanelsValidateScopeOnly(t *testing.T) {
+func TestRollupPanelsValidateScopeOnly(t *testing.T) {
 	for _, viz := range []string{"health", "service_map"} {
 		for _, q := range []*Query{{From: "logs"}, {From: "spans", Measures: []string{"count()"}}, {From: "spans", By: []string{"service"}}, {From: "spans", Bucket: "auto"}, {From: "spans", Sort: "spans"}} {
 			d := Dashboard{Name: "Scope", Panels: []Panel{{ID: "p", Title: "P", Viz: viz, Query: q}}}
@@ -152,7 +147,7 @@ func TestM2RollupPanelsValidateScopeOnly(t *testing.T) {
 		}
 	}
 }
-func TestM2RollupPanelsApplyServiceBeforeLimit(t *testing.T) {
+func TestRollupPanelsApplyServiceBeforeLimit(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	at := fixtureStart
 	_, err := engine.DB.Exec(`INSERT INTO service_rollup SELECT 'shop',?,'noisy-'||i,100,100,3000,4000,.5,0,0 FROM generate_series(1,500) AS t(i)`, at)
@@ -191,7 +186,7 @@ func TestM2RollupPanelsApplyServiceBeforeLimit(t *testing.T) {
 		t.Fatalf("400 per-read cap: %+v %v", got, err)
 	}
 }
-func TestM2RollupPanelsRejectUnrepresentableFilters(t *testing.T) {
+func TestRollupPanelsRejectUnrepresentableFilters(t *testing.T) {
 	e := newFixtureExecutor(t)
 	cases := []struct{ where, message string }{
 		{"http_route = '/cart'", "rollup panels support equality filters on namespace or service"},
@@ -206,5 +201,36 @@ func TestM2RollupPanelsRejectUnrepresentableFilters(t *testing.T) {
 		if !errors.As(err, &got) || !slices.Contains(got, want) {
 			t.Fatalf("%s: got %v want %+v", tc.where, err, want)
 		}
+	}
+}
+
+type countingHealthReadDB struct {
+	observability.DB
+	reads int
+}
+
+func (db *countingHealthReadDB) QueryContext(ctx context.Context, sql string, args ...any) (queryrows.Rows, error) {
+	db.reads++
+	return db.DB.QueryContext(ctx, sql, args...)
+}
+func TestHealthPanelReadsOnlySummaryAndTrendForScopedRollups(t *testing.T) {
+	engine, _ := newTestEngine(t)
+	at := fixtureStart
+	if _, err := engine.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',10,10,50,100,.1,2,3),('shop',?,'checkout',30,30,70,200,0,4,5),('other',?,'checkout',100,100,1,1,1,0,0),('shop',?,'payment',100,100,1,1,1,0,0)`, at, at.Add(10*time.Minute), at, at); err != nil {
+		t.Fatal(err)
+	}
+	counter := &countingHealthReadDB{DB: engine}
+	executor := NewExecutor(engine, 30)
+	executor.SetRollupReader(observability.New(counter, engine, 30))
+	executor.now = func() time.Time { return at.Add(time.Hour) }
+	out, err := executor.Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Health", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "health", Title: "Health", Viz: "health", Query: &Query{From: "spans", Where: []string{"namespace='shop'", "service='checkout'"}}}}}})
+	if err != nil || len(out) != 1 || out[0].Status != "ok" {
+		t.Fatalf("health panel: %+v %v", out, err)
+	}
+	if counter.reads != 2 {
+		t.Fatalf("health panel issued %d reads; want summary and trend only", counter.reads)
+	}
+	if !reflect.DeepEqual(out[0].Frame.Health.ErrorTrend, []float64{10, 0}) || out[0].Frame.Health.ErrorRate != 2.5 {
+		t.Fatalf("scoped health percentages: %+v", out[0].Frame.Health)
 	}
 }

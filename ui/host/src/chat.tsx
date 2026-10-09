@@ -1,19 +1,112 @@
 import type { Message } from "@ag-ui/client";
-import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography } from "@mantine/core";
-import { Check, Copy, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
-import { lazy, Suspense, useEffect, type ComponentProps, type ReactNode } from "react";
+import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
+import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight } from "@phosphor-icons/react";
+import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { toolTitle, useFanoutApp } from "./app-context";
+import { useFanoutApp, useDashboardReceipts } from "./app-context";
 import { useStickToBottom } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
-import type { MCPAppContent } from "./mcp-app-frame";
-import { Link } from "@tanstack/react-router";
-import { dashboardToolResult } from "./dashboard-tool-result";
+import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
+import { fragmentTitle } from "../../panels/fragment";
+import { interruptedResult } from "./dashboard-receipt";
+import { jsonObject, mutationNames } from "./dashboard-tool-result";
+import { DashboardReceiptView } from "./dashboard-receipt-view";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
+
+const isPreset = (content: MCPAppContent) => content.tool_result.view.kind === "preset";
+type AppView = { content: MCPAppContent; expanded: boolean };
+function chatAppViews(messages: Message[]) {
+  const views = new Map<string, AppView>(), duplicates = new Set<string>();
+  let turn: Array<{ id: string; content: MCPAppContent }> = [];
+  const finish = () => {
+    const winners = new Map<string, typeof turn[number]>();
+    for (const item of turn) {
+      const key = item.content.tool_result.view.key;
+      winners.set(key, item);
+    }
+    const chosen = new Set([...winners.values()].map(item => item.id));
+    const hasPreset = [...winners.values()].some(item => isPreset(item.content));
+    const last = turn.filter(item => chosen.has(item.id)).at(-1)?.id;
+    for (const item of turn) {
+      if (!chosen.has(item.id)) duplicates.add(item.id);
+      else views.set(item.id, { content: item.content, expanded: isPreset(item.content) || !hasPreset && item.id === last });
+    }
+    turn = [];
+  };
+  for (const message of messages) {
+    if (message.role === "user") finish();
+    if (message.role === "activity" && message.activityType === "mcp-app") {
+      const content = mcpAppContent(message.content);
+      if (content) turn.push({ id: message.id, content });
+    }
+  }
+  finish(); return { views, duplicates };
+}
+type ToolFailure = {name:string;message:string;readOnly:boolean};
+function toolFailures(messages: Message[]) {
+  const groups = new Map<string, ToolFailure[]>();
+  const calls = new Map<string, { assistant: string; name: string }>();
+  const firstFailures = new Map<string, string>();
+  let assistant = "unattributed";
+  for (const message of messages) {
+    if (message.role === "user") {
+      calls.clear();
+      firstFailures.clear();
+      assistant = message.id;
+    }
+    if (message.role === "assistant") {
+      assistant = message.id;
+      for (const call of message.toolCalls ?? []) calls.set(call.id, { assistant, name: call.function.name });
+    }
+    if (message.role === "tool") {
+      const payload = jsonObject(message.content);
+      if (!message.error && !payload?.error && payload?.isError !== true) continue;
+      const call = calls.get(message.toolCallId);
+      if(call && mutationNames.has(call.name) && interruptedResult(message)) continue;
+      const owner = call?.assistant ?? assistant;
+      const first = firstFailures.get(owner) ?? message.id;
+      firstFailures.set(owner, first);
+      const failures = groups.get(first) ?? [];
+      const text = typeof payload?.error === "string" ? payload.error : typeof message.error === "string" && message.error ? message.error : "Tool execution failed";
+      failures.push({ name: call?.name ?? "Tool", message: text, readOnly: payload?.code === "answer_only" });
+      groups.set(first, failures);
+    }
+  }
+  return groups;
+}
+function ToolFailures({failures}:{failures:ToolFailure[]}) {
+  const [expanded,setExpanded]=useState(false);
+  const failed = failures.filter(f => !f.readOnly);
+  return <Box data-chat-anchor>
+    {failures.some(f => f.readOnly) && <Text size="sm" c="dimmed">Not saved: Explain is read-only</Text>}
+    {failed.length > 0 && <>
+    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)} style={{color:"var(--mantine-color-dimmed)"}}>
+      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failed.length} tool {failed.length === 1 ? "call" : "calls"} failed</span>
+    </UnstyledButton>
+    {expanded && <Stack gap="xs" pl="md">{failed.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}</>}
+  </Box>;
+}
+function ChatAppView({ view }: { view: AppView }) {
+  const [expanded, setExpanded] = useState(view.expanded);
+  useEffect(() => setExpanded(view.expanded), [view.expanded]);
+  const fragment = view.content.tool_result;
+  const title = fragmentTitle(fragment);
+  const viz = [...new Set(fragment.dashboard.panels.map(panel => panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")))].join(", ");
+  const rows = fragment.results.reduce((count, result) => count + (result.frame?.rows ?? 0), 0);
+  const counts=new Map<string,number>();
+  for(const result of fragment.results) if(result.status!=="ok") counts.set(result.status,(counts.get(result.status)??0)+1);
+  const status = fragment.dashboard.panels.length>1
+    ? [`${fragment.dashboard.panels.length} panels`,...Array.from(counts,([status,count])=>`${count} ${status}`)].join(" · ")
+    : counts.size ? [...counts.keys()].join(", ") : `${rows} ${rows === 1 ? "row" : "rows"}`;
+  return <Paper data-chat-app data-chat-anchor withBorder radius="lg" style={{ overflow: "hidden" }}>
+    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{title} · {viz} · {status}</span></UnstyledButton>
+    {expanded && <Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={view.content} /></Suspense>}
+  </Paper>;
+}
 
 const suggestions = [
   "Summarize system health for the last hour",
@@ -23,19 +116,29 @@ const suggestions = [
 ];
 
 export function ChatPage() {
-  const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
+  const { agentAvailable, messages, messageTimes, ready, running, activity, provisional, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
   const { scrollRef, contentRef, toBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
+  const receipts = useDashboardReceipts(messages);
   // Sending is a request to see the answer, so it returns a reader who had
   // scrolled back through the thread to the bottom of it.
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   useEffect(() => { if (lastSent) toBottom(); }, [lastSent, toBottom]);
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
-  const dashboardResults = new Map(messages.flatMap(message => {
-    if (message.role !== "tool" || message.error) return [];
-    const saved = dashboardToolResult(message.toolCallId, message.content, messages);
-    return saved ? [[message.id, saved] as const] : [];
-  }));
-  const visibleMessages = messages.filter((message) => message.role !== "tool" || dashboardResults.has(message.id));
+  const appViews = chatAppViews(messages);
+  const failures = toolFailures(messages);
+  const visibleMessages = messages.filter((message) => {
+    if(appViews.duplicates.has(message.id)) return false;
+    if(message.role === "tool") return failures.has(message.id);
+    if(message.role === "assistant") return !message.toolCalls?.length && typeof message.content === "string" && message.content.trim().length > 0;
+    if(message.role === "activity") return message.activityType === "mcp-app" || message.activityType === "agent-outcome";
+    return message.role === "user";
+  });
+  // Tool receipts can finish before the buffered final answer. Only text in
+  // the current user turn replaces its running status.
+  const turnStart = messages.findIndex(message => message.id === lastSent);
+  const hasFinalText = messages.slice(turnStart + 1).some(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.length > 0);
+  const answer = messages.slice(turnStart + 1).filter(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.trim().length > 0).at(-1);
+  const liveText = running && provisional && !provisional.collapsed && provisional.text && !hasFinalText;
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
@@ -51,17 +154,18 @@ export function ChatPage() {
         {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
         {!threadMissing && ready && <>
           {visibleMessages.length === 0 && <Welcome onSelect={send} />}
-          <Stack gap="lg" aria-live="polite">
-            {visibleMessages.map((message) => {
-              const saved = dashboardResults.get(message.id);
-              return saved ? <Paper key={message.id} withBorder radius="md" p="sm" data-dashboard-result={saved.id}>
-                <Group justify="space-between" gap="sm">
-                  <Box miw={0}><Text size="xs" c="dimmed">{saved.label}</Text><Text size="sm" fw={500} style={{ overflowWrap: "anywhere" }}>{saved.name}</Text></Box>
-                  <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{ dashboardId: saved.id }} search={{}} />} variant="subtle" size="compact-sm">Open dashboard</Button>
-                </Group>
-              </Paper> : <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} send={send} />;
+          <Stack gap="lg">
+            {visibleMessages.filter(message => message.id !== answer?.id).map((message) => {
+              return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : <Box key={message.id}>
+                <ChatMessage message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />
+                {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText && !liveText} activity={activity} /></Box>}
+              </Box>;
             })}
-            {running && <Group gap="xs"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+            {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
+              <ChatMessage message={liveText ? { id: provisional.id, role: "assistant", content: provisional.text } : answer!} provisional={!!liveText} time={liveText ? undefined : messageTimes[answer!.id]} />
+            </Box>}
+            {running && !hasFinalText && !liveText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+            {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
             {error && <RunError message={error} onRetry={retry} />}
           </Stack>
         </>}
@@ -110,24 +214,30 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   </Stack>;
 }
 
-function ChatMessage({ message, time, send }: { message: Message; time?: number; send: (text: string) => Promise<void> }) {
+function ChatMessage({ message, time, appView, provisional = false }: { message: Message; time?: number; appView?: AppView; provisional?: boolean }) {
+
   if (message.role === "activity") {
-    const activity = message as Message & { activityType?: string; content: MCPAppContent };
-    if (activity.activityType === "mcp-app") return <Paper withBorder radius="lg" style={{ overflow: "hidden" }} aria-label={toolTitle(activity.content.toolName)}><Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={activity.content} onMessage={send} /></Suspense></Paper>;
+    if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
+      return "status" in message.content && message.content.status === "stopped" ? <Text c="dimmed" size="sm" data-chat-anchor>{message.content.message}</Text> : <Alert color="bad" title="Something went wrong" data-chat-anchor>{message.content.message}</Alert>;
+    }
+    if (message.activityType === "mcp-app") return appView ? <ChatAppView view={appView} /> : <Alert color="bad" data-chat-anchor>This view could not be loaded. Please try again.</Alert>;
     return null;
   }
+  if (message.role === "assistant" && message.toolCalls?.length) return null;
   const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";
   const stamp = time ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(time)) : "";
-  return <Box className="chat-message" data-role={user ? "user" : "assistant"}>
+  return <Box className={`chat-message${provisional ? " chat-message--provisional" : ""}`} data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
-      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
-    <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4}>
-      {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
-      {!user && <CopyButton text={content} label="Copy message" />}
-    </Group>
+      : <Typography className={`chat-markdown${provisional ? " chat-markdown--provisional" : ""}`} data-provisional={provisional || undefined}><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
+    {(provisional || stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
+      {provisional ? <Loader type="dots" size={20} /> : <>
+        {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
+        {!user && <CopyButton text={content} label="Copy message" />}
+      </>}
+    </Group>}
   </Box>;
 }
 

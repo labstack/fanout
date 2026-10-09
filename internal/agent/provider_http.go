@@ -169,6 +169,7 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 				Message string `json:"message"`
 			} `json:"error"`
 			Response struct {
+				Model  string            `json:"model"`
 				Output []json.RawMessage `json:"output"`
 				Usage  *struct {
 					InputTokens        int `json:"input_tokens"`
@@ -222,10 +223,15 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 			call := callAt(event.OutputIndex)
 			call.call.Input = event.Arguments
 		case "response.completed", "response.incomplete":
-			stop := StreamEvent{Type: EventStop, StopReason: "end_turn"}
+			stop := StreamEvent{Type: EventStop, StopReason: "end_turn", Model: event.Response.Model}
 			if event.Response.Usage != nil {
 				usage := event.Response.Usage
 				stop.Usage = &TokenUsage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, ReasoningTokens: usage.OutputTokensDetails.ReasoningTokens, CacheReadTokens: usage.InputTokensDetails.CachedTokens}
+				// Preserve reported counts even if decoding terminal output fails
+				// or a later tool callback aborts this call.
+				if err := cb(StreamEvent{Type: EventUsage, Usage: stop.Usage, Model: event.Response.Model}); err != nil {
+					return err
+				}
 			}
 			// The terminal output fills gaps when item-done events are absent;
 			// retain item-done bytes verbatim when both are present.
@@ -244,6 +250,7 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 				}
 			}
 			indices := make([]int, 0, len(calls))
+			stop.ToolStep = len(calls) > 0
 			for index, call := range calls {
 				if event.Type == "response.completed" && !call.unfinished && call.call.ID != "" && call.call.Name != "" {
 					indices = append(indices, index)
@@ -295,7 +302,11 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 			} else if event.Message != "" {
 				message = event.Message
 			}
-			return cb(StreamEvent{Type: EventError, Error: message})
+			var usage *TokenUsage
+			if u := event.Response.Usage; u != nil {
+				usage = &TokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens, ReasoningTokens: u.OutputTokensDetails.ReasoningTokens, CacheReadTokens: u.InputTokensDetails.CachedTokens}
+			}
+			return cb(StreamEvent{Type: EventError, Error: message, Usage: usage, Model: event.Response.Model})
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -368,6 +379,7 @@ func (p *anthropicProvider) Stream(ctx context.Context, params StreamParams, cb 
 
 func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 	var currentID, currentName string
+	toolStep := false
 	var args strings.Builder
 	type anthropicUsage struct {
 		InputTokens      *int `json:"input_tokens"`
@@ -429,6 +441,7 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			} `json:"error"`
 			Usage   *anthropicUsage `json:"usage"`
 			Message struct {
+				Model string          `json:"model"`
 				Usage *anthropicUsage `json:"usage"`
 			} `json:"message"`
 		}
@@ -437,9 +450,21 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 		}
 		switch event.Type {
 		case "message_start":
+			if event.Message.Model != "" {
+				if err := cb(StreamEvent{Type: EventUsage, Model: event.Message.Model}); err != nil {
+					return err
+				}
+			}
 			mergeUsage(event.Message.Usage)
+			if usage != nil {
+				copy := *usage
+				if err := cb(StreamEvent{Type: EventUsage, Usage: &copy}); err != nil {
+					return err
+				}
+			}
 		case "content_block_start":
 			if event.ContentBlock.Type == "tool_use" {
+				toolStep = true
 				currentID, currentName = event.ContentBlock.ID, event.ContentBlock.Name
 				args.Reset()
 			}
@@ -465,13 +490,13 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			}
 		case "message_delta":
 			mergeUsage(event.Usage)
-			return cb(StreamEvent{Type: EventStop, StopReason: event.Delta.StopReason, Usage: usage})
+			return cb(StreamEvent{Type: EventStop, StopReason: event.Delta.StopReason, Usage: usage, ToolStep: toolStep})
 		case "error":
 			message := "Anthropic stream error"
 			if event.Error != nil && event.Error.Message != "" {
 				message = event.Error.Message
 			}
-			return cb(StreamEvent{Type: EventError, Error: message})
+			return cb(StreamEvent{Type: EventError, Error: message, Usage: usage})
 		}
 	}
 	if err := scanner.Err(); err != nil {

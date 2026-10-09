@@ -142,8 +142,8 @@ func Validate(d *Dashboard) Problems {
 	}
 	validateTime(d.Time, &problems)
 	vars := validateVariables(d.Variables, &problems)
-	if len(d.Panels) == 0 || len(d.Panels) > 40 {
-		problems.add("panels", "a dashboard has 1 to 40 panels")
+	if len(d.Panels) == 0 || len(d.Panels) > MaxPanels {
+		problems.add("panels", fmt.Sprintf("a dashboard has 1 to %d panels", MaxPanels))
 	}
 	ids := map[string]bool{}
 	for i := range d.Panels {

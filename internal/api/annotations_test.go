@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/labstack/fanout/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +21,7 @@ func (annotationFake) Read(context.Context, annotations.Request) (annotations.Re
 	return annotations.Response{Deploys: []annotations.Deploy{}, Anomalies: []annotations.Anomaly{}}, nil
 }
 
-func TestM2FixAnnotationErrorsWrapped(t *testing.T) {
+func TestAnnotationErrorsWrapped(t *testing.T) {
 	original := errors.New("storage failed")
 	for _, cause := range []error{annotations.ErrRequest, context.DeadlineExceeded, query.ErrParquetReadWait, original} {
 		wrapped := fmt.Errorf("annotation query: %w", cause)
@@ -40,7 +41,7 @@ type annotationErrorFake struct{ err error }
 func (f annotationErrorFake) Read(context.Context, annotations.Request) (annotations.Response, error) {
 	return annotations.Response{}, f.err
 }
-func TestM2FixAnnotationErrorMappings(t *testing.T) {
+func TestAnnotationErrorMappings(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		err     error
@@ -55,10 +56,10 @@ func TestM2FixAnnotationErrorMappings(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestAuthServer(t)
-			if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+			if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
 				t.Fatal(err)
 			}
-			viewer, err := s.users.Create("viewer@example.com", "", "viewer")
+			viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,13 +77,13 @@ func TestM2FixAnnotationErrorMappings(t *testing.T) {
 		})
 	}
 }
-func TestM2AnnotationRoute(t *testing.T) {
+func TestAnnotationRoute(t *testing.T) {
 	s := newTestAuthServer(t)
-	_, err := s.users.Create("admin@example.com", "", "admin")
+	_, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	viewer, err := s.users.Create("viewer@example.com", "", "viewer")
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,13 +109,13 @@ type invalidAnnotationFake struct{}
 func (invalidAnnotationFake) Read(context.Context, annotations.Request) (annotations.Response, error) {
 	return annotations.Response{}, annotations.ErrRequest
 }
-func TestM2AnnotationErrRequest400(t *testing.T) {
+func TestAnnotationErrRequest400(t *testing.T) {
 	s := newTestAuthServer(t)
-	_, err := s.users.Create("admin@example.com", "", "admin")
+	_, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	viewer, err := s.users.Create("viewer@example.com", "", "viewer")
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}

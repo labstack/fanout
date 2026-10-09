@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/labstack/fanout/internal/query/querytest"
 	"reflect"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ func TestDependenciesKeyedTraversalIsBoundedAndScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := query.CreateTables(db); err != nil {
+	if err := querytest.CreateTables(db, query.CreateCacheTables); err != nil {
 		t.Fatal(err)
 	}
 	if err := query.CreateViews(db); err != nil {

@@ -101,6 +101,21 @@ describe("chat scrolling", () => {
     await act(async () => root.unmount());
   });
 
+  it("preserves the visible message when an iframe above the viewport grows", async () => {
+    const { root, scroller } = await mount();
+    sized(scroller, { scrollHeight: 4000, clientHeight: 200 });
+    const anchor = document.createElement("div"); anchor.dataset.chatAnchor = "true";
+    scroller.firstElementChild!.append(anchor);
+    let top = 20;
+    anchor.getBoundingClientRect = () => ({ top, bottom: top + 100 } as DOMRect);
+    scroller.dispatchEvent(new Event("wheel")); scrollTo(scroller, 1200);
+    top = 320; sized(scroller, { scrollHeight: 4300, clientHeight: 200 });
+    act(() => resize?.());
+    expect(scroller.scrollTop).toBe(1500);
+    expect(scroller.scrollTop).not.toBe(scroller.scrollHeight);
+    await act(async () => root.unmount());
+  });
+
   // Naming a draft thread moves the conversation from /chat to /chat/<id>.
   // React reconciles those two routes into one component instance and swaps
   // the DOM underneath it, so anything wired once stayed on nodes that were no

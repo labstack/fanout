@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestM2DashboardGuidancePreservesIntentAndRequiresPreview(t *testing.T) {
+func TestDashboardGuidancePreservesIntentAndRequiresPreview(t *testing.T) {
 	for _, term := range []string{"answer a single factual question with a view instead", "preview_panels", "fix every invalid panel", "get_dashboard first", "edit_dashboard", "heatmap", "histogram", "scatter", "state_timeline", "log_patterns", "service_map", "health", "drill", "annotations", "split", "distinguish missing data from healthy behavior", "single fact"} {
 		if !strings.Contains(systemPrompt, term) {
 			t.Errorf("prompt omits %q", term)
@@ -17,7 +17,7 @@ func TestM2DashboardGuidancePreservesIntentAndRequiresPreview(t *testing.T) {
 	}
 }
 
-func TestM2DashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
+func TestDashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
 	if !strings.HasSuffix(systemPrompt, dashboardAnalysisGuidance) {
 		t.Fatal("analysis guidance is not appended to the system prompt")
 	}
@@ -29,6 +29,10 @@ func TestM2DashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
 		"Preserve every requested facet and explain absent telemetry without inventing it.",
 		"use only the types the question needs; do not fill a dashboard with all of them",
 		"never name schema fields to the user",
+		"Explain in chat is answer intent",
+		"observed absolute panel window and resolved variables",
+		"without creating, editing, replacing or restoring dashboards",
+		"Saved panels must keep working as new telemetry arrives: never filter on trace, span or request IDs or other values copied from one result; show recent evidence with a traces panel and drill to its logs.",
 	} {
 		if !strings.Contains(dashboardAnalysisGuidance, sentence) {
 			t.Errorf("guidance omits %q", sentence)

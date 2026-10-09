@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestM2ExemplarsCheckedScope(t *testing.T) {
+func TestExemplarsCheckedScope(t *testing.T) {
 	e := newFixtureExecutor(t)
 	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", From: fixtureStart.Add(30 * time.Minute), To: fixtureStart.Add(31 * time.Minute), Dimensions: map[string]string{"http_route": "/cart"}}
 	got, err := e.Exemplars(t.Context(), req)
@@ -33,7 +33,7 @@ func TestM2ExemplarsCheckedScope(t *testing.T) {
 		t.Fatalf("cap: %+v %v", got, err)
 	}
 }
-func TestM2ExemplarsRejectForgedDimensions(t *testing.T) {
+func TestExemplarsRejectForgedDimensions(t *testing.T) {
 	e := newFixtureExecutor(t)
 	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", From: fixtureStart, To: fixtureStart.Add(time.Hour), Dimensions: map[string]string{"service": "frontend"}}
 	_, err := e.Exemplars(t.Context(), req)
@@ -52,7 +52,7 @@ func TestM2ExemplarsRejectForgedDimensions(t *testing.T) {
 		t.Fatal("guard bypass")
 	}
 }
-func TestM2ExemplarBucketValidation(t *testing.T) {
+func TestExemplarBucketValidation(t *testing.T) {
 	p := &Panel{Query: &Query{From: "spans", Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}}
 	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour)}
 	bad := math.NaN()
@@ -72,7 +72,7 @@ func TestM2ExemplarBucketValidation(t *testing.T) {
 		}
 	}
 }
-func TestM2ExemplarsLogsCandidateUsesRedactedBody(t *testing.T) {
+func TestExemplarsLogsCandidateUsesRedactedBody(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	spans := []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", TraceID: "log-trace", SpanID: "root", Name: "root", DurationMS: 1, StartUnixNanos: n, EndUnixNanos: n + 1000000, IngestedAt: n}}

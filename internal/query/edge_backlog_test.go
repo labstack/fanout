@@ -28,7 +28,7 @@ func TestEdgeRollupBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:  db,
+		DB: db, writeDB: db,
 		cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
 	}
 	ctx := context.Background()
@@ -252,7 +252,7 @@ func TestEdgeRollupBoundsSubWindowsPerPass(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews: %v", err)
 	}
-	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
+	d := &Duck{DB: db, writeDB: db, cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
 	ctx := context.Background()
 
 	// One ingested instant, but start_time spread over 600 minutes: 20

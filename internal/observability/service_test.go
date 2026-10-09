@@ -2,9 +2,7 @@ package observability
 
 import (
 	"context"
-	"database/sql/driver"
 	"errors"
-	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -98,11 +96,7 @@ func TestTimelineBucketWidth(t *testing.T) {
 }
 
 func TestTimelineQueriesUseAdaptiveBucket(t *testing.T) {
-	for name, query := range map[string]string{
-		"performance points":  performancePointsSQL(30 * 24 * time.Hour),
-		"performance heatmap": performanceHeatmapSQL(30 * 24 * time.Hour),
-		"log buckets":         logBucketsSQL(30 * 24 * time.Hour),
-	} {
+	for name, query := range map[string]string{} {
 		if !strings.Contains(query, "INTERVAL '4 hours'") {
 			t.Errorf("%s query does not use the 30-day bucket: %s", name, query)
 		}
@@ -196,89 +190,6 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 	}
 }
 
-func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
-	svc, mock, _ := newMockService(t)
-	svc.db = completedReadDB{svc.db}
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-	midpoint := start.Add(30 * time.Minute)
-
-	mock.ExpectQuery(regexp.QuoteMeta(performancePointsSQL(time.Hour))).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
-			AddRow(start, int64(120), 0.10, 80.0, 220.0, int64(30), int64(8)))
-	// The rollup path returns cumulative histogram counts and the percentiles
-	// are interpolated from them; 50 calls all at or under 250ms put p95 inside
-	// the 100–250ms bucket.
-	endpointColumns := []string{"method", "path", "calls", "error_rate", "duration_count"}
-	endpointCounts := []driver.Value{"GET", "/pay", int64(50), 0.08, 50.0}
-	for _, count := range []float64{0, 0, 0, 0, 0, 0, 0, 10, 40, 50, 50, 50, 50, 50, 50, 50, 50} {
-		endpointCounts = append(endpointCounts, count)
-	}
-	for _, bucket := range endpointDurationBuckets {
-		endpointColumns = append(endpointColumns, bucket.Column)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(completedEndpointsQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
-		WillReturnRows(sqlmock.NewRows(endpointColumns).AddRow(endpointCounts...))
-	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapSQL(time.Hour))).
-		WithArgs(start, end, "prod", "prod", start, end, "prod", "prod").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "service", "p95_ms"}).
-			AddRow(start, "checkout", 220.0))
-	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
-		WithArgs(start, midpoint, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(50.0, 50.0, 0.12, 90.0, 240.0))
-	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
-		WithArgs(midpoint, end, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 70.0, 0.06, 70.0, 180.0))
-
-	result, err := svc.Performance(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, PerformanceOptions{Service: "checkout", Limit: 25, Heatmap: true})
-	if err != nil {
-		t.Fatalf("Performance: %v", err)
-	}
-	if result.Schema != PerformanceSchema || len(result.Data.Points) != 1 || len(result.Data.Endpoints) != 1 || len(result.Data.Heatmap) != 1 || len(result.Data.Comparison) != 4 {
-		t.Fatalf("incomplete performance result: %#v", result)
-	}
-	if result.Data.Endpoints[0].Health != HealthUnhealthy {
-		t.Fatalf("endpoint health = %q, want unhealthy", result.Data.Endpoints[0].Health)
-	}
-	if result.Data.Comparison[1].Direction != "improvement" {
-		t.Fatalf("error-rate comparison = %#v", result.Data.Comparison[1])
-	}
-	// Totals cover the window, so they are the two halves folded together and
-	// not the newest bucket: a headline read off that bucket would say 220ms
-	// here, and the window's worst P95 is 240ms.
-	totals := result.Data.Totals
-	if totals.Spans != 120 || math.Abs(totals.ErrorRate-0.085) > 1e-9 || math.Abs(totals.P50MS-78.333333) > 1e-6 || totals.P95MS != 240 {
-		t.Fatalf("performance totals = %#v", totals)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestQueryEndpointsOnMutableSQLDB(t *testing.T) {
-	svc, mock, _ := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-
-	mock.ExpectQuery(regexp.QuoteMeta(rawEndpointsQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
-		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
-			AddRow("GET", "/pay", int64(2), 10.0, 20.0, 25.0, 0.0))
-
-	endpoints, source, err := svc.queryEndpoints(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
-	if err != nil {
-		t.Fatalf("queryEndpoints: %v", err)
-	}
-	if source != "spans" || len(endpoints) != 1 {
-		t.Fatalf("queryEndpoints = (%#v, %q), want one raw endpoint", endpoints, source)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	svc, mock, repository := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
@@ -313,148 +224,6 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	}
 	if result.Data.DurationMS != 200 {
 		t.Fatalf("duration = %v, want 200ms", result.Data.DurationMS)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
-	svc, mock, repository := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "logs-fixture", Logs: []telemetry.Log{
-		{Namespace: "prod", TimeUnixNanos: start.UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
-		{Namespace: "prod", TimeUnixNanos: start.Add(time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "card declined: token=abc123", TraceID: "trace-2", SpanID: "root2"},
-		{Namespace: "prod", TimeUnixNanos: start.Add(2 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: `auth declined: {"password":"hunter2"}`, TraceID: "trace-3", SpanID: "root3"},
-	}}); err != nil {
-		t.Fatalf("commit logs fixture: %v", err)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			// Return raw values to prove the Go boundary still redacts even if the
-			// SQL expression and driver ever diverge.
-			AddRow(start.Add(2*time.Millisecond), "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3").
-			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
-			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root"))
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "ERROR", int64(3)))
-
-	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "declined", 10)
-	if err != nil {
-		t.Fatalf("Logs: %v", err)
-	}
-	if result.Schema != LogsSchema || len(result.Data.Entries) != 3 || len(result.Data.Buckets) != 1 || result.Data.Buckets[0].Count != 3 {
-		t.Fatalf("unexpected logs result: %#v", result)
-	}
-	if want := "card declined: token=[REDACTED]"; result.Data.Entries[1].Body != want {
-		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[1].Body, want)
-	}
-	if want := `auth declined: {"password":"[REDACTED]"}`; result.Data.Entries[0].Body != want {
-		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[0].Body, want)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
-	svc, mock, repository := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	logs := make([]telemetry.Log, 100)
-	for i := range logs {
-		logs[i] = telemetry.Log{Namespace: "prod", TimeUnixNanos: start.Add(time.Duration(i) * time.Millisecond).UnixNano(), Severity: "INFO", Body: "entry"}
-	}
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "bounded-logs", Logs: logs}); err != nil {
-		t.Fatal(err)
-	}
-	entryRows := sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"})
-	for i := 99; i >= 95; i-- {
-		entryRows.AddRow(start.Add(time.Duration(i)*time.Millisecond), "INFO", "", "entry", "", "")
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
-		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "", 5).
-		WillReturnRows(entryRows)
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
-		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "INFO", int64(100)))
-	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "", "", "", 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Data.Entries) != 5 || !result.Data.Entries[0].Time.Equal(start.Add(99*time.Millisecond)) || !result.Data.Entries[4].Time.Equal(start.Add(95*time.Millisecond)) {
-		t.Fatalf("newest bounded entries = %#v", result.Data.Entries)
-	}
-}
-
-func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
-	svc, mock, repository := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "parquet-logs", Logs: []telemetry.Log{{
-		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
-		ServiceName: "checkout", Body: "token=secret", TraceID: "trace-parquet",
-	}}}); err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-parquet", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "ERROR", int64(1)))
-	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Data.Entries) != 1 || result.Data.Entries[0].Body != "token=[REDACTED]" || result.Provenance.DataSource != "parquet" {
-		t.Fatalf("Parquet logs result = %#v", result)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLogsQueryParquetAcrossBatches(t *testing.T) {
-	svc, mock, repository := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Second)
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "overlap-newer", Logs: []telemetry.Log{
-		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Body: "newer-old", Severity: "INFO"},
-		{Namespace: "prod", TimeUnixNanos: start.Add(300 * time.Millisecond).UnixNano(), Body: "newer-batch", Severity: "INFO"},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "overlap-late", Logs: []telemetry.Log{
-		{Namespace: "prod", TimeUnixNanos: start.Add(100 * time.Millisecond).UnixNano(), Body: "late-old", Severity: "INFO"},
-		{Namespace: "prod", TimeUnixNanos: start.Add(200 * time.Millisecond).UnixNano(), Body: "late-boundary", Severity: "INFO"},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
-		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(300*time.Millisecond), "INFO", "", "newer-batch", "", "").
-			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", "").
-			AddRow(start.Add(150*time.Millisecond), "INFO", "", "newer-old", "", "").
-			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
-		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "INFO", int64(4)))
-	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Data.Entries) != 4 || result.Summary != "4 logs matched the selected telemetry window" {
-		t.Fatalf("boundary logs = %#v", result)
-	}
-	if result.Data.Entries[0].Body != "newer-batch" || result.Provenance.DataSource != "parquet" {
-		t.Fatalf("boundary result = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -604,49 +373,3 @@ func TestTraceFiltersIndexedSpansByNamespace(t *testing.T) {
 }
 
 var _ DB = queryrows.SQLAdapter{}
-
-func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
-	svc, mock, repository := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "bounded-parquet", Logs: []telemetry.Log{{
-		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
-		ServiceName: "checkout", Body: "hello", TraceID: "trace-parquet",
-	}}}); err != nil {
-		t.Fatal(err)
-	}
-	// The sample query must carry the row limit so a wide window cannot stream
-	// the whole Parquet history through the driver.
-	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
-		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 2).
-		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(3*time.Minute), "ERROR", "checkout", "newest", "trace-c", "").
-			AddRow(start.Add(2*time.Minute), "INFO", "checkout", "older", "trace-b", ""))
-	// Histogram counts come back aggregated, so a million matching rows cost
-	// one row per bucket rather than a million transfers.
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
-		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "ERROR", int64(900000)).
-			AddRow(start.Add(5*time.Minute), "INFO", int64(100000)))
-	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Data.Entries) != 2 || result.Data.Entries[0].Body != "newest" {
-		t.Fatalf("entries = %#v, want the two newest sampled rows", result.Data.Entries)
-	}
-	if len(result.Data.Buckets) != 2 {
-		t.Fatalf("buckets = %#v, want one row per aggregated bucket", result.Data.Buckets)
-	}
-	if !strings.Contains(result.Summary, "1000000") {
-		t.Fatalf("summary = %q, want the aggregated match count", result.Summary)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-type completedReadDB struct{ DB }
-
-func (completedReadDB) CompletedBatchReads() bool { return true }

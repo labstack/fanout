@@ -4,16 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	mcpUIExtension = "io.modelcontextprotocol/ui"
-	mcpAppMIME     = "text/html;profile=mcp-app"
+	mcpUIExtension = fanoutmcp.UIExtension
+	mcpAppMIME     = fanoutmcp.AppMIME
 )
 
 type ToolExecution struct {
@@ -28,6 +29,8 @@ type ToolRegistry struct {
 	serverSession *mcp.ServerSession
 	definitions   []ToolDef
 	apps          map[string]string
+	mutations     map[string]bool
+	readOnly      map[string]bool
 }
 
 func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, error) {
@@ -52,9 +55,16 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 		serverSession.Close()
 		return nil, fmt.Errorf("list MCP tools: %w", err)
 	}
-	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}}
+	registry := &ToolRegistry{session: session, serverSession: serverSession, apps: map[string]string{}, mutations: map[string]bool{}, readOnly: map[string]bool{}}
 	for _, tool := range listed.Tools {
+		if fanoutmcp.AppOnly(tool.Meta) {
+			continue
+		}
 		registry.definitions = append(registry.definitions, ToolDef{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		registry.readOnly[tool.Name] = reviewedReadOnly(tool.Name, tool.Annotations)
+		if fanoutmcp.RequiredToolScope(tool.Name) == dashboard.OAuthScope && tool.Annotations != nil && !tool.Annotations.ReadOnlyHint {
+			registry.mutations[tool.Name] = true
+		}
 		if resourceURI := appResourceURI(tool.Meta); resourceURI != "" {
 			registry.apps[tool.Name] = resourceURI
 		}
@@ -77,7 +87,37 @@ func (r *ToolRegistry) Close() error {
 
 func (r *ToolRegistry) Definitions() []ToolDef { return append([]ToolDef(nil), r.definitions...) }
 
+// MCP metadata classifies registered tools. Explicit writes remain writes even
+// if their annotations drift; tools without metadata require a reviewed entry.
+func reviewedReadOnly(name string, annotations *mcp.ToolAnnotations) bool {
+	switch name {
+	case "create_dashboard", "edit_dashboard", "replace_dashboard", "restore_dashboard_version":
+		return false
+	}
+	if annotations != nil {
+		return annotations.ReadOnlyHint
+	}
+	switch name {
+	case "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs", "get_intelligence_snapshot", "get_telemetry_schema", "query_telemetry", "preview_panels", "list_dashboards", "get_dashboard", "list_dashboard_versions":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *ToolRegistry) ReadOnly(name string) bool { return r.readOnly[name] }
+
 func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecution, error) {
+	allowed := false
+	for _, definition := range r.definitions {
+		if definition.Name == call.Name {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return ToolExecution{Content: "This tool is unavailable to the model: " + call.Name, IsError: true}, nil
+	}
 	arguments := json.RawMessage(call.Input)
 	if len(arguments) == 0 {
 		arguments = json.RawMessage(`{}`)
@@ -85,23 +125,43 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 	params := &mcp.CallToolParams{Name: call.Name, Arguments: arguments}
 	if owner := dashboard.OwnerFromContext(ctx); owner != "" {
 		params.Meta = mcp.Meta{dashboard.OwnerMetaKey: owner}
+		if origin, ok := dashboard.BuildOriginFromContext(ctx); ok {
+			params.Meta[dashboard.BuildOriginMetaKey] = origin
+		}
 	}
 	result, err := r.session.CallTool(ctx, params)
 	if err != nil {
 		return ToolExecution{}, fmt.Errorf("call MCP tool %s: %w", call.Name, err)
 	}
+	if r.mutations[call.Name] && !result.IsError {
+		dashboard.MarkSaveCommitted(ctx)
+	}
+	content, err := r.modelContent(call.Name, result)
+	if err != nil {
+		return ToolExecution{}, err
+	}
+	return ToolExecution{Content: content, Structured: result.StructuredContent, AppResourceURI: r.apps[call.Name], IsError: result.IsError}, nil
+}
+
+func (r *ToolRegistry) modelContent(name string, result *mcp.CallToolResult) (string, error) {
 	content := textContent(result.Content)
-	if result.StructuredContent != nil {
+	if r.apps[name] == "" && result.StructuredContent != nil {
 		if encoded, marshalErr := json.Marshal(result.StructuredContent); marshalErr == nil {
 			content = string(encoded)
 		} else {
-			slog.Warn("encode MCP structured content failed, falling back to text content", "tool", call.Name, "err", marshalErr)
+			return "", fmt.Errorf("encode MCP structured content for %s: %w", name, marshalErr)
+		}
+	}
+	if r.apps[name] != "" && len(content) > 16*1024 {
+		content = content[:16*1024]
+		for !utf8.ValidString(content) {
+			content = content[:len(content)-1]
 		}
 	}
 	if content == "" {
 		content = "{}"
 	}
-	return ToolExecution{Content: content, Structured: result.StructuredContent, AppResourceURI: r.apps[call.Name], IsError: result.IsError}, nil
+	return content, nil
 }
 
 func textContent(contents []mcp.Content) string {
@@ -120,8 +180,23 @@ func appResourceURI(meta mcp.Meta) string {
 			return value
 		}
 	}
-	if value, ok := meta["ui/resourceUri"].(string); ok {
-		return value
-	}
 	return ""
+}
+
+// Consume the server's identity; never recompute it in the agent or host.
+func fragmentView(value any) fanoutmcp.FragmentView {
+	if f, ok := value.(fanoutmcp.PanelFragment); ok {
+		return f.View
+	}
+	if f, ok := value.(*fanoutmcp.PanelFragment); ok && f != nil {
+		return f.View
+	}
+	if f, ok := value.(map[string]any); ok {
+		if v, ok := f["view"].(map[string]any); ok {
+			kind, _ := v["kind"].(string)
+			key, _ := v["key"].(string)
+			return fanoutmcp.FragmentView{Kind: kind, Key: key}
+		}
+	}
+	return fanoutmcp.FragmentView{}
 }

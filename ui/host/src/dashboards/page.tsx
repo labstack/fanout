@@ -1,19 +1,32 @@
 import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import { WarningCircle } from "@phosphor-icons/react";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
-import { createDashboardPrompt, useFanoutApp } from "../app-context";
-import { ApiError, dashboardsKey, getDashboard, listDashboards } from "./api";
+import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
+import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
-import { makeDrill, parseDrill } from "./drill-state";
+import { parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
+import { HistoryDrawer } from "./history";
+import { dashboardDataPredicate } from "./cache";
 import { useBrushZoom } from "./use-brush-zoom";
 import { usePanelResults } from "./use-panel-results";
-import { currentValue, useVariableOptions } from "./use-variables";
+import { useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
+import { useShortcuts } from "./use-shortcuts";
+import { ShortcutsHelp } from "./shortcuts-help";
+import { useViewer } from "../auth";
+import { useShortcutPreference } from "./shortcut-preference";
+import { usePanelViewFocus } from "./use-panel-view-focus";
+
+import { resolvedVariables } from "../../../panels/variables";
+import { drillSelection } from "./panel-handlers";
+import { retryQuery } from "./query-policy";
+import type { DrillClient } from "./drill-client";
+const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
 
 const zoomOut: Record<string, string> = { "5m": "15m", "15m": "1h", "1h": "3h", "3h": "6h", "6h": "12h", "12h": "24h", "24h": "2d", "2d": "7d", "7d": "30d", "30d": "30d" };
 
@@ -24,7 +37,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     if (dashboardId || !list.data?.length) return;
     onOpen((list.data.find((d) => d.is_default) ?? list.data[0]).id, true);
   }, [dashboardId, list.data]);
-  const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: () => getDashboard(dashboardId!), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2 });
+  const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: ({ signal }) => getDashboard(dashboardId!, signal), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2 });
 
   if (!dashboardId && list.error) return <Center mih="50vh"><Alert color="bad" title="Dashboards could not be loaded">{list.error.message}</Alert></Center>;
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
@@ -44,24 +57,29 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
   return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} agentAvailable={agentAvailable} openChat={openChat} />;
 }
 
-function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string): void }) {
+function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
+  // Loading this owner-scoped record proves manage-own capability on the server.
+  const canManage = true;
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const region = useRef<HTMLElement>(null);
+  const scope = useId();
+  const preference = useShortcutPreference(useViewer().id);
+  const viewFocus = usePanelViewFocus(region);
+  const [ranges, setRanges] = useState<Set<string>>(() => new Set());
+  const rangePending = useCallback((id: string, pending: boolean) => setRanges(previous => {
+    if (previous.has(id) === pending) return previous;
+    const next = new Set(previous); if (pending) next.add(id); else next.delete(id); return next;
+  }), []);
+  const client = useQueryClient();
+  const [restoreRefresh, setRestoreRefresh] = useState<number>();
   const { zoom, reset: resetBrush, resetZoom, zoomed } = useBrushZoom(search, onSearch);
   const time = effectiveTime(spec, search);
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
   const compare = search.compare ? search.compare === "1" : spec.time.compare === "previous_period";
   const vars = search.vars ?? {};
-  const options = useVariableOptions(id, version, spec, time, vars);
-  const resolvedVars = useMemo(() => {
-    const out: Record<string, VarValue> = {};
-    for (const v of spec.variables ?? []) {
-      const value = currentValue(v, vars, options.currentData?.[v.name]);
-      // An unresolved or empty query choice belongs to the server's chooseValue.
-      // Placeholder options are display-only, never values for a new request.
-      if (v.kind === "query" && value === "") continue;
-      out[v.name] = value;
-    }
-    return out;
-  }, [spec.variables, vars, options.currentData]);
+  const options = useVariableOptions(`dashboard-${id}`, spec, time, vars, resolveVariables, retryQuery);
+  const resolvedVars = useMemo(() => resolvedVariables(spec.variables, vars, options.currentData), [spec.variables, vars, options.currentData]);
   // Panel widths come from the layout and the viewport, known at first
   // render, so the first batch already carries them and no second request
   // follows once the grid has measured itself.
@@ -78,7 +96,13 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
   }, [viewport, spec]);
   const [visible, setVisible] = useState<string[]>(() => spec.panels.map((p) => p.id));
   const currentVisible = useMemo(() => visible.filter((panelId) => spec.panels.some((panel) => panel.id === panelId)), [visible, spec.panels]);
-  const data = usePanelResults({ dashboardId: id, version, spec, time, vars: resolvedVars, compare, widths, visible: currentVisible, refresh, enabled: options.ready });
+  const data = usePanelResults({ dashboardId: id, version, spec, time, vars: resolvedVars, compare, widths, visible: currentVisible, refresh: ranges.size ? "off" : refresh, enabled: options.ready });
+  useEffect(() => {
+    if (restoreRefresh !== version) return;
+    // Run after both hooks have committed their observers to the restored keys.
+    // Do not restart a new-spec request already in flight.
+    void client.refetchQueries({ predicate: dashboardDataPredicate(id), type: "active", stale: true }, { cancelRefetch: false });
+  }, [restoreRefresh, version, id, client]);
   const annotations = useMemo(() => data.annotations ? {
     ...data.annotations,
     deploys: spec.annotations?.deploys === false ? [] : data.annotations.deploys,
@@ -92,14 +116,20 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
     onSearch({ ...search, vars: next }, true);
   };
 
-  return <Box component="main" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
+  const edit = () => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" });
+  const onView = (view?: string) => { if (view) viewFocus.remember(view); onSearch({ ...search, view }, view === undefined); };
+  useShortcuts(region, {
+    r: () => data.refetch(), e: edit, h: () => setHistoryOpen(true), "?": () => setHelpOpen(true),
+    f: target => { if (search.view) { onView(); return; } const panel = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (panel && spec.panels.some(p => p.id === panel)) onView(panel); },
+  }, {modalOpen: historyOpen || helpOpen || Boolean(search.drill), fullscreenScope: search.view ? scope : undefined, enabled: preference.enabled});
+  return <Box component="main" ref={region} aria-label="Dashboard" maw={1600} mx="auto" px={{ base: "md", sm: "xl" }} pt="lg" pb="xl">
     <Stack gap="sm" mb="md">
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
         <Box miw={0}>
           <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
           {spec.description && <Text c="dimmed" size="sm" mt={2}>{spec.description}</Text>}
         </Box>
-        <Toolbar time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
+        <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
           onRange={(range) => { resetBrush(); onSearch({ ...search, range, from: undefined, to: undefined }); }}
           onAbsolute={(from, to) => { resetBrush(); onSearch({ ...search, range: undefined, from, to }); }}
           onZoomOut={() => {
@@ -112,7 +142,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
           }}
           onRefresh={setRefresh} onRefreshNow={data.refetch}
           onCompare={(on) => onSearch({ ...search, compare: on ? "1" : "0" }, true)}
-          onEdit={() => onSearch({ ...search, edit: search.edit === "1" ? undefined : "1" })} />
+          onEdit={edit} onHistory={() => setHistoryOpen(true)} onShortcuts={() => setHelpOpen(true)} />
       </Group>
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
@@ -126,15 +156,21 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
-    <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
+    <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
+      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onRetry={data.retry} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
       onPoint={(panel, selection) => {
-        const result = data.results.get(panel.id); if (!result) return;
-        const target = makeDrill(panel, result, selection); if (!target) return;
-        const first = Object.values(selection.dimensions)[0]; const variable = panel.click?.set_variable;
-        const vars = variable && first !== undefined ? { ...search.vars, [variable]: first } : search.vars;
-        onSearch({ ...search, vars, drill: JSON.stringify(target) }, false);
+        const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
+        if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);
       }} />
-    <DrillDrawer spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
+    <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
+    <HistoryDrawer id={id} currentVersion={version} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
+      setRestoreRefresh(record.version);
+      const ids = new Set(record.spec.panels.map(panel => panel.id));
+      const drill = parseDrill(search.drill);
+      const view = search.view && !ids.has(search.view) ? undefined : search.view;
+      const nextDrill = drill && !ids.has(drill.panel_id) ? undefined : search.drill;
+      if (view !== search.view || nextDrill !== search.drill) onSearch({ ...search, view, drill: nextDrill }, true);
+    }} />
+    <ShortcutsHelp opened={helpOpen} onClose={() => setHelpOpen(false)} fullscreen={Boolean(search.view)} enabled={preference.enabled} onEnabled={preference.change} />
   </Box>;
 }

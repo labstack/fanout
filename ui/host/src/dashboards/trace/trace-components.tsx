@@ -1,10 +1,8 @@
-import { Badge, Box, Group, Table, Text, Tooltip } from "@mantine/core";
-import { ListBullets } from "@phosphor-icons/react";
-// Adapted copy of ui/apps/src/trace.tsx (M1 echart.tsx precedent). Consolidate in M3.
-import type { LogEntry, TraceSpan } from "../../../../contracts";
-import { seriesSlot, severityColor } from "../../../../chart";
-import { duration, exactTimestamp, timeZoneLabel } from "../../../../format";
-import { EmptyState, PageControls, usePagedItems } from "./components";
+import { Box, Group, Table, Text, Tooltip } from "@mantine/core";
+import type { TraceSpan } from "../../../../contracts";
+import { seriesSlot } from "../../../../chart";
+import { duration } from "../../../../format";
+import { PageControls, usePagedItems } from "./components";
 export function Waterfall({
   spans,
   dark,
@@ -112,77 +110,6 @@ export function Waterfall({
         </Table>
       </Table.ScrollContainer>
       <PageControls {...visibleSpans} onChange={visibleSpans.setPage} />
-    </>
-  );
-}
-
-export function TraceLogs({ entries }: { entries: LogEntry[] }) {
-  const logs = usePagedItems(entries, 6);
-  if (entries.length === 0)
-    return (
-      <EmptyState
-        tall
-        icon={<ListBullets size={20} weight="duotone" />}
-        title="No correlated logs"
-      >
-        No logs in this window carry the selected trace ID.
-      </EmptyState>
-    );
-  return (
-    <>
-      <Table.ScrollContainer minWidth={620}>
-        <Table striped verticalSpacing="xs">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>
-                Time ({timeZoneLabel(logs.pageItems[0]?.time)})
-              </Table.Th>
-              <Table.Th>Level</Table.Th>
-              <Table.Th>Service</Table.Th>
-              <Table.Th>Message</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {logs.pageItems.map((entry, index) => (
-              <Table.Tr key={`${entry.time}-${logs.from + index}`}>
-                <Table.Td style={{ whiteSpace: "nowrap" }}>
-                  <Text
-                    size="xs"
-                    ff="monospace"
-                    title={exactTimestamp(entry.time)}
-                  >
-                    {new Date(entry.time).toLocaleTimeString([], {
-                      hour: "numeric",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Badge
-                    size="sm"
-                    color={severityColor(entry.severity)}
-                    variant="light"
-                  >
-                    {entry.severity || "LOG"}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Text fw={600} size="sm">
-                    {entry.service}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm" lineClamp={2} title={entry.body}>
-                    {entry.body}
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
-      <PageControls {...logs} onChange={logs.setPage} />
     </>
   );
 }

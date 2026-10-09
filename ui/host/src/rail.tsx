@@ -3,11 +3,9 @@ import { useDebouncedValue } from "@mantine/hooks";
 import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { threadHistoryQueryKey } from "./api";
-import type { Overview } from "../../contracts";
+import { getJSON, threadHistoryQueryKey } from "./api";
 import { authorizedFetch } from "./auth";
-import { dashboardsKey, listDashboards } from "./dashboards/api";
-import { freshFor, observabilityParams, useObservability } from "./observability";
+import { dashboardsKey, dashboardsStaleTime, listDashboards } from "./dashboards/api";
 
 export type RailHandle = { focusSearch(): void };
 
@@ -58,19 +56,24 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     getNextPageParam: (last) => last.nextCursor || undefined,
     enabled: agentAvailable,
   });
-  const dashboards = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, refetchInterval: 30_000, staleTime: freshFor });
+  const dashboards = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, refetchInterval: 30_000, staleTime: dashboardsStaleTime });
   const threads = useMemo(() => history.data?.pages.flatMap((page) => page.threads) ?? [], [history.data]);
   const groups = useMemo(() => groupThreads(threads), [threads]);
   // Searching for a service used to answer "No matching chats / No matching
   // dashboards" while that service was live, traced and logged — the search
   // looked only at what the user had already named. The catalogue is fetched
   // only once someone is actually searching.
-  const overview = useObservability<Overview>("overview", observabilityParams({ window: "1h", namespace: "" }), Boolean(query) && Boolean(onInvestigateService));
+  const schema = useQuery({
+    queryKey: ["telemetry-schema", "1h"],
+    queryFn: () => getJSON<{ services: Array<{ value: string; count?: number }> }>("/api/telemetry/schema?window=1h"),
+    enabled: Boolean(query) && Boolean(onInvestigateService),
+    staleTime: 60_000,
+  });
   const matchingServices = useMemo(() => {
     if (!query) return [];
     const needle = query.toLowerCase();
-    return (overview.data?.data.services ?? []).map((entry) => entry.service).filter((service) => service.toLowerCase().includes(needle)).slice(0, 6);
-  }, [overview.data, query]);
+    return (schema.data?.services ?? []).map((entry) => entry.value).filter((service) => service.toLowerCase().includes(needle)).slice(0, 6);
+  }, [schema.data, query]);
   const visibleDashboards = useMemo(() => {
     const items = dashboards.data ?? [];
     const needle = query.toLowerCase();
@@ -101,6 +104,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
       const deletedID = deleting.threadId;
       setDeleting(null);
       await queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
+      await queryClient.invalidateQueries({ queryKey: dashboardsKey });
       onDeletedThread(deletedID);
     } catch (cause) {
       setMutationError(cause instanceof Error ? cause.message : "Unable to delete this chat.");
@@ -122,8 +126,11 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
-        {matchingServices.length > 0 && onInvestigateService && <Stack gap={4}>
+        {query && onInvestigateService && schema.isLoading && <Center py="md"><Loader size="xs" /></Center>}
+        {query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
+          {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
+          {schema.isSuccess && matchingServices.length === 0 && <Text c="dimmed" size="sm" px="sm">No matching services</Text>}
           {matchingServices.map((service) => <UnstyledButton key={service} className="rail-row" p="sm" onClick={() => onInvestigateService(service)}>
             <Text size="sm" fw={500} truncate>{service}</Text>
           </UnstyledButton>)}
@@ -138,7 +145,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">No matching dashboards</Text>}
           {visibleDashboards.map((dashboard) => {
             const active = dashboard.id === activeDashboardID;
-            return <UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} key={dashboard.id} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
+            return <Stack key={dashboard.id} gap={0}><UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
               if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
               event.preventDefault();
               onSelectDashboard(dashboard.id);
@@ -147,7 +154,14 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
                 <Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text>
                 {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
               </Group>
-            </UnstyledButton>;
+            </UnstyledButton>
+              {dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault(); onSelectThread(dashboard.origin!.thread_id);
+              }}>
+                <Text size="xs" c="dimmed" lineClamp={2}>Built from: {dashboard.origin.request_excerpt}</Text>
+              </UnstyledButton>}
+            </Stack>;
           })}
           {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>{dashboards.data?.length === 0 ? "New dashboard" : "Create with AI"}</Button>}
         </Stack>
@@ -222,7 +236,7 @@ function dayStart(value: Date): number {
 // rather than derived from insertion order.
 const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"];
 
-export function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads: ThreadSummary[] }> {
+function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads: ThreadSummary[] }> {
   const today = dayStart(new Date());
   const day = 24 * 60 * 60 * 1000;
   const groups = new Map<string, ThreadSummary[]>();
@@ -236,7 +250,7 @@ export function groupThreads(threads: ThreadSummary[]): Array<{ label: string; t
   return GROUP_ORDER.filter((label) => groups.has(label)).map((label) => ({ label, threads: groups.get(label)! }));
 }
 
-export function threadTime(value: string): string {
+function threadTime(value: string): string {
   const date = parseSQLiteTime(value);
   const today = dayStart(new Date());
   const age = Math.floor((today - dayStart(date)) / (24 * 60 * 60 * 1000));

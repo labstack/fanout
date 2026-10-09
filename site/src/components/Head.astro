@@ -2,6 +2,7 @@
 import Default from "@astrojs/starlight/components/Head.astro";
 import { getCollection } from "astro:content";
 import Analytics from "./Analytics.astro";
+import { siteAssetURL } from "../lib/site-assets";
 
 // Every documentation page advertises its Markdown alternate in the head, so an
 // agent that reads the head never has to parse the rendered body.
@@ -15,7 +16,7 @@ const ids = new Set(docs.map((entry) => entry.id));
 
 const id = Astro.locals.starlightRoute.entry.id;
 const markdownHref = ids.has(id)
-  ? new URL(`/${id}.md`, Astro.site ?? Astro.url).href
+  ? siteAssetURL(Astro.site, `/${id}.md`)
   : null;
 
 // Starlight emits `twitter:card: summary_large_image` but never an image to go
@@ -25,10 +26,8 @@ const markdownHref = ids.has(id)
 // is the same one GitHub shows for the repository.
 //
 // Absolute URLs are required here: Open Graph consumers do not resolve relative
-// hrefs. `astro.config.mjs` always sets `site`, so the fallback is not a
-// configuration this repository ships — Astro types `Astro.site` as optional
-// regardless, and the line above resolves its URL the same way.
-const socialCardHref = new URL("/social-card.png", Astro.site ?? Astro.url).href;
+// hrefs. The configured site is the canonical origin.
+const socialCardHref = siteAssetURL(Astro.site, "/social-card.png");
 ---
 
 <Default><slot /></Default>

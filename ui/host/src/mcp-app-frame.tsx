@@ -1,7 +1,9 @@
+import {mcpAppCSP} from "./mcp-app-csp";
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { Alert, Box, Center, Loader, Text, useComputedColorScheme } from "@mantine/core";
+import { Alert, Box, Button, Center, FocusTrap, Loader, Text, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
+import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { authorizedFetch } from "./auth";
 
 const mcpAppMIME = "text/html;profile=mcp-app";
@@ -12,16 +14,10 @@ const maxAppHeight = 2000;
 
 class InvalidMCPAppResourceError extends Error {}
 
-export type MCPAppContent = {
-  resourceUri: string;
-  toolName: string;
-  toolInput?: Record<string, unknown>;
-  toolResult?: unknown;
-  isError?: boolean;
-};
 
 type BrowserMCPConnection = {
   client: Client;
+  tools: Promise<Awaited<ReturnType<Client["listTools"]>>>;
   references: number;
   closed: boolean;
   closeListeners: Set<() => void>;
@@ -46,10 +42,13 @@ async function createBrowserMCPConnection(): Promise<BrowserMCPConnection> {
     await client.connect(transport);
     const connection: BrowserMCPConnection = {
       client,
+      tools: client.listTools(),
       references: 0,
       closed: false,
       closeListeners: new Set(),
     };
+    // Handle rejection immediately even if the resource load fails first.
+    void connection.tools.catch(() => undefined);
     client.onclose = () => invalidateBrowserMCPConnection(connection, false);
     client.onerror = () => invalidateBrowserMCPConnection(connection, true);
     return connection;
@@ -111,48 +110,26 @@ function releaseBrowserMCPConnection(connection: BrowserMCPConnection) {
   }, 0);
 }
 
-type ResourceCSP = {
-  connectDomains?: unknown;
-  resourceDomains?: unknown;
-  frameDomains?: unknown;
-  baseUriDomains?: unknown;
-};
-
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
-
-function cspSources(value: unknown, schemes: string[]): string[] {
-  if (!Array.isArray(value)) return [];
-  const allowed = new Set(schemes);
-  return value.filter((source): source is string => {
-    if (typeof source !== "string" || /[\s;'\"]/.test(source)) return false;
-    const match = source.match(/^([a-z]+):\/\/([^/]+)$/i);
-    return Boolean(match && allowed.has(match[1].toLowerCase()));
-  });
-}
-
-export function mcpAppCSP(meta: unknown): string {
-  const csp = record(record(record(meta)?.ui)?.csp) as ResourceCSP | undefined;
-  const connect = cspSources(csp?.connectDomains, ["http", "https", "ws", "wss"]);
-  const resources = cspSources(csp?.resourceDomains, ["http", "https"]);
-  const frames = cspSources(csp?.frameDomains, ["http", "https"]);
-  const bases = cspSources(csp?.baseUriDomains, ["http", "https"]);
-  const resourceSuffix = resources.length ? ` ${resources.join(" ")}` : "";
-  const directives = [
-    "default-src 'none'",
-    `script-src 'self' 'unsafe-inline'${resourceSuffix}`,
-    `style-src 'self' 'unsafe-inline'${resourceSuffix}`,
-    `img-src 'self' data:${resourceSuffix}`,
-    `media-src 'self' data:${resourceSuffix}`,
-    // The apps build inlines their woff2 files as data: URIs; without this
-    // every embedded view falls back to the system font.
-    `font-src 'self' data:${resourceSuffix}`,
-    `connect-src ${connect.length ? connect.join(" ") : "'none'"}`,
-  ];
-  if (frames.length) directives.push(`frame-src ${frames.join(" ")}`);
-  if (bases.length) directives.push(`base-uri ${bases.join(" ")}`);
-  return `${directives.join("; ")};`;
+type CachedResource = { text: string; _meta?: unknown };
+const resources = new Map<string, { pending: Promise<CachedResource>; expires: number }>();
+async function cachedResource(client: Client, uri: string): Promise<CachedResource> {
+  const existing = resources.get(uri);
+  if (existing && existing.expires > Date.now()) return existing.pending;
+  const entry = { pending: Promise.resolve({ text: "" }) as Promise<CachedResource>, expires: Infinity };
+  entry.pending = client.readResource({ uri }).then(resource => {
+    const first = resource.contents[0];
+    if (resource.contents.length !== 1 || !first || !("text" in first) || !first.text) throw new InvalidMCPAppResourceError("MCP App resource has no HTML content");
+    if (first.uri !== uri) throw new InvalidMCPAppResourceError("MCP App resource URI does not match the requested URI");
+    if (first.mimeType !== mcpAppMIME) throw new InvalidMCPAppResourceError("MCP App resource has an unsupported MIME type");
+    const ttl = record(resource)?.ttlMs;
+    entry.expires = Date.now() + (typeof ttl === "number" && ttl > 0 ? ttl : 300_000);
+    return { text: first.text, _meta: first._meta };
+  }).catch(cause => { if (resources.get(uri) === entry) resources.delete(uri); throw cause; });
+  resources.set(uri, entry);
+  return entry.pending;
 }
 
 function enforceMCPAppCSP(html: string, meta: unknown): string {
@@ -163,11 +140,13 @@ function enforceMCPAppCSP(html: string, meta: unknown): string {
   return `<!doctype html><html><head>${tag}</head><body>${html}</body></html>`;
 }
 
-function userText(blocks: Array<Record<string, unknown>>): string {
-  return blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n");
+export default function MCPAppFrame({ content: value }: { content: unknown }) {
+  const content = mcpAppContent(value);
+  if (!content) return <Alert color="bad" m="md">This view could not be loaded. Please try again.</Alert>;
+  return <ValidatedMCPAppFrame content={content} />;
 }
 
-export default function MCPAppFrame({ content, onMessage }: { content: MCPAppContent; onMessage: (text: string) => Promise<void> }) {
+function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const clientRef = useRef<Client | null>(null);
   const connectionRef = useRef<BrowserMCPConnection | null>(null);
@@ -176,6 +155,30 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
   // The app reports its own size through the bridge; the floor only covers
   // the moment before the first report.
   const minimumHeight = 240;
+  const [displayMode, setDisplayMode] = useState<"inline" | "fullscreen">("inline");
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const modeRef = useRef(displayMode);
+  modeRef.current = displayMode;
+  const changeDisplayMode = (mode: "inline" | "fullscreen") => {
+    setDisplayMode(mode);
+    bridgeRef.current?.setHostContext({ theme: colorSchemeRef.current, displayMode: mode, availableDisplayModes: ["inline", "fullscreen"] });
+    if (mode === "inline" && document.activeElement !== iframeRef.current) iframeRef.current?.focus();
+  };
+  useEffect(() => {
+    if (displayMode !== "fullscreen") return;
+    closeRef.current?.focus();
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); changeDisplayMode("inline"); } };
+    // Tab inside the sandbox never reaches the host keydown listener. Native
+    // focus leaving its last control must still stay in this full-screen view.
+    const containFocus = (event: FocusEvent) => {
+      if (!iframeRef.current?.parentElement?.contains(event.target as Node)) closeRef.current?.focus();
+    };
+    window.addEventListener("keydown", escape);
+    document.addEventListener("focusin", containFocus);
+    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", escape); document.removeEventListener("focusin", containFocus); };
+  }, [displayMode]);
   const [height, setHeight] = useState(minimumHeight);
   const [error, setError] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);
@@ -188,14 +191,15 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
   colorSchemeRef.current = colorScheme;
 
   useEffect(() => {
-    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: "inline" });
+    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: modeRef.current, availableDisplayModes: ["inline", "fullscreen"] });
   }, [colorScheme]);
 
-  useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resourceUri]);
+  useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resource_uri]);
 
   useEffect(() => {
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    setDisplayMode("inline");
     setHTML("");
     setError("");
     const scheduleReconnect = () => {
@@ -217,11 +221,8 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         connectionRef.current = connection;
         connection.closeListeners.add(reconnect);
         clientRef.current = connection.client;
-        const resource = await connection.client.readResource({ uri: content.resourceUri });
-        const first = resource.contents[0];
-        if (!first || !("text" in first) || !first.text) throw new InvalidMCPAppResourceError("MCP App resource has no HTML content");
-        if (first.uri !== content.resourceUri) throw new InvalidMCPAppResourceError("MCP App resource URI does not match the requested URI");
-        if (first.mimeType !== mcpAppMIME) throw new InvalidMCPAppResourceError("MCP App resource has an unsupported MIME type");
+        const first = await cachedResource(connection.client, content.resource_uri);
+        await connection.tools;
         if (!disposed) {
           reconnectAttemptRef.current = 0;
           setHTML(enforceMCPAppCSP(first.text, first._meta));
@@ -250,7 +251,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
       clientRef.current = null;
       connectionRef.current = null;
     };
-  }, [content.resourceUri, connectionGeneration]);
+  }, [content.resource_uri, connectionGeneration]);
 
   async function connectBridge() {
     const iframe = iframeRef.current;
@@ -260,26 +261,34 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
       const bridge = new AppBridge(
         null,
         { name: "Fanout", version: "0.2.0" },
-        { openLinks: {}, serverTools: {}, logging: {} },
-        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline" } },
+        { serverTools: {}, logging: {} },
+        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } },
       );
-      bridge.oncalltool = (params, extra) => mcpClient.callTool(params, { signal: extra.mcpReq.signal });
+      const connection = connectionRef.current;
+      if (!connection) throw new Error("MCP connection unavailable");
+      bridge.oncalltool = async (params, extra) => {
+        const tools = await connection.tools;
+        const tool = tools.tools.find(tool => tool.name === params.name);
+        const visibility = record(record(tool?._meta)?.ui)?.visibility;
+        if (!Array.isArray(visibility) || !visibility.includes("app") || /^(?:create|edit|replace|restore|delete)_/.test(params.name)) throw new Error("This tool is unavailable in the app");
+        return mcpClient.callTool(params, { signal: extra.mcpReq.signal });
+      };
+      bridge.onrequestdisplaymode = async ({ mode }) => {
+        if (mode !== "inline" && mode !== "fullscreen") return { mode: modeRef.current };
+        changeDisplayMode(mode);
+        return { mode };
+      };
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
-        if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.ceil(requested) + 32)));
+        if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.round(requested))));
       };
-      bridge.onmessage = async ({ content: blocks }) => {
-        const text = userText(blocks as Array<Record<string, unknown>>);
-        if (!text) return { isError: true };
-        await onMessage(text);
-        return {};
-      };
+      bridge.onmessage = async () => ({ isError: true });
       bridge.oninitialized = async () => {
-        await bridge.sendToolInput({ arguments: content.toolInput ?? {} });
+        await bridge.sendToolInput({ arguments: content.tool_input ?? {} });
         await bridge.sendToolResult({
-          content: [{ type: "text", text: JSON.stringify(content.toolResult ?? {}) }],
-          structuredContent: content.toolResult as Record<string, unknown> | undefined,
-          isError: content.isError,
+          content: [{ type: "text", text: JSON.stringify(content.tool_result ?? {}) }],
+          structuredContent: content.tool_result as Record<string, unknown> | undefined,
+          isError: content.is_error,
         });
       };
       await bridge.connect(new PostMessageTransport(iframe.contentWindow, iframe.contentWindow));
@@ -291,5 +300,11 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
 
   if (error) return <Alert color="bad" m="md">{error}</Alert>;
   if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
-  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
+  // Keep the iframe in the same DOM position: reparenting or remounting reloads the app.
+  return <FocusTrap active={displayMode === "fullscreen"}><Box data-app-fullscreen={displayMode === "fullscreen" ? "" : undefined}
+    role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Fanout analysis view" : undefined}
+    bg="var(--mantine-color-body)" style={displayMode === "fullscreen" ? { position: "fixed", inset: 0, zIndex: 1000, display: "flex", flexDirection: "column" } : undefined}>
+    {displayMode === "fullscreen" && <Box p="xs" ta="right"><Button ref={closeRef} data-autofocus size="compact-sm" variant="default" aria-label="Close analysis view" onClick={() => changeDisplayMode("inline")}>Close</Button></Box>}
+    <Box component="iframe" tabIndex={0} ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height: displayMode === "fullscreen" ? "100%" : height, ...(displayMode === "fullscreen" ? { flex: "1 1 0", minHeight: 0 } : {}) }} onLoad={() => void connectBridge()} />
+  </Box></FocusTrap>;
 }

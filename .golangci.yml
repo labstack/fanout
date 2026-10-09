@@ -5,6 +5,8 @@ run:
 
 linters:
   default: standard
+  enable:
+    - unused
   exclusions:
     generated: lax
     presets:
@@ -17,5 +19,3 @@ linters:
         text: "Close|Remove|Sscanf|Walk|Scan|Read|Export"
       - linters: [staticcheck]
         text: "QF"
-      - linters: [unused]
-        path: cmd/

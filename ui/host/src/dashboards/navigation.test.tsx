@@ -2,6 +2,7 @@ import { act, type ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DashboardSearch } from "./search";
+import "../routes/dashboards.$dashboardId";
 
 const mocks = vi.hoisted(() => ({ navigate: vi.fn(), component: undefined as ComponentType | undefined }));
 vi.mock("@tanstack/react-router", () => ({
@@ -13,14 +14,13 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("./page", () => ({
   DashboardPage: ({ onSearch, onOpen }: { onSearch(next: DashboardSearch, replace?: boolean): void; onOpen(id: string): void }) => <>
-    <button onClick={() => onSearch({ range: "1h", drill: "trace" }, false)}>Drill</button>
+    <button onClick={() => onSearch({ range: "1h", drill: JSON.stringify({panel_id: "errors", kind: "traces", from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", window_from: "2026-10-01T12:00:00Z", window_to: "2026-10-01T13:00:00Z", dimensions: {}}) }, false)}>Drill</button>
     <button onClick={() => onSearch({ range: "1h", vars: { service: "cart" } }, true)}>Variable</button>
     <button onClick={() => onSearch({ from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z" }, false)}>Brush</button>
     <button onClick={() => onSearch({ range: "1h", view: "errors" })}>Panel view</button>
     <button onClick={() => onOpen("checkout")}>Another dashboard</button>
   </>,
 }));
-import "../routes/dashboards.$dashboardId";
 
 afterEach(() => { mocks.navigate.mockClear(); document.body.innerHTML = ""; });
 it("preserves scroll for drill, variable, brush and panel-view search updates", async () => {
@@ -33,6 +33,7 @@ it("preserves scroll for drill, variable, brush and panel-view search updates", 
       expect(mocks.navigate.mock.lastCall?.[0]).toMatchObject({ params: { dashboardId: "cart" }, resetScroll: false });
     }
     expect(mocks.navigate.mock.calls[0][0].replace).toBe(false);
+    expect(mocks.navigate.mock.calls[0][0].search.drill).toMatchObject({panel_id: "errors", kind: "traces"});
     expect(mocks.navigate.mock.calls[1][0].replace).toBe(true);
     expect(mocks.navigate.mock.calls[2][0].search).toEqual({ from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z" });
     await act(async () => host.querySelectorAll("button")[4].click());

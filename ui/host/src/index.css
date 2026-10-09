@@ -37,21 +37,6 @@ body,
   min-height: 100%;
 }
 
-.dashboard-grid {
-  min-height: 420px;
-}
-
-.dashboard-table {
-  table-layout: fixed;
-  width: 100%;
-}
-
-.dashboard-dimension-nowrap {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .chat-composer-field {
   background: var(--mantine-color-body);
   transition: border-color 150ms ease, box-shadow 150ms ease;
@@ -89,22 +74,6 @@ body,
   .rail-row-actions {
     opacity: 1;
   }
-}
-
-.react-grid-item.react-grid-placeholder {
-  border-radius: var(--mantine-radius-lg);
-  background: var(--mantine-primary-color-filled);
-  opacity: 0.14;
-}
-
-.react-grid-item > .react-resizable-handle {
-  opacity: 0;
-  transition: opacity 150ms ease;
-}
-
-.react-grid-item:hover > .react-resizable-handle,
-.react-grid-item:focus-within > .react-resizable-handle {
-  opacity: 0.55;
 }
 
 /* The chat pane fills the space under the header; messages scroll inside it
@@ -153,6 +122,14 @@ body,
   margin-bottom: var(--mantine-spacing-xs);
 }
 
+.chat-markdown--provisional {
+  color: var(--mantine-color-dimmed);
+}
+
+.chat-message--provisional .chat-message-meta {
+  opacity: 1;
+}
+
 .chat-markdown :where(p, ul, ol) {
   margin-top: 0;
   margin-bottom: var(--mantine-spacing-sm);
@@ -187,30 +164,23 @@ body,
   font-family: inherit;
 }
 
-.panel-markdown {
-  font-size: 14px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
+/* App snapshots use one quiet, aligned disclosure row in either state. */
+.chat-app-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--mantine-color-dimmed);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+  border-radius: inherit;
 }
-
-.panel-markdown :where(p, ul, ol) {
-  margin: 0 0 0.5em;
-}
-
-.panel-markdown code {
-  font-family: var(--mantine-font-family-monospace);
-  font-size: 12px;
-}
-
-/* Route and viewport changes must settle before the next paint. Editing keeps
-   react-grid-layout's drag/resize transitions. */
-.dashboard-grid:not(.dashboard-grid-editing) {
-  transition: none;
-}
-.dashboard-grid:not(.dashboard-grid-editing) > .react-grid-item {
-  transition: none;
-}
-
-.dashboard-panel-padding {
-  padding-inline: 16px;
-}
+.chat-app-chevron { display: flex; align-items: center; flex: none; }
+.chat-app-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-app-toggle:hover { background: var(--mantine-color-default-hover); }
+.chat-app-toggle:focus-visible { outline: 2px solid var(--mantine-primary-color-filled); outline-offset: -2px; }

@@ -1,0 +1,6 @@
+import type { Frame } from "../../panels/types";
+export const names = ["frontend-proxy", "frontend", "load-generator", "cart", "checkout", "payment", "shipping", "quote", "currency", "product-catalog", "recommendation", "ad", "email", "accounting", "fraud-detection", "kafka", "cart-cache", "checkout-db", "image-provider", "otelcol-contrib"];
+export const routes = [[2,0],[0,1],[1,3],[1,4],[1,8],[1,9],[1,10],[1,11],[4,3],[4,5],[4,6],[4,8],[4,9],[4,12],[4,17],[6,7],[10,9],[3,16],[5,15],[4,15],[15,13],[15,14],[2,9]];
+const columns = ["kind", "service", "caller", "callee", "edge_type", "calls", "average_ms", "error_rate", "health", "p95_ms", "spans"];
+const rows = [...names.map((service, i) => ["node", service, "", "", "", null, null, i === 4 ? 7 : 0, i === 4 ? "unhealthy" : "healthy", 30, 1000]), ...routes.map(([a,b], i) => ["edge", "", names[a], names[b], "call", (i+1)*100, 20, i === 0 ? 5 : i === 1 ? 1 : 0, "", null, null])];
+export const demoFrame: Frame = { rows: rows.length, columns: columns.map(name => ({ name, type: ["calls", "average_ms", "error_rate", "p95_ms", "spans"].includes(name) ? "number" : "string", role: ["calls", "average_ms", "error_rate", "p95_ms", "spans"].includes(name) ? "measure" : "dimension" })), values: columns.map((_, i) => rows.map(row => row[i] as string | number | null)) };

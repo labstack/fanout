@@ -30,7 +30,7 @@ func TestRollupWatermarkPicksUpLateLowIngestedRow(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:             db,
+		DB: db, writeDB: db,
 		cfg:            config.Config{RetentionDays: 30},
 		rollupLagNanos: lag.Nanoseconds(),
 	}
@@ -95,7 +95,7 @@ func TestRollupWatermarkLagSurvivesChunkedCatchUp(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:             db,
+		DB: db, writeDB: db,
 		cfg:            config.Config{RetentionDays: 30},
 		rollupLagNanos: lag.Nanoseconds(),
 	}
@@ -157,7 +157,7 @@ func TestEdgeRollupWatermarkPicksUpLateChild(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:             db,
+		DB: db, writeDB: db,
 		cfg:            config.Config{RetentionDays: 30},
 		rollupLagNanos: lag.Nanoseconds(),
 	}

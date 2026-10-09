@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestM2FixDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
+func TestDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2, RetentionDays: 30}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
@@ -42,7 +42,7 @@ func TestM2FixDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
 	}
 }
 
-func TestM2FixDetectorCoalescesPendingPersistence(t *testing.T) {
+func TestDetectorCoalescesPendingPersistence(t *testing.T) {
 	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -102,7 +102,7 @@ func TestM2FixDetectorCoalescesPendingPersistence(t *testing.T) {
 	}
 }
 
-func TestM2DetectorAnnotationMapping(t *testing.T) {
+func TestDetectorAnnotationMapping(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2, RetentionDays: 30}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {

@@ -70,7 +70,9 @@ func TestOpenAIResponsesTextAndUsage(t *testing.T) {
 	)
 	var events []StreamEvent
 	err := openAIStream(t)(strings.NewReader(input), func(event StreamEvent) error {
-		events = append(events, event)
+		if event.Type != EventUsage {
+			events = append(events, event)
+		}
 		return nil
 	})
 	if err != nil {
@@ -153,6 +155,12 @@ func TestOpenAIResponsesIncomplete(t *testing.T) {
 			)
 			var stop StreamEvent
 			err := openAIStream(t)(strings.NewReader(input), func(event StreamEvent) error {
+				if event.Type == EventUsage {
+					if event.Usage == nil || event.Usage.InputTokens != 1 || event.Usage.OutputTokens != 2 {
+						t.Errorf("usage snapshot = %#v", event.Usage)
+					}
+					return nil
+				}
 				if event.Type != EventStop {
 					t.Errorf("unexpected event: %#v", event)
 				}

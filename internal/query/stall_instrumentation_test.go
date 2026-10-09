@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/metrics"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
-	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 // A rollup or a maintenance pass used to take its connection from the same
@@ -70,7 +70,7 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 	}
 
 	// The read pool is the one worth watching, so it is the one the gauges read.
-	if got := metrics.DuckDBPoolStatsForTest().MaxOpenConnections; got != 4 {
+	if got := int(metricFamily(t, "fanout_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 4 {
 		t.Fatalf("pool gauges read a pool with MaxOpenConnections = %d, want the read pool's 4", got)
 	}
 }
@@ -84,12 +84,12 @@ func TestSnapshotWaitIsMeasuredForReaders(t *testing.T) {
 	admitted := fmt.Sprintf("test-admitted-%d", time.Now().UnixNano())
 	refused := fmt.Sprintf("test-refused-%d", time.Now().UnixNano())
 	d := &Duck{}
-	before := testutil.CollectAndCount(metrics.ParquetReadWaitForTest())
+	before := len(metricFamily(t, "fanout_parquet_read_wait_seconds").Metric)
 	if err := d.lockParquetRead(context.Background(), admitted); err != nil {
 		t.Fatalf("lockParquetRead: %v", err)
 	}
 	d.parquetMu.RUnlock()
-	admittedCount := testutil.CollectAndCount(metrics.ParquetReadWaitForTest())
+	admittedCount := len(metricFamily(t, "fanout_parquet_read_wait_seconds").Metric)
 	if admittedCount != before+1 {
 		t.Fatalf("an admitted reader added %d wait series, want 1", admittedCount-before)
 	}
@@ -105,11 +105,11 @@ func TestSnapshotWaitIsMeasuredForReaders(t *testing.T) {
 	if err := d.lockParquetRead(ctx, refused); err == nil {
 		t.Fatal("reader entered a snapshot held by a publisher")
 	}
-	if refusals := testutil.ToFloat64(metrics.ParquetReadRefusalsForTest(refused)); refusals != 1 {
+	if refusals := counterValue(t, "fanout_parquet_read_refusals_total", "reader", refused); refusals != 1 {
 		t.Fatalf("refusals = %v, want 1", refusals)
 	}
 	// A refusal is not also counted as a wait: they are different failures.
-	if series := testutil.CollectAndCount(metrics.ParquetReadWaitForTest()); series != admittedCount {
+	if series := len(metricFamily(t, "fanout_parquet_read_wait_seconds").Metric); series != admittedCount {
 		t.Fatalf("a refused reader added %d wait series, want 0", series-admittedCount)
 	}
 }
@@ -220,7 +220,7 @@ func TestClosingADisplacedDuckLeavesTheGaugeSourceAlone(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatalf("close first: %v", err)
 	}
-	if got := metrics.DuckDBPoolStatsForTest().MaxOpenConnections; got != 3 {
+	if got := int(metricFamily(t, "fanout_duckdb_pool_max_open").Metric[0].GetGauge().GetValue()); got != 3 {
 		t.Fatalf("pool gauges read MaxOpenConnections = %d after a displaced Duck closed, want the live pool's 3", got)
 	}
 }
@@ -281,7 +281,7 @@ func TestStatementTimerExcludesTheWaitForAConnection(t *testing.T) {
 // statementSeconds reports the histogram's running total.
 func statementSeconds(t *testing.T) float64 {
 	t.Helper()
-	return metrics.DuckDBStatementSecondsForTest()
+	return metricFamily(t, "fanout_duckdb_statement_seconds").Metric[0].GetHistogram().GetSampleSum()
 }
 
 // Close is reached from error paths and from test cleanup, where a Duck may
@@ -294,4 +294,29 @@ func TestClosingADuckWithNoHandlesIsHarmless(t *testing.T) {
 	if err := empty.Close(); err != nil {
 		t.Fatalf("closing it again: %v", err)
 	}
+}
+
+func metricFamily(t *testing.T, name string) *dto.MetricFamily {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() == name {
+			return family
+		}
+	}
+	return &dto.MetricFamily{}
+}
+func counterValue(t *testing.T, name, label, value string) float64 {
+	t.Helper()
+	for _, metric := range metricFamily(t, name).Metric {
+		for _, pair := range metric.Label {
+			if pair.GetName() == label && pair.GetValue() == value {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-func TestM2RowsFixCandidateBound(t *testing.T) {
+func TestRowPanelCandidatesAreBounded(t *testing.T) {
 	for _, tc := range []struct{ sort, order string }{{"", "max(duration_ms) DESC"}, {"+start", "min(start_time) ASC"}, {"errors", "max(duration_ms) DESC"}} {
 		for _, limit := range []int{2, 1000, 2000} {
 			p := Panel{Viz: "traces", Query: &Query{From: "spans", Sort: tc.sort, Limit: limit}}
@@ -31,7 +31,7 @@ func TestM2RowsFixCandidateBound(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixProblems(t *testing.T) {
+func TestRowPanelsReportValidationProblems(t *testing.T) {
 	base := func(viz string) Panel {
 		p := Panel{ID: "p", Title: "Rows", Viz: viz, Query: &Query{From: "logs"}}
 		if viz == "traces" {
@@ -125,7 +125,7 @@ func TestM2RowsFixProblems(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixPatternRankingAndBound(t *testing.T) {
+func TestPatternRankingAndBound(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	var logs []telemetry.Log
 	for i, count := range []int{1, 3, 2} {
@@ -168,7 +168,7 @@ func TestM2RowsFixPatternRankingAndBound(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixRedactedExemplarHighlight(t *testing.T) {
+func TestRedactedExemplarHighlight(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	spans := []telemetry.Span{{Namespace: "shop", TraceID: "secret", SpanID: "root", ServiceName: "s", Name: "root", StartUnixNanos: n, EndUnixNanos: n + int64(time.Millisecond), DurationMS: 1, IngestedAt: n}}
@@ -192,7 +192,7 @@ func TestM2RowsFixRedactedExemplarHighlight(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixErroringRootRanking(t *testing.T) {
+func TestErroringRootRanking(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	var spans []telemetry.Span
@@ -222,7 +222,7 @@ func TestM2RowsFixErroringRootRanking(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixTrendMetadata(t *testing.T) {
+func TestRowPanelTrendsExposeResolvedIntervalAndLookback(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, nil, []telemetry.Log{{Body: "pattern", BodyTemplate: "pattern", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n}})
@@ -276,7 +276,7 @@ func TestM2RowsFixTrendMetadata(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixEmptyDiagnosisAndBodyCap(t *testing.T) {
+func TestEmptyDiagnosisAndBodyCap(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	long := strings.Repeat("界", 1990) + " token=s3cr3t " + strings.Repeat("尾", 30)
@@ -319,7 +319,7 @@ func TestM2RowsFixEmptyDiagnosisAndBodyCap(t *testing.T) {
 	}
 }
 
-func TestM2RowsExecuteAndRedact(t *testing.T) {
+func TestRowsExecuteAndRedact(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	at := fixtureStart.UnixNano()
 	logs := []telemetry.Log{
@@ -368,7 +368,7 @@ func TestM2RowsExecuteAndRedact(t *testing.T) {
 		t.Fatalf("unredacted search: %+v %v", got, err)
 	}
 }
-func TestM2RowsCap(t *testing.T) {
+func TestLogRowPanelsCapNewestRows(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	logs := make([]telemetry.Log, 1002)
 	for i := range logs {
@@ -392,7 +392,7 @@ func TestM2RowsCap(t *testing.T) {
 	}
 }
 
-func TestM2LogPatternsHonoursLimit50(t *testing.T) {
+func TestLogPatternsHonoursLimit50(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	logs := []telemetry.Log{}
 	for i := range 60 {
@@ -412,7 +412,7 @@ func TestM2LogPatternsHonoursLimit50(t *testing.T) {
 	}
 }
 
-func TestM2RowsNanosecondOrderingAndPatternTail(t *testing.T) {
+func TestRowsNanosecondOrderingAndPatternTail(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	start := fixtureStart
 	end := start.Add(30*time.Second + time.Nanosecond)
@@ -456,7 +456,7 @@ func TestM2RowsNanosecondOrderingAndPatternTail(t *testing.T) {
 	}
 }
 
-func TestM2RowsTraceSortsAndSentinel(t *testing.T) {
+func TestRowsTraceSortsAndSentinel(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := make([]telemetry.Span, 1002)
 	for i := range spans {
@@ -502,7 +502,7 @@ func TestM2RowsTraceSortsAndSentinel(t *testing.T) {
 	}
 }
 
-func TestM2RowsValidation(t *testing.T) {
+func TestRowsValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name, viz, from, sort, bucket, highlight string
 		measures, by                             []string

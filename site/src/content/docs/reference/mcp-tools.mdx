@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "14 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
+summary: "20 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -13,11 +13,28 @@ generated: true
     tool list rather than reading the registrations. Edit the generator, not
     this page. */}
 
-A Fanout instance serves MCP at `/mcp`. 14 tools, listed below exactly as the
-server reports them to a connecting client.
+A Fanout instance serves MCP at `/mcp`. 20 tools, listed below exactly as the
+server reports them to an Apps-enabled client. Ordinary clients receive the 17 model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
 and reaches nothing else.
+
+The catalog below includes MCP Apps helpers. App-only helpers are omitted from
+ordinary clients and model tool definitions. Interactive view tools return a
+`PanelFragment`: `{view, dashboard, results, vars?, trace?}`. Results match every
+dashboard panel id exactly once. Required `view` contains `kind` (`preset` or
+`query`) and `key`, a stable SHA-256 hash computed once by Go from the spec,
+captured window and variables. Cosmetic titles and IDs do not affect identity.
+The agent and host use this key and prefer presets when equivalent views repeat.
+Variables retain scalar, `$__all`, empty-list
+and multi-list values. Model text is a deterministic summary of at most 16 KiB;
+structured content is the same bounded full fragment persisted for reload, at
+most 256 KiB, with visible row truncation. Oversized authored spec/variables
+are rejected before execution at 128 KiB rather than changing their semantics.
+
+AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
+`tool_input`, `tool_result`, and `is_error`. Protocol `structuredContent`,
+`resourceUri`, `toolCallId`, `threadId`, and `runId` keep their spelling.
 
 | Tool | Changes state |
 |---|---|
@@ -26,19 +43,25 @@ and reaches nothing else.
 | [`get_dashboard`](#get_dashboard) | No — read-only |
 | [`get_intelligence_snapshot`](#get_intelligence_snapshot) | No — read-only |
 | [`get_observability_overview`](#get_observability_overview) | No — read-only |
+| [`get_panel_exemplars`](#get_panel_exemplars) | No — read-only |
 | [`get_service_dependencies`](#get_service_dependencies) | No — read-only |
 | [`get_service_performance`](#get_service_performance) | No — read-only |
 | [`get_service_topology`](#get_service_topology) | No — read-only |
 | [`get_telemetry_schema`](#get_telemetry_schema) | No — read-only |
 | [`inspect_trace`](#inspect_trace) | No — read-only |
+| [`list_dashboard_versions`](#list_dashboard_versions) | No — read-only |
 | [`list_dashboards`](#list_dashboards) | No — read-only |
 | [`preview_panels`](#preview_panels) | No — read-only |
+| [`query_panel_fragment`](#query_panel_fragment) | No — read-only |
+| [`query_telemetry`](#query_telemetry) | No — read-only |
 | [`replace_dashboard`](#replace_dashboard) | **Yes — replaces existing state** |
+| [`resolve_panel_variables`](#resolve_panel_variables) | No — read-only |
+| [`restore_dashboard_version`](#restore_dashboard_version) | **Yes — replaces existing state** |
 | [`search_logs`](#search_logs) | No — read-only |
 
 ## create_dashboard
 
-**Create dashboard** — Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. A dashboard is \{name, description, time:\{range}, variables, panels}. Each panel: \{id (lowercase), title, viz, width 1-12, query or sql}. viz: stat or gauge (one measure; gauge needs min and max), timeseries (bucket auto, at most one by), bar (one or two by), table (up to three by), text (content in Markdown), heatmap (bucket auto, no by), histogram (at most one by), scatter (exactly two measures in x then y order, one item dimension and an optional colour dimension), state_timeline (one measure, one item dimension, bucket auto and thresholds required). Rollup panel types are service_map (dependency graph) and health (overview metrics, error trend and health distribution). They require query.from=spans, no measures, by, bucket or sort, and only namespace/service equality filters with a literal or single-value variable; explicit casts and values with surrounding whitespace are rejected. Reads default to 400 services/edges and are capped at 400 even when query.limit is larger. Service scope applies before the limit; map nodes carry p95_ms and edges carry average_ms; error_rate is percent. Row panel types are logs, log_patterns and traces. Logs and traces take no measures, by or bucket. Patterns use count() by body_template. Each pattern returns dominant severity (most frequent; ties go to the higher severity), top service (most frequent; ties use service name ascending), count and a dense trend, computed in the same bounded query after redaction and scoped filters. Redaction applies before filtering, grouping, display and drill-down. Row panels cannot use SQL. "erroring" means slowest erroring traces: filter to erroring traces, then rank by root duration. Trace candidate ranking is approximate when filters exclude the root span, as with exemplars. Categorical charts use fixed-order colour slots. Categorical options.top defaults to 6, maximum 6. Structured panels: the server computes Other; series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N). Count, rate, sum and share rank largest first. Error rates require at least 20 requests for eligible Wilson ranking (z=1.96). Percentiles, quantile, avg, max and min require at least 20 non-null numeric samples for eligible value ranking and use better (explicit or inferred). Ineligible series follow eligible ones by sample count descending. Ties use sample count descending, then name ascending. SQL panels: series past six are left out, with a note. state_timeline defaults to 8 rows, maximum 20; other noncategorical panels use the same limits. Scatter supports options.x_scale and options.y_scale (log or linear), with distinct x_unit for x and unit for y, each inferred independently when omitted. Rows returned use the count unit. State timelines preserve null and absent buckets as unknown and keep the top items without merging them into Other. Item panels require structured queries. SQL panels cannot use scatter or state_timeline. Items rank by volume (row count) for top N. Previous-period comparison is not drawn for scatter or state_timeline. Distribution panels use a structured query with one count() measure and histogram: \{field: duration_ms, buckets: log2} for spans or \{field: value, buckets: explicit, temporality: cumulative|delta} for metrics. Negative span durations clamp to [0,1); +Inf goes to overflow; NaN is excluded because it is not a measurement. Metric histograms default to cumulative: last minus first per bound, clamped at zero; a series whose counter resets mid-window contributes 0 for that window. Delta histograms sum observation weights. query: \{from: spans|logs|metrics, where: [filter expressions], measures: [fn(field) as alias], by: [fields], bucket, sort, limit}. Measures: count(), rate() per second, error_rate() percent, share() percent, avg/min/max/sum(field), last(value) for metrics, p50/p75/p90/p95/p99(field), quantile(field, 0.999), count_distinct(field). Fields are columns from get_telemetry_schema or attributes['key'] / resource['key'] with the key written literally. Filters are SQL boolean expressions: service = $service, kind = 'SPAN_KIND_SERVER', status = 'STATUS_CODE_ERROR', http_route IN $routes, attributes['http.response.status_code']::INTEGER >= 500. Variables: \{name, kind: query|custom|constant|text, from, field, default, include_all}; $__all selects All and removes filters that use the variable. sql: one SELECT over spans, logs, metrics, service_rollup or edge_rollup that filters time with $__window(column). Use values exactly as get_telemetry_schema lists them. Example panel: \{"id":"latency","title":"Checkout latency","viz":"timeseries","width":8,"query":\{"from":"spans","where":["service = 'checkout'","kind = 'SPAN_KIND_SERVER'"],"measures":["p50(duration_ms)","p95(duration_ms)","p99(duration_ms)"],"bucket":"auto"},"unit":"ms","thresholds":[\{"value":1500,"status":"bad"}]}. state_timeline needs at least one threshold marked warn or bad, rather than only ok. Annotations attach only to timeseries, heatmap and state_timeline panels, scoped by service and namespace filters. drill: logs needs query.from=logs. Drill is not available on metrics. Every table format's field must exist in the returned frame; formatting cannot reference an absent column. A structured-table sparkline field must be a measure alias from that table's query. service_link needs variable to name the query or custom variable selected by the link. highlight applies to logs and log_patterns, at most 200 characters. split: deploy needs a service equality filter, as a literal or a single-value variable; other filters are allowed. When the service is All, a split: deploy panel shows the plain bar with a note explaining the missing service scope. Use service_map for dependency context, health for service health; neither proves causality. Example 1: Reference shapes; use only the types the question needs. \{"name":"Investigation shapes","annotations":\{"deploys":true,"anomalies":true},"variables":[\{"name":"service","kind":"query","from":"spans","field":"service"}],"panels":[\{"id":"latency_heat","title":"Latency over time","viz":"heatmap","query":\{"from":"spans","where":["service = $service"],"measures":["count()"],"bucket":"auto","histogram":\{"field":"duration_ms","buckets":"log2"}},"drill":"traces"},\{"id":"latency_hist","title":"Latency by operation","viz":"histogram","query":\{"from":"spans","where":["service = $service"],"measures":["count()"],"by":["operation"],"histogram":\{"field":"duration_ms","buckets":"log2"}},"drill":"traces"},\{"id":"items","title":"Calls versus tail latency","viz":"scatter","query":\{"from":"spans","where":["service = $service"],"measures":["count() as rows","p95(duration_ms) as tail_latency"],"by":["operation"]},"drill":"traces"},\{"id":"states","title":"Error states","viz":"state_timeline","query":\{"from":"spans","where":["service = $service"],"measures":["error_rate()"],"by":["operation"],"bucket":"auto"},"thresholds":[\{"value":5,"status":"bad"}],"drill":"traces"},\{"id":"log_rows","title":"Recent logs","viz":"logs","query":\{"from":"logs","where":["service = $service"],"sort":"time","limit":100},"drill":"logs"},\{"id":"patterns","title":"Repeated log patterns","viz":"log_patterns","query":\{"from":"logs","where":["service = $service"],"measures":["count()"],"by":["body_template"],"bucket":"auto","limit":50},"drill":"logs"},\{"id":"trace_rows","title":"Slow traces","viz":"traces","query":\{"from":"spans","where":["service = $service"],"sort":"duration_ms","limit":20},"drill":"traces"},\{"id":"map","title":"Service calls","viz":"service_map","query":\{"from":"spans"}},\{"id":"health","title":"Service health","viz":"health","query":\{"from":"spans"}}]} Example 2: Reference shapes; use only the types the question needs. \{"name":"Interaction shapes","variables":[\{"name":"service","kind":"query","from":"spans","field":"service"}],"panels":[\{"id":"hist","title":"Metric distribution","viz":"histogram","query":\{"from":"metrics","where":["service = $service"],"measures":["count()"],"histogram":\{"field":"value","buckets":"explicit"}}},\{"id":"table","title":"Service calls and trends","viz":"table","query":\{"from":"spans","measures":["count() as calls"],"by":["service"]},"options":\{"columns":[\{"field":"service","format":"service_link","variable":"service"},\{"field":"calls","format":"sparkline"}]}},\{"id":"prior","title":"Service calls one day earlier","viz":"bar","query":\{"from":"spans","measures":["count()"],"by":["service"]},"click":\{"set_variable":"service"},"time":\{"shift":"1d"}}]}
+**Create dashboard** — Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run. A dashboard is \{name, description, time:\{range}, variables, panels}. Each panel: \{id (lowercase), title, viz, width 1-12, query or sql}. viz: stat or gauge (one measure; gauge needs min and max), timeseries (bucket auto, at most one by), bar (one or two by), table (up to three by), text (content in Markdown), heatmap (bucket auto, no by), histogram (at most one by), scatter (exactly two measures in x then y order, one item dimension and an optional colour dimension), state_timeline (one measure, one item dimension, bucket auto and thresholds required). Rollup panel types are service_map (dependency graph) and health (overview metrics, error trend and health distribution). They require query.from=spans, no measures, by, bucket or sort, and only namespace/service equality filters with a literal or single-value variable; explicit casts and values with surrounding whitespace are rejected. Reads default to 400 services/edges and are capped at 400 even when query.limit is larger. Service scope applies before the limit; map nodes carry p95_ms and edges carry average_ms; error_rate is percent. Row panel types are logs, log_patterns and traces. Logs and traces take no measures, by or bucket. Patterns use count() by body_template. Patterns group only by body_template. Severity is the most frequent severity, ties choose the higher severity. Service is the most frequent service, ties choose ascending service name. Both describe the scoped, redacted events, not extra grouping dimensions. Each pattern returns dominant severity, top service, count and a dense trend, computed in the same bounded query after redaction and scoped filters. Redaction applies before filtering, grouping, display and drill-down. Row panels cannot use SQL. "erroring" means slowest erroring traces: filter to erroring traces, then rank by root duration. Trace candidate ranking is approximate when filters exclude the root span, as with exemplars. Categorical charts use fixed-order colour slots. Categorical options.top defaults to 6, maximum 6. Structured panels: the server computes Other; series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N). Count, rate, sum and share rank largest first. Error rates require at least 20 requests for eligible Wilson ranking (z=1.96). Percentiles, quantile, avg, max and min require at least 20 non-null numeric samples for eligible value ranking and use better (explicit or inferred). Ineligible series follow eligible ones by sample count descending. Ties use sample count descending, then name ascending. SQL panels: series past six are left out, with a note. state_timeline defaults to 8 rows, maximum 20; other noncategorical panels use the same limits. Scatter supports options.x_scale and options.y_scale (log or linear), with distinct x_unit for x and unit for y, each inferred independently when omitted. Rows returned use the count unit. State timelines preserve null and absent buckets as unknown and keep the top items without merging them into Other. Item panels require structured queries. SQL panels cannot use scatter or state_timeline. Items rank by volume (row count) for top N. Previous-period comparison is not drawn for scatter or state_timeline. Distribution panels use a structured query with one count() measure and histogram: \{field: duration_ms, buckets: log2} for spans or \{field: value, buckets: explicit, temporality: cumulative|delta} for metrics. Negative span durations clamp to [0,1); +Inf goes to overflow; NaN is excluded because it is not a measurement. Metric histograms default to cumulative: last minus first per bound, clamped at zero; a series whose counter resets mid-window contributes 0 for that window. Delta histograms sum observation weights. query: \{from: spans|logs|metrics, where: [filter expressions], measures: [fn(field) as alias], by: [fields], bucket, sort, limit}. Measures: count(), rate() per second, error_rate() percent, share() percent, avg/min/max/sum(field), last(value) for metrics, p50/p75/p90/p95/p99(field), quantile(field, 0.999), count_distinct(field). Fields are columns from get_telemetry_schema or attributes['key'] / resource['key'] with the key written literally. Filters are SQL boolean expressions: service = $service, kind = 'SPAN_KIND_SERVER', status = 'STATUS_CODE_ERROR', http_route IN $routes, attributes['http.response.status_code']::INTEGER >= 500. Variables: \{name, kind: query|custom|constant|text, from, field, default, include_all}; $__all selects All and removes filters that use the variable. sql: one SELECT over spans, logs, metrics, service_rollup or edge_rollup that filters time with $__window(column). Use values exactly as get_telemetry_schema lists them. Example panel: \{"id":"latency","title":"Checkout latency","viz":"timeseries","width":8,"query":\{"from":"spans","where":["service = 'checkout'","kind = 'SPAN_KIND_SERVER'"],"measures":["p50(duration_ms)","p95(duration_ms)","p99(duration_ms)"],"bucket":"auto"},"unit":"ms","thresholds":[\{"value":1500,"status":"bad"}]}. state_timeline needs at least one threshold marked warn or bad, rather than only ok. Annotations attach only to timeseries, heatmap and state_timeline panels, scoped by service and namespace filters. drill: logs needs query.from=logs. Drill is not available on metrics. Every table format's field must exist in the returned frame; formatting cannot reference an absent column. A structured-table sparkline field must be a measure alias from that table's query. service_link needs variable to name the query or custom variable selected by the link. highlight applies to logs and log_patterns, at most 200 characters. split: deploy needs a service equality filter, as a literal or a single-value variable; other filters are allowed. When the service is All, a split: deploy panel shows the plain bar with a note explaining the missing service scope. Use service_map for dependency context, health for service health; neither proves causality. Example 1: Reference shapes; use only the types the question needs. \{"name":"Investigation shapes","annotations":\{"deploys":true,"anomalies":true},"variables":[\{"name":"service","kind":"query","from":"spans","field":"service"}],"panels":[\{"id":"latency_heat","title":"Latency over time","viz":"heatmap","query":\{"from":"spans","where":["service = $service"],"measures":["count()"],"bucket":"auto","histogram":\{"field":"duration_ms","buckets":"log2"}},"drill":"traces"},\{"id":"latency_hist","title":"Latency by operation","viz":"histogram","query":\{"from":"spans","where":["service = $service"],"measures":["count()"],"by":["operation"],"histogram":\{"field":"duration_ms","buckets":"log2"}},"drill":"traces"},\{"id":"items","title":"Calls versus tail latency","viz":"scatter","query":\{"from":"spans","where":["service = $service"],"measures":["count() as rows","p95(duration_ms) as tail_latency"],"by":["operation"]},"drill":"traces"},\{"id":"states","title":"Error states","viz":"state_timeline","query":\{"from":"spans","where":["service = $service"],"measures":["error_rate()"],"by":["operation"],"bucket":"auto"},"thresholds":[\{"value":5,"status":"bad"}],"drill":"traces"},\{"id":"log_rows","title":"Recent logs","viz":"logs","query":\{"from":"logs","where":["service = $service"],"sort":"time","limit":100},"drill":"logs"},\{"id":"patterns","title":"Repeated log patterns","viz":"log_patterns","query":\{"from":"logs","where":["service = $service"],"measures":["count()"],"by":["body_template"],"bucket":"auto","limit":50},"drill":"logs"},\{"id":"trace_rows","title":"Slow traces","viz":"traces","query":\{"from":"spans","where":["service = $service"],"sort":"duration_ms","limit":20},"drill":"traces"},\{"id":"map","title":"Service calls","viz":"service_map","query":\{"from":"spans"}},\{"id":"health","title":"Service health","viz":"health","query":\{"from":"spans"}}]} Example 2: Reference shapes; use only the types the question needs. \{"name":"Interaction shapes","variables":[\{"name":"service","kind":"query","from":"spans","field":"service"}],"panels":[\{"id":"hist","title":"Metric distribution","viz":"histogram","query":\{"from":"metrics","where":["service = $service"],"measures":["count()"],"histogram":\{"field":"value","buckets":"explicit"}}},\{"id":"table","title":"Service calls and trends","viz":"table","query":\{"from":"spans","measures":["count() as calls"],"by":["service"]},"options":\{"columns":[\{"field":"service","format":"service_link","variable":"service"},\{"field":"calls","format":"sparkline"}]}},\{"id":"prior","title":"Service calls one day earlier","viz":"bar","query":\{"from":"spans","measures":["count()"],"by":["service"]},"click":\{"set_variable":"service"},"time":\{"shift":"1d"}}]}
 
 **Additive.** It creates something new and alters nothing that exists.
 
@@ -48,7 +71,7 @@ and reaches nothing else.
 
 ## edit_dashboard
 
-**Edit dashboard** — Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. See create_dashboard for the spec guide.
+**Edit dashboard** — Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run. See create_dashboard for the spec guide.
 
 **Replaces existing state.**
 
@@ -83,11 +106,35 @@ Takes no arguments.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
+
+## get_panel_exemplars
+
+**Panel exemplars** — Find bounded traces for a panel selection.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `from` | `string` | **yes** | Selection start as an RFC3339Nano UTC timestamp |
+| `panel_id` | `string` | **yes** | ID of the selected panel in dashboard |
+| `to` | `string` | **yes** | Selection end as an RFC3339Nano UTC timestamp, after from |
+| `bucket` | `object` | no | Optional selected bucket with its exact bounds |
+| `dimensions` | `object` | no | Exact dimension values of the selected series or row |
+| `kind` | `string` | no | Selection signal: traces or logs; defaults from the selected panel |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
 
 ## get_service_dependencies
 
@@ -106,15 +153,19 @@ Read-only. Calling it changes nothing.
 
 ## get_service_performance
 
-**Service performance explorer** — Inspect activity, errors, latency, endpoints, cross-signal correlation, and change over time for one service or the system.
+**Service performance explorer** — Display separate latency, error rate and request rate panels plus slow endpoints for one service or the system.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum endpoints to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional exact OpenTelemetry service name; omit for the whole system |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## get_service_topology
@@ -123,10 +174,14 @@ Read-only. Calling it changes nothing.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## get_telemetry_schema
@@ -146,13 +201,27 @@ Read-only. Calling it changes nothing.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum spans and correlated logs to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional service filter when choosing a recent trace |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `trace_id` | `string` | no | Exact trace ID; omit to inspect the most relevant recent error or slow trace |
 | `window` | `string` | no | Trace lookup window such as 1h, 24h, 168h, or 720h; defaults to 1h |
+
+## list_dashboard_versions
+
+**List dashboard versions** — List the authenticated user's saved versions of one dashboard, newest first, with author and message. The historical version identifies a restore target; restore_dashboard_version saves it as a new version.
+
+Read-only. Calling it changes nothing.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `id` | `string` | **yes** | Dashboard ID returned by list_dashboards or create_dashboard |
 
 ## list_dashboards
 
@@ -164,7 +233,7 @@ Takes no arguments.
 
 ## preview_panels
 
-**Preview panels** — Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.
+**Preview panels** — Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels omit elapsed_ms because they were not executed. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.
 
 Read-only. Calling it changes nothing.
 
@@ -175,9 +244,40 @@ Read-only. Calling it changes nothing.
 | `variables` | `array` | no | Variables the panels reference |
 | `vars` | `object` | no | Variable values to preview with; $__all selects All |
 
+## query_panel_fragment
+
+**Refresh telemetry panels** — Run every panel in a dashboard fragment; panel subsets are forbidden.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `compare` | `boolean` | no | Override previous-period comparison for the complete fragment |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
+| `widths` | `object` | no | Optional panel widths in pixels, keyed by panel ID |
+
+## query_telemetry
+
+**Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide. The authored spec plus vars must fit 128 KiB (131072 serialized JSON bytes); larger inputs are rejected with their actual size.
+
+Read-only. Calling it changes nothing.
+
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `panel` | `object` | **yes** | One v1 panel to display in the answer |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `variables` | `array` | no | Optional v1 variable definitions used by this panel |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
+
 ## replace_dashboard
 
-**Replace dashboard** — Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. See create_dashboard for the spec guide.
+**Replace dashboard** — Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run. See create_dashboard for the spec guide.
 
 **Replaces existing state.** Calling it twice with the same arguments leaves the same result as calling it once, but the first call has already overwritten what was there.
 
@@ -188,19 +288,48 @@ Read-only. Calling it changes nothing.
 | `base_version` | `integer` | no | Version you read; the call fails if someone saved since |
 | `message` | `string` | no | One line describing the change, shown in history |
 
+## resolve_panel_variables
+
+**Panel variable options** — Resolve variable options within a dashboard fragment window.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
+
+## restore_dashboard_version
+
+**Restore dashboard version** — Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. A missing or pruned target returns error_code dashboard_version_not_found; list_dashboard_versions shows retained versions. Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run.
+
+**Replaces existing state.**
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `id` | `string` | **yes** | Dashboard ID |
+| `version` | `integer` | **yes** | Positive stored version to restore; restoring creates a new version |
+
 ## search_logs
 
 **Log explorer** — Search and filter logs with a severity timeline and links back to correlated traces.
 
 Read-only. Calling it changes nothing.
 
+**View resource:** `ui://fanout/panels.html` (model and app visible).
+
 | Input | Type | Required | Means |
 |---|---|---|---|
+| `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
 | `limit` | `integer` | no | Maximum log entries to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
-| `search` | `string` | no | Optional case-insensitive text contained in the log body |
+| `search` | `string` | no | Optional case-insensitive text contained in the log body, at most 200 characters |
 | `service` | `string` | no | Optional exact OpenTelemetry service name |
 | `severity` | `string` | no | Optional exact severity such as ERROR, WARN, or INFO |
+| `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## Authentication

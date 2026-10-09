@@ -17,15 +17,15 @@ type SelectionBucket struct {
 	Upper *float64 `json:"upper,omitempty"`
 }
 type ExemplarRequest struct {
-	Dashboard  Dashboard         `json:"dashboard"`
-	PanelID    string            `json:"panel_id"`
-	Kind       string            `json:"kind,omitempty"`
-	Time       *Time             `json:"time,omitempty"`
-	From       time.Time         `json:"from"`
-	To         time.Time         `json:"to"`
-	Dimensions map[string]string `json:"dimensions,omitempty"`
-	Bucket     *SelectionBucket  `json:"bucket,omitempty"`
-	Vars       map[string]Value  `json:"vars,omitempty"`
+	Dashboard  Dashboard         `json:"dashboard" jsonschema:"Complete v1 dashboard specification; every panel is executed"`
+	PanelID    string            `json:"panel_id" jsonschema:"ID of the selected panel in dashboard"`
+	Kind       string            `json:"kind,omitempty" jsonschema:"Selection signal: traces or logs; defaults from the selected panel"`
+	Time       *Time             `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
+	From       time.Time         `json:"from" jsonschema:"Selection start as an RFC3339Nano UTC timestamp"`
+	To         time.Time         `json:"to" jsonschema:"Selection end as an RFC3339Nano UTC timestamp, after from"`
+	Dimensions map[string]string `json:"dimensions,omitempty" jsonschema:"Exact dimension values of the selected series or row"`
+	Bucket     *SelectionBucket  `json:"bucket,omitempty" jsonschema:"Optional selected bucket with its exact bounds"`
+	Vars       map[string]Value  `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 type Exemplar struct {
 	TraceID    string    `json:"trace_id"`

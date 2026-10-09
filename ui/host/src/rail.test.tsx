@@ -28,11 +28,8 @@ function dashboards() {
 function respond(input: RequestInfo | URL, init?: RequestInit) {
   const url = new URL(String(input), "http://localhost");
   if (url.pathname === "/api/dashboards") return dashboards();
-  if (url.pathname === "/api/observability/overview") {
-    return json({ schema: "test", summary: "", provenance: {}, data: { health: "unhealthy", counts: { healthy: 0, degraded: 0, unhealthy: 1 }, total_spans: 10, error_rate: 0.1, service_count: 2, services: [
-      { service: "checkout", health: "unhealthy", spans: 10, error_rate: 0.1, p50_ms: 4, p95_ms: 900, log_count: 0, metric_count: 0 },
-      { service: "payments", health: "healthy", spans: 8, error_rate: 0, p50_ms: 3, p95_ms: 40, log_count: 0, metric_count: 0 },
-    ] } });
+  if (url.pathname === "/api/telemetry/schema") {
+    return json({window:"1h",signals:{},measures:[],units:[],services:[{value:"checkout",count:10},{value:"payments",count:8}]});
   }
   if (url.pathname === "/api/agent/threads") return threadsPage(url.searchParams.get("q") ?? "");
   if (url.pathname.startsWith("/api/agent/threads/") && init?.method === "PATCH") return json({ title: "Checkout follow-up" });
@@ -101,6 +98,20 @@ describe("Rail", () => {
     await act(async () => newChat?.click());
     expect(handlers.onNewChat).toHaveBeenCalled();
     await act(async () => root.unmount());
+  });
+
+  it("loads persisted provenance across threads and reload without per-dashboard requests", async () => {
+    fetchMock.mockImplementation(async (input,init) => String(input)==="/api/dashboards" ? json({dashboards:[{id:"origin-board",name:"Origin board",origin:{thread_id:"source-thread",message_id:"user",request_excerpt:"Build latency <img src=x>"}}]}) : respond(input,init));
+    for(let reload=0;reload<2;reload++) {
+      const {root,handlers,render}=mount({activeThreadID:"different-thread"});
+      try{await act(async()=>render());await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).not.toBeNull());
+      const link=document.querySelector<HTMLAnchorElement>('[data-request-provenance]')!;expect(link.getAttribute('href')).toBe('/chat/source-thread');expect(link.textContent).toContain('Built from: Build latency <img src=x>');expect(link.querySelector('img')).toBeNull();
+      const modified=new MouseEvent('click',{bubbles:true,cancelable:true,ctrlKey:true});await act(async()=>link.dispatchEvent(modified));expect(modified.defaultPrevented).toBe(false);
+      await act(async()=>link.click());expect(handlers.onSelectThread).toHaveBeenCalledWith('source-thread');
+      }finally{await act(async()=>root.unmount());}
+    }
+    expect(fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards')).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(([input])=>String(input).includes('/api/dashboards/'))).toBe(false);
   });
 
   it("lists panel dashboard summaries from the new dashboard API", async () => {
@@ -173,7 +184,7 @@ describe("Rail", () => {
     const now = new Date();
     const sqliteTimestamp = (date: Date) => date.toISOString().slice(0, 19).replace("T", " ");
     const todayThread = { threadId: "thread-standup", title: "Standup notes", updatedAt: sqliteTimestamp(now) };
-    const olderThread = { threadId: "thread-legacy", title: "Legacy migration", updatedAt: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
+    const olderThread = { threadId: "thread-historical", title: "Historical chat", updatedAt: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/dashboards") return dashboards();
@@ -182,7 +193,7 @@ describe("Rail", () => {
     });
     const { root, render } = mount();
     await act(async () => render());
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Legacy migration"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Historical chat"));
     expect(document.body.textContent).toContain("Standup notes");
     const text = document.body.textContent ?? "";
     const todayIndex = text.indexOf("Today");
@@ -249,12 +260,49 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  it("keeps the service catalogue loading until its matching rows are ready", async () => {
+    let resolveSchema!: (response: Response) => void;
+    const schemaResponse = new Promise<Response>((resolve) => { resolveSchema = resolve; });
+    fetchMock.mockImplementation(async (input, init) => String(input).includes("/api/telemetry/schema") ? schemaResponse : respond(input, init));
+    const { root, render } = mount();
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+      await act(async () => setValue(document.querySelector('input[aria-label="Search chats, dashboards and services"]')!, "payments"));
+      await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/telemetry/schema"))).toBe(true));
+      expect(document.body.textContent).not.toContain("Services");
+      expect(document.body.textContent).not.toContain("No matching services");
+      await act(async () => resolveSchema(json({ services: [{ value: "payments", count: 8 }] })));
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Services"));
+      expect([...document.querySelectorAll(".rail-row")].some(row => row.textContent?.trim() === "payments")).toBe(true);
+    } finally {
+      resolveSchema(json({ services: [] }));
+      await act(async () => root.unmount());
+    }
+  });
+
   it("does not ask for the service catalogue until someone searches", async () => {
     const { root, render } = mount();
     await act(async () => render());
     await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/observability/overview"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/telemetry/schema"))).toBe(false);
     await act(async () => root.unmount());
+  });
+
+  it("refetches dashboard origins immediately after source-thread deletion",async()=>{
+    let deleted=false;
+    fetchMock.mockImplementation(async(input,init)=>{
+      if(String(input)==="/api/dashboards")return json({dashboards:[{id:"board",name:"Private board",...(deleted?{}:{origin:{thread_id:"thread-checkout",message_id:"request",request_excerpt:"Private request"}})}]});
+      if(init?.method==='DELETE'){deleted=true;return new Response(null,{status:204});}
+      return respond(input,init);
+    });
+    const {root,render}=mount();try{await act(async()=>render());await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).not.toBeNull());
+    const before=fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length;
+    await act(async()=>document.querySelector<HTMLButtonElement>('button[aria-label="Actions for Checkout latency"]')!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el=>el.textContent?.includes('Delete'))!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(el=>el.textContent?.trim()==='Delete')!.click());
+    await vi.waitFor(()=>expect(document.querySelector('[data-request-provenance]')).toBeNull());expect(fetchMock.mock.calls.filter(([input])=>String(input)==='/api/dashboards').length).toBeGreaterThan(before);expect(document.body.textContent).not.toContain('Private request');
+    }finally{await act(async()=>root.unmount());}
   });
 
   it("renames and deletes a chat", async () => {
@@ -281,4 +329,16 @@ describe("Rail", () => {
     expect(handlers.onDeletedThread).toHaveBeenCalledWith("thread-checkout");
     await act(async () => root.unmount());
   });
+
+it.each(["empty","error"])("keeps schema search %s visible without inventing services",async mode=>{
+ vi.stubGlobal("fetch",fetchMock);fetchMock.mockReset();document.body.innerHTML="";
+ fetchMock.mockImplementation(async(input,init)=>String(input).includes("/api/telemetry/schema")?json(mode==="error"?{message:"Unavailable"}:{services:[]},mode==="error"?503:200):respond(input,init));
+ const {root,render}=mount();await act(async()=>render());try {
+ await vi.waitFor(()=>expect(document.body.textContent).toContain("System overview"));
+ await act(async()=>setValue(document.querySelector('input[aria-label="Search chats, dashboards and services"]')!,"missing-service"));
+ await vi.waitFor(()=>expect(fetchMock.mock.calls.some(([input])=>String(input)==="/api/telemetry/schema?window=1h")).toBe(true),{timeout:1500});
+ await vi.waitFor(()=>expect(document.body.textContent).toContain(mode==="error"?"Services could not be searched":"No matching services"));
+ expect([...document.querySelectorAll(".rail-row")].some(n=>n.textContent?.trim()==="missing-service")).toBe(false);
+ }finally{await act(async()=>root.unmount());}
+});
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { healthBorderType, healthColor, healthSymbol, healthSymbolScale } from "../../chart";
-import { errorRateTone, latencyTone } from "../../health";
+import { healthBorderType, healthColor, healthSymbol } from "../../chart";
+import {serviceMapModel} from "../../panels/rollups";
+import {layoutServiceMapRaw} from "./dashboards/viz/service-map-layout";
+import {demoFrame} from "../tests/service-map-demo";
 
 describe("status encoding", () => {
   // Health was drawn in hue alone, which is the one channel a reader with a
@@ -15,26 +17,22 @@ describe("status encoding", () => {
     expect(healthColor("unknown")).not.toBe(healthColor("healthy"));
   });
 
-  it("colours a figure by its own threshold, not the row verdict", () => {
-    // Slow with no errors: the latency is the problem, and only the latency.
-    expect(latencyTone(2500)).toBe("bad");
-    expect(errorRateTone(0)).toBe("dimmed");
-    // Fast but failing: the inverse.
-    expect(latencyTone(12)).toBeUndefined();
-    expect(errorRateTone(0.1)).toBe("bad");
-    expect(errorRateTone(0.02)).toBe("warn");
+  it("preserves unknown health without inferring a verdict from traffic", () => {
+    const healthColumn=demoFrame.columns.findIndex(c=>c.name==="health");
+    const f=structuredClone(demoFrame);f.values[healthColumn]=f.values[healthColumn].map(()=>"unknown");
+    expect(serviceMapModel(f).nodes.every(n=>n.health==="unknown")).toBe(true);
+    expect(healthColor("unknown")).toBe("gray");
   });
 });
 
 describe("map symbols", () => {
-  // ECharts sizes by bounding box, so a diamond drew a third less area than a
-  // circle at the same size — the unhealthy node was the smallest on the map.
-  it("evens out the area each shape actually draws", () => {
-    const area = (health: string, fill: number) => (healthSymbolScale(health) ** 2) * fill;
-    const unhealthy = area("unhealthy", 0.5);
-    const degraded = area("degraded", 0.95);
-    const healthy = area("healthy", 0.785);
-    expect(unhealthy).toBeGreaterThan(healthy * 0.9);
-    expect(Math.abs(unhealthy - degraded) / degraded).toBeLessThan(0.05);
+  it("keeps card hit targets equal across health states", () => {
+    const widths=[];
+    for(const health of ["healthy","degraded","unhealthy"]) {
+      const f=structuredClone(demoFrame),index=f.columns.findIndex(c=>c.name==="health");f.values[index]=f.values[index].map(()=>health);
+      const layout=layoutServiceMapRaw(serviceMapModel(f),{width:1100,height:300});
+      widths.push(layout.nodes.map(n=>[n.width,n.height]));
+    }
+    expect(widths[0]).toEqual(widths[1]);expect(widths[1]).toEqual(widths[2]);
   });
 });

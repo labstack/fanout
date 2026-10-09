@@ -49,21 +49,6 @@ func NewEngine(
 	}
 }
 
-// Store exposes the underlying store for MCP tools.
-func (e *Engine) Store() *Store { return e.store }
-
-// RecompileRule compiles (or recompiles) the program for a single rule.
-func (e *Engine) RecompileRule(ruleID, expression string) error {
-	prog, err := CompileExpression(expression)
-	if err != nil {
-		return err
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.programs[ruleID] = prog
-	return nil
-}
-
 // RemoveRule removes a compiled program so it is not evaluated on future ticks.
 func (e *Engine) RemoveRule(ruleID string) {
 	e.mu.Lock()
@@ -92,16 +77,6 @@ func (e *Engine) Run(ctx context.Context) {
 			return
 		}
 	}
-}
-
-// BuildEnvForService returns the AlertEnv for a single service (for MCP test action).
-func (e *Engine) BuildEnvForService(ctx context.Context, service string) (AlertEnv, bool) {
-	envs := e.buildEnvs(ctx)
-	if envs == nil {
-		return AlertEnv{}, false
-	}
-	env, ok := envs[service]
-	return env, ok
 }
 
 // BuildAllEnvs returns all current AlertEnvs keyed by service name.
@@ -547,4 +522,16 @@ func abs(f float64) float64 {
 		return -f
 	}
 	return f
+}
+
+// RecompileRule compiles an expression and replaces the rule used on future evaluation ticks.
+func (e *Engine) RecompileRule(ruleID, expression string) error {
+	prog, err := CompileExpression(expression)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.programs[ruleID] = prog
+	return nil
 }

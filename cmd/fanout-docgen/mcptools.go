@@ -26,13 +26,19 @@ func renderMCPTools() ([]byte, error) {
 		return nil, err
 	}
 
+	modelVisible := 0
+	for _, tool := range tools {
+		if !tool.AppOnly {
+			modelVisible++
+		}
+	}
 	var b strings.Builder
 
 	b.WriteString("---\n")
 	b.WriteString("title: \"MCP tools\"\n")
 	b.WriteString("description: \"Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything.\"\n")
 	fmt.Fprintf(&b,
-		"summary: \"%s served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer.\"\n",
+		"summary: \"%s served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer.\"\n",
 		count(len(tools), "tool"),
 	)
 	b.WriteString("read_when:\n")
@@ -47,8 +53,8 @@ func renderMCPTools() ([]byte, error) {
 	b.WriteString("    this page. */}\n\n")
 
 	fmt.Fprintf(&b,
-		"A Fanout instance serves MCP at `/mcp`. %s, listed below exactly as the\nserver reports them to a connecting client.\n\n",
-		count(len(tools), "tool"),
+		"A Fanout instance serves MCP at `/mcp`. %s, listed below exactly as the\nserver reports them to an Apps-enabled client. Ordinary clients receive the %d model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.\n\n",
+		count(len(tools), "tool"), modelVisible,
 	)
 
 	// The closed-world sentence below is a safety claim a reader acts on. It is
@@ -71,6 +77,21 @@ func renderMCPTools() ([]byte, error) {
 
 	b.WriteString("Every tool is **closed-world**: it reads or writes what this instance holds\n")
 	b.WriteString("and reaches nothing else.\n\n")
+	b.WriteString("The catalog below includes MCP Apps helpers. App-only helpers are omitted from\n")
+	b.WriteString("ordinary clients and model tool definitions. Interactive view tools return a\n")
+	b.WriteString("`PanelFragment`: `{view, dashboard, results, vars?, trace?}`. Results match every\n")
+	b.WriteString("dashboard panel id exactly once. Required `view` contains `kind` (`preset` or\n")
+	b.WriteString("`query`) and `key`, a stable SHA-256 hash computed once by Go from the spec,\n")
+	b.WriteString("captured window and variables. Cosmetic titles and IDs do not affect identity.\n")
+	b.WriteString("The agent and host use this key and prefer presets when equivalent views repeat.\n")
+	b.WriteString("Variables retain scalar, `$__all`, empty-list\n")
+	b.WriteString("and multi-list values. Model text is a deterministic summary of at most 16 KiB;\n")
+	b.WriteString("structured content is the same bounded full fragment persisted for reload, at\n")
+	b.WriteString("most 256 KiB, with visible row truncation. Oversized authored spec/variables\n")
+	b.WriteString("are rejected before execution at 128 KiB rather than changing their semantics.\n\n")
+	b.WriteString("AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,\n")
+	b.WriteString("`tool_input`, `tool_result`, and `is_error`. Protocol `structuredContent`,\n")
+	b.WriteString("`resourceUri`, `toolCallId`, `threadId`, and `runId` keep their spelling.\n\n")
 
 	// Each row links to the tool's own section, whose heading is the tool name.
 	// That only works while the name is already what a slugger would produce
@@ -100,6 +121,12 @@ func renderMCPTools() ([]byte, error) {
 		fmt.Fprintf(&b, "## %s\n\n", tool.Name)
 		fmt.Fprintf(&b, "**%s** — %s\n\n", mdx(tool.Title), mdx(tool.Description))
 		fmt.Fprintf(&b, "%s\n\n", effectProse(tool))
+		if tool.AppOnly {
+			b.WriteString("**Visibility:** app only; no resource attachment.\n\n")
+		}
+		if tool.ResourceURI != "" {
+			fmt.Fprintf(&b, "**View resource:** `%s` (model and app visible).\n\n", tool.ResourceURI)
+		}
 
 		if len(tool.Inputs) == 0 {
 			b.WriteString("Takes no arguments.\n\n")

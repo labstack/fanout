@@ -36,12 +36,8 @@ pre-commit:
       run: bash scripts/with-duckdb.sh golangci-lint run
 
     - name: ui-host-lint
-      glob: "{ui/host/**/*.{ts,tsx},ui/theme.ts}"
+      glob: "{ui/host/**/*.{ts,tsx},ui/panels/**/*.{ts,tsx},ui/*.ts}"
       run: cd ui/host && bun run lint
-
-    - name: ui-apps-lint
-      glob: "{ui/apps/**/*.{ts,tsx},ui/theme.ts}"
-      run: cd ui/apps && bun run lint
 
 pre-push:
   jobs:

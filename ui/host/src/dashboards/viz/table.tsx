@@ -10,6 +10,7 @@ import { formatLabel, formatTimestamp, formatValue } from "../../../../panels/un
 import { Sparkline } from "./stat";
 import { columnDisplay, type ColumnFormat } from "../../../../panels/column-formats";
 import { makeDrill } from "../drill-state";
+import { drillHref } from "../search";
 import { RowText } from "./cell-text";
 import { statusInk, tint } from "../../../../panels/style";
 import { chartThemeFor } from "../../../../panels/compile";
@@ -20,14 +21,15 @@ type Row = Cell[];
 
 export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowIndex: number; columnIndex: number };
 
-export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell }: { panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
+export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks, foldConstants = true }: { foldConstants?: boolean; traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode }) {
   const dark=useComputedColorScheme("light")==="dark";
+  const traceInteractive = Boolean(onPoint);
   const pointCallback = useRef(onPoint);
   const variableCallback = useRef(onVariable);
   pointCallback.current = onPoint;
   variableCallback.current = onVariable;
   const frame = result.frame!;
-  const hidden = useMemo(() => new Set(logConstants(panel,frame).map(c=>c.name)),[panel,frame]);
+  const hidden = useMemo(() => new Set((foldConstants ? logConstants(panel,frame) : []).map(c=>c.name)),[panel,frame,foldConstants]);
   const [expanded,setExpanded] = useState<Set<number>>(new Set());
   useEffect(()=>setExpanded(new Set()),[frame]);
   const expandable = (column: Column) => ["body","body_template"].includes(column.name) || panel.options?.columns?.some(c=>c.field===column.name&&c.format==="log_template");
@@ -50,10 +52,9 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         if (format.format === "sparkline" && !panel.query && column.type !== "json") return <Text fz={12} c="dimmed" role="status">Sparkline requires an array column</Text>;
         const selection = { ...model.selection(model.rows[info.row.index]), trace_id: value === null ? undefined : String(value) };
         const target = format.format === "trace_link" ? makeDrill(panel, result, selection) : undefined;
-        const url = target ? new URL(window.location.href) : undefined;
-        if (url && target) url.searchParams.set("drill", JSON.stringify(target));
+        const traceHref = target && !traceLinks ? drillHref(window.location.href, target) : undefined;
         return <FormattedCell format={{ ...format, unit: format.unit ?? (column.unit as Unit | undefined) ?? panel.unit }} value={value} max={maxima[index]} panel={panel} better={result.better}
-          trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={url?.toString()}
+          trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={traceHref} traceButton={traceLinks === "button" && Boolean(target && selection.trace_id && traceInteractive)}
           onTrace={() => pointCallback.current?.(selection)} onService={(name, value) => variableCallback.current?.(name, value)} />;
       }
       if (column.type === "number" && typeof value === "number") {
@@ -67,14 +68,14 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
       if (column.type === "time" && typeof value === "number") return <Text size="sm" ff="monospace" style={{ whiteSpace: "nowrap" }} title={new Date(value).toISOString()}>{formatTimestamp(value)}</Text>;
       const text = value === null ? "—" : String(value);
       if (column.name === "trace_id") return <Text fz={12} ff="monospace" title={text} data-trace-id={text}>{text.slice(0,16)}</Text>;
-      return <Text fz={12} className="dashboard-dimension-nowrap" title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
+      return <Text fz={12} className="dashboard-dimension-nowrap" style={panel.viz === "traces" ? { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } : undefined} title={text} ff={column.type === "json" || /(_id|^id)$/.test(column.name) ? "monospace" : undefined}>{text}</Text>;
     },
     sortFn: column.role === "measure" ? "basic" : "alphanumeric",
   })).filter(c=>!hidden.has(c.id!)).sort((a,b)=> {
     if(panel.viz!=="log_patterns") return 0;
     const order=["severity","body_template","service","count","trend"];
     return order.indexOf(a.id!)-order.indexOf(b.id!);
-  }), [frame, panel, panel.options?.columns, result, firstMeasure, maxima, renderCell, model,hidden,dark]);
+  }), [frame, panel, panel.options?.columns, result, firstMeasure, maxima, renderCell, model,hidden,dark,traceLinks,traceInteractive]);
   const [sorting, setSorting] = useState<SortingState>([]);
   const table = useTable({ features, data: rows, columns, state: { sorting }, onSortingChange: setSorting });
   const firstDimension = panel.query?.by?.length ? frame.columns.findIndex(c => c.role === "dimension") : panel.query && frame.columns.some(c => c.name === "service") ? frame.columns.findIndex(c => c.name === "service") : frame.columns.findIndex(c => c.role === "dimension");
@@ -96,16 +97,17 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   };
   const logWidths:Record<string,number>={time:146,severity:90,service:120,trace_id:150,namespace:100};
   const fixedWidths=columns.flatMap(c=>logWidths[c.id!]? [logWidths[c.id!]]:[]);
+  const traceWidths: Record<string, string> = { trace_id: "136px", duration_ms: "124px", status: "84px" };
   const minWidth=panel.viz === "logs" && columns.some(c=>c.id==="body") ? fixedWidths.reduce((sum,n)=>sum+n,0)+Math.max(180,...fixedWidths) : panel.viz === "log_patterns" ? 660 : undefined;
   return <Box>
-    <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth}}>
-      <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "log_patterns" ? ({severity:"100px",service:"140px",count:"140px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
+    <Table className="dashboard-table" stickyHeader highlightOnHover fz={12} verticalSpacing={6} style={{minWidth, ...(panel.viz === "traces" ? { width: "100%", tableLayout: "fixed" } : {}) }}>
+      <colgroup>{columns.map(c=><col key={c.id} data-field={c.id} style={{width:panel.viz === "logs" ? ({time:"146px",severity:"90px",service:"120px",trace_id:"150px",namespace:"100px"} as Record<string,string>)[c.id!] : panel.viz === "traces" ? (frame.columns.find(column => column.name === c.id)?.type === "time" ? "146px" : traceWidths[c.id!]) : panel.viz === "log_patterns" ? ({severity:"100px",service:"140px",count:"140px",trend:"100px"} as Record<string,string>)[c.id!] : undefined}} />)}</colgroup>
       <Table.Thead>
         {table.getHeaderGroups().map((group) => <Table.Tr key={group.id}>
           {group.headers.map((header) => {
             const measure = frame.columns.find(c=>c.name===header.column.id)?.type === "number";
             return <Table.Th aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none"} key={header.id} ta={measure ? "right" : undefined}>
-              <UnstyledButton onClick={header.column.getToggleSortingHandler()} fz="xs" c="dimmed" ff="monospace" fw={500}>
+              <UnstyledButton onClick={header.column.getToggleSortingHandler()} fz="xs" c="dimmed" ff="monospace" fw={500} title={header.column.id} style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <table.FlexRender header={header} />{header.column.getIsSorted() === "asc" ? <CaretUp size={10} /> : header.column.getIsSorted() === "desc" ? <CaretDown size={10} /> : null}
               </UnstyledButton>
             </Table.Th>;
@@ -118,7 +120,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {
             const column=frame.columns.find(c=>c.name===cell.column.id)!;
-            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : undefined}>
+            return <Table.Td key={cell.id} data-field={column.name} ta={column.type === "number" ? "right" : undefined} style={panel.viz === "log_patterns" ? { overflow: "hidden", ...(column.name === "service" ? { minWidth: 140 } : {}), ...(column.name === "count" ? { minWidth: 140, paddingLeft: 12, paddingRight: 12 } : {}) } : panel.viz === "traces" && column.type !== "time" ? { overflow: "hidden" } : undefined}>
               {expandable(column) ? <div data-row-text style={{display:expanded.has(row.index)?"block":"-webkit-box",WebkitLineClamp:expanded.has(row.index)?undefined:2,WebkitBoxOrient:"vertical",maxHeight:expanded.has(row.index)?undefined:36,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"normal",overflowWrap:"anywhere",lineHeight:"18px"}}><table.FlexRender cell={cell}/></div> : <table.FlexRender cell={cell}/>}
             </Table.Td>;
           })}
@@ -129,9 +131,9 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   </Box>;
 }
 
-function FormattedCell({ format, value, max, panel, better, trend, traceHref, onTrace, onService }: {
+function FormattedCell({ format, value, max, panel, better, trend, traceHref, traceButton, onTrace, onService }: {
   format: ColumnFormat; value: Cell; max: number; panel: Panel; better?: "lower" | "higher"; trend?: (number | null)[];
-  traceHref?: string; onTrace: () => void; onService: (name: string, value: string) => void;
+  traceHref?: string; traceButton?: boolean; onTrace: () => void; onService: (name: string, value: string) => void;
 }): ReactNode {
   const dark=useComputedColorScheme("light")==="dark";
   const display = columnDisplay(format, value, max, panel, better, trend);
@@ -153,7 +155,7 @@ function FormattedCell({ format, value, max, panel, better, trend, traceHref, on
         {(typeof value === "number" || value === null) && <Text size="sm" ff="monospace" style={{ flex: "none" }}>{display.text}</Text>}
         {display.points && display.points.filter(p => p !== null).length >= 2 ? <Sparkline points={display.points} /> : <Text c="dimmed">No trend</Text>}
       </Box>;
-    case "trace_link": return traceHref ? <Anchor ff="monospace" fz={12} title={display.text} href={traceHref} onClick={event => {
+    case "trace_link": return traceButton ? <Anchor component="button" type="button" ff="monospace" fz={12} title={display.text} onClick={event => { event.stopPropagation(); onTrace(); }}>{display.text.slice(0,16)}</Anchor> : traceHref ? <Anchor ff="monospace" fz={12} title={display.text} href={traceHref} onClick={event => {
       if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
         event.preventDefault(); event.stopPropagation(); onTrace();
       }

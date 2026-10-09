@@ -2,196 +2,138 @@ import { graphlib, layout } from "@dagrejs/dagre";
 import type { ChartSize } from "../../../../panels/compile";
 import { healthGlyph, type ServiceGraph, type ServiceNode } from "../../../../panels/rollups";
 import { formatValue } from "../../../../panels/units";
-import { fonts } from "../../../../tokens";
+import { fonts, typeScale } from "../../../../tokens";
 const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
-type Point = { x: number; y: number };
-
-/** Fit routing and per-node cards horizontally; excess height remains scrollable. */
-export type CardWidths = Record<string, {full:number;compact:number;identity:number}>;
+const compactHeight = 20, fullHeight = 44;
+// A compact card must hold micro text plus its two one-pixel borders.
+const compactReadableScale = (typeScale.micro + 2) / compactHeight;
+export type Point = { x: number; y: number };
+export type CardWidths = Record<string, {full:number;compact:number}>;
+export type Box = ServiceNode & Point & { width: number; height: number; entry: boolean; uncalled: boolean };
+type CardLayout = { nodes: Box[]; routes: Point[][]; width: number; height: number; label?: Point; labelWidth: number };
+export type MapLayout = CardLayout & { full: CardLayout };
 export function serviceMapStructure(model: ServiceGraph, measureText?: ChartSize["measureText"]) {
   const widths: CardWidths = Object.create(null);
-  for (const n of model.nodes) widths[n.id] = {full:serviceCardWidth(n,false,measureText),compact:serviceCardWidth(n,true,measureText),identity:serviceCardWidth(n,true,measureText,false)};
-  const orderedWidths=Object.entries(widths).sort(([a],[b])=>order(a,b));
-  const topology=JSON.stringify([orderedWidths.map(([id])=>id),model.edges.map(e=>[e.id,e.caller,e.callee]).sort((a,b)=>order(a[0],b[0]))]);
-  const key=JSON.stringify([topology,orderedWidths]);
-  return {key,topology,widths};
-}
-export type Box = ServiceNode & Point & {width:number;height:number;entry:boolean;uncalled:boolean};
-export type Raw = {nodes:Box[];routes:Point[][];width:number;height:number;label?:Point};
-export type MapLayout = Raw & {compact:boolean;folded:boolean;metrics:boolean;centre:number;groups?:string[][]};
-export function layoutServiceMapRaw(model: ServiceGraph, size: ChartSize, cardWidths?: CardWidths): MapLayout {
-  const nodes = [...model.nodes].sort((a,b)=>order(a.id,b.id)), edges = [...model.edges].sort((a,b)=>order(a.id,b.id));
-  const outgoing = new Map<string, typeof edges>();
-  const incoming = new Set(edges.map(e=>e.callee));
-  for (const e of edges) { const list = outgoing.get(e.caller) ?? []; list.push(e); outgoing.set(e.caller,list); }
-  for (const list of outgoing.values()) list.sort((a,b)=>(b.request_rate??b.calls)-(a.request_rate??a.calls)||order(a.id,b.id));
-  const connected = new Set(edges.flatMap(e=>[e.caller,e.callee]));
-  const uncalled = nodes.filter(n=>!connected.has(n.id));
-  const entries = nodes.filter(n=>outgoing.has(n.id)&&!incoming.has(n.id));
-  const g = new graphlib.Graph({directed:true,multigraph:true});
-  g.setDefaultEdgeLabel(()=>({}));
-  for(const e of edges)g.setEdge(e.caller,e.callee,{weight:1,minlen:1},e.id);
-  const innerWidth=Math.max(1,size.width-24), innerHeight=Math.max(1,size.height-24);
-  // A simple fan-out has one leaf rank. If even the minimum full-card
-  // separation cannot fit it vertically, full-card trials cannot succeed.
-  const fanout = entries.length === 1 && uncalled.length === 0 && edges.length === nodes.length - 1
-    && incoming.size === nodes.length - 1 && edges.every(e => e.caller === entries[0].id);
-  const compactFirst = fanout && (nodes.length - 1) * 44 + Math.max(0, nodes.length - 2) * .1 > innerHeight;
-  let compact=compactFirst, height=compactFirst?20:44, nodesep=compactFirst?4:16, ranksep=48, metrics=true;
-  let widths=new Map<string,number>();
-  const entryIDs = new Set(entries.map(n=>n.id)), isolatedIDs = new Set(uncalled.map(n=>n.id));
-  const isolatedIndexes = new Map(uncalled.map((n,i)=>[n.id,i]));
-  const large = nodes.length > 60;
-  let foldedGroups: string[][] | undefined;
-  const configure=()=>{
-    widths=new Map(nodes.map(n=>[n.id,cardWidths?.[n.id]?.[compact ? metrics ? "compact" : "identity" : "full"] ?? serviceCardWidth(n,compact,size.measureText,metrics)]));
-    for(const n of nodes.filter(n=>connected.has(n.id)))g.setNode(n.id,{width:widths.get(n.id),height});
-  };
-  const run=()=>{
-    g.setGraph({rankdir:"LR",ranker:"network-simplex",acyclicer:"greedy",ranksep,nodesep,edgesep:compact?2:8,marginx:0,marginy:0});
-    if(g.nodeCount())layout(g);
-  };
-  const regular=():Raw=>{
-    // Isolated cards live beside the graph, sharing its height rather than
-    // adding a footer rank that clips otherwise fitted connected services.
-    const strip=compact&&uncalled.length>0&&uncalled.reduce((sum,n)=>sum+widths.get(n.id)!+4,0)<=innerWidth/.75;
-    const lane=uncalled.length&&!strip?Math.max(252,...uncalled.map(n=>widths.get(n.id)!))+8:0;
-    const graphTop=strip?17+height+4:0;
-    let isolatedX=0;
-    const isolatedLeft=new Map(uncalled.map(n=>{const x=isolatedX;isolatedX+=widths.get(n.id)!+4;return [n.id,x];}));
-    const boxes=nodes.map(n=>{
-      const i=isolatedIndexes.get(n.id) ?? -1, isolated=i>=0, width=widths.get(n.id)!;
-      const raw=isolated?{x:strip?isolatedLeft.get(n.id)!:0,y:strip?17:17+i*(height+4)}:{x:lane+g.node(n.id).x-width/2,y:graphTop+g.node(n.id).y-height/2};
-      return {...n,...raw,width,height,entry:entryIDs.has(n.id),uncalled:isolated};
-    });
-    const routes=edges.map(e=>(g.edge(e.caller,e.callee,e.id).points as Point[]).map(p=>({x:p.x+lane,y:p.y+graphTop})));
-    return {nodes:boxes,routes,width:Math.max(1,lane+(g.graph().width??0),...boxes.map(n=>n.x+n.width))+16,height:Math.max(1,graphTop+(g.graph().height??0),...boxes.map(n=>n.y+n.height)),label:uncalled.length?{x:0,y:12}:undefined};
-  };
-  const fitRanks=()=>{
-    for(const gap of compact?[24,16,8]:[48,24,8,0]){
-      ranksep=gap;run();if(regular().width*(compact?.75:.85)<=innerWidth)break;
-    }
-  };
-  if(large){compact=true;height=20;nodesep=4;metrics=false;configure();run();}
-  else {
-  configure();
-  if(compact)fitRanks();
-  else for(const gap of [16,8,.1]){nodesep=gap;fitRanks();if(regular().height<=innerHeight)break;}
-  if(!compact&&(regular().height>innerHeight||regular().width*.85>innerWidth)){
-    compact=true;height=20;nodesep=4;configure();fitRanks();
-  }
-  if(regular().width*.85>innerWidth){metrics=false;configure();fitRanks();}
-  }
-  let raw=regular(),folded=false;
-  const busyCentre=(boxes:Box[])=>{
-    const roots=entries.length?entries:[...nodes].sort((a,b)=>(b.request_rate??b.spans??0)-(a.request_rate??a.spans??0)||order(a.id,b.id)).slice(0,1);
-    const boxesByID = new Map(boxes.map(n=>[n.id,n]));
-    let y=0,weight=0;
-    for(const root of roots){
-      const traffic=Math.max(1e-9,root.request_rate??root.spans??(outgoing.get(root.id)??[]).reduce((n,e)=>n+(e.request_rate??e.calls),0)??1),seen=new Set<string>();
-      let current:string|undefined=root.id;
-      while(current&&!seen.has(current)){
-        seen.add(current);const n=boxesByID.get(current)!;y+=(n.y+n.height/2)*traffic;weight+=traffic;
-        current=outgoing.get(current)?.find(e=>!seen.has(e.callee))?.callee;
-      }
-    }
-    return weight?y/weight:raw.height/2;
-  };
-  // Keep separated roots in a common leading rank. Measure the extra routing
-  // lane before fitting; it must never be appended to already-fitted content.
-  const roots=raw.nodes.filter(n=>n.entry);
-  if(!large&&roots.length&&Math.max(...roots.map(n=>n.y+n.height))-Math.min(...roots.map(n=>n.y))>innerHeight/.85){
-    const left=Math.min(...raw.nodes.filter(n=>!n.uncalled).map(n=>n.x));
-    const perColumn=Math.max(1,Math.floor((innerHeight/.85+6)/(height+6))), columns=Math.ceil(roots.length/perColumn);
-    const cellWidth=Math.max(...roots.map(n=>n.width))+6;
-    if(columns>1||raw.nodes.some(n=>!n.entry&&!n.uncalled&&n.x<left+cellWidth)){
-      const extra=columns*cellWidth;
-      for(const n of raw.nodes)if(!n.entry&&!n.uncalled)n.x+=extra;
-      for(const route of raw.routes)for(const p of route)p.x+=extra;
-      raw.width+=extra;
-    }
-    const packHeight=Math.min(perColumn,roots.length)*(height+6)-6;
-    const top=clamp(busyCentre(raw.nodes)-packHeight/2,0,Math.max(0,raw.height-packHeight));
-    roots.sort((a,b)=>(b.request_rate??b.spans??0)-(a.request_rate??a.spans??0)||order(a.id,b.id)).forEach((n,i)=>{n.x=left+Math.floor(i/perColumn)*cellWidth;n.y=top+(i%perColumn)*(height+6);});
-    const boxesByID=new Map(raw.nodes.map(n=>[n.id,n]));
-    edges.forEach((e,i)=>{const source=boxesByID.get(e.caller)!;if(source.entry)raw.routes[i][0]={x:source.x+source.width,y:source.y+source.height/2};});
-  }
-  if(large||raw.width*.85>innerWidth){
-    folded=true;
-    // A long chain cannot fit readable full identities in a narrow LR view.
-    // Fold Dagre's ordered ranks into bounded rows, retaining the dependency
-    // ordering and routed edges while allowing only vertical navigation.
-    compact=true;height=20;nodesep=4;metrics=false;if(!large){configure();run();}
-    const groups:ServiceNode[][]=[entries];
-    const ranked = new Map<number,ServiceNode[]>();
-    for (const n of nodes) if(connected.has(n.id)&&!entryIDs.has(n.id)) {const x=g.node(n.id).x;const list=ranked.get(x)??[];list.push(n);ranked.set(x,list);}
-    for (const [,rank] of [...ranked].sort(([a],[b])=>a-b)) groups.push(rank.sort((a,b)=>g.node(a.id).y-g.node(b.id).y||order(a.id,b.id)));
-    groups.push(uncalled);
-    foldedGroups = groups.map(group=>group.map(n=>n.id));
-    const boxes:Box[]=[],capacity=Math.max(1,innerWidth/.85-16);
-    let y=0,label:Point|undefined;
-    for(const group of groups.filter(group=>group.length)){
-      if(group===uncalled){label={x:0,y:y+12};y+=17;}
-      let x=0;
-      for(const n of group){const width=widths.get(n.id)!;if(x&&x+width>capacity){x=0;y+=height+6;}boxes.push({...n,x,y,width,height,entry:entryIDs.has(n.id),uncalled:isolatedIDs.has(n.id)});x+=width+6;}
-      y+=height+6;
-    }
-    const boxesByID=new Map(boxes.map(n=>[n.id,n]));
-    const routes=edges.map(e=>{
-      const source=boxesByID.get(e.caller)!,target=boxesByID.get(e.callee)!;
-      return [{x:source.x+source.width/2,y:source.y+source.height},{x:target.x+target.width/2,y:target.y}];
-    });
-    raw={nodes:boxes,routes,width:Math.max(1,label?252:0,...boxes.map(n=>n.x+n.width))+16,height:Math.max(1,y-6),label};
-  }
-  if (compact && !foldedGroups) {
-    const ranks=new Map<number,Box[]>();
-    for(const n of raw.nodes) if(!n.entry&&!n.uncalled){const x=n.x+n.width/2;const rank=ranks.get(x)??[];rank.push(n);ranks.set(x,rank);}
-    foldedGroups=[raw.nodes.filter(n=>n.entry).map(n=>n.id),...[...ranks].sort(([a],[b])=>a-b).map(([,rank])=>rank.sort((a,b)=>a.y-b.y||order(a.id,b.id)).map(n=>n.id)),uncalled.map(n=>n.id)];
-  }
-  return {...raw,compact,folded,metrics,centre:busyCentre(raw.nodes),groups:foldedGroups};
+  for (const node of model.nodes) widths[node.id] = {full:serviceCardWidth(node,false,measureText),compact:serviceCardWidth(node,true,measureText)};
+  const ordered = Object.entries(widths).sort(([a], [b]) => order(a, b));
+  const topology = JSON.stringify([ordered.map(([id]) => id), model.edges.map(e => [e.id, e.caller, e.callee]).sort((a,b) => order(a[0],b[0]))]);
+  return { key: JSON.stringify([topology, ordered]), topology, widths };
 }
 
-/** Cheap scale/translation and folded-row packing; does not invoke Dagre. */
-export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: ChartSize) {
-  let raw: Raw = layout;
-  const {compact} = layout;
-  let {folded} = layout;
-  const innerWidth=Math.max(1,size.width-24),innerHeight=Math.max(1,size.height-24);
-  if (compact && layout.groups && (folded || raw.width*.75>innerWidth)) {
-    folded=true;
-    const byID = new Map(layout.nodes.map(n=>[n.id,n]));
-    const nodes:Box[]=[],capacity=Math.max(1,innerWidth/.85-16);
-    let y=0,label:Point|undefined;
-    for(const group of layout.groups.filter(group=>group.length)) {
-      if(byID.get(group[0])!.uncalled){label={x:0,y:y+12};y+=17;}
-      let x=0;
-      for(const id of group){const n=byID.get(id)!;if(x&&x+n.width>capacity){x=0;y+=26;}nodes.push({...n,x,y});x+=n.width+6;}
-      y+=26;
-    }
-    const boxes=new Map(nodes.map(n=>[n.id,n]));
-    const routes=[...model.edges].sort((a,b)=>order(a.id,b.id)).map(e=>{const s=boxes.get(e.caller)!,t=boxes.get(e.callee)!;return [{x:s.x+s.width/2,y:s.y+s.height},{x:t.x+t.width/2,y:t.y}];});
-    raw={nodes,routes,width:Math.max(1,label?252:0,...nodes.map(n=>n.x+n.width))+16,height:Math.max(1,y-6),label};
+/** One deterministic LR layout, independent of viewport size. Dagre owns all routes. */
+export function layoutServiceMapRaw(model: ServiceGraph, _size: ChartSize, cardWidths?: CardWidths): MapLayout {
+  const widths=cardWidths??serviceMapStructure(model,_size.measureText).widths;
+  return {...layoutCards(model,widths,true),full:layoutCards(model,widths,false)};
+}
+function layoutCards(model:ServiceGraph,cardWidths:CardWidths,compact:boolean):CardLayout {
+  const nodes = [...model.nodes].sort((a,b) => order(a.id,b.id)), edges = [...model.edges].sort((a,b) => order(a.id,b.id));
+  const connected = new Set(edges.flatMap(e => [e.caller,e.callee]));
+  const incoming = new Set(edges.map(e => e.callee)), outgoing = new Set(edges.map(e => e.caller));
+  const graph = new graphlib.Graph({ directed: true, multigraph: true });
+  graph.setDefaultEdgeLabel(() => ({}));
+  const cardHeight=compact?compactHeight:fullHeight;
+  graph.setGraph({ rankdir: "LR", ranker: "network-simplex", acyclicer: "greedy", ranksep: compact?16:32, nodesep: compact?4:8, edgesep: compact?2:8, marginx: 0, marginy: 0 });
+  const widths = new Map(nodes.map(n => [n.id, cardWidths[n.id][compact?"compact":"full"]]));
+  for (const node of nodes) if (connected.has(node.id)) graph.setNode(node.id, { width: widths.get(node.id), height: cardHeight });
+  for (const edge of edges) graph.setEdge(edge.caller, edge.callee, { weight: 1, minlen: 1 }, edge.id);
+  if (graph.nodeCount()) layout(graph);
+  const boxes: Box[] = nodes.filter(n => connected.has(n.id)).map(n => ({ ...n, x: graph.node(n.id).x - widths.get(n.id)! / 2, y: graph.node(n.id).y - cardHeight/2, width: widths.get(n.id)!, height: cardHeight, entry: outgoing.has(n.id) && !incoming.has(n.id), uncalled: false }));
+  const routes = edges.map(e => graph.edge(e.caller, e.callee, e.id).points as Point[]);
+  const uncalled = nodes.filter(n => !connected.has(n.id));
+  const rowWidth = uncalled.reduce((sum,n) => sum + widths.get(n.id)! + 12, 0) - (uncalled.length ? 12 : 0);
+  const labelWidth = uncalled.length ? textMeasure("No traced calls in this window", `12px ${fonts.display}`) : 0;
+  const width = Math.max(1, graph.graph().width ?? 0, rowWidth, labelWidth);
+  let rowX = (width - rowWidth) / 2;
+  const graphHeight = Math.max(0, graph.graph().height ?? 0, ...routes.flat().map(p => p.y), ...boxes.map(n => n.y + n.height));
+  // The isolated heading has a dedicated lane between routes and isolated cards.
+  const rowY = graphHeight + (graphHeight ? 40 : 24);
+  for (const node of uncalled) { boxes.push({ ...node, x: rowX, y: rowY, width: widths.get(node.id)!, height: cardHeight, entry: false, uncalled: true }); rowX += widths.get(node.id)! + 12; }
+  // Centre connected graph and its separate uncalled row within the same bounds.
+  const shift = (width - (graph.graph().width ?? 0)) / 2;
+  for (const node of boxes) if (!node.uncalled) node.x += shift;
+  for (const route of routes) for (const point of route) point.x += shift;
+  const byID = new Map(boxes.map(node => [node.id, node]));
+  // Dagre's diagonal attachment to the top/bottom of a variable-width card can
+  // cross another card in the target rank. Keep its intermediate routing lanes
+  // and approach through the rank gap, attaching to the facing sides instead.
+  for (const [index, edge] of edges.entries()) {
+    const source = byID.get(edge.caller)!, target = byID.get(edge.callee)!;
+    const middle = routes[index].slice(1, -1);
+    if (!middle.length || source === target) continue;
+    const forward = source.x < target.x;
+    const start = { x: source.x + (forward ? source.width : 0), y: source.y + source.height / 2 };
+    const end = { x: target.x + (forward ? 0 : target.width), y: target.y + target.height / 2 };
+    routes[index] = [start, { x: middle[0].x, y: start.y }, ...middle, { x: middle.at(-1)!.x, y: end.y }, end];
   }
-  const centre=folded ? raw.nodes.filter(n=>n.entry).reduce((sum,n,_,a)=>sum+(n.y+n.height/2)/a.length,0) : layout.centre;
-  const nodesByID=new Map(model.nodes.map(n=>[n.id,n])),edges=[...model.edges].sort((a,b)=>order(a.id,b.id));
-  // Include routed points and stroke/arrow room, not only card rectangles.
-  const points=raw.routes.flat(), minX=Math.min(0,...points.map(p=>p.x)),minY=Math.min(0,...points.map(p=>p.y));
-  const width=Math.max(raw.width,...points.map(p=>p.x+8))-minX;
-  const totalHeight=Math.max(raw.height,...points.map(p=>p.y))-minY;
-  const scale=Math.min(1,innerWidth/width,Math.max(compact?.75:.85,innerHeight/totalHeight));
-  const contentWidth=size.width,contentHeight=Math.max(size.height,totalHeight*scale+24);
-  const offsetX=(size.width-width*scale)/2+8*scale,offsetY=(contentHeight-totalHeight*scale)/2;
-  const fit=(p:Point)=>({x:offsetX+(p.x-minX)*scale,y:offsetY+(p.y-minY)*scale});
-  const positioned=raw.nodes.map(n=>({...n,...nodesByID.get(n.id),...fit(n),width:n.width*scale,height:n.height*scale}));
-  const entryBoxes=positioned.filter(n=>n.entry),maxScroll=Math.max(0,contentHeight-size.height);
-  const lower=Math.max(0,...entryBoxes.map(n=>n.y+n.height-size.height)),upper=Math.min(maxScroll,...entryBoxes.map(n=>n.y));
-  const initialScrollY=clamp(fit({x:0,y:centre}).y-size.height/2,lower,upper);
-  return {nodes:positioned,edges:edges.map((e,index)=>{
-    const points=raw.routes[index].map(fit);
-    const path=points.slice(1).reduce((path,p,i)=>{const prev=points[i],mid=(prev.x+p.x)/2;return `${path} C${mid},${prev.y} ${mid},${p.y} ${p.x},${p.y}`;},`M${points[0].x},${points[0].y}`);
-    return {...e,path};
-  }),scale,compact,folded,initialScrollY,contentWidth,contentHeight,uncalledLabel:raw.label?fit(raw.label):undefined};
+  return { nodes: boxes, routes, width, height: Math.max(1, graphHeight, uncalled.length ? rowY + cardHeight : 0), label: uncalled.length ? { x: (width - labelWidth) / 2, y: rowY - 24 } : undefined, labelWidth };
+}
+
+/** Contain when readable; larger graphs start at the floor around an entry. */
+export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: ChartSize) {
+  const wrapIsolated = (raw: CardLayout, floor: number): CardLayout => {
+    const isolated = raw.nodes.filter(n => n.uncalled);
+    if (!isolated.length) return raw;
+    const available = Math.max(1, size.width - 24) / floor;
+    const rows: Box[][] = [[]];
+    let used = 0;
+    for (const node of isolated) {
+      if (used && used + 12 + node.width > available) { rows.push([]); used = 0; }
+      rows.at(-1)!.push(node);
+      used += (used ? 12 : 0) + node.width;
+    }
+    const rowWidths = rows.map(row => row.reduce((sum, node) => sum + node.width, 0) + (row.length - 1) * 12);
+    const connected = raw.nodes.filter(n => !n.uncalled), points = raw.routes.flat();
+    const graphLeft = Math.min(...connected.map(n => n.x), ...points.map(p => p.x));
+    const graphWidth = connected.length ? Math.max(...connected.map(n => n.x + n.width), ...points.map(p => p.x)) - graphLeft : 0;
+    const width = Math.max(graphWidth, raw.labelWidth, ...rowWidths);
+    const shift = connected.length ? (width - graphWidth) / 2 - graphLeft : 0;
+    const nodes = connected.map(n => ({ ...n, x: n.x + shift }));
+    rows.forEach((row, index) => {
+      let x = (width - rowWidths[index]) / 2;
+      for (const node of row) {
+        nodes.push({ ...node, x, y: isolated[0].y + index * (node.height + 12) });
+        x += node.width + 12;
+      }
+    });
+    return { ...raw, nodes, routes: raw.routes.map(route => route.map(p => ({ ...p, x: p.x + shift }))), width, height: Math.max(...nodes.map(n => n.y + n.height)) };
+  };
+  const bounds=(raw:CardLayout)=>{
+    const points = raw.routes.flat();
+    const minX = Math.min(0, ...points.map(p => p.x)), minY = Math.min(0, ...points.map(p => p.y));
+    const width = Math.max(raw.width, ...points.map(p => p.x)) - minX;
+    const height = Math.max(raw.height, ...points.map(p => p.y)) - minY;
+    const graphBottom = Math.max(0, ...raw.routes.flat().map(p => p.y), ...raw.nodes.filter(n=>!n.uncalled).map(n=>n.y+n.height));
+    const rowY = raw.nodes.find(n=>n.uncalled)?.y;
+    const gap = rowY === undefined ? 0 : rowY - graphBottom;
+    const lane = rowY === undefined ? 0 : 32;
+    const scale = Math.min(Math.max(1, size.width - 24) / width, Math.max(1, size.height - 24 - lane) / Math.max(1,height-gap));
+    return {minX,minY,width,height,scale,graphBottom,rowY,gap,lane};
+  };
+  const full = wrapIsolated(layout.full, 1);
+  const compact=bounds(full).scale<1;
+  const raw=compact?wrapIsolated(layout, compactReadableScale):full;
+  const {minX,minY,width,height,scale:containScale,graphBottom,rowY,gap,lane}=bounds(raw);
+  const scale=Math.max(compact ? compactReadableScale : 1, Math.min(containScale,1));
+  const fittedHeight=(height-gap)*scale+lane;
+  const contentWidth=Math.max(size.width,width*scale+24),contentHeight=Math.max(size.height,fittedHeight+24);
+  const offsetX = (contentWidth - width * scale) / 2, offsetY = (contentHeight - fittedHeight) / 2;
+  const fit = (p: Point) => ({ x: offsetX + (p.x - minX) * scale, y: offsetY + (p.y - minY) * scale + (rowY !== undefined && p.y>=rowY ? lane-gap*scale : 0) });
+  const nodesByID = new Map(model.nodes.map(n => [n.id, n]));
+  const nodes = raw.nodes.map(n => ({ ...n, ...nodesByID.get(n.id), ...fit(n), width: n.width * scale, height: n.height * scale }));
+  const edges = [...model.edges].sort((a,b) => order(a.id,b.id)).map((e,index) => {
+    const points = raw.routes[index].map(fit);
+    // Straight Dagre segments stay inside their routing lanes; cubic smoothing
+    // could cut a corner across a neighbouring box.
+    const path = points.map((p,i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
+    return { ...e, points, path };
+  });
+  const entry=nodes.find(n=>n.entry) ?? nodes[0];
+  const initialView=entry ? {
+    x:clamp(size.width/2-entry.x-entry.width/2,size.width-contentWidth,0),
+    y:clamp(size.height/2-entry.y-entry.height/2,size.height-contentHeight,0),
+  } : {x:0,y:0};
+  return { nodes, edges, scale, compact, initialView, contentWidth, contentHeight, uncalledLabel: raw.label ? {x:(contentWidth-raw.labelWidth)/2,y:offsetY+(graphBottom-minY)*scale+8} : undefined };
 }
 
 export const nodeMetrics = (n: ServiceNode) => `${formatValue("per_second", n.request_rate)} · ${formatValue("percent", n.error_rate)} err · ${formatValue("ms", n.p95_ms)} p95`;
@@ -208,44 +150,28 @@ const shortDuration = (value: number | null) => value === null ? "—" : Number(
 const textMeasure: NonNullable<ChartSize["measureText"]> = (text,font)=>Array.from(text).length*Number(font.match(/([\d.]+)px/)?.[1]??11)*.6;
 const protectedName=(name:string)=>Array.from(name).length>24?Array.from(name).slice(0,24).join("")+"…":name;
 
-/** Keep the identity; optional metrics consume only its remaining space. */
-export function serviceCardLabels(n: ServiceNode, {width,scale,compact,measureText}: {width:number;scale:number;compact:boolean;measureText?:ChartSize["measureText"]}) {
-  const nameSize=Math.max(12,Math.ceil(1100/scale)/100),metricSize=Math.ceil(1100/scale)/100;
-  const measure=measureText??textMeasure,nameFont=`600 ${nameSize}px ${fonts.display}`,metricFont=`${metricSize}px ${fonts.display}`;
-  const name=protectedName(n.id),available=Math.max(0,width-14),glyph=measure(healthGlyph[n.health]??"○",nameFont);
-  const rate=`${shortNumber(n.request_rate)}/s`,error=shortError(n.error_rate);
-  const key=n.error_rate !== null && n.error_rate > 0 ? error : rate,pair=`${rate} · ${error}`,all=`${pair} · p95 ${shortDuration(n.p95_ms)}`;
-  const metric=compact?(measure(name,nameFont)+glyph+8+measure(key,metricFont)<=available?key:""):measure(all,metricFont)<=available?all:measure(pair,metricFont)<=available?pair:key;
-  const metricWidth=compact?measure(metric,metricFont):available;
-  const nameWidth=Math.max(0,available-glyph-4-(compact&&metric?metricWidth+4:0));
-  return {name,metric,nameSize,metricSize,nameWidth};
+/** Identity owns its line. Compact cards keep all metrics in the tooltip/Data view. */
+export function serviceCardLabels(n: ServiceNode, { width, scale, compact=false, measureText }: { width: number; scale: number; compact?:boolean; measureText?: ChartSize["measureText"] }) {
+  const nameSize = Math.max(12, typeScale.micro / scale), metricSize = typeScale.micro / scale;
+  const measure = measureText ?? textMeasure;
+  const available = Math.max(0, width - 12 / scale), glyph = measure(healthGlyph[n.health] ?? "○", `${nameSize}px ${fonts.display}`);
+  const name = protectedName(n.id);
+  const candidate = n.error_rate !== null && n.error_rate > 0 ? shortError(n.error_rate) : `${shortNumber(n.request_rate)}/s`;
+  const pair = `${shortNumber(n.request_rate)}/s · ${shortError(n.error_rate)}`;
+  const metric = compact ? "" : [`${pair} · p95 ${shortDuration(n.p95_ms)}`, pair, candidate].find(text => measure(text, `${metricSize}px ${fonts.display}`) <= available) ?? "";
+  return { name, metric, nameSize, metricSize, nameWidth: Math.max(0, available - glyph - 4 / scale) };
 }
-
-// Per measurement context (and thus font load generation), reserve the widest
-// bounded card format instead of measuring a live value. The widest error
-// label is nine monospace characters; rates are capped at 999K/s.
-const slotWidths = new WeakMap<NonNullable<ChartSize["measureText"]>, Map<string, number>>();
-function fixedSlotWidth(measure: NonNullable<ChartSize["measureText"]>, font: string, metric: boolean) {
-  let cache = slotWidths.get(measure);
-  if (!cache) { cache = new Map(); slotWidths.set(measure, cache); }
-  const key = `${metric ? "metric" : "health"}:${font}`;
-  let width = cache.get(key);
-  if (width === undefined) {
-    const templates = metric ? Array.from({length:10}, (_, digit) => [
-      `${digit}${digit}${digit}K/s`, `<0.0${digit}/s`, `${digit}${digit}.${digit}% err`, "100% err",
-    ]).flat() : Object.values(healthGlyph);
-    width = Math.max(...templates.map(text => measure(text, font)));
-    cache.set(key, width);
-  }
-  return width;
-}
-function serviceCardWidth(n:ServiceNode,compact:boolean,measureText?:ChartSize["measureText"],metrics=true) {
-  // Size for the floor's compensated fonts, so later scale selection cannot
-  // turn a protected name into clipped text. Health and metrics have fixed slots.
-  const scale=compact?.75:.85, nameSize=Math.max(12,Math.ceil(1100/scale)/100), metricSize=Math.ceil(1100/scale)/100;
-  const measure=measureText??textMeasure, font=`600 ${nameSize}px ${fonts.display}`;
-  const name=measure(protectedName(n.id),font)+fixedSlotWidth(measure,font,false)+18;
-  const withMetric=name+4+fixedSlotWidth(measure,`${metricSize}px ${fonts.display}`,true);
-  // Allow a fourteen-character identity beside the fixed nine-character slot.
-  return compact?(metrics&&withMetric<=240?Math.ceil(withMetric):Math.ceil(name)):Math.ceil(Math.max(168,name));
+// Widths depend on names and fonts, never on live health/rate values.
+const slotWidths = new WeakMap<NonNullable<ChartSize["measureText"]>, Map<string,number>>();
+function serviceCardWidth(n: ServiceNode, compact:boolean, measureText?: ChartSize["measureText"]) {
+  const measure = measureText ?? textMeasure;
+  let slots = slotWidths.get(measure);
+  if (!slots) {slots=new Map();slotWidths.set(measure,slots);}
+  // Reserve each name at the smallest scale that can contain micro text.
+  // Full cards put metrics on a second line, so they never compete with names.
+  const nameSize=compact?typeScale.micro/compactReadableScale:12,font=`600 ${nameSize}px ${fonts.display}`;
+  let glyph=slots.get(font);
+  if(glyph===undefined){glyph=Math.max(...Object.values(healthGlyph).map(g=>measure(g,font)));slots.set(font,glyph);}
+  const padding=compact?Math.ceil(16/compactReadableScale)+1:20;
+  return Math.ceil(Math.max(compact?0:168,measure(protectedName(n.id),font)+glyph+padding));
 }

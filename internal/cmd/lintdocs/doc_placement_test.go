@@ -39,16 +39,9 @@ func TestDocCommentsDocumentWhatTheySitOn(t *testing.T) {
 	}
 	var decls []decl
 
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := walkSourceTree(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
-		}
-		if info.IsDir() {
-			switch info.Name() {
-			case ".git", "node_modules", "vendor", "dist", "site", "experiments":
-				return filepath.SkipDir
-			}
-			return nil
 		}
 		if !strings.HasSuffix(path, ".go") {
 			return nil
@@ -121,4 +114,52 @@ func TestDocCommentsDocumentWhatTheySitOn(t *testing.T) {
 			d.file, d.line, d.name, first)
 	}
 	t.Logf("checked %d declarations, %d documented, %d flagged", len(decls), documented, flagged)
+}
+
+// walkSourceTree applies the same source exclusions to every documentation check.
+func walkSourceTree(root string, visit filepath.WalkFunc) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path != root && strings.HasPrefix(info.Name(), ".") {
+				return filepath.SkipDir
+			}
+			switch info.Name() {
+			case ".git", "node_modules", "vendor", "dist", "site", "experiments":
+				return filepath.SkipDir
+			}
+		}
+		return visit(path, info, nil)
+	})
+}
+
+func TestSourceWalkerSkipsDotDirectoriesWithVanishingFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".source-root")
+	if err := os.MkdirAll(filepath.Join(root, ".build-cache"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(root, ".build-cache", "vanishing.go")
+	if err := os.WriteFile(gone, []byte("package cache"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	visible := filepath.Join(root, "visible.go")
+	if err := os.WriteFile(visible, []byte("package visible"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var visited []string
+	err := walkSourceTree(root, func(path string, info os.FileInfo, err error) error {
+		visited = append(visited, path)
+		if path == filepath.Dir(gone) {
+			_ = os.Remove(gone)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visited) != 2 || visited[0] != root || visited[1] != visible {
+		t.Fatalf("walker visited hidden build files or skipped its dot-named root: %v", visited)
+	}
 }

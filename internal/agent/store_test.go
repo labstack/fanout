@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -46,6 +47,142 @@ func TestStorePersistsOwnerScopedThread(t *testing.T) {
 	}
 	if _, err := store.Thread(context.Background(), "owner-2", input.ThreadID); !errors.Is(err, ErrThreadNotFound) {
 		t.Fatalf("other owner error = %v", err)
+	}
+}
+
+func TestStoreReloadsSanitizedRunOutcome(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"provider", fmt.Errorf("%w: private provider body", errProvider), "Fanout could not reach the model provider. Please try again."},
+		{"step limit", errStepLimit, "Fanout reached its step limit before finishing. Try a narrower question."},
+		{"stopped", context.Canceled, "Stopped"},
+		{"stopped delivery", errors.Join(errAnswerDelivery, context.Canceled), "Stopped"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := controlstore.NewSQLite(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			store := NewStore(db.DB)
+			input := agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Show"}}}
+			messages, err := store.StartRun(t.Context(), "owner", input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.FinishRun(t.Context(), "owner", "thread", "run", messages, nil, false, tc.err); err != nil {
+				t.Fatal(err)
+			}
+			thread, err := store.Thread(t.Context(), "owner", "thread")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var outcome string
+			for _, m := range thread.Messages {
+				if m.Role == agtypes.RoleActivity && m.ActivityType == "agent-outcome" {
+					outcome = messageText(m.Content)
+				}
+			}
+			if !strings.Contains(outcome, tc.want) || strings.Contains(outcome, "private") {
+				t.Fatalf("reload outcome=%q", outcome)
+			}
+			for _, m := range providerMessages(thread.Messages) {
+				if strings.Contains(m.Content, tc.want) {
+					t.Fatal("outcome entered provider conversation")
+				}
+			}
+		})
+	}
+}
+
+func TestStoreReloadsCompletedRunWithoutToolNarration(t *testing.T) {
+	db, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store := NewStore(db.DB)
+	input := agtypes.RunAgentInput{ThreadID: "quiet-thread", RunID: "quiet-run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Edit"}}}
+	messages, err := store.StartRun(t.Context(), "owner", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &scriptedProvider{steps: [][]StreamEvent{
+		{{Type: EventText, Delta: "Fixing the sort."}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "edit_dashboard", Input: `{}`}}, {Type: EventStop, StopReason: "tool_use"}},
+		{{Type: EventText, Delta: "Updated the latency panel."}, {Type: EventStop, StopReason: "end_turn"}},
+	}}
+	tools := &fakeTools{execution: ToolExecution{Content: `{"ok":true}`, AppResourceURI: "ui://fixture", Structured: map[string]any{"ok": true}}}
+	emitter, _ := newTestEmitter()
+	truncated, runErr := NewRuntime(p, tools, store).execute(t.Context(), input.ThreadID, input.RunID, &messages, emitter)
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if err := store.FinishRun(t.Context(), "owner", input.ThreadID, input.RunID, messages, emitter.events, truncated, runErr); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := store.Thread(t.Context(), "owner", input.ThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls, results, activities, answers int
+	for _, m := range thread.Messages {
+		switch m.Role {
+		case agtypes.RoleAssistant:
+			if len(m.ToolCalls) > 0 {
+				calls++
+				if messageText(m.Content) != "" || m.ToolCalls[0].ID != "call" {
+					t.Fatalf("tool assistant=%+v", m)
+				}
+			} else if m.Content == "Updated the latency panel." {
+				answers++
+			}
+		case agtypes.RoleTool:
+			results++
+			if m.ToolCallID != "call" || m.Content != `{"ok":true}` {
+				t.Fatalf("result=%+v", m)
+			}
+		case agtypes.RoleActivity:
+			activities++
+			if m.ActivityType != "mcp-app" {
+				t.Fatalf("activity=%+v", m)
+			}
+		}
+	}
+	if calls != 1 || results != 1 || activities != 1 || answers != 1 {
+		t.Fatalf("calls=%d results=%d activities=%d answers=%d", calls, results, activities, answers)
+	}
+	var status, events string
+	if err := db.DB.QueryRow(`SELECT status,events_json FROM agui_runs WHERE run_id=?`, input.RunID).Scan(&status, &events); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed" || strings.Contains(events, "Fixing the sort.") || !strings.Contains(events, "Updated the latency panel.") || !strings.Contains(events, "ACTIVITY_SNAPSHOT") {
+		t.Fatalf("status=%s events=%s", status, events)
+	}
+	seed, err := store.StartRun(t.Context(), "owner", agtypes.RunAgentInput{ThreadID: input.ThreadID, RunID: "next-run", Messages: []agtypes.Message{{ID: "next-user", Role: agtypes.RoleUser, Content: "Again"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation := providerMessages(seed)
+	var sawCall, sawResult bool
+	for _, m := range continuation {
+		if strings.Contains(m.Content, "Fixing the sort.") {
+			t.Fatal("reload reintroduced narration")
+		}
+		if len(m.ToolCalls) > 0 {
+			sawCall = true
+			if m.Content != "" {
+				t.Fatal("tool assistant has reload text")
+			}
+		}
+		if m.ToolResult != nil && m.ToolResult.ToolCallID == "call" {
+			sawResult = true
+		}
+	}
+	if !sawCall || !sawResult {
+		t.Fatalf("continuation lost tool exchange: %+v", continuation)
 	}
 }
 
@@ -283,11 +420,11 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 	}
 	defer database.Close()
 	users := auth.NewUserStore(database.DB)
-	ownerA, err := users.Create("thread-a@example.com", "", "operator")
+	ownerA, err := users.CreateWithAudit("thread-a@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ownerB, err := users.Create("thread-b@example.com", "", "operator")
+	ownerB, err := users.CreateWithAudit("thread-b@example.com", "", "operator", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +531,10 @@ func TestStoreStartRunKeepsStoredHistory(t *testing.T) {
 	stored := []agtypes.Message{
 		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
 		{ID: "assistant-1", Role: agtypes.RoleAssistant, Content: "here it is"},
-		{ID: "activity-1", Role: agtypes.RoleActivity, ActivityType: "mcp-app"},
+		{ID: "activity-1", Role: agtypes.RoleActivity, ActivityType: "mcp-app", Content: map[string]any{
+			"resource_uri": "ui://fanout/panels.html", "tool_name": "query_telemetry", "tool_input": map[string]any{}, "is_error": false,
+			"tool_result": map[string]any{"dashboard": map[string]any{"version": 1, "name": "Fixture", "panels": []any{map[string]any{"id": "text", "title": "Text", "viz": "text", "content": "Hello"}}}, "results": []any{map[string]any{"id": "text", "status": "ok"}}},
+		}},
 	}
 	if err := store.FinishRun(ctx, "owner-1", first.ThreadID, first.RunID, stored, nil, false, nil); err != nil {
 		t.Fatal(err)
@@ -489,20 +629,21 @@ func TestStoreStartRunRepairsUnansweredToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, message := range seed {
-		for _, call := range message.ToolCalls {
-			t.Fatalf("seed still carries the unanswered tool call %q, which the provider rejects", call.ID)
-		}
+	if len(seed[1].ToolCalls) != 1 || seed[1].ToolCalls[0].ID != "call-1" {
+		t.Fatal("interrupted call was erased")
 	}
-	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,user-2" {
-		t.Fatalf("seed = %v, want the turn kept with its unanswered call dropped", got)
+	if seed[2].Role != agtypes.RoleTool || seed[2].ToolCallID != "call-1" || seed[2].Content != `{"error":"interrupted"}` {
+		t.Fatalf("missing interrupted result: %+v", seed)
+	}
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,assistant-1-call-1-interrupted,run-1-outcome,user-2" {
+		t.Fatal(got)
 	}
 	if seed[1].Content != "checking" {
 		t.Fatalf("assistant text = %q, want the spoken part kept", seed[1].Content)
 	}
 }
 
-func TestStoreStartRunDropsAnEmptyInterruptedTurn(t *testing.T) {
+func TestStoreStartRunPreservesAnEmptyInterruptedToolTurn(t *testing.T) {
 	database, err := controlstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -528,7 +669,42 @@ func TestStoreStartRunDropsAnEmptyInterruptedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,user-2" {
-		t.Fatalf("seed = %v, want the empty interrupted turn dropped entirely", got)
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,assistant-1-call-1-interrupted,run-1-outcome,user-2" {
+		t.Fatalf("seed = %v, want the empty interrupted turn dropped and stopped outcome kept", got)
+	}
+}
+
+func TestInterruptedBuildEvidenceSurvivesReloadAndTheNextRun(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewStore(database.DB)
+	ctx := t.Context()
+	input := agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "Build"}}}
+	seed, err := store.StartRun(ctx, "owner", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed = append(seed, agtypes.Message{ID: "build", Role: agtypes.RoleAssistant, ToolCalls: []agtypes.ToolCall{{ID: "create", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "create_dashboard", Arguments: "{}"}}}})
+	if err := store.FinishRun(ctx, "owner", "thread", "run", seed, nil, false, context.Canceled); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.Thread(ctx, "owner", "thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before.Messages) < 3 || before.Messages[2].ToolCallID != "create" || before.Messages[2].Content != `{"error":"interrupted"}` {
+		t.Fatalf("reload=%+v", before.Messages)
+	}
+	next, err := store.StartRun(ctx, "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "next", Messages: []agtypes.Message{{ID: "next-user", Role: agtypes.RoleUser, Content: "Again"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldJSON, _ := json.Marshal(before.Messages)
+	nextJSON, _ := json.Marshal(next[:len(before.Messages)])
+	if string(oldJSON) != string(nextJSON) {
+		t.Fatal("next run rewrote interrupted evidence")
 	}
 }

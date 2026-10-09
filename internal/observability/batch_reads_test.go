@@ -3,7 +3,6 @@ package observability
 import (
 	"fmt"
 	"math/rand/v2"
-	"reflect"
 	"testing"
 	"time"
 
@@ -46,7 +45,7 @@ func warmCompletedReads(t *testing.T, d *query.Duck, want int) {
 	}
 	t.Fatal("cache backfill made no progress")
 }
-func TestCompletedDashboardReadsMatchColdAndLateData(t *testing.T) {
+func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 	d, repo, svc := newCompletedReadTest(t)
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	commit := func(id string, offset int) {
@@ -80,29 +79,7 @@ func TestCompletedDashboardReadsMatchColdAndLateData(t *testing.T) {
 	}
 	commit("first", 0)
 	scope := Scope{Start: at.Add(10 * time.Second), End: at.Add(150 * time.Second), Namespace: "prod"}
-	cold, _, err := svc.queryEndpoints(t.Context(), scope, "", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	logsCold, err := svc.Logs(t.Context(), scope, "", "", "", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
 	warmCompletedReads(t, d, 1)
-	warm, _, err := svc.queryEndpoints(t.Context(), scope, "", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	logsWarm, err := svc.Logs(t.Context(), scope, "", "", "", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(cold, warm) {
-		t.Fatalf("endpoints cold=%#v warm=%#v", cold, warm)
-	}
-	if !reflect.DeepEqual(logsCold.Data, logsWarm.Data) {
-		t.Fatalf("logs cold=%#v warm=%#v", logsCold.Data, logsWarm.Data)
-	}
 	commit("late", 5)
 	raw := New(SQLDB(d.DB), d, 30)
 	for _, ns := range []string{"", "prod", "other"} {
@@ -119,21 +96,6 @@ func TestCompletedDashboardReadsMatchColdAndLateData(t *testing.T) {
 				}
 				if got.Data.TraceID != want.Data.TraceID {
 					t.Fatalf("candidate ns=%s service=%s window=%v: %s != %s", ns, service, window, got.Data.TraceID, want.Data.TraceID)
-				}
-				for _, severity := range []string{"", "error", "warn", "unspecified", "i", "İ"} {
-					for _, search := range []string{"", "event5", "secret"} {
-						got, err := svc.Logs(t.Context(), selected, service, severity, search, 100)
-						if err != nil {
-							t.Fatal(err)
-						}
-						want, err := raw.Logs(t.Context(), selected, service, severity, search, 100)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if !reflect.DeepEqual(got.Data, want.Data) {
-							t.Fatalf("logs ns=%s svc=%s window=%v severity=%s search=%s: %#v != %#v", ns, service, window, severity, search, got.Data, want.Data)
-						}
-					}
 				}
 			}
 		}

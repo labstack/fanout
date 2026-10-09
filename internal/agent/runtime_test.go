@@ -3,14 +3,22 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/encoding/sse"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/fanout/internal/auth"
+	fanoutmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/panel"
 
+	"github.com/labstack/fanout/internal/dashboard"
 	controlstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -54,6 +62,8 @@ type fakeTools struct {
 	err       error
 	calls     []ToolCall
 }
+
+func (f *fakeTools) ReadOnly(name string) bool { return reviewedReadOnly(name, nil) }
 
 func (f *fakeTools) Definitions() []ToolDef { return f.defs }
 
@@ -157,14 +167,14 @@ func TestRuntimeToolCallLoop(t *testing.T) {
 		t.Fatalf("missing mcp-app activity message: %#v", messages)
 	}
 	content, ok := activity.Content.(map[string]any)
-	if !ok || content["resourceUri"] != "ui://overview" {
+	if !ok || content["resource_uri"] != "ui://overview" {
 		t.Fatalf("activity content = %#v", activity.Content)
 	}
 }
 
 func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	provider := &scriptedProvider{steps: [][]StreamEvent{
-		{{Type: EventError, Error: "upstream 529: {\"secret\":\"provider body\"}"}},
+		{{Type: EventText, Delta: "Unfinished provider text"}, {Type: EventError, Error: "upstream 529: {\"secret\":\"provider body\"}"}},
 	}}
 	runtime := NewRuntime(provider, &fakeTools{}, nil)
 	emitter, output := newTestEmitter()
@@ -175,11 +185,14 @@ func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	}
 	stream := output.String()
 	assertEventOrder(t, stream, "RUN_STARTED", "RUN_ERROR")
-	if !strings.Contains(stream, "model provider unavailable") {
+	if !strings.Contains(stream, "Fanout could not reach the model provider. Please try again.") {
 		t.Errorf("RUN_ERROR missing generic message: %s", stream)
 	}
 	if strings.Contains(stream, "secret") {
 		t.Errorf("RUN_ERROR leaks provider body: %s", stream)
+	}
+	if strings.Contains(answerSSE(stream), "Unfinished provider text") || strings.Contains(answerSSE(stream), "TEXT_MESSAGE_") || len(messages) != 1 {
+		t.Fatalf("failed step leaked text: stream=%s messages=%#v", stream, messages)
 	}
 
 	// The raw error must still be persisted on the run for operators.
@@ -256,7 +269,7 @@ func TestRuntimeStepLimitExceeded(t *testing.T) {
 	}
 	stream := output.String()
 	assertEventOrder(t, stream, "RUN_STARTED", "RUN_ERROR")
-	if !strings.Contains(stream, "step limit exceeded") {
+	if !strings.Contains(stream, "Fanout reached its step limit before finishing. Try a narrower question.") {
 		t.Errorf("RUN_ERROR missing step limit message: %s", stream)
 	}
 }
@@ -308,5 +321,81 @@ func TestSystemPromptBuildsDashboardsForDashboardShapedRequests(t *testing.T) {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("system prompt is missing %q", want)
 		}
+	}
+}
+
+func TestBuildOriginUsesLastAuthoritativeUserAndUnicodeLimit(t *testing.T) {
+	seed := []agtypes.Message{{ID: "old", Role: agtypes.RoleUser, Content: "Old"}, {ID: "last", Role: agtypes.RoleUser, Content: strings.Repeat("🐈", 281)}, {ID: "assistant", Role: agtypes.RoleAssistant, Content: "Never use narration"}}
+	got, ok := buildOriginForSeed("thread", seed)
+	want := dashboard.BuildOrigin{ThreadID: "thread", MessageID: "last", RequestExcerpt: strings.Repeat("🐈", 280)}
+	if !ok || got != want {
+		t.Fatal(got, ok)
+	}
+	if _, ok := buildOriginForSeed("thread", seed[2:]); ok {
+		t.Fatal("fabricated request")
+	}
+}
+
+func TestBuildOriginSkipsMissingMessageIdentity(t *testing.T) {
+	for _, id := range []string{"", "   "} {
+		if _, ok := buildOriginForSeed("thread", []agtypes.Message{{ID: id, Role: agtypes.RoleUser, Content: "Build"}}); ok {
+			t.Fatal("origin without message identity")
+		}
+	}
+}
+
+type originValidator struct{}
+
+func (originValidator) Validate(_ context.Context, d *panel.Dashboard) error {
+	panel.Normalize(d)
+	if problems := panel.Validate(d); len(problems) > 0 {
+		return problems
+	}
+	return nil
+}
+func TestRuntimeRunInjectsAuthoritativeOriginIntoDashboardTool(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	_, err = database.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database.DB)
+	seed := []agtypes.Message{{ID: "old-user", Role: agtypes.RoleUser, Content: "Old request"}, {ID: "actual-user", Role: agtypes.RoleUser, Content: "Authoritative stored request"}}
+	_, err = store.StartRun(t.Context(), "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "seed", Messages: seed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := dashboard.New(database.DB, originValidator{})
+	registry, err := NewToolRegistry(t.Context(), fanoutmcp.NewWithIntelligence(registryQueries{}, service, nil, nil, "test").MCP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "create", Name: "create_dashboard", Input: `{"dashboard":{"name":"Wired","panels":[{"id":"notes","title":"Notes","viz":"text","content":"hello"}]}}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventText, Delta: "Done."}, {Type: EventStop, StopReason: "end_turn"}}}}
+	input := agtypes.RunAgentInput{ThreadID: "thread", RunID: "run", Messages: []agtypes.Message{{ID: "actual-user", Role: agtypes.RoleUser, Content: "Browser forged request"}, {ID: "old-user", Role: agtypes.RoleUser, Content: "Browser last user is wrong"}}}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/agent/runs", strings.NewReader(string(raw)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set("auth_user", &auth.User{ID: "owner", Role: "admin"})
+	if err := NewRuntime(provider, registry, store).Run(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	list, err := service.List(t.Context(), "owner")
+	want := dashboard.BuildOrigin{ThreadID: "thread", MessageID: "actual-user", RequestExcerpt: "Authoritative stored request"}
+	if err != nil || len(list) != 1 || list[0].Origin == nil || *list[0].Origin != want {
+		t.Fatalf("runtime origin=%+v err=%v stream=%s", list, err, rec.Body)
 	}
 }

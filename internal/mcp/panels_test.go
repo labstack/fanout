@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,11 +13,31 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func TestPreviewReportsTotalAndExecutedPanelTimings(t *testing.T) {
+	s := newPanelServer(t)
+	s.panels = receiptExecutor{panelExecutor: s.panels, run: func(_ context.Context, req panel.RunRequest) ([]panel.Result, error) {
+		return []panel.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
+	}}
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
+	if err != nil || out.ElapsedMS < 0 || len(out.Panels) != 1 || (out.Panels[0].ElapsedMS == nil || *out.Panels[0].ElapsedMS != 37) || out.Panels[0].Status != "ok" {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+}
+
 func newPanelServer(t *testing.T) *Server {
+	return panelServerFixture(t, false)
+}
+
+func panelServerFixture(t *testing.T, seed bool) *Server {
+	return panelServerFixtureAt(t, seed, time.Now().UTC())
+}
+
+func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
@@ -34,9 +56,37 @@ func newPanelServer(t *testing.T) *Server {
 	if _, err := sqlite.DB.Exec(`INSERT INTO users (id, email) VALUES ('owner', 'owner@example.com')`); err != nil {
 		t.Fatal(err)
 	}
+	if seed {
+		at := now.Add(-30 * time.Minute)
+		var spans []telemetry.Span
+		var logs []telemetry.Log
+		for i := range 30 {
+			n := at.Add(time.Duration(i) * time.Second).UnixNano()
+			route := "/cart"
+			if i == 0 {
+				route = ""
+			}
+			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, HTTPRoute: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
+			logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", TimeUnixNanos: n, Severity: "ERROR", Body: "timeout", TraceID: fmt.Sprintf("trace-%d", i), IngestedAt: n})
+		}
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := duck.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',30,30,100,100,.1,30,0)`, at); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
+			t.Fatal(err)
+		}
+	}
 	executor := panel.NewExecutor(duck, 30)
 	executor.SetRollupReader(observability.New(duck, duck, 30))
-	return New(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, "test")
+	if seed {
+		server := NewWithIntelligence(observability.New(duck, duck, 30), dashboard.New(sqlite.DB, executor), executor, nil, "test")
+		server.now = func() time.Time { return now }
+		return server
+	}
+	return NewWithIntelligence(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, nil, "test")
 }
 
 func ownerRequest() *mcp.CallToolRequest {
@@ -57,6 +107,9 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	}
 	if out.Panels[0].Status != "not_run" {
 		t.Fatalf("a valid panel is not run while another is invalid: %+v", out.Panels[0])
+	}
+	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
+		t.Fatalf("invalid/not_run timing = %+v", out)
 	}
 	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}})
 	if err != nil || out.Panels[0].Status != "empty" || out.Panels[0].Diagnosis == "" {
@@ -85,7 +138,7 @@ func TestCreateAndEditDashboardTools(t *testing.T) {
 }
 
 func TestDashboardToolScopes(t *testing.T) {
-	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard", "list_dashboard_versions", "restore_dashboard_version"} {
 		if RequiredToolScope(name) != dashboard.OAuthScope {
 			t.Errorf("%s scope = %q", name, RequiredToolScope(name))
 		}
@@ -97,7 +150,7 @@ func TestDashboardToolScopes(t *testing.T) {
 	}
 }
 
-func TestM2ItemsSpecGuide(t *testing.T) {
+func TestItemsSpecGuide(t *testing.T) {
 	for _, phrase := range []string{
 		"Scatter supports options.x_scale and options.y_scale (log or linear)",
 		"distinct x_unit for x and unit for y",
@@ -112,7 +165,7 @@ func TestM2ItemsSpecGuide(t *testing.T) {
 	}
 }
 
-func TestM2RowsFixSpecGuide(t *testing.T) {
+func TestSpecGuideExplainsRowPanelQueriesRedactionAndRanking(t *testing.T) {
 	for _, phrase := range []string{
 		"Row panel types are logs, log_patterns and traces.",
 		"Logs and traces take no measures, by or bucket.",
@@ -131,7 +184,7 @@ func TestM2RowsFixSpecGuide(t *testing.T) {
 	}
 }
 
-func TestM4SeriesGuide(t *testing.T) {
+func TestSeriesGuide(t *testing.T) {
 	for _, phrase := range []string{"Structured panels: the server computes Other", "SQL panels: series past six are left out, with a note", "state_timeline defaults to 8 rows, maximum 20"} {
 		if !strings.Contains(specGuide, phrase) {
 			t.Errorf("guide missing %q", phrase)
@@ -139,13 +192,13 @@ func TestM4SeriesGuide(t *testing.T) {
 	}
 }
 
-func TestI4RankingGuide(t *testing.T) {
+func TestRankingGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency); the rest fold into Other (N)") {
 		t.Fatal("missing ranking semantics")
 	}
 }
 
-func TestQ4ConfidenceGuide(t *testing.T) {
+func TestConfidenceGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
 		t.Fatal("missing confidence semantics")
 	}

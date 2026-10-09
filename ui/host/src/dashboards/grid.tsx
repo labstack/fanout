@@ -1,33 +1,34 @@
-import { Alert, Button, Group, Modal, Text } from "@mantine/core";
+import { Alert, Button, Group, Text } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Responsive, type Layout } from "react-grid-layout/legacy";
+import { Responsive, verticalCompactor, type Layout } from "react-grid-layout";
 import type { DashboardSpec, DashboardTime, Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { ApiError, patchDashboard, replaceDashboard } from "./api";
+import { interpolate } from "../../../panels/variables";
+import { panelHandlers } from "./panel-handlers";
 import { PanelCard } from "./panel-card";
+import { PanelFullscreen } from "./panel-fullscreen";
+import { explainPrompt, fixPrompt, type ExplainContext } from "./explain";
+import type { TurnOptions } from "../app-context";
 
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
  *  with the same row unit. */
-export const rowHeight = 40;
-const margin = 12;
-const pixels = (h: number) => h * rowHeight + (h - 1) * margin;
-const defaultRows = (p: Panel) => ({s:3,m:6,l:10}[p.height ?? (p.viz === "service_map" ? "l" : "m")]);
+import { rowHeight, margin, pixels, defaultRows } from "./layout";
 
 export type GridProps = {
   dashboardId: string; version: number; spec: DashboardSpec; vars: Record<string, VarValue>; results: Map<string, PanelResult>; fetching: boolean; editing: boolean; view?: string;
   fetchingIds?: string[]; staleAt?: Map<string, number>; time?: DashboardTime; onEditExit?(): void;
   annotations?: AnnotationsResponse;
-  agentAvailable: boolean; onOpenChat(prompt?: string): void; onVariable(name: string, value: VarValue): void; onView(view?: string): void; onVisible(ids: string[]): void;
+  canManage?: boolean; agentAvailable: boolean; onOpenChat(prompt?: string, options?: TurnOptions): void; onVariable(name: string, value: VarValue): void; onView(view?: string): void; onVisible(ids: string[]): void;
+  onRetry?(panelId: string): void;
   onPoint?(panel: Panel, selection: Selection): void; onZoom?(from: number, to: number): void;
-  zoomed?: boolean; onZoomReset?(): void;
+  zoomed?: boolean; onZoomReset?(): void; onRangePending?(id: string, pending: boolean): void;
+  shortcutScope?: string; onShortcuts?(): void; overlayOpen?: boolean; returnViewFocus?(panel?: string): HTMLElement | undefined;
 };
 
-export const interpolate = (text: string, vars: Record<string, VarValue>) =>
-  text.replace(/\$([a-z][a-z0-9_]*)/g, (match, name: string) => { const v = vars[name]; return v === undefined ? match : v === "$__all" ? "all" : Array.isArray(v) ? v.join(", ") : v; });
-
 let panelIdCounter = 0;
-export function newPanelId(panels: Panel[]): string {
+function newPanelId(panels: Panel[]): string {
   let id: string;
   do {
     id = `p_${Date.now().toString(36)}_${(++panelIdCounter).toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -35,13 +36,10 @@ export function newPanelId(panels: Panel[]): string {
   return id;
 }
 
-export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, onOpenChat, onVariable, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible }: GridProps) {
+export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, canManage = false, onOpenChat, onVariable, onRetry, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible, onRangePending, shortcutScope, onShortcuts, overlayOpen, returnViewFocus }: GridProps) {
   const client = useQueryClient();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) }))); }, [spec]);
-  // Presentation minimum fits preview stat chrome + value/delta + area trend.
-  // Keep saved coordinates intact; a layout is persisted only by an edit action.
-  const visibleLayout = useMemo(() => layout.map(l => spec.panels.find(p => p.id === l.i)?.viz === "stat" ? { ...l, h: Math.max(4, l.h), minH: 4 } : l), [layout, spec.panels]);
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
   const [copyFeedback, setCopyFeedback] = useState<string>();
   useEffect(() => {
@@ -50,6 +48,9 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     return () => window.removeEventListener("resize", resize);
   }, []);
   const container = useRef<HTMLDivElement>(null);
+  const menus = useRef(new Map<string, HTMLButtonElement>());
+  const focusedPanel = useRef<string | undefined>(view);
+  if (view) focusedPanel.current = view;
   const [width, setWidth] = useState(0);
   const gridReady = width > 0;
   const breakpoint = width >= 1100 ? "lg" : width >= 800 ? "md" : "sm";
@@ -130,16 +131,27 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   };
   const group = `dashboard-${dashboardId}`;
 
-  const card = (panel: Panel, height: number) => <PanelCard panel={panel} title={interpolate(panel.title, vars)} result={results.get(panel.id)} loading={fetching && fetchingIds.includes(panel.id)} height={height} group={group} editing={canEdit} agentAvailable={agentAvailable}
+  const context = (panel: Panel): ExplainContext => ({
+    dashboard_id: dashboardId, version, panel_id: panel.id, title: interpolate(panel.title, vars),
+    from_ms: results.get(panel.id)?.from_ms, to_ms: results.get(panel.id)?.to_ms,
+    vars, error: results.get(panel.id)?.error, status: results.get(panel.id)?.status, diagnosis: results.get(panel.id)?.diagnosis,
+    stale_since: staleAt.get(panel.id), truncated: results.has(panel.id) ? Boolean(results.get(panel.id)?.frame?.truncated || results.get(panel.id)?.previous?.truncated) : undefined, note: results.get(panel.id)?.frame?.note,
+    // Authored absolute bounds retain their precision; the observed window is milliseconds.
+    spec: { ...panel, dashboard_time: time },
+  });
+  const card = (panel: Panel, height: number, fullscreen = false) => <PanelCard panel={panel} title={interpolate(panel.title, vars)} result={results.get(panel.id)} loading={fetching && fetchingIds.includes(panel.id)} height={height} group={group} editing={canEdit && !fullscreen} agentAvailable={agentAvailable}
+    suspended={!fullscreen && panel.id === view}
+    menuRef={!fullscreen ? node => { if (node) menus.current.set(panel.id, node); else menus.current.delete(panel.id); } : undefined}
     compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
-    onSelect={panel.click && (panel.viz === "service_map" || !(panel.drill && onPoint)) ? value => onVariable(panel.click!.set_variable, value) : undefined}
-    onPoint={onPoint && (panel.viz === "service_map" || panel.click || panel.drill || results.get(panel.id)?.frame?.columns.some((c, i) => c.name === "trace_id" && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")) || panel.options?.columns?.some(c => c.format === "trace_link" && results.get(panel.id)?.frame?.columns.some((column, i) => column.name === c.field && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")))) ? selection => onPoint(panel, selection) : undefined}
-    onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
+    {...panelHandlers(panel, results.get(panel.id), onVariable, onPoint ? selection => onPoint(panel, selection) : undefined)}
+    onRangePending={pending => onRangePending?.(panel.id, pending)} onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
+    onRetry={onRetry ? () => onRetry(panel.id) : undefined}
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
-    onExplain={() => onOpenChat(`Explain the panel "${interpolate(panel.title, vars)}" (panel id: ${panel.id}) on the dashboard "${spec.name}" (dashboard id: ${dashboardId}). Effective time range: ${JSON.stringify(panel.time ?? time)}. Resolved variables: ${JSON.stringify(vars)}. ${results.get(panel.id)?.status === "error" ? `It fails with: ${results.get(panel.id)?.error}. Please fix the panel.` : "What does it show right now, and is anything unusual?"}`)}
-    staleAt={staleAt.get(panel.id)} onDuplicate={canEdit ? () => duplicate.mutate(panel) : undefined}
-    onRemove={canEdit ? () => remove.mutate(panel.id) : undefined} />;
+    onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true }) : undefined}
+    onFix={dashboardId && canManage ? () => onOpenChat(fixPrompt(context(panel))) : undefined}
+    staleAt={staleAt.get(panel.id)} onDuplicate={canEdit && !fullscreen ? () => duplicate.mutate(panel) : undefined}
+    onRemove={canEdit && !fullscreen ? () => remove.mutate(panel.id) : undefined} />;
 
   const viewed = spec.panels.find((p) => p.id === view);
   const mutationError = editing ? save.error ?? remove.error ?? duplicate.error : null;
@@ -157,14 +169,14 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     {conflict && <Alert color="warn" mb="sm">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Alert>}
     {mutationError && !conflict && <Alert color="bad" mb="sm">{mutationError.message}</Alert>}
     {copyFeedback && <Alert role="status" mb="sm">{copyFeedback}</Alert>}
-    {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...visibleLayout.map(l => l.y + l.h))) }} />}
-    {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: visibleLayout, md: visibleLayout, sm: visibleLayout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
-      rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactType="vertical" isDraggable={canEdit} isResizable={canEdit} draggableHandle=".panel-drag" draggableCancel="button"
+    {!gridReady && <div data-grid-placeholder style={{ height: pixels(Math.max(1, ...layout.map(l => l.y + l.h))) }} />}
+    {gridReady && <Responsive width={width} className={`dashboard-grid${canEdit ? " dashboard-grid-editing" : ""}`} layouts={{ lg: layout, md: layout, sm: layout.map((l) => ({ ...l, x: 0, w: 12 })) }} breakpoints={{ lg: 1100, md: 800, sm: 0 }} cols={{ lg: 12, md: 12, sm: 12 }}
+      rowHeight={rowHeight} margin={[margin, margin]} containerPadding={[0, 0]} compactor={verticalCompactor} dragConfig={{enabled:canEdit,handle:".panel-drag",cancel:"button"}} resizeConfig={{enabled:canEdit}}
       onDragStop={changeLayout} onResizeStop={changeLayout}>
-      {spec.panels.map((panel) => { const g = visibleLayout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
+      {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
-    <Modal opened={Boolean(viewed)} onClose={() => onView(undefined)} fullScreen aria-label={viewed ? interpolate(viewed.title, vars) : undefined} closeButtonProps={{ "aria-label": "Close panel view" }}>
-      {viewed && <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, windowHeight - 140)}</div>}
-    </Modal>
+    <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
+      {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
+    </PanelFullscreen>
   </div>;
 }

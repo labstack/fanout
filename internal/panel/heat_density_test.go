@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestH1WidthAwareCellBuckets(t *testing.T) {
+func TestWidthAwareCellBuckets(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Density", Time: Time{Range: "24h"}, Panels: []Panel{
 		{ID: "heat", Title: "Heat", Viz: "heatmap", Query: &Query{From: "spans", Measures: []string{"count()"}, Bucket: "auto", Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}},

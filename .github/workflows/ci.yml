@@ -97,6 +97,39 @@ jobs:
       - name: just test-race
         run: just test-race
 
+  e2e:
+    name: Browser smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+      - name: just ui-deps
+        run: just ui-deps
+      - name: just e2e
+        run: just e2e
+      - name: Upload browser failures
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-smoke-failure
+          path: |
+            ui/host/playwright-report/
+            ui/host/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Build the exact runtime image on pull requests and reject high/critical OS,
   # Go-binary, or embedded-secret findings before merge.
   container-scan:

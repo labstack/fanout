@@ -1,15 +1,17 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { timeseriesOption, chartThemeFor } from "../../../panels/compile";
+import { EChartCanvas } from "./echart-canvas";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn(), registered: [] as unknown[], connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
 
 vi.mock("echarts/core", () => ({ init: mocks.init, use: (components: unknown[]) => { mocks.registered = components; }, connect: mocks.connect, disconnect: mocks.disconnect }));
 vi.mock("echarts/charts", () => ({ BarChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
 vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GraphicComponent: { id: "graphic" }, GridComponent: {}, LegendComponent: {}, MarkAreaComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
+vi.mock("echarts/features", () => ({ LabelLayout: { id: "label-layout" } }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
-import { EChartCanvas } from "./echart-canvas";
 
 function fresh() {
   const instance = { setOption: vi.fn(), dispatchAction: vi.fn(), dispose: vi.fn(), on: vi.fn(), resize: vi.fn(), group: "" };
@@ -20,7 +22,7 @@ function fresh() {
 describe("EChartCanvas", () => {
   afterEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
 
-  it("I2 has no production audit hook, large data attributes or per-frame audit", async () => {
+  it("has no production audit hook, large data attributes or per-frame audit", async () => {
     vi.stubEnv("DEV", false);
     const instance=fresh(), getDisplayList=vi.fn(() => []);
     Object.assign(instance,{getZr:()=>({storage:{getDisplayList}})});
@@ -159,7 +161,7 @@ describe("EChartCanvas", () => {
   });
 });
 
-it("W12 inspects rendered legend text bounds on demand", async () => {
+it("inspects rendered legend text bounds on demand", async () => {
  vi.stubEnv("DEV",true); window.history.replaceState({},"","/?__fanout_audit=1");
  const instance = fresh();
  Object.assign(instance, { getZr: () => ({ storage: { getDisplayList: () => [{ style: { text: "load-generator" }, getBoundingRect: () => ({ clone: () => ({ x: 10, y: 0, width: 100, height: 16, applyTransform: () => {} }) }), getComputedTransform: () => null }] } }) });
@@ -169,4 +171,30 @@ it("W12 inspects rendered legend text bounds on demand", async () => {
  expect(window.__fanoutAudit!(chart.id)!.legend).toMatchObject({ type: "plain", names: ["load-generator"], entries: [{ name: "load-generator", text: "load-generator", left: 10, top: 0, right: 110, bottom: 16 }] });
  expect(window.__fanoutAudit!(chart.id)!.legendBottom).toBe(30);
  await act(async () => root.unmount()); container.remove(); window.history.replaceState({},"","/"); vi.unstubAllEnvs();
+});
+
+it("registers end-label collision management",()=>{expect(mocks.registered).toContainEqual({id:"label-layout"});});
+it("keeps nice duration intervals when adapting to native plot height",async()=>{
+ const instance=fresh();Object.assign(instance,{getModel:()=>({getComponent:()=>({coordinateSystem:{getRect:()=>({height:750})}})})});
+ const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
+ try {await act(async()=>root.render(<EChartCanvas option={{yAxis:{type:"value",fanout_unit:"ms",min:0,max:90000,interval:50000,splitNumber:2,axisLabel:{formatter:(v:number)=>v+"ms"}}}} height={800} label="Latency"/>));
+ const axis=instance.setOption.mock.lastCall![0].yAxis;expect(axis.interval).toBe(10000);expect(axis.splitNumber).toBe(9);
+ }finally {await act(async()=>root.unmount());container.remove();}
+});
+
+it.each([120,170,400,16])("bounds native end labels by priority in a %ipx grid after containment",async(height)=>{
+ const instance=fresh();const top=40;
+ const pixel=(index:number)=>top+height*(.5+index*.01);
+ Object.assign(instance,{getModel:()=>({getComponent:()=>({coordinateSystem:{getRect:()=>({y:top,height})}})}),convertToPixel:({seriesIndex}:{seriesIndex:number})=>[500,pixel(seriesIndex)]});
+ const option=timeseriesOption({id:"p",title:"Latency",viz:"timeseries"},{id:"p",status:"ok",elapsed_ms:0,frame:{columns:[{name:"time",type:"time",role:"time"},...["p50","p90","p99"].map(name=>({name,type:"number" as const,role:"measure" as const}))],values:[[0,1000],[900,900],[901,901],[902,902]],rows:2}},chartThemeFor(false),{width:500,height:800});
+ const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+ try {
+  await act(async()=>root.render(<EChartCanvas option={option} height={height+80} label="Latency"/>));
+  const lines=instance.setOption.mock.calls.filter(([o])=>o.series).at(-1)![0].series;
+  const labels=lines.flatMap((line:any,index:number)=>line.endLabel.show?[pixel(index)+line.labelLayout.dy]:[]);
+  expect(labels.length).toBe(height===16?1:3);expect(lines[0].endLabel.show).toBe(true);
+  for(const y of labels){expect(y-8).toBeGreaterThanOrEqual(top);expect(y+8).toBeLessThanOrEqual(top+height);}
+  for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++)expect(Math.abs(labels[i]-labels[j])).toBeGreaterThanOrEqual(16);
+  expect(option.legend).toMatchObject({show:true});
+ } finally {await act(async()=>root.unmount());container.remove();}
 });

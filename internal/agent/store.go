@@ -184,10 +184,6 @@ func threadTitle(messages []agtypes.Message) string {
 // connection so two concurrent first-runs on the same thread serialize
 // instead of racing into a unique-constraint error.
 func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) ([]agtypes.Message, error) {
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("encode run input: %w", err)
-	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open run connection: %w", err)
@@ -229,6 +225,48 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 			return nil, fmt.Errorf("decode stored messages: %w", err)
 		}
 		messages = mergeThreadMessages(stored, input.Messages)
+		// A retry cannot remove the mode of the run that introduced this user
+		// turn. Inspect immutable run inputs under the same write transaction.
+		userCount := func(items []agtypes.Message) int {
+			n := 0
+			for _, m := range items {
+				if m.Role == agtypes.RoleUser {
+					n++
+				}
+			}
+			return n
+		}
+		if userCount(messages) == userCount(stored) {
+			// Every retry persists its effective mode. The most recent run
+			// therefore carries the introducing run's restriction forward,
+			// including protocol messages with empty IDs.
+			var original string
+			err := conn.QueryRowContext(ctx, `SELECT input_json FROM agui_runs WHERE thread_id=? ORDER BY rowid DESC LIMIT 1`, input.ThreadID).Scan(&original)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, fmt.Errorf("read original turn mode: %w", err)
+			}
+			if err == nil {
+				var previous agtypes.RunAgentInput
+				if err := json.Unmarshal([]byte(original), &previous); err != nil {
+					return nil, fmt.Errorf("decode original turn input: %w", err)
+				}
+				inherited, err := answerOnlyRequest(previous.ForwardedProps)
+				if err != nil {
+					return nil, err
+				}
+				if inherited {
+					props := map[string]any{}
+					if originalProps, ok := input.ForwardedProps.(map[string]any); ok {
+						for k, v := range originalProps {
+							props[k] = v
+						}
+					}
+					props["answer_only"] = true
+					input.ForwardedProps = props
+				}
+			}
+		}
+
 		messagesJSON, err := json.Marshal(messages)
 		if err != nil {
 			return nil, fmt.Errorf("encode messages: %w", err)
@@ -239,6 +277,10 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		); err != nil {
 			return nil, fmt.Errorf("update thread input: %w", err)
 		}
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("encode run input: %w", err)
 	}
 	var parent any
 	if input.ParentRunID != nil {
@@ -255,6 +297,13 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	}
 	committed = true
 	return messages, nil
+}
+
+// runAnswerOnly reads the effective mode persisted by StartRun after retry inheritance.
+func (s *Store) runAnswerOnly(ctx context.Context, runID string) (bool, error) {
+	var mode bool
+	err := s.db.QueryRowContext(ctx, `SELECT coalesce(json_extract(input_json,'$.forwardedProps.answer_only'),0) FROM agui_runs WHERE run_id=?`, runID).Scan(&mode)
+	return mode, err
 }
 
 // mergeThreadMessages returns the stored history with the request's new user
@@ -275,7 +324,7 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 // request carrying the browser's copy. The thread keeps the question and loses
 // the answer, where before it might have been restored by accident.
 func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
-	stored = dropUnansweredToolCalls(stored)
+	stored = completeInterruptedToolCalls(stored)
 	known := make(map[string]struct{}, len(stored))
 	for _, message := range stored {
 		if message.ID != "" {
@@ -298,42 +347,29 @@ func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
 	return merged
 }
 
-// dropUnansweredToolCalls removes tool calls that no result answers.
-//
-// A run can die between the model asking for a tool and the tool replying —
-// the reader pressing Stop is the everyday case, since that cancels the
-// request while the final write still goes through on an uncancelled context.
-// What lands is an ask with no answer, and both providers reject a
-// conversation carrying one. That used to be survivable because the next run
-// rebuilt the thread from the browser's copy; now that the server seeds from
-// its own record, an orphan left in it would fail every later run on the
-// thread with no way for the reader to clear it. An assistant turn that said
-// something keeps its words and loses the dangling call; one that only asked
-// is dropped whole, because nothing of it remains to say.
-func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
-	answered := make(map[string]struct{})
+// completeInterruptedToolCalls preserves observed calls and supplies a stable
+// error result when a run ended before answering them. The provider receives a
+// valid call/result sequence, and later runs cannot erase build evidence.
+func completeInterruptedToolCalls(messages []agtypes.Message) []agtypes.Message {
+	answered := make(map[string]bool)
 	for _, message := range messages {
 		if message.Role == agtypes.RoleTool && message.ToolCallID != "" {
-			answered[message.ToolCallID] = struct{}{}
+			answered[message.ToolCallID] = true
 		}
 	}
 	repaired := make([]agtypes.Message, 0, len(messages))
 	for _, message := range messages {
-		if message.Role != agtypes.RoleAssistant || len(message.ToolCalls) == 0 {
-			repaired = append(repaired, message)
-			continue
-		}
-		kept := make([]agtypes.ToolCall, 0, len(message.ToolCalls))
-		for _, call := range message.ToolCalls {
-			if _, ok := answered[call.ID]; ok {
-				kept = append(kept, call)
-			}
-		}
-		if len(kept) == 0 && strings.TrimSpace(messageText(message.Content)) == "" {
-			continue
-		}
-		message.ToolCalls = kept
 		repaired = append(repaired, message)
+		if message.Role != agtypes.RoleAssistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			if answered[call.ID] {
+				continue
+			}
+			repaired = append(repaired, agtypes.Message{ID: message.ID + "-" + call.ID + "-interrupted", Role: agtypes.RoleTool, ToolCallID: call.ID, Content: `{"error":"interrupted"}`, Error: "interrupted"})
+			answered[call.ID] = true
+		}
 	}
 	return repaired
 }
@@ -345,6 +381,18 @@ func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
 // events and outcome. truncated marks a run whose answer was cut off at the
 // provider's token limit; it only applies when runErr is nil.
 func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, messages []agtypes.Message, eventJSON [][]byte, truncated bool, runErr error) error {
+	// A completed answer survives a transport failure without a failure marker.
+	if errors.Is(runErr, errAnswerDelivery) && !errors.Is(runErr, context.Canceled) {
+		runErr = nil
+	}
+	if runErr != nil {
+		status := "failed"
+		if errors.Is(runErr, context.Canceled) {
+			status = "stopped"
+		}
+		messages = append(append([]agtypes.Message(nil), messages...), agtypes.Message{ID: runID + "-outcome", Role: agtypes.RoleActivity, ActivityType: "agent-outcome", Content: map[string]any{"status": status, "message": clientErrorMessage(runErr)}})
+	}
+	messages = completeInterruptedToolCalls(messages)
 	messagesJSON, err := json.Marshal(messages)
 	if err != nil {
 		return fmt.Errorf("encode final messages: %w", err)
@@ -360,6 +408,8 @@ func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, 
 	title := threadTitle(messages)
 	status, errorText := "completed", ""
 	switch {
+	case errors.Is(runErr, context.Canceled):
+		status, errorText = "stopped", runErr.Error()
 	case runErr != nil:
 		status, errorText = "failed", runErr.Error()
 	case truncated:

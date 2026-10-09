@@ -54,7 +54,7 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
 		t.Fatal(err)
 	}
-	server := New(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, "test")
+	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}, Extra: &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}}
 	spec := panel.Dashboard{Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 	_, output, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Dashboard: withName(spec, "AI overview")})
@@ -88,7 +88,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := New(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, "test")
+	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
 	// A remote client always carries TokenInfo (ProtectMCP guarantees it), so a
 	// spoofed _meta owner key must lose to the token identity.
 	req := &mcp.CallToolRequest{
@@ -109,7 +109,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 }
 
 func TestDashboardOwnerRejectsTokenMissingDashboardScope(t *testing.T) {
-	server := New(&fakeObservability{}, nil, nil, "test")
+	server := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 	// Even with a spoofed _meta owner key, a token lacking the dashboard scope
 	// must be rejected outright — the meta fallback never applies once
 	// TokenInfo is present.
@@ -123,42 +123,14 @@ func TestDashboardOwnerRejectsTokenMissingDashboardScope(t *testing.T) {
 	}
 }
 
-func (f *fakeObservability) Overview(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Overview], error) {
-	f.scope = scope
-	return observability.Result[observability.Overview]{
-		Schema:  observability.OverviewSchema,
-		Summary: "2 services: 0 unhealthy, 0 degraded, 2 healthy",
-		Data:    observability.Overview{ServiceCount: 2},
-	}, nil
-}
-
 func (f *fakeObservability) Dependencies(_ context.Context, scope observability.Scope, options observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
 	f.scope = scope
 	return observability.Result[observability.Dependencies]{Schema: observability.DependenciesSchema, Data: observability.Dependencies{Service: options.Service, Direction: options.Direction, MaxDepth: options.MaxDepth, MaxNodes: options.MaxNodes}}, nil
 }
 
-func (f *fakeObservability) Topology(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Topology], error) {
-	f.scope = scope
-	return observability.Result[observability.Topology]{
-		Schema:  observability.TopologySchema,
-		Summary: "2 services connected by 1 dependency edge",
-		Data:    observability.Topology{Edges: []observability.Edge{{Caller: "api", Callee: "db"}}},
-	}, nil
-}
-
-func (f *fakeObservability) Performance(_ context.Context, scope observability.Scope, _ observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
-	f.scope = scope
-	return observability.Result[observability.Performance]{Schema: observability.PerformanceSchema, Summary: "performance"}, nil
-}
-
 func (f *fakeObservability) Trace(_ context.Context, scope observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
 	f.scope = scope
 	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema, Summary: "trace", Data: observability.TraceDetail{Spans: nil}}, nil
-}
-
-func (f *fakeObservability) Logs(_ context.Context, scope observability.Scope, _, _, _ string, _ int) (observability.Result[observability.Logs], error) {
-	f.scope = scope
-	return observability.Result[observability.Logs]{Schema: observability.LogsSchema, Summary: "logs", Data: observability.Logs{Entries: nil}}, nil
 }
 
 func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
@@ -167,25 +139,23 @@ func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
 		want   time.Duration
 	}{{"15m", 15 * time.Minute}, {"720h", 30 * 24 * time.Hour}} {
 		t.Run(tt.window, func(t *testing.T) {
-			backend := &fakeObservability{}
-			s := New(backend, nil, nil, "test")
-			s.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
-			result, output, err := s.overview(context.Background(), nil, QueryInput{Window: tt.window, Namespace: "prod"})
+			s := newPanelServer(t)
+			result, output, err := s.overview(t.Context(), nil, QueryInput{Window: tt.window, Namespace: "prod"})
 			if err != nil {
-				t.Fatalf("overview: %v", err)
+				t.Fatal(err)
 			}
-			if len(result.Content) != 1 || output.Schema != observability.OverviewSchema {
-				t.Fatalf("unexpected result: %#v %#v", result, output)
+			if len(result.Content) != 1 || output.Dashboard.Version != 1 || len(output.Results) != 1 {
+				t.Fatalf("result=%+v", output)
 			}
-			if got := backend.scope.End.Sub(backend.scope.Start); got != tt.want {
-				t.Fatalf("window = %s, want %s", got, tt.want)
+			if got := output.Dashboard.Time.To.Sub(*output.Dashboard.Time.From); got != tt.want {
+				t.Fatalf("window=%s", got)
 			}
 		})
 	}
 }
 
 func TestInvalidWindowIsToolError(t *testing.T) {
-	s := New(&fakeObservability{}, nil, nil, "test")
+	s := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 	if _, _, err := s.topology(context.Background(), nil, QueryInput{Window: "later"}); err == nil {
 		t.Fatal("expected invalid window error")
 	}
@@ -193,7 +163,7 @@ func TestInvalidWindowIsToolError(t *testing.T) {
 
 func TestDependencyToolForwardsScopeAndBounds(t *testing.T) {
 	backend := &fakeObservability{}
-	server := New(backend, nil, nil, "test")
+	server := NewWithIntelligence(backend, nil, nil, nil, "test")
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	server.now = func() time.Time { return now }
 	session := connectTestClient(t, server, nil)
@@ -249,7 +219,7 @@ func TestIntelligenceSnapshotReportsNotReady(t *testing.T) {
 
 func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 	t.Run("negotiated client", func(t *testing.T) {
-		server := New(&fakeObservability{}, nil, nil, "test")
+		server := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 		session := connectTestClient(t, server, &mcp.ClientCapabilities{Extensions: map[string]any{
 			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 		}})
@@ -258,14 +228,20 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(listed.Tools) != 8 {
-			t.Fatalf("tool count = %d, want 8", len(listed.Tools))
+		if len(listed.Tools) != 12 {
+			t.Fatalf("tool count = %d, want 12", len(listed.Tools))
 		}
 		resources := map[string]bool{}
 		for _, tool := range listed.Tools {
 			if tool.Name == "get_service_dependencies" {
 				if _, ok := tool.Meta["ui"]; ok {
 					t.Fatal("dependency traversal advertised a UI resource")
+				}
+				continue
+			}
+			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+				if !appOnly(tool.Meta) {
+					t.Fatalf("not app-only: %s", tool.Name)
 				}
 				continue
 			}
@@ -281,16 +257,16 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 				t.Fatalf("tool %s has no nested ui metadata: %#v", tool.Name, tool.Meta)
 			}
 			uri, _ := ui["resourceUri"].(string)
-			if !strings.HasPrefix(uri, "ui://") {
+			if uri != panelsAppURI {
 				t.Fatalf("tool %s resource URI = %q", tool.Name, uri)
 			}
-			if legacy, _ := tool.Meta["ui/resourceUri"].(string); legacy != uri {
-				t.Fatalf("tool %s legacy resource URI = %q, want %q", tool.Name, legacy, uri)
+			if _, exists := tool.Meta["ui/resourceUri"]; exists {
+				t.Fatal("flat UI metadata present")
 			}
 			resources[uri] = true
 		}
-		if len(resources) != 5 {
-			t.Fatalf("resource count = %d, want 5", len(resources))
+		if len(resources) != 1 {
+			t.Fatalf("resource count = %d, want 1", len(resources))
 		}
 		for uri := range resources {
 			result, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
@@ -308,14 +284,19 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 	})
 
 	t.Run("client without extension", func(t *testing.T) {
-		server := New(&fakeObservability{}, nil, nil, "test")
+		server := NewWithIntelligence(&fakeObservability{}, nil, nil, nil, "test")
 		session := connectTestClient(t, server, nil)
 		listed, err := session.ListTools(context.Background(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(listed.Tools) != 8 {
-			t.Fatalf("tool count = %d, want 8", len(listed.Tools))
+		for _, tool := range listed.Tools {
+			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+				t.Fatalf("app helper exposed without negotiation: %s", tool.Name)
+			}
+		}
+		if len(listed.Tools) != 9 {
+			t.Fatalf("tool count = %d, want 9", len(listed.Tools))
 		}
 		for _, tool := range listed.Tools {
 			if _, ok := tool.Meta["ui"]; ok {
@@ -329,7 +310,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 }
 
 func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
-	server := New(&fakeObservability{}, nil, nil, "test")
+	server := newPanelServer(t)
 	session := connectTestClient(t, server, nil)
 	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_observability_overview") || !strings.Contains(instructions, "authenticated user") {
 		t.Fatalf("server instructions = %q", instructions)

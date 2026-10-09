@@ -11,7 +11,7 @@ export function frameRows(frame: Frame): Record<string, Cell>[] {
 
 /** Only context dimensions can be folded; messages, IDs and severity remain. */
 export function logConstants(panel: Panel, frame?: Frame): { name: string; value: string }[] {
-  if (panel.viz !== "logs" || !frame || frame.rows === 0) return [];
+  if (panel.viz !== "logs" || !frame || frame.rows < 2) return [];
   return frame.columns.flatMap((c,i) => {
     if (c.role !== "dimension" || c.type !== "string" || ["body","body_template","severity","status"].includes(c.name) || /(^id$|_id$)/.test(c.name)) return [];
     const value = frame.values[i][0];

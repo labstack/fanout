@@ -8,7 +8,7 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 )
 
-func TestM2ExamplesAndPreviewCoverNewTypes(t *testing.T) {
+func TestExamplesAndPreviewCoverNewTypes(t *testing.T) {
 	s := newPanelServer(t)
 	coverage := map[string]int{}
 	for example, text := range []string{investigationExample, paymentExample} {
@@ -87,7 +87,7 @@ func TestM2ExamplesAndPreviewCoverNewTypes(t *testing.T) {
 	}
 }
 
-func TestM2DescriptionsExposeAnalysisContract(t *testing.T) {
+func TestDescriptionsExposeAnalysisContract(t *testing.T) {
 	docs, err := DescribeTools(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestM2DescriptionsExposeAnalysisContract(t *testing.T) {
 	}
 }
 
-func TestM2SpecGuidePinsAnalysisSemantics(t *testing.T) {
+func TestSpecGuidePinsAnalysisSemantics(t *testing.T) {
 	for _, sentence := range []string{
 		"state_timeline needs at least one threshold marked warn or bad, rather than only ok.",
 		"Annotations attach only to timeseries, heatmap and state_timeline panels, scoped by service and namespace filters.",
@@ -159,7 +159,7 @@ func TestM2SpecGuidePinsAnalysisSemantics(t *testing.T) {
 	}
 }
 
-func TestM2SpecGuideIsLimitedToCreate(t *testing.T) {
+func TestSpecGuideIsLimitedToCreate(t *testing.T) {
 	docs, err := DescribeTools(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestM2SpecGuideIsLimitedToCreate(t *testing.T) {
 	}
 }
 
-func TestM2GuidanceSize(t *testing.T) {
+func TestGuidanceSize(t *testing.T) {
 	if size := len([]rune(m2SpecGuide)); size > 1100 {
 		t.Errorf("M2 guide has %d characters, want about 1000", size)
 	}

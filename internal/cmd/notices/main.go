@@ -50,11 +50,14 @@ type npmPackage struct {
 	Version              string            `json:"version"`
 	License              any               `json:"license"`
 	Dependencies         map[string]string `json:"dependencies"`
+	DevDependencies      map[string]string `json:"devDependencies"`
 	OptionalDependencies map[string]string `json:"optionalDependencies"`
 	PeerDependencies     map[string]string `json:"peerDependencies"`
 	PeerDependenciesMeta map[string]struct {
 		Optional bool `json:"optional"`
 	} `json:"peerDependenciesMeta"`
+	OS  []string `json:"os"`
+	CPU []string `json:"cpu"`
 }
 
 type noticeGroup struct {
@@ -122,7 +125,7 @@ func collect(root string) ([]component, error) {
 	}
 	id := "Native: DuckDB " + engine.Version + " (" + engine.SourceCommit + ")"
 	all[id] = component{id: id, kind: "native engine and static extensions", documents: []document{{name: "duckdb-NOTICE", text: string(data)}}}
-	for _, workspace := range []string{"ui/host", "ui/apps"} {
+	for _, workspace := range []string{"ui/host"} {
 		if err := collectNPM(root, filepath.Join(root, workspace), all); err != nil {
 			return nil, err
 		}
@@ -200,10 +203,14 @@ func collectNPM(root, workspace string, all map[string]component) error {
 	type dependency struct {
 		name, from string
 		optional   bool
+		buildOnly  bool
 	}
 	queue := make([]dependency, 0, len(names))
 	for _, name := range names {
 		queue = append(queue, dependency{name: name, from: workspace})
+	}
+	if _, ok := manifest.DevDependencies["knip"]; ok {
+		queue = append(queue, dependency{name: "knip", from: workspace, buildOnly: true})
 	}
 	seenDirs := map[string]bool{}
 	for len(queue) > 0 {
@@ -231,6 +238,12 @@ func collectNPM(root, workspace string, all map[string]component) error {
 		if pkg.Name == "" || pkg.Version == "" {
 			return fmt.Errorf("%s has incomplete package metadata", realDir)
 		}
+		// An optional package pinned to an OS or CPU is whichever native binary
+		// the installing machine selected, so listing it would make the notices
+		// differ between a developer's machine and CI.
+		if next.optional && (len(pkg.OS) > 0 || len(pkg.CPU) > 0) {
+			continue
+		}
 		id := "npm: " + pkg.Name + " " + pkg.Version
 		docs, err := licenseDocuments(realDir)
 		if err != nil {
@@ -251,18 +264,22 @@ func collectNPM(root, workspace string, all map[string]component) error {
 				return fmt.Errorf("%s resolves to conflicting package contents", id)
 			}
 		} else {
-			all[id] = component{id: id, kind: "npm production package", license: license, documents: docs}
+			kind := "npm production package"
+			if next.buildOnly {
+				kind = "npm build tool"
+			}
+			all[id] = component{id: id, kind: kind, license: license, documents: docs}
 		}
 
 		for _, name := range sortedKeys(pkg.Dependencies) {
-			queue = append(queue, dependency{name: name, from: realDir})
+			queue = append(queue, dependency{name: name, from: realDir, buildOnly: next.buildOnly})
 		}
 		for _, name := range sortedKeys(pkg.OptionalDependencies) {
-			queue = append(queue, dependency{name: name, from: realDir, optional: true})
+			queue = append(queue, dependency{name: name, from: realDir, optional: true, buildOnly: next.buildOnly})
 		}
 		for _, name := range sortedKeys(pkg.PeerDependencies) {
 			queue = append(queue, dependency{
-				name: name, from: realDir,
+				name: name, from: realDir, buildOnly: next.buildOnly,
 				optional: pkg.PeerDependenciesMeta[name].Optional,
 			})
 		}

@@ -8,9 +8,8 @@ import (
 // groupPrefixes maps a function that registers onto an *echo.Group to the
 // prefix that group is mounted at.
 //
-// Echo group registrations carry relative paths: `group.GET("/overview")` in a
-// handler whose group was created as `e.Group("/api/observability", ...)`.
-// Reading the registration alone yields `/overview`, which classifyRoute's SPA
+// Echo group registrations carry relative paths. Reading a registration such as
+// `group.GET("/overview")` alone yields `/overview`, which classifyRoute's SPA
 // catch-all then reports as public — so the page published five telemetry
 // endpoints as requiring no credential, which is the precise failure its own
 // prose promises cannot happen. The prefix is therefore stated here rather than
@@ -20,8 +19,7 @@ import (
 // one mounted elsewhere is a deliberate edit. An unrecognised group
 // registration is an error, never a guess.
 var groupPrefixes = map[string]string{
-	"ObservabilityHandler.Register": "/api/observability",
-	"Runtime.Register":              "/api/agent",
+	"Runtime.Register": "/api/agent",
 }
 
 // groupParams finds every `*echo.Group` parameter in a file and returns the

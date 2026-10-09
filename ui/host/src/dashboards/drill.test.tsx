@@ -3,6 +3,15 @@ import { makeDrill, parseDrill } from "./drill-state";
 import { router } from "../router";
 import { parseSearch, toSearchParams } from "./search";
 import type { Panel, PanelResult } from "../../../panels/types";
+import { MantineProvider } from "@mantine/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { DrillDrawer } from "./drill";
+import type { DashboardSpec } from "../../../panels/types";
+import type { DrillTarget } from "./drill-state";
+import { TableViz } from "./viz/table";
+
 const panel: Panel = {
   id: "p",
   title: "P",
@@ -18,7 +27,7 @@ const result: PanelResult = {
   to_ms: 500000,
   interval: "1m",
 };
-describe("M2 drill URL", () => {
+describe("drill URL", () => {
   it("reproduces bucket, dimensions, trace and variables", () => {
     const target = makeDrill(panel, result, {
       time: 200000,
@@ -65,17 +74,11 @@ describe("M2 drill URL", () => {
   });
 });
 
-import { MantineProvider } from "@mantine/core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { DrillDrawer } from "./drill";
-import type { DashboardSpec } from "../../../panels/types";
-import type { DrillTarget } from "./drill-state";
+const hostAPI = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
 const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
 vi.mock("./api", () => ({
-  queryExemplars: wire.exemplars,
-  getTrace: wire.trace,
+  queryExemplars: hostAPI.exemplars,
+  getTrace: hostAPI.trace,
 }));
 const spec: DashboardSpec = {
   version: 1,
@@ -94,7 +97,11 @@ const target: DrillTarget = {
 };
 const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  expect(hostAPI.exemplars).not.toHaveBeenCalled();
+  expect(hostAPI.trace).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
 it("aborts an obsolete selection and keeps the next selection visible", async () => {
   let signal: AbortSignal | undefined;
   let finish: (value: { traces: [] }) => void = () => undefined;
@@ -119,7 +126,7 @@ it("aborts an obsolete selection and keeps the next selection visible", async ()
   const render = (active?: DrillTarget) => (
     <MantineProvider>
       <QueryClientProvider client={client}>
-        <DrillDrawer
+        <DrillDrawer client={wire}
           spec={spec}
           time={spec.time}
           vars={{}}
@@ -220,7 +227,7 @@ it("renders the existing waterfall and correlated logs with visible truncation",
     root.render(
       <MantineProvider>
         <QueryClientProvider client={client}>
-          <DrillDrawer
+          <DrillDrawer client={wire}
             spec={spec}
             time={spec.time}
             vars={{}}
@@ -255,7 +262,7 @@ async function mountDrawer(active: DrillTarget = target) {
   const root = createRoot(node); const change = vi.fn();
   const render = async (next?: DrillTarget) => act(async () => {
     root.render(<MantineProvider><QueryClientProvider client={client}>
-      <DrillDrawer spec={spec} time={spec.time} vars={{}} target={next} onChange={change} />
+      <DrillDrawer client={wire} spec={spec} time={spec.time} vars={{}} target={next} onChange={change} />
     </QueryClientProvider></MantineProvider>);
   });
   // The dashboard keeps the drawer mounted while closed before a selection opens it.
@@ -337,7 +344,6 @@ it("shows an empty trace and its empty correlated logs", async () => {
   } finally { await drawer.cleanup(); }
 });
 
-import { TableViz } from "./viz/table";
 it("drills configured trace-link rows with their namespace after sorting, without making empty rows actionable", async () => {
   const node = document.createElement("div");
   document.body.append(node);

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestM2PanelTimeWindow(t *testing.T) {
+func TestPanelTimeWindow(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = d.Panels[:1]
