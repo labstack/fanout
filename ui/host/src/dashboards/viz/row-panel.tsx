@@ -78,7 +78,7 @@ export function RowPanel(props: AnalysisProps) {
   }, [props.panel, props.result, props.onSelect, props.onPoint, props.dark, props.traceLinks, model]);
   return <div role="region" aria-label={`${props.title ?? props.panel.title}: ${model.rows.length} rows`}>
     <TableViz foldConstants={props.foldConstants} traceLinks={props.traceLinks} panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
-    {props.panel.viz === "log_patterns" && <Text data-pattern-summary role="status" c="dimmed" fz={12} style={{marginTop:8,flexShrink:0}}>
+    {props.panel.viz === "log_patterns" && <Text data-pattern-summary c="dimmed" fz={12} style={{marginTop:8,flexShrink:0}}>
       {model.rows.length} {model.rows.length === 1 ? "pattern" : "patterns"} · {patternEvents.toLocaleString()} {patternEvents === 1 ? "event" : "events"} in the window{props.result.frame?.truncated ? " (shown)" : ""}
     </Text>}
   </div>;
