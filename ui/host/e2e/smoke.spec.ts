@@ -4,8 +4,9 @@ import { fileURLToPath } from "node:url";
 import spec from "./fixtures/all-panels.json" with { type: "json" };
 import { inside, overlaps, type Rect } from "./geometry";
 import { typeScale } from "../../tokens";
+import { chartLabel } from "./setup-support";
 
-type ObservedResult = { id: string; status: string; diagnosis?: string };
+type ObservedResult = { id: string; status: string; frame?: { rows: number; values: unknown[][] } };
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const test = base.extend<{ faults: string[] }>({
   baseURL: async ({}, use) => { await use(process.env.FANOUT_E2E_BASE_URL); },
@@ -33,14 +34,23 @@ const expectedElements: Record<string, string> = {
   service_map: '[role=region][aria-label*="service dependency graph"] button', health: "[data-health-tiles]",
 };
 
-async function rendered(card: Locator, viz: string, result?: ObservedResult) {
+async function rendered(card: Locator, panel: { title: string; viz: string }, result?: ObservedResult) {
+  const { viz, title } = panel;
   await expect(card.locator('[aria-label="Loading panel"], [aria-label="Refreshing"]')).toHaveCount(0);
   await expect(card.locator("[data-panel-error]")).toHaveCount(0);
-  if (result?.status === "empty") {
-    expect(result.diagnosis, "Empty panels must give an authored diagnosis").toBeTruthy();
-    await expect(card.locator("[data-panel-body]")).toContainText(result.diagnosis!);
-  } else {
-    await expect(card.locator(expectedElements[viz]).first(), `Expected ${viz} element`).toBeVisible();
+  if (result) expect(result.status, "The seeded fixture has no empty panels").toBe("ok");
+  await expect(card.locator(expectedElements[viz]).first(), `Expected ${viz} element`).toBeVisible();
+  const label = chartLabel(title, viz);
+  if (label) {
+    // Keyboard charts hide the canvas container from the accessibility tree,
+    // but retain its role=img label. Their accessible overview names series.
+    await expect(card.locator('[role="img"]').first()).toHaveAttribute("aria-label", label);
+    if (viz === "gauge") {
+      expect(result?.frame?.rows, "Gauge has seeded values").toBeGreaterThan(0);
+      expect(result?.frame?.values.flat().filter(value => typeof value === "number").length, "Gauge has a numeric value").toBeGreaterThan(0);
+    } else {
+      await expect(card.getByRole("application")).toHaveAttribute("aria-label", chartLabel(title, viz, true)!);
+    }
   }
 }
 
@@ -78,6 +88,7 @@ async function mapGeometry(card: Locator) {
   const viewport = await bounds(region.locator(":scope > div").first());
   const nodes = region.locator("button");
   await expect.poll(() => nodes.count()).toBeGreaterThan(0);
+  await expect.poll(() => region.locator("svg path[marker-end]").count(), { message: "Seeded topology renders an edge (excluding arrow definitions)" }).toBeGreaterThan(0);
   const boxes: Rect[] = [];
   for (const node of await nodes.all()) {
     const rect = await bounds(node);
@@ -107,12 +118,29 @@ test("all fifteen dashboard panels settle with valid geometry", async ({ page })
     const card = page.locator(`.mantine-Paper-root[data-panel="${panel.id}"]`);
     await card.scrollIntoViewIfNeeded();
     if (panel.viz !== "text") {
-      await expect.poll(() => results.get(panel.id)?.status, { timeout: 60_000 }).toMatch(/^(ok|empty)$/);
+      await expect.poll(() => results.get(panel.id)?.status, { timeout: 60_000 }).toBe("ok");
     }
-    await rendered(card, panel.viz, results.get(panel.id));
+    await rendered(card, panel, results.get(panel.id));
     await cardGeometry(card);
     if (panel.viz === "service_map") await mapGeometry(card);
   }
+  // Annotation chips are canvas text; hovering them exposes the authored deploy
+  // details as HTML text. Inspect that text without reading any canvas pixels.
+  const timeseries = page.locator('.mantine-Paper-root[data-panel="timeseries"]');
+  await timeseries.scrollIntoViewIfNeeded();
+  const plot = await bounds(timeseries.locator('[role="img"]').first());
+  const deploy = timeseries.getByText(/checkout · 1\.1\.0 · /);
+  await expect.poll(async () => {
+    for (const y of [8, 20, 32, 44]) {
+      for (let x = plot.width - 12; x > plot.width / 2; x -= 12) {
+        await page.mouse.move(plot.x + x, plot.y + y);
+        await page.waitForTimeout(50);
+        if (await deploy.first().isVisible()) return true;
+      }
+    }
+    return false;
+  }, { timeout: 30_000, message: "A time-series deploy annotation exposes checkout 1.1.0 as text" }).toBe(true);
+  await page.mouse.move(0, 0);
   await expect(page.locator('[aria-label="Loading panel"], [aria-label="Refreshing"]')).toHaveCount(0);
   // Compare every card in one coordinate system after lazy content has settled.
   for (const panel of spec.panels) cards.push(await bounds(page.locator(`.mantine-Paper-root[data-panel="${panel.id}"]`)));
@@ -143,7 +171,8 @@ async function mountApp(page: Page, html: string, fragment: unknown, theme: "lig
         host.smokeDelivered = true;
       } else if (message.method === "ui/notifications/size-changed") {
         host.smokeSizes.push(performance.now());
-        if (message.params.height) iframe.style.height = `${Math.min(12000, Math.max(240, Math.round(message.params.height)))}px`;
+        // Mirror maxAppHeight in ui/host/src/mcp-app-frame.tsx (not exported).
+        if (message.params.height) iframe.style.height = `${Math.min(2000, Math.max(240, Math.round(message.params.height)))}px`;
       } else if (message.id !== undefined) {
         send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Smoke harness has no interactive tools" } });
       }
@@ -155,7 +184,7 @@ async function mountApp(page: Page, html: string, fragment: unknown, theme: "lig
 for (const name of ["overview", "performance", "topology", "logs", "trace"]) {
   test(`chat fragment ${name} renders and size messages converge`, async ({ page }) => {
     const html = await readFile(`${root}/internal/mcp/apps/panels.html`, "utf8");
-    const fragment = JSON.parse(await readFile(`${root}/ui/host/tests/go-fragments/${name}.json`, "utf8")) as { dashboard: { panels: { id: string; viz: string }[] } };
+    const fragment = JSON.parse(await readFile(`${root}/ui/host/tests/go-fragments/${name}.json`, "utf8")) as { dashboard: { panels: { id: string; title: string; viz: string }[] }; results: ObservedResult[] };
     await mountApp(page, html, fragment, test.info().project.use.colorScheme as "light" | "dark");
     const frame = page.frameLocator("iframe");
     await expect.poll(() => page.evaluate(() => (window as typeof window & { smokeDelivered: boolean }).smokeDelivered)).toBe(true);
@@ -163,7 +192,7 @@ for (const name of ["overview", "performance", "topology", "logs", "trace"]) {
     for (const panel of fragment.dashboard.panels) {
       const card = frame.locator(`.mantine-Paper-root[data-panel="${panel.id}"]`);
       await card.scrollIntoViewIfNeeded();
-      await rendered(card, panel.viz);
+      await rendered(card, panel, fragment.results.find(result => result.id === panel.id));
     }
     await expect(frame.getByRole("alert")).toHaveCount(0);
     await expect(frame.locator('[aria-label="Loading panel view"], [data-panel-error]')).toHaveCount(0);
@@ -173,8 +202,8 @@ for (const name of ["overview", "performance", "topology", "logs", "trace"]) {
       return times.length > 0 && performance.now() - times[times.length - 1] >= 1000;
     }), { timeout: 30_000 }).toBe(true);
     const before = await page.evaluate(() => (window as typeof window & { smokeSizes: number[] }).smokeSizes.length);
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(5_000);
     const after = await page.evaluate(() => (window as typeof window & { smokeSizes: number[] }).smokeSizes.length);
-    expect(after - before, "Zero size messages in two seconds after settled frame").toBe(0);
+    expect(after - before, "Zero size messages in five seconds after settled frame").toBe(0);
   });
 }

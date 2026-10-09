@@ -50,7 +50,7 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var spec panel.Dashboard
-	if err := json.Unmarshal(data, &spec); err != nil {
+	if err := decodeFixture(data, &spec); err != nil {
 		t.Fatal(err)
 	}
 	panel.Normalize(&spec)
@@ -83,6 +83,31 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 	}
 	if spec.Annotations == nil || spec.Annotations.Deploys == nil || !*spec.Annotations.Deploys || spec.Annotations.Anomalies == nil || !*spec.Annotations.Anomalies {
 		t.Fatal("annotations must be enabled")
+	}
+}
+
+func decodeFixture(data []byte, spec *panel.Dashboard) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(spec)
+}
+
+func TestAllPanelsFixtureRejectsUnknownFields(t *testing.T) {
+	data, err := os.ReadFile("../../../ui/host/e2e/fixtures/all-panels.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []struct{ name, old, replacement string }{
+		{"panel", `"id": "stat"`, `"titel": "typo", "id": "stat"`},
+		{"variable", `"include_all": true`, `"includeAll": true, "include_all": true`},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			mutated := bytes.Replace(data, []byte(mutation.old), []byte(mutation.replacement), 1)
+			var spec panel.Dashboard
+			if err := decodeFixture(mutated, &spec); err == nil {
+				t.Fatal("fixture accepted an unknown field")
+			}
+		})
 	}
 }
 
