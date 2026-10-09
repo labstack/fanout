@@ -1,4 +1,5 @@
-import { parseDrill } from "./drill-state";
+import { parseDrill, type DrillTarget } from "./drill-state";
+import { parseSearch as decodeSearch, stringifySearch } from "../search-encoding";
 import type { DashboardSpec, DashboardTime, VarValue } from "../../../panels/types";
 
 export const ranges = ["5m", "15m", "1h", "3h", "6h", "12h", "24h", "2d", "7d", "30d"] as const;
@@ -52,7 +53,7 @@ export function parseSearch(raw: Record<string, unknown>): DashboardSearch {
 
 export function toSearchParams(search: DashboardSearch): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (search.drill) out.drill = search.drill;
+  if (search.drill) out.drill = JSON.parse(search.drill);
   if (search.range) out.range = search.range;
   if (search.from && search.to) { out.from = search.from; out.to = search.to; }
   if (search.compare) out.compare = search.compare;
@@ -60,6 +61,14 @@ export function toSearchParams(search: DashboardSearch): Record<string, unknown>
   if (search.edit) out.edit = search.edit;
   for (const [name, value] of Object.entries(search.vars ?? {})) out[`var-${name}`] = Array.isArray(value) ? { values: value } : value;
   return out;
+}
+
+/** Build trace links with the same canonical search state and codec as the router. */
+export function drillHref(href: string, target: DrillTarget): string {
+  const url = new URL(href);
+  const search = {...parseSearch(decodeSearch(url.search)), drill: JSON.stringify(target)};
+  url.search = stringifySearch(toSearchParams(search));
+  return url.href;
 }
 
 export function effectiveTime(spec: DashboardSpec, search: DashboardSearch): DashboardTime {

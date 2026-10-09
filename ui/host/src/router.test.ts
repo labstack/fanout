@@ -3,6 +3,15 @@ import { router } from "./router";
 import { parseSearch, toSearchParams } from "./dashboards/search";
 
 describe("router search encoding", () => {
+  it("keeps hand-typed quoted scalars literal and unquotes only stringifier output", () => {
+    expect(parseSearch(router.options.parseSearch!("?var-q=%22timeout%22")).vars).toEqual({q: '"timeout"'});
+    for (const q of ['{"literal":true}', '"timeout"', '"', '{']) {
+      const search = {vars: {q}};
+      const location = router.buildLocation({to: "/dashboards/$dashboardId", params: {dashboardId: "d"}, search: toSearchParams(search)});
+      expect(parseSearch(router.options.parseSearch!(location.searchStr))).toEqual(search);
+    }
+  });
+
   it("round trips structured variable arrays and rejects repeated variable decoding", () => {
     const search={range:"6h",compare:"1" as const,vars:{service:"checkout",route:["a","b"]}};
     const location=router.buildLocation({to:"/dashboards/$dashboardId",params:{dashboardId:"d"},search:toSearchParams(search)});
@@ -30,4 +39,13 @@ it('copies full-screen compare and drill links with exact instants and distinct 
   const location=router.buildLocation({to:'/dashboards/$dashboardId',params:{dashboardId:'d'},search:toSearchParams(search)});
   expect(parseSearch(router.options.parseSearch!(new URL(location.href,'https://fanout.test').search))).toEqual(search);
  }
+});
+
+it("passes drill as an object for a single router serialization", () => {
+  const from = "2026-10-08T00:00:00.123456789Z", to = "2026-10-08T01:00:00.987654321Z";
+  const target = {panel_id: "logs", kind: "logs", from, to, window_from: from, window_to: to, dimensions: {body_template: "token=[REDACTED] failed <*>"}};
+  const search = toSearchParams({drill: JSON.stringify(target)});
+  expect(search.drill).toEqual(target);
+  const location = router.buildLocation({to: "/dashboards/$dashboardId", params: {dashboardId: "d"}, search});
+  expect(new URL(location.href, "https://fanout.test").searchParams.get("drill")).toBe(JSON.stringify(target));
 });

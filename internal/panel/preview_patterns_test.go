@@ -58,21 +58,26 @@ func TestPreviewPatternContextEngineScoped(t *testing.T) {
 	if total != 4 || len(trend) > 240 {
 		t.Fatalf("trend: %v", trend)
 	}
-	d.Panels[0].Viz = "logs"
-	d.Panels[0].Query = &Query{From: "logs", Where: []string{"namespace = 'shop'", "body_template = '" + pattern + "'"}}
-	got, err = e.Run(t.Context(), RunRequest{Dashboard: d})
-	if err != nil || got[0].Status != StatusOK || got[0].Frame == nil || got[0].Frame.Rows != 4 {
-		t.Fatalf("drill: %+v %v", got, err)
+	resp, err := e.Exemplars(t.Context(), ExemplarRequest{Dashboard: d, PanelID: "p", Kind: "logs", From: fixtureStart, To: fixtureStart.Add(time.Hour), Dimensions: map[string]string{"body_template": pattern}})
+	if err != nil || resp.Logs == nil || resp.Logs.Rows != 4 {
+		t.Fatalf("drill: %+v %v", resp, err)
 	}
-	for i, c := range got[0].Frame.Columns {
-		if c.Name == "body" {
-			for _, body := range got[0].Frame.Values[i] {
-				if body != pattern {
-					t.Fatalf("unredacted drill: %v", body)
-				}
-			}
-			return
+	cols = map[string]int{}
+	for i, c := range resp.Logs.Columns {
+		cols[c.Name] = i
+	}
+	for _, name := range []string{"body", "namespace", "service", "time"} {
+		if _, ok := cols[name]; !ok {
+			t.Fatalf("missing drill %s", name)
 		}
 	}
-	t.Fatal("missing drill body")
+	for row := range resp.Logs.Rows {
+		body := resp.Logs.Values[cols["body"]][row]
+		namespace := resp.Logs.Values[cols["namespace"]][row]
+		service := resp.Logs.Values[cols["service"]][row]
+		at, ok := resp.Logs.Values[cols["time"]][row].(int64)
+		if body != pattern || namespace != "shop" || service != "alpha" && service != "zeta" || !ok || at < fixtureStart.UnixMilli() || at >= fixtureStart.Add(time.Hour).UnixMilli() {
+			t.Fatalf("out-of-scope or unredacted drill row: body=%v namespace=%v service=%v time=%v", body, namespace, service, resp.Logs.Values[cols["time"]][row])
+		}
+	}
 }

@@ -10,6 +10,7 @@ import { formatLabel, formatTimestamp, formatValue } from "../../../../panels/un
 import { Sparkline } from "./stat";
 import { columnDisplay, type ColumnFormat } from "../../../../panels/column-formats";
 import { makeDrill } from "../drill-state";
+import { drillHref } from "../search";
 import { RowText } from "./cell-text";
 import { statusInk, tint } from "../../../../panels/style";
 import { chartThemeFor } from "../../../../panels/compile";
@@ -51,10 +52,9 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         if (format.format === "sparkline" && !panel.query && column.type !== "json") return <Text fz={12} c="dimmed" role="status">Sparkline requires an array column</Text>;
         const selection = { ...model.selection(model.rows[info.row.index]), trace_id: value === null ? undefined : String(value) };
         const target = format.format === "trace_link" ? makeDrill(panel, result, selection) : undefined;
-        const url = target && !traceLinks ? new URL(window.location.href) : undefined;
-        if (url && target) url.searchParams.set("drill", JSON.stringify(target));
+        const traceHref = target && !traceLinks ? drillHref(window.location.href, target) : undefined;
         return <FormattedCell format={{ ...format, unit: format.unit ?? (column.unit as Unit | undefined) ?? panel.unit }} value={value} max={maxima[index]} panel={panel} better={result.better}
-          trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={url?.toString()} traceButton={traceLinks === "button" && Boolean(target && selection.trace_id && traceInteractive)}
+          trend={panel.query ? frame.trends?.[column.name]?.[info.row.index] ?? [] : undefined} traceHref={traceHref} traceButton={traceLinks === "button" && Boolean(target && selection.trace_id && traceInteractive)}
           onTrace={() => pointCallback.current?.(selection)} onService={(name, value) => variableCallback.current?.(name, value)} />;
       }
       if (column.type === "number" && typeof value === "number") {

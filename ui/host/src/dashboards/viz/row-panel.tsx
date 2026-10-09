@@ -1,6 +1,7 @@
 import { Anchor, Badge, Text } from "@mantine/core";
 import { useCallback, useMemo, type CSSProperties } from "react";
 import { makeDrill } from "../drill-state";
+import { drillHref } from "../search";
 import { rowModel } from "../../../../panels/rows";
 import type { AnalysisProps } from "./analysis-chart";
 import { TableViz, type TableCellProps } from "./table";
@@ -33,8 +34,8 @@ export function RowPanel(props: AnalysisProps) {
       if (props.traceLinks === "button") return <Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" onClick={event => {
         event.stopPropagation(); props.onPoint?.(selection);
       }}>{String(value).slice(0,16)}</Anchor>;
-      const url = new URL(window.location.href); url.searchParams.set("drill", JSON.stringify(target));
-      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={url.toString()} onClick={event => {
+      const href = drillHref(window.location.href, target);
+      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={href} onClick={event => {
         if (props.onPoint && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
           event.preventDefault(); event.stopPropagation(); props.onPoint(selection);
         }

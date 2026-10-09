@@ -731,13 +731,16 @@ it("shows fix for a loaded owner-scoped dashboard without maintaining a client r
 it("removes an explicit empty multi-select chip and restores its default",async()=>{
  servedRecord={...record,spec:{...spec,variables:[{name:"service",kind:"custom",options:["checkout","cart"],multi:true,default:"checkout"}]}};
  const {host,onSearch,rerender}=await render({compare:"1",vars:{service:[],other:"kept"}});
+ await vi.waitFor(()=>expect(host.querySelector('[aria-label="Remove filter service"]')).not.toBeNull());
  const chip=host.querySelector<HTMLButtonElement>('[aria-label="Remove filter service"]')!;
- expect(chip).not.toBeNull();
+ expect(queryBodies.at(-1)).toMatchObject({vars:{service:[]}});
  await act(async()=>chip.click());
  expect(onSearch).toHaveBeenLastCalledWith({compare:"1",vars:{other:"kept"}},true);
  await rerender({compare:"1",vars:{other:"kept"}});
- expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
- expect(host.textContent).toContain("checkout");
+ await vi.waitFor(()=>{
+  expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
+  expect(queryBodies.at(-1)).toMatchObject({vars:{service:"checkout"}});
+ });
 });
 
 
