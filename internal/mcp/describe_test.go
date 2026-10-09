@@ -98,6 +98,9 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 	if !update.Destructive {
 		t.Error("replace_dashboard reported non-destructive; it replaces a dashboard's design")
 	}
+	if update.Idempotent {
+		t.Error("replace_dashboard reported idempotent; every save appends a version")
+	}
 	if edit := found["edit_dashboard"]; edit.ReadOnly || !edit.Destructive {
 		t.Errorf("edit_dashboard annotations = %+v, want destructive and not read-only", edit)
 	}
@@ -248,7 +251,7 @@ func TestDescribeToolsDocumentsFragmentResourcesAndAppHelpers(t *testing.T) {
 			t.Fatalf("%s doc=%+v", name, found[name])
 		}
 	}
-	for _, name := range []string{"query_panel_fragment", "get_panel_exemplars", "resolve_panel_variables"} {
+	for _, name := range []string{"query_panel_fragment", "list_panel_exemplars", "resolve_panel_variables"} {
 		if !found[name].AppOnly || found[name].ResourceURI != "" {
 			t.Fatalf("%s helper doc=%+v", name, found[name])
 		}

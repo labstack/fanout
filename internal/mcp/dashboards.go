@@ -126,7 +126,7 @@ var dashboardTools = [...]mcp.Tool{
 	{
 		Name: "replace_dashboard", Title: "Replace dashboard",
 		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: true, OpenWorldHint: boolPtr(false)},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "edit_dashboard", Title: "Edit dashboard",

@@ -31,7 +31,7 @@ func RegisterPanelRoutes(e *echo.Echo, engine PanelEngine) {
 	read := RequireCapability(ReadTelemetry)
 	e.POST("/api/panels/query", h.query, read)
 	e.POST("/api/panels/exemplars", h.exemplars, read)
-	e.POST("/api/variables/resolve", h.resolve, read)
+	e.POST("/api/panels/variables/resolve", h.resolve, read)
 	e.GET("/api/telemetry/schema", h.schema, read)
 }
 

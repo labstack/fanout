@@ -34,6 +34,14 @@ const expectedElements: Record<string, string> = {
   service_map: '[role=region][aria-label*="service dependency graph"] button', health: "[data-health-tiles]",
 };
 
+test("resolves dashboard variables through the panel route", async ({ request }) => {
+  const response = await request.post("/api/panels/variables/resolve", {
+    headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
+  });
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toHaveProperty("options");
+});
+
 async function rendered(card: Locator, panel: { title: string; viz: string }, result?: ObservedResult) {
   const { viz, title } = panel;
   await expect(card.locator('[aria-label="Loading panel"], [aria-label="Refreshing"]')).toHaveCount(0);

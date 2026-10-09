@@ -97,9 +97,8 @@ v2026.9.5
 
 ## API and MCP naming
 
-Use the same naming conventions as Monk, Goal, Cipher, and ResponseKeeper
-where the operations have the same meaning. Product-specific resources and
-protocol-defined contracts keep their own semantics.
+These are LabStack's shared API and MCP conventions. Product-specific
+resources and protocol-defined contracts keep their own semantics.
 
 - Application HTTP routes use `/api`, lowercase words, meaningful slash-separated
   domains/resources/actions, and plural collections. Do not use hyphens in
@@ -118,15 +117,23 @@ protocol-defined contracts keep their own semantics.
 - Equivalent authentication flows use `/api/auth/me`, `/api/auth/code/send`,
   `/api/auth/code/verify`, and `POST /api/auth/logout`. Flow selection, passkeys,
   account linking, and sign-in link verification are distinct operations.
+  OIDC sign-in uses `/api/auth/oidc/start` and `/api/auth/oidc/callback` without
+  a provider segment because Fanout supports exactly one configured provider.
 - Operational routes use `/healthz` for liveness, `/readyz` for readiness,
   and `/metrics` for Prometheus exposition. Preserve authorization requirements.
 - MCP tool names use verb-first snake_case and describe their behavior:
   `get`, `list`, `search`, `inspect`, `create`, `replace`, and domain actions.
   Full replacement uses `replace`, not `update`. Do not add product prefixes
   solely to avoid collisions in clients that aggregate servers.
-- New product-owned JSON fields and query parameters use snake_case. Preserve
-  protocol-defined names, including MCP, OAuth, OTLP, and AG-UI fields. Existing
+- MCP tool annotations must reflect actual read-only, destructive, and
+  idempotent behavior.
+- Product-owned JSON fields and query parameters use snake_case; an entity's
+  own identifier is `id`. Preserve protocol-defined names, including MCP,
+  OAuth, OTLP, and AG-UI fields. Existing
   client-contract exceptions require a deliberate contract change.
+- Cursor-paginated collections return `items` and `next_cursor` (null at the
+  end) and accept `page_size` and `cursor`. Unpaginated lists keep a named
+  array such as `dashboards` or `versions`.
 - Product CalVer, client-contract versions, and protocol versions are separate.
   Do not put the product release or maturity suffix in API paths or tool names.
 - Breaking naming changes update registrations, authorization classification,

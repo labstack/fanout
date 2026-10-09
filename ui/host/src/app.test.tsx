@@ -73,7 +73,7 @@ describe("Session", () => {
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/dashboards") return json({ dashboards: [] });
-      if (url.pathname === "/api/agent/threads") return json({ threads: [], nextCursor: "" });
+      if (url.pathname === "/api/agent/threads") return json({ items: [], next_cursor: null });
       if (url.pathname.startsWith("/api/agent/threads/")) return json({ message: "not found" }, 404);
       throw new Error(`unexpected request: ${url.pathname}`);
     });
@@ -101,7 +101,7 @@ describe("Session", () => {
       fetchMock.mockImplementation(async (input) => {
         const url = new URL(String(input), "http://localhost");
         if (url.pathname === "/api/dashboards") return json({ dashboards: [{ id: "saved-1", name: "Cart errors", version: 2, panel_count: 2 }] });
-        if (url.pathname === "/api/agent/threads") return json({ threads: [], nextCursor: "" });
+        if (url.pathname === "/api/agent/threads") return json({ items: [], next_cursor: null });
         return json({ message: "not found" }, 404);
       });
       const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, receipt: {base_version: name === "create_dashboard" ? 0 : 1, version: 2, changes: [], layout_changed: false, save_check: {checked: true, elapsed_ms: 12, panels: []}} });
@@ -166,7 +166,7 @@ describe("Session", () => {
         { id: "dash-main", name: "System overview", description: "", is_default: true, version: 1, panel_count: 4, updated_at: "2026-07-22 03:00:00" },
         { id: "dash-checkout", name: "Checkout", description: "", is_default: false, version: 1, panel_count: 2, updated_at: "2026-07-22 03:00:00" },
       ] });
-      return json({ threads: [], nextCursor: "" });
+      return json({ items: [], next_cursor: null });
     });
     const rootRoute = createRootRoute({ component: App });
     const detail = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards/$dashboardId", validateSearch: (raw: Record<string, unknown>) => toSearchParams(parseSearch(raw)), component: () => <div>Dashboard</div> });
@@ -236,7 +236,7 @@ describe("Session", () => {
     if(terminal==='run_throw')agentMocks.runAgent.mockImplementationOnce(()=>new Promise<undefined>((_resolve,reject)=>{rejectRun=reject;}));
     fetchMock.mockImplementation(async input=>{
       const path=new URL(String(input),"https://fanout.example.com").pathname;
-      return json(path==='/api/dashboards'?{dashboards:[]}:path==='/api/agent/threads'?{threads:[],nextCursor:""}:{messages:[]});
+      return json(path==='/api/dashboards'?{dashboards:[]}:path==='/api/agent/threads'?{items:[],next_cursor:null}:{messages:[]});
     });
     window.happyDOM.setURL("https://fanout.example.com/chat/thread");
     const rootRoute=createRootRoute({component:App});
@@ -303,7 +303,7 @@ describe("Session", () => {
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/dashboards") return json({ dashboards: [] });
-      if (url.pathname === "/api/agent/threads") return json({ threads: [], nextCursor: "" });
+      if (url.pathname === "/api/agent/threads") return json({ items: [], next_cursor: null });
       if (url.pathname.startsWith("/api/agent/threads/")) {
         threadRequests += 1;
         return threadRequests === 1 ? json({ message: "boom" }, 500) : json({ message: "not found" }, 404);

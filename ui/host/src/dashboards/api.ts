@@ -54,7 +54,7 @@ export const patchDashboard = (id: string, operations: Operation[], baseVersion:
 export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/panels/query", { method: "POST", json: body, signal }).then((r) => r.results);
 export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
-  request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
+  request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/panels/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
 
 export type ExemplarBody = { dashboard: DashboardSpec; panel_id: string; kind?: "traces" | "logs"; time?: DashboardTime; from: string; to: string; dimensions?: Record<string, string>; bucket?: Selection["bucket"]; vars?: Record<string, VarValue> };
 export type Exemplar = { trace_id: string; namespace: string; service: string; operation: string; duration_ms: number; status: string; start: string };

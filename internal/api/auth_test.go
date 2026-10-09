@@ -133,7 +133,6 @@ func TestRetiredRoutesDoNotReachSPA(t *testing.T) {
 		{http.MethodPost, "/api/agent"},
 		{http.MethodPost, "/api/users/" + admin.ID + "/logout-all"},
 		{http.MethodPost, "/api/settings/ingest/rotate-token"},
-		{http.MethodGet, "/-/metrics"},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -175,6 +174,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/api/dashboards/dashboard-1/versions/1", routePolicyCapability, ManageOwnDashboards},
 		{http.MethodPost, "/api/dashboards/dashboard-1/versions/1/restore", routePolicyCapability, ManageOwnDashboards},
 		{http.MethodPost, "/api/agent/runs", routePolicyCapability, RunAgent},
+		{http.MethodPost, "/api/panels/variables/resolve", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
 		{http.MethodPost, "/api/settings/ingest/token/rotate", routePolicyCapability, ManageIngest},
 		{http.MethodPost, "/api/users/user-1/access/revoke", routePolicyCapability, ManageUsers},
@@ -222,19 +222,19 @@ func TestUnknownProtectedPathsReturn404BeforeAuthentication(t *testing.T) {
 	}
 }
 
-func TestRetiredMetricsReturns404ForScrapers(t *testing.T) {
+func TestMetricsRequiresValidScraperToken(t *testing.T) {
 	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", MetricsToken: "metrics-test-token"}, auth.SMTPConfig{})
 	s.e.GET("/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	s.e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "SPA") })
-	for _, token := range []string{"", "wrong", "metrics-test-token"} {
-		req := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+	for _, token := range []string{"", "wrong"} {
+		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("retired metrics = %d, want 404", rec.Code)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("metrics with invalid token = %d, want 401", rec.Code)
 		}
 	}
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)

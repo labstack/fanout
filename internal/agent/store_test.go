@@ -463,7 +463,7 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 		t.Fatalf("cross-owner thread read = %d, want 404", recorder.Code)
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/agent/threads?q=owner&limit=1", nil)
+	request = httptest.NewRequest(http.MethodGet, "/api/agent/threads?q=owner&page_size=1", nil)
 	request.AddCookie(cookie)
 	recorder = httptest.NewRecorder()
 	e.ServeHTTP(recorder, request)
@@ -471,14 +471,83 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 		t.Fatalf("thread list = %d, want 200: %s", recorder.Code, recorder.Body.String())
 	}
 	var page struct {
-		Threads    []ThreadSummary `json:"threads"`
-		NextCursor string          `json:"nextCursor"`
+		Items      []ThreadSummary `json:"items"`
+		NextCursor *string         `json:"next_cursor"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Threads) != 1 || page.Threads[0].ThreadID != "own-thread" || page.NextCursor != "" {
+	if len(page.Items) != 1 || page.Items[0].ThreadID != "own-thread" || page.NextCursor != nil {
 		t.Fatalf("owner-scoped thread page = %#v", page)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(recorder.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire) != 2 || string(wire["next_cursor"]) != "null" || wire["items"] == nil {
+		t.Fatalf("thread page JSON = %s", recorder.Body.String())
+	}
+	var summaries []map[string]json.RawMessage
+	if err := json.Unmarshal(wire["items"], &summaries); err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries[0]) != 3 || string(summaries[0]["id"]) != `"own-thread"` || summaries[0]["title"] == nil || summaries[0]["updated_at"] == nil {
+		t.Fatalf("thread summary JSON = %s", wire["items"])
+	}
+	read := func(path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.AddCookie(cookie)
+		recorder := httptest.NewRecorder()
+		e.ServeHTTP(recorder, request)
+		return recorder
+	}
+	threadResponse := read("/api/agent/threads/own-thread")
+	if threadResponse.Code != http.StatusOK {
+		t.Fatalf("own thread = %d: %s", threadResponse.Code, threadResponse.Body.String())
+	}
+	wire = nil
+	if err := json.Unmarshal(threadResponse.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire) != 3 || string(wire["id"]) != `"own-thread"` || wire["messages"] == nil || wire["updated_at"] == nil {
+		t.Fatalf("thread JSON = %s", threadResponse.Body.String())
+	}
+	for _, value := range []string{"0", "101", "invalid"} {
+		if response := read("/api/agent/threads?page_size=" + value); response.Code != http.StatusBadRequest {
+			t.Fatalf("page_size %q = %d, want 400", value, response.Code)
+		}
+	}
+	if _, err := store.StartRun(context.Background(), ownerB.ID, agtypes.RunAgentInput{
+		ThreadID: "older-thread", RunID: "run-3",
+		Messages: []agtypes.Message{{ID: "message-2", Role: agtypes.RoleUser, Content: "Investigate another issue"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.DB.Exec(`UPDATE agui_threads SET updated_at = '2026-10-01 00:00:00' WHERE owner_id = ?`, ownerB.ID); err != nil {
+		t.Fatal(err)
+	}
+	firstPage := read("/api/agent/threads?page_size=1")
+	if firstPage.Code != http.StatusOK {
+		t.Fatalf("first page = %d: %s", firstPage.Code, firstPage.Body.String())
+	}
+	if err := json.Unmarshal(firstPage.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ThreadID != "own-thread" || page.NextCursor == nil || *page.NextCursor == "" {
+		t.Fatalf("first thread page = %#v", page)
+	}
+	lastPage := read("/api/agent/threads?page_size=1&cursor=" + *page.NextCursor)
+	if lastPage.Code != http.StatusOK {
+		t.Fatalf("last page = %d: %s", lastPage.Code, lastPage.Body.String())
+	}
+	if err := json.Unmarshal(lastPage.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ThreadID != "older-thread" || page.NextCursor != nil {
+		t.Fatalf("last thread page = %#v", page)
+	}
+	if response := read("/api/agent/threads?cursor=invalid"); response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid cursor = %d, want 400", response.Code)
 	}
 
 	mutation := func(method, path, body string) *httptest.ResponseRecorder {

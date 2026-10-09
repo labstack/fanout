@@ -94,7 +94,7 @@ func TestPanelQueryOperationalErrors(t *testing.T) {
 }
 
 func TestVariableAndSchemaRoutes(t *testing.T) {
-	rec := servePanels(t, &fakePanels{}, http.MethodPost, "/api/variables/resolve", `{"dashboard":{"name":"x","panels":[]}}`)
+	rec := servePanels(t, &fakePanels{}, http.MethodPost, "/api/panels/variables/resolve", `{"dashboard":{"name":"x","panels":[]}}`)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"checkout"`) {
 		t.Fatalf("resolve %d %s", rec.Code, rec.Body)
 	}
@@ -107,7 +107,7 @@ func TestVariableAndSchemaRoutes(t *testing.T) {
 func TestPanelRoutesAreClassified(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodPost, "/api/panels/query"},
-		{http.MethodPost, "/api/variables/resolve"},
+		{http.MethodPost, "/api/panels/variables/resolve"},
 		{http.MethodGet, "/api/telemetry/schema"},
 	} {
 		policy, ok := classifyRoute(tc.method, tc.path)

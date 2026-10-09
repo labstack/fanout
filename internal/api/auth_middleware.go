@@ -292,7 +292,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		}
 	case strings.HasPrefix(path, "/api/alerting/rules/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
-	case path == "/api/panels/query" || path == "/api/panels/exemplars" || path == "/api/variables/resolve" || path == "/api/annotations":
+	case path == "/api/panels/query" || path == "/api/panels/exemplars" || path == "/api/panels/variables/resolve" || path == "/api/annotations":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
 	case path == "/api/telemetry/schema":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
@@ -317,14 +317,14 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 			action == "access/revoke" && method == http.MethodPost
 		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, allowed
 	case path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||
-		(!strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/") && !strings.HasPrefix(path, "/-/") && path != "/metrics"):
+		(!strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/") && path != "/metrics"):
 		return routePolicy{kind: routePolicyPublic}, read
 	}
 	return routePolicy{}, false
 }
 
 func isProtectedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || strings.HasPrefix(path, "/-/") || path == "/metrics"
+	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || path == "/metrics"
 }
 
 func routePathKnown(path string) bool {

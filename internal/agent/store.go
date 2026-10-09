@@ -16,16 +16,16 @@ var ErrThreadNotFound = errors.New("agent thread not found")
 
 // Thread is a persisted agent conversation owned by one user.
 type Thread struct {
-	ThreadID string            `json:"threadId"`
+	ThreadID string            `json:"id"`
 	Messages []agtypes.Message `json:"messages"`
-	Updated  string            `json:"updatedAt"`
+	Updated  string            `json:"updated_at"`
 }
 
 // ThreadSummary is the compact representation returned by conversation history.
 type ThreadSummary struct {
-	ThreadID string `json:"threadId"`
+	ThreadID string `json:"id"`
 	Title    string `json:"title"`
-	Updated  string `json:"updatedAt"`
+	Updated  string `json:"updated_at"`
 }
 
 // ThreadListOptions controls owner-scoped conversation history queries.

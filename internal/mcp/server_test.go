@@ -239,7 +239,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 				}
 				continue
 			}
-			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+			if tool.Name == "query_panel_fragment" || tool.Name == "list_panel_exemplars" || tool.Name == "resolve_panel_variables" {
 				if !appOnly(tool.Meta) {
 					t.Fatalf("not app-only: %s", tool.Name)
 				}
@@ -291,7 +291,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, tool := range listed.Tools {
-			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+			if tool.Name == "query_panel_fragment" || tool.Name == "list_panel_exemplars" || tool.Name == "resolve_panel_variables" {
 				t.Fatalf("app helper exposed without negotiation: %s", tool.Name)
 			}
 		}

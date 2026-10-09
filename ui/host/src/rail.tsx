@@ -24,11 +24,11 @@ export type RailProps = {
   ref?: Ref<RailHandle>;
 };
 
-type ThreadSummary = { threadId: string; title: string; updatedAt: string };
-type ThreadPage = { threads: ThreadSummary[]; nextCursor: string };
+type ThreadSummary = { id: string; title: string; updated_at: string };
+type ThreadPage = { items: ThreadSummary[]; next_cursor: string | null };
 
 async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> {
-  const params = new URLSearchParams({ limit: "30" });
+  const params = new URLSearchParams({ page_size: "30" });
   if (query) params.set("q", query);
   if (cursor) params.set("cursor", cursor);
   const response = await authorizedFetch(`/api/agent/threads?${params}`);
@@ -53,11 +53,11 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     queryKey: [...threadHistoryQueryKey, query],
     queryFn: ({ pageParam }) => fetchThreads(query, pageParam),
     initialPageParam: "",
-    getNextPageParam: (last) => last.nextCursor || undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
     enabled: agentAvailable,
   });
   const dashboards = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, refetchInterval: 30_000, staleTime: dashboardsStaleTime });
-  const threads = useMemo(() => history.data?.pages.flatMap((page) => page.threads) ?? [], [history.data]);
+  const threads = useMemo(() => history.data?.pages.flatMap((page) => page.items) ?? [], [history.data]);
   const groups = useMemo(() => groupThreads(threads), [threads]);
   // Searching for a service used to answer "No matching chats / No matching
   // dashboards" while that service was live, traced and logged — the search
@@ -86,7 +86,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     if (!renaming || !renameTitle.trim()) return;
     setBusy(true); setMutationError("");
     try {
-      const response = await authorizedFetch(`/api/agent/threads/${encodeURIComponent(renaming.threadId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: renameTitle.trim() }) });
+      const response = await authorizedFetch(`/api/agent/threads/${encodeURIComponent(renaming.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: renameTitle.trim() }) });
       if (!response.ok) throw new Error(`Unable to rename chat (${response.status})`);
       await queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
       setRenaming(null);
@@ -99,9 +99,9 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     if (!deleting) return;
     setBusy(true); setMutationError("");
     try {
-      const response = await authorizedFetch(`/api/agent/threads/${encodeURIComponent(deleting.threadId)}`, { method: "DELETE" });
+      const response = await authorizedFetch(`/api/agent/threads/${encodeURIComponent(deleting.id)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(`Unable to delete chat (${response.status})`);
-      const deletedID = deleting.threadId;
+      const deletedID = deleting.id;
       setDeleting(null);
       await queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
       await queryClient.invalidateQueries({ queryKey: dashboardsKey });
@@ -122,7 +122,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           {!history.isLoading && !history.isError && threads.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">{query ? "No matching chats" : "No chats yet"}</Text>}
           {groups.map((group) => <Stack key={group.label} gap={2}>
             {groups.length > 1 && <Text c="dimmed" size="xs" px="sm" pt={4}>{group.label}</Text>}
-            {group.threads.map((thread) => <ThreadRow key={thread.threadId} thread={thread} active={thread.threadId === activeThreadID} onSelect={() => onSelectThread(thread.threadId)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
+            {group.threads.map((thread) => <ThreadRow key={thread.id} thread={thread} active={thread.id === activeThreadID} onSelect={() => onSelectThread(thread.id)} onRename={() => beginRename(thread)} onDelete={() => { setMutationError(""); setDeleting(thread); }} />)}
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
@@ -206,7 +206,7 @@ function ThreadRow({ thread, active, onSelect, onRename, onDelete }: { thread: T
       <UnstyledButton onClick={onSelect} aria-current={active ? "page" : undefined} p="sm" flex={1} style={{ minWidth: 0 }}>
         <Stack gap={0}>
           <Text size="sm" fw={active ? 600 : 500} truncate>{thread.title}</Text>
-          <Text c="dimmed" size="xs">{threadTime(thread.updatedAt)}</Text>
+          <Text c="dimmed" size="xs">{threadTime(thread.updated_at)}</Text>
         </Stack>
       </UnstyledButton>
       <Menu position="bottom-end" withinPortal>
@@ -241,7 +241,7 @@ function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads:
   const day = 24 * 60 * 60 * 1000;
   const groups = new Map<string, ThreadSummary[]>();
   for (const thread of threads) {
-    const age = Math.floor((today - dayStart(parseSQLiteTime(thread.updatedAt))) / day);
+    const age = Math.floor((today - dayStart(parseSQLiteTime(thread.updated_at))) / day);
     const label = age <= 0 ? "Today" : age === 1 ? "Yesterday" : age <= 7 ? "Previous 7 days" : "Older";
     const group = groups.get(label) ?? [];
     group.push(thread);

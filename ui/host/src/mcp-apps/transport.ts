@@ -20,7 +20,7 @@ export function appTransport(app: App) {
     return result.structuredContent as T;
   }
   const drill: DrillClient = {
-    exemplars: (body, signal) => call("get_panel_exemplars", { ...body }, signal),
+    exemplars: (body, signal) => call("list_panel_exemplars", { ...body }, signal),
     trace: async (target, signal) => {
       const fragment = panelFragment(await call<PanelFragment>("inspect_trace", { trace_id: target.trace_id, namespace: target.namespace, from: target.window_from, to: target.window_to, limit: 200 }, signal));
       if (!fragment.trace) throw new Error("Trace unavailable");

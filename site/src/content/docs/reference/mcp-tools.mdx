@@ -43,7 +43,6 @@ AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
 | [`get_dashboard`](#get_dashboard) | No — read-only |
 | [`get_intelligence_snapshot`](#get_intelligence_snapshot) | No — read-only |
 | [`get_observability_overview`](#get_observability_overview) | No — read-only |
-| [`get_panel_exemplars`](#get_panel_exemplars) | No — read-only |
 | [`get_service_dependencies`](#get_service_dependencies) | No — read-only |
 | [`get_service_performance`](#get_service_performance) | No — read-only |
 | [`get_service_topology`](#get_service_topology) | No — read-only |
@@ -51,6 +50,7 @@ AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
 | [`inspect_trace`](#inspect_trace) | No — read-only |
 | [`list_dashboard_versions`](#list_dashboard_versions) | No — read-only |
 | [`list_dashboards`](#list_dashboards) | No — read-only |
+| [`list_panel_exemplars`](#list_panel_exemplars) | No — read-only |
 | [`preview_panels`](#preview_panels) | No — read-only |
 | [`query_panel_fragment`](#query_panel_fragment) | No — read-only |
 | [`query_telemetry`](#query_telemetry) | No — read-only |
@@ -115,26 +115,6 @@ Read-only. Calling it changes nothing.
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
-
-## get_panel_exemplars
-
-**Panel exemplars** — Find bounded traces for a panel selection.
-
-Read-only. Calling it changes nothing.
-
-**Visibility:** app only; no resource attachment.
-
-| Input | Type | Required | Means |
-|---|---|---|---|
-| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
-| `from` | `string` | **yes** | Selection start as an RFC3339Nano UTC timestamp |
-| `panel_id` | `string` | **yes** | ID of the selected panel in dashboard |
-| `to` | `string` | **yes** | Selection end as an RFC3339Nano UTC timestamp, after from |
-| `bucket` | `object` | no | Optional selected bucket with its exact bounds |
-| `dimensions` | `object` | no | Exact dimension values of the selected series or row |
-| `kind` | `string` | no | Selection signal: traces or logs; defaults from the selected panel |
-| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
-| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
 
 ## get_service_dependencies
 
@@ -231,6 +211,26 @@ Read-only. Calling it changes nothing.
 
 Takes no arguments.
 
+## list_panel_exemplars
+
+**Panel exemplars** — Find bounded traces for a panel selection.
+
+Read-only. Calling it changes nothing.
+
+**Visibility:** app only; no resource attachment.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `dashboard` | `object` | **yes** | Complete v1 dashboard specification; every panel is executed |
+| `from` | `string` | **yes** | Selection start as an RFC3339Nano UTC timestamp |
+| `panel_id` | `string` | **yes** | ID of the selected panel in dashboard |
+| `to` | `string` | **yes** | Selection end as an RFC3339Nano UTC timestamp, after from |
+| `bucket` | `object` | no | Optional selected bucket with its exact bounds |
+| `dimensions` | `object` | no | Exact dimension values of the selected series or row |
+| `kind` | `string` | no | Selection signal: traces or logs; defaults from the selected panel |
+| `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
+| `vars` | `object` | no | Resolved variable values: strings or lists; preserves $__all and empty lists |
+
 ## preview_panels
 
 **Preview panels** — Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels omit elapsed_ms because they were not executed. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.
@@ -279,7 +279,7 @@ Read-only. Calling it changes nothing.
 
 **Replace dashboard** — Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. Successful saves return a receipt for that committed version: base_version, version, changes, layout_changed, dashboard_fields and save_check. Changes describe authored panel fields and position_changed; physical packing is only layout_changed. Order chips mark the minimal moved set. save_check reports checked, reason when unchecked, total elapsed_ms and one status/rows result per saved panel with elapsed_ms when executed. checked means every panel was executed, not that error or empty panels are healthy. Text rows identify nonempty content, not telemetry. Use the structured receipt rather than prose warnings as check evidence. Create receipts list added panels without layout or dashboard edit chips. No-op saves still create a new version with no change chips. Per-panel elapsed_ms is omitted when the panel did not run. See create_dashboard for the spec guide.
 
-**Replaces existing state.** Calling it twice with the same arguments leaves the same result as calling it once, but the first call has already overwritten what was there.
+**Replaces existing state.**
 
 | Input | Type | Required | Means |
 |---|---|---|---|

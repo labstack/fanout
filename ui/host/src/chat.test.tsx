@@ -33,7 +33,7 @@ async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "a
       requests.push(JSON.parse(String(init?.body)));
       return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
     }
-    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { threads: [], nextCursor: "" } : { messages: stored };
+    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { items: [], next_cursor: null } : { messages: stored };
     return Response.json(body);
   });
   vi.stubGlobal("fetch", fetchMock);
