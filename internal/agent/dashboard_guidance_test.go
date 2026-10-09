@@ -32,6 +32,7 @@ func TestDashboardGuidancePinsEvidenceAndIntent(t *testing.T) {
 		"Explain in chat is answer intent",
 		"observed absolute panel window and resolved variables",
 		"without creating, editing, replacing or restoring dashboards",
+		"Saved panels must keep working as new telemetry arrives: never filter on trace, span or request IDs or other values copied from one result; show recent evidence with a traces panel and drill to its logs.",
 	} {
 		if !strings.Contains(dashboardAnalysisGuidance, sentence) {
 			t.Errorf("guidance omits %q", sentence)
