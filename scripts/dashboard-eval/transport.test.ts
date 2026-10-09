@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, type Ledger } from './transport';
@@ -71,7 +72,7 @@ it('applies cookie expiry, domain, secure and path rules without exposing secret
   expect(cookieHeader(jar,new URL('https://evil.test/api/x'))).toBe('');
 });
 it('refuses collisions, unsafe labels, symlink ancestors and internal sealed-set output',()=>{
-  const root=mkdtempSync('/private/tmp/fanout-eval-');roots.push(root);mkdirSync(join(root,'.superpowers/eval'),{recursive:true});
+  const root=mkdtempSync(join(realpathSync(tmpdir()),'fanout-eval-'));roots.push(root);mkdirSync(join(root,'.superpowers/eval'),{recursive:true});
   const out=join(root,'.superpowers/eval/run');expect(safeOutput(out,'benchmark',root)).toBe(out);
   expect(()=>safeOutput(out,'benchmark',root)).toThrow();
   symlinkSync(join(root,'.superpowers/eval'),join(root,'link'));expect(()=>safeOutput(join(root,'link/run2'),'benchmark',root)).toThrow();

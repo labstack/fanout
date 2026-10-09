@@ -1,5 +1,6 @@
 import { expect, it, afterEach, spyOn } from 'bun:test';
-import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import * as cli from './main';
 import * as transport from './transport';
@@ -138,7 +139,7 @@ it('enforces replay age independently of signed bounds with a five-minute tolera
  expect(()=>cli.assertPromptHash('benchmark','a74ce656679ca792'+'0'.repeat(49))).toThrow();expect(()=>cli.assertPromptHash('benchmark','0'.repeat(64))).not.toThrow();
 });
 it('does not create controller output on a frozen hash mismatch',async()=>{
- const root=resolve('/private/tmp/eval-refusal-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
+ const root=resolve(realpathSync(tmpdir()),'eval-refusal-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
  const previous=process.env.FANOUT_HOLDOUT_OUT_ROOT;process.env.FANOUT_HOLDOUT_OUT_ROOT=root;
  const file=(n:string,v:any)=>{const p=join(root,n);writeFileSync(p,JSON.stringify(v));return p;};const out=join(root,'out');const lines:string[]=[];
  try{expect(await cli.main(['--base','http://127.0.0.1:1','--cookies',file('cookies.txt',''),'--out',out,'--prompts-file',file('prompts.json',[]),'--set','holdout','--holdout-sha','0'.repeat(64),'--budget-usd','1','--cost-ledger',file('ledger.json',ledger()),'--snapshot-manifest',file('snapshot.json',{}),'--edits-file',file('edits.json',[])],x=>lines.push(x))).toBe(2);expect(lines.at(-1)).toContain('sealed_hash');expect(existsSync(out)).toBe(false);}finally{if(previous===undefined)delete process.env.FANOUT_HOLDOUT_OUT_ROOT;else process.env.FANOUT_HOLDOUT_OUT_ROOT=previous;}
