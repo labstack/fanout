@@ -46,6 +46,11 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # The single-file panel app is a minified build of ui/host, which is
+          # analysed from source; its vendored libraries only repeat alerts.
+          config: |
+            paths-ignore:
+              - internal/mcp/apps/panels.html
 
       - if: matrix.build-mode == 'manual'
         run: bash scripts/with-duckdb.sh go build ./...
