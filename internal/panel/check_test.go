@@ -4,7 +4,15 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	duckdb "github.com/duckdb/duckdb-go/v2"
 )
+
+type interruptingParser struct{ Parser }
+
+func (interruptingParser) PrepareTelemetrySQL(context.Context, string, string, int) (string, []bool, error) {
+	return "", nil, &duckdb.Error{Type: duckdb.ErrorTypeInterrupt, Msg: "INTERRUPT Error: Interrupted!"}
+}
 
 func TestCheckCollectsFiltersAndSQLProblems(t *testing.T) {
 	d, _ := newTestEngine(t)
@@ -105,6 +113,16 @@ func TestCheckReturnsOperationalErrorsNotProblems(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, problems, err := Check(ctx, d, &spec)
+	if err == nil || len(problems) != 0 {
+		t.Fatalf("err = %v, problems = %v", err, problems)
+	}
+}
+
+func TestCheckReturnsEngineInterruptAsOperationalError(t *testing.T) {
+	d, _ := newTestEngine(t)
+	spec := decode(t, specExample)
+	Normalize(&spec)
+	_, problems, err := Check(t.Context(), interruptingParser{d}, &spec)
 	if err == nil || len(problems) != 0 {
 		t.Fatalf("err = %v, problems = %v", err, problems)
 	}

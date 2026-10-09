@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	duckdb "github.com/duckdb/duckdb-go/v2"
 )
 
 // Parser is the slice of the query engine that checks SQL text. *query.Duck
@@ -26,10 +28,13 @@ type Checked struct {
 }
 
 // isOperational reports whether err is the engine's or the caller's failure
-// (cancellation, deadline, closed database) rather than a fault in the spec.
+// (cancellation, deadline, interrupt, closed database) rather than a fault in
+// the spec. The engine reports a cancelled query as a bare interrupt.
 func isOperational(err error) bool {
+	var engineError *duckdb.Error
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, sql.ErrConnDone) || (err != nil && strings.Contains(err.Error(), "database is closed"))
+		errors.Is(err, sql.ErrConnDone) || (err != nil && strings.Contains(err.Error(), "database is closed")) ||
+		errors.As(err, &engineError) && engineError.Type == duckdb.ErrorTypeInterrupt
 }
 
 // Check runs Validate and then the checks that need DuckDB's parser: every
