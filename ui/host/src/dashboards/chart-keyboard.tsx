@@ -10,7 +10,7 @@ function pointIdentity(point: KeyboardPoint): string {
   const value = point.event.value;
   return JSON.stringify([point.event.seriesName, point.event.name, selection?.from ?? selection?.time ?? (Array.isArray(value) ? value[0] : undefined), selection?.dimensions, selection?.bucket]);
 }
-type Range = {anchor: string; from: string; to: string};
+type Range = {anchor: string; window: Window; from: string; to: string};
 type Window = {from: number; to: number};
 
 function rangeLabel(range: Range): string {
@@ -23,10 +23,10 @@ function rangeLabel(range: Range): string {
 }
 const surface = {background: "color-mix(in srgb, var(--mantine-color-body) 92%, transparent)", border: "1px solid var(--mantine-color-default-border)", borderRadius: "var(--mantine-radius-sm)", padding: "2px 6px"};
 
-// Panel chrome owns the visual hint; standalone charts retain its accessible description.
+// Panel chrome owns the visual hint; every plot owns its static accessible description.
 /** Glyph form for the one-line panel subtitle; screen readers get the spelled-out hint. */
 export function compactHint(hint: string): string { return hint.replace("Enter drill", "↵ drill").replace("Shift+←→", "⇧←→"); }
-export const ChartHintContext = createContext<{id: string; setHint(hint?: string): void} | undefined>(undefined);
+export const ChartHintContext = createContext<{setHint(hint?: string): void} | undefined>(undefined);
 
 /** A single plot tab stop; keyboard chrome never participates in plot layout. */
 export function ChartKeyboard({ points, label, summary, children, onClick, canSelect, onHighlight, onActiveChange, onRangePending, onRangeChange, onRangeBarHeight, rangeReset, height = "100%", onZoom, bounds, pointWindow }: {
@@ -38,49 +38,69 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
   pointWindow?(point: KeyboardPoint): {from: number; to: number} | undefined;
 }) {
   const [focused, setFocused] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const [selectedKey, setSelectedKey] = useState<string>();
   const [pending, setPending] = useState<Range | null>(null);
   const plot = useRef<HTMLDivElement>(null);
+  const pointerFocus = useRef(false);
+  const firstNavigation = useRef<{key: string; shift: boolean} | undefined>(undefined);
+  useEffect(() => {
+    const keyboardFocus = (event: KeyboardEvent) => { if (event.key === "Tab") pointerFocus.current = false; };
+    document.addEventListener("keydown", keyboardFocus, true);
+    return () => document.removeEventListener("keydown", keyboardFocus, true);
+  }, []);
   const hintId = useId();
   const chrome = useContext(ChartHintContext);
   const rangeBar = useRef<HTMLDivElement>(null);
   const callbacks = useRef({onHighlight, onActiveChange, onRangePending, onRangeChange, onRangeBarHeight});
   callbacks.current = {onHighlight, onActiveChange, onRangePending, onRangeChange, onRangeBarHeight};
   const identities = useMemo(() => new Map(points.map(point => [pointIdentity(point), point])), [points]);
-  const current = selectedKey ? identities.get(selectedKey) ?? points[0] : points[0];
+  const selectedPoint = useRef<KeyboardPoint | undefined>(undefined);
+  const location = (point: KeyboardPoint) => pointWindow?.(point)?.from ?? point.event.name ?? (Array.isArray(point.event.value) ? point.event.value[0] : undefined);
+  const saved = selectedPoint.current;
+  const candidates = saved ? points.filter(point => point.event.seriesName === saved.event.seriesName) : points;
+  const at = saved && location(saved);
+  const nearest = typeof at === "number" ? candidates.reduce<KeyboardPoint | undefined>((best, point) => {
+    const next = location(point), old = best && location(best);
+    return typeof next === "number" && (!best || typeof old !== "number" || Math.abs(next - at) < Math.abs(old - at)) ? point : best;
+  }, undefined) : candidates.find(point => location(point) === at);
+  const current = selectedKey ? identities.get(selectedKey) ?? nearest ?? candidates[0] : points[0];
   const rangeAvailable = Boolean(onZoom && bounds && Number.isFinite(bounds.from) && Number.isFinite(bounds.to) && bounds.from < bounds.to);
   const series = useMemo(() => [...new Set(points.map(point => point.event.seriesName))], [points]);
   const peers = useMemo(() => points.filter(point => point.event.seriesName === current?.event.seriesName), [points, current?.event.seriesName]);
   const position = current ? peers.indexOf(current) : -1;
   useEffect(() => {
-    if (current && selectedKey !== pointIdentity(current)) setSelectedKey(pointIdentity(current));
+    if (current && (!selectedKey || identities.has(selectedKey))) {
+      selectedPoint.current = current;
+      if (!selectedKey) setSelectedKey(pointIdentity(current));
+    }
     if (focused) callbacks.current.onHighlight(current);
   }, [current, selectedKey, focused]);
   useEffect(() => {
     if (!pending) return;
     const from = Date.parse(pending.from), to = Date.parse(pending.to);
-    if (points.length && !identities.has(pending.anchor) || bounds && (Number.isFinite(from) && from < bounds.from || Number.isFinite(to) && to > bounds.to)) {
+    if (bounds && (Number.isFinite(from) && from < bounds.from || Number.isFinite(to) && to > bounds.to)) {
       setPending(null);
     }
-  }, [identities, points.length, bounds?.from, bounds?.to, pending]);
+  }, [bounds?.from, bounds?.to, pending]);
   useEffect(() => { callbacks.current.onRangePending?.(Boolean(pending)); }, [Boolean(pending)]);
   useEffect(() => { callbacks.current.onRangeChange?.(pending ? {from: Date.parse(pending.from), to: Date.parse(pending.to)} : undefined); }, [pending]);
   useEffect(() => { setPending(null); }, [rangeReset]);
   useEffect(() => () => { callbacks.current.onHighlight(undefined); callbacks.current.onRangePending?.(false); callbacks.current.onRangeChange?.(undefined); }, []);
   const choose = (next: KeyboardPoint | undefined, extend = false) => {
     if (!next) return;
+    setAnnouncement(summary(next));
     if (extend && rangeAvailable && current) {
       const anchor = pending?.anchor ?? pointIdentity(current);
       const first = identities.get(anchor);
-      const a = first && pointWindow?.(first), b = pointWindow?.(next);
+      const a = pending?.window ?? (first && pointWindow?.(first)), b = pointWindow?.(next);
       if (a && b) {
         const from = Math.max(bounds!.from, Math.min(a.from, b.from)), to = Math.min(bounds!.to, Math.max(a.to, b.to));
-        if (Number.isFinite(from) && Number.isFinite(to) && from < to) setPending({anchor, from: new Date(from).toISOString(), to: new Date(to).toISOString()});
+        if (Number.isFinite(from) && Number.isFinite(to) && from < to) setPending({anchor, window: a, from: new Date(from).toISOString(), to: new Date(to).toISOString()});
       }
     }
-    setSelectedKey(pointIdentity(next));
+    selectedPoint.current = next; setSelectedKey(pointIdentity(next));
   };
-  const location = (point: KeyboardPoint) => pointWindow?.(point)?.from ?? point.event.name ?? (Array.isArray(point.event.value) ? point.event.value[0] : undefined);
   const moveSeries = (delta: number) => {
     if (!current) return;
     const name = series[Math.max(0, Math.min(series.length - 1, series.indexOf(current.event.seriesName) + delta))];
@@ -93,6 +113,16 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     }, undefined) : undefined;
     choose(exact ?? nearest ?? candidates[0]);
   };
+  const navigate = (key: string, shift: boolean) => {
+    if (key === "ArrowLeft" || key === "ArrowRight") choose(peers[Math.max(0, Math.min(peers.length - 1, position + (key === "ArrowLeft" ? -1 : 1)))], shift);
+    else if (!shift && (key === "ArrowUp" || key === "ArrowDown")) moveSeries(key === "ArrowUp" ? -1 : 1);
+    else if (!shift && (key === "Home" || key === "End")) choose(key === "Home" ? peers[0] : peers.at(-1));
+  };
+  useEffect(() => {
+    if (!current || !firstNavigation.current) return;
+    const navigation = firstNavigation.current; firstNavigation.current = undefined;
+    navigate(navigation.key, navigation.shift);
+  }, [current]);
   const cancel = () => { setPending(null); plot.current?.focus(); };
   const hint = rangeAvailable ? "←→ points · ↑↓ series · Enter drill · Shift+←→ range" : "←→ points · ↑↓ series · Enter drill";
   useLayoutEffect(() => {
@@ -112,13 +142,22 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
     observer.observe(bar);
     return () => { observer.disconnect(); callbacks.current.onRangeBarHeight?.(0); };
   }, [Boolean(pending && rangeAvailable)]);
-  return <Box ref={plot} data-chart-plot tabIndex={0} role="group" aria-label={label} aria-describedby={focused ? chrome?.id ?? hintId : undefined}
+  return <Box ref={plot} data-chart-plot tabIndex={0} role="application" aria-roledescription="chart" aria-label={label} aria-describedby={hintId}
     data-mantine-stop-propagation={pending ? "true" : undefined} className="chart-keyboard-point"
     style={{position: "relative", height, width: "100%", flex: "1 1 auto", minHeight: 0, minWidth: 0}}
-    onFocus={event => { callbacks.current.onActiveChange?.(true); setFocused(event.target === event.currentTarget); }}
+    onPointerDownCapture={event => {
+      if (rangeBar.current?.contains(event.target as Node)) return;
+      pointerFocus.current = true; setFocused(false);
+      if (focused) callbacks.current.onHighlight(undefined);
+      callbacks.current.onActiveChange?.(false);
+    }}
+    onFocus={event => {
+      if (event.target !== event.currentTarget || pointerFocus.current) return;
+      callbacks.current.onActiveChange?.(true); setFocused(true);
+    }}
     onBlur={event => {
       setFocused(false);
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { callbacks.current.onHighlight(undefined); callbacks.current.onActiveChange?.(false); }
+      if (!rangeBar.current?.contains(event.relatedTarget as Node | null)) { setPending(null); setAnnouncement(""); callbacks.current.onHighlight(undefined); callbacks.current.onActiveChange?.(false); }
     }}
     onKeyDown={event => {
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;
@@ -130,13 +169,14 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
         return;
       }
       if (event.target !== event.currentTarget || event.repeat && !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
-      if (event.key === "Enter" && !event.shiftKey && current && onClick && (!canSelect || canSelect(current.event))) { event.preventDefault(); onClick(current.event); }
-      else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault(); choose(peers[Math.max(0, Math.min(peers.length - 1, position + (event.key === "ArrowLeft" ? -1 : 1)))], event.shiftKey);
-      } else if (!event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
-        event.preventDefault(); moveSeries(event.key === "ArrowUp" ? -1 : 1);
-      } else if (!event.shiftKey && (event.key === "Home" || event.key === "End")) {
-        event.preventDefault(); choose(event.key === "Home" ? peers[0] : peers.at(-1));
+      const navigation = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key);
+      if (navigation && !focused) {
+        pointerFocus.current = false; setFocused(true); callbacks.current.onActiveChange?.(true);
+        if (!current) { firstNavigation.current = {key: event.key, shift: event.shiftKey}; event.preventDefault(); return; }
+      }
+      if (event.key === "Enter" && focused && !event.shiftKey && current && onClick && (!canSelect || canSelect(current.event))) { event.preventDefault(); onClick(current.event); }
+      else if (navigation && (!event.shiftKey || event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        event.preventDefault(); navigate(event.key, event.shiftKey);
       }
     }}>
     {children}
@@ -149,7 +189,7 @@ export function ChartKeyboard({ points, label, summary, children, onClick, canSe
         <Button size="compact-xs" variant="subtle" data-mantine-stop-propagation="true" onClick={cancel}>Cancel</Button>
       </Group>}
     </Box>
-    {!chrome && focused && <VisuallyHidden id={hintId}>{hint}</VisuallyHidden>}
-    <VisuallyHidden aria-live="polite" aria-atomic="true">{focused && current ? summary(current) : ""}</VisuallyHidden>
+    <VisuallyHidden id={hintId}>{hint}</VisuallyHidden>
+    <VisuallyHidden aria-live="polite" aria-atomic="true">{announcement}</VisuallyHidden>
   </Box>;
 }

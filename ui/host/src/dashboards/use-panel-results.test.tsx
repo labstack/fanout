@@ -6,6 +6,7 @@ import { usePanelResults } from "./use-panel-results";
 import type { DashboardSpec, PanelResult } from "../../../panels/types";
 import type { QueryBody } from "./api";
 import { MantineProvider } from "@mantine/core";
+import { ApiError } from "./api";
 import { PanelCard } from "./panel-card";
 const wire = vi.hoisted(() => ({ panels: vi.fn(), annotations: vi.fn() }));
 vi.mock("./api", async (importOriginal) => ({ ...await importOriginal<typeof import("./api")>(), queryPanels: wire.panels, queryAnnotations: wire.annotations }));
@@ -18,7 +19,7 @@ afterEach(() => vi.unstubAllGlobals());
 it("S8 integrates one annotation request into every 20-panel manual refresh", async () => {
   const spec: DashboardSpec = { version: 1, name: "S8", time: { range: "1h" }, panels: Array.from({ length: 20 }, (_, i) => ({ id: `p_${i}`, title: `P ${i}`, viz: "timeseries", query: { from: "spans", measures: ["count()"] } })) };
   wire.panels.mockResolvedValue(spec.panels.map(p => ({ id: p.id, status: "ok", elapsed_ms: 1, from_ms: 1000, to_ms: 2000, frame: { columns: [{ name: "time", type: "time", role: "time" }, { name: "count", type: "number", role: "measure" }], values: [[1000], [1]], rows: 1 } }))); wire.annotations.mockResolvedValue({ deploys: [], anomalies: [] });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); const node = document.createElement("div"); document.body.append(node); const root = createRoot(node); let current: ReturnType<typeof usePanelResults>;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } }); const node = document.createElement("div"); document.body.append(node); const root = createRoot(node); let current: ReturnType<typeof usePanelResults>;
   function Host() { current = usePanelResults({ dashboardId: "d", version: 1, spec, time: spec.time, vars: {}, compare: false, widths: {}, visible: spec.panels.map(p => p.id), refresh: "off" }); return null; }
   try {
     await act(async () => { root.render(<QueryClientProvider client={client}><Host /></QueryClientProvider>); });
@@ -59,13 +60,13 @@ async function waitForHook(check: () => void) {
   });
 }
 async function mountVisibility(visible: string[], spec = visibilitySpec, renderPanels = false) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
   const node = document.createElement("div"); document.body.append(node);
   const root = createRoot(node);
   let current!: ReturnType<typeof usePanelResults>;
   function Host({ visible }: { visible: string[] }) {
     current = usePanelResults({ dashboardId: "d", version: 1, spec, time: spec.time, vars: {}, compare: false, widths: {}, visible, refresh: "off" });
-    return renderPanels ? <MantineProvider>{spec.panels.filter(p => visible.includes(p.id)).map(panel => <PanelCard key={panel.id} panel={panel} title={panel.title} result={current.results.get(panel.id)} loading={current.fetchingIds.includes(panel.id)} height={200} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}} />)}</MantineProvider> : null;
+    return renderPanels ? <MantineProvider>{spec.panels.filter(p => visible.includes(p.id)).map(panel => <PanelCard key={panel.id} panel={panel} title={panel.title} result={current.results.get(panel.id)} loading={current.fetchingIds.includes(panel.id)} height={200} group="g" editing={false} agentAvailable={false} onRetry={()=>current.retry()} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}} />)}</MantineProvider> : null;
   }
   const show = async (visible: string[]) => {
     await act(async () => root.render(<QueryClientProvider client={client}><Host visible={visible} /></QueryClientProvider>));
@@ -243,4 +244,45 @@ it("prioritizes a queued full refresh over a newly visible lazy batch", async ()
   await waitForHook(() => { expect(wire.panels.mock.calls[2][0].panels).toEqual(["a", "b", "loaded"]); expect(host.current.fetching).toBe(false); });
   expect(wire.panels).toHaveBeenCalledTimes(3);
  } finally { await host.dispose(); }
+});
+
+
+it.each([new Error("Network disconnected"),new DOMException("Request aborted","AbortError"),new ApiError("Server unavailable",500)])("settles failed batch panels into retryable error cards (%s)",async error=>{
+  wire.panels.mockResolvedValueOnce([resultFor("loaded")]);
+  const host=await mountVisibility(["loaded"],visibilitySpec,true);
+  try{
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.has("loaded")).toBe(true);});
+    wire.panels.mockRejectedValue(error);
+    await host.show(["loaded","a","b"]);
+    await waitForHook(()=>{
+      expect(host.current.fetching).toBe(false);expect(host.current.error?.message).toBe(error.message);
+      for(const id of ["a","b"]){
+        const card=host.node.querySelector(`[data-panel="${id}"]`)!;
+        expect(card.textContent).toContain("This panel failed");expect(card.textContent).toContain(error.message);
+        expect([...card.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
+      }
+      expect(host.node.querySelector('[aria-label="Loading panel"],[aria-label="Refreshing"]')).toBeNull();
+    });
+    const before=wire.panels.mock.calls.length;
+    wire.panels.mockImplementation((body:QueryBody)=>Promise.resolve(body.panels!.map(resultFor)));
+    const retry=[...host.node.querySelectorAll<HTMLButtonElement>('[data-panel="a"] button')].find(button=>button.textContent==="Retry")!;
+    await act(async()=>retry.click());
+    await waitForHook(()=>{expect(host.current.fetching).toBe(false);expect(host.current.results.get("a")?.status).toBe("ok");expect(host.current.results.get("b")?.status).toBe("ok");});
+    expect(wire.panels).toHaveBeenCalledTimes(before+1);expect(wire.panels.mock.lastCall![0].panels).toEqual(["a","b"]);
+    expect(host.node.textContent).not.toContain("This panel failed");
+  }finally{await host.dispose();}
+});
+
+it("shows a retryable panel error while preserving the last successful frame as stale",async()=>{
+  wire.panels.mockResolvedValue([resultFor("loaded")]);const host=await mountVisibility(["loaded"],visibilitySpec,true);
+  try{
+    await waitForHook(()=>expect(host.current.results.get("loaded")?.frame).toBeDefined());
+    wire.panels.mockRejectedValue(new Error("Refresh disconnected"));await act(async()=>host.current.refetch());
+    await waitForHook(()=>{
+      expect(host.current.fetching).toBe(false);expect(host.current.staleAt.has("loaded")).toBe(true);
+      expect(host.node.textContent).toContain("This panel failed");expect(host.node.textContent).toContain("Refresh disconnected");
+      expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
+      expect([...host.node.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
+    });
+  }finally{await host.dispose();}
 });

@@ -1,4 +1,4 @@
-import { Alert, Box, Group, Stack, Text } from "@mantine/core";
+import { Alert, Box, Stack, Text } from "@mantine/core";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { panelFragment, fragmentTitle, type PanelFragment } from "../../../panels/fragment";
 import { resolvedVariables, interpolate } from "../../../panels/variables";
@@ -15,10 +15,6 @@ import { useVariableOptions, type VariableResolver } from "./use-variables";
 import { useBrushZoom } from "./use-brush-zoom";
 import { drillSelection, panelHandlers } from "./panel-handlers";
 import { fragmentPanelHeight } from "./layout";
-import { useShortcuts } from "./use-shortcuts";
-import { ShortcutsHelp } from "./shortcuts-help";
-import { ShortcutButton } from "./shortcut-button";
-import { useShortcutPreference } from "./shortcut-preference";
 import { usePanelViewFocus } from "./use-panel-view-focus";
 const unavailableOptions: VariableResolver = async () => { throw new Error("Variable options unavailable"); };
 
@@ -39,9 +35,7 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
   const generation = useRef(0);
   const [target, setTarget] = useState<DrillTarget>();
   const [view, setView] = useState<string>();
-  const [helpOpen, setHelpOpen] = useState(false);
   const region = useRef<HTMLDivElement>(null);
-  const preference = useShortcutPreference("fragment");
   const viewFocus = usePanelViewFocus(region);
   const previousMode = useRef(hostDisplayMode);
   useEffect(() => {
@@ -68,7 +62,7 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     wasHostFocused.current = hostFocused;
     if (hostFocused) focusedRegion.current?.focus();
     if (!closing) return;
-    const frame = requestAnimationFrame(() => (viewFocus.restore() ?? menus.current.get(focusedPanel.current ?? ""))?.focus());
+    const frame = requestAnimationFrame(() => (viewFocus.restore(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? ""))?.focus());
     return () => cancelAnimationFrame(frame);
   }, [hostFocused]);
   useEffect(() => {
@@ -127,14 +121,9 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     {...panelHandlers(panel, shown.results.find(r => r.id === panel.id), setVariable, selection => point(panel, selection))}
     onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={hostDisplayMode === undefined || onDisplayMode ? () => void openView(panel.id) : undefined} traceLinks="button" />;
   const viewed = spec.panels.find(p => p.id === view);
-  useShortcuts(region, {
-    r: () => void query(), "?": () => setHelpOpen(true),
-    f: target => { if (view) { closeView(); return; } const id = target.closest<HTMLElement>("[data-panel]")?.dataset.panel; if (id && spec.panels.some(p => p.id === id) && (hostDisplayMode === undefined || onDisplayMode)) void openView(id); },
-  }, {fragment: true, modalOpen: helpOpen || Boolean(target), fullscreenScope: view ? group : undefined, enabled: preference.enabled});
   return <Stack ref={region} data-dashboard-fragment gap="md" p="md">
     <Box hidden={hostFocused} style={hostFocused ? { display: "none" } : undefined}><Stack gap="md">
     {spec.panels.length > 1 && <Text data-fragment-header fw={600}>{fragmentTitle(shown)}</Text>}
-    <Box style={{alignSelf: "flex-start"}}><ShortcutButton onClick={() => setHelpOpen(true)}/></Box>
     <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVariable} />
     {options.error && <Alert color="bad">Variable options could not be loaded.</Alert>}
     {error && <Alert color="bad">{error}</Alert>}
@@ -142,13 +131,12 @@ export function FragmentView({ fragment, dark, onQuery, drillClient, resolveVari
     {shown.trace && <TraceDetailView result={shown.trace} dark={dark} />}
     </Stack></Box>
     {hostFocused && viewed && <Box data-fragment-fullscreen data-shortcut-scope={group} role="region" aria-label={interpolate(viewed.title, resolvedVars)} tabIndex={-1} ref={focusedRegion} h="calc(100vh - 32px)">
-      <Group justify="flex-end" mb="xs"><ShortcutButton onClick={() => setHelpOpen(true)}/></Group>
       {card(viewed, Math.max(40, windowHeight - 80), true)}
     </Box>}
-    {hostDisplayMode !== "fullscreen" && <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} shortcutScope={group} onShortcuts={() => setHelpOpen(true)} escapeEnabled={!helpOpen && !target} returnFocusTo={() => viewFocus.restore() ?? menus.current.get(focusedPanel.current ?? "")}>
+    {hostDisplayMode !== "fullscreen" && <PanelFullscreen opened={Boolean(viewed)} onClose={closeView} title={viewed ? interpolate(viewed.title, resolvedVars) : "Panel"} shortcutScope={group} escapeEnabled={!target} returnFocusTo={() => viewFocus.restore(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "")}>
       {viewed && <Box h="calc(100vh - 120px)">{card(viewed, Math.max(40, windowHeight - 140), true)}</Box>}
     </PanelFullscreen>}
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={target} onChange={setTarget} />
-    <ShortcutsHelp opened={helpOpen} onClose={() => setHelpOpen(false)} dashboard={false} fullscreen={Boolean(view)} enabled={preference.enabled} onEnabled={preference.change} />
+
   </Stack>;
 }

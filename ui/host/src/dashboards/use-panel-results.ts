@@ -28,6 +28,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   const key = queryKey[1];
   const ids = visible.filter((id) => spec.panels.some((panel) => panel.id === id));
   const inFlight = useRef<string[]>([]);
+  const failedBatch = useRef<{key: string; ids: string[]; error: string} | undefined>(undefined);
   const lazyBatch = useRef<{ key: string; ids: string[] } | null>(null);
   // A manual refresh pressed while a partial lazy batch is in flight runs once
   // that batch settles; during a full refresh it is already covered.
@@ -55,6 +56,9 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
         const missing: PanelResult[] = sent.filter(id => !returned.has(id) && spec.panels.find(p => p.id === id)?.viz !== "text")
           .map(id => ({id,status:"error",elapsed_ms:0,error:"No result was returned for this panel; refresh to retry."}));
         return {...data,results:[...data.results,...missing],hasTimePanels:spec.panels.some(p => sent.includes(p.id) && ["timeseries","heatmap","state_timeline"].includes(p.viz))};
+      }).catch(error => {
+        failedBatch.current = {key, ids: sent.filter(id => spec.panels.find(panel => panel.id === id)?.viz !== "text"), error: error instanceof Error ? error.message : String(error)};
+        throw error;
       });
     },
     retry: retryPanelQuery,
@@ -63,7 +67,8 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     staleTime: 5_000,
     placeholderData: (previous) => previous,
   });
-  const snapshot = useMemo(() => merge(kept, key, query.isPlaceholderData ? undefined : query.data?.results, query.dataUpdatedAt, query.error ? inFlight.current : []),
+  const failure = query.error && failedBatch.current?.key === key ? failedBatch.current : undefined;
+  const snapshot = useMemo(() => merge(kept, key, query.isPlaceholderData ? undefined : query.data?.results, query.dataUpdatedAt, failure),
     [kept, key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const results = snapshot.results;
   const annotationSnapshot = query.isPlaceholderData ? undefined : query.data?.hasTimePanels ? query.data : keptAnnotations.key === key ? keptAnnotations : undefined;
@@ -72,7 +77,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   }, [key, query.data, query.isPlaceholderData]);
   useEffect(() => {
     if (query.isPlaceholderData) return;
-    setKept((previous) => merge(previous, key, query.data?.results, query.dataUpdatedAt, query.error ? inFlight.current : []));
+    setKept((previous) => merge(previous, key, query.data?.results, query.dataUpdatedAt, failure));
   }, [key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const staleAt = new Map([...snapshot.stale].flatMap((id) => { const at = snapshot.updated.get(id); return at ? [[id, at] as const] : []; }));
   const panelError = (query.data?.results ?? []).find((r) => r.status === "error" && snapshot.stale.has(r.id));
@@ -96,11 +101,18 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     lazyBatch.current = null;
     if (canQuery && !knownEmpty) void query.refetch({ cancelRefetch: false });
   }, [query.isFetching, canQuery, knownEmpty, query.refetch]);
-  return { results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
+  const retry = () => {
+    if (!canQuery || query.isFetching) return;
+    const failed = spec.panels.filter(panel => panel.viz !== "text" && results.get(panel.id)?.error).map(panel => panel.id).sort();
+    if (!failed.length) return;
+    const batch = {key, ids: failed}; lazyBatch.current = batch;
+    void query.refetch({cancelRefetch: false}).finally(() => { if (lazyBatch.current === batch) lazyBatch.current = null; });
+  };
+  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
 }
 
 type Snapshot = { key: string; results: Map<string, PanelResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number };
-function merge(previous: Snapshot, key: string, data: PanelResult[] | undefined, at: number, failed: string[]): Snapshot {
+function merge(previous: Snapshot, key: string, data: PanelResult[] | undefined, at: number, failed?: {ids: string[]; error: string}): Snapshot {
   const next: Snapshot = previous.key === key
     ? { key, results: new Map(previous.results), updated: new Map(previous.updated), stale: new Set(previous.stale), receivedAt: previous.receivedAt }
     : { key, results: new Map(), updated: new Map(), stale: new Set(), receivedAt: 0 };
@@ -109,6 +121,11 @@ function merge(previous: Snapshot, key: string, data: PanelResult[] | undefined,
     else { next.results.set(result.id, result); next.updated.set(result.id, at); next.stale.delete(result.id); }
   }
   if (data) next.receivedAt = at;
-  for (const id of failed) if (next.results.get(id)?.frame) next.stale.add(id);
+  for (const id of failed?.ids ?? []) {
+    const previous = next.results.get(id);
+    if (previous?.frame) {
+      next.stale.add(id); next.results.set(id, {...previous, error: failed!.error});
+    } else next.results.set(id, {id, status: "error", elapsed_ms: 0, error: failed!.error});
+  }
   return next;
 }

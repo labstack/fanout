@@ -110,7 +110,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     const ctx = context.current;
     const measureText = ctx ? (text: string, font: string) => { ctx.font = font; return ctx.measureText(text).width; } : undefined;
     const size = { measureText, width: ref.current?.clientWidth ?? 0, height: ref.current?.clientHeight ?? 0 };
-    let compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize({...size, height: Math.max(1, size.height - rangeBarHeight.current)}) : option;
+    let compiled = optionForSize && size.width > 0 && size.height > 0 ? optionForSize(size) : option;
     if (rangeBarHeight.current && compiled.grid && !Array.isArray(compiled.grid)) {
       const grid = compiled.grid as {bottom?: number};
       compiled = {...compiled, grid: {...grid, bottom: (typeof grid.bottom === "number" ? grid.bottom : 8) + rangeBarHeight.current}};

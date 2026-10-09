@@ -63,6 +63,7 @@ it.each([false,true])('uses real focus and ECharts highlight; Enter and mouse di
     await act(async()=>root.render(<MantineProvider forceColorScheme={dark?'dark':'light'}><TimeseriesViz panel={panel} result={result} dark={dark} height={240} {...handlers}/></MantineProvider>));
     await act(async()=>el.querySelector<HTMLElement>('[data-chart-plot]')!.focus());
     const point=el.querySelector<HTMLElement>('[data-chart-plot]')!;
+    await press(point,'Home');
     const live=el.querySelector('[aria-live]')!;
     expect(live.textContent).toContain('checkout · previous');
     expect(live.textContent).toContain('1970-01-01T00:00:02.000Z');
@@ -135,9 +136,9 @@ it('recomputes responsive displayed candidates, clamps selection without invokin
     const canvas=el.querySelector<HTMLElement>('[role="img"]')!;
     Object.defineProperty(canvas,'clientWidth',{value:400});Object.defineProperty(canvas,'clientHeight',{value:100});
     await act(async()=>resize([],{} as ResizeObserver));
-    expect(el.querySelector('[aria-live]')?.textContent).toContain('9');expect(click).not.toHaveBeenCalled();
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('3');expect(click).not.toHaveBeenCalled();
     await act(async()=>draw({series:[]}));
-    expect(el.querySelector('[aria-live]')?.textContent).toContain('9'); // responsive compile still owns the displayed data
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('3'); // responsive compile still owns the displayed data
     await act(async()=>root.unmount());expect(chart.dispose).toHaveBeenCalled();
   }finally{el.remove();vi.unstubAllGlobals();}
 });
@@ -234,19 +235,21 @@ it('retains existing row and waterfall Enter activation',async()=>{
   }finally{await act(async()=>root.unmount());el.remove();}
 });
 
-it('cancels a chat host full-screen range before Escape exits and restores its plot focus',async()=>{
+it('cancels a chat host full-screen range before Escape exits and restores its menu focus',async()=>{
   const el=document.createElement('div');document.body.append(el);const root=createRoot(el),client=new QueryClient();
   const f=fixture();f.dashboard.panels=[panel];f.results=[result];
   const display=vi.fn().mockResolvedValue(true),query=vi.fn().mockResolvedValue(f);
   try{
     await act(async()=>root.render(<MantineProvider><QueryClientProvider client={client}><FragmentView fragment={f} dark={false} hostDisplayMode="fullscreen" onDisplayMode={display} onQuery={query} drillClient={{exemplars:vi.fn(),trace:vi.fn()}}/></QueryClientProvider></MantineProvider>));
-    const original=el.querySelector<HTMLElement>('[data-chart-plot]')!;await press(original,'f');
+    const menu=el.querySelector<HTMLButtonElement>('[aria-label="Latency menu"]')!;
+    await act(async()=>{menu.focus();menu.click();});
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==='View')!.click());
     expect(display).toHaveBeenCalledExactlyOnceWith('fullscreen');
     const plot=el.querySelector<HTMLElement>('[data-fragment-fullscreen] [data-chart-plot]')!;
     await press(plot,'ArrowRight',{shiftKey:true});await press(plot,'Escape');
     expect(display).toHaveBeenCalledOnce();expect(el.textContent).not.toContain('Zoom to range');
     await press(plot,'Escape');expect(display).toHaveBeenLastCalledWith('inline');
-    await vi.waitFor(()=>expect(document.activeElement).toBe(el.querySelector('[data-chart-plot]')));
+    await vi.waitFor(()=>expect(document.activeElement).toBe(menu));
   }finally{await act(async()=>root.unmount());el.remove();client.clear();}
 });
 it('keeps real scatter rows in the compiled Other group reachable by mouse and keyboard',async()=>{
@@ -263,4 +266,19 @@ it('keeps real scatter rows in the compiled Other group reachable by mouse and k
     chart.on.mock.calls.find(([name])=>name==='click')![1]({seriesIndex:index,seriesName:'Other (2)',value:data.value,data});
     expect(select).toHaveBeenCalledTimes(2);expect(select.mock.calls[0][0]).toEqual(data.selection);expect(select.mock.lastCall![0]).toEqual(data.selection);
   }finally{await act(async()=>root.unmount());el.remove();}
+});
+
+
+it('omits fragment shortcut help and ignores all character keys while chart navigation remains active',async()=>{
+  const el=document.createElement('div');document.body.append(el);const root=createRoot(el),client=new QueryClient();
+  const f=fixture();f.dashboard.panels=[panel];f.results=[result];
+  const display=vi.fn().mockResolvedValue(true),query=vi.fn().mockResolvedValue(f);
+  try{
+    await act(async()=>root.render(<MantineProvider><QueryClientProvider client={client}><FragmentView fragment={f} dark={false} onDisplayMode={display} onQuery={query} drillClient={{exemplars:vi.fn(),trace:vi.fn()}}/></QueryClientProvider></MantineProvider>));
+    const plot=el.querySelector<HTMLElement>('[data-chart-plot]')!;
+    for(const key of ['r','e','h','f','?']){await press(plot,key);}
+    expect(display).not.toHaveBeenCalled();expect(query).not.toHaveBeenCalled();expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(el.querySelector('[aria-label="Keyboard shortcuts (?)"]')).toBeNull();expect(el.textContent).not.toContain('Single-key shortcuts');
+    await press(plot,'ArrowRight');expect(plot.querySelector('[aria-live]')?.textContent).toContain('00:00:03.000Z');
+  }finally{await act(async()=>root.unmount());el.remove();client.clear();}
 });

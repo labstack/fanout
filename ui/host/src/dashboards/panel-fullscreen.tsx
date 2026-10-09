@@ -17,7 +17,7 @@ export function PanelFullscreen({ opened, onClose, title, children, returnFocusT
     const frame = requestAnimationFrame(() => restore.current()?.focus());
     return () => cancelAnimationFrame(frame);
   }, [opened]);
-  return <Modal.Root opened={opened} onClose={onClose} fullScreen trapFocus returnFocus={false} closeOnEscape={escapeEnabled} onExitTransitionEnd={() => restore.current()?.focus()}>
+  return <Modal.Root opened={opened} onClose={onClose} fullScreen trapFocus returnFocus={false} closeOnEscape={escapeEnabled}>
     <Modal.Overlay />
     <Modal.Content aria-label={title} data-panel-fullscreen data-shortcut-scope={shortcutScope}>
       <Modal.Header><Group ml="auto" gap="xs">{onShortcuts && <ShortcutButton onClick={onShortcuts}/>}<Modal.CloseButton data-autofocus aria-label="Close panel view" /></Group></Modal.Header>

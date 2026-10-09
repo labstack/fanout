@@ -173,3 +173,15 @@ it.each(["service_map", "table"] as const)("names the %s dialog and returns focu
   expect(document.querySelector('[role="dialog"]')).toBeNull();expect(document.activeElement).toBe(menu);expect(view.onQuery).not.toHaveBeenCalled();
  } finally { await view.cleanup(); }
 });
+
+it("omits shortcuts help and the single-key toggle in inline and full-screen fragments",async()=>{
+  const view=await mount(fixture());
+  try{
+    expect(view.el.querySelector('[aria-label="Keyboard shortcuts (?)"]')).toBeNull();
+    expect(view.el.textContent).not.toContain("Single-key shortcuts");
+    await act(async()=>view.el.querySelector<HTMLButtonElement>('[aria-label="Checkout logs menu"]')!.click());
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==="View")!.click());
+    const dialog=document.querySelector('[role="dialog"]')!;expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('[aria-label="Keyboard shortcuts (?)"]')).toBeNull();expect(dialog.textContent).not.toContain("Single-key shortcuts");
+  }finally{await view.cleanup();}
+});

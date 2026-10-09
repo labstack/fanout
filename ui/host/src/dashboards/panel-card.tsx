@@ -1,27 +1,26 @@
-import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, VisuallyHidden, useComputedColorScheme } from "@mantine/core";
+import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
 import type { Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { logConstants } from "../../../panels/rows";
-import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
 import { ChartHintContext, compactHint } from "./chart-keyboard";
 import { Viz } from "./viz";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRemove, onDuplicate, staleAt, traceLinks, suspended = false, menuRef }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, staleAt, traceLinks, suspended = false, menuRef }: {
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button";
-  onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
+  onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   suspended?: boolean; menuRef?: Ref<HTMLButtonElement>;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
   zoomed?: boolean; onZoomReset?: () => void; onRangePending?(pending: boolean): void;
 }) {
-  const hintId = useId();
   const [keyboardHint, setKeyboardHint] = useState<string>();
-  const chartHint = useMemo(() => ({id: hintId, setHint: setKeyboardHint}), [hintId]);
+  const chartHint = useMemo(() => ({setHint: setKeyboardHint}), []);
   const dark = useComputedColorScheme("light") === "dark";
   const card = useRef<HTMLDivElement>(null);
   const [width,setWidth] = useState(0);
@@ -81,7 +80,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
             {/* Preserve the subtitle's measured line box, including narrow cards. */}
             <span aria-hidden={keyboardHint ? true : undefined} style={{visibility: keyboardHint ? "hidden" : undefined}}>{subtitle}</span>
-            {keyboardHint && <><span data-chart-hint aria-hidden="true" style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{compactHint(keyboardHint)}</span><VisuallyHidden id={hintId}>{keyboardHint}</VisuallyHidden></>}
+            {keyboardHint && <><span data-chart-hint aria-hidden="true" style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{compactHint(keyboardHint)}</span></>}
           </Text>
           {panel.options?.highlight && <Text component="span" data-highlight-term title={`highlight: ${panel.options.highlight}`} fz={11} c="dimmed" style={{display:"inline-block",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",border:"1px solid var(--mantine-color-default-border)",borderRadius:4,padding:"0 5px"}}>highlight: {panel.options.highlight}</Text>}
         </Box>
@@ -115,11 +114,13 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Menu>
       </Group>
     </Group>
+    {result?.error && result.status !== "error" && <Group px={16} pt={8} gap="xs"><Stack gap={4} style={{flex: 1, minWidth: 0}}><Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group><Text size="xs" c="dimmed" style={{overflowWrap: "anywhere"}}>{result.error}</Text></Stack>{onRetry && <Button size="compact-xs" variant="light" disabled={loading} onClick={onRetry}>Retry</Button>}</Group>}
     <Box ref={body} data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
       {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
           <Text size="xs" c="dimmed" ta="center" style={{ overflowWrap: "anywhere" }}>{result.error}</Text>
+          {onRetry && <Button size="compact-xs" variant="light" disabled={loading} onClick={onRetry}>Retry</Button>}
           {agentAvailable && onFix && <Button size="compact-xs" variant="light" onClick={onFix}>Ask Fanout to fix it</Button>}
         </Stack></Center>
         : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>

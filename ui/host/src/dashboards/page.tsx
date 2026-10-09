@@ -157,7 +157,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} annotations={annotations} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={{ ...time, compare: compare ? "previous_period" : undefined }} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
+      canManage={canManage} agentAvailable={agentAvailable} onOpenChat={openChat} onRetry={data.retry} onVariable={setVar} onZoom={zoom} zoomed={zoomed} onZoomReset={resetZoom} onView={onView} onRangePending={rangePending} shortcutScope={scope} onShortcuts={() => setHelpOpen(true)} overlayOpen={historyOpen || helpOpen || Boolean(search.drill)} returnViewFocus={viewFocus.restore} onVisible={setVisible}
       onPoint={(panel, selection) => {
         const selected = drillSelection(panel, data.results.get(panel.id), selection, vars);
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);

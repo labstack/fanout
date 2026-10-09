@@ -1,5 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +57,9 @@ const settle = async (client: QueryClient) => {
     await act(async () => {});
     idleCycles = client.isFetching() === 0 && client.isMutating() === 0 ? idleCycles + 1 : 0;
     expect(idleCycles).toBeGreaterThanOrEqual(2);
+    if (client.getQueryData(["dashboard", "d1"])) expect(document.querySelector('[aria-label="Refresh now"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Refresh now"][disabled]')).toBeNull();
+    expect(document.querySelector('[data-panel] [aria-label="Loading panel"],[data-panel] [aria-label="Refreshing"]')).toBeNull();
   }, {timeout: 3000, interval: 5});
 };
 async function key(target: HTMLElement, key: string, extra: KeyboardEventInit = {}) {
@@ -131,19 +134,19 @@ describe("DashboardPage", () => {
   it("opens help from body focus immediately after dashboard load", async () => {
     await render();expect(document.activeElement).toBe(document.body);
     await act(async()=>document.body.dispatchEvent(new KeyboardEvent("keydown",{key:"?",bubbles:true,cancelable:true})));
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts");
+    await vi.waitFor(()=>expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts"));
   });
   it("keeps help and refresh active in full-screen, suppresses layout/history, and Escape closes only help",async()=>{
     const {client,onSearch,rerender}=await render({view:'latency'});
     const close=document.querySelector<HTMLElement>('[aria-label="Close panel view"]')!;
-    const before=queryBodies.length;await key(close,'r');await settle(client);expect(queryBodies).toHaveLength(before+1);
+    const before=queryBodies.length;await key(close,'r');await vi.waitFor(()=>expect(queryBodies).toHaveLength(before+1));await settle(client);
     for(const letter of ['e','h'])await key(close,letter);expect(onSearch).not.toHaveBeenCalled();
-    await key(close,'?');expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+    await key(close,'?');await vi.waitFor(()=>expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2));
     const dialogs=document.querySelectorAll('[role="dialog"]'),help=dialogs[1];
     expect(help.textContent).toContain('Exit full-screen');expect(help.textContent).not.toContain('Toggle layout mode');
     await key(help.querySelector<HTMLElement>('button')!,'Escape');
     await vi.waitFor(()=>expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1));expect(onSearch).not.toHaveBeenCalled();
-    await key(close,'f');expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:undefined},true);
+    await key(close,'f');await vi.waitFor(()=>expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:undefined},true));
     await rerender(onSearch.mock.lastCall![0]);await closed();
   });
   it("uses a keyboard icon with an accessible shortcut tooltip", async () => {
@@ -165,7 +168,7 @@ describe("DashboardPage", () => {
       await act(async()=>vi.advanceTimersByTimeAsync(60000));await settle(client);expect(queryBodies).toHaveLength(before);
       await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label^="Cancel range"]')!.click());
       expect(host.textContent).not.toContain("Paused while selecting");
-      await act(async()=>vi.advanceTimersByTimeAsync(30000));await settle(client);expect(queryBodies.length).toBeGreaterThan(before);
+      await act(async()=>vi.advanceTimersByTimeAsync(30000));await vi.waitFor(()=>expect(queryBodies.length).toBeGreaterThan(before));await settle(client);
     }finally{vi.useRealTimers();}
   });
   it("returns f to its original panel control through the shared View transition",async()=>{
@@ -180,11 +183,11 @@ describe("DashboardPage", () => {
   it("routes refresh, layout and focused-panel View through their visible controls", async () => {
     const {host, client, onSearch}=await render();
     const toolbar=host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!;
-    const before=queryBodies.length;await key(toolbar,"r");await settle(client);expect(queryBodies).toHaveLength(before+1);
-    await key(toolbar,"e");expect(onSearch).toHaveBeenCalledExactlyOnceWith({edit:"1"});onSearch.mockClear();
+    const before=queryBodies.length;await key(toolbar,"r");await vi.waitFor(()=>expect(queryBodies).toHaveLength(before+1));await settle(client);
+    await key(toolbar,"e");await vi.waitFor(()=>expect(onSearch).toHaveBeenCalledExactlyOnceWith({edit:"1"}));onSearch.mockClear();
     await key(toolbar,"f");expect(onSearch).not.toHaveBeenCalled();
     await key(host.querySelector<HTMLElement>('[data-panel="latency"] [data-panel-view="Data"]')!,"f");
-    expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:"latency"},false);
+    await vi.waitFor(()=>expect(onSearch).toHaveBeenCalledExactlyOnceWith({view:"latency"},false));
   });
   it("ignores modified and repeated dashboard keys",async()=>{
     const {host,onSearch}=await render();const panel=host.querySelector<HTMLElement>('[data-panel="latency"] [data-panel-view="Data"]')!;
@@ -199,7 +202,7 @@ describe("DashboardPage", () => {
   });
   it("contains keyboard help focus and returns it to the shortcut opener",async()=>{
     const {host}=await render();const toolbar=host.querySelector<HTMLElement>('[aria-label="Refresh now"]')!;
-    await key(toolbar,"?");expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts");
+    await key(toolbar,"?");await vi.waitFor(()=>expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Keyboard shortcuts"));
     const close=document.querySelector<HTMLElement>('[role="dialog"] button')!;await key(close,"Tab",{shiftKey:true});
     expect(document.querySelector('[role="dialog"]')?.contains(document.activeElement)).toBe(true);
     await key(close,"Escape");await closed();await vi.waitFor(()=>expect(document.activeElement).toBe(toolbar));
@@ -735,4 +738,16 @@ it("removes an explicit empty multi-select chip and restores its default",async(
  await rerender({compare:"1",vars:{other:"kept"}});
  expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
  expect(host.textContent).toContain("checkout");
+});
+
+
+it("waits for rendered idle even when query notifications lag network idle", async () => {
+  notifyManager.setScheduler(callback => setTimeout(callback, 100));
+  try {
+    const {host}=await render();
+    const refresh=host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]');
+    expect(refresh).not.toBeNull();expect(refresh!.disabled).toBe(false);
+    expect(host.querySelector('[aria-label="Loading panel"],[aria-label="Refreshing"]')).toBeNull();
+    expect(host.textContent).toContain("120");
+  } finally { notifyManager.setScheduler(callback => setTimeout(callback, 0)); }
 });
