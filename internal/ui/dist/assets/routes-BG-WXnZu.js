@@ -1,1 +1,0 @@
-import{_t as e}from"./brand-B8x2UvAx.js";import{n as t,u as n}from"./auth-DQIRmg9h.js";var r=e();function i(){let{agent_available:e}=t();return e?(0,r.jsx)(n,{to:`/chat`,replace:!0}):(0,r.jsx)(n,{to:`/dashboards`,replace:!0})}export{i as component};

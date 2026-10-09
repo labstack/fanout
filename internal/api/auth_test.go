@@ -66,6 +66,7 @@ func newTestAuthServerWith(t *testing.T, cfg config.Config, smtp auth.SMTPConfig
 	sessions := auth.NewBrowserSessions(sqlite.DB, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL, false)
 	audit := auth.NewAuditStore(sqlite.DB)
 	e := echo.New()
+	e.HTTPErrorHandler = HTTPErrorHandler
 	RegisterAuthMiddleware(e, users, sessions, audit, cfg)
 	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), sessions, audit, smtp, cfg)
 	return &testAuthServer{e: e, db: sqlite, users: users, codes: codes, setup: setup, setupToken: setupToken, sessions: sessions, audit: audit, cfg: cfg}
@@ -464,14 +465,14 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 	}
 }
 
-func TestStartExplainsWhenSMTPIsNotConfigured(t *testing.T) {
+func TestLoginWithoutSMTPReturnsUnavailable(t *testing.T) {
 	s := newTestAuthServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/send", strings.NewReader(`{"email":"active@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "login link") {
-		t.Fatalf("status = %d body=%s, want 503 with login-link guidance", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"code":"unavailable"`) {
+		t.Fatalf("status = %d body=%s, want 503 with unavailable code", rec.Code, rec.Body.String())
 	}
 }
 
@@ -674,6 +675,7 @@ func TestSetupLifecycleAndIngestToken(t *testing.T) {
 func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 	t.Run("expired", func(t *testing.T) {
 		e := echo.New()
+		e.HTTPErrorHandler = HTTPErrorHandler
 		h := &AuthHandler{setup: expiredSetupCredential{}, setupLimiter: auth.NewKeyedLimiter(10, 15*time.Minute)}
 		e.POST("/api/auth/setup", h.Setup)
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"expired"}`))

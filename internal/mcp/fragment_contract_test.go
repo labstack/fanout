@@ -31,7 +31,15 @@ func TestOmittedArgumentsRawJSONRPC(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			h.ServeHTTP(recorder, request)
 			body := recorder.Body.String()
-			if strings.Contains(body, "unexpected end of JSON") || strings.Contains(body, `"error":{`) || recorder.Code != http.StatusOK {
+			var response struct{ Error json.RawMessage }
+			for _, line := range strings.Split(body, "\n") {
+				if strings.HasPrefix(line, "data: ") {
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &response); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if strings.Contains(body, "unexpected end of JSON") || len(response.Error) != 0 || recorder.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", recorder.Code, body)
 			}
 		})

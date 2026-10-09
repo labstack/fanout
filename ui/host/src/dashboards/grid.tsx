@@ -155,7 +155,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
 
   const viewed = spec.panels.find((p) => p.id === view);
   const mutationError = editing ? save.error ?? remove.error ?? duplicate.error : null;
-  const conflict = mutationError instanceof ApiError && mutationError.status === 409;
+  const conflict = mutationError instanceof ApiError && mutationError.code === "dashboard_version_conflict";
   // Responsive compaction can emit a layout on mount or viewport changes.
   // Only user drag/resize completions should become edits to persist.
   const changeLayout = (next: Layout) => {

@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -132,7 +133,7 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
-	s.mcp.AddReceivingMiddleware(recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
+	s.mcp.AddReceivingMiddleware(normalizeToolErrors, recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
 	return s
 }
 
@@ -152,14 +153,51 @@ func recoverToolPanic(next mcp.MethodHandler) mcp.MethodHandler {
 					failure := summary("tool execution failed")
 					failure.IsError = true
 					if dashboard.SaveCommitted(ctx) {
-						failure.Content = []mcp.Content{&mcp.TextContent{Text: `{"error":"interrupted"}`}}
-						failure.StructuredContent = map[string]any{"error": "interrupted"}
+						failure.Content = []mcp.Content{&mcp.TextContent{Text: toolerror.JSON("interrupted", "Tool execution was interrupted. The save may have completed.")}}
+						failure.StructuredContent = toolerror.New("interrupted", "Tool execution was interrupted. The save may have completed.")
 					}
 					result, err = failure, nil
 				}
 			}()
 		}
 		return next(ctx, method, req)
+	}
+}
+
+// Normalize only product tool failures; JSON-RPC errors and panel frames keep
+// their protocol contracts. Both content paths carry the same error object.
+func normalizeToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		result, err := next(ctx, method, req)
+		failure, ok := result.(*mcp.CallToolResult)
+		if err != nil || method != "tools/call" || !ok || !failure.IsError {
+			return result, err
+		}
+		// A tool's output schema rarely declares an error field, so a failure
+		// keeps structured content only when the tool supplied it.
+		structured := failure.StructuredContent != nil
+		content := ""
+		if structured {
+			if raw, marshalErr := json.Marshal(failure.StructuredContent); marshalErr == nil {
+				content = string(raw)
+			}
+		} else {
+			for _, block := range failure.Content {
+				if value, ok := block.(*mcp.TextContent); ok {
+					content += value.Text
+				}
+			}
+		}
+		payload := toolerror.Normalize(content)
+		raw, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		if structured {
+			failure.StructuredContent = payload
+		}
+		failure.Content = []mcp.Content{&mcp.TextContent{Text: string(raw)}}
+		return failure, nil
 	}
 }
 

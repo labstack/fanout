@@ -46,10 +46,11 @@ describe("dashboard api", () => {
 
   it("turns a 400 with problems into an ApiError", async () => {
     const problems = [{ path: "panels[0].id", message: "bad", hint: "use lowercase" }];
-    fetchMock.mockResolvedValue(json(400, { message: "The dashboard spec is invalid.", problems }));
+    fetchMock.mockResolvedValue(json(400, { code: "invalid_spec", message: "The dashboard spec is invalid.", problems }));
     const error = await replaceDashboard("d1", spec, 1).catch((e) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect(error.status).toBe(400);
+    expect(error.code).toBe("invalid_spec");
     expect(error.problems).toEqual(problems);
     expect(error.message).toBe("The dashboard spec is invalid.");
   });

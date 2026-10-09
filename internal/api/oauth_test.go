@@ -45,6 +45,7 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 		t.Fatalf("NewMCPAuthorization: %v", err)
 	}
 	e := echo.New()
+	e.HTTPErrorHandler = HTTPErrorHandler
 	RegisterAuthMiddleware(e, users, sessions, audit, cfg)
 	// Test-only login hook: it still creates the cookie through the production
 	// BrowserSessions API and middleware commit path.

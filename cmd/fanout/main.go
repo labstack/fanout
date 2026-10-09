@@ -199,6 +199,7 @@ func main() {
 
 	// Start Echo HTTP API
 	e := echo.New()
+	e.HTTPErrorHandler = api.HTTPErrorHandler
 	if err := api.ConfigureClientIP(e, cfg.TrustedProxyCIDRs); err != nil {
 		slog.Error("trusted proxy IP extraction configuration failed", "err", err)
 		os.Exit(1)
@@ -222,7 +223,7 @@ func main() {
 			}
 			attrs := []any{"method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency}
 			if v.Error != nil {
-				attrs = append(attrs, "err", v.Error)
+				attrs = []any{"method", v.Method, "route", c.Path(), "status", v.Status, "latency", v.Latency, "err", v.Error}
 			}
 			if v.Status >= 500 {
 				slog.Error("request", attrs...)

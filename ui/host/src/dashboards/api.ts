@@ -35,8 +35,8 @@ async function request<T>(url: string, init?: RequestInit & { json?: unknown }):
     body = JSON.stringify(json);
   }
   const response = await authorizedFetch(url, { ...rest, headers, body });
-  const payload = await response.json().catch(() => ({})) as { message?: string; problems?: Problem[] };
-  if (!response.ok) throw new ApiError(payload.message ?? `Request failed (${response.status})`, response.status, payload.problems ?? []);
+  const payload = await response.json().catch(() => ({})) as { code?: string; message?: string; problems?: Problem[] };
+  if (!response.ok) throw new ApiError(payload.message ?? `Request failed (${response.status})`, response.status, payload.problems ?? [], payload.code ?? "");
   return payload as T;
 }
 

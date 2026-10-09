@@ -22,6 +22,7 @@ import (
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/dashboard"
 	appid "github.com/labstack/fanout/internal/id"
+	"github.com/labstack/fanout/internal/toolerror"
 )
 
 const systemPrompt = `You are Fanout's observability assistant. When a view is attached to your reply it is the picture: never draw diagrams, trees, or charts in text, never use code fences to draw boxes, arrows, or trees, and never add a table or list that restates what an attached view already shows; your prose adds only what the view omits. Use get_observability_overview first for broad health questions, get_intelligence_snapshot for the latest precomputed anomalies and recurring log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for activity/latency/endpoints/comparisons, inspect_trace for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You build and change the user's dashboards. Build one whenever the user asks for an overview, asks why something is slow, failing or changing, asks to compare, break down or track telemetry, or asks for anything they would want to look at again; answer a single factual question with a view instead. To build one, read get_telemetry_schema, draft a complete spec of panels that answer the request, run preview_panels, fix every invalid panel, replace or explain every empty one, and only then call create_dashboard. Cover every part of the request: when a part has no data, keep its panel and say why in the panel description instead of dropping it. Title each panel with exactly what it measures. Prefer a few precise panels over many vague ones: headline stats first, then the time series that explain them, then a table of the worst offenders. After saving, reply in two or three sentences with what the dashboard shows and what stands out. Use filter values exactly as the schema lists them. To change a dashboard, get_dashboard first and use edit_dashboard so unrelated panels stay as they are; replace only when the user asks for a redesign. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.` + dashboardAnalysisGuidance
@@ -463,18 +464,15 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				// Relayed to the model as a tool error; log it so repeated
 				// tool-transport failures are findable server-side.
 				slog.Warn("agent tool execution failed", "thread_id", threadID, "run_id", runID, "tool", call.Name, "err", err)
-				execution = ToolExecution{Content: fmt.Sprintf(`{"error":%q}`, err.Error()), IsError: true}
+				execution = ToolExecution{Content: toolerror.JSON("tool_failed", "Tool execution failed. Please try again."), IsError: true}
 			}
 			messageError := errorString(execution.IsError)
 			if execution.IsError {
 				// AG-UI's live result event carries content, not Message.Error.
 				// Keep the error structural on that path as well as on reload.
-				var payload map[string]any
-				if json.Unmarshal([]byte(execution.Content), &payload) != nil || payload == nil {
-					payload = map[string]any{"error": execution.Content}
-				}
+				payload := toolerror.Normalize(execution.Content)
 				payload["isError"] = true
-				if payload["error"] == "interrupted" {
+				if failure, ok := payload["error"].(map[string]any); ok && failure["code"] == "interrupted" {
 					messageError = "interrupted"
 				}
 				raw, marshalErr := json.Marshal(payload)
@@ -533,7 +531,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution ToolExecution, err error) {
 	if answerOnly, _ := ctx.Value(answerOnlyKey{}).(bool); answerOnly {
 		if !r.tools.ReadOnly(call.Name) {
-			return ToolExecution{Content: `{"code":"answer_only","error":"This explanation request is answer-only. Do not save changes; explain the observed evidence and suggest corrections in your answer."}`, IsError: true}, nil
+			return ToolExecution{Content: toolerror.JSON("answer_only", "This explanation request is answer-only. Do not save changes; explain the observed evidence and suggest corrections in your answer."), IsError: true}, nil
 		}
 	}
 	ctx = dashboard.TrackSave(ctx)
@@ -541,7 +539,7 @@ func (r *Runtime) executeTool(ctx context.Context, call ToolCall) (execution Too
 		if value := recover(); value != nil {
 			slog.Error("agent tool panicked", "tool", call.Name, "panic", value, "stack", string(debug.Stack()))
 			if dashboard.SaveCommitted(ctx) {
-				execution = ToolExecution{Content: `{"error":"interrupted"}`, IsError: true}
+				execution = ToolExecution{Content: toolerror.JSON("interrupted", "Tool execution was interrupted. The save may have completed."), IsError: true}
 				err = nil
 			} else {
 				execution = ToolExecution{}

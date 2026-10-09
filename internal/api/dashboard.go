@@ -183,15 +183,15 @@ func dashboardError(c *echo.Context, err error) error {
 	}
 	switch {
 	case errors.Is(err, dashboard.ErrAlreadyCurrent):
-		return c.JSON(http.StatusConflict, map[string]any{"message": err.Error(), "error_code": dashboard.AlreadyCurrentCode})
+		return newAPIError(http.StatusConflict, dashboard.AlreadyCurrentCode, err.Error())
 	case errors.Is(err, dashboard.ErrVersionNotFound):
-		return c.JSON(http.StatusNotFound, map[string]any{"message": err.Error(), "error_code": dashboard.VersionNotFoundCode})
+		return newAPIError(http.StatusNotFound, dashboard.VersionNotFoundCode, err.Error())
 	case errors.Is(err, dashboard.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "dashboard not found")
 	case errors.Is(err, dashboard.ErrConflict):
 		return echo.NewHTTPError(http.StatusConflict, "a dashboard with that name already exists")
 	case errors.Is(err, dashboard.ErrStale):
-		return echo.NewHTTPError(http.StatusConflict, "The dashboard changed since you opened it. Reload to see the latest version.")
+		return newAPIError(http.StatusConflict, "dashboard_version_conflict", "The dashboard changed since you opened it. Reload to see the latest version.")
 	case errors.Is(err, context.DeadlineExceeded):
 		return echo.NewHTTPError(http.StatusGatewayTimeout, "Checking the dashboard took too long. Try again, or narrow its panels.").Wrap(err)
 	case errors.Is(err, context.Canceled):

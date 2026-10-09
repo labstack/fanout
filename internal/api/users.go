@@ -183,7 +183,7 @@ func (h *UserHandler) updateUser(c *echo.Context, email, displayName *string, ro
 			return echo.NewHTTPError(http.StatusConflict, "user already exists")
 		}
 		if errors.Is(err, auth.ErrLastActiveAdmin) {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return newAPIError(http.StatusConflict, "last_active_administrator", err.Error())
 		}
 		if errors.Is(err, auth.ErrUserNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
@@ -199,7 +199,7 @@ func (h *UserHandler) DeleteUser(c *echo.Context) error {
 	id := c.Param("id")
 	if err := h.users.DeleteWithAudit(id, userAuditEvent(c, "user.deleted")); err != nil {
 		if err == auth.ErrLastActiveAdmin {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
+			return newAPIError(http.StatusConflict, "last_active_administrator", err.Error())
 		}
 		if errors.Is(err, auth.ErrUserNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")

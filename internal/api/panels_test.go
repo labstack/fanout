@@ -84,7 +84,7 @@ func TestPanelQueryRoute(t *testing.T) {
 
 func TestPanelQueryOperationalErrors(t *testing.T) {
 	rec := servePanels(t, &fakePanels{err: context.DeadlineExceeded}, http.MethodPost, "/api/panels/query", `{"dashboard":{"name":"x","panels":[]}}`)
-	if rec.Code != http.StatusGatewayTimeout || !strings.Contains(rec.Body.String(), "20 seconds") {
+	if rec.Code != http.StatusGatewayTimeout || !strings.Contains(rec.Body.String(), `"code":"timeout"`) {
 		t.Fatalf("deadline %d %s", rec.Code, rec.Body)
 	}
 	rec = servePanels(t, &fakePanels{err: context.Canceled}, http.MethodPost, "/api/panels/query", `{"dashboard":{"name":"x","panels":[]}}`)

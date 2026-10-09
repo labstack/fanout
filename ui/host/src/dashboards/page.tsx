@@ -37,7 +37,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     if (dashboardId || !list.data?.length) return;
     onOpen((list.data.find((d) => d.is_default) ?? list.data[0]).id, true);
   }, [dashboardId, list.data]);
-  const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: ({ signal }) => getDashboard(dashboardId!, signal), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2 });
+  const record = useQuery({ queryKey: ["dashboard", dashboardId], queryFn: ({ signal }) => getDashboard(dashboardId!, signal), enabled: Boolean(dashboardId), retry: (count, error) => !(error instanceof ApiError && error.code === "not_found") && count < 2 });
 
   if (!dashboardId && list.error) return <Center mih="50vh"><Alert color="bad" title="Dashboards could not be loaded">{list.error.message}</Alert></Center>;
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
@@ -46,7 +46,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     {agentAvailable && <Button mt="sm" size="sm" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
   </Stack></Center>;
   if (!dashboardId || record.isLoading) return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading your dashboard…</Text></Center>;
-  if (record.error instanceof ApiError && record.error.status === 404) {
+  if (record.error instanceof ApiError && record.error.code === "not_found") {
     return <Center mih="50vh"><Stack align="center" gap="xs">
       <Title order={1} fz={24}>This dashboard isn&apos;t here</Title>
       <Text c="dimmed" size="sm" ta="center">The link may be out of date, or the dashboard may have been deleted.</Text>

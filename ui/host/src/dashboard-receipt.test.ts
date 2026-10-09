@@ -85,7 +85,7 @@ it('records resolved validation paths even when a later preview finds another pr
 });
 
 it.each(['create_dashboard','edit_dashboard'])('keeps an interrupted %s outcome unknown after reload',name=>{
- const messages=[user(),call('save',name),result('save',{error:'interrupted'},'interrupted')];
+ const messages=[user(),call('save',name),result('save',{error:{code:'interrupted',message:'Tool execution was interrupted. The save may have completed.'}},'interrupted')];
  const receipt=receiptForTurn(messages,'u')!;
  expect(receipt.stages.save.state).toBe('interrupted');expect(receipt.saved).toBeUndefined();
  expect(receipt.explanations).toContain('Save interrupted · outcome unknown');
@@ -93,7 +93,7 @@ it.each(['create_dashboard','edit_dashboard'])('keeps an interrupted %s outcome 
  expect(receiptForTurn(JSON.parse(JSON.stringify(messages)),'u')).toEqual(receipt);
 });
 it.each(['same call','later call'])('uses proven success after an interrupted save (%s)',mode=>{
- const messages=[user(),call('save','edit_dashboard'),result('save',{error:'interrupted'},'interrupted')];
+ const messages=[user(),call('save','edit_dashboard'),result('save',{error:{code:'interrupted',message:'Tool execution was interrupted. The save may have completed.'}},'interrupted')];
  if(mode==='later call') messages.push(call('retry','edit_dashboard'));
  messages.push({...result(mode==='same call'?'save':'retry',saved),id:'proven-result'});
  const receipt=receiptForTurn(messages,'u')!;expect(receipt.stages.save.state).toBe('complete');expect(receipt.saved?.version).toBe(2);
@@ -105,7 +105,7 @@ it('marks an observed failed attempt retried after a successful save',()=>{
  expect(receipt.save_attempts).toEqual([{call_id:'failed',state:'retried'},{call_id:'retry',state:'complete'}]);
 });
 it('keeps the last proven version when a later save is interrupted',()=>{
- const messages=build();messages.push(call('next','edit_dashboard'),result('next',{error:'interrupted'},'interrupted'));
+ const messages=build();messages.push(call('next','edit_dashboard'),result('next',{error:{code:'interrupted',message:'Tool execution was interrupted. The save may have completed.'}},'interrupted'));
  const receipt=receiptForTurn(messages,'u')!;expect(receipt.saved?.version).toBe(2);expect(receipt.stages.save.state).toBe('interrupted');expect(receipt.explanations).toContain('Save interrupted · outcome unknown');expect(receipt.explanations.join(' ')).not.toContain('failed');
 });
 
@@ -131,5 +131,5 @@ it.each(['create_dashboard','restore_dashboard_version'])('reads %s errors only 
 });
 
 it("omits a save receipt for structural answer-only refusals",()=>{
- expect(receiptForTurn([user(),call("refused","create_dashboard"),result("refused",{error:"Read-only",isError:true,code:"answer_only"},"Read-only")],"u")).toBeNull();
+ expect(receiptForTurn([user(),call("refused","create_dashboard"),result("refused",{error:{code:"answer_only",message:"Read-only"},isError:true},"Read-only")],"u")).toBeNull();
 });

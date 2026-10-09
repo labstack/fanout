@@ -47,7 +47,7 @@ export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored 
       void client.invalidateQueries({ queryKey: ["drill-trace"], refetchType: "none" });
     },
     onError: error => {
-      if (error instanceof ApiError && error.status === 404) void client.invalidateQueries({ queryKey: ["dashboard-versions", id] });
+      if (error instanceof ApiError && error.code === "dashboard_version_not_found") void client.invalidateQueries({ queryKey: ["dashboard-versions", id] });
     },
     onSettled: () => { submitting.current = false; if (mounted.current) setPending(false); },
   });
@@ -108,7 +108,7 @@ function HistoryContent({ id, opened, currentVersion, selected, onSelect, pendin
     <VisuallyHidden role="status" aria-live="polite">{version === undefined ? "Select a version." : detail.isFetching ? `Loading version ${version}…` : detail.error ? `Version ${version} unavailable.` : `Version ${version} ready.`}</VisuallyHidden>
     <Box mih={280} aria-busy={detail.isFetching}>
       {version !== undefined && detail.isPending && <Group gap="xs" role="status"><Loader size="sm" /><Text size="sm">Loading version…</Text></Group>}
-      {detail.error && <Alert color="bad" title={detail.error instanceof ApiError && detail.error.status === 404 ? "This version is no longer available" : "Version unavailable"}>
+      {detail.error && <Alert color="bad" title={detail.error instanceof ApiError && detail.error.code === "dashboard_version_not_found" ? "This version is no longer available" : "Version unavailable"}>
         {detail.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void detail.refetch()}>Retry version</Button>
       </Alert>}
       {detail.data && !detail.error && <VersionDetails record={detail.data} currentVersion={currentVersion} pending={pending} onRestore={() => onRestore(detail.data.dashboard.version)} />}
@@ -148,8 +148,8 @@ function VersionDetails({ record, currentVersion, pending, onRestore }: { record
 }
 
 function RestoreError({ error, version }: { error: Error; version: number }) {
-  const status = error instanceof ApiError ? error.status : undefined;
-  const advice = status === undefined || status >= 500 ? "Try again with the restore button." : status === 400 ? "This saved spec is invalid. Review the fields below and choose another version." : status === 404 ? "Reload history and choose a retained version." : status === 409 ? "This dashboard changed or its name conflicts. Reload history and choose another version." : "Check your access and reload history.";
+  const code = error instanceof ApiError ? error.code : undefined;
+  const advice = !(error instanceof ApiError) || error.status >= 500 ? "Try again with the restore button." : code === "invalid_spec" ? "This saved spec is invalid. Review the fields below and choose another version." : code === "dashboard_version_not_found" ? "Reload history and choose a retained version." : ["already_current", "dashboard_version_conflict", "conflict"].includes(code ?? "") ? "This dashboard changed or its name conflicts. Reload history and choose another version." : "Check your access and reload history.";
   return <Alert color="bad" title={`Restore of version ${version} failed`}>
     <Text size="sm">{error.message}</Text>
     {error instanceof ApiError && error.problems.length > 0 && <ul>{error.problems.map((problem, index) => <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}

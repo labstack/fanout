@@ -86,7 +86,7 @@ beforeEach(() => {
     const url = new URL(String(input), "http://localhost");
     if (url.pathname === "/api/dashboards") return listResponse();
     if (url.pathname === "/api/dashboards/d1") return json(servedRecord);
-    if (url.pathname === "/api/dashboards/missing") return json({ message: "dashboard not found" }, 404);
+    if (url.pathname === "/api/dashboards/missing") return json({ code: "not_found", message: "dashboard not found" }, 404);
     if (url.pathname === "/api/panels/variables/resolve") return variableResponse();
     if (url.pathname === "/api/annotations") return annotationResponse();
     if (url.pathname === "/api/panels/query") {
@@ -675,7 +675,7 @@ it("keeps a real fetch 403 fixable with no Retry or automatic retry", async () =
 });
 
 it("never retries a 504 panel batch",async()=>{
- panelResponse=async()=>json({message:"Time limit"},504);const {client}=await render();await settle(client);
+ panelResponse=async()=>json({code:"timeout",message:"Time limit"},504);const {client}=await render();await settle(client);
  await vi.waitFor(() => expect(queryBodies).toHaveLength(1), { interval: 5, timeout: 3000 });
 });
 

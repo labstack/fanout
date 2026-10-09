@@ -28,8 +28,8 @@ export async function authorizedFetch(input: RequestInfo | URL, init: RequestIni
   const response = await fetch(input, { ...init, headers, credentials: "same-origin" });
   if (response.status === 401) clearSession();
   if (response.status === 403) {
-    const payload = await response.clone().json().catch(() => ({})) as { message?: string; error?: string };
-    throw new ApiError(payload.message ?? payload.error ?? "You do not have permission to perform this action.", response.status);
+    const payload = await response.clone().json().catch(() => ({})) as { code?: string; message?: string };
+    throw new ApiError(payload.message ?? "You do not have permission to perform this action.", response.status, [], payload.code ?? "");
   }
   return response;
 }

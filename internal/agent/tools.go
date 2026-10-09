@@ -9,6 +9,7 @@ import (
 
 	"github.com/labstack/fanout/internal/dashboard"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -116,7 +117,7 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 		}
 	}
 	if !allowed {
-		return ToolExecution{Content: "This tool is unavailable to the model: " + call.Name, IsError: true}, nil
+		return ToolExecution{Content: toolerror.JSON("tool_failed", "This tool is unavailable to the model: "+call.Name), IsError: true}, nil
 	}
 	arguments := json.RawMessage(call.Input)
 	if len(arguments) == 0 {

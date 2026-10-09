@@ -105,7 +105,7 @@ it("submits one restore for a double click, retains the pending lock when reopen
 });
 
 it.each([404, 409, 500])("keeps the current view on restore failure %s and retries only after a new click", async status => {
-  api.restoreVersion.mockRejectedValue(new ApiError("Restore failed", status)); client.setQueryData(["dashboard", "board"], record);
+  api.restoreVersion.mockRejectedValue(new ApiError("Restore failed", status, [], status === 404 ? "dashboard_version_not_found" : "conflict")); client.setQueryData(["dashboard", "board"], record);
   await render(); await act(async () => button("Version 1").click()); await settle();
   await act(async () => button("Restore version 1").click()); await settle();
   expect(document.body.textContent).toContain("Restore failed"); expect(api.restoreVersion).toHaveBeenCalledTimes(1); expect(onRestored).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ it("shows list loading, empty and error states with a deliberate read retry", as
 });
 
 it("shows not-found and pruned-predecessor states without invented changes", async () => {
-  api.getVersion.mockRejectedValue(new ApiError("Missing", 404)); await render();
+  api.getVersion.mockRejectedValue(new ApiError("Missing", 404, [], "dashboard_version_not_found")); await render();
   expect(document.body.textContent).toContain("This version is no longer available"); expect(button("Restore version 3")).toBeUndefined();
   api.getVersion.mockResolvedValue({ ...historic(2), changes: [], layout_changed: false, dashboard_fields: [], changes_available: false });
   await act(async () => button("Version 2").click()); await settle();
@@ -150,7 +150,7 @@ it("uses the receipt's Layout adjusted chip for the server layout flag", async (
 });
 
 it("scopes escaped validation problems to the failed version and clears feedback on selection or close", async () => {
-  api.restoreVersion.mockRejectedValue(new ApiError("Invalid spec", 400, [{ path: "panels[0].query", message: "<img src=x onerror=alert(1)>", hint: "Use an available column" }]));
+  api.restoreVersion.mockRejectedValue(new ApiError("Invalid spec", 400, [{ path: "panels[0].query", message: "<img src=x onerror=alert(1)>", hint: "Use an available column" }], "invalid_spec"));
   await render(); await act(async () => button("Version 1").click()); await settle();
   await act(async () => button("Restore version 1").click()); await settle();
   expect(document.body.textContent).toContain("Restore of version 1 failed");
@@ -164,7 +164,7 @@ it("scopes escaped validation problems to the failed version and clears feedback
 });
 
 it.each([404, 409, 500])("gives status-specific restore advice for %s and refreshes pruned history", async status => {
-  api.restoreVersion.mockRejectedValue(new ApiError("Rejected restore", status));
+  api.restoreVersion.mockRejectedValue(new ApiError("Rejected restore", status, [], status === 404 ? "dashboard_version_not_found" : "conflict"));
   await render(); await act(async () => button("Version 1").click()); await settle();
   const reads = api.listVersions.mock.calls.length;
   await act(async () => button("Restore version 1").click()); await settle();

@@ -19,7 +19,8 @@ export type BuildReceipt = {
 };
 const contextTools = new Set(["get_intelligence_snapshot", "query_telemetry", "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
 const namedProblems = (value: unknown, id: string): Correction[] => Array.isArray(value) ? value.flatMap(p => object(p) && typeof p.path === "string" && typeof p.message === "string" ? [{panel_id:id,path:p.path,message:p.message}] : []) : [];
-export const interruptedResult = (message:Message) => message.role === "tool" && (message.error === "interrupted" || jsonObject(message.content)?.error === "interrupted");
+const toolCode = (content: unknown) => { const error = jsonObject(content)?.error; return object(error) ? error.code : undefined; };
+export const interruptedResult = (message:Message) => message.role === "tool" && toolCode(message.content) === "interrupted";
 const executed = (p: PanelCheck) => !["invalid", "not_run"].includes(p.status);
 
 /** No browser-only progress state: calls, inputs and server results in this user
@@ -29,7 +30,7 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
   if (start < 0) return null;
   const next = messages.findIndex((m, i) => i > start && m.role === "user");
   const turn = messages.slice(start + 1, next < 0 ? undefined : next);
-  const refused = new Set(turn.flatMap(m => m.role === "tool" && jsonObject(m.content)?.code === "answer_only" ? [m.toolCallId] : []));
+  const refused = new Set(turn.flatMap(m => m.role === "tool" && toolCode(m.content) === "answer_only" ? [m.toolCallId] : []));
   const calls = turn.flatMap((m, i) => m.role === "assistant" ? (m.toolCalls ?? []).map(call => ({call,index:i})) : []).filter(({call}) => !refused.has(call.id));
   if (!calls.some(({call}) => mutationNames.has(call.function.name) || call.function.name === "preview_panels")) return null;
   const stages: BuildReceipt["stages"] = {schema:{state:"unobserved"},context:{state:"unobserved"},draft:{state:"unobserved"},validation:{state:"unobserved"},preview:{state:"unobserved"},save:{state:"unobserved"}};

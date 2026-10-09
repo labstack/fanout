@@ -120,7 +120,7 @@ describe("dashboard layout editing", () => {
   });
 
   it("shows a version conflict without overwriting newer data", async () => {
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: "Conflict" }), { status: 409, headers: { "content-type": "application/json" } }));
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ code: "dashboard_version_conflict", message: "Conflict" }), { status: 409, headers: { "content-type": "application/json" } }));
     const { host, client, save } = await render();
     await act(async () => { grid.current!.onDragStop([{ i: "note", x: 0, y: 3, w: 6, h: 3 }]); });
     await act(async () => { save().click(); });
@@ -159,7 +159,7 @@ it("ignores narrow breakpoint stop events and never dirties or saves the compact
 });
 
 it("loads the latest dashboard on conflict and clears errors when leaving edit mode", async () => {
-  fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: "Conflict" }), { status: 409, headers: { "content-type": "application/json" } }));
+  fetchMock.mockImplementation(async () => new Response(JSON.stringify({ code: "dashboard_version_conflict", message: "Conflict" }), { status: 409, headers: { "content-type": "application/json" } }));
   const { host, client, save, rerender, onEditExit } = await render();
   const invalidate = vi.spyOn(client, "invalidateQueries");
   const conflict = async () => {

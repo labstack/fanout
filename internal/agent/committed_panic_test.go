@@ -73,11 +73,12 @@ func TestRuntimePanicDistinguishesCommittedSave(t *testing.T) {
 				if json.Unmarshal([]byte(messageText(m.Content)), &p) != nil {
 					t.Fatal(m)
 				}
-				want := "tool execution failed"
+				failure, ok := p["error"].(map[string]any)
+				want := "tool_failed"
 				if commit {
 					want = "interrupted"
 				}
-				if p["error"] != want || p["isError"] != true || commit && m.Error != "interrupted" || !commit && m.Error == "interrupted" {
+				if !ok || failure["code"] != want || failure["message"] == "" || p["isError"] != true || commit && m.Error != "interrupted" || !commit && m.Error == "interrupted" {
 					t.Fatalf("commit=%v message=%+v", commit, m)
 				}
 			}

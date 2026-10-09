@@ -52,7 +52,7 @@ it('shows in-flight stages as progress while keeping observed failures visible',
 });
 
 it.each(['create_dashboard','edit_dashboard'])('renders interrupted %s with muted outcome-unknown text',async name=>{
- const receipt=receiptForTurn([user(),call('save',name),result('save',{error:'interrupted'},'interrupted')],'u')!;
+ const receipt=receiptForTurn([user(),call('save',name),result('save',{error:{code:'interrupted',message:'Tool execution was interrupted. The save may have completed.'}},'interrupted')],'u')!;
  const host=document.createElement('div');const root=createRoot(host);
  try{await act(async()=>root.render(view(receipt)));
  const notice=Array.from(host.querySelectorAll<HTMLElement>('[data-receipt-attention]')).find(el=>el.textContent==='Save interrupted · outcome unknown');
