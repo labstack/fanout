@@ -1,0 +1,1 @@
+import{St as e,yt as t}from"./brand-B8x2UvAx.js";var n=e(t(),1);function r(e){return Array.isArray(e)||e===null?!1:typeof e==`object`&&e.type!==n.Fragment}function i(e){let t=n.Children.toArray(e);return t.length!==1||!r(t[0])?null:t[0]}export{r as n,i as t};

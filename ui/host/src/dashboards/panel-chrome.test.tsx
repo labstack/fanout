@@ -22,7 +22,7 @@ it.each([380, 410])("keeps view controls and their focus stable across refresh a
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({width,height:300}));
   const panel = {...p, title:"Request rate by service"};
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
-  const draw=async(loading:boolean)=>act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={r} loading={loading} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+  const draw=async(loading:boolean)=>act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={panel} title={panel.title} result={r} loading={loading} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
   await draw(false);
   const control=host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]') ?? host.querySelector<HTMLButtonElement>('[aria-label$=" menu"]')!;
   control.focus();
@@ -43,7 +43,7 @@ afterEach(async()=>{await act(async()=>cleanup.splice(0).forEach(fn=>fn()));vi.r
 async function render(panel:Panel=p,result:PanelResult=r,onSelect:((value:string)=>void)|undefined=undefined,vars?:Record<string,string>,onVariable?: (name:string,value:string)=>void,staleAt?:number) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
-  await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect} vars={vars} onVariable={onVariable}/></MantineProvider>));
+  await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={panel} title={panel.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect} vars={vars} onVariable={onVariable}/></MantineProvider>));
   return host;
 }
 it.each([120,159,160,238,300])("gauge fills its measured body, readable untruncated value and separate status at %ipx",width=>{
@@ -121,7 +121,7 @@ it.each(["ms","s","ns","count"])("uses nice capped ticks over 0–90 seconds (un
 it("keeps the chart body and plot budget identical after a transient refresh failure", async () => {
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
   const retry=vi.fn();
-  const draw=async(result:PanelDisplayResult,staleAt?:number)=>act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={true} onRetry={retry}/></MantineProvider>));
+  const draw=async(result:PanelDisplayResult,staleAt?:number)=>act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={p} title={p.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={true} onRetry={retry}/></MantineProvider>));
   await draw(r);
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
   const before=body.previousElementSibling;
@@ -150,7 +150,7 @@ it.each([120,300])("bounds the full error state inside a %ipx body with inline R
   vi.stubGlobal("ResizeObserver",class { record:{callback:ResizeObserverCallback;elements:Element[]}; constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);} observe(el:Element){this.record.elements.push(el);} disconnect(){} });
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
   const message="Server unavailable "+"very long details ".repeat(100),retry=vi.fn();
-  await act(async()=>root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
+  await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={p} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
   const observer=observers.find(o=>o.elements.includes(body));
   expect(observer).toBeDefined();
@@ -217,7 +217,7 @@ it.each([false, true])("opens the refresh tooltip only for focus-visible=%s", as
 it("dismisses a hovered refresh tooltip on Escape before the full-screen dialog", async () => {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
   const close = vi.fn();
-  await act(async () => root.render(<MantineProvider><PanelFullscreen opened onClose={close} title="Panel full-screen" returnFocusTo={() => undefined}><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></PanelFullscreen></MantineProvider>));
+  await act(async () => root.render(<MantineProvider env="test"><PanelFullscreen opened onClose={close} title="Panel full-screen" returnFocusTo={() => undefined}><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></PanelFullscreen></MantineProvider>));
   const menu = within(document.body).getByRole("button", {name: "Panel menu, refresh failed"});
   await act(async () => menu.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})));
   await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).not.toBeNull(), {timeout: 3000, interval: 5});
@@ -241,7 +241,7 @@ it("closes the refresh tooltip on pointer leave even while keyboard focused", as
 it("closes the tooltip after a mouse Retry and programmatic focus restoration", async () => {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
   const retry = vi.fn();
-  await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected", request_error: [p.id]}} loading={false} height={300} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
+  await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected", request_error: [p.id]}} loading={false} height={300} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
   const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
   focusVisible(menu, false);
   await act(async () => menu.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})));
@@ -263,7 +263,7 @@ it("gives the compact error message at least half a 200px card with an icon Fix"
   try {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
     const fix = vi.fn();
-    await act(async () => root.render(<MantineProvider><PanelCard panel={{...p, viz:"stat"}} title={p.title} result={{id: p.id, status: "error", elapsed_ms: 0, error: "Invalid query"}} loading={false} height={200} group="g" editing={false} agentAvailable onFix={fix}/></MantineProvider>));
+    await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={{...p, viz:"stat"}} title={p.title} result={{id: p.id, status: "error", elapsed_ms: 0, error: "Invalid query"}} loading={false} height={200} group="g" editing={false} agentAvailable onFix={fix}/></MantineProvider>));
     const body = host.querySelector<HTMLElement>('[data-panel-body]')!;
     await act(async () => {
       for (const observer of observers) for (const target of observer.elements) observer.callback([{target, contentRect: {width: 200, height: 112}} as unknown as ResizeObserverEntry], {} as ResizeObserver);
@@ -288,7 +288,7 @@ it("gives the compact error message at least half a 200px card with an icon Fix"
 
 it("exposes the refresh failure on the menu button and opens its tooltip on keyboard focus", async () => {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
-  await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={Date.now() - 60000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+  await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={Date.now() - 60000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
   const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
   expect(within(host).getByRole("button", {name: "Panel menu, refresh failed", description: /Showing data from 1 minute ago.*Disconnected/})).toBe(menu);
   focusVisible(menu, true);
@@ -301,7 +301,7 @@ it("updates the failed frame's age in its description and tooltip with a stable 
   try {
     const now = Date.parse("2026-10-08T12:00:00Z"); vi.setSystemTime(now);
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
-    await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={now - 90_000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+    await act(async () => root.render(<MantineProvider env="test"><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={now - 90_000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
     const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
     expect(within(host).getByRole("button", {name: "Panel menu, refresh failed", description: /Showing data from 1 minute ago/})).toBe(menu);
     focusVisible(menu, true);
