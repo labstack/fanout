@@ -66,8 +66,9 @@ it.each([false,true])("native renderer keeps five heat intensities and excludes 
   const option=analysisOption({id:"h",title:"Heat",viz:"heatmap"},result,chartThemeFor(dark));chart.setOption(option,{notMerge:true});
   const audit=nativeAudit(chart,option,{width:600,height:248});
   expect(audit.marks).toHaveLength(5);expect(new Set(audit.marks.map(m=>m.fill)).size).toBe(5);
-  for(const text of ["1","10","100","3k"]) expect(audit.texts.some(t=>t.text===text)).toBe(true);
-  const ticks=audit.texts.filter(t=>["10","100","3k"].includes(t.text));
+  for(const text of ["1","3k"]) expect(audit.texts.filter(t=>t.text===text)).toHaveLength(1);
+  expect(audit.texts.some(t=>["10","100"].includes(t.text))).toBe(false);
+  const ticks=audit.texts.filter(t=>["1","3k"].includes(t.text));
   for(const tick of ticks) {expect(tick.left).toBeGreaterThanOrEqual(0);expect(tick.right).toBeLessThanOrEqual(600);expect(tick.top).toBeGreaterThanOrEqual(0);expect(tick.bottom).toBeLessThanOrEqual(248);}
  }finally{chart.dispose();el.remove();}
 });

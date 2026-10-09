@@ -160,10 +160,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
     // Nearest-rank p99 uses only finite, non-empty cells; outliers saturate.
     const cap = counts[Math.max(0, Math.ceil(counts.length * .99) - 1)] ?? 1, ramp = heatRamp(theme);
     const data = heat ? occupied.map(bucket => ({ ...bucket, value: [...bucket.value, heatStep(Number(bucket.value[2]), cap)] })) : mergeStateRuns(buckets).map(run => ({ ...run, tooltip: { formatter: () => `${escapeHTML(names[Number(run.value[1])])} · ${["Unknown", "OK", "Warn", "Bad"][Number(run.value[4])]}\n${formatTimestamp(Number(run.value[0]))} – ${formatTimestamp(Number(run.value[3]))}` } }));
-    const logCap = Math.log10(cap), lastExponent = Math.ceil(logCap) - 1;
-    const ticks = lastExponent < 1 ? [] : [...new Set([1 / 3, 2 / 3].map(fraction => Math.max(1, Math.min(lastExponent, Math.round(logCap * fraction)))))].map(exponent => 10 ** exponent);
     const capLabel = heatCountLabel(counts.length ? cap : 0);
-    const capLabelWidth = size.measureText?.(capLabel, `11px ${theme.font}`) ?? capLabel.length * 11 * .6;
     return {
       ...base,
       grid: { ...base.grid, left: 8, right: 8, top: 8, bottom: heat ? 32 : hiddenRows.length ? 24 : 8 },
@@ -183,11 +180,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         itemWidth: 8, itemHeight: 96, text: [capLabel, counts.length ? "1" : "0"], textGap: 10, textStyle: { color: theme.muted,fontFamily:theme.font,fontSize:11 },
         min: 0, max: 6, dimension: 5, inRange: { color: ramp },
       } : undefined,
-      graphic: heat ? ticks.map(count => ({ type: "group", right: 16 + capLabelWidth + 10, bottom: 14,
-        // Invisible bounds fix the group's origin at the right edge of the scale.
-        children: [{ type: "rect", shape: { x: -96, y: 0, width: 96, height: 0 }, invisible: true },
-          { type: "text", x: -96 + 96 * Math.log10(count) / logCap, y: 0, style: { text: heatCountLabel(count), fill: theme.muted, fontSize: 11, fontFamily: theme.font, align: "center", verticalAlign: "bottom" } }],
-      })) : hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
+      graphic: !heat && hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
         type: "custom", clip: true, name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; visual: (key: "color") => string }) => {

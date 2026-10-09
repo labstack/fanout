@@ -71,6 +71,33 @@ function layoutCards(model:ServiceGraph,cardWidths:CardWidths,compact:boolean):C
 
 /** Contain when readable; larger graphs start at the floor around an entry. */
 export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: ChartSize) {
+  const wrapIsolated = (raw: CardLayout, floor: number): CardLayout => {
+    const isolated = raw.nodes.filter(n => n.uncalled);
+    if (!isolated.length) return raw;
+    const available = Math.max(1, size.width - 24) / floor;
+    const rows: Box[][] = [[]];
+    let used = 0;
+    for (const node of isolated) {
+      if (used && used + 12 + node.width > available) { rows.push([]); used = 0; }
+      rows.at(-1)!.push(node);
+      used += (used ? 12 : 0) + node.width;
+    }
+    const rowWidths = rows.map(row => row.reduce((sum, node) => sum + node.width, 0) + (row.length - 1) * 12);
+    const connected = raw.nodes.filter(n => !n.uncalled), points = raw.routes.flat();
+    const graphLeft = Math.min(...connected.map(n => n.x), ...points.map(p => p.x));
+    const graphWidth = connected.length ? Math.max(...connected.map(n => n.x + n.width), ...points.map(p => p.x)) - graphLeft : 0;
+    const width = Math.max(graphWidth, raw.labelWidth, ...rowWidths);
+    const shift = connected.length ? (width - graphWidth) / 2 - graphLeft : 0;
+    const nodes = connected.map(n => ({ ...n, x: n.x + shift }));
+    rows.forEach((row, index) => {
+      let x = (width - rowWidths[index]) / 2;
+      for (const node of row) {
+        nodes.push({ ...node, x, y: isolated[0].y + index * (node.height + 12) });
+        x += node.width + 12;
+      }
+    });
+    return { ...raw, nodes, routes: raw.routes.map(route => route.map(p => ({ ...p, x: p.x + shift }))), width, height: Math.max(...nodes.map(n => n.y + n.height)) };
+  };
   const bounds=(raw:CardLayout)=>{
     const points = raw.routes.flat();
     const minX = Math.min(0, ...points.map(p => p.x)), minY = Math.min(0, ...points.map(p => p.y));
@@ -83,8 +110,9 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
     const scale = Math.min(Math.max(1, size.width - 24) / width, Math.max(1, size.height - 24 - lane) / Math.max(1,height-gap));
     return {minX,minY,width,height,scale,graphBottom,rowY,gap,lane};
   };
-  const compact=bounds(layout.full).scale<1;
-  const raw=compact?layout:layout.full;
+  const full = wrapIsolated(layout.full, 1);
+  const compact=bounds(full).scale<1;
+  const raw=compact?wrapIsolated(layout, compactReadableScale):full;
   const {minX,minY,width,height,scale:containScale,graphBottom,rowY,gap,lane}=bounds(raw);
   const scale=Math.max(compact ? compactReadableScale : 1, Math.min(containScale,1));
   const fittedHeight=(height-gap)*scale+lane;

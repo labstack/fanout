@@ -57,7 +57,9 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   let used = 0;
   for (const name of legend?.data ?? []) {
     const entry = 10 + 5 + measure(legend?.formatter?.(name) ?? name);
-    if (used && used + (legend?.itemGap ?? 6) + entry > size.width-16) break;
+    // The legend spans the canvas; reserving the chips' right inset here
+    // incorrectly omits a final item that still fits in its first row.
+    if (used && used + (legend?.itemGap ?? 6) + entry > size.width) break;
     used += (used ? legend?.itemGap ?? 6 : 0) + entry;
   }
   const candidates = [

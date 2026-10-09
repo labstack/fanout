@@ -1,5 +1,24 @@
 import { withAnnotations } from "./annotations";
 import { chartThemeFor, timeseriesOption } from "./compile";
+import { wrappingLegend } from "./series";
+
+it.each([false, true])("uses a separate annotation lane when the first legend row fills the canvas (dark=%s)", dark => {
+  const size = { width: 450, height: 248, measureText: (text: string) => text.length * 6 };
+  const names = ["cart", "currency", "flagd", "frontend", "frontend-proxy", "product-catalog", "Other (9)"];
+  const theme = chartThemeFor(dark);
+  const legend = wrappingLegend(names, size.width, true, theme.muted, theme.font, size.measureText);
+  const base = { legend: legend.option, grid: { left: 8, right: 151, top: legend.top }, series: [{ type: "line" }] };
+  const option = withAnnotations(base, { id: "p", title: "Requests", viz: "timeseries" }, { id: "p", status: "ok", elapsed_ms: 0, from_ms: 0, to_ms: 10000 }, {
+    deploys: [], anomalies: [{ namespace: "shop", service: "cart", kind: "latency", title: "Slow", severity: "warn", from: new Date(2000).toISOString(), to: new Date(9000).toISOString() }],
+  }, {}, theme, size) as any;
+  // Six measured entries fit the real first row; Other wraps to the second.
+  const firstRow = names.slice(0, 6).reduce((used, name) => used + 15 + size.measureText(name) + (used ? 6 : 0), 0);
+  expect(firstRow).toBe(444);
+  const chips = option.graphic.filter((g: any) => g.annotation);
+  expect(chips.map((g: any) => g.style.text)).toEqual(["anomaly"]);
+  expect(option.grid.top).toBe(base.grid.top + 18);
+  expect(chips[0].top).toBeGreaterThanOrEqual(base.grid.top);
+});
 
 it("keeps shared-row chips clear of a one-row legend with end labels at 560 px", () => {
   const size = { width: 560, height: 248, measureText: (text: string) => text.length * 6 };

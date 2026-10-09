@@ -515,7 +515,11 @@ func failed(res Result, err error, ownTimeout bool) Result {
 			res.Retryable = true
 		}
 	}
-	slog.Error("panel query failed", "panel_id", res.ID, "error", err)
+	// ownTimeout is false when runPanel's caller context is already done.
+	// Navigation cancellation is expected; unrelated failures still need a log.
+	if ownTimeout || !errors.Is(err, context.Canceled) {
+		slog.Error("panel query failed", "panel_id", res.ID, "error", err)
+	}
 	switch {
 	case ownTimeout && errors.Is(err, context.DeadlineExceeded):
 		res.Error = QueryTimeoutError

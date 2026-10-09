@@ -34,13 +34,12 @@ it("derives nearest-rank p99 from occupied cells and saturates outliers", () => 
   expect(o.visualMap.text).toEqual(["3k", "1"]);
   expect(fill(o, 1e9)).toBe(o.visualMap.inRange.color[6]);
 });
-it("legend labels real endpoints and two interior log ticks", () => {
-  const o = option([1, 10, 100, 1000, 3000]);
+it.each([false, true])("shows only one heatmap scale label per end with no extra positioned text (%s)", dark => {
+  const o = option([1, 10, 100, 1000, 3000], dark);
   expect(o.visualMap.text).toEqual(["3k", "1"]);
-  const ticks = o.graphic.flatMap((g: any) => g.children ?? []).filter((g: any) => g.type === "text");
-  expect(ticks.map((g: any) => g.style.text)).toEqual(["10", "100"]);
-  expect(ticks[0].x).toBeCloseTo(-96 + 96 / Math.log10(3000));
-  expect(ticks[1].x).toBeCloseTo(-96 + 192 / Math.log10(3000));
+  expect(o.visualMap.orient).toBe("horizontal");
+  expect(o.visualMap.inRange.color).toEqual(heatRamp(chartThemeFor(dark)));
+  expect(o.graphic).toEqual([]);
 });
 it("handles empty and unit caps without non-finite steps", () => {
   expect(option([0, null]).series[0].data).toEqual([]);
