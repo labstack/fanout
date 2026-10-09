@@ -9,6 +9,8 @@ RUN cd ui/host && bun install --frozen-lockfile
 COPY ui/*.ts ./ui/
 COPY ui/panels/ ./ui/panels/
 COPY ui/host/ ./ui/host/
+# The build type-checks the host tests, and one reads the eval golden fixture.
+COPY scripts/dashboard-eval/testdata/server.json ./scripts/dashboard-eval/testdata/
 RUN cd ui/host && bun run build
 
 # DuckDB needs CGO, so this stage must run on the target architecture — there
