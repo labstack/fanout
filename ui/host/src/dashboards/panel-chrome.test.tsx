@@ -17,6 +17,23 @@ vi.mock("./echart-canvas", () => ({ EChartCanvas: ({label,height}: {label:string
 const p:Panel={id:"p",title:"Panel",viz:"timeseries",query:{from:"spans"},drill:"traces"};
 const r:PanelResult={id:"p",status:"ok",elapsed_ms:1,from_ms:0,to_ms:600000,interval:"1m",frame:{columns:[{name:"time",type:"time",role:"time"},{name:"calls",type:"number",role:"measure"}],values:[[0,60000],[1,2]],rows:2}};
 const cleanup:(()=>void)[]=[];
+
+it.each([380, 410])("keeps view controls and their focus stable across refresh at %s px", async width => {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({width,height:300}));
+  const panel = {...p, title:"Request rate by service"};
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
+  const draw=async(loading:boolean)=>act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={r} loading={loading} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+  await draw(false);
+  const control=host.querySelector<HTMLButtonElement>('[data-panel-view="Data"]') ?? host.querySelector<HTMLButtonElement>('[aria-label$=" menu"]')!;
+  control.focus();
+  const inline=Boolean(host.querySelector('[data-panel-view="Data"]'));
+  await draw(true);
+  expect(Boolean(host.querySelector('[data-panel-view="Data"]'))).toBe(inline);
+  expect(document.activeElement).toBe(control);
+  await draw(false);
+  expect(Boolean(host.querySelector('[data-panel-view="Data"]'))).toBe(inline);
+  expect(document.activeElement).toBe(control);
+});
 function focusVisible(menu: HTMLElement, visible: boolean) {
   const matches = menu.matches.bind(menu);
   vi.spyOn(menu, "matches").mockImplementation(selector => selector === ":focus-visible" ? visible : matches(selector));

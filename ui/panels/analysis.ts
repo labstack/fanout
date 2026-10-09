@@ -189,7 +189,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
           { type: "text", x: -96 + 96 * Math.log10(count) / logCap, y: 0, style: { text: heatCountLabel(count), fill: theme.muted, fontSize: 11, fontFamily: theme.font, align: "center", verticalAlign: "bottom" } }],
       })) : hiddenRows.length ? [{type:"text",right:0,bottom:0,style:{text:`+${hiddenRows.length} rows`,fill:theme.muted,fontSize:11,fontFamily:theme.font},tooltip:{formatter:()=>hiddenRows.map(escapeHTML).join("<br/>")}}] : [],
       series: [{
-        type: "custom", name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
+        type: "custom", clip: true, name: panel.title, interactive: true, keyboard_unit: heat ? "count" : panel.unit ?? measures[0]?.unit, encode: { x: [0, 3], y: 1, tooltip: 2 }, data,
         renderItem: (_params: unknown, api: { value: (index: number) => number; coord: (value: number[]) => number[]; size: (value: number[]) => number[]; visual: (key: "color") => string }) => {
           const left = api.coord([api.value(0), api.value(1)]);
           const right = api.coord([api.value(3), api.value(1)]);

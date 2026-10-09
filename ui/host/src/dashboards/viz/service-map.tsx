@@ -51,7 +51,6 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
   const neighbours = new Set([active, ...model.edges.filter(e => e.caller === active || e.callee === active).flatMap(e => [e.caller, e.callee])]);
   const maxZoom = Math.max(12, 1 / graph.scale);
   const maxRate = Math.max(1e-9, ...model.edges.map(e => e.request_rate ?? e.calls));
-  const labelScale = Math.min(1, graph.scale / .65);
   const fittedX=graph.initialView.x,fittedY=graph.initialView.y;
   const fit = useCallback(() => setView({x:fittedX,y:fittedY,zoom:1}), [fittedX,fittedY]);
   useLayoutEffect(() => {
@@ -97,8 +96,8 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
           const label = serviceCardLabels(n, { width: n.width / graph.scale, scale: graph.scale * view.zoom, compact:graph.compact, measureText });
           return <button type="button" key={n.id} {...(import.meta.env.DEV ? { "data-service-node": n.id, "data-service-entry": n.entry } : {})} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} aria-label={`${n.id}, ${n.health}, ${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
-            style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", flexDirection:"column", justifyContent:"center", gap: 3 / view.zoom, boxSizing: "border-box", border: `${labelScale / view.zoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${5 * labelScale / view.zoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: active && !neighbours.has(n.id) ? .25 : 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
-            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 * labelScale / view.zoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro * labelScale / view.zoom, 12 * graph.scale), lineHeight: 1, whiteSpace: "nowrap" }}>
+            style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", flexDirection:"column", justifyContent:"center", gap: 3 / view.zoom, boxSizing: "border-box", border: `${1 / view.zoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${5 / view.zoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: active && !neighbours.has(n.id) ? .25 : 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
+            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / view.zoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / view.zoom, 12 * graph.scale), lineHeight: 1, whiteSpace: "nowrap" }}>
               <span aria-hidden="true" style={{ color, flex: "none" }}>{healthGlyph[n.health] ?? "○"}</span>
               <span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{ flex: "none", fontWeight: 600, whiteSpace: "nowrap" }}>{label.name}</span>
             </span>

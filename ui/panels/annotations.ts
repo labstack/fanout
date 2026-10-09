@@ -77,7 +77,7 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
   const bandTop = share ? 1 : top-17;
   // Labels occupy measured, disjoint boxes in the row. Excess labels are
   // dropped; every deploy line and anomaly area keeps its own exact time.
-  let rightOffset = typeof grid.right === "number" ? grid.right : 16;
+  let rightOffset = share ? 16 : typeof grid.right === "number" ? grid.right : 16;
   const chips = labels.map(l=>{
     const width = measure(l.text);
     const chip = {type:"text",right:rightOffset,top:bandTop,annotation:true,style:{text:l.text,fill:theme.muted,backgroundColor:theme.surface,padding:[1,3],fontSize:11,fontFamily:theme.font,width,stroke:theme.surface,lineWidth:3},tooltip:{formatter:()=>l.details}};

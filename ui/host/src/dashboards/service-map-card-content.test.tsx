@@ -15,6 +15,8 @@ const cleanups:(()=>void)[]=[];
 beforeEach(()=>vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true));
 afterEach(async()=>{await act(async()=>cleanups.splice(0).forEach(fn=>fn()));vi.restoreAllMocks();vi.unstubAllGlobals();document.body.innerHTML="";});
 function contained(graph:ReturnType<typeof graphAt>,width:number,height:number) {
+  expect(graph.contentWidth).toBeGreaterThanOrEqual(width);expect(graph.contentHeight).toBeGreaterThanOrEqual(height);
+  width=graph.contentWidth;height=graph.contentHeight;
   for(const n of graph.nodes) {
     expect(n.x).toBeGreaterThanOrEqual(8);expect(n.y).toBeGreaterThanOrEqual(8);
     expect(n.x+n.width).toBeLessThanOrEqual(width-8);expect(n.y+n.height).toBeLessThanOrEqual(height-8);
@@ -27,9 +29,9 @@ it("fits the 20px compact demo at 1100×230 with no clipping or pan",()=>{
   const graph=graphAt(1100,230);expect(graph.compact).toBe(true);expect(graph.nodes).toHaveLength(20);
   contained(graph,1100,230);for(const n of graph.nodes) expect(n.height/graph.scale).toBeCloseTo(20);
 });
-it("fits all twenty demo services and the isolated heading in a 1100×190 body",()=>{
+it("fits all twenty demo services and the isolated heading in a readable pan canvas for a 1100×190 body",()=>{
   const graph=graphAt(1100,190);expect(graph.compact).toBe(true);contained(graph,1100,190);
-  expect(graph.uncalledLabel!.y).toBeGreaterThanOrEqual(8);expect(graph.uncalledLabel!.y+typeScale.micro).toBeLessThan(190);
+  expect(graph.uncalledLabel!.y).toBeGreaterThanOrEqual(8);expect(graph.uncalledLabel!.y+typeScale.micro).toBeLessThan(graph.contentHeight);
 });
 it.each([190,220])("protects all names in a twenty-node graph with nine leaf lanes and four uncalled services at height %s",height=>{
   const names=["load-generator","frontend-proxy","frontend","checkout","recommendation","product-reviews","product-catalog","shipping","payment","fraud-detection","email","currency","cart","ad","quote","flagd","accounting","image-provider","kafka","otelcol-contrib"];
@@ -39,7 +41,8 @@ it.each([190,220])("protects all names in a twenty-node graph with nine leaf lan
   const m={nodes,edges},graph=fitServiceMap(layoutServiceMapRaw(m,{width:1100,height,measureText:measure}),m,{width:1100,height});
   contained(graph,1100,height);
   for(const n of graph.nodes) {
-    const labelScale=Math.min(1,graph.scale/.65),font=Math.max(typeScale.micro*labelScale,12*graph.scale);
+    const labelScale=1,font=Math.max(typeScale.micro,12*graph.scale);
+    expect(font).toBeGreaterThanOrEqual(11);
     expect(n.height).toBeGreaterThanOrEqual(font+2*labelScale-.01);
     expect(n.width).toBeGreaterThanOrEqual(measure(n.id+"●",`${font}px monospace`)+16*labelScale);
   }
@@ -56,7 +59,7 @@ it("protects all 24 characters using per-node measurements",()=>{
   expect(label.name).toBe(n.id);expect(label.nameWidth).toBeGreaterThanOrEqual(measure(n.id,`600 ${label.nameSize}px sans-serif`));
 });
 it.each([180,190,220,230,280,396,480])("keeps entry services initially visible at body height %s",height=>{
-  const graph=graphAt(1100,height);for(const n of graph.nodes.filter(n=>n.entry)){expect(n.y).toBeGreaterThanOrEqual(8);expect(n.y+n.height).toBeLessThanOrEqual(height-8);}
+  const graph=graphAt(1100,height);for(const n of graph.nodes.filter(n=>n.entry)){expect(n.y+graph.initialView.y).toBeGreaterThanOrEqual(8);expect(n.y+n.height+graph.initialView.y).toBeLessThanOrEqual(height-8);}
 });
 it("uses full name-plus-metrics cards only when they fit at scale 1 or greater",()=>{
   const small={nodes:[model.nodes[0]],edges:[]};
@@ -89,14 +92,14 @@ it("uses compact nodesep of 4 logical pixels",()=>{
   const rank=graph.nodes.filter(n=>!n.entry).sort((a,b)=>a.y-b.y);expect(graph.compact).toBe(true);
   for(let i=1;i<rank.length;i++) expect((rank[i].y-rank[i-1].y-rank[i-1].height)/graph.scale).toBeCloseTo(4);
 });
-it("contains separated entries and all leaves even below the natural text scale",()=>{
+it("keeps separated entries and leaves readable in the pan canvas",()=>{
   const nodes=[] as typeof model.nodes,edges=[] as typeof model.edges;
   for(let root=0;root<2;root++) {
     const id=`entry-${root}`;nodes.push({...model.nodes[0],id});
     for(let i=0;i<20;i++){const child=`${id}-callee-${i}`;nodes.push({...model.nodes[0],id:child});edges.push({...model.edges[0],id:child,caller:id,callee:child});}
   }
   const m={nodes,edges},graph=fitServiceMap(layoutServiceMapRaw(m,{width:1100,height:180}),m,{width:1100,height:180});
-  expect(graph.scale).toBeLessThan(.65);expect(graph.contentHeight).toBe(180);
+  expect(graph.scale).toBe(.65);expect(graph.contentHeight).toBeGreaterThan(180);
   const entries=graph.nodes.filter(n=>n.entry);expect(entries.some(n=>n.y+graph.initialView.y>=8 && n.y+n.height+graph.initialView.y<=172)).toBe(true);
   for(const n of graph.nodes) {expect(n.height).toBeCloseTo(20*graph.scale);for(const o of graph.nodes) if(o!==n) expect(n.x>=o.x+o.width||o.x>=n.x+n.width||n.y>=o.y+o.height||o.y>=n.y+n.height).toBe(true);}
 });
@@ -104,7 +107,7 @@ it("keeps an entry in a distant Dagre rank inside the initial viewport",()=>{
   const nodes=Array.from({length:12},(_,i)=>({...model.nodes[0],id:`chain-${i}`}));nodes.push({...model.nodes[0],id:"late-entry"});
   const edges=nodes.slice(1,12).map((n,i)=>({...model.edges[0],id:n.id,caller:`chain-${i}`,callee:n.id}));edges.push({...model.edges[0],id:"late-hop",caller:"late-entry",callee:"chain-11"});
   const m={nodes,edges},graph=fitServiceMap(layoutServiceMapRaw(m,{width:1100,height:180}),m,{width:1100,height:180});
-  contained(graph,1100,180);for(const n of graph.nodes.filter(n=>n.entry)) expect(n.x+n.width).toBeLessThanOrEqual(1092);
+  contained(graph,1100,180);expect(graph.nodes.some(n=>n.entry && n.x+graph.initialView.x>=8 && n.x+n.width+graph.initialView.x<=1092)).toBe(true);
 });
 for(const [width,height] of [[1100,220],[1100,190],[1600,700],[1440,480]]) for(const dark of [false,true]) it(`keeps measured compact/full card content inside its lanes at ${width}×${height}, dark=${dark}`,async()=>{
   const original=HTMLElement.prototype.getBoundingClientRect;

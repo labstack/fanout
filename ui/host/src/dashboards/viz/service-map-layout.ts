@@ -69,7 +69,7 @@ function layoutCards(model:ServiceGraph,cardWidths:CardWidths,compact:boolean):C
   return { nodes: boxes, routes, width, height: Math.max(1, graphHeight, uncalled.length ? rowY + cardHeight : 0), label: uncalled.length ? { x: (width - labelWidth) / 2, y: rowY - 24 } : undefined, labelWidth };
 }
 
-/** Contain the complete graph initially; zoom restores natural text size. */
+/** Contain when readable; larger graphs start at the floor around an entry. */
 export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: ChartSize) {
   const bounds=(raw:CardLayout)=>{
     const points = raw.routes.flat();
@@ -86,9 +86,9 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
   const compact=bounds(layout.full).scale<1;
   const raw=compact?layout:layout.full;
   const {minX,minY,width,height,scale:containScale,graphBottom,rowY,gap,lane}=bounds(raw);
-  const scale=Math.min(containScale,1);
+  const scale=Math.max(compact ? compactReadableScale : 1, Math.min(containScale,1));
   const fittedHeight=(height-gap)*scale+lane;
-  const contentWidth=size.width,contentHeight=size.height;
+  const contentWidth=Math.max(size.width,width*scale+24),contentHeight=Math.max(size.height,fittedHeight+24);
   const offsetX = (contentWidth - width * scale) / 2, offsetY = (contentHeight - fittedHeight) / 2;
   const fit = (p: Point) => ({ x: offsetX + (p.x - minX) * scale, y: offsetY + (p.y - minY) * scale + (rowY !== undefined && p.y>=rowY ? lane-gap*scale : 0) });
   const nodesByID = new Map(model.nodes.map(n => [n.id, n]));
@@ -100,9 +100,12 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
     const path = points.map((p,i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
     return { ...e, points, path };
   });
-  // Once contained, the entry and every reachable/isolated node share one view.
-  const initialView={x:0,y:0};
-  return { nodes, edges, scale, compact, initialView, contentWidth, contentHeight, uncalledLabel: raw.label ? {x:(size.width-raw.labelWidth)/2,y:offsetY+(graphBottom-minY)*scale+8} : undefined };
+  const entry=nodes.find(n=>n.entry) ?? nodes[0];
+  const initialView=entry ? {
+    x:clamp(size.width/2-entry.x-entry.width/2,size.width-contentWidth,0),
+    y:clamp(size.height/2-entry.y-entry.height/2,size.height-contentHeight,0),
+  } : {x:0,y:0};
+  return { nodes, edges, scale, compact, initialView, contentWidth, contentHeight, uncalledLabel: raw.label ? {x:(contentWidth-raw.labelWidth)/2,y:offsetY+(graphBottom-minY)*scale+8} : undefined };
 }
 
 export const nodeMetrics = (n: ServiceNode) => `${formatValue("per_second", n.request_rate)} · ${formatValue("percent", n.error_rate)} err · ${formatValue("ms", n.p95_ms)} p95`;

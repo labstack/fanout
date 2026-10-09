@@ -22,11 +22,11 @@ afterEach(async () => { await act(async () => cleanups.splice(0).forEach(fn => f
 const model = () => serviceMapModel(demoFrame, { from_ms: 0, to_ms: 3600000 });
 const layoutServiceMap = (m: ReturnType<typeof model>, size: { width: number; height: number }) => fitServiceMap(layoutServiceMapRaw(m, size), m, size);
 
-it.each([180,190,220,230,280,396,460,480])("contains nodes, labels and routed edges at dashboard body height %s", height => {
+it.each([180,190,220,230,280,396,460,480])("keeps nodes, labels and routed edges inside the readable pan canvas at body height %s", height => {
   const graph = layoutServiceMap(model(), { width: 1100, height });
   expect(graph.nodes).toHaveLength(20); expect(graph.edges).toHaveLength(23);
-  for (const node of graph.nodes) { expect(node.x).toBeGreaterThanOrEqual(8); expect(node.y).toBeGreaterThanOrEqual(8); expect(node.x + node.width).toBeLessThanOrEqual(1092); expect(node.y + node.height).toBeLessThanOrEqual(height - 8); }
-  for (const edge of graph.edges) for (const p of edge.points) { expect(p.x).toBeGreaterThanOrEqual(8); expect(p.y).toBeGreaterThanOrEqual(8); expect(p.x).toBeLessThanOrEqual(1092); expect(p.y).toBeLessThanOrEqual(height - 8); }
+  for (const node of graph.nodes) { expect(node.x).toBeGreaterThanOrEqual(8); expect(node.y).toBeGreaterThanOrEqual(8); expect(node.x + node.width).toBeLessThanOrEqual(graph.contentWidth - 8); expect(node.y + node.height).toBeLessThanOrEqual(graph.contentHeight - 8); }
+  for (const edge of graph.edges) for (const p of edge.points) { expect(p.x).toBeGreaterThanOrEqual(8); expect(p.y).toBeGreaterThanOrEqual(8); expect(p.x).toBeLessThanOrEqual(graph.contentWidth - 8); expect(p.y).toBeLessThanOrEqual(graph.contentHeight - 8); }
   expect(graph.uncalledLabel!.y).toBeGreaterThanOrEqual(8);
 });
 
@@ -39,8 +39,7 @@ for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark 
   expect(cards).toHaveLength(20); expect(host.textContent).not.toMatch(/\+\d+ below/);
   for (const card of cards) {
     const text = card.querySelector<HTMLElement>('[data-service-text]')!;
-    const scale=Number(host.querySelector<HTMLElement>('[data-service-viewport]')!.dataset.layoutScale);
-    expect(parseFloat(text.style.fontSize)+.01).toBeGreaterThanOrEqual(typeScale.micro*Math.min(1,scale/.65));
+    expect(parseFloat(text.style.fontSize)+.01).toBeGreaterThanOrEqual(typeScale.micro);
     expect(text.style.visibility).not.toBe("hidden");
     expect(card.querySelector('[data-service-name]')!.textContent).toBe(card.dataset.serviceNode);
     expect(card.title).toContain("p95"); expect(card.title).toContain("err");
@@ -61,10 +60,10 @@ it.each([{width:780,height:460},{width:1100,height:220}])("runs the shared brows
   }
   const label = viewport.querySelector<HTMLElement>('[data-service-uncalled-label]')!;
   label.getBoundingClientRect = () => DOMRect.fromRect({x:(size.width-180)/2,y:parseFloat(label.style.top),width:180,height:11});
-  expect(assertServiceMapDOM(viewport)).toMatchObject({nodes:20,edges:23,body:size});
+  expect(assertServiceMapDOM(viewport,{allowOverflow:true})).toMatchObject({nodes:20,edges:23,body:size});
   const clipped = viewport.querySelector<HTMLButtonElement>('button[title]')!;
   clipped.getBoundingClientRect = () => DOMRect.fromRect({x:0,y:-10,width:20,height:20});
-  expect(()=>assertServiceMapDOM(viewport)).toThrow(/clipped/);
+  expect(()=>assertServiceMapDOM(viewport,{allowOverflow:true})).toThrow(/clipped/);
 });
 
 it("keeps queued pan positions stable, suppresses a drag click and Fit resets zoom/pan", async () => {
@@ -92,7 +91,8 @@ it("measures usable client bounds and refits on resize without changing the LR l
   await act(async () => root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
   width = 744; height = 460; await act(async () => resize());
   const content=host.querySelector<HTMLElement>('[data-service-content]')!;
-  expect(parseFloat(content.style.width)).toBe(width);expect(parseFloat(content.style.height)).toBe(height);expect(content.style.transform).toBe("translate(0px, 0px) scale(1)");
+  const graph=layoutServiceMap(model(),{width,height});
+  expect(parseFloat(content.style.width)).toBeCloseTo(graph.contentWidth);expect(parseFloat(content.style.height)).toBeCloseTo(graph.contentHeight);expect(content.style.transform).toBe(`translate(${graph.initialView.x}px, ${graph.initialView.y}px) scale(1)`);
   for (const node of host.querySelectorAll<HTMLElement>('[data-service-node]')) { expect(parseFloat(node.style.left)+parseFloat(node.style.width)).toBeLessThanOrEqual(parseFloat(content.style.width)-8); expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(parseFloat(content.style.height)-8); }
 });
 

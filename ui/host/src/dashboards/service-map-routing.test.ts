@@ -36,7 +36,7 @@ it.each([{ width: 780, height: 460 }, { width: 1100, height: 220 }])("contains t
   const width = Math.max(...graph.nodes.map(n => n.x + n.width)) - Math.min(...graph.nodes.map(n => n.x));
   const height = Math.max(...graph.nodes.map(n => n.y + n.height)) - Math.min(...graph.nodes.map(n => n.y));
   expect(Math.max(width / size.width, height / size.height)).toBeGreaterThanOrEqual(.7);
-  expect(graph.contentWidth).toBe(size.width);expect(graph.contentHeight).toBe(size.height);
+  expect(graph.contentWidth).toBeGreaterThanOrEqual(size.width);expect(graph.contentHeight).toBeGreaterThanOrEqual(size.height);
   expect(graph.scale).toBeLessThanOrEqual(1);
   for(const n of graph.nodes.filter(n=>n.entry)) {expect(n.x+graph.initialView.x).toBeGreaterThanOrEqual(8);expect(n.y+graph.initialView.y).toBeGreaterThanOrEqual(8);expect(n.x+n.width+graph.initialView.x).toBeLessThanOrEqual(size.width-8);expect(n.y+n.height+graph.initialView.y).toBeLessThanOrEqual(size.height-8);}
 });

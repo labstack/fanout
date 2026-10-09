@@ -1,5 +1,27 @@
 import { withAnnotations } from "./annotations";
-import { chartThemeFor } from "./compile";
+import { chartThemeFor, timeseriesOption } from "./compile";
+
+it("keeps shared-row chips clear of a one-row legend with end labels at 560 px", () => {
+  const size = { width: 560, height: 248, measureText: (text: string) => text.length * 6 };
+  const panel = { id: "p", title: "Requests", viz: "timeseries" as const };
+  const names = ["cart", "frontend-proxy", "recommendation", "currency"];
+  const result = { id: "p", status: "ok" as const, elapsed_ms: 0, from_ms: 0, to_ms: 10000, frame: {
+    columns: [{ name: "time", type: "time" as const, role: "time" as const }, { name: "service", type: "string" as const, role: "dimension" as const }, { name: "count", type: "number" as const, role: "measure" as const }],
+    values: [[...names.map(() => 0), ...names.map(() => 10000)], [...names, ...names], [1, 2, 3, 4, 2, 3, 4, 5]], rows: 8,
+  } };
+  const theme = chartThemeFor(false);
+  const base = timeseriesOption(panel, result, theme, size) as any;
+  expect(base.grid.right).toBeGreaterThan(16);
+  expect(base.series.every((s: any) => s.endLabel.show)).toBe(true);
+  const option = withAnnotations(base, panel, result, { deploys: [{ namespace: "shop", service: "cart", version: "2.3.0", at: new Date(1000).toISOString() }], anomalies: [{ namespace: "shop", service: "cart", kind: "latency", title: "Slow", severity: "warn", from: new Date(2000).toISOString(), to: new Date(9000).toISOString() }] }, {}, theme, size) as any;
+  const chips = option.graphic.filter((g: any) => g.annotation);
+  expect(chips).toHaveLength(2);
+  expect(option.grid.top).toBe(base.grid.top);
+  let legendRight = 0;
+  for (const name of base.legend.data) legendRight += 15 + size.measureText(base.legend.formatter?.(name) ?? name) + (legendRight ? base.legend.itemGap ?? 6 : 0);
+  for (const chip of chips) expect(size.width - chip.right - chip.style.width - 6).toBeGreaterThanOrEqual(legendRight + 12);
+  expect(chips[0].right).toBe(16);
+});
 
 it.each([false, true])("merges six adjacent windows and labels the anomaly row once with its source count (dark=%s)", dark => {
   const anomalies = Array.from({length:6},(_,i)=>({namespace:"shop",service:"cart",kind:"volume",title:"Changed",severity:"warn",from:new Date(i*1000).toISOString(),to:new Date((i+1)*1000).toISOString()}));

@@ -44,12 +44,12 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       const titleWidth = context?.measureText(title).width ?? Array.from(title).length * 8.25;
       if (context) context.font = `400 11px ${family}`;
       const switchWidth = ["Chart", "Data", "Spec"].reduce((sum, label) => sum + (context?.measureText(label).width ?? label.length * 7) + 12, 4);
-      const extras = (panel.description ? 24 : 0) + (loading && result ? 18 : 0) + (panelTimeLabel(panel)?.length ?? 0) * 7;
+      const extras = (panel.description ? 24 : 0) + 18 + (panelTimeLabel(panel)?.length ?? 0) * 7;
       setHeaderWidth(titleWidth + switchWidth + 22 + 32 + 20 + extras);
     };
     measure(); document.fonts?.addEventListener("loadingdone", measure);
     return () => document.fonts?.removeEventListener("loadingdone", measure);
-  }, [title, panel.description, panel.time, loading, Boolean(result)]);
+  }, [title, panel.description, panel.time]);
   const compactViews = small || width > 0 && width < headerWidth;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {

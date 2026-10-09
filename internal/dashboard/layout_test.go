@@ -2,10 +2,55 @@ package dashboard
 
 import (
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/labstack/fanout/internal/panel"
 )
+
+func TestPackedRowBandsSnapOnlyFreeNewPanels(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		panels []panel.Panel
+		want   []panel.Grid
+	}{
+		{"wall", []panel.Panel{
+			{Width: 4, Height: "s"}, {Width: 4, Height: "s"}, {Width: 4, Height: "s"},
+			{Width: 6, Height: "m"}, {Width: 6, Height: "m"},
+			{Viz: "service_map", Width: 6, Height: "l"}, {Viz: "health", Width: 6, Height: "m"},
+			{Viz: "heatmap", Width: 12, Height: "m"}, {Viz: "traces", Width: 12, Height: "m"}, {Viz: "log_patterns", Width: 12, Height: "m"},
+		}, []panel.Grid{{X: 0, Y: 0, W: 4, H: 3}, {X: 4, Y: 0, W: 4, H: 3}, {X: 8, Y: 0, W: 4, H: 3}, {X: 0, Y: 3, W: 6, H: 6}, {X: 6, Y: 3, W: 6, H: 6}, {X: 0, Y: 9, W: 6, H: 10}, {X: 6, Y: 9, W: 6, H: 10}, {X: 0, Y: 19, W: 12, H: 6}, {X: 0, Y: 25, W: 12, H: 6}, {X: 0, Y: 31, W: 12, H: 6}}},
+		{"text beside series", []panel.Panel{{Viz: "text", Width: 6, Height: "s"}, {Viz: "timeseries", Width: 6, Height: "m"}}, []panel.Grid{{X: 0, Y: 0, W: 6, H: 6}, {X: 6, Y: 0, W: 6, H: 6}}},
+		{"authored short", []panel.Panel{{Grid: &panel.Grid{X: 0, Y: 0, W: 6, H: 3}}, {Width: 6, Height: "m"}}, []panel.Grid{{X: 0, Y: 0, W: 6, H: 3}, {X: 6, Y: 0, W: 6, H: 6}}},
+		{"authored tall", []panel.Panel{{Grid: &panel.Grid{X: 0, Y: 0, W: 6, H: 10}}, {Width: 6, Height: "s"}}, []panel.Grid{{X: 0, Y: 0, W: 6, H: 10}, {X: 6, Y: 0, W: 6, H: 3}}},
+		{"occupied hole", []panel.Panel{{Width: 3, Height: "s"}, {Width: 9, Height: "m"}, {Width: 3, Height: "s"}}, []panel.Grid{{X: 0, Y: 0, W: 3, H: 3}, {X: 3, Y: 0, W: 9, H: 6}, {X: 0, Y: 3, W: 3, H: 3}}},
+	} {
+		for name, pack := range map[string]func([]panel.Panel){"pack": PackMissing, "compact": Compact} {
+			t.Run(tc.name+"/"+name, func(t *testing.T) {
+				panels := slices.Clone(tc.panels)
+				pack(panels)
+				for i, p := range panels {
+					if *p.Grid != tc.want[i] {
+						t.Errorf("panel %d = %+v, want %+v", i, *p.Grid, tc.want[i])
+					}
+				}
+				if needsPack(panels) {
+					t.Fatal("packed panels overlap or have unusable grids")
+				}
+				before := make([]panel.Grid, len(panels))
+				for i, p := range panels {
+					before[i] = *p.Grid
+				}
+				pack(panels)
+				for i, p := range panels {
+					if *p.Grid != before[i] {
+						t.Errorf("second pack changed panel %d", i)
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestServiceMapDefaultLayoutLarge(t *testing.T) {
 	for _, pack := range []func([]panel.Panel){PackMissing} {

@@ -56,6 +56,11 @@ func needsPack(panels []panel.Panel) bool {
 // PackMissing preserves every valid, non-overlapping supplied grid and packs
 // only panels without usable coordinates around them.
 func PackMissing(panels []panel.Panel) {
+	snapRowBands(panels, packMissing(panels))
+}
+
+func packMissing(panels []panel.Panel) []int {
+	packed := make([]int, 0, len(panels))
 	placed := make([]panel.Grid, 0, len(panels))
 	for i := range panels {
 		g := panels[i].Grid
@@ -83,14 +88,38 @@ func PackMissing(panels []panel.Panel) {
 		x, y := firstFit(placed, w, h)
 		g := panel.Grid{X: x, Y: y, W: w, H: h}
 		panels[i].Grid = &g
+		packed = append(packed, i)
 		placed = append(placed, g)
+	}
+	return packed
+}
+
+// Snap only newly packed panels. Scan rectangles, never individual grid cells
+// or row coordinates, so work depends on panel count rather than grid Y.
+func snapRowBands(panels []panel.Panel, packed []int) {
+	bottoms := make(map[int]int, len(packed))
+	placed := make([]panel.Grid, len(panels))
+	for i, p := range panels {
+		placed[i] = *p.Grid
+	}
+	for _, i := range packed {
+		g := placed[i]
+		bottoms[g.Y] = max(bottoms[g.Y], g.Y+g.H)
+	}
+	for _, i := range packed {
+		g := panels[i].Grid
+		bottom := bottoms[g.Y]
+		if bottom > g.Y+g.H && bottom-g.Y <= maxHeight && fits(placed, g.X, g.Y+g.H, g.W, bottom-g.Y-g.H) {
+			g.H = bottom - g.Y
+			placed[i] = *g
+		}
 	}
 }
 
 // Compact repairs unusable grids, then closes vertical gaps without changing
 // usable columns or dimensions. Work depends on panel count, never grid Y.
 func Compact(panels []panel.Panel) {
-	PackMissing(panels)
+	packed := packMissing(panels)
 	order := make([]int, 0, len(panels))
 	for i, p := range panels {
 		if p.Grid != nil {
@@ -111,4 +140,5 @@ func Compact(panels []panel.Panel) {
 		at, _ := slices.BinarySearchFunc(placed, g, func(a, b panel.Grid) int { return cmp.Compare(a.Y, b.Y) })
 		placed = slices.Insert(placed, at, g)
 	}
+	snapRowBands(panels, packed)
 }
