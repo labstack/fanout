@@ -130,4 +130,43 @@ No scorer, threshold or post-save check was changed.
 - Each column is one run, not a mean.
 - Metric points were not replayed.
 - The edits target the first saved board (frontend latency by route).
-- The sealed holdout set is untouched and was not used for tuning; Task 14 decides whether its budget allows a frozen-candidate run.
+- The sealed holdout set is untouched and was not used for tuning. Task 14 records it as unrun; see below.
+
+## Final acceptance (Task 14)
+
+Status: **PASS** for the authoring benchmark, the browser collector, the checked-in smoke test and the per-panel check. The sealed holdout set was **not run**.
+
+### Authoring benchmark on the frozen candidate
+
+| Run | Candidate | S1 saved | S2 good / total | S3 invalid | S4 median (s) | S5 edits | Cost (USD) |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Final | eee385d8 | 10/10 | 67/67 | 0 | 18.7 | 5/5 | 1.449 |
+
+- The method is the same as Task 12: a production build, a fresh replay with one shared shift, default DuckDB sizing, and its own $5 cost ledger.
+- The fix rounds after eee385d8 change rendering, the server's packing of new panels and query-cancellation logging. They do not change agent guidance, tools or panel execution results, so the run was not repeated.
+
+### Browser evidence
+
+- **Collector** (private, development build of a1395856, fresh replay with deploy markers, light and dark): 33 of 33 checks pass, and theme coverage passes 30 of 30 visualization and theme rows.
+- **Smoke test** (`just e2e`, 1100 and 1440 px, light and dark): 24 of 24 on every fix round, including 0d8a5123.
+- **Per-panel check** (0d8a5123, a 23-panel verification board and a 10-panel agent-built board, light and dark):
+  - all 33 panels render with no failed panels, stuck loaders, truncated titles or overflow outside the card;
+  - every row has one height and spans all twelve columns;
+  - there are no console errors.
+- **Service map overflow:** at half width, 7 of 18 services fit at the readable floor. The cropped edge fades and Fit appears at first render. Fit shows all 18 services, and a second press returns to the readable view. A map that fits shows neither.
+
+### Panel app size
+
+`internal/mcp/apps/panels.html` is the only MCP app: 2,380,413 bytes raw and 784,374 bytes with `gzip -9 -n`. The five milestone 2 apps were 7,076,818 and 2,412,876 bytes, so the new app is 66% smaller raw and 67% smaller gzipped.
+
+### Holdout set
+
+- The sealed holdout has 16 prompts: 11 ask for a dashboard and 5 ask for a direct answer. The prompt text was not read.
+- The promoted runner grades exactly ten dashboard prompts, so it cannot score the holdout unchanged. Every M3 benchmark number therefore comes from prompts the work was tuned against, and unseen requests may score lower.
+- Milestone 4 needs a runner that grades both answer and dashboard intent before the holdout can run.
+
+### Findings for milestone 4 (Task 14)
+
+- A long refresh error is truncated in the panel and its full text cannot be reached.
+- The rollup and panel out-of-memory errors under a DuckDB memory cap during an ingest backlog, recorded in Task 12, remain open.
+- Saved dashboards keep their stored grid. Row snapping and twelve-column fill apply only when the server packs new panels.
