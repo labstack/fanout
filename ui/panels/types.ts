@@ -79,6 +79,7 @@ export type PanelResult = {
   frame?: Frame;
   previous?: Frame;
   error?: string;
+  retryable?: boolean;
   diagnosis?: string;
   sql?: string;
   interval?: string;

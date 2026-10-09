@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
 )
@@ -46,6 +47,7 @@ type Result struct {
 	Frame           *Frame           `json:"frame,omitempty"`
 	Previous        *Frame           `json:"previous,omitempty"`
 	Error           string           `json:"error,omitempty"`
+	Retryable       bool             `json:"retryable,omitempty"`
 	Diagnosis       string           `json:"diagnosis,omitempty"`
 	SQL             string           `json:"sql,omitempty"`
 	Interval        string           `json:"interval,omitempty"`
@@ -157,7 +159,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 	defer cancel()
 	results := make([]Result, len(targets))
 	for i, p := range targets {
-		results[i] = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError}
+		results[i] = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Retryable: true}
 	}
 	batchError := func(err error) ([]Result, error) {
 		if caller.Err() != nil {
@@ -205,7 +207,7 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			}
 			result := e.runPanel(ctx, p, checked, t, now, vars, req.Widths[p.ID], compare)
 			if ctx.Err() == context.DeadlineExceeded {
-				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, ElapsedMS: result.ElapsedMS}
+				result = failed(Result{ID: p.ID, ElapsedMS: result.ElapsedMS}, errBatchDeadline, false)
 			}
 			results[i] = result
 			return nil
@@ -221,6 +223,11 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 
 // BatchDeadlineError is shared by HTTP and MCP batch callers.
 const BatchDeadlineError = "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard."
+
+var errBatchDeadline = errors.New("dashboard batch deadline exceeded")
+
+// QueryTimeoutError describes the executor's per-panel time limit.
+const QueryTimeoutError = "The query took longer than 10 seconds. Narrow the time range or add filters."
 
 // Allocate the response budget in panel order, independently of completion
 // order, so concurrent refreshes retain the same portion of their frames.
@@ -501,10 +508,22 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 
 func failed(res Result, err error, ownTimeout bool) Result {
 	res.Status = StatusError
+	res.Retryable = false
+	var engineError *duckdb.Error
+	if errors.As(err, &engineError) {
+		switch engineError.Type {
+		case duckdb.ErrorTypeOutOfMemory, duckdb.ErrorTypeIO, duckdb.ErrorTypeInterrupt:
+			res.Retryable = true
+		}
+	}
 	slog.Error("panel query failed", "panel_id", res.ID, "error", err)
 	switch {
 	case ownTimeout && errors.Is(err, context.DeadlineExceeded):
-		res.Error = "The query took longer than 10 seconds. Narrow the time range or add filters."
+		res.Error = QueryTimeoutError
+		res.Retryable = true
+	case errors.Is(err, errBatchDeadline):
+		res.Error = BatchDeadlineError
+		res.Retryable = true
 	default:
 		message := RedactPaths(err.Error())
 		if len(message) > 500 {

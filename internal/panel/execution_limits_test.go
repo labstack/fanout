@@ -41,6 +41,7 @@ func TestBatchDeadlineKeepsCompletedPanels(t *testing.T) {
 		t.Fatalf("completed=%+v", results[0])
 	}
 	for _, r := range results[1:] {
+		assertRetryable(t, r, true)
 		if r.Status != StatusError || r.Error != "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard." {
 			t.Errorf("unfinished=%+v", r)
 		}

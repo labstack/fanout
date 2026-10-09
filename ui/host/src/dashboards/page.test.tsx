@@ -655,10 +655,23 @@ it("marks older panels stale after a failed refresh and clears stale on recovery
  panelResponse=async()=>json({message:"Refresh failed"},400);
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
  await vi.waitFor(() => expect(host.textContent).toContain("Panels could not be loaded"), { interval: 5, timeout: 3000 });await vi.waitFor(() => expect(host.textContent).toContain("120"), { interval: 5, timeout: 3000 });
- await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /Refresh failed/})).not.toBeNull(), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /refresh failed/})).not.toBeNull(), { interval: 5, timeout: 3000 });
  panelResponse=async()=>defaultPanels();
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
- await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /Refresh failed/})).toBeNull(), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /refresh failed/})).toBeNull(), { interval: 5, timeout: 3000 });
+});
+
+it("keeps a real fetch 403 fixable with no Retry or automatic retry", async () => {
+ viewer.role = "admin";
+ panelResponse = async () => json({message: "insufficient permissions"}, 403);
+ const {host, client} = await render();
+ await settle(client);
+ expect(queryBodies).toHaveLength(1);
+ const card = within(host.querySelector<HTMLElement>('[data-panel="requests"]')!);
+ expect(card.queryByRole("button", {name: "Retry"})).toBeNull();
+ const fix = card.getByRole("button", {name: "Ask Fanout to fix it"});
+ await act(async () => fix.click());
+ expect(app.openChat).toHaveBeenCalledOnce();
 });
 
 it("never retries a 504 panel batch",async()=>{
@@ -683,7 +696,7 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
  },{interval:5,timeout:3000});
  panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"DuckDB failed",elapsed_ms:3},{id:"latency",status:"empty",diagnosis:"empty",elapsed_ms:2}]});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
- await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /Refresh failed/})).not.toBeNull(), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /refresh failed/})).not.toBeNull(), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120"), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.textContent).toContain("Panels could not be loaded"), { interval: 5, timeout: 3000 });
  const hidden=host.querySelector('.react-grid-item[data-panel="requests"]')!;
@@ -694,7 +707,7 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
   expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
  },{interval:5,timeout:3000});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
- await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /Refresh failed/})).not.toBeNull(), { interval: 5, timeout: 3000 });
+ await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /refresh failed/})).not.toBeNull(), { interval: 5, timeout: 3000 });
  await vi.waitFor(() => expect(host.querySelector('[data-panel="latency"]')!.textContent).not.toContain("Stale:"), { interval: 5, timeout: 3000 });
 });
 
@@ -725,7 +738,7 @@ it("shows fix for a loaded owner-scoped dashboard without maintaining a client r
  viewer.role="future_authenticated_role";
  panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"Observed invalid measure",elapsed_ms:1}]});
  const {host}=await render();
- const fix=[...host.querySelectorAll<HTMLButtonElement>("button")].find(el=>el.textContent==="Ask Fanout to fix it");
+ const fix=within(host).getByRole("button", {name:"Ask Fanout to fix it"});
  expect(fix).toBeDefined();await act(async()=>fix!.click());expect(app.openChat.mock.lastCall![0]).toContain("explicit dashboard edit request");
 });
 

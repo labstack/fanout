@@ -1,3 +1,5 @@
+import { ApiError } from "./api-error";
+
 export const unauthorizedEvent = "fanout:unauthorized";
 
 export function oauthReturnTo(): string {
@@ -27,7 +29,7 @@ export async function authorizedFetch(input: RequestInfo | URL, init: RequestIni
   if (response.status === 401) clearSession();
   if (response.status === 403) {
     const payload = await response.clone().json().catch(() => ({})) as { message?: string; error?: string };
-    throw new Error(payload.message ?? payload.error ?? "You do not have permission to perform this action.");
+    throw new ApiError(payload.message ?? payload.error ?? "You do not have permission to perform this action.", response.status);
   }
   return response;
 }

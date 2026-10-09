@@ -9,6 +9,7 @@ import { heatRamp } from "../../../panels/heat-scale";
 import { withAnnotations } from "../../../panels/annotations";
 import { relativeLuminance } from "../../../theme";
 import { PanelCard } from "./panel-card";
+import { PanelFullscreen } from "./panel-fullscreen";
 import type { PanelDisplayResult } from "./panel-result";
 import type { Panel, PanelResult } from "../../../panels/types";
 
@@ -16,12 +17,16 @@ vi.mock("./echart-canvas", () => ({ EChartCanvas: ({label,height}: {label:string
 const p:Panel={id:"p",title:"Panel",viz:"timeseries",query:{from:"spans"},drill:"traces"};
 const r:PanelResult={id:"p",status:"ok",elapsed_ms:1,from_ms:0,to_ms:600000,interval:"1m",frame:{columns:[{name:"time",type:"time",role:"time"},{name:"calls",type:"number",role:"measure"}],values:[[0,60000],[1,2]],rows:2}};
 const cleanup:(()=>void)[]=[];
+function focusVisible(menu: HTMLElement, visible: boolean) {
+  const matches = menu.matches.bind(menu);
+  vi.spyOn(menu, "matches").mockImplementation(selector => selector === ":focus-visible" ? visible : matches(selector));
+}
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
-afterEach(async()=>{await act(async()=>cleanup.splice(0).forEach(fn=>fn()));vi.restoreAllMocks();document.body.innerHTML="";});
-async function render(panel:Panel=p,result:PanelResult=r,onSelect:((value:string)=>void)|undefined=undefined,vars?:Record<string,string>,onVariable?: (name:string,value:string)=>void) {
+afterEach(async()=>{await act(async()=>cleanup.splice(0).forEach(fn=>fn()));vi.restoreAllMocks();vi.unstubAllGlobals();document.body.innerHTML="";});
+async function render(panel:Panel=p,result:PanelResult=r,onSelect:((value:string)=>void)|undefined=undefined,vars?:Record<string,string>,onVariable?: (name:string,value:string)=>void,staleAt?:number) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
-  await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={result} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect} vars={vars} onVariable={onVariable}/></MantineProvider>));
+  await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect} vars={vars} onVariable={onVariable}/></MantineProvider>));
   return host;
 }
 it.each([120,159,160,238,300])("gauge fills its measured body, readable untruncated value and separate status at %ipx",width=>{
@@ -114,7 +119,7 @@ it("keeps the chart body and plot budget identical after a transient refresh fai
   expect(host.querySelector<HTMLElement>('[data-plot-budget]')!.style.height).toBe(plotHeight);
   expect(plotHeight).toBe("212px");
   expect(host.querySelector('[data-panel-notes]')).toBeNull();
-  const indicator=within(host).getByRole("button", {name: /Refresh failed: Disconnected/});
+  const indicator=within(host).getByRole("button", {name: "Panel menu, refresh failed"});
   expect(indicator).not.toBeNull();expect(body.contains(indicator)).toBe(false);
   const menu=within(host).getByRole("button", {name: /Panel menu/});
   await act(async()=>menu.click());
@@ -158,26 +163,134 @@ it.each(["heatmap","state_timeline"] as const)("renders %s with literal styles a
   expect(rect.shape.height).toBe(viz==="heatmap"?19:13);
 });
 
+it("bounds and wraps the refresh tooltip with age first and four message lines", async () => {
+  const message = "Binder error with long details ".repeat(20);
+  const host = await render(p, {...r, error: message}, undefined, undefined, undefined, Date.now() - 120_000);
+  const menu = within(host).getByRole("button", {name: /Panel menu/});
+  await act(async () => menu.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})));
+  const tooltip = await vi.waitFor(() => within(document.body).getByRole("tooltip"), {timeout: 3000, interval: 5});
+  expect(tooltip.firstElementChild?.textContent).toBe("Showing data from 2 minutes ago");
+  expect(tooltip.hasAttribute("data-multiline")).toBe(true);
+  expect(tooltip.style.maxWidth).toBe("min(360px, calc(100vw - 32px))");
+  const text = tooltip.querySelector<HTMLElement>('[data-refresh-error-message]')!;
+  expect(text.style.getPropertyValue("--text-line-clamp")).toBe("4");
+  expect(text.title).toBe(message);
+});
+
+it("announces a short name and bounded age-first description once", async () => {
+  const message = "Long query error ".repeat(40);
+  const age = "Showing data from 2 minutes ago";
+  const description = `${age}. ${message}`.slice(0, 199) + "…";
+  const host = await render(p, {...r, error: message}, undefined, undefined, undefined, Date.now() - 120_000);
+  const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed", description});
+  const node = document.getElementById(menu.getAttribute("aria-describedby")!)!;
+  expect(node.hidden || node.getAttribute("aria-hidden") === "true").toBe(true);
+  expect(node.textContent).toHaveLength(200);
+});
+
+it.each([false, true])("opens the refresh tooltip only for focus-visible=%s", async visible => {
+  const host = await render(p, {...r, error: "Disconnected"});
+  const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
+  focusVisible(menu, visible);
+  await act(async () => menu.focus());
+  if (visible) await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).not.toBeNull(), {timeout: 3000, interval: 5});
+  else expect(within(document.body).queryByRole("tooltip")).toBeNull();
+});
+
+it("dismisses a hovered refresh tooltip on Escape before the full-screen dialog", async () => {
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
+  const close = vi.fn();
+  await act(async () => root.render(<MantineProvider><PanelFullscreen opened onClose={close} title="Panel full-screen" returnFocusTo={() => undefined}><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></PanelFullscreen></MantineProvider>));
+  const menu = within(document.body).getByRole("button", {name: "Panel menu, refresh failed"});
+  await act(async () => menu.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})));
+  await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).not.toBeNull(), {timeout: 3000, interval: 5});
+  await act(async () => menu.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true})));
+  await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).toBeNull(), {timeout: 3000, interval: 5});
+  expect(close).not.toHaveBeenCalled();
+  await act(async () => menu.dispatchEvent(new KeyboardEvent("keydown", {key: "Escape", bubbles: true})));
+  expect(close).toHaveBeenCalledOnce();
+});
+
+it("closes the refresh tooltip on pointer leave even while keyboard focused", async () => {
+  const host = await render(p, {...r, error: "Disconnected"});
+  const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
+  focusVisible(menu, true);
+  await act(async () => {menu.focus(); menu.dispatchEvent(new MouseEvent("mouseover", {bubbles: true}));});
+  await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).not.toBeNull(), {timeout: 3000, interval: 5});
+  await act(async () => menu.dispatchEvent(new MouseEvent("mouseout", {bubbles: true, relatedTarget: document.body})));
+  await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).toBeNull(), {timeout: 3000, interval: 5});
+});
+
+it("closes the tooltip after a mouse Retry and programmatic focus restoration", async () => {
+  const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
+  const retry = vi.fn();
+  await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected", request_error: [p.id]}} loading={false} height={300} group="g" editing={false} agentAvailable={false} onRetry={retry}/></MantineProvider>));
+  const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
+  focusVisible(menu, false);
+  await act(async () => menu.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})));
+  await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).not.toBeNull(), {timeout: 3000, interval: 5});
+  await act(async () => menu.click());
+  const action = within(document.body).getByRole("menuitem", {name: "Retry", hidden: true});
+  await act(async () => {action.click(); menu.focus();});
+  expect(retry).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(within(document.body).queryByRole("tooltip")).toBeNull(), {timeout: 3000, interval: 5});
+});
+
+it("gives the compact error message at least half a 200px card with an icon Fix", async () => {
+  const observers: {callback: ResizeObserverCallback; elements: Element[]}[] = [];
+  vi.stubGlobal("ResizeObserver", class {
+    record: {callback: ResizeObserverCallback; elements: Element[]};
+    constructor(callback: ResizeObserverCallback) {this.record = {callback, elements: []}; observers.push(this.record);}
+    observe(el: Element) {this.record.elements.push(el);} disconnect() {}
+  });
+  try {
+    const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
+    const fix = vi.fn();
+    await act(async () => root.render(<MantineProvider><PanelCard panel={{...p, viz:"stat"}} title={p.title} result={{id: p.id, status: "error", elapsed_ms: 0, error: "Invalid query"}} loading={false} height={200} group="g" editing={false} agentAvailable onFix={fix}/></MantineProvider>));
+    const body = host.querySelector<HTMLElement>('[data-panel-body]')!;
+    await act(async () => {
+      for (const observer of observers) for (const target of observer.elements) observer.callback([{target, contentRect: {width: 200, height: 112}} as unknown as ResizeObserverEntry], {} as ResizeObserver);
+    });
+    const row = host.querySelector<HTMLElement>('[data-panel-error]')!;
+    const action = within(row).getByRole("button", {name: "Ask Fanout to fix it"});
+    expect(action.textContent).toBe("");
+    expect(action.querySelector("svg")).not.toBeNull();
+    const text = row.querySelector<HTMLElement>('[data-panel-error-message]')!;
+    expect(text.style.flex).toBe("1 1 0px");
+    // happy-dom has no layout: bound the flex budget from the actual DOM styles.
+    const rowWidth = 200 - 2 * parseFloat(body.style.padding);
+    const occupied = Number(row.querySelector("svg")!.getAttribute("width")) + parseFloat(action.style.flexBasis) + 2 * parseFloat(row.style.gap);
+    expect(rowWidth - occupied).toBeGreaterThanOrEqual(rowWidth * .5);
+    expect(rowWidth - occupied).toBeGreaterThanOrEqual(200 * .5);
+    await act(async () => {action.dispatchEvent(new MouseEvent("mouseover", {bubbles: true})); action.dispatchEvent(new MouseEvent("mouseenter"));});
+    await vi.waitFor(() => expect(within(document.body).getByRole("tooltip").textContent).toBe("Ask Fanout to fix it"), {timeout: 3000, interval: 5});
+    await act(async () => action.click());
+    expect(fix).toHaveBeenCalledOnce();
+  } finally {await act(async () => cleanup.splice(0).forEach(fn => fn()));}
+});
+
 it("exposes the refresh failure on the menu button and opens its tooltip on keyboard focus", async () => {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
   await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={Date.now() - 60000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
-  const menu = within(host).getByRole("button", {name: /Refresh failed: Disconnected/});
-  expect(within(host).getByRole("button", {name: /Refresh failed/, description: /Refresh failed: Disconnected/})).toBe(menu);
+  const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
+  expect(within(host).getByRole("button", {name: "Panel menu, refresh failed", description: /Showing data from 1 minute ago.*Disconnected/})).toBe(menu);
+  focusVisible(menu, true);
   await act(async () => menu.focus());
-  await vi.waitFor(() => expect(within(document.body).getByRole("tooltip").textContent).toContain("Refresh failed: Disconnected"), {timeout: 3000, interval: 5});
+  await vi.waitFor(() => expect(within(document.body).getByRole("tooltip").textContent).toContain("Disconnected"), {timeout: 3000, interval: 5});
 });
 
-it("updates the failed frame's age in the menu name, description and focused tooltip", async () => {
+it("updates the failed frame's age in its description and tooltip with a stable menu name", async () => {
   vi.useFakeTimers();
   try {
     const now = Date.parse("2026-10-08T12:00:00Z"); vi.setSystemTime(now);
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanup.push(() => root.unmount());
     await act(async () => root.render(<MantineProvider><PanelCard panel={p} title={p.title} result={{...r, error: "Disconnected"}} staleAt={now - 90_000} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
-    const menu = within(host).getByRole("button", {name: /Refresh failed.*Showing data from 1 minute ago/});
-    expect(within(host).getByRole("button", {name: /Refresh failed/, description: /Showing data from 1 minute ago/})).toBe(menu);
-    await act(async () => menu.focus());
+    const menu = within(host).getByRole("button", {name: "Panel menu, refresh failed"});
+    expect(within(host).getByRole("button", {name: "Panel menu, refresh failed", description: /Showing data from 1 minute ago/})).toBe(menu);
+    focusVisible(menu, true);
+  await act(async () => menu.focus());
     await act(async () => vi.advanceTimersByTimeAsync(30_000));
-    expect(within(host).getByRole("button", {name: /Refresh failed.*Showing data from 2 minutes ago/, description: /Showing data from 2 minutes ago/})).toBe(menu);
+    expect(within(host).getByRole("button", {name: "Panel menu, refresh failed", description: /Showing data from 2 minutes ago/})).toBe(menu);
     expect(within(document.body).getByRole("tooltip").textContent).toContain("Showing data from 2 minutes ago");
     expect(host.querySelector('[data-panel-notes]')).toBeNull();
   } finally {vi.useRealTimers();}

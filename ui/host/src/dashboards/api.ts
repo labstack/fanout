@@ -4,13 +4,14 @@ import type { AnnotationBody, AnnotationsResponse } from "../../../panels/annota
 import type { Frame, Selection, DashboardSpec, DashboardTime, Panel, PanelResult, Variable, VarValue } from "../../../panels/types";
 import { authorizedFetch } from "../auth";
 import type { Change } from "../dashboard-receipt";
+import { ApiError, type Problem } from "../api-error";
+export { ApiError, type Problem } from "../api-error";
 
 export type BuildOrigin = { thread_id: string; message_id: string; request_excerpt: string };
 export type DashboardSummary = { origin?: BuildOrigin; id: string; name: string; description: string; is_default: boolean; version: number; panel_count: number; updated_at: string };
 export type DashboardRecord = { id: string; name: string; description: string; is_default: boolean; version: number; spec: DashboardSpec; created_at: string; updated_at: string };
 export type VersionInfo = { version: number; author_kind: "user" | "agent" | "system"; author_id?: string; message?: string; created_at: string };
 export type VersionRecord = Omit<VersionInfo, "version"> & { dashboard: DashboardRecord; changes: Change[]; layout_changed: boolean; dashboard_fields: string[]; changes_available: boolean };
-export type Problem = { path: string; message: string; hint?: string };
 export type Operation =
   | { op: "add_panel"; panel: Panel; after?: string }
   | { op: "update_panel"; id: string; set: Record<string, unknown> }
@@ -24,12 +25,6 @@ export type QueryBody = { dashboard: DashboardSpec; panels?: string[]; time?: Da
 
 export const dashboardsKey = ["dashboards"] as const;
 export const dashboardsStaleTime = 30_000;
-
-export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly problems: Problem[] = []) {
-    super(message);
-  }
-}
 
 async function request<T>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};

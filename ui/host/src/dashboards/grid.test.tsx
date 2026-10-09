@@ -176,7 +176,7 @@ describe("PanelGrid", () => {
 
 
 async function menu(host: HTMLElement, title: string, item: string) {
-  await act(async () => { within(host).getByRole("button", {name: name => name === title + " menu" || name.startsWith(title + " menu. ")}).click(); });
+  await act(async () => { within(host).getByRole("button", {name: name => name === title + " menu" || name === title + " menu, refresh failed"}).click(); });
   await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === item)!.click(); });
 }
 
@@ -189,7 +189,7 @@ it("pins dashboard Explain to the executed panel window and keeps fix a separate
   for (const value of ["dashboard id d1", "version 2", "panel id broken", "1970-01-01T00:00:00.000Z", "1970-01-01T01:00:00.000Z", '"service":"$__all"', "2026-10-08T00:00:00.123456789Z", "2026-10-08T01:00:00.987654321Z", "Observed diagnosis", '"stale_since":42', '"truncated":true', "Partial result", "Do not create, edit, replace or restore"]) expect(prompt).toContain(value);
   expect(options).toEqual({ answer_only: true });
   expect(prompt).not.toContain("Please fix");
-  const fix = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Ask Fanout to fix it")!;
+  const fix = within(host).getByRole("button", {name: "Ask Fanout to fix it"});
   await act(async () => fix.click());
   const [edit, editOptions] = vi.mocked(props.onOpenChat).mock.calls[1];
   expect(edit).toContain("Please fix");

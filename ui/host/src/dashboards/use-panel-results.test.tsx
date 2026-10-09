@@ -283,7 +283,7 @@ it("shows a retryable panel error while preserving the last successful frame as 
     wire.panels.mockRejectedValue(new Error("Refresh disconnected"));await act(async()=>host.current.refetch());
     await waitForHook(()=>{
       expect(host.current.fetching).toBe(false);expect(host.current.staleAt.get("loaded")).toBe(successfulAt);
-      expect(within(host.node).queryByRole("button", {name: /Refresh failed: Refresh disconnected/})).not.toBeNull();
+      expect(within(host.node).queryByRole("button", {name: /refresh failed/, description: /Refresh disconnected/})).not.toBeNull();
       expect(host.current.results.get("loaded")?.frame).toEqual(resultFor("loaded").frame);
     });
     await act(async()=>within(host.node).getByRole("button", {name: /loaded menu/}).click());
@@ -392,6 +392,8 @@ const failureCases = [
   {name: "missing result", message: undefined, retryable: true},
   {name: "dashboard execution timeout", message: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard.", retryable: true},
   {name: "query execution timeout", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: true},
+  {name: "server retryable failure", message: "Transient failure with new wording", retryable: true},
+  {name: "timeout explicitly not retryable", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: false},
   {name: "returned validation", message: "Invalid measure", retryable: false},
   {name: "returned invalid query", message: "Invalid query", retryable: false},
   ...[400, 401, 403, 404, 422].map(status => ({name: "HTTP " + status, failure: new ApiError("Invalid request", status), retryable: false})),
@@ -399,7 +401,7 @@ const failureCases = [
 it.each([200, 388].flatMap(height => [false, true].flatMap(stale => failureCases.map(failure => ({height, stale, ...failure})))))
 ("offers working Retry or Fix for $name at height=$height with retained frame=$stale", async scenario => {
   const fix = vi.fn();
-  const failedResults = ["a", "b"].map(id => ({id, status: "error" as const, elapsed_ms: 0, error: scenario.message}));
+  const failedResults = ["a", "b"].map(id => ({id, status: "error" as const, elapsed_ms: 0, error: scenario.message, retryable: scenario.retryable}));
   const fail = () => "failure" in scenario ? Promise.reject(scenario.failure) : Promise.resolve(scenario.message === undefined ? [] : failedResults);
   wire.panels.mockImplementation(scenario.stale ? (body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)) : fail);
   const host = await mountVisibility(scenario.stale ? ["a", "b", "c"] : ["a", "b"], visibilitySpec, true, {height: scenario.height, onFix: fix});
@@ -460,7 +462,7 @@ it.each([200, 388])("shows only a fixable error message without an agent at heig
 it("retries only timeouts and missing results in a mixed returned batch", async () => {
   wire.panels.mockResolvedValue([
     resultFor("loaded"),
-    {id: "a", status: "error", elapsed_ms: 0, error: "The query took longer than 10 seconds. Narrow the time range or add filters."},
+    {id: "a", status: "error", elapsed_ms: 0, retryable: true, error: "The query took longer than 10 seconds. Narrow the time range or add filters."},
     {id: "b", status: "error", elapsed_ms: 0, error: "Invalid query"},
   ]);
   const host = await mountVisibility(["loaded", "a", "b", "c"], visibilitySpec, true);

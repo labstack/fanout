@@ -1,17 +1,18 @@
 import { useMergedRef } from "@mantine/hooks";
-import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, VisuallyHidden, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
+import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle, Wrench } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
 import { logConstants } from "../../../panels/rows";
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
 import { ChartHintContext, compactHint } from "./chart-keyboard";
 import { Viz } from "./viz";
+import { PanelTooltipContext } from "./panel-fullscreen";
 
 export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, staleAt, traceLinks, suspended = false, menuRef }: {
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
@@ -58,12 +59,36 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const refreshError = result?.frame && result.error;
   const retryable = Boolean(result?.request_error?.length);
   const fixable = Boolean(result?.error) && !retryable;
-  const refreshDescription = refreshError ? `Refresh failed: ${refreshError}.${staleAt ? ` Showing data from ${relativeTime(staleAt, now)}.` : ""}` : undefined;
+  const refreshAge = staleAt ? `Showing data from ${relativeTime(staleAt, now)}` : undefined;
+  const refreshDetails = refreshError ? `${refreshAge ? `${refreshAge}. ` : ""}${refreshError}` : undefined;
+  const refreshDescription = refreshDetails && refreshDetails.length > 200 ? `${refreshDetails.slice(0, 199)}…` : refreshDetails;
   const refreshDescriptionId = useId();
   const tooltipTarget = useRef<HTMLButtonElement>(null);
   const buttonRef = useMergedRef(menuRef, tooltipTarget);
   const [menuFocused, setMenuFocused] = useState(false);
   const [menuHovered, setMenuHovered] = useState(false);
+  const [tooltipDismissed, setTooltipDismissed] = useState(false);
+  const tooltipOpen = Boolean(refreshError) && !tooltipDismissed && (menuFocused || menuHovered);
+  const onTooltipOpen = useContext(PanelTooltipContext);
+  useEffect(() => {
+    onTooltipOpen?.(tooltipOpen);
+    return () => onTooltipOpen?.(false);
+  }, [onTooltipOpen, tooltipOpen]);
+  const closeTooltip = useCallback(() => {
+    setTooltipDismissed(true);
+    setMenuFocused(false);
+    setMenuHovered(false);
+  }, []);
+  useEffect(() => {
+    if (!tooltipOpen) return;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      closeTooltip();
+    };
+    document.addEventListener("keydown", dismiss, true);
+    return () => document.removeEventListener("keydown", dismiss, true);
+  }, [tooltipOpen, closeTooltip]);
   const notes = [...new Set([
     staleAt && !refreshError ? `Stale: last updated ${relativeTime(staleAt, now)}` : undefined,
     result?.frame?.truncated || result?.previous?.truncated ? "Truncated: showing limited data" : undefined,
@@ -112,9 +137,16 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Group>}
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
       {zoomed && onZoomReset && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Reset ${title} zoom`} onClick={onZoomReset}><ArrowCounterClockwise size={16} /></ActionIcon>}
-      <Menu position="bottom-end" withinPortal>
-        <Menu.Target><ActionIcon ref={buttonRef} variant="subtle" color="gray" size="sm" aria-label={`${title} menu${refreshDescription ? `. ${refreshDescription}` : ""}`} aria-describedby={refreshDescription ? refreshDescriptionId : undefined} onFocus={() => setMenuFocused(true)} onBlur={() => setMenuFocused(false)} onMouseEnter={() => setMenuHovered(true)} onMouseLeave={() => setMenuHovered(false)}>{refreshError ? <WarningCircle size={18} weight="fill" color="var(--mantine-color-warn-filled)" /> : <DotsThree size={18} weight="bold" />}</ActionIcon></Menu.Target>
-        <Tooltip target={tooltipTarget} label={refreshDescription} opened={Boolean(refreshError) && (menuFocused || menuHovered)} />
+      <Menu position="bottom-end" withinPortal onChange={opened => {if (opened) closeTooltip();}}>
+        <Menu.Target><ActionIcon ref={buttonRef} variant="subtle" color="gray" size="sm" aria-label={`${title} menu${refreshDescription ? ", refresh failed" : ""}`} aria-describedby={refreshDescription ? refreshDescriptionId : undefined} onFocus={event => {
+          const visible = event.currentTarget.matches(":focus-visible");
+          setMenuFocused(visible);
+          if (visible) setTooltipDismissed(false);
+        }} onBlur={() => setMenuFocused(false)} onMouseEnter={() => {setMenuHovered(true); setTooltipDismissed(false);}} onMouseLeave={closeTooltip}>{refreshError ? <WarningCircle size={18} weight="fill" color="var(--mantine-color-warn-filled)" /> : <DotsThree size={18} weight="bold" />}</ActionIcon></Menu.Target>
+        <Tooltip target={tooltipTarget} multiline maw="min(360px, calc(100vw - 32px))" label={<>
+          {refreshAge && <Text size="xs">{refreshAge}</Text>}
+          <Text data-refresh-error-message size="xs" title={refreshError || undefined} lineClamp={4} style={{overflowWrap:"anywhere"}}>{refreshError}</Text>
+        </>} opened={tooltipOpen} />
         <Menu.Dropdown>
           {(small || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
@@ -124,7 +156,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
             </Menu.RadioGroup>
             <Menu.Divider />
           </>}
-          {refreshError && retryable && onRetry && <Menu.Item disabled={loading} onClick={onRetry}>Retry</Menu.Item>}
+          {refreshError && retryable && onRetry && <Menu.Item disabled={loading} onClick={() => {closeTooltip(); onRetry();}}>Retry</Menu.Item>}
           {fixable && agentAvailable && onFix && <Menu.Item onClick={onFix}>Ask Fanout to fix it</Menu.Item>}
           {onView && <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>}
           {agentAvailable && onExplain && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
@@ -142,7 +174,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
           <Text data-panel-error-message title={result.error} size="xs" c="dimmed" ta={compactError ? "left" : "center"} style={{minWidth:0, minHeight:0, overflow:"hidden", ...(compactError ? {flex:"1 1 0px", whiteSpace:"nowrap", textOverflow:"ellipsis"} : {overflowWrap:"anywhere", flex:"0 1 auto"})}}>{compactError ? `This panel failed: ${result.error ?? "Request failed"}` : result.error}</Text>
           {retryable && onRetry && <Button size="compact-xs" variant="light" style={{flexShrink:0}} disabled={loading} onClick={onRetry}>Retry</Button>}
-          {fixable && agentAvailable && onFix && <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>}
+          {fixable && agentAvailable && onFix && (compactError ? <Tooltip label="Ask Fanout to fix it"><ActionIcon size={32} variant="light" aria-label="Ask Fanout to fix it" style={{flex:"0 0 32px"}} onClick={onFix}><Wrench size={16}/></ActionIcon></Tooltip> : <Button size="compact-xs" variant="light" style={{flexShrink:0}} onClick={onFix}>Ask Fanout to fix it</Button>)}
         </Box>
         : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
@@ -153,7 +185,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, background: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
     </Box>}
-    {refreshDescription && <VisuallyHidden id={refreshDescriptionId}>{refreshDescription}</VisuallyHidden>}
+    {refreshDescription && <span id={refreshDescriptionId} hidden>{refreshDescription}</span>}
     {fade&&<Box data-panel-scroll-fade aria-hidden="true" style={{position:"absolute",left:16,right:16,bottom:fade.bottom,height:16,pointerEvents:"none",zIndex:1,background:"linear-gradient(to bottom, transparent, var(--mantine-color-body))"}}/>}
   </Paper>;
 }

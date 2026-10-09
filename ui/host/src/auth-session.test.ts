@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authorizedFetch, browserViewerFromMe, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { ApiError } from "./dashboards/api";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -100,6 +101,8 @@ describe("authorizedFetch", () => {
     window.addEventListener(unauthorizedEvent, unauthorized);
     fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
     await expect(authorizedFetch("/api/data")).rejects.toThrow("insufficient permissions");
+    fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
+    await expect(authorizedFetch("/api/panels/query")).rejects.toEqual(new ApiError("insufficient permissions", 403));
     fetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect((await authorizedFetch("/api/data")).status).toBe(503);
     expect(unauthorized).not.toHaveBeenCalled();
