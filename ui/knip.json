@@ -3,12 +3,19 @@
   "entry": [
     "host/src/main.tsx!",
     "host/src/mcp-apps/main.tsx!",
-    "host/src/routeTree.gen.ts!"
+    "host/src/routeTree.gen.ts!",
+    "host/playwright.config.ts!",
+    "host/e2e/global-setup.ts!",
+    "host/e2e/failure-report.ts!",
+    "host/e2e/**/*.spec.ts!"
   ],
   "project": [
     "host/src/**/*.{ts,tsx}!",
     "*.ts!",
     "panels/**/*.ts!",
+    "host/playwright.config.ts!",
+    "host/e2e/**/*.ts!",
+    "!host/e2e/**/*.test.ts!",
     "!host/src/**/*.test.{ts,tsx}!",
     "!panels/**/*.test.ts!"
   ],

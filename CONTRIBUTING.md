@@ -47,6 +47,9 @@ Run `just check` and `just test-race`. Together they match the CI gate:
 formatting, linting, browser dependency audits, embedded-asset freshness, Go
 and browser tests, then the Go suite under the race detector.
 
+Run `just e2e` with Google Chrome installed for the separate CI browser smoke
+suite. See [browser smoke testing](docs/testing.md) for coverage and failure artifacts.
+
 `just install` also installs [Lefthook](https://lefthook.dev), which runs
 formatting and linting on commit and the full gate on push. That is the fastest
 way to avoid a red CI run.

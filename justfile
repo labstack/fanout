@@ -60,6 +60,11 @@ ui: ui-lint ui-host ui-apps
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
     bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
 
+# Disposable seeded instance and system Google Chrome; separate from check.
+e2e:
+    just build
+    cd ui/host && bun run e2e
+
 # CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
 # without pushing anything.
 

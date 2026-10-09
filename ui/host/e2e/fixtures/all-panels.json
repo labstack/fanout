@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "name": "Browser smoke: all panels",
+  "description": "Deterministic smoke telemetry across every visualization",
+  "time": {"range": "3h", "refresh": "off"},
+  "variables": [{"name": "service", "kind": "query", "from": "spans", "field": "service", "multi": true, "include_all": true, "default": "$__all"}],
+  "annotations": {"deploys": true, "anomalies": true},
+  "panels": [
+    {"id": "stat", "title": "Requests", "viz": "stat", "width": 6, "height": "m", "query": {"from": "spans", "measures": ["count()"], "where": ["service IN $service"]}},
+    {"id": "gauge", "title": "Error rate", "viz": "gauge", "width": 6, "height": "m", "min": 0, "max": 100, "query": {"from": "spans", "measures": ["error_rate()"]}},
+    {"id": "timeseries", "title": "Requests over time", "viz": "timeseries", "width": 6, "height": "l", "time": {"range": "3h"}, "query": {"from": "spans", "measures": ["count()"], "by": ["service"], "bucket": "5m"}},
+    {"id": "bar", "title": "Requests by service", "viz": "bar", "width": 6, "height": "l", "query": {"from": "spans", "measures": ["count()"], "by": ["service"]}},
+    {"id": "table", "title": "Service totals", "viz": "table", "width": 6, "height": "l", "query": {"from": "spans", "measures": ["count()", "p95(duration_ms)"], "by": ["service"]}},
+    {"id": "text", "title": "Smoke notes", "viz": "text", "width": 6, "height": "l", "content": "All fifteen visualization types on deterministic smoke telemetry."},
+    {"id": "heatmap", "title": "Latency density", "viz": "heatmap", "width": 6, "height": "l", "query": {"from": "spans", "measures": ["count()"], "bucket": "5m", "histogram": {"field": "duration_ms", "buckets": "log2"}}},
+    {"id": "histogram", "title": "Latency distribution", "viz": "histogram", "width": 6, "height": "l", "query": {"from": "spans", "measures": ["count()"], "histogram": {"field": "duration_ms", "buckets": "log2"}}},
+    {"id": "scatter", "title": "Volume and latency", "viz": "scatter", "width": 6, "height": "l", "query": {"from": "spans", "measures": ["count()", "p95(duration_ms)"], "by": ["service"]}},
+    {"id": "state_timeline", "title": "Service errors", "viz": "state_timeline", "width": 6, "height": "l", "thresholds": [{"value": 1, "status": "warn"}, {"value": 5, "status": "bad"}], "query": {"from": "spans", "measures": ["error_rate()"], "by": ["service"], "bucket": "5m"}},
+    {"id": "logs", "title": "Recent logs", "viz": "logs", "width": 12, "height": "l", "query": {"from": "logs", "limit": 50}},
+    {"id": "log_patterns", "title": "Repeating patterns", "viz": "log_patterns", "width": 12, "height": "l", "query": {"from": "logs", "measures": ["count()"], "by": ["body_template"], "bucket": "5m", "limit": 20}},
+    {"id": "traces", "title": "Distributed traces", "viz": "traces", "width": 12, "height": "l", "query": {"from": "spans", "limit": 30}},
+    {"id": "service_map", "title": "Service dependencies", "viz": "service_map", "width": 12, "height": "l", "query": {"from": "spans"}},
+    {"id": "health", "title": "Service health", "viz": "health", "width": 12, "height": "l", "query": {"from": "spans"}}
+  ]
+}
