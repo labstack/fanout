@@ -701,7 +701,7 @@ func TestStoreStartRunRepairsUnansweredToolCalls(t *testing.T) {
 	if len(seed[1].ToolCalls) != 1 || seed[1].ToolCalls[0].ID != "call-1" {
 		t.Fatal("interrupted call was erased")
 	}
-	if seed[2].Role != agtypes.RoleTool || seed[2].ToolCallID != "call-1" || seed[2].Content != `{"error":"interrupted"}` {
+	if seed[2].Role != agtypes.RoleTool || seed[2].ToolCallID != "call-1" || seed[2].Content != `{"error":{"code":"interrupted","message":"Tool execution was interrupted. The save may have completed."}}` {
 		t.Fatalf("missing interrupted result: %+v", seed)
 	}
 	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,assistant-1-call-1-interrupted,run-1-outcome,user-2" {
@@ -764,7 +764,7 @@ func TestInterruptedBuildEvidenceSurvivesReloadAndTheNextRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(before.Messages) < 3 || before.Messages[2].ToolCallID != "create" || before.Messages[2].Content != `{"error":"interrupted"}` {
+	if len(before.Messages) < 3 || before.Messages[2].ToolCallID != "create" || before.Messages[2].Content != `{"error":{"code":"interrupted","message":"Tool execution was interrupted. The save may have completed."}}` {
 		t.Fatalf("reload=%+v", before.Messages)
 	}
 	next, err := store.StartRun(ctx, "owner", agtypes.RunAgentInput{ThreadID: "thread", RunID: "next", Messages: []agtypes.Message{{ID: "next-user", Role: agtypes.RoleUser, Content: "Again"}}})

@@ -171,7 +171,7 @@ func TestDashboardRestoreReceiptUsesLatestCommittedBase(t *testing.T) {
 	// The current version is rejected. A historical version with identical
 	// contents still appends a version on each successful restore.
 	result, rejected, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 3})
-	if err != nil || !result.IsError || rejected.ErrorCode != "already_current" || rejected.Receipt != nil || rejected.Dashboard != nil {
+	if err != nil || !result.IsError || rejected.Error.Code != "already_current" || rejected.Receipt != nil || rejected.Dashboard != nil {
 		t.Fatalf("current restore=%+v err=%v", rejected, err)
 	}
 	for range 2 {
@@ -263,7 +263,7 @@ func TestDashboardHistoryRejectsInvalidMissingAndPrunedVersions(t *testing.T) {
 		t.Fatalf("pruned version error=%v", err)
 	}
 	result, out, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 1})
-	if err != nil || !result.IsError || out.Error != fmt.Sprintf("version 1 of dashboard %s does not exist", created.Dashboard.ID) || out.ErrorCode != "dashboard_version_not_found" || out.Dashboard != nil || out.Receipt != nil {
+	if err != nil || !result.IsError || out.Error.Message != fmt.Sprintf("version 1 of dashboard %s does not exist", created.Dashboard.ID) || out.Error.Code != "dashboard_version_not_found" || out.Dashboard != nil || out.Receipt != nil {
 		t.Fatalf("pruned version result=%+v output=%+v err=%v", result, out, err)
 	}
 	_, history, err := s.dashboardVersions(t.Context(), ownerRequest(), DashboardIDInput{ID: created.Dashboard.ID})
@@ -284,8 +284,11 @@ func TestMissingDashboardVersionHasDistinctErrorCode(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	raw, _ := json.Marshal(result.StructuredContent)
-	var payload map[string]any
-	if json.Unmarshal(raw, &payload) != nil || payload["error"] != fmt.Sprintf("version 9 of dashboard %s does not exist", created.Dashboard.ID) || payload["error_code"] != "dashboard_version_not_found" || payload["receipt"] != nil || payload["dashboard"] != nil {
+	var payload struct {
+		Error              struct{ Code, Message string }
+		Receipt, Dashboard any
+	}
+	if json.Unmarshal(raw, &payload) != nil || payload.Error.Message != fmt.Sprintf("version 9 of dashboard %s does not exist", created.Dashboard.ID) || payload.Error.Code != "dashboard_version_not_found" || payload.Receipt != nil || payload.Dashboard != nil {
 		t.Fatalf("missing version payload=%s", raw)
 	}
 }
@@ -302,8 +305,11 @@ func TestCurrentDashboardVersionRestoreHasDistinctErrorCodeWithoutSave(t *testin
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	raw, _ := json.Marshal(result.StructuredContent)
-	var payload map[string]any
-	if json.Unmarshal(raw, &payload) != nil || payload["error_code"] != "already_current" || payload["error"] != dashboard.ErrAlreadyCurrent.Error() || payload["receipt"] != nil || payload["dashboard"] != nil {
+	var payload struct {
+		Error              struct{ Code, Message string }
+		Receipt, Dashboard any
+	}
+	if json.Unmarshal(raw, &payload) != nil || payload.Error.Code != "already_current" || payload.Error.Message != dashboard.ErrAlreadyCurrent.Error() || payload.Receipt != nil || payload.Dashboard != nil {
 		t.Fatalf("current version payload=%s", raw)
 	}
 	versions, err := s.dashboards.Versions(t.Context(), "owner", created.Dashboard.ID)

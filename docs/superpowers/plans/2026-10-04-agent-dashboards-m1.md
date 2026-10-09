@@ -4641,7 +4641,7 @@ func writeProblems(c *echo.Context, err error) (bool, error) {
 	if !errors.As(err, &problems) {
 		return false, nil
 	}
-	return true, c.JSON(http.StatusBadRequest, map[string]any{"message": "The dashboard spec is invalid.", "problems": problems})
+	return true, c.JSON(http.StatusBadRequest, map[string]any{"code": "invalid_spec", "message": "The dashboard spec is invalid.", "problems": problems})
 }
 ```
 

@@ -240,7 +240,7 @@ func TestRuntimeToolExecutionErrorFeedsModel(t *testing.T) {
 	second := provider.got[1]
 	var sawErrorResult bool
 	for _, message := range second {
-		if message.Role == RoleTool && message.ToolResult != nil && message.ToolResult.IsError && strings.Contains(message.ToolResult.Content, "mcp session closed") {
+		if message.Role == RoleTool && message.ToolResult != nil && message.ToolResult.IsError && strings.Contains(message.ToolResult.Content, `"code":"tool_failed"`) && !strings.Contains(message.ToolResult.Content, "mcp session closed") {
 			sawErrorResult = true
 		}
 	}

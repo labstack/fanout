@@ -730,31 +730,31 @@
   },
   "tool_errors": {
     "escaped": {
-      "content": "{\"error\":\"\\u003cimg src=x onerror=alert(1)\\u003e\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"\\u003cimg src=x onerror=alert(1)\\u003e\"},\"isError\":true}",
       "error": "tool execution failed"
     },
     "first": {
-      "content": "{\"error\":\"first failure\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"first failure\"},\"isError\":true}",
       "error": "tool execution failed"
     },
     "invalid_panel": {
-      "content": "{\"error\":\"Invalid panel\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"Invalid panel\"},\"isError\":true}",
       "error": "tool execution failed"
     },
     "invalid_window": {
-      "content": "{\"error\":\"Invalid telemetry window\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"Invalid telemetry window\"},\"isError\":true}",
       "error": "tool execution failed"
     },
     "second": {
-      "content": "{\"error\":\"second failure\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"second failure\"},\"isError\":true}",
       "error": "tool execution failed"
     },
     "temporary": {
-      "content": "{\"error\":\"Temporary failure\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"Temporary failure\"},\"isError\":true}",
       "error": "tool execution failed"
     },
     "third": {
-      "content": "{\"error\":\"third failure\",\"isError\":true}",
+      "content": "{\"error\":{\"code\":\"tool_failed\",\"message\":\"third failure\"},\"isError\":true}",
       "error": "tool execution failed"
     }
   }

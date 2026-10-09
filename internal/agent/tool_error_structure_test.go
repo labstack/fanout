@@ -106,7 +106,14 @@ func TestRuntimeToolErrorsAreStructuredLiveAndPersisted(t *testing.T) {
 				if json.Unmarshal([]byte(messageText(message.Content)), &payload) != nil || payload["error"] == nil && payload["isError"] != true || message.Error == "" {
 					t.Fatalf("unstructured error: %+v", message)
 				}
-				if interrupted && (message.Error != "interrupted" || payload["error"] != "interrupted") {
+				failure, ok := payload["error"].(map[string]any)
+				if code, _ := failure["code"].(string); !ok || code == "" {
+					t.Fatalf("tool error has no code: %v", failure)
+				}
+				if message, _ := failure["message"].(string); message == "" {
+					t.Fatalf("missing error code or message: %+v", message)
+				}
+				if interrupted && (message.Error != "interrupted" || failure["code"] != "interrupted") {
 					t.Fatalf("unknown outcome lost: %+v", message)
 				}
 			}
@@ -129,6 +136,13 @@ func TestRuntimeToolErrorsAreStructuredLiveAndPersisted(t *testing.T) {
 					var payload map[string]any
 					if json.Unmarshal([]byte(event.Content), &payload) != nil || payload["error"] == nil && payload["isError"] != true {
 						t.Fatalf("unstructured live error: %s", event.Content)
+					}
+					failure, ok := payload["error"].(map[string]any)
+					if code, _ := failure["code"].(string); !ok || code == "" {
+						t.Fatalf("tool error has no code: %v", failure)
+					}
+					if message, _ := failure["message"].(string); message == "" {
+						t.Fatalf("missing live code or message: %s", event.Content)
 					}
 					found = true
 				}

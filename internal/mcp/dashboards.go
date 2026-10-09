@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -65,8 +66,7 @@ type dashboardOutput struct {
 	Dashboard *dashboard.Record `json:"dashboard,omitempty"`
 	Warnings  []string          `json:"warnings,omitempty"`
 	Receipt   *dashboardReceipt `json:"receipt,omitempty"`
-	Error     string            `json:"error,omitempty"`
-	ErrorCode string            `json:"error_code,omitempty"`
+	Error     *toolerror.Error  `json:"error,omitempty"`
 }
 
 type savedPanelCheck struct {
@@ -140,7 +140,7 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "restore_dashboard_version", Title: "Restore dashboard version",
-		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. A missing or pruned target returns error_code dashboard_version_not_found; list_dashboard_versions shows retained versions. " + saveReceiptGuide,
+		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. A missing or pruned target returns error.code dashboard_version_not_found; list_dashboard_versions shows retained versions. " + saveReceiptGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 }
@@ -284,7 +284,7 @@ func (s *Server) dashboardRestore(ctx context.Context, req *mcp.CallToolRequest,
 		if code != "" {
 			result := summary(err.Error())
 			result.IsError = true
-			return result, dashboardOutput{Error: err.Error(), ErrorCode: code}, nil
+			return result, dashboardOutput{Error: &toolerror.Error{Code: code, Message: err.Error()}}, nil
 		}
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}

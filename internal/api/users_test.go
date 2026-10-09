@@ -44,7 +44,7 @@ func TestUserMutationsProtectLastActiveAdmin(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			s.e.ServeHTTP(rec, req)
-			if rec.Code != http.StatusConflict {
+			if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"last_active_administrator"`) {
 				t.Fatalf("status = %d, want 409", rec.Code)
 			}
 		})

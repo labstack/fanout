@@ -598,7 +598,7 @@ it('renders nothing for an empty final-answer slot after the run',async()=>{
 });
 
 it.each(['create_dashboard','edit_dashboard','restore_dashboard_version'])('keeps an interrupted %s out of chat error groups',async name=>{
- const messages=[user(),call('save',name),result('save',{error:'interrupted'},'interrupted')];
+ const messages=[user(),call('save',name),result('save',{error:{code:'interrupted',message:'Tool execution was interrupted. The save may have completed.'}},'interrupted')];
  const {root}=await mountStreamChat(messages,false);
  try{expect(document.body.textContent).toContain('Save interrupted · outcome unknown');expect(document.body.textContent).not.toMatch(/tool calls? failed|Save failed|not saved/);}
  finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
@@ -625,14 +625,14 @@ it.each(['live','reloaded'])('renders the committed restore receipt in %s chat',
  }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });
 it('replaces interrupted chat uncertainty with a later proven save',async()=>{
- const messages=[user(),call('save','edit_dashboard'),result('save',{error:'interrupted'},'interrupted'),{...result('save',receiptFixture),id:'proven-result'}];
+ const messages=[user(),call('save','edit_dashboard'),result('save',{error:{code:'interrupted',message:'Tool execution was interrupted. The save may have completed.'}},'interrupted'),{...result('save',receiptFixture),id:'proven-result'}];
  const {root}=await mountStreamChat(messages,false);
  try{expect(document.body.textContent).toContain('Saved v2');expect(document.body.textContent).not.toMatch(/interrupted|outcome unknown|tool calls? failed/);}
  finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });
 
 it("labels a structural answer-only refusal as read-only instead of save or tool failure",async()=>{
- const root=await mount(value({messages:[user(),call("refused","create_dashboard"),result("refused",{error:"Read-only",code:"answer_only",isError:true},"Read-only")]}));
+ const root=await mount(value({messages:[user(),call("refused","create_dashboard"),result("refused",{error:{code:"answer_only",message:"Read-only"},isError:true},"Read-only")]}));
  try { expect(document.body.textContent).toContain("Not saved: Explain is read-only");expect(document.body.textContent).not.toMatch(/Save failed|tool calls? failed/); }
  finally { await act(async()=>root.unmount());document.body.innerHTML=""; }
 });

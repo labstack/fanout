@@ -367,7 +367,7 @@ func completeInterruptedToolCalls(messages []agtypes.Message) []agtypes.Message 
 			if answered[call.ID] {
 				continue
 			}
-			repaired = append(repaired, agtypes.Message{ID: message.ID + "-" + call.ID + "-interrupted", Role: agtypes.RoleTool, ToolCallID: call.ID, Content: `{"error":"interrupted"}`, Error: "interrupted"})
+			repaired = append(repaired, agtypes.Message{ID: message.ID + "-" + call.ID + "-interrupted", Role: agtypes.RoleTool, ToolCallID: call.ID, Content: `{"error":{"code":"interrupted","message":"Tool execution was interrupted. The save may have completed."}}`, Error: "interrupted"})
 			answered[call.ID] = true
 		}
 	}

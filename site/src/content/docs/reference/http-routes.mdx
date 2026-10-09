@@ -51,6 +51,43 @@ them: alert rules (`/api/alerting/rules`, `/api/alerts`) and ingest-token rotati
 (`/api/settings/ingest`). Neither has a browser page yet.
 :::
 
+## Errors
+
+Application API errors, including unknown routes and wrong methods, return exactly
+`{"code":"bad_request","message":"Safe explanation"}`. Codes are stable
+snake_case identifiers; clients branch on `code` rather than message text.
+Invalid dashboard or panel specs also include `problems` with field paths,
+messages and optional hints. Every error response uses `Cache-Control: no-store`;
+HEAD errors have no body. Server failures return a short, safe message; the
+underlying error is logged and never returned.
+
+Default codes by HTTP status:
+
+| Status | Code |
+|---|---|
+| 400 | `bad_request` |
+| 401 | `unauthorized` |
+| 403 | `forbidden` |
+| 404 | `not_found` |
+| 405 | `method_not_allowed` |
+| 409 | `conflict` |
+| 413 | `payload_too_large` |
+| 415 | `unsupported_media_type` |
+| 422 | `unprocessable` |
+| 429 | `rate_limited` |
+| 500 | `internal` |
+| 502 | `bad_gateway` |
+| 503 | `unavailable` |
+| 504 | `timeout` |
+
+Other 4xx statuses use `bad_request`; other 5xx statuses use `internal`.
+Specific conditions use `already_current`, `dashboard_version_not_found`,
+`dashboard_version_conflict`, `invalid_spec` and `last_active_administrator`.
+Tool failures carry `error: {code, message}` inside the tool result.
+Panel execution results keep their own status and error fields.
+OAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.
+Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
+
 The **Requires** column is not a description of the rule. It is the answer the
 authorization middleware gives for that exact method and path, so a route
 cannot be documented as public while the server treats it otherwise.

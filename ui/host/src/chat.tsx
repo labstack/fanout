@@ -12,7 +12,7 @@ import { exactTimestamp } from "../../format";
 import { mcpAppContent, type MCPAppContent } from "./mcp-app-content";
 import { fragmentTitle } from "../../panels/fragment";
 import { interruptedResult } from "./dashboard-receipt";
-import { jsonObject, mutationNames } from "./dashboard-tool-result";
+import { jsonObject, mutationNames, object } from "./dashboard-tool-result";
 import { DashboardReceiptView } from "./dashboard-receipt-view";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
@@ -71,8 +71,9 @@ function toolFailures(messages: Message[]) {
       const first = firstFailures.get(owner) ?? message.id;
       firstFailures.set(owner, first);
       const failures = groups.get(first) ?? [];
-      const text = typeof payload?.error === "string" ? payload.error : typeof message.error === "string" && message.error ? message.error : "Tool execution failed";
-      failures.push({ name: call?.name ?? "Tool", message: text, readOnly: payload?.code === "answer_only" });
+      const failure = object(payload?.error) ? payload?.error : undefined;
+      const text = typeof failure?.message === "string" ? failure.message : typeof message.error === "string" && message.error ? message.error : "Tool execution failed";
+      failures.push({ name: call?.name ?? "Tool", message: text, readOnly: failure?.code === "answer_only" });
       groups.set(first, failures);
     }
   }

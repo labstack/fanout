@@ -100,6 +100,8 @@ v2026.9.5
 These are LabStack's shared API and MCP conventions. Product-specific
 resources and protocol-defined contracts keep their own semantics.
 
+- API errors are `{code, message}` with stable snake_case codes; tool errors
+  are `error: {code, message}`. Protocol-defined error bodies keep their spelling.
 - Application HTTP routes use `/api`, lowercase words, meaningful slash-separated
   domains/resources/actions, and plural collections. Do not use hyphens in
   product-defined static path segments. Opaque resource IDs may contain hyphens.

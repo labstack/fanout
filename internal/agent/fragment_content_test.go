@@ -156,8 +156,11 @@ func TestAppToolErrorHasNoActivity(t *testing.T) {
 		}
 		if message.Role == agtypes.RoleTool {
 			found = true
-			var payload map[string]any
-			if json.Unmarshal([]byte(messageText(message.Content)), &payload) != nil || payload["error"] != "Invalid telemetry window" || payload["isError"] != true || message.Error == "" {
+			var payload struct {
+				Error   struct{ Code, Message string }
+				IsError bool
+			}
+			if json.Unmarshal([]byte(messageText(message.Content)), &payload) != nil || payload.Error.Code != "tool_failed" || payload.Error.Message != "Invalid telemetry window" || !payload.IsError || message.Error == "" {
 				t.Fatal("tool error lost")
 			}
 		}

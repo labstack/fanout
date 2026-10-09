@@ -337,7 +337,7 @@ it.each([false,true])("queues a transport Retry during an unrelated lazy batch a
     await host.show(["a","b"]);
     await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.error).toBe("Offline"); });
     const pending = deferred<PanelResult[]>();
-    wire.panels.mockImplementation((body:QueryBody) => body.panels!.includes("c") ? pending.promise.then(results => { if(failure)throw new ApiError("Unrelated failure",504);return results; }) : Promise.resolve(body.panels!.map(resultFor)));
+    wire.panels.mockImplementation((body:QueryBody) => body.panels!.includes("c") ? pending.promise.then(results => { if(failure)throw new ApiError("Unrelated failure",504,[],"timeout");return results; }) : Promise.resolve(body.panels!.map(resultFor)));
     await host.show(["c"]);
     await waitForHook(() => expect(host.current.fetchingIds).toEqual(["c"]));
     const before = wire.panels.mock.calls.length;

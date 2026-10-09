@@ -99,10 +99,10 @@ describe("authorizedFetch", () => {
   it("surfaces authorization errors without announcing logout", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
-    fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
+    fetchMock.mockResolvedValueOnce(json({ code: "forbidden", message: "insufficient permissions" }, 403));
     await expect(authorizedFetch("/api/data")).rejects.toThrow("insufficient permissions");
-    fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
-    await expect(authorizedFetch("/api/panels/query")).rejects.toEqual(new ApiError("insufficient permissions", 403));
+    fetchMock.mockResolvedValueOnce(json({ code: "forbidden", message: "insufficient permissions" }, 403));
+    await expect(authorizedFetch("/api/panels/query")).rejects.toEqual(new ApiError("insufficient permissions", 403, [], "forbidden"));
     fetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect((await authorizedFetch("/api/data")).status).toBe(503);
     expect(unauthorized).not.toHaveBeenCalled();

@@ -75,11 +75,11 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 		t.Fatalf("patch %d %s", rec.Code, rec.Body)
 	}
 	rec = call(http.MethodPut, "/api/dashboards/"+created.ID, `{"spec":{"name":"Ops","panels":[{"id":"notes","title":"Notes","viz":"text","content":"x"}]},"base_version":1}`, ownerCookie)
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "changed since") {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"dashboard_version_conflict"`) || !strings.Contains(rec.Body.String(), "changed since") {
 		t.Fatalf("stale put %d %s", rec.Code, rec.Body)
 	}
 	rec = call(http.MethodPut, "/api/dashboards/"+created.ID, `{"spec":{"name":"Ops","panels":[{"id":"notes","title":"Notes","viz":"piechart"}]}}`, ownerCookie)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"problems"`) {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"invalid_spec"`) || !strings.Contains(rec.Body.String(), `"problems"`) {
 		t.Fatalf("invalid put %d %s", rec.Code, rec.Body)
 	}
 	rec = call(http.MethodGet, "/api/dashboards/"+created.ID+"/versions", "", ownerCookie)
@@ -91,7 +91,7 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 		t.Fatalf("restore %d %s", rec.Code, rec.Body)
 	}
 	rec = call(http.MethodPost, "/api/dashboards/"+created.ID+"/versions/9/restore", "", ownerCookie)
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "version 9 of dashboard "+created.ID+" does not exist") || !strings.Contains(rec.Body.String(), `"error_code":"dashboard_version_not_found"`) {
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "version 9 of dashboard "+created.ID+" does not exist") || !strings.Contains(rec.Body.String(), `"code":"dashboard_version_not_found"`) {
 		t.Fatalf("missing version %d %s", rec.Code, rec.Body)
 	}
 	if rec := call(http.MethodDelete, "/api/dashboards/"+created.ID, "", ownerCookie); rec.Code != http.StatusPreconditionRequired {

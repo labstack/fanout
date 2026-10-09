@@ -114,7 +114,9 @@ func writeProblems(c *echo.Context, err error) (bool, error) {
 	if !errors.As(err, &problems) {
 		return false, nil
 	}
-	return true, c.JSON(http.StatusBadRequest, map[string]any{"message": "The dashboard spec is invalid.", "problems": problems})
+	failure := newAPIError(http.StatusBadRequest, "invalid_spec", "The dashboard spec is invalid.")
+	failure.Problems = problems
+	return true, failure
 }
 
 func (h *PanelHandler) exemplars(c *echo.Context) error {

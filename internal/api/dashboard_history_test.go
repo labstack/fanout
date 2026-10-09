@@ -78,14 +78,14 @@ func TestHistoricalDashboardHTTPReadRequiresOwnerAndReturnsSaveChanges(t *testin
 		message, code string
 	}{
 		{cookie, "version 99 of dashboard " + first.ID + " does not exist", "dashboard_version_not_found"},
-		{s.login(t, other), "dashboard not found", ""},
+		{s.login(t, other), "dashboard not found", "not_found"},
 	} {
 		var wire map[string]any
 		missing := call("99", tc.cookie)
 		if err := json.Unmarshal(missing.Body.Bytes(), &wire); err != nil {
 			t.Fatal(err)
 		}
-		if missing.Code != 404 || wire["message"] != tc.message || (tc.code != "" && wire["error_code"] != tc.code) || (tc.code == "" && wire["error_code"] != nil) {
+		if missing.Code != 404 || wire["message"] != tc.message || (tc.code != "" && wire["code"] != tc.code) || (tc.code == "" && wire["code"] != nil) {
 			t.Fatalf("missing = %s", missing.Body)
 		}
 	}
@@ -107,7 +107,7 @@ func TestHistoricalDashboardHTTPReadRequiresOwnerAndReturnsSaveChanges(t *testin
 	if err := json.Unmarshal(current.Body.Bytes(), &conflict); err != nil {
 		t.Fatal(err)
 	}
-	if current.Code != 409 || conflict["error_code"] != "already_current" {
+	if current.Code != 409 || conflict["code"] != "already_current" {
 		t.Fatalf("current restore=%d %s", current.Code, current.Body)
 	}
 	versions, err := service.Versions(t.Context(), owner.ID, first.ID)
