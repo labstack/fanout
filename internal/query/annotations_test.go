@@ -92,8 +92,9 @@ func TestVersionIncrementalLateBatch(t *testing.T) {
 }
 
 func TestAnnotationHistoryBounds(t *testing.T) {
-	started := time.Now()
 	d, _ := versionEngine(t)
+	// Time the bounded history work, not engine startup.
+	started := time.Now()
 	now := time.Now().UTC()
 	if _, err := d.DB.Exec(`INSERT INTO anomaly_log SELECT 'shop','service-'||i,'latency',(?::TIMESTAMP_NS-i*INTERVAL '1 minute'-INTERVAL '1 minute')::TIMESTAMPTZ_NS,(?::TIMESTAMP_NS-i*INTERVAL '1 minute')::TIMESTAMPTZ_NS,'Slow','warn' FROM generate_series(1,10000) t(i)`, now, now); err != nil {
 		t.Fatal(err)
