@@ -134,7 +134,7 @@ No scorer, threshold or post-save check was changed.
 
 ## Final acceptance (Task 14)
 
-Status: **PASS** for the authoring benchmark, the browser collector, the checked-in smoke test and the per-panel check. The sealed holdout set was **not run**.
+Status: **PASS** for the authoring benchmark, the sealed holdout, the browser collector, the checked-in smoke test and the per-panel check.
 
 ### Authoring benchmark on the frozen candidate
 
@@ -161,12 +161,21 @@ Status: **PASS** for the authoring benchmark, the browser collector, the checked
 
 ### Holdout set
 
-- The sealed holdout has 16 prompts: 11 ask for a dashboard and 5 ask for a direct answer. The prompt text was not read.
-- The promoted runner grades exactly ten dashboard prompts, so it cannot score the holdout unchanged. Every M3 benchmark number therefore comes from prompts the work was tuned against, and unseen requests may score lower.
-- Milestone 4 needs a runner that grades both answer and dashboard intent before the holdout can run.
+The sealed holdout ran once on a production build of 04cd5c19, through the private intent-aware harness that scored the milestone 2 holdout. The prompt text was not read, and nothing was tuned on it.
+
+| Run | Correct outcome | Dashboards saved | Answered without a dashboard | Acceptable panels | S3 invalid | S4 median (s) | Run errors |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| M2 candidate | 16/16 | 11/11 | 5/5 | 95/95 | 0 | 57.4 | 0 |
+| M3 final | 16/16 | 11/11 | 5/5 | 88/88 | 0 | 33.4 | 0 |
+
+- The set has 16 prompts: 11 ask for a dashboard and 5 ask for a direct answer.
+- The harness scores the agent's choice of outcome and the panel checks. It does not score whether a saved dashboard answers the question; that needs the paid two-model judge, which neither milestone ran.
+- The harness has no cost ledger. At the benchmark's per-prompt cost, the run is estimated below $3.
+- Three dashboards were saved on a second create after the first create returned an error; every saved panel passed.
 
 ### Findings for milestone 4 (Task 14)
 
 - A long refresh error is truncated in the panel and its full text cannot be reached.
-- The rollup and panel out-of-memory errors under a DuckDB memory cap during an ingest backlog, recorded in Task 12, remain open.
+- The rollup and panel out-of-memory errors under a DuckDB memory cap during an ingest backlog, recorded in Task 12, remain open. While a bulk replay's backlog drains, detector annotation writes and the version rollup also time out once a minute; both stop when the backlog clears.
+- Promote an intent-aware runner with cost metering and the two-model quality judge, so the holdout is scored like the benchmark.
 - Saved dashboards keep their stored grid. Row snapping and twelve-column fill apply only when the server packs new panels.
