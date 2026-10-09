@@ -51,7 +51,7 @@ func TestCheckFilterRejectsUnsafeExpressions(t *testing.T) {
 	vars := map[string]Variable{"service": {Name: "service", Kind: "query"}, "routes": {Name: "routes", Kind: "query", Multi: true}}
 	cases := map[string]string{
 		"1=1) UNION SELECT * FROM users WHERE (1=1":           "single boolean expression",
-		"service IN (SELECT name FROM users)":                 "not allowed",
+		"service IN (SELECT display_name FROM users)":         "not allowed",
 		"read_text('/etc/passwd') <> ''":                      "read_text",
 		"servce = 'checkout'":                                 "service",
 		"service = $svc":                                      "$svc",

@@ -175,7 +175,7 @@ func authenticateSession(c *echo.Context, users *auth.UserStore, sessions *auth.
 	case err != nil:
 		slog.Error("auth user lookup failed", "user_id", userID, "err", err)
 		return auth.User{}, echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
-	case !user.Active || user.AuthVersion != sessions.AuthVersion(ctx):
+	case user.Status != auth.UserStatusActive || user.AuthVersion != sessions.AuthVersion(ctx):
 		if destroyErr := sessions.Destroy(ctx); destroyErr != nil {
 			slog.Error("auth revoked-session destroy failed", "user_id", userID, "err", destroyErr)
 		}
@@ -292,7 +292,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		}
 	case strings.HasPrefix(path, "/api/alerting/rules/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
-	case path == "/api/panels/query" || path == "/api/panels/exemplars" || path == "/api/variables/resolve" || path == "/api/annotations":
+	case path == "/api/panels/query" || path == "/api/panels/exemplars" || path == "/api/panels/variables/resolve" || path == "/api/annotations":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
 	case path == "/api/telemetry/schema":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
@@ -314,17 +314,18 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 			return routePolicy{}, false
 		}
 		allowed := action == "" && (method == http.MethodPatch || method == http.MethodDelete) ||
+			(action == "role" || action == "status") && method == http.MethodPatch ||
 			action == "access/revoke" && method == http.MethodPost
 		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, allowed
 	case path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||
-		(!strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/") && !strings.HasPrefix(path, "/-/") && path != "/metrics"):
+		(!strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/") && path != "/metrics"):
 		return routePolicy{kind: routePolicyPublic}, read
 	}
 	return routePolicy{}, false
 }
 
 func isProtectedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || strings.HasPrefix(path, "/-/") || path == "/metrics"
+	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || path == "/metrics"
 }
 
 func routePathKnown(path string) bool {

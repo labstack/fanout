@@ -106,7 +106,7 @@ export default async function globalSetup() {
       const response = await safeRequest("/readyz", () => api!.get("/readyz", { timeout: Math.max(1, Math.min(1000, startDeadline - Date.now())) }));
       return response.status() === 200 ? undefined : `HTTP ${response.status()} /readyz`;
     }, 100);
-    const { body: setup } = await requestJSON("/api/auth/setup", { email: "smoke@example.test", name: "Browser smoke", setup_token: decodeURIComponent(token) });
+    const { body: setup } = await requestJSON("/api/auth/setup", { email: "smoke@example.test", display_name: "Browser smoke", setup_token: decodeURIComponent(token) });
     const { ingest_token: ingestToken } = setup as { ingest_token?: string };
     if (!ingestToken) throw new Error("Setup returned no ingest credential");
     const tokenFile = join(dir, "ingest-token");

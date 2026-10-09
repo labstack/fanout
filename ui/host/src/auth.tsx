@@ -23,7 +23,7 @@ export function useRuntimeStatus(): Status {
   return status;
 }
 
-export type Viewer = { id: string; email: string; name: string; role: string };
+export type Viewer = { id: string; email: string; display_name: string; status: "active" | "suspended"; role: string };
 const ViewerContext = createContext<Viewer | null>(null);
 
 export function useViewer(): Viewer {
@@ -36,10 +36,12 @@ function viewerFromMe(user: unknown): Viewer | null {
   if (!user || typeof user !== "object") return null;
   const record = user as Record<string, unknown>;
   if (typeof record.id !== "string" || record.id === "") return null;
+  if (record.status !== "active" && record.status !== "suspended") return null;
   return {
     id: record.id,
     email: typeof record.email === "string" ? record.email : "",
-    name: typeof record.name === "string" ? record.name : "",
+    display_name: typeof record.display_name === "string" ? record.display_name : "",
+    status: record.status,
     role: typeof record.role === "string" ? record.role : "",
   };
 }
@@ -106,7 +108,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [account, setAccount] = useState<Viewer | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [setupToken, setSetupToken] = useState(readSetupTokenFromURL);
   const [loginToken, setLoginToken] = useState(readLoginTokenFromURL);
   const [code, setCode] = useState("");
@@ -225,7 +227,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (!status) return <AuthSurface><Stack gap="lg"><BrandLockup /><Title order={1}>Fanout is unavailable</Title><Alert color="bad" radius="md">{error || "Authentication status could not be loaded."}</Alert></Stack></AuthSurface>;
   if (authenticated && returnTo) return null;
   if (authenticated) return <RuntimeStatusContext.Provider value={status}>
-    <ViewerContext.Provider value={account ?? { id: "", email, name, role: "" }}>{children}</ViewerContext.Provider>
+    <ViewerContext.Provider value={account ?? { id: "", email, display_name: displayName, status: "active", role: "" }}>{children}</ViewerContext.Provider>
   </RuntimeStatusContext.Provider>;
 
   if (status && !status.setup_required && status.auth_mode === "oidc") {
@@ -291,7 +293,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setError("");
     try {
       if (status?.setup_required) {
-        const result = await jsonRequest("/api/auth/setup", { email, name, setup_token: setupToken }) as SetupResult;
+        const result = await jsonRequest("/api/auth/setup", { email, display_name: displayName, setup_token: setupToken }) as SetupResult;
         if (result.ingest_token) setSetupResult(result); else { setViewer("user"); void refreshAccount(); }
       } else if (!codeSent) {
         await sendCode();
@@ -329,7 +331,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     </Stack>
     <form onSubmit={submit}><Stack gap="md">
       <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} disabled={codeSent} variant="filled" radius="md" size="md" autoFocus={!codeSent} />
-      {status?.setup_required && <TextInput label="Name" placeholder="Your name" value={name} onChange={(event) => setName(event.currentTarget.value)} variant="filled" radius="md" size="md" />}
+      {status?.setup_required && <TextInput label="Display name" placeholder="Your display name" value={displayName} onChange={(event) => setDisplayName(event.currentTarget.value)} variant="filled" radius="md" size="md" />}
       {status?.setup_required && <TextInput label="Setup token" placeholder="from the setup URL printed at startup" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
       {onCodeStep && <Stack gap="xs">
         <Text size="sm" fw={600}>Verification code</Text>

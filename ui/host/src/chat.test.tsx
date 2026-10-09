@@ -14,7 +14,7 @@ vi.mock("./mcp-app-frame", () => ({ default: () => <div data-app-frame>Panel fra
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
   useRuntimeStatus: () => ({ agent_available: true, setup_required: false, auth_mode: "local" }),
-  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: "admin" }),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", display_name: "Viewer", status: "active" as const, role: "admin" }),
   authorizedFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
   logout: vi.fn(), clearSession: vi.fn(),
 }));
@@ -33,7 +33,7 @@ async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "a
       requests.push(JSON.parse(String(init?.body)));
       return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; init?.signal?.addEventListener("abort", () => c.error(new DOMException("Aborted", "AbortError")), { once: true }); } }), { headers: { "Content-Type": "text/event-stream" } });
     }
-    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { threads: [], nextCursor: "" } : { messages: stored };
+    const body = path === "/api/dashboards" ? { dashboards: [] } : path === "/api/agent/threads" ? { items: [], next_cursor: null } : { messages: stored };
     return Response.json(body);
   });
   vi.stubGlobal("fetch", fetchMock);

@@ -233,7 +233,7 @@ func TestToolDocsDescribeFragmentInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tool := range tools {
-		if tool.Name == "query_telemetry" || tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+		if tool.Name == "query_telemetry" || tool.Name == "query_panel_fragment" || tool.Name == "list_panel_exemplars" || tool.Name == "resolve_panel_variables" {
 			for _, input := range tool.Inputs {
 				if input.Description == "" {
 					t.Fatalf("%s.%s missing input description", tool.Name, input.Name)

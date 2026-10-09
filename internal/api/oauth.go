@@ -251,7 +251,7 @@ func (h *MCPAuthorization) verifyMCPToken(ctx context.Context, raw string, _ *ht
 		slog.Error("mcp oauth user lookup failed", "user_id", record.UserID, "err", err)
 		return nil, fmt.Errorf("load mcp token user: %w", err)
 	}
-	if !user.Active {
+	if user.Status != appauth.UserStatusActive {
 		return nil, mcpgoauth.ErrInvalidToken
 	}
 	if !userCanUseMCPScopes(user, record.Scope) {
@@ -547,7 +547,7 @@ func userCanUseMCPScopes(user appauth.User, raw string) bool {
 
 func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {
 	user := GetCurrentUser(c)
-	if user == nil || !user.Active {
+	if user == nil || user.Status != appauth.UserStatusActive {
 		return appauth.User{}, false
 	}
 	return *user, true
@@ -642,7 +642,7 @@ func (h *MCPAuthorization) exchangeAuthorizationCode(c *echo.Context, clientID s
 		// DB failure is an infrastructure error, not an invalid grant.
 		return appauth.OAuthTokenPair{}, fmt.Errorf("load code user: %w", err)
 	}
-	if !user.Active {
+	if user.Status != appauth.UserStatusActive {
 		return appauth.OAuthTokenPair{}, appauth.ErrInvalidOAuthGrant
 	}
 	return h.store.IssueTokenPair(c.Request().Context(), code.ClientID, code.UserID, code.Scope, code.Resource)

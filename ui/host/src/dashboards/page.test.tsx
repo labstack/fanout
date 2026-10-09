@@ -13,7 +13,7 @@ import { assertServiceMapDOM } from "../../tests/service-map-collector";
 const viewer = vi.hoisted(() => ({ role: "viewer" }));
 vi.mock("../auth", async (importOriginal) => ({
   ...await importOriginal<typeof import("../auth")>(),
-  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: viewer.role }),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", display_name: "Viewer", status: "active" as const, role: viewer.role }),
 }));
 
 const charts = vi.hoisted(() => ({ option: vi.fn() }));
@@ -87,7 +87,7 @@ beforeEach(() => {
     if (url.pathname === "/api/dashboards") return listResponse();
     if (url.pathname === "/api/dashboards/d1") return json(servedRecord);
     if (url.pathname === "/api/dashboards/missing") return json({ message: "dashboard not found" }, 404);
-    if (url.pathname === "/api/variables/resolve") return variableResponse();
+    if (url.pathname === "/api/panels/variables/resolve") return variableResponse();
     if (url.pathname === "/api/annotations") return annotationResponse();
     if (url.pathname === "/api/panels/query") {
       const body = JSON.parse(String(init?.body)) as { panels: string[]; dashboard: { panels: { id: string }[] } };
@@ -241,7 +241,7 @@ describe("DashboardPage", () => {
     const search: DashboardSearch = { from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", vars: { service: "cart" }, compare: "1", view: "latency", drill: JSON.stringify({ panel_id: "latency", kind: "traces", from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", window_from: "2026-10-01T12:00:00Z", window_to: "2026-10-01T13:00:00Z", dimensions: {} }) };
     const { client, onSearch } = await render(search);
     const count = queryBodies.length;
-    const variableCount = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/variables/resolve").length;
+    const variableCount = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/panels/variables/resolve").length;
     await act(async () => [...document.querySelectorAll("button")].find(button => button.textContent === "History")!.click());
     await settle(client);
     expect(queryBodies).toHaveLength(count);
@@ -253,7 +253,7 @@ describe("DashboardPage", () => {
     if (removed) expect(onSearch).toHaveBeenCalledWith({ ...search, view: undefined, drill: undefined }, true);
     else expect(onSearch).not.toHaveBeenCalled();
     expect(queryBodies.length).toBeGreaterThan(count);
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/variables/resolve").length).toBeGreaterThan(variableCount);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/panels/variables/resolve").length).toBeGreaterThan(variableCount);
     const laterBatches = queryBodies.slice(count) as { dashboard: { panels: { id: string }[] } }[];
     if (removed) expect(laterBatches.every(body => body.dashboard.panels.every(panel => panel.id !== "latency"))).toBe(true);
   });
@@ -518,8 +518,8 @@ describe("DashboardPage", () => {
     variableResponse = () => new Promise(() => {});
     panelResponse = () => new Promise(() => {});
     const { rerender } = await render({}, "d1", false);
-    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => /\/api\/(panels\/query|variables\/resolve)$/.test(String(input)))).toHaveLength(2), { interval: 5, timeout: 3000 });
-    const signals = fetchMock.mock.calls.filter(([input]) => /\/api\/(panels\/query|variables\/resolve)$/.test(String(input)))
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => /\/api\/(panels\/(query|variables\/resolve))$/.test(String(input)))).toHaveLength(2), { interval: 5, timeout: 3000 });
+    const signals = fetchMock.mock.calls.filter(([input]) => /\/api\/(panels\/(query|variables\/resolve))$/.test(String(input)))
       .map(([, init]) => init?.signal);
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
@@ -612,7 +612,7 @@ describe("dashboard batch regressions", () => {
     else variableResponse = async () => json({ message: "Invalid" }, 400);
     const { client } = await render();
     await settle(client);
-    const path = kind === "panels" ? "/api/panels/query" : "/api/variables/resolve";
+    const path = kind === "panels" ? "/api/panels/query" : "/api/panels/variables/resolve";
     await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === path)).toHaveLength(1), { interval: 5, timeout: 3000 });
   });
 });
@@ -637,7 +637,7 @@ it.each(["panels", "variables"])("retries server errors at most twice for %s", a
   else variableResponse = async () => json({ message: "Server failed" }, 500);
   const { host, client } = await render();
   await settle(client);
-  const path = kind === "panels" ? "/api/panels/query" : "/api/variables/resolve";
+  const path = kind === "panels" ? "/api/panels/query" : "/api/panels/variables/resolve";
   await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === path)).toHaveLength(3), { interval: 5, timeout: 3000 });
   await vi.waitFor(() => expect(host.textContent).toContain("Server failed"), { interval: 5, timeout: 3000 });
 });

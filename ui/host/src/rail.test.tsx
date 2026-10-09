@@ -13,8 +13,8 @@ function json(body: unknown, status = 200) {
 
 function threadsPage(query = "") {
   return json({
-    threads: [{ threadId: "thread-checkout", title: query ? `Result for ${query}` : "Checkout latency", updatedAt: "2026-07-22 03:00:00" }],
-    nextCursor: "",
+    items: [{ id: "thread-checkout", title: query ? `Result for ${query}` : "Checkout latency", updated_at: "2026-07-22 03:00:00" }],
+    next_cursor: null,
   });
 }
 
@@ -82,6 +82,8 @@ describe("Rail", () => {
     expect(document.body.textContent).toContain("Chats");
     expect(document.body.textContent).toContain("Dashboards");
     expect(document.body.textContent).not.toContain("Investigation");
+    const historyRequest = fetchMock.mock.calls.find(([input]) => new URL(String(input), "http://localhost").pathname === "/api/agent/threads");
+    expect(new URL(String(historyRequest?.[0]), "http://localhost").searchParams.get("page_size")).toBe("30");
 
     const activeRows = document.querySelectorAll('[aria-current="page"]');
     expect(activeRows).toHaveLength(2);
@@ -98,6 +100,27 @@ describe("Rail", () => {
     await act(async () => newChat?.click());
     expect(handlers.onNewChat).toHaveBeenCalled();
     await act(async () => root.unmount());
+  });
+
+  it("loads the next history page and stops at a null cursor", async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname !== "/api/agent/threads") return respond(input, init);
+      return url.searchParams.has("cursor")
+        ? json({ items: [{ id: "thread-older", title: "Older chat", updated_at: "2026-07-21 03:00:00" }], next_cursor: null })
+        : json({ items: [{ id: "thread-checkout", title: "Checkout latency", updated_at: "2026-07-22 03:00:00" }], next_cursor: "opaque-cursor" });
+    });
+    const { root, render } = mount();
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("See all"));
+      const more = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(button => button.textContent === "See all");
+      await act(async () => more!.click());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Older chat"));
+      expect(document.body.textContent).toContain("Checkout latency");
+      expect(document.body.textContent).not.toContain("See all");
+      expect(fetchMock.mock.calls.some(([input]) => new URL(String(input), "http://localhost").searchParams.get("cursor") === "opaque-cursor")).toBe(true);
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("loads persisted provenance across threads and reload without per-dashboard requests", async () => {
@@ -183,12 +206,12 @@ describe("Rail", () => {
   it("groups chats in a fixed section order regardless of API order", async () => {
     const now = new Date();
     const sqliteTimestamp = (date: Date) => date.toISOString().slice(0, 19).replace("T", " ");
-    const todayThread = { threadId: "thread-standup", title: "Standup notes", updatedAt: sqliteTimestamp(now) };
-    const olderThread = { threadId: "thread-historical", title: "Historical chat", updatedAt: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
+    const todayThread = { id: "thread-standup", title: "Standup notes", updated_at: sqliteTimestamp(now) };
+    const olderThread = { id: "thread-historical", title: "Historical chat", updated_at: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
     fetchMock.mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/dashboards") return dashboards();
-      if (url.pathname === "/api/agent/threads") return json({ threads: [olderThread, todayThread], nextCursor: "" });
+      if (url.pathname === "/api/agent/threads") return json({ items: [olderThread, todayThread], next_cursor: null });
       throw new Error(`unexpected request: ${url.pathname}`);
     });
     const { root, render } = mount();

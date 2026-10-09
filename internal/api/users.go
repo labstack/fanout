@@ -20,6 +20,9 @@ type UserHandler struct {
 	smtpConfigured bool
 }
 
+// userBodyLimit bounds user administration requests, which carry a few short fields.
+const userBodyLimit = 16 << 10
+
 // RegisterUserRoutes registers user management endpoints.
 func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig, cfg config.Config) {
 	mode := strings.ToLower(strings.TrimSpace(cfg.AuthMode))
@@ -32,6 +35,8 @@ func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfi
 	e.GET("/api/users", h.ListUsers, adminOnly)
 	e.POST("/api/users", h.CreateUser, adminOnly)
 	e.PATCH("/api/users/:id", h.UpdateUser, adminOnly)
+	e.PATCH("/api/users/:id/role", h.UpdateRole, adminOnly)
+	e.PATCH("/api/users/:id/status", h.UpdateStatus, adminOnly)
 	e.DELETE("/api/users/:id", h.DeleteUser, adminOnly)
 	e.POST("/api/users/:id/access/revoke", h.RevokeAccess, adminOnly)
 }
@@ -62,12 +67,12 @@ func (h *UserHandler) ListUsers(c *echo.Context) error {
 // CreateUser adds a new user (admin only).
 func (h *UserHandler) CreateUser(c *echo.Context) error {
 	var req struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
-		Role  string `json:"role"`
+		Email       string `json:"email"`
+		DisplayName string `json:"display_name"`
+		Role        string `json:"role"`
 	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
+	if err := decodeStrict(c, &req, userBodyLimit); err != nil {
+		return err
 	}
 	role := auth.Role(req.Role)
 	if role == "" {
@@ -81,7 +86,7 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	user, err := h.users.CreateWithAudit(email, req.Name, role, userAuditEvent(c, "user.created"))
+	user, err := h.users.CreateWithAudit(email, req.DisplayName, role, userAuditEvent(c, "user.created"))
 	if err != nil {
 		if errors.Is(err, auth.ErrUserConflict) {
 			return echo.NewHTTPError(http.StatusConflict, "user already exists")
@@ -117,20 +122,14 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, resp)
 }
 
-// UpdateUser modifies a user's fields (admin only).
+// UpdateUser modifies only a user's profile (admin only).
 func (h *UserHandler) UpdateUser(c *echo.Context) error {
-	id := c.Param("id")
 	var req struct {
-		Email  *string `json:"email"`
-		Name   *string `json:"name"`
-		Role   *string `json:"role"`
-		Active *bool   `json:"active"`
+		Email       *string `json:"email"`
+		DisplayName *string `json:"display_name"`
 	}
-	if err := c.Bind(&req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
-	}
-	if req.Role != nil && !auth.ValidRole(*req.Role) {
-		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
+	if err := decodeStrict(c, &req, userBodyLimit); err != nil {
+		return err
 	}
 	if req.Email != nil {
 		email, err := auth.NormalizeEmail(*req.Email)
@@ -139,24 +138,51 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 		}
 		req.Email = &email
 	}
+	return h.updateUser(c, req.Email, req.DisplayName, nil, nil, "user.updated")
+}
 
+// UpdateRole modifies a user's role (admin only).
+func (h *UserHandler) UpdateRole(c *echo.Context) error {
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := decodeStrict(c, &req, userBodyLimit); err != nil {
+		return err
+	}
+	if !auth.ValidRole(req.Role) {
+		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
+	}
+	role := auth.Role(req.Role)
+	return h.updateUser(c, nil, nil, &role, nil, "role.changed")
+}
+
+// UpdateStatus modifies a user's status (admin only).
+func (h *UserHandler) UpdateStatus(c *echo.Context) error {
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := decodeStrict(c, &req, userBodyLimit); err != nil {
+		return err
+	}
+	if !auth.ValidUserStatus(req.Status) {
+		return echo.NewHTTPError(http.StatusBadRequest, "status must be active or suspended")
+	}
+	status := auth.UserStatus(req.Status)
 	eventType := auth.AuditEventType("user.updated")
-	if req.Role != nil {
-		eventType = "role.changed"
-	} else if req.Active != nil && !*req.Active {
-		eventType = "user.deactivated"
+	if status == auth.UserStatusSuspended {
+		eventType = "user.suspended"
 	}
-	var role *auth.Role
-	if req.Role != nil {
-		parsed := auth.Role(*req.Role)
-		role = &parsed
-	}
-	user, err := h.users.UpdateWithAudit(id, req.Email, req.Name, role, req.Active, userAuditEvent(c, eventType))
+	return h.updateUser(c, nil, nil, nil, &status, eventType)
+}
+
+func (h *UserHandler) updateUser(c *echo.Context, email, displayName *string, role *auth.Role, status *auth.UserStatus, eventType auth.AuditEventType) error {
+	id := c.Param("id")
+	user, err := h.users.UpdateWithAudit(id, email, displayName, role, status, userAuditEvent(c, eventType))
 	if err != nil {
 		if errors.Is(err, auth.ErrUserConflict) {
 			return echo.NewHTTPError(http.StatusConflict, "user already exists")
 		}
-		if err == auth.ErrLastActiveAdmin {
+		if errors.Is(err, auth.ErrLastActiveAdmin) {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
 		if errors.Is(err, auth.ErrUserNotFound) {
@@ -165,7 +191,7 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 		slog.Error("update user failed", "id", id, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update user")
 	}
-	return c.JSON(200, user)
+	return c.JSON(http.StatusOK, user)
 }
 
 // DeleteUser removes a user (admin only).

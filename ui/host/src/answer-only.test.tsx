@@ -10,7 +10,7 @@ import { useFanoutApp } from "./app-context";
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
   useRuntimeStatus: () => ({ agent_available: true, setup_required: false, auth_mode: "local" }),
-  useViewer: () => ({ id: "viewer", email: "viewer@example.test", name: "Viewer", role: "viewer" }),
+  useViewer: () => ({ id: "viewer", email: "viewer@example.test", display_name: "Viewer", status: "active" as const, role: "viewer" }),
   authorizedFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
   logout: vi.fn(), clearSession: vi.fn(),
 }));
@@ -35,7 +35,7 @@ it("carries answer-only through openChat and HttpAgent, retains it on retry and 
       const events = [{ type: "RUN_STARTED", threadId: body.threadId, runId: body.runId }, { type: "RUN_FINISHED", threadId: body.threadId, runId: body.runId }];
       return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "Content-Type": "text/event-stream" } });
     }
-    return Response.json(path === "/api/dashboards" ? { dashboards: [] } : { messages: [], threads: [], nextCursor: "" });
+    return Response.json(path === "/api/dashboards" ? { dashboards: [] } : { messages: [], items: [], next_cursor: null });
   }));
   const rootRoute = createRootRoute({ component: App });
   const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat/$threadId", component: Controls });

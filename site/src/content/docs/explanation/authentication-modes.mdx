@@ -25,6 +25,25 @@ designed path, not a workaround — see
 
 In local mode, roles are managed inside Fanout.
 
+### Account profiles and suspension
+
+User responses from `GET /api/auth/me` and `GET /api/users` use `display_name`
+and `status`. Status is `active` or `suspended`; roles remain `viewer`,
+`operator`, and `admin`.
+
+Administrators provision users with `POST /api/users`, supplying `email`,
+`display_name`, and `role`. New users have status `active`. Profile edits use
+`PATCH /api/users/{id}` with only `email` and `display_name`. Change roles with
+`PATCH /api/users/{id}/role` and a body such as `{"role":"viewer"}`; suspend an
+account with `PATCH /api/users/{id}/status` and `{"status":"suspended"}`.
+Use `{"status":"active"}` on that same status route to restore sign-in.
+Unknown fields and invalid statuses return `400`.
+
+Email, role, and status changes revoke existing browser sessions. Suspension
+blocks both local and OIDC sign-in, as well as OAuth token use. Restoring status
+does not restore revoked sessions. The last active administrator cannot be
+demoted, suspended, or deleted. These account rules apply in both auth modes.
+
 ### Self-signup
 
 `FANOUT_SELF_SIGNUP` (default `false`) lets anyone who can receive an email code

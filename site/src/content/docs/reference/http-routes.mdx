@@ -65,9 +65,9 @@ Capabilities map to roles in [roles](/reference/roles).
 | `GET` | `/.well-known/oauth-protected-resource/mcp` | protocol handshake |
 | `POST` | `/api/agent/runs` | `agent:run` |
 | `GET` | `/api/agent/threads` | `agent:run` |
-| `DELETE` | `/api/agent/threads/:threadID` | `agent:run` |
-| `GET` | `/api/agent/threads/:threadID` | `agent:run` |
-| `PATCH` | `/api/agent/threads/:threadID` | `agent:run` |
+| `DELETE` | `/api/agent/threads/:id` | `agent:run` |
+| `GET` | `/api/agent/threads/:id` | `agent:run` |
+| `PATCH` | `/api/agent/threads/:id` | `agent:run` |
 | `GET` | `/api/alerting/rules` | `telemetry:read` |
 | `POST` | `/api/alerting/rules` | `alerts:manage` |
 | `DELETE` | `/api/alerting/rules/:id` | `alerts:manage` |
@@ -100,6 +100,7 @@ Capabilities map to roles in [roles](/reference/roles).
 | `Any` | `/api/mcp` | `telemetry:read` |
 | `POST` | `/api/panels/exemplars` | `telemetry:read` |
 | `POST` | `/api/panels/query` | `telemetry:read` |
+| `POST` | `/api/panels/variables/resolve` | `telemetry:read` |
 | `GET` | `/api/settings/ingest` | `ingest:read-metadata` |
 | `POST` | `/api/settings/ingest/token/rotate` | `ingest:manage` |
 | `GET` | `/api/telemetry/schema` | `telemetry:read` |
@@ -109,7 +110,8 @@ Capabilities map to roles in [roles](/reference/roles).
 | `DELETE` | `/api/users/:id` | `users:manage` |
 | `PATCH` | `/api/users/:id` | `users:manage` |
 | `POST` | `/api/users/:id/access/revoke` | `users:manage` |
-| `POST` | `/api/variables/resolve` | `telemetry:read` |
+| `PATCH` | `/api/users/:id/role` | `users:manage` |
+| `PATCH` | `/api/users/:id/status` | `users:manage` |
 | `GET` | `/debug/pprof/` | `operations:read` |
 | `GET` | `/debug/pprof/:name` | `operations:read` |
 | `GET` | `/debug/pprof/cmdline` | `operations:read` |

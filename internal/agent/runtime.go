@@ -63,9 +63,9 @@ func NewRuntime(provider Provider, tools toolExecutor, store *Store) *Runtime {
 func (r *Runtime) Register(group *echo.Group) {
 	group.POST("/runs", r.Run)
 	group.GET("/threads", r.ListThreads)
-	group.GET("/threads/:threadID", r.GetThread)
-	group.PATCH("/threads/:threadID", r.RenameThread)
-	group.DELETE("/threads/:threadID", r.DeleteThread)
+	group.GET("/threads/:id", r.GetThread)
+	group.PATCH("/threads/:id", r.RenameThread)
+	group.DELETE("/threads/:id", r.DeleteThread)
 }
 
 type threadCursor struct {
@@ -79,10 +79,10 @@ func (r *Runtime) ListThreads(c *echo.Context) error {
 		return ownerErr
 	}
 	limit := 30
-	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
+	if raw := strings.TrimSpace(c.QueryParam("page_size")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 100 {
-			return echo.NewHTTPError(http.StatusBadRequest, "limit must be between 1 and 100")
+			return echo.NewHTTPError(http.StatusBadRequest, "page_size must be between 1 and 100")
 		}
 		limit = parsed
 	}
@@ -106,7 +106,7 @@ func (r *Runtime) ListThreads(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list threads").Wrap(err)
 	}
-	nextCursor := ""
+	var nextCursor *string
 	if len(items) > limit {
 		items = items[:limit]
 		last := items[len(items)-1]
@@ -114,9 +114,10 @@ func (r *Runtime) ListThreads(c *echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to paginate threads").Wrap(err)
 		}
-		nextCursor = base64.RawURLEncoding.EncodeToString(encoded)
+		value := base64.RawURLEncoding.EncodeToString(encoded)
+		nextCursor = &value
 	}
-	return c.JSON(http.StatusOK, map[string]any{"threads": items, "nextCursor": nextCursor})
+	return c.JSON(http.StatusOK, map[string]any{"items": items, "next_cursor": nextCursor})
 }
 
 func (r *Runtime) GetThread(c *echo.Context) error {
@@ -124,7 +125,7 @@ func (r *Runtime) GetThread(c *echo.Context) error {
 	if ownerErr != nil {
 		return ownerErr
 	}
-	thread, err := r.store.Thread(c.Request().Context(), ownerID, c.Param("threadID"))
+	thread, err := r.store.Thread(c.Request().Context(), ownerID, c.Param("id"))
 	if errors.Is(err, ErrThreadNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 	}
@@ -149,7 +150,7 @@ func (r *Runtime) RenameThread(c *echo.Context) error {
 	if title == "" || len([]rune(title)) > 120 {
 		return echo.NewHTTPError(http.StatusBadRequest, "thread title must be between 1 and 120 characters")
 	}
-	if err := r.store.RenameThread(c.Request().Context(), ownerID, c.Param("threadID"), title); errors.Is(err, ErrThreadNotFound) {
+	if err := r.store.RenameThread(c.Request().Context(), ownerID, c.Param("id"), title); errors.Is(err, ErrThreadNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 	} else if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to rename thread").Wrap(err)
@@ -162,7 +163,7 @@ func (r *Runtime) DeleteThread(c *echo.Context) error {
 	if ownerErr != nil {
 		return ownerErr
 	}
-	if err := r.store.DeleteThread(c.Request().Context(), ownerID, c.Param("threadID")); errors.Is(err, ErrThreadNotFound) {
+	if err := r.store.DeleteThread(c.Request().Context(), ownerID, c.Param("id")); errors.Is(err, ErrThreadNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 	} else if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete thread").Wrap(err)

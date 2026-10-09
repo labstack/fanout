@@ -51,7 +51,7 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	}
 	defer database.Close()
 	ctx := context.Background()
-	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
+	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,status) VALUES('owner','owner@example.test','Owner','admin','active')`); err != nil {
 		t.Fatal(err)
 	}
 	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
@@ -84,7 +84,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 	defer database.Close()
 	ctx := context.Background()
 	for _, owner := range []string{"owner", "attacker"} {
-		if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES(?,?,?,'admin',1)`, owner, owner+"@example.test", owner); err != nil {
+		if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,status) VALUES(?,?,?,'admin','active')`, owner, owner+"@example.test", owner); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -239,7 +239,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 				}
 				continue
 			}
-			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+			if tool.Name == "query_panel_fragment" || tool.Name == "list_panel_exemplars" || tool.Name == "resolve_panel_variables" {
 				if !appOnly(tool.Meta) {
 					t.Fatalf("not app-only: %s", tool.Name)
 				}
@@ -291,7 +291,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, tool := range listed.Tools {
-			if tool.Name == "query_panel_fragment" || tool.Name == "get_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+			if tool.Name == "query_panel_fragment" || tool.Name == "list_panel_exemplars" || tool.Name == "resolve_panel_variables" {
 				t.Fatalf("app helper exposed without negotiation: %s", tool.Name)
 			}
 		}

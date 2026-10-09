@@ -56,5 +56,5 @@ it("resolves options and exemplars only through the bridge", async () => {
   const body = { dashboard: fixture().dashboard, panel_id: "p", from: "a", to: "b", vars: { service: [] } };
   await transport.drill.exemplars(body, controller.signal);
   expect(callServerTool.mock.calls[0][0].name).toBe("resolve_panel_variables");
-  expect(callServerTool).toHaveBeenLastCalledWith({ name: "get_panel_exemplars", arguments: body }, { signal: controller.signal });
+  expect(callServerTool).toHaveBeenLastCalledWith({ name: "list_panel_exemplars", arguments: body }, { signal: controller.signal });
 });

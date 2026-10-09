@@ -43,7 +43,7 @@ func TestCollectRoutesResolvesGroupPrefixes(t *testing.T) {
 	relative := map[string]bool{
 		"/overview": true, "/topology": true, "/logs": true,
 		"/trace": true, "/performance": true,
-		"/runs": true, "/threads": true, "/threads/:threadID": true,
+		"/runs": true, "/threads": true, "/threads/:id": true,
 	}
 	for _, r := range routes {
 		if relative[r.Path] {

@@ -91,9 +91,9 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return rateLimited(c, 15*time.Minute)
 	}
 	var req struct {
-		Email      string `json:"email"`
-		Name       string `json:"name"`
-		SetupToken string `json:"setup_token"`
+		Email       string `json:"email"`
+		DisplayName string `json:"display_name"`
+		SetupToken  string `json:"setup_token"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
@@ -119,7 +119,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	createEvent := auth.AuditEvent{EventType: "setup.completed", Outcome: "success", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
-	user, err := h.users.CreateFirstAdminWithAudit(email, req.Name, createEvent)
+	user, err := h.users.CreateFirstAdminWithAudit(email, req.DisplayName, createEvent)
 	if errors.Is(err, auth.ErrSetupComplete) {
 		// The setup credential creates exactly one administrator. Establishing
 		// a session for an existing admin here would let one token mint
@@ -219,7 +219,7 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 		slog.Error("auth: login user lookup failed", "err", userErr)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
-	if !errors.Is(userErr, auth.ErrUserNotFound) && !user.Active {
+	if !errors.Is(userErr, auth.ErrUserNotFound) && user.Status != auth.UserStatusActive {
 		jitter()
 		return c.JSON(200, map[string]bool{"code_sent": true})
 	}
@@ -308,10 +308,10 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 		slog.Error("auth: complete verified self-signup", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
-	if errors.Is(err, auth.ErrUserNotFound) || !user.Active {
-		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "inactive_or_missing"}})
+	if errors.Is(err, auth.ErrUserNotFound) || user.Status != auth.UserStatusActive {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "suspended_or_missing"}})
 		jitter()
-		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
+		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or suspended")
 	}
 
 	if err := h.establishSession(c, user); err != nil {
@@ -353,10 +353,10 @@ func (h *AuthHandler) LoginLink(c *echo.Context) error {
 		slog.Error("auth: login link user lookup failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
-	if errors.Is(err, auth.ErrUserNotFound) || !user.Active {
-		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "inactive_or_missing_login_link_user"}})
+	if errors.Is(err, auth.ErrUserNotFound) || user.Status != auth.UserStatusActive {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "suspended_or_missing_login_link_user"}})
 		jitter()
-		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
+		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or suspended")
 	}
 	if err := h.establishSession(c, user); err != nil {
 		slog.Error("auth: login link session establishment failed", "user_id", user.ID, "err", err)

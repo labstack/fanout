@@ -62,7 +62,7 @@ role is fixed: self-signup can never create an operator or administrator.
 The setting requires complete SMTP configuration and local auth mode.
 
 Self-signup remains unavailable until the first administrator completes setup.
-Inactive accounts are not recreated or reactivated. Public installations
+Suspended accounts are not recreated or reactivated. Public installations
 should enforce traffic and AI-budget limits at the deployment edge; Fanout also
 retains its per-IP, per-address, expiry, and attempt limits described below.
 
@@ -82,7 +82,7 @@ docker exec <container> fanout --config /etc/fanout/fanout.yaml \
   login-link admin@example.com
 ```
 
-The command refuses missing or inactive users and a missing control database.
+The command refuses missing or suspended users and a missing control database.
 It writes a hashed credential and a `login_link.issued` audit event, then prints
 one URL to stderr. The URL expires after 15 minutes, works once, and writes a
 distinct `login_link.redeemed` audit event when used. Running it while Fanout is
@@ -91,6 +91,28 @@ online is supported by the control database's WAL and busy-timeout settings.
 Fix SMTP after regaining access if email-code login is expected. OIDC-mode
 recovery remains at the identity provider or OIDC configuration layer; local
 login links are deliberately unavailable in that mode.
+
+### User account API
+
+All user-management routes require an administrator. User projections, including
+`GET /api/auth/me` and `GET /api/users`, expose `display_name` and `status`.
+Status is either `active` or `suspended`; roles remain `viewer`, `operator`,
+and `admin`.
+
+- `POST /api/users` provisions an account with `email`, `display_name`, and
+  `role`. New accounts have status `active`.
+- `PATCH /api/users/{id}` changes only `email` and `display_name`; omitted
+  profile fields retain their values.
+- `PATCH /api/users/{id}/role` accepts only `{"role":"viewer"}` (or
+  `operator` or `admin`).
+- `PATCH /api/users/{id}/status` accepts only `{"status":"suspended"}` or
+  `{"status":"active"}`.
+
+Unknown fields return `400`. Email, role, and status changes revoke browser
+sessions. Suspension also blocks sign-in and OAuth token use. Demotion,
+suspension, and deletion cannot remove the last active administrator.
+The first-run `POST /api/auth/setup` request uses `display_name` alongside
+`email` and `setup_token`.
 
 ### Adding local users without SMTP
 
@@ -101,15 +123,15 @@ same command shown above and deliver it through a trusted channel. When SMTP is
 configured, Fanout sends the invitation synchronously and reports relay
 failure rather than claiming it was delivered.
 
-If the local account is inactive or its address is no longer usable, the
+If the local account is suspended or its address is no longer usable, the
 command refuses to mint a credential. Stop Fanout, copy the control database,
 and repair that account without deleting it or its owned data:
 
 ```sql
-SELECT id, email, role, active FROM users;
+SELECT id, email, display_name, role, status FROM users;
 
 UPDATE users
-   SET email = 'you@example.com', active = 1, role = 'admin'
+   SET email = 'you@example.com', status = 'active', role = 'admin'
  WHERE id = '<the administrator id>';
 ```
 

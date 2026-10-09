@@ -191,12 +191,13 @@ describe("AuthGate OAuth return", () => {
     fetchMock.mockImplementation(async (input) => authResponse(input, {
       id: "viewer-123",
       email: "v@example.com",
-      name: "Vee",
+      display_name: "Vee",
+      status: "active",
       role: "viewer",
     }));
     function Probe() {
       const viewer = useViewer();
-      return <div>Signed in as {viewer.email} ({viewer.role})</div>;
+      return <div>Signed in as {viewer.display_name}: {viewer.email} ({viewer.role}, {viewer.status})</div>;
     }
     const container = document.createElement("div");
     document.body.append(container);
@@ -208,7 +209,38 @@ describe("AuthGate OAuth return", () => {
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Signed in as v@example.com (viewer)"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Signed in as Vee: v@example.com (viewer, active)"));
+    await act(async () => root.unmount());
+  });
+
+  it("sends display_name when setting up the first administrator", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/");
+    let setupBody: unknown;
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/api/auth/status") return json({ setup_required: true, auth_mode: "local", agent_available: true, smtp_configured: false, self_signup: false });
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      if (path === "/api/auth/setup") {
+        setupBody = JSON.parse(String(init?.body));
+        return json({ status: "authenticated" });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Create the first admin"));
+    const inputs = document.querySelectorAll<HTMLInputElement>('form input');
+    expect(inputs).toHaveLength(3);
+    await act(async () => {
+      for (const [index, value] of ["admin@example.com", "First Admin", "setup-credential"].entries()) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(inputs[index], value);
+        inputs[index].dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await act(async () => document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(setupBody).toEqual({ email: "admin@example.com", display_name: "First Admin", setup_token: "setup-credential" }));
     await act(async () => root.unmount());
   });
 

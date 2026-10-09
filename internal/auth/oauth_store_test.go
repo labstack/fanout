@@ -134,10 +134,10 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	}
 }
 
-func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
+func TestOAuthStoreRejectsWrongAudienceAndSuspendedRefresh(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
-	user, err := users.CreateWithAudit("inactive-oauth@example.com", "", "operator", AuditEvent{EventType: "user.created", Outcome: "success"})
+	user, err := users.CreateWithAudit("suspended-oauth@example.com", "", "operator", AuditEvent{EventType: "user.created", Outcome: "success"})
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
@@ -154,12 +154,12 @@ func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://other.example/mcp"); !errors.Is(err, ErrInvalidOAuthToken) {
 		t.Fatalf("wrong audience = %v, want invalid token", err)
 	}
-	active := false
-	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &active, AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
-		t.Fatalf("deactivate user: %v", err)
+	status := UserStatusSuspended
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, nil, &status, AuditEvent{EventType: "user.updated", Outcome: "success"}); err != nil {
+		t.Fatalf("suspend user: %v", err)
 	}
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {
-		t.Fatalf("inactive user refresh = %v, want invalid grant", err)
+		t.Fatalf("suspended user refresh = %v, want invalid grant", err)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
 
-	// Simulate an infrastructure failure on the user-active read.
+	// Simulate an infrastructure failure on the user-status read.
 	if _, err := sqlite.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
 		t.Fatalf("hide users table: %v", err)
 	}

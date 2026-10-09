@@ -290,24 +290,24 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 	if record.ExpiresAt.Unix() <= now {
 		return OAuthTokenPair{}, ErrInvalidOAuthGrant
 	}
-	var active int64
-	err = conn.QueryRowContext(ctx, `SELECT active FROM users WHERE id = ?`, record.UserID).Scan(&active)
+	var status string
+	err = conn.QueryRowContext(ctx, `SELECT status FROM users WHERE id = ?`, record.UserID).Scan(&status)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		active = 0 // user row is definitively gone: treat as inactive
+		status = string(UserStatusSuspended) // user row is definitively gone: deny refresh
 	case err != nil:
 		// A failed read is an infrastructure error, never an invalid grant:
 		// do not revoke the family because the database hiccuped.
 		return OAuthTokenPair{}, fmt.Errorf("oauth: read user for refresh: %w", err)
 	}
-	if active != 1 {
+	if status != string(UserStatusActive) {
 		// Same deliberate commit-before-error as the reuse branch above: the
-		// revocation of the inactive user's family must outlive the failure.
+		// revocation of the suspended user's family must outlive the failure.
 		if _, revokeErr := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE family_id = ?`, now, record.FamilyID); revokeErr != nil {
-			return OAuthTokenPair{}, fmt.Errorf("oauth: revoke inactive user token family: %w", revokeErr)
+			return OAuthTokenPair{}, fmt.Errorf("oauth: revoke suspended user token family: %w", revokeErr)
 		}
 		if _, commitErr := conn.ExecContext(ctx, "COMMIT"); commitErr != nil {
-			return OAuthTokenPair{}, fmt.Errorf("oauth: commit inactive user revocation: %w", commitErr)
+			return OAuthTokenPair{}, fmt.Errorf("oauth: commit suspended user revocation: %w", commitErr)
 		}
 		committed = true
 		return OAuthTokenPair{}, ErrInvalidOAuthGrant

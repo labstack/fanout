@@ -21,7 +21,7 @@ func newConcurrentFileServer(t *testing.T) *Server {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	for _, owner := range []string{"owner", "other"} {
-		if _, err := database.DB.Exec(`INSERT INTO users(id,email,name,role,active) VALUES(?,?,?,'admin',1)`, owner, owner+"@example.test", owner); err != nil {
+		if _, err := database.DB.Exec(`INSERT INTO users(id,email,display_name,role,status) VALUES(?,?,?,'admin','active')`, owner, owner+"@example.test", owner); err != nil {
 			t.Fatal(err)
 		}
 	}

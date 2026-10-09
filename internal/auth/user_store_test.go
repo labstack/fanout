@@ -197,7 +197,7 @@ func TestUserTimestampsUseOneSortableFormat(t *testing.T) {
 		t.Fatalf("touch timestamps = logged %q updated %q", touched.LoggedInAt, touched.UpdatedAt)
 	}
 
-	if _, err := sqlite.DB.Exec(`INSERT INTO users(id,email,role,active) VALUES(?,?,?,1)`, "default-time", "default-time@example.com", "viewer"); err != nil {
+	if _, err := sqlite.DB.Exec(`INSERT INTO users(id,email,role,status) VALUES(?,?,?,'active')`, "default-time", "default-time@example.com", "viewer"); err != nil {
 		t.Fatal(err)
 	}
 	var created, updated string
