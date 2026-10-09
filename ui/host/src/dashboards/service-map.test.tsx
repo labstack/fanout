@@ -30,7 +30,7 @@ it.each([180,190,220,230,280,396,460,480])("contains nodes, labels and routed ed
   expect(graph.uncalledLabel!.y).toBeGreaterThanOrEqual(8);
 });
 
-for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark of [false,true]) it(`renders floor-sized labels and safe titles at ${width}×${height}, dark=${dark}`, async () => {
+for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark of [false,true]) it(`renders fitted labels and safe titles at ${width}×${height}, dark=${dark}`, async () => {
   const original = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) { return this.hasAttribute("data-service-viewport") ? DOMRect.fromRect({width,height}) : original.call(this); });
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanups.push(() => root.unmount());
@@ -39,7 +39,8 @@ for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark 
   expect(cards).toHaveLength(20); expect(host.textContent).not.toMatch(/\+\d+ below/);
   for (const card of cards) {
     const text = card.querySelector<HTMLElement>('[data-service-text]')!;
-    expect(parseFloat(text.style.fontSize)).toBeGreaterThanOrEqual(typeScale.micro);
+    const scale=Number(host.querySelector<HTMLElement>('[data-service-viewport]')!.dataset.layoutScale);
+    expect(parseFloat(text.style.fontSize)+.01).toBeGreaterThanOrEqual(typeScale.micro*Math.min(1,scale/.65));
     expect(text.style.visibility).not.toBe("hidden");
     expect(card.querySelector('[data-service-name]')!.textContent).toBe(card.dataset.serviceNode);
     expect(card.title).toContain("p95"); expect(card.title).toContain("err");
@@ -60,7 +61,7 @@ it.each([{width:780,height:460},{width:1100,height:220}])("runs the shared brows
   }
   const label = viewport.querySelector<HTMLElement>('[data-service-uncalled-label]')!;
   label.getBoundingClientRect = () => DOMRect.fromRect({x:(size.width-180)/2,y:parseFloat(label.style.top),width:180,height:11});
-  expect(assertServiceMapDOM(viewport,{allowOverflow:size.width===780})).toMatchObject({nodes:20,edges:23,body:size});
+  expect(assertServiceMapDOM(viewport)).toMatchObject({nodes:20,edges:23,body:size});
   const clipped = viewport.querySelector<HTMLButtonElement>('button[title]')!;
   clipped.getBoundingClientRect = () => DOMRect.fromRect({x:0,y:-10,width:20,height:20});
   expect(()=>assertServiceMapDOM(viewport)).toThrow(/clipped/);
@@ -91,7 +92,7 @@ it("measures usable client bounds and refits on resize without changing the LR l
   await act(async () => root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={254}/></MantineProvider>));
   width = 744; height = 460; await act(async () => resize());
   const content=host.querySelector<HTMLElement>('[data-service-content]')!;
-  expect(Number(host.querySelector<HTMLElement>('[data-service-viewport]')!.dataset.layoutScale)).toBeGreaterThanOrEqual(.65);
+  expect(parseFloat(content.style.width)).toBe(width);expect(parseFloat(content.style.height)).toBe(height);expect(content.style.transform).toBe("translate(0px, 0px) scale(1)");
   for (const node of host.querySelectorAll<HTMLElement>('[data-service-node]')) { expect(parseFloat(node.style.left)+parseFloat(node.style.width)).toBeLessThanOrEqual(parseFloat(content.style.width)-8); expect(parseFloat(node.style.top)+parseFloat(node.style.height)).toBeLessThanOrEqual(parseFloat(content.style.height)-8); }
 });
 

@@ -39,9 +39,9 @@ it.each([190,220])("protects all names in a twenty-node graph with nine leaf lan
   const m={nodes,edges},graph=fitServiceMap(layoutServiceMapRaw(m,{width:1100,height,measureText:measure}),m,{width:1100,height});
   contained(graph,1100,height);
   for(const n of graph.nodes) {
-    const font=Math.max(typeScale.micro,12*graph.scale);
-    expect(n.height).toBeGreaterThanOrEqual(font+2);
-    expect(n.width).toBeGreaterThanOrEqual(measure(n.id+"●",`${font}px monospace`)+16);
+    const labelScale=Math.min(1,graph.scale/.65),font=Math.max(typeScale.micro*labelScale,12*graph.scale);
+    expect(n.height).toBeGreaterThanOrEqual(font+2*labelScale-.01);
+    expect(n.width).toBeGreaterThanOrEqual(measure(n.id+"●",`${font}px monospace`)+16*labelScale);
   }
 });
 it("drops the compact metric before a protected service name",()=>{
@@ -89,16 +89,16 @@ it("uses compact nodesep of 4 logical pixels",()=>{
   const rank=graph.nodes.filter(n=>!n.entry).sort((a,b)=>a.y-b.y);expect(graph.compact).toBe(true);
   for(let i=1;i<rank.length;i++) expect((rank[i].y-rank[i-1].y-rank[i-1].height)/graph.scale).toBeCloseTo(4);
 });
-it("keeps a separated entry visible when their full extent exceeds the text floor viewport",()=>{
+it("contains separated entries and all leaves even below the natural text scale",()=>{
   const nodes=[] as typeof model.nodes,edges=[] as typeof model.edges;
   for(let root=0;root<2;root++) {
     const id=`entry-${root}`;nodes.push({...model.nodes[0],id});
     for(let i=0;i<20;i++){const child=`${id}-callee-${i}`;nodes.push({...model.nodes[0],id:child});edges.push({...model.edges[0],id:child,caller:id,callee:child});}
   }
   const m={nodes,edges},graph=fitServiceMap(layoutServiceMapRaw(m,{width:1100,height:180}),m,{width:1100,height:180});
-  expect(graph.scale).toBe(.65);expect(graph.contentHeight).toBeGreaterThan(180);
+  expect(graph.scale).toBeLessThan(.65);expect(graph.contentHeight).toBe(180);
   const entries=graph.nodes.filter(n=>n.entry);expect(entries.some(n=>n.y+graph.initialView.y>=8 && n.y+n.height+graph.initialView.y<=172)).toBe(true);
-  for(const n of graph.nodes) {expect(n.height).toBeGreaterThanOrEqual(13);for(const o of graph.nodes) if(o!==n) expect(n.x>=o.x+o.width||o.x>=n.x+n.width||n.y>=o.y+o.height||o.y>=n.y+n.height).toBe(true);}
+  for(const n of graph.nodes) {expect(n.height).toBeCloseTo(20*graph.scale);for(const o of graph.nodes) if(o!==n) expect(n.x>=o.x+o.width||o.x>=n.x+n.width||n.y>=o.y+o.height||o.y>=n.y+n.height).toBe(true);}
 });
 it("keeps an entry in a distant Dagre rank inside the initial viewport",()=>{
   const nodes=Array.from({length:12},(_,i)=>({...model.nodes[0],id:`chain-${i}`}));nodes.push({...model.nodes[0],id:"late-entry"});

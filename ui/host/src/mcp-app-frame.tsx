@@ -162,7 +162,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   const changeDisplayMode = (mode: "inline" | "fullscreen") => {
     setDisplayMode(mode);
     bridgeRef.current?.setHostContext({ theme: colorSchemeRef.current, displayMode: mode, availableDisplayModes: ["inline", "fullscreen"] });
-    if (mode === "inline") iframeRef.current?.focus();
+    if (mode === "inline" && document.activeElement !== iframeRef.current) iframeRef.current?.focus();
   };
   useEffect(() => {
     if (displayMode !== "fullscreen") return;
@@ -170,8 +170,14 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); changeDisplayMode("inline"); } };
+    // Tab inside the sandbox never reaches the host keydown listener. Native
+    // focus leaving its last control must still stay in this full-screen view.
+    const containFocus = (event: FocusEvent) => {
+      if (!iframeRef.current?.parentElement?.contains(event.target as Node)) closeRef.current?.focus();
+    };
     window.addEventListener("keydown", escape);
-    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", escape); };
+    document.addEventListener("focusin", containFocus);
+    return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", escape); document.removeEventListener("focusin", containFocus); };
   }, [displayMode]);
   const [height, setHeight] = useState(minimumHeight);
   const [error, setError] = useState("");
@@ -299,6 +305,6 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
     role={displayMode === "fullscreen" ? "dialog" : undefined} aria-modal={displayMode === "fullscreen" ? true : undefined} aria-label={displayMode === "fullscreen" ? "Fanout analysis view" : undefined}
     bg="var(--mantine-color-body)" style={displayMode === "fullscreen" ? { position: "fixed", inset: 0, zIndex: 1000, display: "flex", flexDirection: "column" } : undefined}>
     {displayMode === "fullscreen" && <Box p="xs" ta="right"><Button ref={closeRef} data-autofocus size="compact-sm" variant="default" aria-label="Close analysis view" onClick={() => changeDisplayMode("inline")}>Close</Button></Box>}
-    <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height: displayMode === "fullscreen" ? "100%" : height, ...(displayMode === "fullscreen" ? { flex: "1 1 0", minHeight: 0 } : {}) }} onLoad={() => void connectBridge()} />
+    <Box component="iframe" tabIndex={0} ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height: displayMode === "fullscreen" ? "100%" : height, ...(displayMode === "fullscreen" ? { flex: "1 1 0", minHeight: 0 } : {}) }} onLoad={() => void connectBridge()} />
   </Box></FocusTrap>;
 }

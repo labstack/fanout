@@ -10,7 +10,7 @@ vi.mock("@modelcontextprotocol/client",()=>({Client:class {onclose?:()=>void;one
 vi.mock("@modelcontextprotocol/ext-apps/app-bridge",()=>({AppBridge:class {oninitialized?:()=>Promise<void>;oncalltool?:()=>Promise<unknown>;onsizechange?:()=>void;constructor(client:unknown,_info:unknown,capabilities:unknown,options:unknown){mcp.contexts.push(options);expect(client).toBeNull();mcp.bridges.push(this);mcp.capabilities.push(capabilities);}async connect(){await this.oninitialized?.();}async sendToolInput(){}async sendToolResult(){}async teardownResource(){}setHostContext=mcp.setHostContext;},PostMessageTransport:class {}}));
 let MCPAppFrame:ComponentType<{content:unknown}>;
 let mcpAppCSP:(meta:unknown)=>string;
-beforeEach(async()=>{await new Promise(r=>setTimeout(r,0));vi.resetModules();vi.clearAllMocks();mcp.clients.length=0;mcp.bridges.length=0;mcp.capabilities.length=0;mcp.contexts.length=0;
+beforeEach(async()=>{vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);await new Promise(r=>setTimeout(r,0));vi.resetModules();vi.clearAllMocks();mcp.clients.length=0;mcp.bridges.length=0;mcp.capabilities.length=0;mcp.contexts.length=0;
  mcp.connect.mockResolvedValue(undefined);mcp.close.mockResolvedValue(undefined);mcp.callTool.mockResolvedValue({content:[]});
  mcp.readResource.mockImplementation(({uri})=>Promise.resolve({contents:[{uri,mimeType:"text/html;profile=mcp-app",text:"<!doctype html><html><head></head><body>app</body></html>",_meta:{ui:{csp:{}}}}],ttlMs:300000}));
  mcp.listTools.mockResolvedValue({tools:[{name:"query_panel_fragment",_meta:{ui:{visibility:["app"]}}},{name:"inspect_trace",_meta:{ui:{visibility:["model","app"]}}},{name:"create_dashboard"},{name:"replace_dashboard"},{name:"model_tool",_meta:{ui:{visibility:["model"]}}}]});
@@ -74,4 +74,64 @@ it.each(["Close", "Escape", "app"])("negotiates a viewport overlay and restores 
   expect(document.querySelector('[data-app-fullscreen]')).toBeNull();expect(view.container.querySelector("iframe")).toBe(frame);expect(frame.style.height).toBe("240px");expect(document.activeElement).toBe(frame);
   expect(mcp.setHostContext).toHaveBeenLastCalledWith(expect.objectContaining({displayMode:"inline"}));
  } finally {await view.unmount();}
+});
+
+
+it("preserves focus inside the iframe when the app returns inline, focusing the frame only from outside",async()=>{
+  const view=await mount();
+  try {
+    const frame=view.container.querySelector("iframe")!;
+    await act(async()=>frame.dispatchEvent(new Event("load")));
+    const bridge=mcp.bridges[0] as unknown as {onrequestdisplaymode(params:{mode:string}):Promise<unknown>};
+    await act(async()=>bridge.onrequestdisplaymode({mode:"fullscreen"}));
+    await act(async()=>new Promise(resolve=>setTimeout(resolve,10)));
+    frame.focus();
+    expect(document.activeElement).toBe(frame);
+    const focus=vi.spyOn(frame,"focus");
+    await act(async()=>bridge.onrequestdisplaymode({mode:"inline"}));
+    expect(focus).not.toHaveBeenCalled();
+    await act(async()=>bridge.onrequestdisplaymode({mode:"fullscreen"}));
+    await act(async()=>new Promise(resolve=>setTimeout(resolve,10)));
+    const close=view.container.querySelector<HTMLButtonElement>('[aria-label="Close analysis view"]')!;
+    close.focus();
+    await act(async()=>close.click());
+    expect(focus).toHaveBeenCalledOnce();expect(document.activeElement).toBe(frame);
+  } finally {await view.unmount();vi.restoreAllMocks();}
+});
+
+
+it("includes the iframe in the full-screen Tab and Shift+Tab cycle with Close analysis view",async()=>{
+  const view=await mount();
+  try {
+    const frame=view.container.querySelector("iframe")!;
+    await act(async()=>frame.dispatchEvent(new Event("load")));
+    const bridge=mcp.bridges[0] as unknown as {onrequestdisplaymode(params:{mode:string}):Promise<unknown>};
+    await act(async()=>bridge.onrequestdisplaymode({mode:"fullscreen"}));
+    // Flush FocusTrap's deferred autofocus before exercising its real handler.
+    await act(async()=>new Promise(resolve=>setTimeout(resolve,10)));
+    const close=view.container.querySelector<HTMLButtonElement>('[aria-label="Close analysis view"]')!;
+    expect(frame.getAttribute("tabindex")).toBe("0");
+    close.focus();
+    const forward=new KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true});
+    await act(async()=>close.dispatchEvent(forward));
+    // An unhandled native Tab enters the iframe's first tabbable control.
+    expect(forward.defaultPrevented).toBe(false);
+    frame.focus();
+    const exit=new KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true});
+    await act(async()=>frame.dispatchEvent(exit));
+    expect(exit.defaultPrevented).toBe(true);expect(document.activeElement).toBe(close);
+    const reverse=new KeyboardEvent("keydown",{key:"Tab",shiftKey:true,bubbles:true,cancelable:true});
+    await act(async()=>close.dispatchEvent(reverse));
+    expect(reverse.defaultPrevented).toBe(true);expect(document.activeElement).toBe(frame);
+    const back=new KeyboardEvent("keydown",{key:"Tab",shiftKey:true,bubbles:true,cancelable:true});
+    await act(async()=>frame.dispatchEvent(back));expect(back.defaultPrevented).toBe(false);
+    // happy-dom does not run native Tab navigation; the browser moves back to Close.
+    const outside=document.createElement("button");document.body.append(outside);
+    try {
+      // Tab from the iframe's last inner control dispatches no host keydown.
+      // Its next native focus destination must be brought back into the trap.
+      await act(async()=>outside.focus());
+      expect(document.activeElement).toBe(close);
+    } finally {outside.remove();}
+  } finally {await view.unmount();}
 });

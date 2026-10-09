@@ -124,3 +124,13 @@ it("highlights log pattern body templates while preserving monospace text", asyn
   await render({ ...panel, viz: "log_patterns", options: { highlight: "cafe" } }, resultFor("body_template", "FAILED <*> café"));
   expect(marks()).toEqual([]);
 });
+
+
+it.each([[[37],"1 pattern · 37 events in the window"],[[37,5],"2 patterns · 42 events in the window"]] as const)("places the pattern/event summary directly after the table (%j)",async(counts,text)=>{
+  await render({...panel,viz:"log_patterns"},{id:"p",status:"ok",elapsed_ms:1,frame:{columns:[{name:"body_template",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[counts.map(()=>"feature flag: False"),[...counts]],rows:counts.length}});
+  const table=container.querySelector("table")!,summary=container.querySelector<HTMLElement>("[data-pattern-summary]")!;
+  expect(summary?.textContent).toBe(text);
+  expect(table.parentElement!.nextElementSibling).toBe(summary);
+  expect(summary.style.position).not.toBe("absolute");expect(summary.style.marginTop).toBe("8px");
+  expect(summary.style.flexShrink).toBe("0");
+});

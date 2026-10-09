@@ -295,3 +295,36 @@ it("updates the failed frame's age in its description and tooltip with a stable 
     expect(host.querySelector('[data-panel-notes]')).toBeNull();
   } finally {vi.useRealTimers();}
 });
+
+
+it.each(["stat", "gauge"] as const)("keeps a 30-character %s title readable in a four-column card and closes the view menu on selection", async viz => {
+  vi.spyOn(HTMLElement.prototype,"getBoundingClientRect").mockReturnValue(DOMRect.fromRect({width:380,height:180}));
+  const title="Request rate (server spans) XX".padEnd(30,"X");
+  expect(title).toHaveLength(30);
+  const h=await render({...p,title,viz});
+  expect(h.querySelector('[data-panel-view="Data"]')).toBeNull();
+  const heading=h.querySelector<HTMLElement>('[data-panel-title]')!;
+  expect(heading.textContent).toBe(title);
+  expect(heading.hasAttribute("data-truncate")).toBe(false);
+  const menu=h.querySelector<HTMLButtonElement>('[aria-label$=" menu"]')!;
+  await act(async()=>menu.click());
+  const data=document.querySelector<HTMLButtonElement>('[role="menuitemradio"][data-panel-view="Data"]')!;
+  await act(async()=>data.click());
+  await vi.waitFor(()=>expect(document.querySelector('[role="menu"]')).toBeNull());
+  expect(h.querySelector("table")).not.toBeNull();
+});
+
+
+it.each(["traces","logs","table","log_patterns"] as const)("reserves a separate footer below the clipped %s row viewport",async viz=>{
+  const h=await render({...p,viz},{...r,frame:{...r.frame!,truncated:true}});
+  const body=h.querySelector<HTMLElement>("[data-panel-body]")!, footer=h.querySelector<HTMLElement>("[data-panel-notes]")!;
+  // happy-dom has no layout engine. Project the card's flex geometry from
+  // the rendered clipping and footer styles, including an overflowing row.
+  const bodyRect=DOMRect.fromRect({x:16,y:70,width:728,height:200});
+  const rowRect=DOMRect.fromRect({x:16,y:250,width:728,height:34});
+  const noteRect=DOMRect.fromRect({x:16,y:bodyRect.bottom+parseFloat(footer.style.paddingTop||"0"),width:728,height:18});
+  const visibleRowBottom=body.style.contain==="paint"?Math.min(rowRect.bottom,bodyRect.bottom):rowRect.bottom;
+  expect(noteRect.top).toBeGreaterThanOrEqual(visibleRowBottom+8);
+  expect(body.contains(footer)).toBe(false);expect(body.nextElementSibling).toBe(footer);
+  expect(footer.style.flexShrink).toBe("0");
+});

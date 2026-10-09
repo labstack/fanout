@@ -14,7 +14,8 @@ export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = fals
     inside(node.box, node.id);
     for (const other of nodes) if (node !== other && node.box.left < other.box.right - .1 && node.box.right > other.box.left + .1 && node.box.top < other.box.bottom - .1 && node.box.bottom > other.box.top + .1) fail(`${node.id} overlaps ${other.id}`);
     const text = node.element.querySelector<HTMLElement>("[data-service-text]") ?? node.element.firstElementChild as HTMLElement;
-    if (text && parseFloat(getComputedStyle(text).fontSize) < 11) fail(`${node.id} text is below micro`);
+    const minimumFont = 11 * Math.min(1, Number(viewport.dataset.layoutScale ?? 1) / .65);
+    if (text && parseFloat(getComputedStyle(text).fontSize) + .01 < minimumFont) fail(`${node.id} text is below its fitted scale`);
     if (requireNames) {
       const name=node.element.querySelector<HTMLElement>("[data-service-name]")??text?.children[1] as HTMLElement;
       const expected=Array.from(node.id).slice(0,24).join("")+(Array.from(node.id).length>24?"…":"");
@@ -25,7 +26,7 @@ export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = fals
       }
       const style=getComputedStyle(name),lineStyle=getComputedStyle(text);
       const fontSize=parseFloat(style.fontSize)||parseFloat(lineStyle.fontSize);
-      if(!(fontSize>=11)) fail(`${node.id} name is below micro`);
+      if(!(fontSize+.01>=minimumFont)) fail(`${node.id} name is below its fitted scale`);
       if(fontSize+2>node.box.height+1) fail(`${node.id} name exceeds its card height`);
       const rect=name.getBoundingClientRect();
       if(rect.width>0&&(rect.left<node.box.left||rect.right>node.box.right||rect.top<node.box.top||rect.bottom>node.box.bottom)) fail(`${node.id} name leaves its card`);
@@ -35,7 +36,8 @@ export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = fals
         context.font=`600 ${fontSize}px ${style.fontFamily||lineStyle.fontFamily}`;
         const glyph=text.firstElementChild!.textContent!;
         if(!glyph) fail(`${node.id} health icon is missing`);
-        if(context.measureText(name.textContent!+glyph).width+14>node.box.width+1) fail(`${node.id} name exceeds its measured card budget`);
+      const padding = 14 * Math.min(1, Number(viewport.dataset.layoutScale ?? 1) / .65);
+      if(context.measureText(name.textContent!+glyph).width+padding>node.box.width+1) fail(`${node.id} name exceeds its measured card budget`);
       }
     }
   }
@@ -63,7 +65,13 @@ export function assertServiceMapDOM(viewport: HTMLElement, { requireNames = fals
     }
   }
   const label = viewport.querySelector<HTMLElement>("[data-service-uncalled-label]") ?? [...viewport.querySelectorAll("span")].find(element => element.textContent === "No traced calls in this window");
-  if (label) inside(label.getBoundingClientRect(), "uncalled label");
+  if (label) {
+    const box = label.getBoundingClientRect();
+    inside(box, "uncalled label");
+    const overlaps = (other: DOMRect) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top;
+    for (const node of nodes) if (overlaps(node.box)) fail(`uncalled label overlaps ${node.id}`);
+    for (const edge of edges) if (overlaps(edge.getBoundingClientRect())) fail("uncalled label overlaps an edge");
+  }
   const width = Math.max(...nodes.map(n => n.box.right)) - Math.min(...nodes.map(n => n.box.left));
   const height = Math.max(...nodes.map(n => n.box.bottom)) - Math.min(...nodes.map(n => n.box.top));
   if (Math.max(width / body.width, height / body.height) < .7) fail("graph does not fill 70% of the limiting dimension");

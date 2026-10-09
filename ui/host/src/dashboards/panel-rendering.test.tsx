@@ -63,16 +63,16 @@ describe("panel rendering", () => {
     expect(JSON.parse(host.querySelector("output")!.textContent!)).toEqual({ range: "24h", vars: { service: "payment" } });
     expect(host.querySelector('[aria-label="Reset Requests zoom"]')).toBeNull();
   });
-  it.each([false, true])("renders the horizontal annotation lane with clustered surface chips (dark=%s)", dark => {
+  it.each([false, true])("drops oversized annotation labels while preserving all deploy lines (dark=%s)", dark => {
     const theme = chartThemeFor(dark);
     const deploys = [1000, 1001, 400000].map(at => ({ service: "cart", namespace: "", version: "a-very-long-version-name", at: new Date(at).toISOString() }));
     const got = withAnnotations(timeseriesOption(panel, result, theme), panel, result, { deploys, anomalies: [] }, {}, theme, { width: 270, height: 248 });
     const grid = got.grid as { top: number };
     const series = got.series as { markLine: { data: { label: { show: boolean; formatter: string; position: string; distance: number; height: number; backgroundColor: string; overflow: string } }[] } }[];
     const labels = got.graphic as {style:{text:string;backgroundColor:string;stroke:string;overflow:string}}[];
-    expect(labels).toHaveLength(2); expect(grid.top).toBe(30);
-    for (const label of labels) { expect(label.style.backgroundColor).toBe(theme.surface); expect(label.style.stroke).toBe(theme.surface); expect(label.style.overflow).toBe("truncate"); }
-    expect(labels[0].style.text).toBe("2 deploys");
+    expect(labels).toHaveLength(0); expect(grid.top).toBe(12);
+    expect(series[0].markLine.data).toHaveLength(3);
+    expect(series[0].markLine.data.every(mark=>mark.label.show===false)).toBe(true);
   });
   it("merges adjacent same-state buckets, preserves gaps and unknown, and draws only rounded rects", () => {
     const got = analysis.analysisOption({ ...panel, viz: "state_timeline", thresholds: [{ value: 1, status: "warn" }] }, result, chartThemeFor(true));

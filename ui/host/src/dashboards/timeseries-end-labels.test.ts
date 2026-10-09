@@ -23,13 +23,13 @@ describe("timeseries end labels", () => {
     const o = timeseriesOption(panel, { ...result, frame: { columns: [result.frame!.columns[0], ...columns], values: [[0], ...columns.map(() => [1])], rows: 1 } }, chartThemeFor(false));
     expect((o.series as Series[]).every(s => !s.endLabel?.show)).toBe(true);
   });
-  it.each([false, true])("merges deploys within 12px and places deploy/anomaly labels in the top lane (%s)", dark => {
+  it.each([false, true])("retains every deploy and drops excess individual labels in the top lane (%s)", dark => {
     const theme = chartThemeFor(dark), base = timeseriesOption(panel, result, theme);
     const got = withAnnotations(base, panel, result, { deploys: [600000, 610000, 1800000].map(at => ({ namespace: "shop", service: "payments", version: "v2.14.0", at: new Date(at).toISOString() })), anomalies: [{ namespace: "shop", service: "payments", title: "Slow", severity: "bad", kind: "latency", from: new Date(800000).toISOString(), to: new Date(2000000).toISOString() }] }, {}, theme, { width: 500, height: 248 });
     expect((got.grid as {top:number}).top-(base.grid as {top:number}).top).toBeLessThanOrEqual(18);
     const first = (got.series as Series[])[0]; const deploys = first.markLine.data.filter(mark => mark.xAxis !== undefined);
-    expect(deploys).toHaveLength(2);
-    expect((got.graphic as {annotation?:boolean;style:{text:string}}[]).filter(g=>g.annotation).map(g=>g.style.text)).toEqual(["2 deploys","payments v2.14.0","anomaly"]);
+    expect(deploys).toHaveLength(3);
+    expect((got.graphic as {annotation?:boolean;style:{text:string}}[]).filter(g=>g.annotation).map(g=>g.style.text)).toEqual(["anomaly","payments v2.14.0"]);
     for (const deploy of deploys) expect(deploy.label).toEqual({show:false});
     const area = first.markArea.data[0][0]; expect(area.label).toEqual({show:false});
     expect(area.tooltip.formatter()).toContain("Slow · bad"); expect(area.tooltip.formatter()).toContain(new Date(800000).toISOString()); expect(area.tooltip.formatter()).toContain(new Date(2000000).toISOString());

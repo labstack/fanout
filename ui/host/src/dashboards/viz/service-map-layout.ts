@@ -45,8 +45,9 @@ function layoutCards(model:ServiceGraph,cardWidths:CardWidths,compact:boolean):C
   const labelWidth = uncalled.length ? textMeasure("No traced calls in this window", `12px ${fonts.display}`) : 0;
   const width = Math.max(1, graph.graph().width ?? 0, rowWidth, labelWidth);
   let rowX = (width - rowWidth) / 2;
-  const graphHeight = graph.graph().height ?? 0;
-  const rowY = graphHeight + (graphHeight ? compact?20:40 : 20);
+  const graphHeight = Math.max(0, graph.graph().height ?? 0, ...routes.flat().map(p => p.y), ...boxes.map(n => n.y + n.height));
+  // The isolated heading has a dedicated lane between routes and isolated cards.
+  const rowY = graphHeight + (graphHeight ? 40 : 24);
   for (const node of uncalled) { boxes.push({ ...node, x: rowX, y: rowY, width: widths.get(node.id)!, height: cardHeight, entry: false, uncalled: true }); rowX += widths.get(node.id)! + 12; }
   // Centre connected graph and its separate uncalled row within the same bounds.
   const shift = (width - (graph.graph().width ?? 0)) / 2;
@@ -65,26 +66,31 @@ function layoutCards(model:ServiceGraph,cardWidths:CardWidths,compact:boolean):C
     const end = { x: target.x + (forward ? 0 : target.width), y: target.y + target.height / 2 };
     routes[index] = [start, { x: middle[0].x, y: start.y }, ...middle, { x: middle.at(-1)!.x, y: end.y }, end];
   }
-  return { nodes: boxes, routes, width, height: Math.max(1, graphHeight, uncalled.length ? rowY + cardHeight : 0), label: uncalled.length ? { x: (width - labelWidth) / 2, y: rowY - (compact?18:26) } : undefined, labelWidth };
+  return { nodes: boxes, routes, width, height: Math.max(1, graphHeight, uncalled.length ? rowY + cardHeight : 0), label: uncalled.length ? { x: (width - labelWidth) / 2, y: rowY - 24 } : undefined, labelWidth };
 }
 
-/** Contain at natural size or above the text floor, with entry-centred pan for overflow. */
+/** Contain the complete graph initially; zoom restores natural text size. */
 export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: ChartSize) {
   const bounds=(raw:CardLayout)=>{
     const points = raw.routes.flat();
     const minX = Math.min(0, ...points.map(p => p.x)), minY = Math.min(0, ...points.map(p => p.y));
     const width = Math.max(raw.width, ...points.map(p => p.x)) - minX;
     const height = Math.max(raw.height, ...points.map(p => p.y)) - minY;
-    const scale = Math.min(Math.max(1, size.width - 24) / width, Math.max(1, size.height - 24) / height);
-    return {minX,minY,width,height,scale};
+    const graphBottom = Math.max(0, ...raw.routes.flat().map(p => p.y), ...raw.nodes.filter(n=>!n.uncalled).map(n=>n.y+n.height));
+    const rowY = raw.nodes.find(n=>n.uncalled)?.y;
+    const gap = rowY === undefined ? 0 : rowY - graphBottom;
+    const lane = rowY === undefined ? 0 : 32;
+    const scale = Math.min(Math.max(1, size.width - 24) / width, Math.max(1, size.height - 24 - lane) / Math.max(1,height-gap));
+    return {minX,minY,width,height,scale,graphBottom,rowY,gap,lane};
   };
   const compact=bounds(layout.full).scale<1;
   const raw=compact?layout:layout.full;
-  const {minX,minY,width,height,scale:containScale}=bounds(raw);
-  const scale=clamp(containScale,compact?compactReadableScale:1,1);
-  const contentWidth=Math.max(size.width,width*scale+24),contentHeight=Math.max(size.height,height*scale+24);
-  const offsetX = (contentWidth - width * scale) / 2, offsetY = (contentHeight - height * scale) / 2;
-  const fit = (p: Point) => ({ x: offsetX + (p.x - minX) * scale, y: offsetY + (p.y - minY) * scale });
+  const {minX,minY,width,height,scale:containScale,graphBottom,rowY,gap,lane}=bounds(raw);
+  const scale=Math.min(containScale,1);
+  const fittedHeight=(height-gap)*scale+lane;
+  const contentWidth=size.width,contentHeight=size.height;
+  const offsetX = (contentWidth - width * scale) / 2, offsetY = (contentHeight - fittedHeight) / 2;
+  const fit = (p: Point) => ({ x: offsetX + (p.x - minX) * scale, y: offsetY + (p.y - minY) * scale + (rowY !== undefined && p.y>=rowY ? lane-gap*scale : 0) });
   const nodesByID = new Map(model.nodes.map(n => [n.id, n]));
   const nodes = raw.nodes.map(n => ({ ...n, ...nodesByID.get(n.id), ...fit(n), width: n.width * scale, height: n.height * scale }));
   const edges = [...model.edges].sort((a,b) => order(a.id,b.id)).map((e,index) => {
@@ -94,13 +100,9 @@ export function fitServiceMap(layout: MapLayout, model: ServiceGraph, size: Char
     const path = points.map((p,i) => `${i ? "L" : "M"}${p.x},${p.y}`).join(" ");
     return { ...e, points, path };
   });
-  const entries=nodes.filter(n=>n.entry);
-  const entryWidth=Math.max(...entries.map(n=>n.x+n.width))-Math.min(...entries.map(n=>n.x));
-  const entryHeight=Math.max(...entries.map(n=>n.y+n.height))-Math.min(...entries.map(n=>n.y));
-  const anchor=entries.length && entryWidth<=size.width-24 && entryHeight<=size.height-24 ? entries : (entries.length?entries:nodes).slice(0,1);
-  const centre=(axis:"x"|"y",dimension:"width"|"height")=>anchor.reduce((sum,n)=>sum+n[axis]+n[dimension]/2,0)/Math.max(1,anchor.length);
-  const initialView={x:clamp(size.width/2-centre("x","width"),size.width-contentWidth,0),y:clamp(size.height/2-centre("y","height"),size.height-contentHeight,0)};
-  return { nodes, edges, scale, compact, initialView, contentWidth, contentHeight, uncalledLabel: raw.label ? fit(raw.label) : undefined };
+  // Once contained, the entry and every reachable/isolated node share one view.
+  const initialView={x:0,y:0};
+  return { nodes, edges, scale, compact, initialView, contentWidth, contentHeight, uncalledLabel: raw.label ? {x:(size.width-raw.labelWidth)/2,y:offsetY+(graphBottom-minY)*scale+8} : undefined };
 }
 
 export const nodeMetrics = (n: ServiceNode) => `${formatValue("per_second", n.request_rate)} · ${formatValue("percent", n.error_rate)} err · ${formatValue("ms", n.p95_ms)} p95`;

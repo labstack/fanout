@@ -1,5 +1,5 @@
 import { within } from "@testing-library/dom";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -185,4 +185,27 @@ it("omits shortcuts help and the single-key toggle in inline and full-screen fra
     const dialog=document.querySelector('[role="dialog"]')!;expect(dialog).not.toBeNull();
     expect(dialog.querySelector('[aria-label="Keyboard shortcuts (?)"]')).toBeNull();expect(dialog.textContent).not.toContain("Single-key shortcuts");
   }finally{await view.cleanup();}
+});
+
+
+it("returns Escape from a chat full-screen view control to that panel menu across the host inline handshake",async()=>{
+  const raw=presetFixture("performance");raw.dashboard.panels=raw.dashboard.panels.slice(0,1);raw.results=raw.results.filter(r=>r.id===raw.dashboard.panels[0].id);
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host),client=new QueryClient(),onQuery=vi.fn(),onMode=vi.fn();
+  function ChatFrame() {
+    const [mode,setMode]=useState("inline");
+    return <FragmentView fragment={raw} dark={false} onQuery={onQuery} drillClient={{exemplars:vi.fn(),trace:vi.fn()}} hostDisplayMode={mode} onDisplayMode={async next=>{onMode(next);setMode(next);return true;}}/>;
+  }
+  try {
+    await act(async()=>root.render(<MantineProvider><QueryClientProvider client={client}><ChatFrame/></QueryClientProvider></MantineProvider>));
+    const menu=host.querySelector<HTMLButtonElement>('[aria-label$=" menu"]')!;
+    await act(async()=>menu.click());
+    await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button=>button.textContent==="View")!.click());
+    const region=host.querySelector<HTMLElement>('[data-fragment-fullscreen]')!;
+    expect(region).not.toBeNull();
+    const control=region.querySelector<HTMLButtonElement>('[data-panel-view="Data"]')!;
+    await act(async()=>{control.focus();control.click();});
+    await act(async()=>window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+    await vi.waitFor(()=>expect(document.activeElement).toBe(menu));
+    expect(host.querySelector('[data-fragment-fullscreen]')).toBeNull();expect(onMode.mock.calls.map(([mode])=>mode)).toEqual(["fullscreen","inline"]);expect(onQuery).not.toHaveBeenCalled();
+  } finally {await act(async()=>root.unmount());host.remove();client.clear();}
 });

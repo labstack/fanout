@@ -34,6 +34,23 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     return ()=>observer.disconnect();
   },[]);
   const small = width > 0 && width < 360;
+  const [headerWidth, setHeaderWidth] = useState(0);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const context = document.createElement("canvas").getContext("2d");
+      const titleFont = card.current?.querySelector("[data-panel-title]");
+      const family = titleFont ? getComputedStyle(titleFont).fontFamily : "inherit";
+      if (context) context.font = `600 15px ${family}`;
+      const titleWidth = context?.measureText(title).width ?? Array.from(title).length * 8.25;
+      if (context) context.font = `400 11px ${family}`;
+      const switchWidth = ["Chart", "Data", "Spec"].reduce((sum, label) => sum + (context?.measureText(label).width ?? label.length * 7) + 12, 4);
+      const extras = (panel.description ? 24 : 0) + (loading && result ? 18 : 0) + (panelTimeLabel(panel)?.length ?? 0) * 7;
+      setHeaderWidth(titleWidth + switchWidth + 22 + 32 + 20 + extras);
+    };
+    measure(); document.fonts?.addEventListener("loadingdone", measure);
+    return () => document.fonts?.removeEventListener("loadingdone", measure);
+  }, [title, panel.description, panel.time, loading, Boolean(result)]);
+  const compactViews = small || width > 0 && width < headerWidth;
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!staleAt) return;
@@ -117,10 +134,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     const mutations=new MutationObserver(measure);mutations.observe(el,{childList:true,subtree:true,attributes:true,characterData:true});
     return ()=>{observer.disconnect();mutations.disconnect();};
   },[result,view,rows,scrolls,height,small,notes.length]);
-  return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={small}>
+  return <Paper ref={card} withBorder radius="md" h="100%" p={0} style={{ display: "flex", flexDirection: "column", minWidth: 0, position:"relative" }} data-panel={panel.id} data-compact-views={compactViews}>
     <Group justify="space-between" wrap="nowrap" gap="xs" px={16} pt={12} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined, flexShrink: 0 }}>
       <Group gap={6} wrap="nowrap" miw={0} style={{flex:1}}>
-        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
+        <Box miw={0} style={{flex:1}}><Text data-panel-title fw={600} fz={15} truncate={compactViews ? undefined : true} style={compactViews ? {overflowWrap:"anywhere"} : undefined}>{title}</Text><Text data-panel-subtitle title={keyboardHint ?? subtitle} fz={12} ff={fonts.display} c="dimmed" truncate={small ? undefined : true} style={{position: "relative", ...(small ? {overflowWrap:"anywhere"} : {})}}>
             {/* Preserve the subtitle's measured line box, including narrow cards. */}
             <span aria-hidden={keyboardHint ? true : undefined} style={{visibility: keyboardHint ? "hidden" : undefined}}>{subtitle}</span>
             {keyboardHint && <><span data-chart-hint aria-hidden="true" style={{position: "absolute", inset: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{compactHint(keyboardHint)}</span></>}
@@ -132,7 +149,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
       </Group>
       <Group gap={4} wrap="nowrap" style={{ flexShrink: 0 }}>
-      {!small && panel.viz !== "text" && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
+      {!compactViews && panel.viz !== "text" && <Group gap={0} wrap="nowrap" role="group" aria-label={`${title} view`} style={{ border: "1px solid var(--mantine-color-default-border)", borderRadius: 5, overflow: "hidden" }}>
         {["Chart", "Data", "Spec"].map(mode => <button key={mode} type="button" data-panel-view={mode} aria-pressed={view === mode} onClick={() => setView(mode)} style={{ border: 0, borderLeft: mode === "Chart" ? undefined : "1px solid var(--mantine-color-default-border)", padding: "2px 6px", fontSize: 11, fontFamily: "inherit", cursor: "pointer", background: view === mode ? "var(--mantine-color-default)" : "transparent", color: view === mode ? "var(--mantine-primary-color-filled)" : "var(--mantine-color-dimmed)", fontWeight: view === mode ? 600 : 400, boxShadow: view === mode ? "inset 0 -2px var(--mantine-primary-color-filled)" : undefined }}>{mode}</button>)}
       </Group>}
       {panel.viz === "service_map" && mapView?.canFit && <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Fit ${title} graph`} onClick={mapView.fit}><ArrowsOut size={16} /></ActionIcon>}
@@ -148,10 +165,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           <Text data-refresh-error-message size="xs" title={refreshError || undefined} lineClamp={4} style={{overflowWrap:"anywhere"}}>{refreshError}</Text>
         </>} opened={tooltipOpen} />
         <Menu.Dropdown>
-          {(small || panel.viz === "text") && <>
+          {(compactViews || panel.viz === "text") && <>
             <Menu.RadioGroup value={view} onChange={setView}>
               <Box role="group" aria-label={`${title} view`}>
-                {(panel.viz === "text" ? ["Chart", "Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode}>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
+                {(panel.viz === "text" ? ["Chart", "Spec"] : ["Chart", "Data", "Spec"]).map(mode => <Menu.RadioItem key={mode} value={mode} data-panel-view={mode} closeMenuOnClick>{panel.viz === "text" && mode === "Chart" ? "Content" : mode}</Menu.RadioItem>)}
               </Box>
             </Menu.RadioGroup>
             <Menu.Divider />
@@ -167,7 +184,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Menu>
       </Group>
     </Group>
-    <Box ref={body} data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
+    <Box ref={body} data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
       {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
           <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
@@ -182,7 +199,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         </Stack></Center>
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
-    {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, background: "inherit" }}>
+    {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
     </Box>}
     {refreshDescription && <span id={refreshDescriptionId} hidden>{refreshDescription}</span>}
