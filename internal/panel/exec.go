@@ -335,7 +335,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	}
 	start, end, err := resolveWindow(t, p.Time, now, e.maxWindow)
 	if err != nil {
-		return failed(res, err, parent.Err() == nil)
+		return failed(res, err, parent.Err())
 	}
 	res.FromMS, res.ToMS = start.UnixMilli(), end.UnixMilli()
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
@@ -356,7 +356,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	frame, sqlText, err := e.runScope(ctx, p, checked, scope)
 	if err != nil {
 		res.SQL = sqlText
-		return failed(res, err, parent.Err() == nil)
+		return failed(res, err, parent.Err())
 	}
 	res.Frame, res.SQL = frame, sqlText
 	// Trend failures are recorded on the frame and preserve the main table.
@@ -377,7 +377,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
 		if err != nil {
-			return failed(res, err, parent.Err() == nil)
+			return failed(res, err, parent.Err())
 		}
 		frame.Totals = totals
 	}
@@ -505,19 +505,24 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 	return frame, query, err
 }
 
-func failed(res Result, err error, ownTimeout bool) Result {
+// stopped is the batch context's error: nil while the panel's own timeout
+// governs, context.Canceled when the caller went away.
+func failed(res Result, err error, stopped error) Result {
+	ownTimeout := stopped == nil
 	res.Status = StatusError
 	res.Retryable = false
 	var engineError *duckdb.Error
-	if errors.As(err, &engineError) {
+	isEngine := errors.As(err, &engineError)
+	if isEngine {
 		switch engineError.Type {
 		case duckdb.ErrorTypeOutOfMemory, duckdb.ErrorTypeIO, duckdb.ErrorTypeInterrupt:
 			res.Retryable = true
 		}
 	}
-	// ownTimeout is false when runPanel's caller context is already done.
-	// Navigation cancellation is expected; unrelated failures still need a log.
-	if ownTimeout || !errors.Is(err, context.Canceled) {
+	// The engine reports a caller's cancellation as a bare interrupt. That is
+	// expected navigation; unrelated failures and deadlines still need a log.
+	interrupted := errors.Is(err, context.Canceled) || isEngine && engineError.Type == duckdb.ErrorTypeInterrupt
+	if !errors.Is(stopped, context.Canceled) || !interrupted {
 		slog.Error("panel query failed", "panel_id", res.ID, "error", err)
 	}
 	switch {

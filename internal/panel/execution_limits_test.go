@@ -209,7 +209,7 @@ func TestEmptyMultiSelectMatchesNothing(t *testing.T) {
 
 func TestPanelErrorsRedactPaths(t *testing.T) {
 	for _, path := range []string{"/srv/data/telemetry/a.parquet", "/tmp/duckdb.db", "C:\\data\\telemetry\\a.parquet"} {
-		r := failed(Result{ID: "a"}, fmt.Errorf("IO Error: cannot open '%s'", path), false)
+		r := failed(Result{ID: "a"}, fmt.Errorf("IO Error: cannot open '%s'", path), context.Canceled)
 		if strings.Contains(r.Error, path) || !strings.Contains(r.Error, "<path>") {
 			t.Errorf("leaked path: %s", r.Error)
 		}

@@ -44,14 +44,14 @@ func TestFailedClassifiesDriverErrorTypes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// The misleading message guards against classifying message text.
 			err := fmt.Errorf("wrapped: %w", &duckdb.Error{Type: tc.kind, Msg: "Binder Error: Out of Memory Error: IO Error"})
-			assertRetryable(t, failed(Result{ID: "p"}, err, true), tc.retryable)
+			assertRetryable(t, failed(Result{ID: "p"}, err, nil), tc.retryable)
 		})
 	}
 }
 
 func TestFailedValidationIsNotRetryable(t *testing.T) {
-	assertRetryable(t, failed(Result{ID: "p"}, Problems{{Path: "query", Message: "Out of Memory Error"}}, true), false)
-	assertRetryable(t, failed(Result{ID: "p"}, errors.New("IO Error: not a typed driver error"), true), false)
+	assertRetryable(t, failed(Result{ID: "p"}, Problems{{Path: "query", Message: "Out of Memory Error"}}, nil), false)
+	assertRetryable(t, failed(Result{ID: "p"}, errors.New("IO Error: not a typed driver error"), nil), false)
 }
 
 func TestQueryDeadlineIsRetryable(t *testing.T) {
@@ -66,7 +66,7 @@ func TestQueryDeadlineIsRetryable(t *testing.T) {
 		t.Fatalf("result=%+v", results[0])
 	}
 	assertRetryable(t, results[0], true)
-	assertRetryable(t, failed(Result{}, context.DeadlineExceeded, false), false)
+	assertRetryable(t, failed(Result{}, context.DeadlineExceeded, context.DeadlineExceeded), false)
 }
 
 func TestRealEngineOutOfMemoryIsRetryable(t *testing.T) {
@@ -86,5 +86,5 @@ func TestRealEngineOutOfMemoryIsRetryable(t *testing.T) {
 	if !errors.As(err, &engineError) || engineError.Type != duckdb.ErrorTypeOutOfMemory {
 		t.Fatalf("expected typed out of memory, got %v", err)
 	}
-	assertRetryable(t, failed(Result{ID: "p"}, err, true), true)
+	assertRetryable(t, failed(Result{ID: "p"}, err, nil), true)
 }
