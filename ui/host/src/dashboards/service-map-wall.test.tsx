@@ -8,7 +8,7 @@ import { assertServiceMapDOM } from "../../tests/service-map-collector";
 import { fitServiceMap, layoutServiceMapRaw } from "./viz/service-map-layout";
 import { ServiceMapViz } from "./viz/service-map";
 
-it.each([{width:460,height:360},{width:760,height:360},{width:1100,height:420}])("keeps the wall readable with a separate isolated note and stable Fit transform at $width × $height", async size => {
+it.each([{width:460,height:360},{width:760,height:360},{width:1100,height:420}])("keeps the wall readable with a separate isolated note and reversible Fit transform at $width × $height", async size => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const model = serviceMapModel(wallFrame), graph = fitServiceMap(layoutServiceMapRaw(model, size), model, size);
   expect(graph.nodes).toHaveLength(18); expect(graph.edges).toHaveLength(23);
@@ -42,8 +42,10 @@ it.each([{width:460,height:360},{width:760,height:360},{width:1100,height:420}])
     await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:wallFrame}} dark={false} height={size.height+24} onMapView={view}/></MantineProvider>));
     const content=host.querySelector<HTMLElement>('[data-service-content]')!, initial=content.style.transform;
     expect(initial).toBe(`translate(${graph.initialView.x}px, ${graph.initialView.y}px) scale(1)`);
-    expect(view.mock.lastCall![0].canFit).toBe(false);
+    expect(view.mock.lastCall![0].canFit).toBe(graph.contentWidth > size.width || graph.contentHeight > size.height);
     expect(assertServiceMapDOM(host.querySelector('[data-service-viewport]')!,{requireNames:true,allowOverflow:true})).toMatchObject({nodes:18,edges:23});
-    await act(async()=>view.mock.lastCall![0].fit());expect(content.style.transform).toBe(initial);
+    await act(async()=>view.mock.lastCall![0].fit());
+    if (view.mock.lastCall![0].overview) await act(async()=>view.mock.lastCall![0].fit());
+    expect(content.style.transform).toBe(initial);
   } finally {await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();}
 });

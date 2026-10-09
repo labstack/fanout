@@ -34,5 +34,7 @@ it("keeps dense fanout labels in their boxes and allows pan then Fit",async()=>{
  const viewport=host.querySelector<HTMLElement>('[data-service-viewport]')!,content=host.querySelector<HTMLElement>('[data-service-content]')!,initial=content.style.transform;
  for(const card of host.querySelectorAll<HTMLElement>('[data-service-node]')) {expect(parseFloat(card.querySelector<HTMLElement>('[data-service-text]')!.style.fontSize)).toBeGreaterThanOrEqual(11);expect(parseFloat(card.style.height)).toBeGreaterThanOrEqual(parseFloat(card.querySelector<HTMLElement>('[data-service-text]')!.style.fontSize)+2-.01);}
  await act(async()=>{viewport.dispatchEvent(new PointerEvent("pointerdown",{button:0,clientY:100,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointermove",{clientY:-100,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointerup",{bubbles:true}));});
- expect(content.style.transform).not.toBe(initial);await act(async()=>view.mock.lastCall![0].fit());expect(content.style.transform).toBe(initial);
+ expect(content.style.transform).not.toBe(initial);await act(async()=>view.mock.lastCall![0].fit());
+ expect(view.mock.lastCall![0].overview).toBe(true);
+ await act(async()=>view.mock.lastCall![0].fit());expect(content.style.transform).toBe(initial);
 });

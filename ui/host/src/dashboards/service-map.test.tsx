@@ -66,7 +66,7 @@ it.each([{width:780,height:460},{width:1100,height:220}])("runs the shared brows
   expect(()=>assertServiceMapDOM(viewport,{allowOverflow:true})).toThrow(/clipped/);
 });
 
-it("keeps queued pan positions stable, suppresses a drag click and Fit resets zoom/pan", async () => {
+it("keeps queued pan positions stable, suppresses a drag click and Fit toggles overview/readable after zoom/pan", async () => {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanups.push(() => root.unmount());
   const point = vi.fn(), mapView = vi.fn();
   await act(async () => root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:demoFrame}} dark={false} height={300} onPoint={point} onMapView={mapView}/></MantineProvider>));
@@ -79,7 +79,9 @@ it("keeps queued pan positions stable, suppresses a drag click and Fit resets zo
   expect(content.style.transform).toBe("translate(40px, 60px) scale(1)");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-service-node]')!.click()); expect(point).not.toHaveBeenCalled();
   await act(async () => mapView.mock.lastCall![0].fit());
-  expect(content.style.transform).toBe("translate(0px, 0px) scale(1)"); expect(mapView.mock.lastCall![0].canFit).toBe(false);
+  expect(mapView.mock.lastCall![0].overview).toBe(true);
+  await act(async () => mapView.mock.lastCall![0].fit());
+  expect(content.style.transform).toBe("translate(0px, 0px) scale(1)"); expect(mapView.mock.lastCall![0].canFit).toBe(true);
 });
 
 it("measures usable client bounds and refits on resize without changing the LR layout", async () => {
@@ -133,8 +135,10 @@ describe("shared map interactions", () => {
       viewport.dispatchEvent(new PointerEvent("pointermove", { clientX: 140, clientY: 110, bubbles: true }));
       viewport.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
     });
-    const fit = host.querySelector<HTMLButtonElement>('[aria-label="Fit Map graph"]')!;
+    const fit = host.querySelector<HTMLButtonElement>('[aria-label="Show whole Map graph"]')!;
     expect(fit).not.toBeNull(); await act(async () => fit.click());
+    expect(fit.getAttribute("aria-label")).toBe("Return to readable Map view");
+    await act(async () => fit.click());
     expect(content.style.transform).toBe("translate(0px, 0px) scale(1)");
     expect(host.textContent).toContain("No traced calls in this window");
     expect(host.textContent).toContain("20 services · 23 routes");
