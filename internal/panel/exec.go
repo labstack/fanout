@@ -207,7 +207,8 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			}
 			result := e.runPanel(ctx, p, checked, t, now, vars, req.Widths[p.ID], compare)
 			if ctx.Err() == context.DeadlineExceeded {
-				result = failed(Result{ID: p.ID, ElapsedMS: result.ElapsedMS}, errBatchDeadline, false)
+				// runPanel already logged the interrupted query; the overwrite adds no log line.
+				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Retryable: true, ElapsedMS: result.ElapsedMS}
 			}
 			results[i] = result
 			return nil
@@ -223,8 +224,6 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 
 // BatchDeadlineError is shared by HTTP and MCP batch callers.
 const BatchDeadlineError = "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard."
-
-var errBatchDeadline = errors.New("dashboard batch deadline exceeded")
 
 // QueryTimeoutError describes the executor's per-panel time limit.
 const QueryTimeoutError = "The query took longer than 10 seconds. Narrow the time range or add filters."
@@ -520,9 +519,6 @@ func failed(res Result, err error, ownTimeout bool) Result {
 	switch {
 	case ownTimeout && errors.Is(err, context.DeadlineExceeded):
 		res.Error = QueryTimeoutError
-		res.Retryable = true
-	case errors.Is(err, errBatchDeadline):
-		res.Error = BatchDeadlineError
 		res.Retryable = true
 	default:
 		message := RedactPaths(err.Error())

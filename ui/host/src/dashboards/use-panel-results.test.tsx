@@ -259,7 +259,7 @@ it.each([new Error("Network disconnected"),new DOMException("Request aborted","A
       expect(host.current.fetching).toBe(false);expect(host.current.error?.message).toBe(error.message);
       for(const id of ["a","b"]){
         const card=host.node.querySelector(`[data-panel="${id}"]`)!;
-        expect(card.textContent).toContain("This panel failed");expect(card.querySelector<HTMLElement>('[data-panel-error]')!.title).toBe(error.message);
+        expect(card.textContent).toContain("This panel failed");expect(card.querySelector<HTMLElement>('[data-panel-error-message]')!.title).toBe(error.message);
         expect(card.textContent).not.toContain("Ask Fanout to fix it");
         expect([...card.querySelectorAll("button")].some(button=>button.textContent==="Retry")).toBe(true);
       }
