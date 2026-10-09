@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.27.1"
+  GO_VERSION: "1.27.2"
   IMAGE: ghcr.io/labstack/fanout
   DOCKERHUB_IMAGE: docker.io/labstack/fanout
   MCP_PUBLISHER_VERSION: "1.8.1"

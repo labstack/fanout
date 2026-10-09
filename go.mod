@@ -1,6 +1,6 @@
 module github.com/labstack/fanout
 
-go 1.27.1
+go 1.27.2
 
 require (
 	cel.dev/cel-go v0.32.0

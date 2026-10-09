@@ -10,7 +10,7 @@ just build     # browser assets, then the binaries
 just check     # the full gate
 ```
 
-You need Go 1.27.1 and a C/C++ toolchain on native Linux or macOS (amd64 or arm64),
+You need Go 1.27.2 and a C/C++ toolchain on native Linux or macOS (amd64 or arm64),
 [Bun](https://bun.sh), [just](https://just.systems),
 [golangci-lint](https://golangci-lint.run/), and
 [Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
