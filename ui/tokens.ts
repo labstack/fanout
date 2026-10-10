@@ -85,8 +85,8 @@ export const info = [
  *  CSS custom properties and need the resolved values. These are the same Ayu
  *  and light-scheme stops the rest of the app gets from Mantine. */
 export const chart = {
-  dark: { text: "#bfbdb6", muted: "#8b8e99", grid: "#1d2433", surface: "#131721", border: "#565b69" },
-  light: { text: "#4a5058", muted: "#6b7280", grid: "#eceef0", surface: "#fcfcfc", border: "#a4abb4" },
+  dark: { text: "#bfbdb6", muted: "#8b8e99", grid: "#1d2433", surface: "#131721", border: "#626777" },
+  light: { text: "#4a5058", muted: "#6b7280", grid: "#eceef0", surface: "#fcfcfc", border: "#8c939d" },
 } as const;
 
 /** Categorical identity comes from fixed-order slots, never a name hash or a

@@ -141,8 +141,8 @@ function VersionDetails({ record, currentVersion, pending, onRestore }: { record
     </> : <Alert color="warn" title="Changes unavailable">The preceding version is no longer retained. This saved spec is still available.</Alert>}
     <Text size="sm" c="dimmed">Read-only · {dashboard.spec.panels.length} panels. Historical data is not queried.</Text>
     <Accordion variant="contained">
-      <Accordion.Item value="spec"><Accordion.Control>Spec</Accordion.Control><Accordion.Panel><Code block style={{ maxHeight: 320, overflow: "auto" }}>{JSON.stringify(dashboard.spec, null, 2)}</Code></Accordion.Panel></Accordion.Item>
-      <Accordion.Item value="data"><Accordion.Control>Data</Accordion.Control><Accordion.Panel><Stack gap="xs">{dashboard.spec.panels.map(panel => <Box key={panel.id}><Text size="sm" fw={500}>{panel.title} · {panel.viz}</Text><Code block>{panel.content ?? panel.sql ?? JSON.stringify(panel.query ?? {}, null, 2)}</Code></Box>)}</Stack></Accordion.Panel></Accordion.Item>
+      <Accordion.Item value="spec"><Accordion.Control>Spec</Accordion.Control><Accordion.Panel><Code block tabIndex={0} style={{ maxHeight: 320, overflow: "auto" }}>{JSON.stringify(dashboard.spec, null, 2)}</Code></Accordion.Panel></Accordion.Item>
+      <Accordion.Item value="data"><Accordion.Control>Data</Accordion.Control><Accordion.Panel><Stack gap="xs">{dashboard.spec.panels.map(panel => <Box key={panel.id}><Text size="sm" fw={500}>{panel.title} · {panel.viz}</Text><Code block tabIndex={0}>{panel.content ?? panel.sql ?? JSON.stringify(panel.query ?? {}, null, 2)}</Code></Box>)}</Stack></Accordion.Panel></Accordion.Item>
     </Accordion>
   </Stack>;
 }

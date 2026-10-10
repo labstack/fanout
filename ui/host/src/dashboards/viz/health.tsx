@@ -36,14 +36,14 @@ export function HealthViz({ result, dark, onSelect, onVariable, vars }: Analysis
       </Metric>
     </SimpleGrid>
     {!empty && <Box style={{ flexShrink: 0 }}>
-      <Progress.Root size="md" aria-label="Service health distribution">
-        <Progress.Section value={data.counts.healthy / total * 100} color="ok" />
-        <Progress.Section value={data.counts.degraded / total * 100} color="warn" />
-        <Progress.Section value={data.counts.unhealthy / total * 100} color="bad" />
+      <Progress.Root size="md" role="group" aria-label="Service health distribution">
+        <Progress.Section value={data.counts.healthy / total * 100} color="ok" aria-label="Healthy" />
+        <Progress.Section value={data.counts.degraded / total * 100} color="warn" aria-label="Degraded" />
+        <Progress.Section value={data.counts.unhealthy / total * 100} color="bad" aria-label="Unhealthy" />
       </Progress.Root>
       <Group mt={6} gap="md">
         {(["healthy", "degraded", "unhealthy"] as const).map(health => <Group key={health} gap={6}>
-          <HealthShape health={health} /><Text c="dimmed" size="xs">{data.counts[health]} {health}</Text>
+          <HealthShape health={health} /><Text c="dimmed" size="xs">{`${data.counts[health]} ${health}`}</Text>
         </Group>)}
       </Group>
     </Box>}

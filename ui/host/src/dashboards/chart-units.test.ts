@@ -99,3 +99,25 @@ it.each([false,true])("threshold/anomaly text stays readable over the warm tint,
  expect(anomaly.stroke).toBe(theme.surface);expect(anomaly.lineWidth).toBeGreaterThanOrEqual(3);expect(contrast(anomaly.fill,anomaly.stroke)).toBeGreaterThanOrEqual(4.5);
  for(const label of [threshold]) {expect(label.textBorderColor).toBe(theme.surface);expect(label.textBorderWidth).toBeGreaterThanOrEqual(3);expect(contrast(label.color,label.textBorderColor)).toBeGreaterThanOrEqual(4.5);}
 });
+
+it.each([false, true])("canvas labels and essential boundaries meet AA, dark=%s", dark => {
+ const theme = chartThemeFor(dark);
+ const timeFrame: Frame = {columns:[{name:"time",type:"time",role:"time"},{name:"service",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure"}],values:[[0,60000,0,60000],["one","one","two","two"],[1,2,2,3]],rows:4};
+ const time = timeseriesOption({id:"t",title:"Time",viz:"timeseries",options:{legend:"auto"}}, {...heat,frame:timeFrame}, theme) as any;
+ const bar = barOption({id:"b",title:"Bar",viz:"bar"},bars,theme) as any;
+ const gauge = gaugeOption({id:"g",title:"Gauge",viz:"gauge",thresholds:[{value:50,status:"warn"}]},75,theme) as any;
+ const texts = [time.textStyle.color, time.tooltip.textStyle.color, time.legend.textStyle.color,
+  ...time.series.filter((s:any)=>s.endLabel?.show).map((s:any)=>s.endLabel.color),
+  ...bar.series.map((s:any)=>s.label.color), ...gauge.graphic.filter((g:any)=>g.type==="text").map((g:any)=>g.style.fill)];
+ for (const viz of ["heatmap", "histogram", "scatter", "state_timeline"] as const) {
+  const option = analysisOption({id:"a",title:"Analysis",viz},heat,theme) as any;
+  for (const axis of [option.xAxis,option.yAxis]) texts.push(axis.axisLabel.color);
+  if (option.visualMap) texts.push(option.visualMap.textStyle.color);
+ }
+ for (const color of texts) expect(contrast(color,theme.surface)).toBeGreaterThanOrEqual(4.5);
+ // Pointer/tooltip boundaries and neutral map node boundaries are meaningful;
+ // recessive chart gridlines and tinted gauge bands are decorative.
+ expect(contrast(theme.border,theme.surface)).toBeGreaterThanOrEqual(3);
+ expect(contrast(gauge.graphic.find((g:any)=>g.id==="gauge-marker").style.fill,theme.surface)).toBeGreaterThanOrEqual(3);
+ for (const status of Object.values(theme.status)) expect(contrast(status,theme.surface)).toBeGreaterThanOrEqual(3);
+});

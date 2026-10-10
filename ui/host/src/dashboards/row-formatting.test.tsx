@@ -10,9 +10,16 @@ import { PanelCard } from "./panel-card";
 import { TableViz } from "./viz/table";
 import { RowPanel } from "./viz/row-panel";
 import { StateTimelineViz } from "./viz/state-timeline";
-import { ok, warn, bad } from "../../../tokens";
+import { ok, warn, bad, chart } from "../../../tokens";
+import { PanelSpec } from "./inspect";
+import { RowText } from "./viz/cell-text";
 
 const contrastRatio=(a:string,b:string)=>{const x=relativeLuminance(a),y=relativeLuminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+const toHex=(color:string)=>color.startsWith("#")?color:"#"+(color.match(/[\d.]+/g)??[]).slice(0,3).map(n=>Math.round(Number(n)).toString(16).padStart(2,"0")).join("");
+function composite(color:string,surface:string) {
+ const values=color.match(/[\d.]+/g)!.map(Number),alpha=values[3]??1;
+ return "#"+[1,3,5].map((at,i)=>Math.round(values[i]*alpha+parseInt(surface.slice(at,at+2),16)*(1-alpha)).toString(16).padStart(2,"0")).join("");
+}
 vi.mock("./echart-canvas",()=>({EChartCanvas:()=>null}));
 let host: HTMLDivElement, root: Root;
 beforeEach(()=>{vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);host=document.createElement("div");document.body.append(host);root=createRoot(host);});
@@ -92,7 +99,27 @@ it.each([false,true])("formatted status badges use readable text and soft backgr
  for(const badge of host.querySelectorAll<HTMLElement>(".mantine-Badge-root")) {
   expect(badge.style.color).toBe(chartThemeFor(dark).text);
   expect(badge.style.background).toContain("0.14");
+  expect(contrastRatio(toHex(badge.style.color),composite(badge.style.background,chartThemeFor(dark).surface))).toBeGreaterThanOrEqual(4.5);
  }
+});
+
+it.each([false,true])("spec, highlighted rows and nested template chips reach text AA on composited surfaces, dark=%s",async dark=>{
+ const surface=chart[dark?"dark":"light"].surface;
+ await mount(<RowText text="ERROR failed <*> <str> <num>" template highlight="<*>"/>,dark);
+ const row=host.querySelector<HTMLElement>("[title]")!;
+ for(const element of host.querySelectorAll<HTMLElement>("mark,[data-template-chip]")) {
+  const ancestors:HTMLElement[]=[];
+  for(let node:HTMLElement|null=element;node&&node!==row;node=node.parentElement) ancestors.unshift(node);
+  let background:string=surface,ink=row.style.color;
+  for(const node of ancestors) {
+   if(node.style.background) background=composite(node.style.background,background);
+   if(node.style.color&&node.style.color!=="inherit") ink=node.style.color;
+  }
+  expect(contrastRatio(toHex(ink),background)).toBeGreaterThanOrEqual(4.5);
+ }
+ await mount(<PanelSpec panel={{id:"p",title:"Spec",viz:"stat",min:1,query:{from:"spans",measures:["count()"]}}} dark={dark}/>,dark);
+ const pre=host.querySelector<HTMLElement>("pre")!;
+ for(const token of host.querySelectorAll<HTMLElement>("[data-json-token]")) expect(contrastRatio(toHex(token.style.color||pre.style.color),surface)).toBeGreaterThanOrEqual(4.5);
 });
 
 it.each([false,true])("semantic table ink reaches 4.5:1, severity badge uses text tokens, dark=%s",async dark=>{

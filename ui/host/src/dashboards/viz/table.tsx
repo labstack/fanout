@@ -115,7 +115,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         </Table.Tr>)}
       </Table.Thead>
       <Table.Tbody>
-        {table.getRowModel().rows.map((row) => <Table.Tr key={row.id} data-row-expanded={expanded.has(row.index)} aria-expanded={canExpand ? expanded.has(row.index) : undefined} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
+        {table.getRowModel().rows.map((row) => <Table.Tr key={row.id} data-row-expanded={expanded.has(row.index)} tabIndex={rowInteractive(row.index) || canExpand ? 0 : undefined} style={{ cursor: rowInteractive(row.index) || canExpand ? "pointer" : undefined }}
           onClick={event => { if ((event.target as Element).closest("a,button")) return; if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); }}
           onKeyDown={event => { if ((!rowInteractive(row.index)&&!canExpand) || (event.target as Element).closest("a,button")) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if(canExpand && (panel.viz === "logs" || !rowInteractive(row.index))) toggle(row.index); else activate(row.index, row.original); } }}>
           {row.getAllCells().map(cell => {

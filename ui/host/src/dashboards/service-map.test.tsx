@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serviceMapModel } from "../../../panels/rollups";
 import { chartThemeFor } from "../../../panels/compile";
+import { relativeLuminance } from "../../../theme";
 import { typeScale } from "../../../tokens";
 import { ServiceMapViz } from "./viz/service-map";
 import { fitServiceMap, layoutServiceMapRaw, serviceCardLabels, serviceMapStructure } from "./viz/service-map-layout";
@@ -44,6 +45,12 @@ for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark 
     expect(card.querySelector('[data-service-name]')!.textContent).toBe(card.dataset.serviceNode);
     expect(card.title).toContain("p95"); expect(card.title).toContain("err");
     expect(card.querySelector<HTMLElement>('[data-service-name]')!.style.textOverflow).not.toBe("ellipsis");
+    const theme=chartThemeFor(dark);
+    const contrast=(color:string)=>{const a=relativeLuminance(color),b=relativeLuminance(theme.surface);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);};
+    expect(contrast(theme.text)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(theme.muted)).toBeGreaterThanOrEqual(4.5);
+    const border=card.style.border.match(/#[a-f\d]{6}/i)![0];
+    expect(contrast(border)).toBeGreaterThanOrEqual(3);
   }
 });
 
@@ -105,14 +112,20 @@ it("drops optional metrics before names and bounds labels without changing the f
 });
 
 describe("shared map interactions", () => {
-  it.each([false, true])("dims non-neighbours, supports keyboard/filter and bounded vertical pan/fit (%s)", async dark => {
+  it.each([false, true])("retains readable service labels while highlighting routes, supports keyboard/filter and bounded vertical pan/fit (%s)", async dark => {
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host); cleanups.push(() => root.unmount());
     const select = vi.fn(), point = vi.fn();
     await act(async () => root.render(<MantineProvider forceColorScheme={dark ? "dark" : "light"}><PanelCard panel={{ id: "map", title: "Map", viz: "service_map", click: { set_variable: "service" } }} title="Map" result={{ id: "map", elapsed_ms: 1, status: "ok", from_ms: 0, to_ms: 3600000, frame: demoFrame }} height={300} group="g" editing={false} agentAvailable={false} loading={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={select} onPoint={point} /></MantineProvider>));
     const button = (name: string) => host.querySelector<HTMLElement>(`[data-service-node="${name}"]`)!;
     await act(async () => button("frontend-proxy").dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
-    expect(button("frontend-proxy").style.opacity).toBe("1"); expect(button("frontend").style.opacity).toBe("1"); expect(button("payment").style.opacity).toBe("0.25");
+    expect(button("frontend-proxy").style.opacity).toBe("1"); expect(button("frontend").style.opacity).toBe("1"); expect(button("payment").style.opacity).toBe("1");
+    // Opacity also fades text: unrelated services still need readable labels.
+    const palette=chartThemeFor(dark),opacity=Number(button("payment").style.opacity||1);
+    const painted="#"+[1,3,5].map(at=>Math.round(parseInt(palette.text.slice(at,at+2),16)*opacity+parseInt(palette.surface.slice(at,at+2),16)*(1-opacity)).toString(16).padStart(2,"0")).join("");
+    const ink=relativeLuminance(painted),surface=relativeLuminance(palette.surface);
+    expect((Math.max(ink,surface)+.05)/(Math.min(ink,surface)+.05)).toBeGreaterThanOrEqual(4.5);
     expect(host.querySelector('svg > g > path')?.getAttribute("marker-end")).toBeTruthy();
+    expect([...host.querySelectorAll('svg > g > path')].some(edge=>edge.getAttribute("opacity")==="0.25")).toBe(true);
     const theme = chartThemeFor(dark);
     expect(button("frontend").style.border).toContain(theme.border);
     expect(button("checkout").style.border).toContain(theme.status.bad);

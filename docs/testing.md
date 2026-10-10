@@ -106,7 +106,10 @@ empty, failed, stale and truncated states.
 Assess WCAG AA text contrast and chart marks against their actual surfaces.
 Check all six ordered categorical colours plus Other under colour-vision
 deficiency simulation. Browser accessibility scans cannot read canvas text, so
-supplement any scan with compiler/token assertions and screenshots. Record the
+supplement any scan with compiler/token assertions and screenshots.
+`just e2e` runs the axe-core AA scan of dashboards and chat panels in both
+themes; `FANOUT_E2E_SCREENSHOTS=1 just e2e` also captures every panel type in
+both themes and states for review under `ui/host/test-results/`. Record the
 scanner or simulation method and version, findings and manual review results;
 an unrun or inconclusive check is not an accessibility pass.
 
