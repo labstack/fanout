@@ -31,11 +31,11 @@ func metricMeasurePlan(m Measure) (source, perSeries, acrossSeries string) {
 	case "share":
 		return "metric_raw_window", "count(*)::DOUBLE", "100.0*sum(_v)/nullif(sum(sum(_v)) OVER (_partition),0)"
 	case "rate":
-		return "metric_increases", "sum(CASE WHEN type='histogram' THEN count_increase ELSE increase END ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0)/nullif(sum(elapsed_s ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0),0)", "sum(_v ORDER BY " + metricSeriesKey + ")::DOUBLE"
+		return "metric_increases", "sum(_rate_share ORDER BY time,ingested_unix_nano) FILTER (WHERE _rate_covered>0)/nullif(sum(_rate_covered ORDER BY time,ingested_unix_nano) FILTER (WHERE _rate_covered>0),0)", "sum(_v ORDER BY " + metricSeriesKey + ")::DOUBLE"
 	case "sum":
 		return "metric_value_rows", "CASE WHEN type IN ('gauge','updown') THEN avg(_value) WHEN type='counter' THEN sum(increase) WHEN type='histogram' THEN sum(sum_increase) END", "sum(_v)::DOUBLE"
 	case "avg":
-		return "metric_window_points", "CASE WHEN type='histogram' THEN sum(sum_increase) ELSE avg(" + gauge + ") END", "sum(_v)/nullif(sum(_weight),0)::DOUBLE"
+		return "metric_gauge_rows", "CASE WHEN type='histogram' THEN sum(sum_increase) ELSE avg(" + gauge + ") END", "sum(_v)/nullif(sum(_weight),0)::DOUBLE"
 	case "last":
 		return "metric_last_points", "arg_max(" + scalar + ",(time,ingested_unix_nano))", "sum(_v)::DOUBLE"
 	case "min", "max":
@@ -107,11 +107,12 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 	// names, but an Other bucket must never combine different metrics.
 	selectNames := top > 0 && dims[fold].Column == "name" && dims[fold].Key == ""
 
-	// Share one builder for each source and kind set. A sum's point-only
-	// gauge/updown branch can share avg/percentile work; its counter branch
+	// Share one builder for each source and kind set. A sum's carried
+	// gauge/updown branch shares avg work; its counter branch
 	// shares the increase builder with rate, without lagging across kinds.
 	builders := map[string]string{}
-	lastSources := []string{}
+	bucketSources := []string{}
+	needRate := slices.ContainsFunc(measures, func(m Measure) bool { return m.Func == "rate" })
 	builder := func(source string, kinds []string) (string, error) {
 		key := source + ":" + strings.Join(kinds, ",")
 		if name, ok := builders[key]; ok {
@@ -124,6 +125,18 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		switch source {
 		case "metric_increases":
 			cte, builderArgs, err = metricSeriesCTE(filters, scope, kinds)
+			spread, spreadArgs := metricSpreadCTE(scope)
+			cte += spread
+			builderArgs = append(builderArgs, spreadArgs...)
+			if needRate {
+				cte += metricRateCarryCTE(scope)
+				source = "metric_rate_rows"
+			} else {
+				cte += ", metric_spread_rows AS (SELECT *,false AS _carry FROM metric_spread)"
+				source = "metric_spread_rows"
+			}
+		case "metric_gauge_rows":
+			cte, builderArgs, err = metricGaugeCTE(filters, scope, kinds)
 		case "metric_last_points":
 			cte, builderArgs, err = metricLastCTE(filters, scope, kinds)
 		default:
@@ -136,8 +149,8 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		ctes = append(ctes, name+" AS ("+cte+" SELECT * FROM "+source+")")
 		args = append(args, builderArgs...)
 		builders[key] = name
-		if source == "metric_last_points" {
-			lastSources = append(lastSources, name)
+		if source == "metric_last_points" || source == "metric_gauge_rows" || source == "metric_rate_rows" || source == "metric_spread_rows" {
+			bucketSources = append(bucketSources, name)
 		}
 		return name, nil
 	}
@@ -153,7 +166,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			}
 		}
 		if source == "metric_value_rows" {
-			gaugeRows, err := builder("metric_window_points", []string{"gauge", "updown"})
+			gaugeRows, err := builder("metric_gauge_rows", []string{"gauge", "updown"})
 			if err != nil {
 				return Compiled{}, err
 			}
@@ -192,7 +205,11 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			distinct = m.Field.stringSQL()
 		}
 		sources[i] = prefix + "source"
-		ctes = append(ctes, sources[i]+" AS (SELECT *,"+projection+" AS _value,"+distinct+" AS _distinct FROM "+source+")")
+		visible := ""
+		if m.Func != "rate" && metricHistogramMeasure(m) && !metricHistogramQuantile(m) {
+			visible = " WHERE type IN ('gauge','updown') OR NOT coalesce(_carry,false)"
+		}
+		ctes = append(ctes, sources[i]+" AS (SELECT *,"+projection+" AS _value,"+distinct+" AS _distinct FROM "+source+visible+")")
 		per[i], across[i] = perSeries, acrossSeries
 		unit := m.Unit
 		if unit == "none" {
@@ -229,7 +246,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			sample = "CASE WHEN type IN (" + strings.Join(qs, ",") + ") THEN _value END"
 		}
 		if metricHistogramMeasure(m) && !metricHistogramQuantile(m) {
-			selects = append(selects, "CASE WHEN type='histogram' THEN sum(count_increase) ELSE count("+sample+") END AS _n")
+			selects = append(selects, "CASE WHEN type='histogram' THEN sum(count_increase) ELSE count("+sample+") FILTER (WHERE NOT coalesce(_carry,false)) END AS _n")
 		} else {
 			selects = append(selects, "count("+sample+") AS _n")
 		}
@@ -242,6 +259,15 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		where := ""
 		if name == "metric_rank_series" && bucketed && m.Func == "last" && metricValueMeasure(m) {
 			where = fmt.Sprintf(" WHERE _bucket=%d", alignedBucketMillis(scope.End.Add(-time.Nanosecond), scope.Interval))
+		}
+		if name == "metric_rank_series" && bucketed && (m.Func == "rate" || (metricValueMeasure(m) && (m.Func == "sum" || m.Func == "avg"))) {
+			// Ranking is one whole-window bucket: carried bucket samples must
+			// not reweight a series with real window coverage or gauge points.
+			covered := "NOT coalesce(_carry,false)"
+			if m.Func == "rate" {
+				covered += " AND _rate_covered>0"
+			}
+			where = " WHERE NOT coalesce(_carry,false) OR series_id NOT IN (SELECT series_id FROM " + sources[i] + " WHERE " + covered + ")"
 		}
 		ctes = append(ctes, name+" AS (SELECT "+strings.Join(selects, ",")+" FROM "+sources[i]+where+" GROUP BY "+strings.Join(groups, ",")+")")
 	}
@@ -265,7 +291,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		selects = append(selects, "unnest(list_append(_bounds,NULL::DOUBLE)) AS hi", "unnest(bound_increases) AS n")
 		grouped := strings.Join(keys, ",") + ",hi"
 		ctes = append(ctes,
-			weights+" AS (SELECT "+grouped+",sum(n) AS n FROM (SELECT "+strings.Join(selects, ",")+" FROM "+histograms[i]+") WHERE n>=0 GROUP BY "+grouped+")",
+			weights+" AS (SELECT "+grouped+",sum(n) AS n FROM (SELECT "+strings.Join(selects, ",")+" FROM "+histograms[i]+" WHERE NOT _carry) WHERE n>=0 GROUP BY "+grouped+")",
 			answers+" AS ("+histogramQuantileSQL(weights, keys, measures[i].Q)+")",
 			samples+" AS (SELECT "+strings.Join(keys, ",")+",sum(n)::DOUBLE AS _n FROM "+weights+" GROUP BY "+strings.Join(keys, ",")+")",
 			name+"_scalar AS ("+scalar+")")
@@ -304,10 +330,13 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		if first.Func == "last" && metricValueMeasure(first) {
 			rankSource = sources[0]
 		}
+		if samples == "r.n" {
+			samples = "coalesce(r.n,0)"
+		}
 		ctes = append(ctes,
 			"metric_rank_values AS (SELECT d,_v AS value,_n AS n FROM metric_rank_groups)",
 			"metric_rank_keys AS (SELECT "+dimExprs[fold]+" AS d,count(*) AS n FROM "+rankSource+" GROUP BY 1)",
-			"candidates AS (SELECT r.d,v.value,"+samples+" AS n FROM metric_rank_keys r LEFT JOIN metric_rank_values v ON r.d IS NOT DISTINCT FROM v.d)",
+			"candidates AS (SELECT coalesce(r.d,v.d) AS d,v.value,"+samples+" AS n FROM metric_rank_keys r FULL OUTER JOIN metric_rank_values v ON r.d IS NOT DISTINCT FROM v.d)",
 			fmt.Sprintf("top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", order, top))
 
 	}
@@ -326,7 +355,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		ctes = append(ctes, "metric_groups AS (SELECT 0::BIGINT AS _bucket)")
 	} else {
 		groupSource := "SELECT " + strings.Join(keySelect, ",") + " FROM metric_raw_window"
-		for _, source := range lastSources {
+		for _, source := range bucketSources {
 			groupSource += " UNION ALL SELECT " + strings.Join(keySelect, ",") + " FROM " + source
 		}
 		ctes = append(ctes, "metric_groups AS (SELECT DISTINCT * FROM ("+groupSource+"))")

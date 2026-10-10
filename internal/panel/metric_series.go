@@ -23,7 +23,7 @@ func metricReadScope(p *Panel, scope Scope) Scope {
 			if metricHistogramMeasure(m) {
 				lookback = metricLookback
 			}
-			if m.Func == "last" && metricValueMeasure(m) {
+			if (m.Func == "last" || m.Func == "sum" || m.Func == "avg") && metricValueMeasure(m) {
 				lookback = max(lookback, metricStaleness)
 			}
 		}
@@ -114,7 +114,7 @@ func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []a
         CASE WHEN temporality='delta' AND start_time IS NOT NULL AND start_time<time THEN start_time
              ELSE _previous_time END AS _elapsed_from
         FROM metric_rebinned),
-      metric_increases AS (SELECT *,
+      metric_deltas AS MATERIALIZED (SELECT *,
         CASE WHEN type='counter' THEN CASE WHEN temporality='delta' OR _reset THEN value ELSE value-_previous_value END END::DOUBLE AS increase,
         CASE WHEN type='histogram' THEN CASE WHEN temporality='delta' OR _reset THEN hist_count ELSE hist_count-_previous_count END END::DOUBLE AS count_increase,
         CASE WHEN type='histogram' THEN CASE WHEN temporality='delta' OR _reset THEN hist_sum ELSE hist_sum-_previous_sum END END::DOUBLE AS sum_increase,
@@ -123,9 +123,10 @@ func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []a
                ELSE _counts[i]::HUGEINT-_rebinned_previous[i] END) END AS bound_increases,
         CASE WHEN _elapsed_from<time THEN (epoch_ns(time::TIMESTAMP_NS)::HUGEINT-epoch_ns(_elapsed_from::TIMESTAMP_NS)::HUGEINT)::DOUBLE/1e9 END AS elapsed_s
         FROM metric_reset
-        WHERE time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
-          AND type IN ('counter','histogram') AND temporality IN ('delta','cumulative')
-          AND (temporality='delta' OR _previous_time IS NOT NULL))`
+        WHERE type IN ('counter','histogram') AND temporality IN ('delta','cumulative')
+          AND (temporality='delta' OR _previous_time IS NOT NULL)),
+      metric_increases AS (SELECT * FROM metric_deltas
+        WHERE time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS)`
 	args = append(args, scope.Start.UTC(), scope.End.UTC())
 	return strings.TrimSpace(text), args, nil
 }
@@ -135,13 +136,20 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
 	if err != nil {
 		return "", nil, err
 	}
+	spread, spreadArgs := metricSpreadCTE(scope)
+	cte += spread
+	args = append(args, spreadArgs...)
 	// Zipped select-list unnests avoid the lateral join WITH ORDINALITY plans;
 	// bucket k spans (bounds[k-1], bounds[k]], open at both ends.
-	text := cte + ` SELECT * FROM (SELECT time AS t,` + dimSelect + `,_bucket,
+	timeSQL := "time"
+	if scope.Interval > 0 {
+		timeSQL = "make_timestamp_ns(_bucket*1000000)::TIMESTAMPTZ_NS"
+	}
+	text := cte + ` SELECT * FROM (SELECT ` + timeSQL + ` AS t,` + dimSelect + `,_bucket,
       unnest(list_prepend(NULL::DOUBLE,_bounds)) AS lo,
       unnest(list_append(_bounds,NULL::DOUBLE)) AS hi,
       unnest(bound_increases) AS n
-      FROM metric_increases WHERE type='histogram') WHERE n>=0`
+      FROM metric_spread WHERE type='histogram') WHERE n>=0`
 	return text, args, nil
 }
 

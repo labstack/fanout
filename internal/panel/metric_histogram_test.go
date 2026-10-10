@@ -30,7 +30,7 @@ func TestHistogramMeasuresInterpolateSummedIncreases(t *testing.T) {
 		{"p50(value)", 12.5}, {"p75(value)", 16.25}, {"p95(value)", 19.25},
 		{"quantile(value, 0.95)", 19.25}, {"min(value)", nil}, {"max(value)", nil}, {"last(value)", nil},
 	} {
-		r := runMetricMeasure(t, e, []string{tc.measure}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
+		r := runMetricMeasure(t, e, []string{tc.measure}, "", nil, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))
 		got := r.Frame.Values[len(r.Frame.Columns)-1]
 		if len(got) != 1 || got[0] != tc.want {
 			t.Fatalf("%s=%v want %v", tc.measure, got, tc.want)
@@ -61,7 +61,7 @@ func TestHistogramQuantileHandlesZeroAndOverflow(t *testing.T) {
 				m.Type = "exponential_histogram"
 			}
 			insertMetrics(t, db, m)
-			r := runMetricMeasure(t, e, []string{"p95(value)"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
+			r := runMetricMeasure(t, e, []string{"p95(value)"}, "", nil, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))
 			if got := metricValues(t, r, "p95"); len(got) != 1 || got[0] != tc.want {
 				t.Fatalf("p95=%v want=%v", got, tc.want)
 			}
@@ -105,8 +105,8 @@ func TestHistogramRateUsesPerSeriesCoveredElapsedTime(t *testing.T) {
 		insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Duration(p.seconds)*time.Second), "[10]", fmt.Sprintf("[%d,0]", p.count), int64(p.count), float64(p.count), p.series))
 	}
 	r := runMetricMeasure(t, e, []string{"rate()", "sum(value)", "avg(value)", "p95(value)"}, "5m", nil, fixtureStart, fixtureStart.Add(2*time.Minute))
-	a, b := 120.0/90.0, 300.0/150.0
-	if !reflect.DeepEqual(metricValues(t, r, "rate"), []any{a + b}) || metricValues(t, r, "sum")[0] != 420.0 || metricValues(t, r, "avg")[0] != 1.0 {
+	a, b := 2.0, 2.0
+	if !reflect.DeepEqual(metricValues(t, r, "rate"), []any{a + b}) || metricValues(t, r, "sum")[0] != 240.0 || metricValues(t, r, "avg")[0] != 1.0 {
 		t.Fatalf("per-series measures=%+v", r.Frame)
 	}
 	for _, bucket := range []string{"10s", "1m", "1h"} {
@@ -198,8 +198,8 @@ func TestHistogramMeasuresReadSeparateLookbackBatch(t *testing.T) {
 	e := NewExecutor(engine, 30)
 	for _, tc := range []struct {
 		measure, alias string
-		want           float64
-	}{{"rate()", "rate", 10.0 / 60.0}, {"sum(value)", "sum", 50}, {"avg(value)", "avg", 5}, {"p95(value)", "p95", 9.5}} {
+		want           any
+	}{{"rate()", "rate", 10.0 / 60.0}, {"sum(value)", "sum", nil}, {"avg(value)", "avg", nil}, {"p95(value)", "p95", nil}} {
 		r := runMetricMeasure(t, e, []string{tc.measure}, "1m", nil, fixtureStart, fixtureStart.Add(time.Minute))
 		if !reflect.DeepEqual(metricValues(t, r, tc.alias), []any{tc.want}) || r.FromMS != fixtureStart.UnixMilli() || r.ToMS != fixtureStart.Add(time.Minute).UnixMilli() {
 			t.Fatalf("%s lookback=%+v", tc.measure, r)
@@ -223,9 +223,9 @@ func TestHistogramMeasuresResetTogetherAndKeepNegativeSums(t *testing.T) {
 		insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Duration(i-1)*time.Minute), p.bounds, p.counts, p.count, p.sum, "a"))
 	}
 	r := runMetricMeasure(t, e, []string{"sum(value)", "avg(value)", "p50(value)"}, "1m", nil, fixtureStart, fixtureStart.Add(4*time.Minute))
-	if !reflect.DeepEqual(metricValues(t, r, "sum"), []any{-10.0, 5.0, -4.0, -5.0}) ||
-		!reflect.DeepEqual(metricValues(t, r, "avg"), []any{-5.0, 5.0 / 12.0, -4.0, -2.5}) ||
-		!reflect.DeepEqual(metricValues(t, r, "p50"), []any{-5.0, -3.75, -10.0, -20.0}) {
+	if !reflect.DeepEqual(metricValues(t, r, "sum"), []any{5.0, -4.0, -5.0, nil}) ||
+		!reflect.DeepEqual(metricValues(t, r, "avg"), []any{5.0 / 12.0, -4.0, -2.5, nil}) ||
+		!reflect.DeepEqual(metricValues(t, r, "p50"), []any{-3.75, -10.0, -20.0, nil}) {
 		t.Fatalf("reset channels=%+v", r.Frame)
 	}
 }
@@ -241,7 +241,7 @@ func TestHistogramUndefinedQuantilesKeepAllGroups(t *testing.T) {
 		m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano()
 		insertMetrics(t, db, m)
 	}
-	r := runMetricMeasure(t, e, []string{"rate()", "sum(value)", "avg(value)", "p95(value)"}, "", []string{"attributes['series']"}, fixtureStart, fixtureStart.Add(time.Minute))
+	r := runMetricMeasure(t, e, []string{"rate()", "sum(value)", "avg(value)", "p95(value)"}, "", []string{"attributes['series']"}, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))
 	groups := metricValues(t, r, "series")
 	if len(groups) != 3 {
 		t.Fatalf("missing groups=%+v", r.Frame)
@@ -280,7 +280,7 @@ func TestHistogramQuantilesOnConvertedExponentialLayout(t *testing.T) {
 	m.Type, m.Temporality = "exponential_histogram", "delta"
 	m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano()
 	insertMetrics(t, db, m)
-	r := runMetricMeasure(t, e, []string{"quantile(value, 0.25) as q25", "p50(value)", "p75(value)"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
+	r := runMetricMeasure(t, e, []string{"quantile(value, 0.25) as q25", "p50(value)", "p75(value)"}, "", nil, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))
 	for alias, want := range map[string]float64{"q25": 0.625, "p50": 1, "p75": 2.5} {
 		if got := metricValues(t, r, alias); len(got) != 1 || got[0] != want {
 			t.Fatalf("%s=%v want %v", alias, got, want)

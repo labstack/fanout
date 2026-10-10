@@ -5,6 +5,8 @@ package panel
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -101,6 +103,8 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 		}{
 			{"table_five", "table", []string{"avg(value)", "min(value)", "max(value)", "last(value)", "p95(value)"}, []string{"service"}, 0},
 			{"timeseries_three", "timeseries", []string{"avg(value)", "min(value)", "max(value)"}, nil, time.Minute},
+			{"sum_by_service", "timeseries", []string{"sum(value)"}, []string{"service"}, time.Minute},
+			{"avg_by_service", "timeseries", []string{"avg(value)"}, []string{"service"}, time.Minute},
 			{"stat_last", "stat", []string{"last(value)"}, nil, 0},
 		}
 		if kind == "counter" {
@@ -110,6 +114,8 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 				interval     time.Duration
 			}{
 				{"rate_by_service", "timeseries", []string{"rate()"}, []string{"service"}, time.Minute},
+				{"rate_by_service_10s", "timeseries", []string{"rate()"}, []string{"service"}, 10 * time.Second},
+				{"sum_by_service", "timeseries", []string{"sum(value)"}, []string{"service"}, time.Minute},
 				{"stat_rate", "stat", []string{"rate()"}, nil, 0},
 			}
 		}
@@ -121,6 +127,7 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			}{
 				{"table_histogram_five", "table", []string{"rate()", "sum(value)", "avg(value)", "p50(value)", "p95(value)"}, []string{"service"}, 0},
 				{"timeseries_histogram_three", "timeseries", []string{"rate()", "avg(value)", "p95(value)"}, nil, time.Minute},
+				{"p95_by_service", "timeseries", []string{"p95(value)"}, []string{"service"}, time.Minute},
 				{"stat_histogram_p95", "stat", []string{"p95(value)"}, nil, 0},
 			}
 		}
@@ -128,6 +135,9 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			p := Panel{ID: shape.id, Title: shape.id, Viz: shape.viz, Query: &Query{From: "metrics", Where: []string{"name='net'"}, Measures: shape.measures, By: shape.by}}
 			if shape.interval > 0 {
 				p.Query.Bucket = "1m"
+				if shape.interval == 10*time.Second {
+					p.Query.Bucket = "10s"
+				}
 			}
 			d := Dashboard{Name: "Review timings", Time: Time{From: &start, To: &end}, Panels: []Panel{p}}
 			Normalize(&d)
@@ -137,6 +147,30 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			}
 			p = d.Panels[0]
 			scope := Scope{Start: start, End: end, Interval: shape.interval}
+			if dir := os.Getenv("FANOUT_METRIC_PROFILE_DIR"); dir != "" {
+				for _, stmt := range []string{"SET enable_profiling='json'", "SET profiling_output=" + sqlString(filepath.Join(t.TempDir(), "profile.json"))} {
+					if _, err := db.Exec(stmt); err != nil {
+						t.Fatal(err)
+					}
+				}
+				compiled, err := compileQuery(&p, checked.Measures[p.ID], checked.Filters[p.ID], scope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var key, plan string
+				if err := db.QueryRow("EXPLAIN (ANALYZE, FORMAT JSON) "+compiled.SQL, compiled.Args...).Scan(&key, &plan); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, kind+"-"+shape.id+".json"), []byte(plan), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec("PRAGMA disable_profiling"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			for _, mode := range []string{"query", "executor"} {
 				samples := []float64{}
 				for trial := 0; trial < 8; trial++ {

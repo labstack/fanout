@@ -249,7 +249,8 @@ func TestMetricExamplesExecuteWithObservations(t *testing.T) {
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	var metrics []telemetry.Metric
 	for i := range 2 {
-		n := at.Add(time.Duration(i-1) * time.Minute).UnixNano()
+		// The completed interval must overlap the example's selected window.
+		n := at.Add(time.Duration(i-1)*time.Minute + 30*time.Second).UnixNano()
 		metrics = append(metrics,
 			telemetry.Metric{Namespace: "test", ServiceName: "api", Name: "system.network.io", Unit: "By",
 				Type: "sum", Monotonic: true, Temporality: "cumulative", Value: float64(i * 60),

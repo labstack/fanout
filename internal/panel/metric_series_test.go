@@ -235,8 +235,8 @@ func TestHistogramPanelsShareResetIncreases(t *testing.T) {
 		for _, n := range metricValues(t, r, "count") {
 			total += n.(float64)
 		}
-		if total != 106 {
-			t.Fatalf("%s count=%g want 106", viz, total)
+		if total != 96 {
+			t.Fatalf("%s count=%g want 96", viz, total)
 		}
 		if viz == "heatmap" {
 			times := metricValues(t, r, "time")
@@ -245,7 +245,7 @@ func TestHistogramPanelsShareResetIncreases(t *testing.T) {
 			for i, n := range counts {
 				buckets[times[i].(int64)] += n.(float64)
 			}
-			if buckets[fixtureStart.UnixMilli()] != 10 || buckets[fixtureStart.Add(time.Minute).UnixMilli()] != 90 || buckets[fixtureStart.Add(2*time.Minute).UnixMilli()] != 6 {
+			if buckets[fixtureStart.UnixMilli()] != 90 || buckets[fixtureStart.Add(time.Minute).UnixMilli()] != 6 || buckets[fixtureStart.Add(2*time.Minute).UnixMilli()] != 0 {
 				t.Fatalf("buckets=%v", buckets)
 			}
 		}
@@ -375,7 +375,7 @@ func TestMetricHistogramReadsSeparateLookbackBatch(t *testing.T) {
 	e := NewExecutor(engine, 30)
 	p := Panel{Viz: "heatmap", Query: &Query{From: "metrics", Where: []string{"name='net'", "attributes['series']='a'"}, Measures: []string{"count()"}, Bucket: "1m", Histogram: &Histogram{Field: "value", Buckets: "explicit"}}}
 	r := runMetricPanel(t, e, p, fixtureStart, fixtureStart.Add(2*time.Minute))
-	if !reflect.DeepEqual(metricValues(t, r, "count"), []any{1.0, 2.0, 1.0, 2.0}) || r.FromMS != fixtureStart.UnixMilli() || r.ToMS != fixtureStart.Add(2*time.Minute).UnixMilli() {
+	if !reflect.DeepEqual(metricValues(t, r, "count"), []any{1.0, 2.0}) || r.FromMS != fixtureStart.UnixMilli() || r.ToMS != fixtureStart.Add(2*time.Minute).UnixMilli() {
 		t.Fatalf("lookback or visible window: %+v", r)
 	}
 }
@@ -462,7 +462,7 @@ func TestHistogramIncreaseRebinsChangedBounds(t *testing.T) {
 			}
 			if tc.name == "growing_exponential_range" {
 				h := runMetricPanel(t, e, Panel{Viz: "histogram", Query: &Query{From: "metrics", Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}}, scope.Start, scope.End)
-				if !reflect.DeepEqual(metricValues(t, h, "count"), []any{2.0, 1.0}) {
+				if !reflect.DeepEqual(metricValues(t, h, "count"), []any{2.0}) {
 					t.Fatalf("growing range distribution=%+v", h.Frame)
 				}
 			}

@@ -28,6 +28,9 @@ func TestMetricRateUsesCoveredElapsedTime(t *testing.T) {
 		if len(values) == 0 {
 			t.Fatalf("%s: no rates", bucket)
 		}
+		if bucket == "10s" && len(values) != 18 {
+			t.Fatalf("single 60s reporter has %d ten-second buckets, want 18", len(values))
+		}
 		for _, v := range values {
 			if v != 1.0 {
 				t.Fatalf("%s rate=%v want 1", bucket, v)
@@ -45,7 +48,7 @@ func TestMetricRateUsesCoveredElapsedTime(t *testing.T) {
 	}
 }
 
-func TestMetricRestartDoesNotCarryOldSeries(t *testing.T) {
+func TestMetricRestartCarriesOldRateUntilStale(t *testing.T) {
 	e, db := metricFixture(t)
 	for _, p := range []struct {
 		minute int
@@ -62,10 +65,10 @@ func TestMetricRestartDoesNotCarryOldSeries(t *testing.T) {
 	for i, v := range values {
 		got[times[i].(int64)] = v
 	}
-	if got[fixtureStart.UnixMilli()] != 1.0 || got[fixtureStart.Add(2*time.Minute).UnixMilli()] != 1.0 {
+	if got[fixtureStart.UnixMilli()] != 1.0 || got[fixtureStart.Add(2*time.Minute).UnixMilli()] != 2.0 {
 		t.Fatalf("restart=%v", got)
 	}
-	if v, exists := got[fixtureStart.Add(time.Minute).UnixMilli()]; exists && v != nil {
+	if v, exists := got[fixtureStart.Add(time.Minute).UnixMilli()]; !exists || v != 2.0 {
 		t.Fatalf("first new point=%v", v)
 	}
 }
@@ -82,7 +85,7 @@ func TestMetricRateSumsPerSeriesAndIgnoresMissingElapsed(t *testing.T) {
 		insertMetrics(t, db, m)
 	}
 	r := runMetricMeasure(t, e, []string{"rate()"}, "5m", nil, fixtureStart, fixtureStart.Add(2*time.Minute))
-	a, b := 120.0/90.0, 300.0/150.0
+	a, b := 2.0, 2.0
 	want := a + b
 	if got := metricValues(t, r, "rate"); !reflect.DeepEqual(got, []any{want}) {
 		t.Fatalf("rates=%v", got)
@@ -125,7 +128,7 @@ func TestMetricMeasuresRespectKindsAndSeriesWeight(t *testing.T) {
 			}
 			want := map[string]any{"sum(value)": 120.0, "avg(value)": 60.0, "last(value)": 130.0, "min(value)": 10.0, "max(value)": 100.0, "p75(value)": 65.0, "quantile(value, 0.5)": 30.0}
 			if kind == "counter" {
-				want["sum(value)"] = 130.0
+				want["sum(value)"] = 20.0
 				want["avg(value)"] = nil
 				want["p75(value)"] = nil
 				want["quantile(value, 0.5)"] = nil
@@ -266,9 +269,10 @@ func TestMetricRankingRecomputesOtherFromSeriesRates(t *testing.T) {
 	for i, d := range dims {
 		got[d.(string)] = rates[i]
 	}
-	increase, elapsed := 120.0, 90.0
+	increase, elapsed := 60.0, 30.0
 	wantOther := increase / elapsed
-	if got["b"] != 2.0 || got["Other (1)"] != wantOther {
+	// Window-clipped rates tie at 2/s, so the stable name tie-break picks a.
+	if got["a"] != 2.0 || got["Other (1)"] != wantOther {
 		t.Fatalf("ranking=%v", got)
 	}
 }
@@ -282,7 +286,7 @@ func TestMetricWindowClipsPointsAfterComputingIncrease(t *testing.T) {
 		insertMetrics(t, db, metricCounter(fixtureStart.Add(p.offset), p.value))
 	}
 	r := runMetricMeasure(t, e, []string{"sum(value)"}, "1m", nil, fixtureStart, fixtureStart.Add(time.Minute))
-	if !reflect.DeepEqual(metricValues(t, r, "sum"), []any{60.0}) {
+	if !reflect.DeepEqual(metricValues(t, r, "sum"), []any{nil}) {
 		t.Fatalf("clipped=%+v", r.Frame)
 	}
 	r = runMetricMeasure(t, e, []string{"rate()"}, "1m", nil, fixtureStart, fixtureStart.Add(time.Minute))
@@ -327,7 +331,7 @@ func TestMetricSeriesFiltersPreserveLiteralNamesAndAttributeKeys(t *testing.T) {
 	r := runMetricPanel(t, e, Panel{Viz: "table", Query: &Query{From: "metrics", Where: []string{
 		"name='metric_points'", "attributes['metric_input']='metric_previous'",
 	}, Measures: []string{"rate()", "sum(value)"}}}, fixtureStart, fixtureStart.Add(2*time.Minute))
-	if !reflect.DeepEqual(metricValues(t, r, "rate"), []any{1.0}) || !reflect.DeepEqual(metricValues(t, r, "sum"), []any{120.0}) {
+	if !reflect.DeepEqual(metricValues(t, r, "rate"), []any{1.0}) || !reflect.DeepEqual(metricValues(t, r, "sum"), []any{60.0}) {
 		t.Fatalf("filters=%+v", r.Frame)
 	}
 }
@@ -435,7 +439,7 @@ func TestMetricKindsAreSelectedBeforeSeriesWindows(t *testing.T) {
 		insertMetrics(t, db, m)
 	}
 	r := runMetricMeasure(t, e, []string{"rate()", "avg(value)", "sum(value)"}, "", nil, fixtureStart, fixtureStart.Add(2*time.Minute))
-	if metricValues(t, r, "rate")[0] != 1.0 || metricValues(t, r, "avg")[0] != 42.0 || metricValues(t, r, "sum")[0] != 162.0 {
+	if metricValues(t, r, "rate")[0] != 1.0 || metricValues(t, r, "avg")[0] != 42.0 || metricValues(t, r, "sum")[0] != 102.0 {
 		t.Fatalf("kinds=%+v", r.Frame)
 	}
 }
@@ -462,7 +466,7 @@ func TestMetricBaselineIsUndefinedButZeroIncreaseHasValue(t *testing.T) {
 	}
 	insertMetrics(t, db, metricCounter(fixtureStart.Add(time.Minute), 100))
 	r = runMetricMeasure(t, e, []string{"rate()", "sum(value)"}, "1m", nil, fixtureStart, fixtureStart.Add(3*time.Minute))
-	if r.Status != StatusOK || !reflect.DeepEqual(metricValues(t, r, "rate"), []any{nil, 0.0}) || !reflect.DeepEqual(metricValues(t, r, "sum"), []any{nil, 0.0}) {
+	if r.Status != StatusOK || !reflect.DeepEqual(metricValues(t, r, "rate"), []any{0.0, 0.0, 0.0}) || !reflect.DeepEqual(metricValues(t, r, "sum"), []any{0.0, nil, nil}) {
 		t.Fatalf("zero=%+v", r)
 	}
 }

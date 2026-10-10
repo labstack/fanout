@@ -326,9 +326,9 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 			t.Fatalf("heat: %+v %v", got, err)
 		}
 		f := got[0].Frame
-		want := []any{float64(2), float64(4), float64(6), float64(12)}
+		want := []any{float64(5), float64(10), float64(3), float64(6)}
 		if temporality == "delta" {
-			want = []any{float64(22), float64(44), float64(33), float64(66)}
+			want = []any{float64(37), float64(74), float64(18), float64(36)}
 		}
 		if f.Rows != 4 || !slices.Equal(f.Values[3], want) || f.Values[0][0] != fixtureStart.UnixMilli() || f.Values[0][2] != fixtureStart.Add(5*time.Minute).UnixMilli() {
 			t.Fatalf("%q frame: %+v", temporality, f)
@@ -462,7 +462,7 @@ func TestMetricDistributionOtherCountsContributingSeries(t *testing.T) {
 		insertMetrics(t, db, metricHistogram(fixtureStart, "[10]", fmt.Sprintf("[%d,0]", 10+increase), int64(10+increase), float64(100+increase), series))
 	}
 	q := &Query{From: "metrics", By: []string{"attributes['series']"}, Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}
-	r := runMetricPanel(t, e, Panel{Viz: "histogram", Options: &Options{Top: 5}, Query: q}, fixtureStart, fixtureStart.Add(time.Minute))
+	r := runMetricPanel(t, e, Panel{Viz: "histogram", Options: &Options{Top: 5}, Query: q}, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))
 	if !reflect.DeepEqual(metricValues(t, r, "series"), []any{"Other (2)", "s0", "s1", "s2", "s3", "s4"}) ||
 		!reflect.DeepEqual(metricValues(t, r, "count"), []any{7.0, 9.0, 8.0, 7.0, 6.0, 5.0}) {
 		t.Fatalf("folded counts=%+v", r.Frame)

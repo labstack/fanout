@@ -90,21 +90,52 @@ func metricOracleSQL(measure string) string {
           lag(start_time) OVER w AS previous_start,lag(hist_count) OVER w AS previous_count,
           lag(bounds) OVER w AS previous_bounds,lag(counts) OVER w AS previous_counts
         FROM samples WINDOW w AS (PARTITION BY series_id ORDER BY time,ingested_unix_nano)),
-      steps AS (
-        SELECT *,epoch_ms(time_bucket(INTERVAL '1 minute',time::TIMESTAMP_NS,'1970-01-01'::TIMESTAMP_NS))::BIGINT AS bucket,
+      intervals AS (
+        SELECT *,epoch_ms(time_bucket(INTERVAL '1 minute',time::TIMESTAMP_NS,'1970-01-01'::TIMESTAMP_NS))::BIGINT AS point_bucket,
           (start_time IS NOT NULL AND previous_start IS NOT NULL AND start_time<>previous_start) AS restarted,
-          CASE WHEN temporality='delta' AND start_time IS NOT NULL AND start_time<time
-            THEN (epoch_ns(time)::HUGEINT-epoch_ns(start_time)::HUGEINT)::DOUBLE/1e9
-            WHEN previous_time<time THEN (epoch_ns(time)::HUGEINT-epoch_ns(previous_time)::HUGEINT)::DOUBLE/1e9 END AS elapsed
-        FROM ordered,settings WHERE time>=visible_start
-          AND temporality IN ('delta','cumulative') AND (temporality='delta' OR previous_time IS NOT NULL))`
+          CASE WHEN temporality='delta' AND start_time IS NOT NULL AND start_time<time THEN start_time
+            ELSE previous_time END AS covered_from
+        FROM ordered WHERE temporality IN ('delta','cumulative') AND (temporality='delta' OR previous_time IS NOT NULL)),
+      steps AS (
+        SELECT *,CASE WHEN covered_from<time THEN
+          (epoch_ns(time::TIMESTAMP_NS)::HUGEINT-epoch_ns(covered_from::TIMESTAMP_NS)::HUGEINT)::DOUBLE/1e9 END AS elapsed
+        FROM intervals),
+      limits AS (
+        SELECT *,epoch_ns(visible_start::TIMESTAMP_NS) AS lo,
+          epoch_ns(visible_end::TIMESTAMP_NS) AS hi FROM settings),
+      buckets AS (
+        SELECT b AS bucket,greatest(lo,b*1000000) AS bucket_start,
+          least(hi,(b+60000)*1000000) AS bucket_end
+        FROM limits,generate_series(
+          (lo//60000000000-CASE WHEN lo%60000000000<0 THEN 1 ELSE 0 END)*60000,
+          ((hi-1)//60000000000-CASE WHEN (hi-1)%60000000000<0 THEN 1 ELSE 0 END)*60000,
+          60000::BIGINT) AS indexes(b))`
 	if measure == "rate()" {
-		return base + `, series_rates AS (
+		// Ordinary joins and a recency rank keep this independent of the
+		// compiler's index expansion and ASOF carry implementation.
+		return base + `, deltas AS (
+          SELECT *,CASE WHEN temporality='delta' OR restarted OR value<previous_value THEN value
+            ELSE value-previous_value END AS increase FROM steps WHERE elapsed>0),
+        interval_shares AS (
+          SELECT d.*,b.bucket,
+            (least(epoch_ns(time::TIMESTAMP_NS),bucket_end)-greatest(epoch_ns(covered_from::TIMESTAMP_NS),bucket_start))::DOUBLE/1e9 AS covered
+          FROM deltas d JOIN buckets b ON epoch_ns(time::TIMESTAMP_NS)>bucket_start
+            AND epoch_ns(covered_from::TIMESTAMP_NS)<bucket_end),
+        shares AS (
+          SELECT bucket,series_id,time,ingested_unix_nano,attributes,
+            increase*covered/elapsed AS share,covered FROM interval_shares WHERE covered>0),
+        recent AS (
+          SELECT d.*,b.bucket,row_number() OVER (PARTITION BY bucket,series_id ORDER BY time DESC) AS recency
+          FROM buckets b JOIN deltas d ON epoch_ns(time::TIMESTAMP_NS)<=bucket_start
+            AND epoch_ns(time::TIMESTAMP_NS)>=bucket_start-300000000000),
+        rate_rows AS (
+          SELECT * FROM shares UNION ALL BY NAME
+          SELECT bucket,series_id,time,ingested_unix_nano,attributes,increase/elapsed AS share,1.0 AS covered
+          FROM recent r WHERE recency=1 AND NOT EXISTS (SELECT 1 FROM shares s WHERE s.bucket=r.bucket AND s.series_id=r.series_id)),
+        series_rates AS (
           SELECT bucket,series_id,coalesce(TRY_CAST(attributes['direction'] AS VARCHAR),'') AS dimension,
-            sum(CASE WHEN temporality='delta' OR restarted OR value<previous_value THEN value
-              ELSE value-previous_value END ORDER BY time,ingested_unix_nano)
-              /sum(elapsed ORDER BY time,ingested_unix_nano) AS rate
-          FROM steps WHERE elapsed>0 GROUP BY bucket,series_id,dimension)
+            sum(share ORDER BY time,ingested_unix_nano)/sum(covered ORDER BY time,ingested_unix_nano) AS rate
+          FROM rate_rows GROUP BY bucket,series_id,dimension)
         SELECT bucket,dimension,sum(rate ORDER BY series_id)::DOUBLE AS value
         FROM series_rates GROUP BY bucket,dimension ORDER BY 1,2`
 	}
@@ -124,10 +155,17 @@ func metricOracleSQL(measure string) string {
           OR bool_or(current_weight<old_weight) OVER point AS reset
         FROM bins WINDOW point AS (PARTITION BY series_id,time)),
       increases AS (
-        SELECT bucket,upper_bound,CASE WHEN temporality='delta' OR reset THEN current_weight
+        SELECT *,CASE WHEN temporality='delta' OR reset THEN current_weight
           ELSE current_weight-old_weight END AS n FROM resets),
+      interval_shares AS (
+        SELECT b.bucket,i.upper_bound,
+          i.n::DOUBLE*((least(epoch_ns(time::TIMESTAMP_NS),bucket_end)-greatest(epoch_ns(covered_from::TIMESTAMP_NS),bucket_start))::DOUBLE/1e9)/elapsed AS n
+        FROM increases i JOIN buckets b ON elapsed>0 AND epoch_ns(time::TIMESTAMP_NS)>bucket_start
+          AND epoch_ns(covered_from::TIMESTAMP_NS)<bucket_end
+        UNION ALL SELECT point_bucket,upper_bound,n::DOUBLE FROM increases,settings
+          WHERE elapsed IS NULL AND time>=visible_start),
       merged AS (
-        SELECT bucket,upper_bound,sum(n)::DOUBLE AS n FROM increases WHERE n>=0 GROUP BY bucket,upper_bound),
+        SELECT bucket,upper_bound,sum(n)::DOUBLE AS n FROM interval_shares WHERE n>=0 GROUP BY bucket,upper_bound),
       cumulative AS (
         SELECT *,sum(n) OVER (PARTITION BY bucket ORDER BY upper_bound NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total,
           sum(n) OVER (PARTITION BY bucket ORDER BY upper_bound NULLS LAST ROWS UNBOUNDED PRECEDING) AS seen,
@@ -218,7 +256,13 @@ func crosscheckMetricFrame(t *testing.T, engine Engine, name, measure string, st
 	}
 	for cell, want := range expected {
 		got, exists := actual[cell]
-		if !exists || got != want {
+		equal := got == want
+		if measure == "p95(value)" {
+			// Fractional histogram shares are summed in different orders by
+			// the independent oracle and the panel's spread expansion.
+			equal = equal || math.Abs(got-want) <= 1e-12*math.Max(math.Abs(got), math.Abs(want))
+		}
+		if !exists || !equal {
 			t.Fatalf("metric %q %s bucket=%d present=%t panel=%v oracle=%v", name, measure, cell.bucket, exists, got, want)
 		}
 	}
@@ -270,7 +314,7 @@ func TestMetricOracleMatchesKnownFixture(t *testing.T) {
 		values                   []float64
 	}{
 		{"net", "rate()", "receive", []float64{1, 1, 1}},
-		{"latency", "p95(value)", "", []float64{19, 19, 19}},
+		{"latency", "p95(value)", "", []float64{19, 19}},
 		{"memory", "last(value)", "used", []float64{10, 11, 12}},
 	} {
 		t.Run(tc.measure, func(t *testing.T) {

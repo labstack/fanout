@@ -470,9 +470,9 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 		}
 		values := result.Frame.Values[len(result.Frame.Values)-1]
 		if result.ID == "metric_histogram_p95" {
-			// The first cumulative point is a baseline. The next point's
-			// single observation in [0,10] interpolates to 9.5.
-			if result.Status != StatusOK || !reflect.DeepEqual(values, []any{nil, 9.5}) {
+			// The next point's observation spreads across both buckets,
+			// including the nanosecond overlap after the minute boundary.
+			if result.Status != StatusOK || !reflect.DeepEqual(values, []any{9.5, 9.5}) {
 				t.Fatalf("histogram percentiles=%+v", result)
 			}
 			continue
@@ -481,8 +481,9 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 			t.Fatalf("metric shape did not execute: %+v", result)
 		}
 		if result.ID == "metric_counter_rate" {
-			// The first cumulative point is a baseline, not a zero rate.
-			if !reflect.DeepEqual(values, []any{nil, 2.0 / 60.0}) {
+			// Covered buckets have both series; the live edge carries their
+			// rate through minute six and disappears after five-minute expiry.
+			if !reflect.DeepEqual(values, []any{2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0}) {
 				t.Fatalf("counter rates=%v", values)
 			}
 			continue

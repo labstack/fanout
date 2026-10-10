@@ -170,7 +170,11 @@ A series combines namespace, service, name, unit, instrumentation scope name
 and version, attributes and resource. Fanout computes measures per series
 before combining series within a group. For gauges and updown metrics,
 `sum(value)` sums the series' bucket averages and `avg(value)` averages those
-averages, so a series that exports more often does not get extra weight.
+averages, so a series that exports more often does not get extra weight. If a
+series has no point in a bucket, these two measures use its latest earlier
+point when it is at most 5 minutes old at the clipped bucket start. They read a
+5-minute lookback; older series stop contributing. `min`, `max`, percentiles
+and `count()` still use only points inside the selected window.
 
 Counter and histogram increases read a 10-minute lookback before the selected
 window to find preceding points. A cumulative counter's increase is current
@@ -190,12 +194,22 @@ re-bin whole previous buckets; changes that lose observations or produce
 negative bucket differences reset instead. A decreasing histogram sum alone
 is not a reset, because observations can be negative.
 
+Each cumulative increase covers the interval from its previous point to its
+current point. A delta uses its usable start time, or its preceding point's
+time. Fanout spreads each increase across the buckets that interval overlaps,
+in proportion to the overlap, clipping buckets to the selected window.
+Histogram count, sum and every bound's increase use the same proportion.
+
 `rate()` is per-second increase over **covered elapsed time**, not bucket width.
-For each series, Fanout divides the bucket's total increase by the total seconds
-those increases cover, then sums the series' rates. Histogram rates use count
-increases. A counter exported every 60 seconds therefore reads the same rate
-with 10-second and 1-minute buckets. A series with no point in a bucket adds no
-increase or rate to that bucket. Automatic metric buckets are at least 1 minute.
+For each series, Fanout divides the sum of its overlap shares by their covered
+seconds, then sums the series' rates. Histogram rates use count increases.
+A counter exported every 60 seconds therefore contributes to all six 10-second
+buckets, and totals across machines with staggered or five-minute exports
+stay flat. In a bucket without a covering delta, `rate()` carries the latest
+completed delta's rate when its end is at most 5 minutes before the clipped
+bucket start, including an end on that boundary. This keeps live charts level
+while reports are in flight. Sums, histogram averages and quantile weights
+receive no carried increases. Automatic metric buckets are at least 1 minute.
 
 `last(value)` sums each series' latest value strictly before the earlier of the
 bucket end and window end. A point exactly on a boundary belongs to the next
