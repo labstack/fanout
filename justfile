@@ -61,9 +61,10 @@ build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
     bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
 
 # Disposable seeded instance and system Google Chrome; separate from check.
-e2e:
+# Extra arguments go to Playwright, e.g. `just e2e e2e/performance.spec.ts`.
+e2e *ARGS:
     just build
-    cd ui/host && bun run e2e
+    cd ui/host && bun run e2e {{ARGS}}
 
 # CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
 # without pushing anything.
