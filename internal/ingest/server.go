@@ -334,6 +334,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						if err != nil {
 							return nil, status.Error(codes.InvalidArgument, err.Error())
 						}
+						bounds, counts := explicitExpHistogram(dp)
 						histSum := 0.0
 						if dp.Sum != nil {
 							histSum = *dp.Sum
@@ -348,8 +349,8 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							Type:               "exponential_histogram",
 							Temporality:        temporality,
 							ServiceName:        svc,
-							HistBoundsJSON:     toJSON(expHistBuckets(dp)),
-							HistCountsJSON:     toJSON(expHistCounts(dp)),
+							HistBoundsJSON:     toJSON(bounds),
+							HistCountsJSON:     toJSON(counts),
 							HistCount:          int64(dp.Count),
 							HistSum:            histSum,
 							ExemplarsJSON:      exemplarsToJSON(dp.Exemplars),
@@ -838,26 +839,45 @@ func exemplarsToJSON(exemplars []*metricspb.Exemplar) string {
 	return string(b)
 }
 
-func expHistBuckets(dp *metricspb.ExponentialHistogramDataPoint) []float64 {
-	// Convert exponential histogram to explicit buckets for simplified storage
-	// This is a lossy conversion but provides compatibility with standard histogram queries
+func explicitExpHistogram(dp *metricspb.ExponentialHistogramDataPoint) ([]float64, []uint64) {
+	// bound returns base^index, with base = 2^(2^-scale), as one exponent so
+	// powers of two stay exact.
+	bound := func(index float64) float64 { return math.Exp2(index * math.Exp2(-float64(dp.Scale))) }
+	bounds := make([]float64, 0)
+	counts := make([]uint64, 0)
+	if dp.Negative != nil && len(dp.Negative.BucketCounts) > 0 {
+		negative := dp.Negative.BucketCounts
+		counts = append(counts, 0)
+		for i := len(negative); i >= 0; i-- {
+			bounds = append(bounds, -bound(float64(dp.Negative.Offset)+float64(i)))
+			if i > 0 {
+				counts = append(counts, negative[i-1])
+			}
+		}
+	}
+	counts = append(counts, dp.ZeroCount)
 	if dp.Positive == nil || len(dp.Positive.BucketCounts) == 0 {
-		return nil
+		bounds = append(bounds, 0)
+	} else {
+		for i := 0; i <= len(dp.Positive.BucketCounts); i++ {
+			bounds = append(bounds, bound(float64(dp.Positive.Offset)+float64(i)))
+		}
+		counts = append(counts, dp.Positive.BucketCounts...)
 	}
-	base := math.Pow(2, math.Pow(2, float64(-dp.Scale)))
-	offset := int(dp.Positive.Offset)
-	buckets := make([]float64, len(dp.Positive.BucketCounts))
-	for i := range dp.Positive.BucketCounts {
-		buckets[i] = math.Pow(base, float64(offset+i))
+	counts = append(counts, 0)
+	// Extreme scales and offsets overflow float64 or underflow to zero. Such a
+	// bound cannot separate float64 observations, so removing it merges the two
+	// buckets it separated and every count is kept.
+	for i := 0; i < len(bounds); {
+		if math.IsInf(bounds[i], 0) || math.IsNaN(bounds[i]) || (i > 0 && bounds[i] <= bounds[i-1]) {
+			counts[i] += counts[i+1]
+			counts = append(counts[:i+1], counts[i+2:]...)
+			bounds = append(bounds[:i], bounds[i+1:]...)
+			continue
+		}
+		i++
 	}
-	return buckets
-}
-
-func expHistCounts(dp *metricspb.ExponentialHistogramDataPoint) []uint64 {
-	if dp.Positive == nil {
-		return nil
-	}
-	return dp.Positive.BucketCounts
+	return bounds, counts
 }
 
 func summaryQuantiles(dp *metricspb.SummaryDataPoint) []float64 {
