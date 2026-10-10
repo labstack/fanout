@@ -171,12 +171,20 @@ apply the same rule per bound, with a reset detected on the total count.
 | Measure | gauge, updown | counter | histogram |
 | --- | --- | --- | --- |
 | `count()` | data points | data points | data points |
-| `rate()` | not defined | Σ series increase ÷ bucket seconds | Σ count increase ÷ bucket seconds |
+| `rate()` | not defined | Σ series (increase ÷ elapsed) | Σ series (count increase ÷ elapsed) |
 | `sum(value)` | Σ series bucket average | Σ series increase | Σ sum increase |
 | `avg(value)` | mean of series bucket averages | not defined | Σ sum increase ÷ Σ count increase |
 | `min`/`max(value)` | over data points | over data points | not defined |
 | `last(value)` | Σ series latest value | Σ series latest value | not defined |
 | `pNN`/`quantile(value, q)` | over data points | not defined | linear interpolation over Σ bound increases |
+
+A series' rate in a bucket is its increase divided by the time those
+increases cover: the sum of `time - previous time` over the deltas whose later
+point falls in the bucket. A bucket narrower than the export interval would
+otherwise multiply the rate, so a counter exported every 60 s reads the same
+per-second rate in 10 s and 1 h buckets. A series with no point in a bucket
+contributes nothing to that bucket, and the automatic bucket for metric
+panels is never shorter than 1 minute.
 
 A measure that is not defined for the series' kind returns no value, and the
 empty-panel diagnosis names the kind and the measures that fit, for example
@@ -186,7 +194,9 @@ stored quantiles cannot be combined.
 
 Validation adds one rule: an aggregate metric query other than `count()` must
 fix the metric per group, with a `name = ...` filter on one value or `name`
-among `by`. Different metrics never sum into one number.
+among `by`. A `name = $var` filter counts only when the variable is
+single-valued and has no All option, because All drops the filter. Different
+metrics never sum into one number.
 
 Histogram quantile interpolation follows Prometheus: the lowest bucket's lower
 bound is 0 when its upper bound is positive, and an observation in the
