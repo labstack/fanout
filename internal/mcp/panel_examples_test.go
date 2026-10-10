@@ -2,21 +2,28 @@ package mcp
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 func TestExamplesAndPreviewCoverNewTypes(t *testing.T) {
 	s := newPanelServer(t)
 	coverage := map[string]int{}
-	for example, text := range []string{investigationExample, paymentExample} {
+	for example, text := range []string{investigationExample, paymentExample, metricExample} {
 		var d panel.Dashboard
 		if err := json.Unmarshal([]byte(text), &d); err != nil {
 			t.Fatal(err)
 		}
-		wantPanels := []int{9, 3}[example]
+		wantPanels := []int{9, 3, 2}[example]
 		if len(d.Panels) != wantPanels {
 			t.Errorf("example %d has %d panels, want %d", example+1, len(d.Panels), wantPanels)
 		}
@@ -107,7 +114,7 @@ func TestDescriptionsExposeAnalysisContract(t *testing.T) {
 			if !strings.Contains(doc.Description, pointer) {
 				t.Errorf("%s omits the spec guide pointer", doc.Name)
 			}
-			for _, guide := range []string{baseSpecGuide, m2SpecGuide, investigationExample, paymentExample} {
+			for _, guide := range []string{baseSpecGuide, m2SpecGuide, metricMeasureGuide, investigationExample, paymentExample, metricExample} {
 				if strings.Contains(doc.Description, guide) {
 					t.Errorf("%s duplicates the full guide or examples", doc.Name)
 				}
@@ -115,7 +122,7 @@ func TestDescriptionsExposeAnalysisContract(t *testing.T) {
 			continue
 		}
 		seen[doc.Name] = true
-		for _, guide := range []string{baseSpecGuide, m2SpecGuide, investigationExample, paymentExample} {
+		for _, guide := range []string{baseSpecGuide, m2SpecGuide, metricMeasureGuide, investigationExample, paymentExample, metricExample} {
 			if !strings.Contains(doc.Description, guide) {
 				t.Errorf("%s omits the full guide or examples", doc.Name)
 			}
@@ -169,7 +176,7 @@ func TestSpecGuideIsLimitedToCreate(t *testing.T) {
 		if doc.Name == "create_dashboard" {
 			want = 1
 		}
-		for _, guide := range []string{baseSpecGuide, m2SpecGuide, investigationExample, paymentExample} {
+		for _, guide := range []string{baseSpecGuide, m2SpecGuide, metricMeasureGuide, investigationExample, paymentExample, metricExample} {
 			if got := strings.Count(doc.Description, guide); got != want {
 				t.Errorf("%s contains guidance %d times, want %d", doc.Name, got, want)
 			}
@@ -184,7 +191,113 @@ func TestGuidanceSize(t *testing.T) {
 	if size := len([]rune(m2SpecGuide)); size > 1100 {
 		t.Errorf("M2 guide has %d characters, want about 1000", size)
 	}
-	if size := len([]rune(investigationExample + paymentExample)); size > 2900 {
-		t.Errorf("examples have %d characters, want about 2600", size)
+	if size := len([]rune(investigationExample + paymentExample + metricExample)); size > 3343 {
+		t.Errorf("examples have %d characters, maximum 3343", size)
+	}
+}
+
+func TestMetricGuidanceIsConciseAndExamplesValidate(t *testing.T) {
+	if utf8.RuneCountInString(metricMeasureGuide) > 900 {
+		t.Fatalf("metric guide has %d characters", utf8.RuneCountInString(metricMeasureGuide))
+	}
+	for _, term := range []string{"gauge/updown", "counter", "histogram", "summary", "rate()", "sum(value)", "avg(value)", "last(value)", "pNN", "elapsed", "All", "multi-value", "count_distinct()", "own where entry", "name in by", "strictly before bucket/window end", "reported within 5m", "per-second increase over covered elapsed time", "interpolated bucket increases"} {
+		if !strings.Contains(metricMeasureGuide, term) {
+			t.Fatalf("missing %q", term)
+		}
+	}
+	s := newPanelServer(t)
+	var d panel.Dashboard
+	if err := json.Unmarshal([]byte(metricExample), &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Panels) != 2 || d.Panels[0].Query.Measures[0] != "rate()" || d.Panels[1].Query.Measures[0] != "p95(value)" {
+		t.Fatalf("examples=%+v", d)
+	}
+	if err := s.panels.Validate(t.Context(), &d); err != nil {
+		t.Fatal(err)
+	}
+	_, preview, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: d.Panels, Time: &d.Time, Variables: d.Variables})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range preview.Panels {
+		if p.Status != "ok" && (p.Status != "empty" || p.Diagnosis == "") {
+			t.Fatalf("preview=%+v", p)
+		}
+	}
+	tools, err := DescribeTools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools {
+		if tool.Name == "create_dashboard" && (!strings.Contains(tool.Description, metricMeasureGuide) || !strings.Contains(tool.Description, metricExample)) {
+			t.Fatal("create omits metric guide/examples")
+		}
+		if tool.Name != "create_dashboard" && strings.Contains(tool.Description, metricExample) {
+			t.Fatalf("duplicate metric example in %s", tool.Name)
+		}
+	}
+}
+
+func TestMetricExamplesExecuteWithObservations(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
+	repo, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	var metrics []telemetry.Metric
+	for i := range 2 {
+		n := at.Add(time.Duration(i-1) * time.Minute).UnixNano()
+		metrics = append(metrics,
+			telemetry.Metric{Namespace: "test", ServiceName: "api", Name: "system.network.io", Unit: "By",
+				Type: "sum", Monotonic: true, Temporality: "cumulative", Value: float64(i * 60),
+				TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, Attributes: map[string]any{"direction": "receive"}},
+			telemetry.Metric{Namespace: "test", ServiceName: "api", Name: "http.server.request.duration", Unit: "s",
+				Type: "histogram", Temporality: "cumulative", HistCount: int64(i * 100), HistSum: float64(i * 50),
+				HistBoundsJSON: "[1]", HistCountsJSON: []string{"[0,0]", "[100,0]"}[i],
+				TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n})
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-examples", Metrics: metrics}); err != nil {
+		t.Fatal(err)
+	}
+	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = duck.Close() })
+	executor := panel.NewExecutor(duck, 30)
+	var d panel.Dashboard
+	if err := json.Unmarshal([]byte(metricExample), &d); err != nil {
+		t.Fatal(err)
+	}
+	end := at.Add(time.Minute)
+	d.Time = panel.Time{From: &at, To: &end}
+	results, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("results=%+v", results)
+	}
+	for i, want := range []float64{1, 0.95} {
+		r := results[i]
+		if r.Status != panel.StatusOK || r.Frame == nil || r.Frame.Rows != 1 {
+			t.Fatalf("%s: %+v", r.ID, r)
+		}
+		found := false
+		for j, column := range r.Frame.Columns {
+			if column.Name == []string{"rate", "p95"}[i] {
+				found = true
+				value, ok := r.Frame.Values[j][0].(float64)
+				if !ok || math.Abs(value-want) > 1e-9 {
+					t.Fatalf("%s: value=%v, want %v", r.ID, r.Frame.Values[j][0], want)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s: measure column missing: %+v", r.ID, r.Frame)
+		}
 	}
 }

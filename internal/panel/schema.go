@@ -44,10 +44,11 @@ type AttributeSchema struct {
 }
 
 type MetricSchema struct {
-	Name  string `json:"name"`
-	Unit  string `json:"unit,omitempty"`
-	Type  string `json:"type"`
-	Count int64  `json:"count"`
+	Name        string `json:"name"`
+	Unit        string `json:"unit,omitempty"`
+	Type        string `json:"type"`
+	Temporality string `json:"temporality,omitempty"`
+	Count       int64  `json:"count"`
 }
 
 type schemaEntry struct {
@@ -214,7 +215,7 @@ FROM keyed GROUP BY scope, k ORDER BY n DESC, k LIMIT 200`
 
 func (e *Executor) metricNames(ctx context.Context, start, end time.Time, namespace string) ([]MetricSchema, error) {
 	where, args := windowWhere(signals["metrics"], start, end, namespace)
-	rows, err := e.engine.QueryContext(ctx, "SELECT name, coalesce(any_value(unit), ''), coalesce(any_value(type), ''), count(*) FROM metrics WHERE "+where+" GROUP BY 1 ORDER BY 4 DESC, 1 LIMIT 300", args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT name,coalesce(unit,''),type,coalesce(temporality,''),count(*) FROM metrics WHERE "+where+" GROUP BY name,unit,type,temporality ORDER BY 5 DESC,1,3,4 LIMIT 300", args...)
 	if err != nil {
 		if isOperational(err) {
 			return nil, err
@@ -225,7 +226,7 @@ func (e *Executor) metricNames(ctx context.Context, start, end time.Time, namesp
 	var out []MetricSchema
 	for rows.Next() {
 		var m MetricSchema
-		if err := rows.Scan(&m.Name, &m.Unit, &m.Type, &m.Count); err != nil {
+		if err := rows.Scan(&m.Name, &m.Unit, &m.Type, &m.Temporality, &m.Count); err != nil {
 			return nil, err
 		}
 		out = append(out, m)

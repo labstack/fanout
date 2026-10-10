@@ -94,6 +94,168 @@ log patterns, traces, scatter and state timelines use structured queries.
 SQL is an authoring escape hatch. **Spec** is a read-only inspection view;
 there is no SQL or chart-style editor there.
 
+## Choose metric measures by kind
+
+`get_telemetry_schema` lists each metric's name, unit, semantic `type` and
+`temporality`. The `metrics` view uses these kinds: `gauge`, `counter` (a
+monotonic sum), `updown` (a non-monotonic sum), `histogram` (explicit or
+exponential) and `summary`. These differ from the stored OTLP kinds: `gauge`,
+`sum`, `histogram`, `exponential_histogram` and `summary`. Discovery keeps
+separate entries when one name has different units, kinds or temporalities.
+There is no separate `kind` field in metric discovery.
+
+Counters and histograms carry `cumulative` or `delta` temporality; gauges and
+summaries have empty temporality. `start_time` is the data point's start time,
+or NULL when absent. Choose measures from the discovered kind:
+
+| Measure | gauge, updown | counter | histogram |
+| --- | --- | --- | --- |
+| `count()` | data points | data points | data points |
+| `rate()` | not defined | Σ series (increase ÷ elapsed) | Σ series (count increase ÷ elapsed) |
+| `sum(value)` | Σ series bucket average | Σ series increase | Σ sum increase |
+| `avg(value)` | mean of series bucket averages | not defined | Σ sum increase ÷ Σ count increase |
+| `min`/`max(value)` | over data points | over data points | not defined |
+| `last(value)` | Σ series value at bucket end | Σ series value at bucket end | not defined |
+| `pNN`/`quantile(value, q)` | over data points | not defined | linear interpolation over Σ bound increases |
+
+`pNN` means `p50`, `p75`, `p90`, `p95` or `p99`. Undefined measures return NULL;
+an all-NULL panel is empty and explains which measures fit the kind. Summary
+metrics permit point-count operations but no value aggregates: stored summary
+quantiles cannot be combined. For every kind, `count_distinct(field)` counts
+distinct field values and `share()` is a group's percentage of matching data
+points, rather than histogram observations or counter increases.
+
+### Keep one metric per aggregate group
+
+An aggregate metric query must fix the metric with a single-valued `name`
+equality filter **in its own `where` entry**, or include `name` in `by`.
+`count()` and `count_distinct()` are exempt; `share()` is not. For example:
+
+```json
+{
+  "from": "metrics",
+  "where": ["name = 'system.memory.usage'", "service = $service"],
+  "measures": ["last(value)"]
+}
+```
+
+Putting `name = 'system.memory.usage' AND service = $service` in one entry
+does not satisfy this rule. A `name = $metric` entry counts only when the
+variable is single-valued and has no All option. Multi-value variables and
+variables with `include_all: true` do not fix the name, even if the current
+selection is one metric: selecting All removes the filter. This is rejected:
+
+```json
+{
+  "variables": [
+    {"name": "metric", "kind": "query", "from": "metrics", "field": "name", "include_all": true}
+  ],
+  "panels": [
+    {
+      "id": "memory",
+      "title": "Memory",
+      "viz": "stat",
+      "query": {"from": "metrics", "where": ["name = $metric"], "measures": ["last(value)"]}
+    }
+  ]
+}
+```
+
+Remove the All option and keep the variable single-valued, or use a table or
+time series with `"by": ["name"]` to keep different metrics in separate groups.
+
+### Understand series, increases and elapsed time
+
+A series combines namespace, service, name, unit, instrumentation scope name
+and version, attributes and resource. Fanout computes measures per series
+before combining series within a group. For gauges and updown metrics,
+`sum(value)` sums the series' bucket averages and `avg(value)` averages those
+averages, so a series that exports more often does not get extra weight.
+
+Counter and histogram increases read a 10-minute lookback before the selected
+window to find preceding points. A cumulative counter's increase is current
+minus previous; a decrease or a change between two present start times is a
+reset and contributes the current value. Its first point without a predecessor
+is a baseline and contributes no increase. A delta point contributes its value,
+including its first point. For rates, a delta's usable start time supplies the
+interval; otherwise a subsequent delta uses the previous point's time. A first
+delta without a usable start time still contributes to sums but has no rate.
+Only positive elapsed intervals contribute to rates. Retries at the same
+timestamp are deduplicated before ordering and calculating increases.
+
+Histograms apply increases to the count, sum and bucket weights together. A
+count decrease, changed present start times or an incompatible bucket layout
+resets all channels to their current values. Compatible layout changes can
+re-bin whole previous buckets; changes that lose observations or produce
+negative bucket differences reset instead. A decreasing histogram sum alone
+is not a reset, because observations can be negative.
+
+`rate()` is per-second increase over **covered elapsed time**, not bucket width.
+For each series, Fanout divides the bucket's total increase by the total seconds
+those increases cover, then sums the series' rates. Histogram rates use count
+increases. A counter exported every 60 seconds therefore reads the same rate
+with 10-second and 1-minute buckets. A series with no point in a bucket adds no
+increase or rate to that bucket. Automatic metric buckets are at least 1 minute.
+
+`last(value)` sums each series' latest value strictly before the earlier of the
+bucket end and window end. A point exactly on a boundary belongs to the next
+bucket. Only series whose latest point is at most 5 minutes old at that end
+count; older series stop contributing. A whole-window stat therefore reflects
+recently reporting series rather than every series seen during the day.
+
+### Histogram percentiles and examples
+
+Histogram percentiles come from summed bucket observation increases, with
+linear interpolation within the selected bucket, as in Prometheus. They do
+not take percentiles of the histogram point's scalar `value`. The lowest
+bucket's lower bound is 0 when its upper bound is positive; a percentile in
+the overflow bucket returns the highest finite bound.
+
+These are approximations. In an exponential histogram's zero bucket,
+interpolation spans (−threshold, threshold], so positive-only data can read
+slightly below 0, by at most the zero threshold (usually 0). Series with
+different bucket layouts in one group combine on the union of their bounds,
+which can lean a percentile upward by up to one coarse bucket width.
+
+Use these panels when discovery reports `system.network.io` as a counter and
+`http.server.request.duration` as a histogram with seconds as its unit:
+
+```json
+{
+  "name": "Metric measures",
+  "panels": [
+    {
+      "id": "network",
+      "title": "Network bytes per second",
+      "viz": "timeseries",
+      "query": {
+        "from": "metrics",
+        "where": ["name = 'system.network.io'"],
+        "measures": ["rate()"],
+        "by": ["attributes['direction']"],
+        "bucket": "auto"
+      }
+    },
+    {
+      "id": "duration",
+      "title": "Request duration p95",
+      "viz": "timeseries",
+      "query": {
+        "from": "metrics",
+        "where": ["name = 'http.server.request.duration'"],
+        "measures": ["p95(value)"],
+        "bucket": "auto"
+      },
+      "unit": "s"
+    }
+  ]
+}
+```
+
+Metric histogram and heatmap panels use the same per-series increases and read
+stored temporality. An authored `histogram.temporality` option is rejected;
+the panel cannot override the data's meaning.
+
 ## Inspect empty or failed panels
 
 Use **Data** to inspect returned rows, execution time, interval and executed SQL
