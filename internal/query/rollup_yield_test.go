@@ -64,7 +64,7 @@ func newSpreadDuck(t *testing.T, rows, spreadMins int) *Duck {
 
 // A rollup pass holds the Parquet snapshot until it commits, so a publication
 // whose grace has run out makes every arriving query wait out the rest of that
-// pass — up to eight sub-windows of work for a request that needed none of it.
+// pass. The one-sub-window budget also bounds that wait without a publisher.
 // The pass now stops at the first sub-window boundary once that happens, which
 // costs nothing to arrange: the resume cursor already exists for the per-pass
 // budget, and the ingested watermark already stays behind an unfinished window.
@@ -107,8 +107,8 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	if watermark != 0 {
 		t.Fatalf("ingested watermark advanced to %d over a window the pass did not finish", watermark)
 	}
-	if yieldCursor >= freeCursor {
-		t.Fatalf("yielding pass reached cursor %d, no earlier than the undisturbed %d", yieldCursor, freeCursor)
+	if yieldCursor != freeCursor {
+		t.Fatalf("queued and undisturbed passes must each commit one sub-window: queued=%d undisturbed=%d", yieldCursor, freeCursor)
 	}
 
 	// Yielding must not stall the rollup: with the publisher gone the same

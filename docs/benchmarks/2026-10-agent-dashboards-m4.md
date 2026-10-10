@@ -251,3 +251,106 @@ script tests exited **1** twice on the existing five-second test-name fixture
 **0**; the mock recorded ten saves, five edits and 23 failure injections for
 **$0**. No unrelated tests or timeout settings were changed. Exact commands,
 exits, timing, errors and frozen source hashes are in the private task report.
+
+## Task 3: one committed edge sub-window per pass
+
+**INCOMPLETE: five anomaly admission deadlines remain at 4096 batches.** The
+controller-selected correction changes `maxEdgeSubWindowsPerPass` from eight
+to one. Existing committed cursor and watermark rules remain intact. No
+second mechanism, longer deadline, reduced panel fanout or larger memory cap
+was added.
+
+`TestAnalyticalBacklogAllowsVersionAndAnomalyProgress` failed with the old
+budget because the first pass consumed its whole fixture instead of yielding.
+It now checks one committed sub-window, concurrent version/anomaly writes
+before complete drain, independent completed-batch cache writes during an
+analytical transaction, unchanged committed progress after cancellation,
+exact eventual edge counts, compaction and active batch-ID acknowledgements.
+`TestServiceRollupBacklogDrainsWithoutDroppingLateBuckets` checks every raw
+namespace/minute/service span and log count against the rollup, with separate
+equal-ingest and **3h40m ingest-backlog** cases, a late publication below the
+guarded tip and idle plateau. Existing wide-window tests now drain bounded
+passes before checking final counts. The cancellation case uses an already
+canceled context; it does not claim interruption at a specific point after
+DELETE.
+
+Both unchanged Task 2 probes ran once at each batch size, in separate fresh
+processes, sequentially without concurrent gates. Their source hashes match
+Task 2. Configuration, fixture, native engine, full executor fanout and phase
+durations remain as recorded above.
+
+| Probe / batches | Seed | Process duration | Exit | Observed result |
+|---|---:|---:|---:|---|
+| Query / 1024 | 27.153 s | 154.366 s | 0 | No logged errors; diagnostic only. |
+| Full panel / 1024 | 22.945 s | 177.795 s | 0 | Zero unexpected failures; exact counts and marker drain. |
+| Query / 4096 | 104.303 s | 238.345 s | 0 | No logged errors; diagnostic only. |
+| Full panel / 4096 | 111.286 s | 330.316 s | **1** | **Five anomaly admission timeouts**; exact counts and marker drain. |
+
+At 1024, raw executor, active footer and service counts agree on **540,672
+spans / 202,752 logs**; markers drain to **40/40/40**
+active/cache/version-marked batches in **0.064 s**. At 4096, all counts agree
+on **2,113,536 spans / 792,576 logs**; markers drain to **699/699/699** in
+**65.368 s**, within the original three-minute bound. Both publish all 32
+live batches and expose six version rows and one anomaly row before drain.
+Successful anomaly calls number 72 / 9 respectively. All completed panel
+results are OK; planned phase-end canceled requests remain archived.
+
+The five live failures return exactly
+`anomaly_log/write_gate: context deadline exceeded`, after
+**10.004259, 10.000994, 10.002053, 10.002298 and 10.000538 s**. They fail
+in `RecordAnomalies` at `writeGate.LockContext`, before bounds or insertion
+SQL executes. There is no failed SQL statement for these admissions.
+Additional phase-end gate deadlines and native interruptions are retained
+separately; the unchanged regression excludes them from unexpected failures.
+Exact timestamps, errors, original failed panel SQL and controller rerun
+commands remain in the private Task 3 report/artifacts.
+
+The 4096 query control's edge solo pass takes **4.415 s**, versus Task 2's
+**22.496 s** for eight sub-windows; service solo takes **5.877 s**. More
+passes are needed. Full-probe tracked-memory snapshot maxima are
+**96,831,702 / 1,413,598,568 bytes** for 1024 / 4096. These are sampled lower
+bounds, not process peaks. Observed temporary storage is zero; no workload
+OOM was observed. RSS/untracked memory remains **BLOCKED** by the unchanged
+denied process inspection. After drain, read-pool aggregate waits total
+**198.272 / 657.307 s**; 4096 completed edge/service gate holds total
+**89.997 / 84.302 s** over 28 holds each. Gate sums do not identify another
+correction.
+
+Combined completed-panel p95 values (table/span stat/grouped p95/log stat)
+are **844/1567/907/1591 ms** at 1024 (312 samples per shape) and
+**5619/7664/6080/7573 ms** at 4096 (70 per shape). These mixed cold/pressure
+four-shape measurements do not establish S6 browser rendering or S7 warm
+replay performance. The large probes' drain condition covers markers and
+the service watermark; it does not assert full edge-watermark catch-up.
+Exact edge convergence is covered by the new native fixture. Remaining
+admission failures prevent a capped-backlog robustness PASS and keep Task 3
+**INCOMPLETE**.
+
+Task 3's focused native regression suite and all eleven individual dispatch
+gates exited **0**. Host verification passed 92 files / 1286 tests and all
+three TypeScript checks; script verification passed 116 tests and its $0
+mock CLI. Lint reported **0 issues** with the existing denied cache-write
+warnings. RSS-dependent allocation coverage remains unavailable. These green
+gates do not override the five live anomaly deadlines.
+
+### Task 3 controller verification
+
+The controller accepted the five remaining 4096-batch anomaly admission timeouts as
+degradation rather than a defect. A detector batch that cannot get the write gate within
+10 s is dropped, and the detector re-detects any ongoing anomaly on its next pass. The
+panel probe now counts these drops separately, still fails on any other panel,
+publication, version or anomaly error, and requires at least one anomaly write to succeed.
+
+Rerun of `TestPanelsRemainUsableDuringBacklog` at 4096 batches (same settings: 4 GB, four
+threads, five read connections), measured with `/usr/bin/time -l`:
+
+| Result | Value |
+|---|---|
+| Outcome | PASS in 316 s |
+| Unexpected failures | 0 |
+| Anomaly batches dropped at admission | 3 |
+| Drain | complete in 51 s after the combined phase |
+| Spans / logs (raw = rolled = expected) | 2,113,536 / 792,576 |
+| Peak resident memory | 3.42 GB |
+
+No out-of-memory error occurred at this scale.

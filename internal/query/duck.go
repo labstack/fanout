@@ -1003,9 +1003,6 @@ WHERE ingested_unix_nano > ?
 			// moment every arriving query waits out whatever is left of it.
 			//
 			// The trigger is the grace running out, not a publisher existing.
-			// A publication queues every ten seconds under compaction, and
-			// yielding on sight would cut a pass from eight sub-windows to one
-			// whenever ingest is busy — which is when the eight are needed.
 			// While the grace holds, readers are still being admitted and
 			// nothing is waiting on this pass.
 			//
@@ -1114,8 +1111,9 @@ const maxEdgeSpansPerSubWindow int64 = 250_000
 // the pass instead stops at a fixed number of sub-windows, persists where to
 // resume, and leaves the ingested watermark where it was. Combined with the
 // adaptive row limit above, every pass makes bounded forward progress without
-// assuming a uniform event rate.
-const maxEdgeSubWindowsPerPass = 8
+// assuming a uniform event rate. One sub-window per pass keeps each hold short
+// enough for version and anomaly writes to get the gate during a backlog.
+const maxEdgeSubWindowsPerPass = 1
 
 func edgeSubWindowEnd(ctx context.Context, tx *sql.Tx, windowStart, windowEnd int64, subLo, maxT time.Time, rowLimit int64) (time.Time, error) {
 	maxEnd := maxT.Add(time.Minute)

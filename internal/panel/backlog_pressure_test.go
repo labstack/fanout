@@ -299,7 +299,7 @@ func runPanelPressure(t *testing.T, assertUsable bool) {
 	}}
 	executor := NewExecutor(observed, 30)
 	pressureDiagnostics(ctx, t, d, repo, "before_panels_alone")
-	var failed, requests, published, versions, anomalies atomic.Int64
+	var failed, requests, published, versions, anomalies, anomalyDropped atomic.Int64
 	run := func(c context.Context, phase string, worker int) []Result {
 		started := time.Now()
 		results, err := executor.Run(c, RunRequest{Dashboard: spec})
@@ -414,9 +414,16 @@ func runPanelPressure(t *testing.T, assertUsable bool) {
 			started := time.Now()
 			err := d.RecordAnomalies(work, []annotations.Anomaly{{Namespace: "pressure", Service: "svc0", Kind: "latency", From: end.Add(-time.Minute), To: end, Title: "Pressure probe", Severity: "warning"}}, end)
 			pressureError(t, "anomaly_log/combined", started, err)
-			if err == nil {
+			// A detector batch that cannot get the write gate in time is
+			// dropped and re-detected on the next pass, so admission timeouts
+			// are counted as degradation. Any other anomaly error fails.
+			switch {
+			case err == nil:
 				anomalies.Add(1)
-			} else if work.Err() == nil {
+			case work.Err() != nil:
+			case errors.Is(err, context.DeadlineExceeded) && strings.Contains(err.Error(), "anomaly_log/write_gate"):
+				anomalyDropped.Add(1)
+			default:
 				failed.Add(1)
 			}
 			select {
@@ -513,9 +520,13 @@ func runPanelPressure(t *testing.T, assertUsable bool) {
 	if len(finalResults) != len(spec.Panels) {
 		rawExact = false
 	}
+	t.Logf("anomaly_admission_dropped=%d", anomalyDropped.Load())
 	if assertUsable {
 		if failed.Load() > 0 {
 			t.Errorf("panel/publication/version/anomaly failures=%d", failed.Load())
+		}
+		if anomalies.Load() == 0 {
+			t.Error("no anomaly write succeeded under backlog")
 		}
 		if !drained || !rawExact || err != nil || spanCount != expectedSpans || logCount != expectedLogs || rolledSpans != expectedSpans || rolledLogs != expectedLogs {
 			t.Error("backlog did not drain with exact counts")
