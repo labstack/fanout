@@ -18,6 +18,26 @@ env:
   CGO_ENABLED: "1"
 
 jobs:
+  secrets:
+    name: Repository secrets
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Scan the source tree, including docs and generated browser assets.
+      # The container scan only sees files copied into the runtime image.
+      - name: Scan repository for secrets
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          version: v0.74.0
+          scanners: secret
+          exit-code: 1
+          format: table
+          cache: false
+
   duckdb:
     name: DuckDB 2 (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
@@ -181,7 +201,7 @@ jobs:
   image:
     name: Image
     if: github.event_name == 'push'
-    needs: gate
+    needs: [gate, secrets]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

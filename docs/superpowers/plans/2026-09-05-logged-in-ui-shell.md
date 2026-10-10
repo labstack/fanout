@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch `ui/shell-rebuild`. Every commit message ends with the trailer line `Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N`.
+- Branch `ui/shell-rebuild`.
 - The lefthook pre-commit hook runs `cd ui/host && bun run lint` (which is `tsc --noEmit`) whenever staged files match `ui/host/**/*.{ts,tsx}` or `ui/theme.ts`. Every task must leave `bun run lint` green in `ui/host` before committing. `ui/apps` has the same `lint` script; run it when apps files change.
 - Naming: the feature is **Chat / Chats**, the button is **New chat**. The strings "Investigations", "Investigation", "Conversation history" and "Guidance" must not appear in `ui/host/src` or `ui/apps/src` when the plan is done.
 - `ui/` (the directory holding `theme.ts`, `tokens.ts`) has no `node_modules`. Files placed there may import only sibling files with relative paths, never bare package names.
@@ -123,15 +123,13 @@ Expected: PASS, all tests in the file.
 
 ```bash
 cd ui/host && bun run lint
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git add ui/host/src/mcp-app-frame.tsx ui/host/src/mcp-app-frame.test.tsx
 git commit -m "fix(ui): let embedded views load their inlined fonts
 
 The MCP app CSP only emitted font-src when a resource domain was declared, so
 the data: woff2 files the apps build inlines were blocked and every embedded
-view rendered in the system font.
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+view rendered in the system font."
 ```
 
 ---
@@ -149,7 +147,7 @@ Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
 - [ ] **Step 1: Move the two pure modules**
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git mv ui/apps/src/format.ts ui/format.ts
 git mv ui/apps/src/contracts.ts ui/contracts.ts
 ```
@@ -231,7 +229,7 @@ In each of `overview.tsx`, `topology.tsx`, `performance.tsx`, `trace.tsx`, `logs
 
 ```bash
 cd ui/apps && bun run lint && bun run build
-cd /Users/v/Projects/labstack/fanout && git checkout -- internal/mcp/apps
+cd "$(git rev-parse --show-toplevel)" && git checkout -- internal/mcp/apps
 git status --short
 ```
 
@@ -241,9 +239,7 @@ Expected: lint clean, five `✓ built` lines, and `git status` shows only the `u
 
 ```bash
 git add ui/format.ts ui/contracts.ts ui/chart.ts ui/apps/src
-git commit -m "refactor(ui): share format, contracts and chart helpers between host and apps
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "refactor(ui): share format, contracts and chart helpers between host and apps"
 ```
 
 ---
@@ -358,11 +354,9 @@ Expected: PASS, seven tests.
 
 ```bash
 cd ui/host && bun run lint
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git add ui/host/src/auth.tsx ui/host/src/auth.test.tsx
-git commit -m "feat(ui): expose the signed-in account to the app
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): expose the signed-in account to the app"
 ```
 
 ---
@@ -819,7 +813,7 @@ Replace the four `.chat-history-*` rules with:
 - [ ] **Step 6: Delete the drawer**
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git rm -q ui/host/src/chat-history.tsx ui/host/src/chat-history.test.tsx
 ```
 
@@ -1370,7 +1364,7 @@ Expected: lint clean; every test file passes (auth, auth-session, dashboard-layo
 - [ ] **Step 9: Build the host and check the shell by hand**
 
 ```bash
-cd /Users/v/Projects/labstack/fanout && just ui-host
+cd "$(git rev-parse --show-toplevel)" && just ui-host
 ```
 
 Start the local instance (memory note "local UI screenshot loop") and open `http://127.0.0.1:7520/chat`. Confirm: rail on the left with New chat, Chats, Dashboards, Search; header has burger (below 992px), brand, theme toggle, avatar; no footer; avatar menu shows the email and Sign out; Cmd-K focuses search; at 390px the burger opens the drawer and nothing clips. Then discard the built assets:
@@ -1389,9 +1383,7 @@ The rail is the only navigation: New chat, the chat list with rename and
 delete, the dashboard list, and search on Cmd-K. The footer, the Live dot and
 the Dashboard/Chat toggle are gone; sign out and the external links live in
 the account menu. The session no longer fetches a thread it has just named,
-which removes the 404 on every new chat.
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+which removes the 404 on every new chat."
 ```
 
 ---
@@ -1744,9 +1736,7 @@ Expected: four chat tests pass; the suite passes; lint clean.
 
 ```bash
 git add ui/host/src/chat.tsx ui/host/src/chat.test.tsx ui/host/src/index.css
-git commit -m "feat(ui): chat pane with sticky composer, activity line and block chrome
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): chat pane with sticky composer, activity line and block chrome"
 ```
 
 ---
@@ -1843,9 +1833,7 @@ Restart the local instance (the apps are embedded at binary build time: run `jus
 
 ```bash
 git add ui/host/src/mcp-app-frame.tsx ui/host/src/mcp-app-frame.test.tsx ui/apps/src internal/mcp/apps
-git commit -m "feat(ui): slimmer embedded views that size to their content
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): slimmer embedded views that size to their content"
 ```
 
 ---
@@ -1951,11 +1939,9 @@ Expected: PASS, five tests.
 
 ```bash
 cd ui/host && bun run lint
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git add ui/host/src/dashboard-layout.ts ui/host/src/dashboard-layout.test.ts
-git commit -m "feat(ui): per-type widget sizes and free-slot placement
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): per-type widget sizes and free-slot placement"
 ```
 
 ---
@@ -2165,11 +2151,9 @@ Run: `cd ui/host && bun run test src/widgets/data.test.tsx && bun run lint`
 Expected: PASS, three tests; lint clean.
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git add ui/host/package.json ui/host/bun.lock ui/host/src/echart.tsx ui/host/src/widgets
-git commit -m "feat(ui): echarts in the host and a shared widget data layer
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): echarts in the host and a shared widget data layer"
 ```
 
 ---
@@ -2864,11 +2848,9 @@ Expected: PASS, seven tests; lint clean.
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git add ui/host/src/widgets ui/host/src/index.css
-git commit -m "feat(ui): native dashboard widgets with charts, hover actions and configuration
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): native dashboard widgets with charts, hover actions and configuration"
 ```
 
 ---
@@ -3123,9 +3105,7 @@ Expected: PASS; suite green; lint clean.
 
 ```bash
 git add ui/host/src/dashboard.tsx ui/host/src/dashboard.test.tsx ui/host/src/index.css
-git commit -m "feat(ui): dashboard page with native widgets and a quieter header
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): dashboard page with native widgets and a quieter header"
 ```
 
 ---
@@ -3340,11 +3320,9 @@ Run: `cd ui/host && bun run test src/auth.test.tsx && bun run lint`
 Expected: PASS, eight tests; lint clean.
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 git add ui/host/src/auth.tsx ui/host/src/auth.test.tsx
-git commit -m "feat(ui): six-digit code entry with resend and change email
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "feat(ui): six-digit code entry with resend and change email"
 ```
 
 ---
@@ -3359,7 +3337,7 @@ Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
 - [ ] **Step 1: Sweep for the retired words**
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 rg -n -i 'investigation|conversation history|guidance' ui/host/src ui/apps/src
 ```
 
@@ -3379,9 +3357,7 @@ In the spec, section 3 "Widgets: native ECharts", the Configure bullet reads `Co
 
 ```bash
 git add docs/superpowers/specs/2026-09-05-logged-in-ui-shell-design.md
-git commit -m "docs: align the shell spec with the configure modal
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "docs: align the shell spec with the configure modal"
 ```
 
 ---
@@ -3394,7 +3370,7 @@ Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
 - [ ] **Step 1: Rebuild both bundles and the binary**
 
 ```bash
-cd /Users/v/Projects/labstack/fanout
+cd "$(git rev-parse --show-toplevel)"
 just build
 git status --short internal/ui/dist internal/mcp/apps | head
 ```
@@ -3424,14 +3400,12 @@ Follow the memory note "local UI screenshot loop": fresh data dir, `FANOUT_AI_AP
 
 ```bash
 git add internal/ui/dist internal/mcp/apps
-git commit -m "chore(ui): rebuild embedded assets for the shell rebuild
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "chore(ui): rebuild embedded assets for the shell rebuild"
 ```
 
 - [ ] **Step 5: Hand off**
 
-Use the superpowers:finishing-a-development-branch skill to decide between merging and opening a pull request. The pull request description, if one is opened, lists the spec path, the six areas above, and ends with `https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N`.
+Use the superpowers:finishing-a-development-branch skill to decide between merging and opening a pull request. The pull request description, if one is opened, lists the spec path and the six areas above.
 
 ## Phase G: added during execution (user requests on 2026-09-05)
 
@@ -3489,9 +3463,7 @@ Expected: PASS.
 gofmt -l internal/agent   # prints nothing
 golangci-lint run ./internal/agent
 git add internal/agent/runtime.go internal/agent/runtime_test.go
-git commit -m "fix(agent): stop the model drawing text diagrams beside an attached view
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+git commit -m "fix(agent): stop the model drawing text diagrams beside an attached view"
 ```
 
 ---
@@ -3657,9 +3629,7 @@ git commit -m "feat(ui): set the app in Geist, with mono reserved for data
 
 One grotesk for UI, prose and headings at weight 600, Geist Mono for code,
 ids, timestamps and numeric cells, tabular figures throughout. Headings no
-longer use the mono display face.
-
-Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+longer use the mono display face."
 ```
 
 - [ ] **Step 9: Hand check (controller)**
