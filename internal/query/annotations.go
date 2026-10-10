@@ -108,7 +108,7 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 	defer cancelWait()
 	unlock, err := d.writeGate.LockContext(waitCtx, writegate.WriteRollupVersion)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("version_rollup/write_gate: %w", err)
 	}
 	defer unlock()
 	if err := d.lockRollupParquetRead(waitCtx); err != nil {
@@ -257,7 +257,7 @@ ON CONFLICT(namespace,service,service_version) DO UPDATE SET first_seen=least(ve
 		attempted = true
 		res, err := tx.ExecContext(ctx, statement)
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("version_rollup/insert: %w", err)
 		}
 		if rows, err := res.RowsAffected(); err == nil {
 			materialized = rows
@@ -405,7 +405,7 @@ func (d *Duck) RecordAnomalies(ctx context.Context, findings []annotations.Anoma
 	defer cancel()
 	unlock, err := d.writeGate.LockContext(ctx, writegate.WriteAnomalyLog)
 	if err != nil {
-		return err
+		return fmt.Errorf("anomaly_log/write_gate: %w", err)
 	}
 	defer unlock()
 	tx, err := d.writer().BeginTx(ctx, nil)
@@ -420,7 +420,7 @@ func (d *Duck) RecordAnomalies(ctx context.Context, findings []annotations.Anoma
 	}
 	// One bounds relation and one query load the overlapping rows for all keys.
 	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE annotation_bounds AS SELECT namespace,service,kind,min(start_time) AS start_time,max(end_time) AS end_time FROM (`+anomalyRowsSQL+`) GROUP BY 1,2,3`, string(encoded)); err != nil {
-		return err
+		return fmt.Errorf("anomaly_log/bounds: %w", err)
 	}
 	overlap := `a.namespace=b.namespace AND a.service=b.service AND a.kind=b.kind AND a.end_time>=b.start_time AND a.start_time<=b.end_time`
 	rows, err := tx.QueryContext(ctx, `SELECT a.namespace,a.service,a.kind,a.start_time::TIMESTAMP_NS,a.end_time::TIMESTAMP_NS,a.title,a.severity FROM anomaly_log a WHERE EXISTS (SELECT 1 FROM annotation_bounds b WHERE `+overlap+`)`)
@@ -467,7 +467,7 @@ func (d *Duck) RecordAnomalies(ctx context.Context, findings []annotations.Anoma
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO anomaly_log SELECT f.* FROM (`+retained+`) f WHERE EXISTS (SELECT 1 FROM annotation_updates u WHERE f.namespace=u.namespace AND f.service=u.service AND f.kind=u.kind AND f.start_time=u.start_time)`); err != nil {
-		return err
+		return fmt.Errorf("anomaly_log/insert: %w", err)
 	}
 	for _, table := range []string{"annotation_candidates", "annotation_updates", "annotation_bounds"} {
 		if _, err := tx.ExecContext(ctx, `DROP TABLE `+table); err != nil {

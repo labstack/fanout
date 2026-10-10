@@ -128,3 +128,126 @@ one evidence document, with no product edits. Existing behavior guards were
 run as evidence of current coverage. No aggregate `just check`, UI rebuild,
 site dependency install, browser run, provider call, sealed-input read,
 release, deployment or git write was performed.
+
+## Task 2: capped small-batch backlog reproduction
+
+**Deadline/progress failure reproduced; native OOM inconclusive.** This is
+diagnosis on the uncorrected candidate, not an S2/S6/S7 PASS. The new opt-in
+`readbench` probes are `TestBacklogPressureRecordsConcurrentStatementFailures`
+and `TestPanelsRemainUsableDuringBacklog`. The latter intentionally fails
+until the diagnosed behavior is corrected. No Task 3 correction was applied.
+
+Each process seeds a fresh native format-3 repository before opening DuckDB:
+4096 batches, 512 spans and 192 logs per batch, six services, v1/v2, distinct
+IDs, 24-hour event-time spread and a 4.095-second ingest interval. Only one
+batch is materialized at a time. The seed contains 8192 Parquet files and
+2,883,584 events, about 183 MB compressed in the first control. This file-count
+fixture does not replace the supplied representative replay. All generated
+state and exact logs remain private under `.superpowers/`; the replay was
+left untouched.
+
+The fixed configuration is **4GB, four threads, five read connections**,
+30-day retention and one-second rollup ticks. Native `SELECT version()`
+returned `v2.0.0-alpha43763` (source
+`96063b9e39749cc0f087bb11501d7edbee527957`), on darwin/arm64 with 14 logical
+CPUs. The engine reports 3.7 GiB for this cap. A 30-minute context starts
+before seed; the test timeout is 35 minutes. Seed and workload are timed
+separately.
+
+The authoritative panel workload uses four simultaneous complete dashboard
+requests through the production executor: service-count table, span-count
+stat, grouped p95 and log-count stat. Absolute 24-hour bounds bind the real
+`queryrows.Window`; executor fanout and timeouts are unchanged. After a
+30-second panels-only control, a two-minute combined phase runs real
+`RunRollups`, including maintenance/read-cache refresh, 32 bounded live
+publications, version refresh and anomaly writes. Half the live batches have
+events twelve hours late. Workers are joined, then marker catch-up has a
+three-minute bound. A test-only forwarding proxy records actual failed SQL,
+including separate stat totals, without changing native execution.
+
+All attempts were retained. Reduced-fanout diagnostics and diagnostic exit
+zero are not robustness results.
+
+| Attempt | Seed | Total test | Outcome | Exit |
+|---|---:|---:|---|---:|
+| 4096, reduced-fanout exploratory control | 113.066 s | 444.90 s | 11 failures; drain incomplete | 0 |
+| 4096, query solo/loop control | 121.433 s | 270.07 s | Solo reads succeeded; loop version admission deadlines | 0 |
+| 4096, initial full dashboard | 121.429 s | 454.21 s | 24 failures; drain incomplete; count assertion subsequently corrected | 1 |
+| 1024, full dashboard | 25.092 s | 175.46 s | One anomaly admission deadline; exact counts and marker drain | 1 |
+| 4096, before actual-SQL proxy | 112.035 s | 448.19 s | 112 failures; drain incomplete | 1 |
+| 4096, final full dashboard | 103.222 s | 441.35 s | 85 unexpected failures; drain incomplete | 1 |
+
+The smallest **tested** failing workload is 1024 batches. All its completed
+panel results succeeded, but an anomaly call waited **10.018 s** and returned
+`anomaly_log/write_gate: context deadline exceeded`. Its raw, footer and
+service totals agree on **540,672 spans / 202,752 logs**. No exhaustive
+threshold search or 8192-batch run was needed to establish this deadline
+defect; the OOM question remains open.
+
+In the final 4096 run, combined pressure lasted **120.129 s**, with 32
+successful publications, 64 directly processed version batches and one
+successful anomaly write. Six version rows and one anomaly row were visible
+before drain. The last active/cached/version-marker counts were
+**3620/702/259**. Raw executor, active-footer and service counts nevertheless
+agree exactly on **2,113,536 spans / 792,576 logs**. Exact event totals do not
+prove complete cache acknowledgement or completed edge catch-up.
+
+The returned errors identify two kinds of wait:
+
+- Ten full anomaly admission timeouts returned
+  `anomaly_log/write_gate: context deadline exceeded`, approximately 10 s
+  each, before bounds/insert SQL.
+- Five full version admission timeouts returned
+  `version_rollup/write_gate: context deadline exceeded`, approximately
+  20 s each, before insertion.
+- Panel calls returned `context deadline exceeded` and native
+  `INTERRUPT Error: Interrupted!` (DuckDB error type 29). Actual failed
+  statements were span/log totals, their bucketed trends, count by service
+  and grouped p95. All 87 SQL-proxy errors, including planned shutdown
+  interruptions, occurred at `QueryContext`. Planned phase-end cancellation
+  is excluded from the 85 unexpected failures.
+
+No workload `Out of Memory Error` was observed. Fixed `%w` labels were added
+only after failing attribution tests, preserving native cause and context
+identity. An injected OOM in those attribution tests is a mock cause and is
+not workload evidence. Whole-window stat totals and actual-SQL attribution
+also have passing native fixture tests.
+
+Service alone took **5.063 s**; edge alone **22.496 s**, even though these
+parentless spans yield no edges. Through final drain, completed analytical
+gate holds totaled **256.250 s / 6** for edge and **41.830 s / 6** for
+service. Read-cache gate waits totaled only **0.000080 s / 22**. The final
+read pool reached all five occupied slots and recorded 323 waits totaling
+**939.573 s** across concurrent callers.
+
+Largest sampled tracked memory was **1,887,812,526 bytes** in the reduced
+fanout control and **1,043,647,116 bytes** in the 1024 full workload. The
+final 4096 workload's largest successful sample was **242,194,364 bytes**;
+only four SQL snapshots succeeded because the read pool was busy. These
+are sampled lower bounds, not measured full-workload peaks. All observed
+temporary-file and temporary-storage totals were zero. The configured spill
+directory exists, but positive spill was not demonstrated. RSS measurement
+was **BLOCKED** by denied `ps` execution; peak RSS and untracked memory are
+unavailable. Go heap/cumulative allocations and CPU time are reported
+separately in the private evidence and are not substitutes for RSS.
+
+The Task 3 recommendation is to first reduce the existing
+`maxEdgeSubWindowsPerPass` budget from eight to one, retaining its committed
+cursor and watermark rules. This yields at an existing unit without a new
+scheduler, cache, option or longer deadline. A minute-scale service ingest
+clamp cannot split this fixture's 1–4-second burst. This is a candidate,
+not a proven fix: cold panel deadlines and service holds also occur. Task 3
+must pass the unchanged full regression and eventual exact-count checks;
+representative replay OOM and RSS remain controller measurements.
+
+Task 2 verification used the individual dispatch gates. Formatting, formatting
+check, UI boundaries, normal Go tests, normal and `readbench` lint (**0
+issues**), both dead-code gates, test names, eval goldens and documentation
+freshness all exited **0**. The native attribution/count suites also exited
+**0**. The full gate remains incomplete: host tests exited **1** twice on
+existing five-second ECharts rendering timeouts (one case, then three);
+script tests exited **1** twice on the existing five-second test-name fixture
+(115/116 passed). Separate host lint and the skipped mock eval CLI exited
+**0**; the mock recorded ten saves, five edits and 23 failure injections for
+**$0**. No unrelated tests or timeout settings were changed. Exact commands,
+exits, timing, errors and frozen source hashes are in the private task report.

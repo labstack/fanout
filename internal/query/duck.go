@@ -844,11 +844,11 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 
 	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
 	if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, args...); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("service_rollup/delete: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, args...)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("service_rollup/insert: %w", err)
 	}
 
 	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
