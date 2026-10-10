@@ -26,7 +26,7 @@
   The verified justfile uses `bash scripts/with-duckdb.sh go test`. Targeted commands below use that exact wrapper. **Every task ends with `rtk just check`.** The controller supplies installed dependencies and runs any gate recipe that needs network outside the restricted dispatch; a blocked or skipped gate is not a pass. Do not inherit M4's instruction to omit the aggregate gate.
 - All modified/new files use repository-relative paths, snake_case product JSON, plain-English Problems with hints, and no machine names, IPs, credentials or absolute local paths. New file paths below are proposals in existing verified directories; existing modify/test paths were read or listed in this checkout.
 - SQL behavior tests execute the actual pinned engine through querytest tables and `Executor.Run`; snapshot tests additionally use the existing Parquet repository helper. No generated-SQL equality assertion is evidence of correctness. Existing span/log compiler tests continue to run.
-- Decisions resolving prose ambiguities: (1) cumulative first points are baselines; delta first points contribute their value to sums and get elapsed time only from a usable non-null start time; subsequent deltas use a valid start time when supplied, otherwise the preceding point; (2) elapsed must be positive for rate, and points without elapsed remain eligible for sums; (3) finite scalar values are selected before lagging, so invalid values never poison a baseline; (4) histogram reset applies once to all channels on count decrease, bounds change or two non-null differing start times; a hist_sum decrease alone is not a reset because negative observations are possible; (5) unspecified/unknown OTLP aggregation temporality on sums/histograms is rejected as InvalidArgument, rather than guessed; (6) summary permits point-count operations (`count`, `count_distinct`, `share`), but all value aggregates return NULL; (7) the brief's count_distinct exception to the name rule is binding, while share requires a fixed name or name grouping.
+- Decisions resolving prose ambiguities: (1) cumulative first points are baselines; delta first points contribute their value to sums and get elapsed time only from a usable non-null start time; subsequent deltas use a valid start time when supplied, otherwise the preceding point; (2) elapsed must be positive for rate, and points without elapsed remain eligible for sums; (3) finite scalar values are selected before lagging, so invalid values never poison a baseline; (4) histogram reset applies once to all channels on count decrease, bounds change or two non-null differing start times; a hist_sum decrease alone is not a reset because negative observations are possible; (5) unspecified/unknown OTLP aggregation temporality on sums/histograms is rejected as InvalidArgument, rather than guessed; (6) summary permits point-count operations (`count`, `count_distinct`, `share`), but all value aggregates return NULL; (7) the amended spec exempts count_distinct from the name rule, while share requires a fixed name or name grouping.
 - Undefined kind/measure contributions stay NULL, including all-summary or all-incompatible groups. A real zero increase stays zero. Keep NULLs in frames; when every measure cell is NULL, report empty and run bounded kind diagnosis. Never convert an undefined value to zero or retain an old series in buckets with no point.
 
 ## Review Focus
@@ -34,14 +34,14 @@
 1. A counter exported every 60 s viewed with 10 s buckets reads the same per-second rate as with 1 m buckets: Task 4, `TestMetricRateUsesCoveredElapsedTime`.
 2. A container restart creates a new series mid-window: no spike from its first point, and the old series stops contributing: Task 3, `TestMetricIncreaseOrdersDeduplicatesAndResets`; Task 4, `TestMetricRestartDoesNotCarryOldSeries`.
 3. Two points of one series at the same timestamp (exporter retry) do not create a reset or double the increase: Task 3, `TestMetricIncreaseOrdersDeduplicatesAndResets`.
-4. A histogram whose bounds change mid-window (Collector reconfigured) treats the change as a reset instead of subtracting mismatched buckets: Task 3, `TestHistogramIncreaseResetsAllChannels`; Task 5, `TestHistogramPanelsShareResetIncreases`.
+4. A histogram whose bounds change mid-window (Collector reconfigured) treats the change as a reset instead of subtracting mismatched buckets: Task 3, `TestHistogramIncreaseResetsAllChannels`; Task 3, `TestHistogramPanelsShareResetIncreases`.
 5. A dashboard variable for the metric name that has an All option does not satisfy the name rule; selecting All never sums different metrics: Task 4, `TestMetricNameRuleUsesCheckedEqualities` and `TestMetricNameAllGroupsDifferentMetricsSeparately`.
 
 ## Task 1: Format 4 metric columns and ingest kinds
 
 **Files**
 
-- Modify: `AGENTS.md`; `internal/telemetry/rows.go`, `internal/telemetry/parquet_rows.go`, `internal/telemetry/parquet.go`, `internal/telemetry/verify.go`; `internal/ingest/server.go`; `internal/query/querytest/tables.go`, `internal/query/views.go`; `internal/panel/testhelpers_test.go`, `internal/panel/panel_bench_data_test.go`, `internal/panel/panel_bench_test.go`; `site/src/content/docs/reference/data-layout.mdx`.
+- Modify: `AGENTS.md`; `internal/telemetry/rows.go`, `internal/telemetry/parquet_rows.go`, `internal/telemetry/parquet.go`, `internal/telemetry/verify.go`; `internal/ingest/server.go`, `internal/ingest/nesting_test.go`; `internal/query/querytest/tables.go`, `internal/query/views.go`; `internal/panel/testhelpers_test.go`, `internal/panel/panel_bench_data_test.go`, `internal/panel/panel_bench_test.go`; `site/src/content/docs/explanation/storage-model.mdx`.
 - Create/test: `internal/ingest/metric_fidelity_test.go`, `internal/telemetry/metric_format_test.go`, `internal/panel/metric_view_test.go`.
 - Existing regression tests: `internal/telemetry/parquet_test.go`, `internal/telemetry/schema_batch_test.go`, `internal/telemetry/verify_test.go`, `internal/telemetry/store/repair_test.go`, `internal/query/views_schema_test.go`, `internal/query/rollup_test.go`, `internal/panel/distribution_test.go`. Update metric fixtures with accurate stored kind/temporality/monotonicity; do not rename visualization `histogram` to an OTLP kind.
 
@@ -62,7 +62,7 @@ func NewExecutor(engine Engine, retentionDays int) *Executor
 func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error)
 ```
 
-Produces: `telemetry.Metric.Temporality string`, `Monotonic bool`, `StartTimeUnixNanos int64`; matching Parquet fields; `batchMetadataVersion = 4`; metrics `type` in gauge/counter/updown/histogram/summary, `temporality VARCHAR`, nullable `start_time TIMESTAMPTZ_NS`. New ingest helper `func metricTemporality(t metricspb.AggregationTemporality) (string, error)`. New test-only shared helpers (fully defined below): `m5Fixture`, `m5Insert`, `m5Run`, `m5Values`, `m5Counter`.
+Produces: `telemetry.Metric.Temporality string`, `Monotonic bool`, `StartTimeUnixNanos int64`; matching Parquet fields; `batchMetadataVersion = 4`; metrics `type` in gauge/counter/updown/histogram/summary, `temporality VARCHAR`, nullable `start_time TIMESTAMPTZ_NS`. New ingest helper `func metricTemporality(t metricspb.AggregationTemporality) (string, error)`. New test-only shared helpers (fully defined below): `metricFixture`, `insertMetrics`, `runMetricPanel`, `metricValues`, `metricCounter`.
 
 - [ ] **Write the failing ingest fidelity test.** In package ingest, import testing, telemetry/config, collectormetrics and metricspb under the same aliases as server.go. Capture through existing `newTestSubmitter`; this is not a fake SQL engine.
 
@@ -163,7 +163,7 @@ func TestFormatFourRequiresNewMetricPhysicalSchema(t *testing.T) {
 - [ ] **Define the shared engine-executed fixture helpers and metrics view test.** Add helpers to existing `testhelpers_test.go`; imports needed are database/sql, encoding/json and querytest, in addition to its existing imports. `query.Duck{DB: db}` has no repository and therefore executes these tables without Parquet rebinding; production snapshot coverage is a separate Task 3 test. The duckdb driver is already registered through query's imports.
 
 ```go
-func m5Fixture(t *testing.T) (*Executor, *sql.DB) {
+func metricFixture(t *testing.T) (*Executor, *sql.DB) {
     t.Helper()
     db, err := sql.Open("duckdb", "?threads=2&memory_limit=256MB")
     if err != nil { t.Fatal(err) }
@@ -177,7 +177,7 @@ func m5Fixture(t *testing.T) (*Executor, *sql.DB) {
     return e, db
 }
 
-func m5Insert(t *testing.T, db *sql.DB, m telemetry.Metric) {
+func insertMetrics(t *testing.T, db *sql.DB, m telemetry.Metric) {
     t.Helper()
     encode := func(v map[string]any) string {
         if v == nil { return "{}" }
@@ -196,14 +196,14 @@ func m5Insert(t *testing.T, db *sql.DB, m telemetry.Metric) {
     if err != nil { t.Fatal(err) }
 }
 
-func m5Counter(at time.Time, value float64) telemetry.Metric {
+func metricCounter(at time.Time, value float64) telemetry.Metric {
     return telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "net", Unit: "By",
         Type: "sum", Monotonic: true, Temporality: "cumulative", Value: value,
         TimeUnixNanos: at.UnixNano(), EventUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano(),
         ScopeName: "scope", ScopeVersion: "1"}
 }
 
-func m5Run(t *testing.T, e *Executor, p Panel, start, end time.Time) Result {
+func runMetricPanel(t *testing.T, e *Executor, p Panel, start, end time.Time) Result {
     t.Helper()
     e.now = func() time.Time { return end }
     if p.ID == "" { p.ID = "metric" }
@@ -216,7 +216,7 @@ func m5Run(t *testing.T, e *Executor, p Panel, start, end time.Time) Result {
     return results[0]
 }
 
-func m5Values(t *testing.T, r Result, column string) []any {
+func metricValues(t *testing.T, r Result, column string) []any {
     t.Helper()
     if r.Frame == nil { t.Fatalf("missing frame: %+v", r) }
     for i, c := range r.Frame.Columns { if c.Name == column { return r.Frame.Values[i] } }
@@ -225,22 +225,22 @@ func m5Values(t *testing.T, r Result, column string) []any {
 }
 
 func TestMetricViewMapsKindsAndKeepsNanosecondStart(t *testing.T) {
-    e, db := m5Fixture(t)
+    e, db := metricFixture(t)
     for i, stored := range []string{"gauge", "sum", "sum", "histogram", "exponential_histogram", "summary"} {
-        m := m5Counter(fixtureStart.Add(time.Duration(i)*time.Second), 1)
+        m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Second), 1)
         m.Type, m.Monotonic = stored, i == 1
         m.Name = fmt.Sprintf("metric%d", i)
         m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano()+17
         if i == 0 { m.StartTimeUnixNanos = 0; m.Temporality = "" }
         if i == 5 { m.Temporality = "" }
-        m5Insert(t, db, m)
+        insertMetrics(t, db, m)
     }
-    r := m5Run(t, e, Panel{Viz: "table", SQL: `SELECT name,type,temporality,
+    r := runMetricPanel(t, e, Panel{Viz: "table", SQL: `SELECT name,type,temporality,
         epoch_ns(start_time)::DOUBLE AS start_nanos,typeof(start_time) AS start_type
         FROM metrics WHERE $__window(time) ORDER BY name`}, fixtureStart, fixtureStart.Add(time.Minute))
-    if got := m5Values(t, r, "type"); !reflect.DeepEqual(got, []any{"gauge","counter","updown","histogram","histogram","summary"}) { t.Fatalf("kinds: %v", got) }
-    if m5Values(t, r, "start_nanos")[0] != nil { t.Fatal("zero start must be NULL") }
-    for _, got := range m5Values(t, r, "start_type") { if got != "TIMESTAMPTZ_NS" { t.Fatalf("start type: %v", got) } }
+    if got := metricValues(t, r, "type"); !reflect.DeepEqual(got, []any{"gauge","counter","updown","histogram","histogram","summary"}) { t.Fatalf("kinds: %v", got) }
+    if metricValues(t, r, "start_nanos")[0] != nil { t.Fatal("zero start must be NULL") }
+    for _, got := range metricValues(t, r, "start_type") { if got != "TIMESTAMPTZ_NS" { t.Fatalf("start type: %v", got) } }
     var exact int64
     if err := db.QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='metric1'").Scan(&exact); err != nil || exact != fixtureStart.Add(-time.Minute).UnixNano()+17 { t.Fatalf("nanoseconds=%d err=%v", exact, err) }
 }
@@ -276,7 +276,7 @@ CASE WHEN start_time_unix_nano=0 THEN NULL
      ELSE make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS END AS start_time,
 ```
 
-Set `batchMetadataVersion` to 4. `loadStoredBatch` already compares the complete `telemetrySchema[metricParquetRow]()` and `BatchVerifier.Validate` calls `loadRegisteredBatch` before decoding: extend the row contract, retain this one verification path and the native all-column decode, rather than invent another schema copy. Update the comments in parquet.go/views.go and AGENTS.md/data-layout to format 4.
+Set `batchMetadataVersion` to 4. `loadStoredBatch` already compares the complete `telemetrySchema[metricParquetRow]()` and `BatchVerifier.Validate` calls `loadRegisteredBatch` before decoding: extend the row contract, retain this one verification path and the native all-column decode, rather than invent another schema copy. Update the comments in parquet.go/views.go, AGENTS.md and both batch-format references in `site/src/content/docs/explanation/storage-model.mdx` (near lines 110 and 165) to format 4.
 
 ```go
 func metricTemporality(t metricspb.AggregationTemporality) (string, error) {
@@ -293,20 +293,24 @@ func metricTemporality(t metricspb.AggregationTemporality) (string, error) {
 
 In all five point loops set `StartTimeUnixNanos: int64(dp.StartTimeUnixNano)`. Gauges and summaries leave temporality empty and monotonic false. For sums call metricTemporality once before the point loop, return `status.Error(codes.InvalidArgument, err.Error())` on error, store `Type: "sum"`, `Temporality: temporality`, `Monotonic: d.Sum.IsMonotonic`; delete the sum_delta branch. For explicit/exponential histograms call the helper on their own aggregation temporality, set Temporality and keep Monotonic false; exponential kind is exactly `exponential_histogram`.
 
-Task 1's mechanical reader audit uses the brief's search, plus all stored-type/format literals. `metricHistogramRaw` still selects semantic `histogram`; that selector now includes exponential points. Change readbench metadata checks/outputs to 4, selectors/maps from `sum` to `counter` (include updown when choosing gauge-like measures), histogram benchmark from `p95(hist_sum)` to `p95(value)`, and shift `start_time_unix_nano` only when nonzero in `tilePanelParquet`. Do not infer monotonicity inside a production reader. Controller conversion of its lost-fidelity source is addressed in Task 7.
+Update `TestExportsBoundAttributeNestingBeforeSubmit` in `internal/ingest/nesting_test.go`: set `AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE` on its Sum, Histogram and ExponentialHistogram fixtures. These remain valid nesting tests; do not relax the `InvalidArgument` rejection of an export containing unspecified aggregate temporality.
+
+Keep `TestPanelBenchmarkMetricNamesSelectMostCommonInWindow` green in this first type-changing task. In its `add` helper set sums to `Monotonic: true, Temporality: "cumulative"`, histograms to cumulative temporality, and emit at least two points per aggregate series with identical service/name/unit/scope/attributes/resource. Keep the first at `at` and the second at `at.Add(time.Minute)` with increased Value, HistCount, HistSum and bucket counts; assign all event/ingestion timestamps consistently. Gauges still emit one point. Change the expected selection map key from `sum` to `counter`; keep requests more frequent than rare, histogram-name tie ordering, outside-window exclusions and the final narrow-window assertions. The second points also supply histogram baselines when Task 3 switches distributions. Include this regression in Task 1's readbench command; it must not be deferred until Task 4.
+
+Task 1's mechanical reader audit uses the brief's search, plus all stored-type/format literals. `metricHistogramRaw` still selects semantic `histogram`; that selector now includes exponential points. Change readbench metadata checks/outputs to 4, selectors/maps from `sum` to `counter` (include updown when choosing gauge-like measures), histogram benchmark from `p95(hist_sum)` to `p95(value)`, and shift `start_time_unix_nano` only when nonzero in `tilePanelParquet`. Do not infer monotonicity inside a production reader. Task 7 consumes data supplied by private tooling outside the repository; this plan implements no replay or lost-fidelity upgrade.
 
 ```bash
 rtk proxy rg -n "sum_delta|'histogram'|\"histogram\"" internal ui
-rtk proxy rg -n 'metric_type|exp_histogram|Version: 3|Version != 3|format-3|format 3' internal ui site/src/content/docs/reference/data-layout.mdx AGENTS.md
+rtk proxy rg -n 'metric_type|exp_histogram|Version: 3|Version != 3|format-3|format 3' internal ui site/src/content/docs/explanation/storage-model.mdx AGENTS.md
 ```
 
-Every stored/view type consumer found by these reads must use the new distinction in this task; negative tests and historical migration descriptions may name rejected versions. Keep existing test fixture kind and temporality truthful even while Task 5 still uses the old panel option.
+Every stored/view type consumer found by these reads must use the new distinction in this task; negative tests and historical migration descriptions may name rejected versions. Keep existing test fixture kind and temporality truthful even while Task 3 still has to remove the old panel option.
 
 - [ ] **Run green and the complete gate.** The targeted command above must pass; verify readbench setup also compiles/runs after the version change.
 
 ```bash
 rtk bash scripts/with-duckdb.sh go test ./internal/telemetry/... ./internal/ingest ./internal/query ./internal/panel -count=1
-rtk bash scripts/with-duckdb.sh go test -tags=readbench ./internal/panel -run 'TestPanelBenchmarkReplay' -count=1
+rtk bash scripts/with-duckdb.sh go test -tags=readbench ./internal/panel -run 'TestPanelBenchmarkReplay|TestPanelBenchmarkMetricNamesSelectMostCommonInWindow' -count=1
 rtk just check
 ```
 
@@ -327,20 +331,22 @@ Produces (new): `func explicitExpHistogram(dp *metricspb.ExponentialHistogramDat
 ```go
 func TestExponentialHistogramRetainsEveryObservation(t *testing.T) {
     for _, tc := range []struct {
-        name string; scale, offset int32; positive, negative []uint64; zero uint64
+        name string; scale, positiveOffset, negativeOffset int32; positive, negative []uint64; zero uint64
         bounds []float64; counts []uint64
     }{
-        {"scale_zero_negative_offset", 0, -1, []uint64{2,3}, []uint64{4,1}, 6, []float64{.5,1,2}, []uint64{11,2,3,0}},
-        {"scale_three_positive_offset", 3, 2, []uint64{2,3}, []uint64{4}, 1, []float64{math.Pow(2,.25),math.Pow(2,.375),math.Pow(2,.5)}, []uint64{5,2,3,0}},
-        {"scale_negative_two", -2, 1, []uint64{7,9}, nil, 0, []float64{16,256,4096}, []uint64{0,7,9,0}},
-        {"zero_only", 0, 0, nil, nil, 9, []float64{0}, []uint64{9,0}},
-        {"negative_only", 3, -2, nil, []uint64{3,5}, 0, []float64{0}, []uint64{8,0}},
-        {"empty", 0, 0, nil, nil, 0, []float64{0}, []uint64{0,0}},
+        {"scale_zero_negative_offset", 0, -1, 0, []uint64{2,3}, []uint64{4,1}, 6, []float64{-4,-2,-1,.5,1,2}, []uint64{0,1,4,6,2,3,0}},
+        {"scale_three_positive_offset", 3, 2, -1, []uint64{2,3}, []uint64{4}, 1, []float64{-1,-math.Pow(math.Pow(2,math.Pow(2,-3)), -1),math.Pow(math.Pow(2,math.Pow(2,-3)),2),math.Pow(math.Pow(2,math.Pow(2,-3)),3),math.Pow(math.Pow(2,math.Pow(2,-3)),4)}, []uint64{0,4,1,2,3,0}},
+        {"scale_negative_two", -2, 1, 0, []uint64{7,9}, nil, 0, []float64{16,256,4096}, []uint64{0,7,9,0}},
+        {"zero_only", 0, 0, 0, nil, nil, 9, []float64{0}, []uint64{9,0}},
+        {"negative_only", 0, 0, 1, nil, []uint64{2,6}, 0, []float64{-8,-4,-2,0}, []uint64{0,6,2,0,0}},
+        {"negative_and_zero", 0, 0, 1, nil, []uint64{2,6}, 3, []float64{-8,-4,-2,0}, []uint64{0,6,2,3,0}},
+        {"positive_only", 0, 0, 0, []uint64{2,3}, nil, 4, []float64{1,2,4}, []uint64{4,2,3,0}},
+        {"empty", 0, 0, 0, nil, nil, 0, []float64{0}, []uint64{0,0}},
     } {
         t.Run(tc.name, func(t *testing.T) {
             dp := &metricspb.ExponentialHistogramDataPoint{Scale: tc.scale, ZeroCount: tc.zero,
-                Positive: &metricspb.ExponentialHistogramDataPoint_Buckets{Offset: tc.offset, BucketCounts: tc.positive},
-                Negative: &metricspb.ExponentialHistogramDataPoint_Buckets{BucketCounts: tc.negative}}
+                Positive: &metricspb.ExponentialHistogramDataPoint_Buckets{Offset: tc.positiveOffset, BucketCounts: tc.positive},
+                Negative: &metricspb.ExponentialHistogramDataPoint_Buckets{Offset: tc.negativeOffset, BucketCounts: tc.negative}}
             dp.Count = tc.zero
             for _, n := range tc.positive { dp.Count += n }
             for _, n := range tc.negative { dp.Count += n }
@@ -348,6 +354,7 @@ func TestExponentialHistogramRetainsEveryObservation(t *testing.T) {
             if len(counts) != len(bounds)+1 || !reflect.DeepEqual(counts, tc.counts) { t.Fatalf("bounds=%v counts=%v", bounds, counts) }
             if len(bounds) != len(tc.bounds) { t.Fatalf("bounds=%v", bounds) }
             for i, want := range tc.bounds { if math.Abs(bounds[i]-want) > math.Abs(want)*1e-12 { t.Fatalf("bound %d=%g want %g", i, bounds[i], want) } }
+            for i:=1;i<len(bounds);i++ { if bounds[i]<=bounds[i-1] {t.Fatalf("bounds are not strictly ascending: %v",bounds)} }
             var total uint64
             for _, n := range counts { total += n }
             if total != dp.Count { t.Fatalf("total=%d count=%d", total, dp.Count) }
@@ -362,26 +369,35 @@ func TestExponentialHistogramRetainsEveryObservation(t *testing.T) {
 rtk bash scripts/with-duckdb.sh go test ./internal/ingest -run TestExponentialHistogramRetainsEveryObservation -count=1
 ```
 
-- [ ] **Implement the paired conversion and replace the nil-output tests.** No interpolation of individual negative buckets is promised: the brief explicitly folds negatives and zero into the first bucket.
+- [ ] **Implement the paired conversion and replace the nil-output tests.** Preserve the true negative grid from the amended spec: with base b, negative offset on and m counts, emit `-b^(on+m)` through `-b^on` in ascending order, with counts `[0,q[m-1],...,q[0]]`. Then emit the positive grid `b^op` through `b^(op+n)` with counts `[z,p[0],...,p[n-1],0]`. If n=0 the positive part has just bound 0 and counts `[z,0]`; if m=0 omit the negative prefix. Counts have one more entry than bounds and sum exactly to the point count. Never fold negative observations into the zero bucket.
 
 ```go
 func explicitExpHistogram(dp *metricspb.ExponentialHistogramDataPoint) ([]float64, []uint64) {
-    low := dp.ZeroCount
-    if dp.Negative != nil { for _, n := range dp.Negative.BucketCounts { low += n } }
-    if dp.Positive == nil || len(dp.Positive.BucketCounts) == 0 {
-        return []float64{0}, []uint64{low, 0}
-    }
     base := math.Pow(2, math.Pow(2, -float64(dp.Scale)))
-    bounds := make([]float64, len(dp.Positive.BucketCounts)+1)
-    for i := range bounds { bounds[i] = math.Pow(base, float64(dp.Positive.Offset)+float64(i)) }
-    counts := make([]uint64, len(bounds)+1)
-    counts[0] = low
-    copy(counts[1:], dp.Positive.BucketCounts)
+    bounds := make([]float64, 0)
+    counts := make([]uint64, 0)
+    if dp.Negative != nil && len(dp.Negative.BucketCounts)>0 {
+        negative := dp.Negative.BucketCounts
+        counts = append(counts, 0)
+        for i:=len(negative);i>=0;i-- {
+            bounds = append(bounds, -math.Pow(base,float64(dp.Negative.Offset)+float64(i)))
+            if i>0 { counts = append(counts, negative[i-1]) }
+        }
+    }
+    counts = append(counts, dp.ZeroCount)
+    if dp.Positive == nil || len(dp.Positive.BucketCounts)==0 {
+        bounds = append(bounds, 0)
+    } else {
+        for i:=0;i<=len(dp.Positive.BucketCounts);i++ {
+            bounds = append(bounds, math.Pow(base,float64(dp.Positive.Offset)+float64(i)))
+        }
+        counts = append(counts, dp.Positive.BucketCounts...)
+    }
+    counts = append(counts, 0)
     return bounds, counts
 }
 ```
-
-In the exponential point loop use `bounds, counts := explicitExpHistogram(dp)` and `toJSON(bounds)`, `toJSON(counts)`. Remove `TestExpHistBuckets`/`TestExpHistCounts` (which currently expect nil for zero-only data) in favor of the full conversion test. Task 5 executes the converted shape through percentile and distribution panels.
+In the exponential point loop use `bounds, counts := explicitExpHistogram(dp)` and `toJSON(bounds)`, `toJSON(counts)`. Remove `TestExpHistBuckets`/`TestExpHistCounts` (which currently expect nil for zero-only data) in favor of the full conversion test. Task 3 executes the converted shape through distribution panels; Task 5 adds percentile execution, including an all-negative result.
 
 - [ ] **Run green:** the conversion and full ingest tests pass; run the gate.
 
@@ -394,7 +410,7 @@ rtk just check
 
 ## Task 3: Shared series-increase SQL
 
-**Files:** Create `internal/panel/metric_series.go`, `internal/panel/metric_series_test.go`; modify `internal/panel/exec.go`, `internal/panel/table_trends.go`. Test with existing `internal/panel/testhelpers_test.go` and `internal/query/file_snapshot_test.go` behavior through a real panel request.
+**Files:** Create `internal/panel/metric_series.go`, `internal/panel/metric_series_test.go`; modify `internal/panel/exec.go`, `internal/panel/table_trends.go`, `internal/panel/distribution.go`, `internal/panel/spec.go`, `internal/panel/validate.go`, `internal/panel/distribution_test.go`, `internal/panel/testhelpers_test.go`, `internal/mcp/panels.go`, `internal/mcp/panels_distribution_test.go`, `ui/panels/types.ts`; regenerate `site/src/content/docs/reference/mcp-tools.mdx` via `cmd/fanout-docgen` and refresh UI embeds only if their bytes change. Regenerate `scripts/dashboard-eval/testdata/server.json` through its recipe if the description guard requires it. Test strict decoding in `internal/api/panels.go`, the MCP examples, and existing `internal/panel/testhelpers_test.go` and `internal/query/file_snapshot_test.go` behavior through a real panel request.
 
 **Interfaces**
 
@@ -407,14 +423,17 @@ const metricLookback = 10 * time.Minute
 const metricSeriesKey = "namespace,service,name,unit,scope_name,scope_version,attributes,resource"
 func metricReadScope(p *Panel, scope Scope) Scope
 func metricSeriesCTE(filters []Filter, scope Scope) (string, []any, error)
+func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error)
 ```
 
-The CTE defines `metric_input` (raw lookback rows), `metric_points` (finite, valid, unique timestamp rows), and `metric_increases` (in-window increases). Output retains identity/grouping fields and exposes `_bucket BIGINT`, `increase DOUBLE`, `elapsed_s DOUBLE`, `count_increase DOUBLE`, `sum_increase DOUBLE`, `bound_increases HUGEINT[]`, `_bounds DOUBLE[]`. A cumulative first point stays in metric_points for latest-value operations but contributes no increase. Delta first points are retained with nullable elapsed. No public API or dependency is added. New test-only helpers are `func m5BindTimes(t *testing.T, text string, args []any) string` and `func m5IncreaseResult(t *testing.T, e *Executor, scope Scope, selectSQL string) Result`.
+The CTE defines `metric_input` (raw lookback rows), `metric_points` (finite, valid, unique timestamp rows), and `metric_increases` (in-window increases). Output retains identity/grouping fields and exposes `_bucket BIGINT`, `increase DOUBLE`, `elapsed_s DOUBLE`, `count_increase DOUBLE`, `sum_increase DOUBLE`, `bound_increases HUGEINT[]`, `_bounds DOUBLE[]`. A cumulative first point stays in metric_points for latest-value operations but contributes no increase. Delta first points are retained with nullable elapsed. No public API or dependency is added. New test-only helpers are `func bindFixtureTimes(t *testing.T, text string, args []any) string` and `func metricIncreaseResult(t *testing.T, e *Executor, scope Scope, selectSQL string) Result`.
 
-- [ ] **Write the failing builder tests.** Package panel imports encoding/json, fmt, reflect, strings, testing, time, telemetry, telemetrystore and queryrows. Execute builder results through SQL panels on the querytest engine; test SQL is the builder plus a projection, not an assertion about its text. Helpers are defined here.
+Replace the old `metricHistogramRaw(dimSelect, where, temporality string, interval time.Duration, heat bool) string` signature entirely in this task. `Histogram` keeps only `Field string` and `Buckets string`; remove `Temporality` and its authored option across Go, MCP, TS, generated contracts and tests here. The builder has a live production caller through `compileDistribution`, so `just check`'s `scripts/go-deadcode.mjs` (`deadcode -test=false`) does not reject a test-only builder. Task 5 adds histogram value measures.
+
+- [ ] **Write the failing builder tests.** Package panel imports bytes, encoding/json, fmt, reflect, strings, testing, time, telemetry and telemetrystore. Execute builder results through SQL panels on the querytest engine; test SQL is the builder plus a projection, not an assertion about its text. Helpers are defined here.
 
 ```go
-func m5BindTimes(t *testing.T, text string, args []any) string {
+func bindFixtureTimes(t *testing.T, text string, args []any) string {
     t.Helper()
     // Builder tests have no authored filters; their four arguments are times.
     // Render only these trusted fixture instants into a guarded SQL panel.
@@ -426,16 +445,16 @@ func m5BindTimes(t *testing.T, text string, args []any) string {
     return text
 }
 
-func m5IncreaseResult(t *testing.T, e *Executor, scope Scope, selectSQL string) Result {
+func metricIncreaseResult(t *testing.T, e *Executor, scope Scope, selectSQL string) Result {
     t.Helper()
     cte, args, err := metricSeriesCTE(nil, scope)
     if err != nil { t.Fatal(err) }
-    return m5Run(t,e,Panel{Viz:"table",SQL:m5BindTimes(t,cte+selectSQL,args)},
+    return runMetricPanel(t,e,Panel{Viz:"table",SQL:bindFixtureTimes(t,cte+selectSQL,args)},
         scope.Start.Add(-metricLookback),scope.End)
 }
 
 func TestMetricIncreaseOrdersDeduplicatesAndResets(t *testing.T) {
-    e, db := m5Fixture(t)
+    e, db := metricFixture(t)
     at := fixtureStart
     for _, p := range []struct{ seconds int; value float64; ingest int64; start int64 }{
         {60,160,60,1}, {-60,40,-60,1}, {0,100,0,1},
@@ -444,44 +463,44 @@ func TestMetricIncreaseOrdersDeduplicatesAndResets(t *testing.T) {
         {180,20,180,2}, // start change without decrease: reset contributes 20
         {240,50,240,0}, // absent start does not by itself reset
     } {
-        m := m5Counter(at.Add(time.Duration(p.seconds)*time.Second),p.value)
+        m := metricCounter(at.Add(time.Duration(p.seconds)*time.Second),p.value)
         m.IngestedAt = at.Add(time.Duration(p.ingest)*time.Second).UnixNano()
         m.StartTimeUnixNanos = p.start
-        m5Insert(t,db,m)
+        insertMetrics(t,db,m)
     }
     // New resource identity is a new container series; its first point is not traffic.
     for i, value := range []float64{9000,9060} {
-        m := m5Counter(at.Add(time.Duration(150+i*60)*time.Second),value)
+        m := metricCounter(at.Add(time.Duration(150+i*60)*time.Second),value)
         m.Resource = map[string]any{"container.id":"new"}
-        m5Insert(t,db,m)
+        insertMetrics(t,db,m)
     }
-    r := m5IncreaseResult(t,e,Scope{Start:at,End:at.Add(5*time.Minute),Interval:time.Minute},
-        " SELECT epoch_ms(time)::BIGINT AS time,increase,elapsed_s FROM metric_increases ORDER BY time")
-    if got := m5Values(t,r,"increase"); !reflect.DeepEqual(got,[]any{60.0,60.0,5.0,20.0,60.0,30.0}) { t.Fatalf("increase=%v",got) }
-    if got := m5Values(t,r,"elapsed_s"); !reflect.DeepEqual(got,[]any{60.0,60.0,60.0,60.0,60.0,60.0}) { t.Fatalf("elapsed=%v",got) }
+    r := metricIncreaseResult(t,e,Scope{Start:at,End:at.Add(5*time.Minute),Interval:time.Minute},
+        " SELECT epoch_ms(time::TIMESTAMP_NS)::BIGINT AS time,increase,elapsed_s FROM metric_increases ORDER BY time")
+    if got := metricValues(t,r,"increase"); !reflect.DeepEqual(got,[]any{60.0,60.0,5.0,20.0,60.0,30.0}) { t.Fatalf("increase=%v",got) }
+    if got := metricValues(t,r,"elapsed_s"); !reflect.DeepEqual(got,[]any{60.0,60.0,60.0,60.0,60.0,60.0}) { t.Fatalf("elapsed=%v",got) }
 }
 
 func TestDeltaFirstPointNeedsElapsedOnlyForRate(t *testing.T) {
-    e,db := m5Fixture(t)
+    e,db := metricFixture(t)
     for i := range 3 {
-        m := m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),12)
+        m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),12)
         m.Temporality = "delta"
         if i == 2 { m.StartTimeUnixNanos = fixtureStart.Add(90*time.Second).UnixNano() }
-        m5Insert(t,db,m)
+        insertMetrics(t,db,m)
     }
-    r := m5IncreaseResult(t,e,Scope{Start:fixtureStart,End:fixtureStart.Add(3*time.Minute)},
-        " SELECT epoch_ms(time)::BIGINT AS time,increase,elapsed_s FROM metric_increases ORDER BY time")
-    if !reflect.DeepEqual(m5Values(t,r,"increase"),[]any{12.0,12.0,12.0}) ||
-       !reflect.DeepEqual(m5Values(t,r,"elapsed_s"),[]any{nil,60.0,30.0}) { t.Fatalf("delta=%+v",r.Frame) }
+    r := metricIncreaseResult(t,e,Scope{Start:fixtureStart,End:fixtureStart.Add(3*time.Minute)},
+        " SELECT epoch_ms(time::TIMESTAMP_NS)::BIGINT AS time,increase,elapsed_s FROM metric_increases ORDER BY time")
+    if !reflect.DeepEqual(metricValues(t,r,"increase"),[]any{12.0,12.0,12.0}) ||
+       !reflect.DeepEqual(metricValues(t,r,"elapsed_s"),[]any{nil,60.0,30.0}) { t.Fatalf("delta=%+v",r.Frame) }
 }
 
 func TestMetricSeriesIdentitySeparatesEveryField(t *testing.T) {
     for _,field:=range []string{"namespace","service","name","unit","scope_name","scope_version","attributes","resource"} {
         t.Run(field,func(t *testing.T) {
-            e,db:=m5Fixture(t)
-            m5Insert(t,db,m5Counter(fixtureStart.Add(-time.Minute),0))
+            e,db:=metricFixture(t)
+            insertMetrics(t,db,metricCounter(fixtureStart.Add(-time.Minute),0))
             for i,value:=range []float64{9000,9060} {
-                m:=m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),value)
+                m:=metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),value)
                 switch field {
                 case "namespace":m.Namespace="other"
                 case "service":m.ServiceName="other"
@@ -492,17 +511,17 @@ func TestMetricSeriesIdentitySeparatesEveryField(t *testing.T) {
                 case "attributes":m.Attributes=map[string]any{"literal.dot":int64(1)}
                 case "resource":m.Resource=map[string]any{"literal.dot":true}
                 }
-                m5Insert(t,db,m)
+                insertMetrics(t,db,m)
             }
-            r:=m5IncreaseResult(t,e,Scope{Start:fixtureStart,End:fixtureStart.Add(2*time.Minute)},
-                " SELECT epoch_ms(time)::BIGINT AS time,increase,elapsed_s FROM metric_increases ORDER BY time")
-            if !reflect.DeepEqual(m5Values(t,r,"increase"),[]any{60.0}) {t.Fatalf("identity=%+v",r.Frame)}
+            r:=metricIncreaseResult(t,e,Scope{Start:fixtureStart,End:fixtureStart.Add(2*time.Minute)},
+                " SELECT epoch_ms(time::TIMESTAMP_NS)::BIGINT AS time,increase,elapsed_s FROM metric_increases ORDER BY time")
+            if !reflect.DeepEqual(metricValues(t,r,"increase"),[]any{60.0}) {t.Fatalf("identity=%+v",r.Frame)}
         })
     }
 }
 
 func TestHistogramIncreaseResetsAllChannels(t *testing.T) {
-    e,db := m5Fixture(t)
+    e,db := metricFixture(t)
     for i,p := range []struct{ bounds,counts string; count int64; sum float64; start int64 }{
         {"[10,20]","[10,20,30]",60,100,1},
         {"[10,20]","[12,23,35]",70,130,1},
@@ -510,25 +529,25 @@ func TestHistogramIncreaseResetsAllChannels(t *testing.T) {
         {"[5,20]","[1,2,3]",6,12,1}, // count decrease
         {"[5,20]","[2,3,4]",9,18,2}, // start change
     } {
-        m:=m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),0)
+        m:=metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),0)
         m.Type,m.Monotonic="histogram",false
         m.HistBoundsJSON,m.HistCountsJSON,m.HistCount,m.HistSum,m.StartTimeUnixNanos=p.bounds,p.counts,p.count,p.sum,p.start
-        m5Insert(t,db,m)
+        insertMetrics(t,db,m)
     }
     cte,args,err:=metricSeriesCTE(nil,Scope{Start:fixtureStart,End:fixtureStart.Add(5*time.Minute),Interval:time.Minute})
     if err!=nil { t.Fatal(err) }
-    r:=m5Run(t,e,Panel{Viz:"table",SQL:m5BindTimes(t,cte+" SELECT count_increase,sum_increase,to_json(bound_increases) AS weights FROM metric_increases ORDER BY time",args)},fixtureStart.Add(-metricLookback),fixtureStart.Add(5*time.Minute))
+    r:=runMetricPanel(t,e,Panel{Viz:"table",SQL:bindFixtureTimes(t,cte+" SELECT count_increase,sum_increase,to_json(bound_increases) AS weights FROM metric_increases ORDER BY time",args)},fixtureStart.Add(-metricLookback),fixtureStart.Add(5*time.Minute))
     wantCounts:=[]float64{10,90,6,9}; wantSums:=[]float64{30,200,12,18}
     wantBounds:=[][]float64{{2,3,5},{20,30,40},{1,2,3},{2,3,4}}
     if r.Frame.Rows!=4 {t.Fatalf("rows=%d",r.Frame.Rows)}
-    for i,weights:=range m5Values(t,r,"weights") {
+    for i,weights:=range metricValues(t,r,"weights") {
         var got []float64;if err:=json.Unmarshal([]byte(weights.(string)),&got);err!=nil {t.Fatal(err)}
-        if m5Values(t,r,"count_increase")[i]!=wantCounts[i]||m5Values(t,r,"sum_increase")[i]!=wantSums[i]||!reflect.DeepEqual(got,wantBounds[i]) {t.Fatalf("row %d: %+v",i,r.Frame)}
+        if metricValues(t,r,"count_increase")[i]!=wantCounts[i]||metricValues(t,r,"sum_increase")[i]!=wantSums[i]||!reflect.DeepEqual(got,wantBounds[i]) {t.Fatalf("row %d: %+v",i,r.Frame)}
     }
 }
 ```
 
-The builder tests above execute real guarded SQL panels through Executor.Run on querytest tables. The integration test below additionally exercises the production file snapshot; Tasks 4–5 add the full structured-panel use of these CTEs.
+The builder tests above execute real guarded SQL panels through Executor.Run on querytest tables. The integration test below additionally exercises the production file snapshot; Task 3 connects metric distributions to these CTEs; Tasks 4–5 add aggregate measures.
 
 - [ ] **Add the lookback snapshot regression.** This test is written now and becomes green when Task 4 connects rate compilation; until then, its Task 3 assertion uses a SQL panel with an explicit extended input window and original output window, plus the `metricReadScope` result. Do not leave the test red across task commits.
 
@@ -537,7 +556,7 @@ func TestMetricReadScopeIncludesSeparateLookbackBatch(t *testing.T) {
     engine,repo:=newTestEngine(t)
     at:=fixtureStart
     for i,p:=range []struct{offset time.Duration; value float64}{{-time.Minute,100},{0,160},{time.Minute,220}} {
-        if err:=repo.Commit(t.Context(),telemetrystore.Batch{ID:fmt.Sprintf("lookback%d",i),Metrics:[]telemetry.Metric{m5Counter(at.Add(p.offset),p.value)}});err!=nil {t.Fatal(err)}
+        if err:=repo.Commit(t.Context(),telemetrystore.Batch{ID:fmt.Sprintf("lookback%d",i),Metrics:[]telemetry.Metric{metricCounter(at.Add(p.offset),p.value)}});err!=nil {t.Fatal(err)}
     }
     p:=Panel{ID:"rate",Title:"Rate",Viz:"timeseries",Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"rate()"},Bucket:"1m"}}
     original:=Scope{Start:at,End:at.Add(2*time.Minute),Interval:time.Minute}
@@ -545,19 +564,19 @@ func TestMetricReadScopeIncludesSeparateLookbackBatch(t *testing.T) {
     if !read.Start.Equal(at.Add(-10*time.Minute))||!original.Start.Equal(at) {t.Fatalf("read=%+v original=%+v",read,original)}
     e:=NewExecutor(engine,30)
     cte,args,err:=metricSeriesCTE(nil,original);if err!=nil {t.Fatal(err)}
-    built:=m5Run(t,e,Panel{Viz:"table",SQL:m5BindTimes(t,cte+" SELECT _bucket AS time,increase,elapsed_s FROM metric_increases ORDER BY time",args)},read.Start,read.End)
-    if built.Frame.Rows!=2||m5Values(t,built,"increase")[0]!=60.0 {t.Fatalf("lookback frame=%+v",built.Frame)}
+    built:=runMetricPanel(t,e,Panel{Viz:"table",SQL:bindFixtureTimes(t,cte+" SELECT _bucket AS time,increase,elapsed_s FROM metric_increases ORDER BY time",args)},read.Start,read.End)
+    if built.Frame.Rows!=2||metricValues(t,built,"increase")[0]!=60.0 {t.Fatalf("lookback frame=%+v",built.Frame)}
     // A real executor SQL panel independently confirms baseline visibility.
-    r:=m5Run(t,e,Panel{Viz:"table",SQL:`WITH prior AS (
+    r:=runMetricPanel(t,e,Panel{Viz:"table",SQL:`WITH prior AS (
         SELECT time,value,lag(value) OVER (ORDER BY time) AS previous FROM metrics
         WHERE time >= $__from::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < $__to::TIMESTAMP_NS::TIMESTAMPTZ_NS
         AND name='net') SELECT value-previous AS increase FROM prior
         WHERE time >= CAST('2026-10-01 12:00:00' AS TIMESTAMPTZ_NS) ORDER BY time`},read.Start,read.End)
-    if !reflect.DeepEqual(m5Values(t,r,"increase"),[]any{60.0,60.0}) {t.Fatalf("snapshot=%+v",r.Frame)}
+    if !reflect.DeepEqual(metricValues(t,r,"increase"),[]any{60.0,60.0}) {t.Fatalf("snapshot=%+v",r.Frame)}
 }
 ```
 
-Once Task 4 lands, append a structured `m5Run` with panel p and original bounds expecting rates `[1,1]`; retain the builder SQL panel snapshot test. queryrows is needed by production code, not by these test helpers; do not leave an unused import in the test file.
+Once Task 4 lands, append a structured `runMetricPanel` with panel p and original bounds expecting rates `[1,1]`; retain the builder SQL panel snapshot test. queryrows is needed by production code, not by these test helpers; do not leave an unused import in the test file.
 
 - [ ] **Run red:** builder/read-scope symbols do not exist; then run again with their signatures to observe missing dedup/reset/lookback behavior.
 
@@ -595,7 +614,7 @@ func metricSeriesCTE(filters []Filter, scope Scope) (string, []any, error) {
         (type='histogram' AND isfinite(hist_sum) AND hist_count>=0
          AND _bounds IS NOT NULL AND _counts IS NOT NULL
          AND len(_counts)=len(_bounds)+1
-         AND coalesce(list_bool_and(list_transform(_bounds,x->isfinite(x))),true))),
+         AND coalesce(list_bool_and(list_transform(_bounds,lambda x: isfinite(x))),true))),
       metric_unique AS (SELECT * EXCLUDE (_retry) FROM (
         SELECT *,row_number() OVER (PARTITION BY `+metricSeriesKey+`,time ORDER BY
           ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
@@ -622,7 +641,7 @@ func metricSeriesCTE(filters []Filter, scope Scope) (string, []any, error) {
         CASE WHEN type='counter' THEN CASE WHEN temporality='delta' OR _reset THEN value ELSE value-_previous_value END END::DOUBLE AS increase,
         CASE WHEN type='histogram' THEN CASE WHEN temporality='delta' OR _reset THEN hist_count ELSE hist_count-_previous_count END END::DOUBLE AS count_increase,
         CASE WHEN type='histogram' THEN CASE WHEN temporality='delta' OR _reset THEN hist_sum ELSE hist_sum-_previous_sum END END::DOUBLE AS sum_increase,
-        CASE WHEN type='histogram' THEN list_transform(range(1,len(_counts)+1),i ->
+        CASE WHEN type='histogram' THEN list_transform(range(1,len(_counts)+1),lambda i:
           CASE WHEN temporality='delta' OR _reset THEN _counts[i]::HUGEINT
                ELSE _counts[i]::HUGEINT-_previous_counts[i]::HUGEINT END) END AS bound_increases,
         CASE WHEN _elapsed_from<time THEN (epoch_ns(time)::HUGEINT-epoch_ns(_elapsed_from)::HUGEINT)::DOUBLE/1e9 END AS elapsed_s
@@ -639,11 +658,106 @@ Explicit histograms with no finite bounds (`[]`) remain valid; an empty bound li
 
 Apply `metricReadScope` at `runScope`'s WithWindow call. Do not alter logical scope.Start/End passed to compilation, comparison, totals, annotation matching or response FromMS/ToMS. The metrics branch of table trends must use the same read scope when it starts running metric aggregates in Task 4. Diagnostic point counts, variable option discovery and schema discovery retain their visible windows because they do not compute increases. No time widening for arbitrary SQL panels.
 
-- [ ] **Run green:** all builder/identity/snapshot tests and the existing file-window tests pass; the task has no change to aggregate meaning yet.
+- [ ] **Switch metric distribution panels to the builder now.** This is Task 3's production integration, with reset/first-delta and strict option-removal tests. Put the shared `metricHistogram` helper in `testhelpers_test.go` so Task 5 and readbench reuse it without milestone names. Add these tests to `metric_series_test.go` (bytes/json/reflect/strings imports are required); they do not call Task 4's scalar-measure helper.
+
+```go
+func metricHistogram(at time.Time, bounds,counts string, count int64, sum float64, series string) telemetry.Metric {
+    m:=metricCounter(at,0)
+    m.Type,m.Monotonic="histogram",false
+    m.HistBoundsJSON,m.HistCountsJSON,m.HistCount,m.HistSum=bounds,counts,count,sum
+    m.Attributes=map[string]any{"series":series}
+    return m
+}
+
+func TestHistogramPanelsShareResetIncreases(t *testing.T) {
+    e,db:=metricFixture(t)
+    for _,m:=range []telemetry.Metric{
+        metricHistogram(fixtureStart.Add(-time.Minute),"[10,20]","[10,20,30]",60,100,"a"),
+        metricHistogram(fixtureStart,"[10,20]","[12,23,35]",70,130,"a"),
+        metricHistogram(fixtureStart.Add(time.Minute),"[5,20]","[20,30,40]",90,200,"a"),
+        metricHistogram(fixtureStart.Add(2*time.Minute),"[5,20]","[1,2,3]",6,12,"a"),
+    } {insertMetrics(t,db,m)}
+    for _,viz:=range []string{"histogram","heatmap"} {
+        q:=&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"count()"},Histogram:&Histogram{Field:"value",Buckets:"explicit"}}
+        if viz=="heatmap" {q.Bucket="1m"}
+        r:=runMetricPanel(t,e,Panel{Viz:viz,Query:q},fixtureStart,fixtureStart.Add(3*time.Minute))
+        total:=0.0;for _,n:=range metricValues(t,r,"count") {total+=n.(float64)}
+        if total!=106 {t.Fatalf("%s count=%g want 106",viz,total)}
+        if viz=="heatmap" {
+            times:=metricValues(t,r,"time");counts:=metricValues(t,r,"count")
+            buckets:=map[int64]float64{};for i,n:=range counts {buckets[times[i].(int64)]+=n.(float64)}
+            if buckets[fixtureStart.UnixMilli()]!=10||buckets[fixtureStart.Add(time.Minute).UnixMilli()]!=90||buckets[fixtureStart.Add(2*time.Minute).UnixMilli()]!=6 {t.Fatalf("buckets=%v",buckets)}
+        }
+    }
+    // Single delta without elapsed still contributes observations.
+    if _,err:=db.Exec("DELETE FROM telemetry.metrics");err!=nil {t.Fatal(err)}
+    m:=metricHistogram(fixtureStart,"[10]","[3,2]",5,30,"a");m.Temporality="delta";insertMetrics(t,db,m)
+    h:=runMetricPanel(t,e,Panel{Viz:"histogram",Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"count()"},Histogram:&Histogram{Field:"value",Buckets:"explicit"}}},fixtureStart,fixtureStart.Add(time.Minute))
+    if !reflect.DeepEqual(metricValues(t,h,"count"),[]any{3.0,2.0}) {t.Fatalf("delta counts=%+v",h.Frame)}
+}
+
+func TestHistogramSpecRejectsRemovedTemporality(t *testing.T) {
+    raw:=[]byte(`{"name":"Hist","panels":[{"id":"h","title":"Hist","viz":"histogram","query":{"from":"metrics","where":["name='net'"],"measures":["count()"],"histogram":{"field":"value","buckets":"explicit","temporality":"delta"}}}]}`)
+    decoder:=json.NewDecoder(bytes.NewReader(raw));decoder.DisallowUnknownFields()
+    var d Dashboard
+    if err:=decoder.Decode(&d);err==nil||!strings.Contains(err.Error(),`unknown field "temporality"`) {t.Fatalf("decode=%v",err)}
+}
+```
+
+- [ ] **Run the distribution/removed-option regressions red before switching production.** Run the new tests against the old renderer and option; reset weights and strict removal fail. Then make the production integration and contract changes below in this same task.
+
+```bash
+rtk bash scripts/with-duckdb.sh go test ./internal/panel ./internal/mcp -run 'TestHistogramPanelsShareResetIncreases|TestHistogramSpecRejectsRemovedTemporality|TestDistributionSpecGuide' -count=1
+```
+
+Expand the builder's bound_increases with ordinality after reset handling; do not subtract exploded mismatched bounds. This is the complete replacement raw renderer:
+
+```go
+func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error) {
+    cte,args,err:=metricSeriesCTE(filters,scope)
+    if err!=nil {return "",nil,err}
+    text:=cte+` SELECT time AS t,`+dimSelect+`,_bucket,
+      CASE WHEN i=1 THEN NULL ELSE _bounds[i-1] END AS lo,
+      CASE WHEN i<=len(_bounds) THEN _bounds[i] END AS hi,
+      n AS n
+      FROM metric_increases,UNNEST(bound_increases) WITH ORDINALITY AS u(n,i)
+      WHERE type='histogram' AND n>=0`
+    return text,args,nil
+}
+```
+
+Update compileDistribution to request this renderer with filters/scope, accept its complete Args including output-window arguments, and wrap its result as existing raw. The heatmap uses later point time; histogram uses the whole window. Preserve group/top/Other/count/cell budgets and preserve Task 2's real negative bounds and zero observations. Distribution display groups use `HAVING sum(n)>0`; retain zero-count bounds in the raw quantile input because they determine interpolation neighbors and the highest finite overflow bound.
+
+
+- [ ] **Remove the option everywhere and regenerate contracts.** Delete Histogram.Temporality, its validator branch, the TS property, old helper parameters, old reflection-tag tests and old panel-option tests. Move temporality fixtures in distribution_test.go onto telemetry.Metric.Temporality and expect reset current weights. Replace the distribution passage in `baseSpecGuide` with these exact sentences (the regression checks this text verbatim):
+
+```text
+Distribution panels use a structured query with one count() measure and histogram: {field: duration_ms, buckets: log2} for spans or {field: value, buckets: explicit} for metrics. Negative span durations clamp to [0,1); +Inf goes to overflow; NaN is excluded because it is not a measurement. Metric histograms use stored temporality and shared per-series increases; resets contribute current counts. Delta histograms sum observation weights.
+```
+
+Replace the old MCP distribution guide regression with the following code in its existing test file:
+
+```go
+func TestDistributionSpecGuide(t *testing.T) {
+    const want = "Distribution panels use a structured query with one count() measure and histogram: {field: duration_ms, buckets: log2} for spans or {field: value, buckets: explicit} for metrics. Negative span durations clamp to [0,1); +Inf goes to overflow; NaN is excluded because it is not a measurement. Metric histograms use stored temporality and shared per-series increases; resets contribute current counts. Delta histograms sum observation weights."
+    if !strings.Contains(specGuide,want) {t.Errorf("guide omits exact distribution passage %q",want)}
+    for _,old:=range []string{"temporality: cumulative|delta","last minus first","counter resets mid-window contributes 0"} {
+        if strings.Contains(specGuide,old) {t.Errorf("obsolete guide phrase %q",old)}
+    }
+}
+```
+
+No custom decoder may consume and silently discard the removed property. Existing API DisallowUnknownFields, dashboard edit decoding and SDK closed JSON schema handle unknown fields; exercise the API/MCP suites as well as the strict unit test. Generated references are produced by `rtk just docs-generate`; never hand-edit mcp-tools.mdx. Use `rtk just ui` then `rtk just ui-check` to verify the shared types and embeds. If changing descriptions affects server eval goldens, use `rtk just dashboard-eval-generate`, not hand-written fixture edits.
+
+- [ ] **Run green:** all builder/identity/snapshot tests and the existing file-window tests pass; distribution panels now use the shared increases and stored temporality; scalar aggregate meaning changes in Task 4.
 
 ```bash
 rtk bash scripts/with-duckdb.sh go test ./internal/panel -run 'TestMetricIncreaseOrdersDeduplicatesAndResets|TestMetricSeriesIdentitySeparatesEveryField|TestDeltaFirstPointNeedsElapsedOnlyForRate|TestHistogramIncreaseResetsAllChannels|TestMetricReadScopeIncludesSeparateLookbackBatch' -count=1
 rtk bash scripts/with-duckdb.sh go test ./internal/query -run 'Test.*Snapshot|Test.*Window' -count=1
+rtk bash scripts/with-duckdb.sh go test ./internal/panel ./internal/mcp ./internal/api ./internal/dashboard -run 'TestHistogramPanelsShareResetIncreases|TestHistogramSpecRejectsRemovedTemporality|TestDistribution|TestExamplesAndPreviewCoverNewTypes|Test.*Unknown' -count=1
+rtk just docs-generate
+rtk just ui
+rtk just ui-check
 rtk just check
 ```
 
@@ -681,87 +795,121 @@ func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []
 
 Extend Filter with internal fields `EqLiteral string`, `EqParam string`, `EqValue bool` (no JSON exposure). These are derived from the original AST only for a field-to-string-constant or field-to-scalar-parameter equality. `EqField` alone is insufficient: `name = service` must not satisfy the rule. Produces unchanged Compiled/Frame wire contracts and at least 1 m automatic buckets for metric queries.
 
-- [ ] **Write rate and restart regressions with known answers.** Package panel imports errors, math, reflect, strings, testing, time, telemetry. New `m5Measure` helper is defined here.
+Series-aware and kind-dependent semantics apply only to the `value` field. Other numeric fields (`hist_count`, `hist_sum`, numeric attributes) retain today's per-point aggregation for every kind, including summary and histogram: do not apply counter increases, per-series weighting, latest-value summation or histogram quantile interpolation to those fields. Field-less count/count_distinct/share retain point meanings and rate follows the kind-aware increase path. Task 5 must preserve this planner split.
+
+- [ ] **Write rate and restart regressions with known answers.** Package panel imports errors, math, reflect, strings, testing, time, telemetry. New `runMetricMeasure` helper is defined here.
 
 ```go
-func m5Measure(t *testing.T, e *Executor, measures []string, bucket string, by []string, start,end time.Time) Result {
+func runMetricMeasure(t *testing.T, e *Executor, measures []string, bucket string, by []string, start,end time.Time) Result {
     t.Helper()
     viz:="table";if bucket!="" {viz="timeseries"}
-    return m5Run(t,e,Panel{Viz:viz,Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:measures,By:by,Bucket:bucket}},start,end)
+    return runMetricPanel(t,e,Panel{Viz:viz,Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:measures,By:by,Bucket:bucket}},start,end)
 }
 
 func TestMetricRateUsesCoveredElapsedTime(t *testing.T) {
-    e,db:=m5Fixture(t)
-    for i:= -1;i<3;i++ {m5Insert(t,db,m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),float64(100+60*(i+1))))}
+    e,db:=metricFixture(t)
+    for i:= -1;i<3;i++ {insertMetrics(t,db,metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),float64(100+60*(i+1))))}
     for _,bucket:=range []string{"10s","1m","1h"} {
-        r:=m5Measure(t,e,[]string{"rate()"},bucket,nil,fixtureStart,fixtureStart.Add(3*time.Minute))
-        values:=m5Values(t,r,"rate")
+        r:=runMetricMeasure(t,e,[]string{"rate()"},bucket,nil,fixtureStart,fixtureStart.Add(3*time.Minute))
+        values:=metricValues(t,r,"rate")
         if len(values)==0 {t.Fatalf("%s: no rates",bucket)}
         for _,v:=range values {if v!=1.0 {t.Fatalf("%s rate=%v want 1",bucket,v)}}
     }
-    r:=m5Run(t,e,Panel{Viz:"stat",Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"rate()"}}},fixtureStart,fixtureStart.Add(3*time.Minute))
+    r:=runMetricPanel(t,e,Panel{Viz:"stat",Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"rate()"}}},fixtureStart,fixtureStart.Add(3*time.Minute))
     if r.Frame.Totals[len(r.Frame.Totals)-1]!=1.0 {t.Fatalf("totals=%v",r.Frame.Totals)}
-    auto:=m5Measure(t,e,[]string{"rate()"},"auto",nil,fixtureStart,fixtureStart.Add(3*time.Minute))
+    auto:=runMetricMeasure(t,e,[]string{"rate()"},"auto",nil,fixtureStart,fixtureStart.Add(3*time.Minute))
     duration,ok:=ParseSpan(auto.Interval);if !ok||duration<time.Minute {t.Fatalf("auto=%q",auto.Interval)}
 }
 
 func TestMetricRestartDoesNotCarryOldSeries(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,p:=range []struct{minute int;value float64;id string}{{-1,100,"old"},{0,160,"old"},{1,10000,"new"},{2,10060,"new"}} {
-        m:=m5Counter(fixtureStart.Add(time.Duration(p.minute)*time.Minute),p.value)
-        m.Resource=map[string]any{"container.id":p.id};m5Insert(t,db,m)
+        m:=metricCounter(fixtureStart.Add(time.Duration(p.minute)*time.Minute),p.value)
+        m.Resource=map[string]any{"container.id":p.id};insertMetrics(t,db,m)
     }
-    r:=m5Measure(t,e,[]string{"rate()"},"1m",nil,fixtureStart,fixtureStart.Add(3*time.Minute))
-    times,values:=m5Values(t,r,"time"),m5Values(t,r,"rate")
+    r:=runMetricMeasure(t,e,[]string{"rate()"},"1m",nil,fixtureStart,fixtureStart.Add(3*time.Minute))
+    times,values:=metricValues(t,r,"time"),metricValues(t,r,"rate")
     got:=map[int64]any{};for i,v:=range values {got[times[i].(int64)]=v}
     if got[fixtureStart.UnixMilli()]!=1.0||got[fixtureStart.Add(2*time.Minute).UnixMilli()]!=1.0 {t.Fatalf("restart=%v",got)}
     if v,exists:=got[fixtureStart.Add(time.Minute).UnixMilli()];exists&&v!=nil {t.Fatalf("first new point=%v",v)}
 }
 
 func TestMetricRateSumsPerSeriesAndIgnoresMissingElapsed(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,p:=range []struct{seconds int;value float64;id string}{{-60,0,"a"},{0,60,"a"},{30,120,"a"},{-60,0,"b"},{0,120,"b"},{90,300,"b"}} {
-        m:=m5Counter(fixtureStart.Add(time.Duration(p.seconds)*time.Second),p.value)
-        m.Attributes=map[string]any{"series":p.id};m5Insert(t,db,m)
+        m:=metricCounter(fixtureStart.Add(time.Duration(p.seconds)*time.Second),p.value)
+        m.Attributes=map[string]any{"series":p.id};insertMetrics(t,db,m)
     }
-    r:=m5Measure(t,e,[]string{"rate()"},"5m",nil,fixtureStart,fixtureStart.Add(2*time.Minute))
-    if got:=m5Values(t,r,"rate");!reflect.DeepEqual(got,[]any{(120.0/90.0)+(300.0/150.0)}) {t.Fatalf("rates=%v",got)}
+    r:=runMetricMeasure(t,e,[]string{"rate()"},"5m",nil,fixtureStart,fixtureStart.Add(2*time.Minute))
+    a, b := 120.0/90.0, 300.0/150.0
+    want := a + b
+    if got:=metricValues(t,r,"rate");!reflect.DeepEqual(got,[]any{want}) {t.Fatalf("rates=%v",got)}
     if _,err:=db.Exec("DELETE FROM telemetry.metrics");err!=nil {t.Fatal(err)}
-    for i:=range 2 {m:=m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),12);m.Temporality="delta";m5Insert(t,db,m)}
-    sums:=m5Measure(t,e,[]string{"sum(value)"},"5m",nil,fixtureStart,fixtureStart.Add(2*time.Minute))
-    rates:=m5Measure(t,e,[]string{"rate()"},"5m",nil,fixtureStart,fixtureStart.Add(2*time.Minute))
-    if m5Values(t,sums,"sum")[0]!=24.0||m5Values(t,rates,"rate")[0]!=.2 {t.Fatalf("sum=%+v rate=%+v",sums.Frame,rates.Frame)}
+    for i:=range 2 {m:=metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),12);m.Temporality="delta";insertMetrics(t,db,m)}
+    sums:=runMetricMeasure(t,e,[]string{"sum(value)"},"5m",nil,fixtureStart,fixtureStart.Add(2*time.Minute))
+    rates:=runMetricMeasure(t,e,[]string{"rate()"},"5m",nil,fixtureStart,fixtureStart.Add(2*time.Minute))
+    if metricValues(t,sums,"sum")[0]!=24.0||metricValues(t,rates,"rate")[0]!=.2 {t.Fatalf("sum=%+v rate=%+v",sums.Frame,rates.Frame)}
 }
 
 func TestMetricMeasuresRespectKindsAndSeriesWeight(t *testing.T) {
     for _,kind:=range []string{"gauge","updown","counter","summary"} {
         t.Run(kind,func(t *testing.T) {
-            e,db:=m5Fixture(t)
+            e,db:=metricFixture(t)
             for _,p:=range []struct{seconds int;value float64;id string}{{-60,0,"a"},{0,10,"a"},{30,30,"a"},{-60,0,"b"},{0,100,"b"}} {
-                m:=m5Counter(fixtureStart.Add(time.Duration(p.seconds)*time.Second),p.value)
+                m:=metricCounter(fixtureStart.Add(time.Duration(p.seconds)*time.Second),p.value)
                 if kind=="gauge"||kind=="summary" {m.Type=kind;m.Temporality="";m.Monotonic=false}
                 if kind=="updown" {m.Monotonic=false}
-                m.Attributes=map[string]any{"series":p.id};m5Insert(t,db,m)
+                m.Attributes=map[string]any{"series":p.id};insertMetrics(t,db,m)
             }
-            want:=map[string]any{"sum(value)":120.0,"avg(value)":60.0,"last(value)":130.0,"min(value)":10.0,"max(value)":100.0,"p95(value)":93.0,"quantile(value, 0.5)":30.0}
-            if kind=="counter" {want["sum(value)"]=130.0;want["avg(value)"]=nil;want["p95(value)"]=nil;want["quantile(value, 0.5)"]=nil}
+            want:=map[string]any{"sum(value)":120.0,"avg(value)":60.0,"last(value)":130.0,"min(value)":10.0,"max(value)":100.0,"p75(value)":65.0,"quantile(value, 0.5)":30.0}
+            if kind=="counter" {want["sum(value)"]=130.0;want["avg(value)"]=nil;want["p75(value)"]=nil;want["quantile(value, 0.5)"]=nil}
             if kind=="summary" {for measure:=range want {want[measure]=nil}}
             for text,value:=range want {
-                r:=m5Measure(t,e,[]string{text},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+                r:=runMetricMeasure(t,e,[]string{text},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
                 got:=r.Frame.Values[len(r.Frame.Columns)-1]
                 if len(got)!=1||got[0]!=value {t.Fatalf("%s got=%v want=%v",text,got,value)}
             }
-            r:=m5Measure(t,e,[]string{"count()","count_distinct(attributes['series'])","share()"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+            r:=runMetricMeasure(t,e,[]string{"count()","count_distinct(attributes['series'])","share()"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
             for i,value:=range []float64{3,2,100} {if r.Frame.Values[i][0]!=value {t.Fatalf("point operation=%+v",r.Frame)}}
         })
     }
 }
 
+func TestMetricNonValueFieldsKeepPerPointAggregates(t *testing.T) {
+    for _,kind:=range []string{"gauge","updown","counter","histogram","summary"} {
+        t.Run(kind,func(t *testing.T) {
+            e,db:=metricFixture(t)
+            for i,value:=range []float64{10,30,100} {
+                m:=metricCounter(fixtureStart.Add(time.Duration(i)*time.Second),999)
+                if kind=="updown" {m.Monotonic=false}
+                if kind!="updown"&&kind!="counter" {m.Type=kind;m.Monotonic=false}
+                if kind=="gauge"||kind=="summary" {m.Temporality=""}
+                m.HistCount,m.HistSum=int64(value),value
+                m.HistBoundsJSON,m.HistCountsJSON="[10]","[1,0]"
+                series:="a";if i==2 {series="b"}
+                m.Attributes=map[string]any{"series":series,"value":value}
+                insertMetrics(t,db,m)
+            }
+            total, points := 140.0, 3.0
+            wantAverage := total / points
+            for _,field:=range []string{"hist_count","hist_sum","attributes['value']"} {
+                for _,tc:=range []struct{fn string;want float64}{
+                    {"sum",140},{"avg",wantAverage},{"min",10},{"max",100},{"last",100},{"p75",65},
+                } {
+                    r:=runMetricMeasure(t,e,[]string{tc.fn+"("+field+")"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+                    got:=r.Frame.Values[len(r.Frame.Columns)-1]
+                    if len(got)!=1||got[0]!=tc.want {t.Fatalf("%s(%s)=%v want %v",tc.fn,field,got,tc.want)}
+                }
+            }
+        })
+    }
+}
+
 func TestMetricFiniteValuesDoNotPoisonLag(t *testing.T) {
-    e,db:=m5Fixture(t)
-    for i,v:=range []float64{100,math.NaN(),math.Inf(1),math.Inf(-1),160} {m5Insert(t,db,m5Counter(fixtureStart.Add(time.Duration(i-1)*time.Minute),v))}
-    r:=m5Measure(t,e,[]string{"rate()"},"5m",nil,fixtureStart,fixtureStart.Add(4*time.Minute))
-    if !reflect.DeepEqual(m5Values(t,r,"rate"),[]any{.25}) {t.Fatalf("finite=%+v",r.Frame)}
+    e,db:=metricFixture(t)
+    for i,v:=range []float64{100,math.NaN(),math.Inf(1),math.Inf(-1),160} {insertMetrics(t,db,metricCounter(fixtureStart.Add(time.Duration(i-1)*time.Minute),v))}
+    r:=runMetricMeasure(t,e,[]string{"rate()"},"5m",nil,fixtureStart,fixtureStart.Add(4*time.Minute))
+    if !reflect.DeepEqual(metricValues(t,r,"rate"),[]any{.25}) {t.Fatalf("finite=%+v",r.Frame)}
 }
 ```
 
@@ -769,7 +917,7 @@ func TestMetricFiniteValuesDoNotPoisonLag(t *testing.T) {
 
 ```go
 func TestMetricNameRuleUsesCheckedEqualities(t *testing.T) {
-    e,_:=m5Fixture(t)
+    e,_:=metricFixture(t)
     for _,tc:=range []struct{label,where string;by []string;all,multi bool;measure string;valid bool}{
         {"literal","name='net'",nil,false,false,"rate()",true},
         {"single","name=$metric",nil,false,false,"rate()",true},
@@ -802,18 +950,18 @@ func TestMetricNameRuleUsesCheckedEqualities(t *testing.T) {
 }
 
 func TestMetricKindMismatchHasActionableDiagnosis(t *testing.T) {
-    e,db:=m5Fixture(t)
-    m:=m5Counter(fixtureStart,100);m.Monotonic=false;m.Name="system.memory.usage";m5Insert(t,db,m)
-    r:=m5Run(t,e,Panel{Viz:"timeseries",Query:&Query{From:"metrics",Where:[]string{"name='system.memory.usage'"},Measures:[]string{"rate()"},Bucket:"1m"}},fixtureStart,fixtureStart.Add(time.Minute))
+    e,db:=metricFixture(t)
+    m:=metricCounter(fixtureStart,100);m.Monotonic=false;m.Name="system.memory.usage";insertMetrics(t,db,m)
+    r:=runMetricPanel(t,e,Panel{Viz:"timeseries",Query:&Query{From:"metrics",Where:[]string{"name='system.memory.usage'"},Measures:[]string{"rate()"},Bucket:"1m"}},fixtureStart,fixtureStart.Add(time.Minute))
     want:="rate() needs a counter; system.memory.usage is an updown; use last(value) or avg(value)"
     if r.Status!=StatusEmpty||r.Diagnosis!=want {t.Fatalf("diagnosis=%+v",r)}
 }
 
 func TestMetricNameAllGroupsDifferentMetricsSeparately(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,p:=range []struct{name string;value float64}{{"net",10},{"cpu",100}} {
-        m:=m5Counter(fixtureStart,p.value);m.Name=p.name;m.Type="gauge";m.Monotonic=false;m.Temporality=""
-        m5Insert(t,db,m)
+        m:=metricCounter(fixtureStart,p.value);m.Name=p.name;m.Type="gauge";m.Monotonic=false;m.Temporality=""
+        insertMetrics(t,db,m)
     }
     start,end:=fixtureStart,fixtureStart.Add(time.Minute)
     d:=Dashboard{Name:"Metrics",Time:Time{From:&start,To:&end},Variables:[]Variable{{
@@ -823,7 +971,7 @@ func TestMetricNameAllGroupsDifferentMetricsSeparately(t *testing.T) {
     }}}}
     results,err:=e.Run(t.Context(),RunRequest{Dashboard:d,Vars:map[string]Value{"metric":{All:true}}})
     if err!=nil {t.Fatal(err)}
-    names,values:=m5Values(t,results[0],"name"),m5Values(t,results[0],"sum")
+    names,values:=metricValues(t,results[0],"name"),metricValues(t,results[0],"sum")
     got:=map[string]any{};for i,name:=range names {got[name.(string)]=values[i]}
     if len(got)!=2||got["net"]!=10.0||got["cpu"]!=100.0 {t.Fatalf("All groups=%v",got)}
 }
@@ -832,13 +980,26 @@ func TestMetricNameAllGroupsDifferentMetricsSeparately(t *testing.T) {
 - [ ] **Run red:** current rate is export frequency, gauge sums/means weight points, kind mismatches return values, auto buckets are 10 s, and All-capable variables pass the name rule.
 
 ```bash
-rtk bash scripts/with-duckdb.sh go test ./internal/panel -run 'TestMetricRateUsesCoveredElapsedTime|TestMetricRestartDoesNotCarryOldSeries|TestMetricRateSumsPerSeriesAndIgnoresMissingElapsed|TestMetricMeasuresRespectKindsAndSeriesWeight|TestMetricFiniteValuesDoNotPoisonLag|TestMetricNameRuleUsesCheckedEqualities|TestMetricNameAllGroupsDifferentMetricsSeparately|TestMetricKindMismatchHasActionableDiagnosis' -count=1
+rtk bash scripts/with-duckdb.sh go test ./internal/panel -run 'TestMetricRateUsesCoveredElapsedTime|TestMetricRestartDoesNotCarryOldSeries|TestMetricRateSumsPerSeriesAndIgnoresMissingElapsed|TestMetricMeasuresRespectKindsAndSeriesWeight|TestMetricFiniteValuesDoNotPoisonLag|TestMetricNonValueFieldsKeepPerPointAggregates|TestMetricNameRuleUsesCheckedEqualities|TestMetricNameAllGroupsDifferentMetricsSeparately|TestMetricKindMismatchHasActionableDiagnosis' -count=1
 ```
 
-- [ ] **Implement per-series then across-series SQL.** The following is the scalar/count stage planner. It emits actual SQL expressions; Stage 1's `_value` is a finite numeric projection of m.Field (NULL for unsupported kinds), and `_bucket` comes from Task 3. A rate's numerator includes only deltas with valid elapsed; it is not divided by the chart bucket width. Task 5 replaces the histogram branches with histogram stages.
+- [ ] **Implement per-series then across-series SQL.** The following is the scalar/count stage planner. It emits actual SQL expressions; Stage 1's `_value` is a finite numeric projection of m.Field; only `value` is NULL for unsupported kinds, and `_bucket` comes from Task 3. A rate's numerator includes only deltas with valid elapsed; it is not divided by the chart bucket width. Task 5 adds the histogram value-measure branches and histogram rate stages.
 
 ```go
 func metricMeasurePlan(m Measure) (source, perSeries, acrossSeries string) {
+    if m.Field != nil && (m.Field.Column != "value" || m.Field.Key != "") && m.Func != "count_distinct" {
+        // _value is the finite FieldRef.numberSQL() projection over raw visible points.
+        switch m.Func {
+        case "sum", "avg", "min", "max":
+            return "metric_raw_window", "list(_value) FILTER (WHERE _value IS NOT NULL)",
+                "list_aggregate(flatten(list(_v)), '"+m.Func+"')::DOUBLE"
+        case "last":
+            return "metric_raw_window", "arg_max(_value,(time,ingested_unix_nano))", "arg_max(_v,_last_order)::DOUBLE"
+        default:
+            return "metric_raw_window", "list(_value) FILTER (WHERE _value IS NOT NULL)",
+                "list_aggregate(flatten(list(_v)), 'quantile_cont', "+sqlFloat(m.Q)+")::DOUBLE"
+        }
+    }
     scalar := "CASE WHEN type IN ('gauge','updown','counter') THEN _value END"
     gauge := "CASE WHEN type IN ('gauge','updown') THEN _value END"
     switch m.Func {
@@ -868,12 +1029,12 @@ func metricMeasurePlan(m Measure) (source, perSeries, acrossSeries string) {
 Implement compileMetricQuery with these concrete stages:
 
 1. Get Task 3's CTE/Args. Add `metric_raw_window` from metric_input with the original `[Start,End)` predicates and computed _bucket (raw rows preserve count semantics). Add `metric_window_points` from metric_points with the original predicates. Bind both windows with the required timestamp casts, appending UTC arguments in textual order. They do not emit lookback observations.
-2. For each measure index i, project its `Field.numberSQL()` as `_value`, replacing nonfinite values with NULL; for count_distinct also project `Field.stringSQL()` as `_distinct`. Field-less functions do not dereference m.Field. For sum, `metric_value_rows` is gauge/updown window points UNION ALL counter metric_increases, projecting the same identity/type/time/_bucket/value/increase columns. Counter baselines are excluded from sum, but kept for last/min/max.
-3. Render dimensions as existing FieldRef.stringSQL() with coalesce to empty text. Stage `metric_series_i` selects `_bucket`, the eight exact identity columns, type, dimension aliases `_d0`…`_d2`, and the planner's perSeries expression as `_v`; group by bucket, identity, type and dimensions. Stage `metric_group_i` groups by bucket/dimensions and evaluates acrossSeries. Replace `_partition` with `PARTITION BY _bucket` for bucketed queries, empty text otherwise. Empty quantile lists return NULL rather than raising an engine error (guard with `CASE WHEN len(flatten(list(_v)))>0 THEN ... END`). Count-distinct of an empty list is zero.
+2. For each measure index i, project its `Field.numberSQL()` as `_value`, replacing nonfinite values with NULL; for count_distinct also project `Field.stringSQL()` as `_distinct`. Field-less functions do not dereference m.Field. For sum(value), `metric_value_rows` is gauge/updown window points UNION ALL counter metric_increases, projecting the same identity/type/time/_bucket/value/increase columns. Counter baselines are excluded from sum, but kept for last/min/max.
+3. Render dimensions as existing FieldRef.stringSQL() with coalesce to empty text. Stage `metric_series_i` selects `_bucket`, the eight exact identity columns, type, dimension aliases `_d0`…`_d2`, and the planner's perSeries expression as `_v`; group by bucket, identity, type and dimensions. Stage `metric_group_i` groups by bucket/dimensions and evaluates acrossSeries. Replace `_partition` with `PARTITION BY _bucket` for bucketed queries, empty text otherwise. The non-value last branch also projects `max((time,ingested_unix_nano))` as `_last_order` for Stage 2; its last selects the globally latest point, never sums latest values per series. Non-value lists flatten all per-point samples across series before applying the requested aggregate, including recomputation for Other. Empty aggregate/quantile lists return NULL rather than raising an engine error (guard with `CASE WHEN len(flatten(list(_v)))>0 THEN ... END`). Count-distinct of an empty list is zero.
 4. Build `metric_groups` from distinct bucket/dimension keys of raw window rows (or one `SELECT 0::BIGINT AS _bucket` for an ungrouped, unbucketed aggregate). Left-join each metric_group_i by bucket and dimension aliases using `IS NOT DISTINCT FROM`. An unsupported measure has a NULL column even when no increase row exists; do not drop an otherwise existing group. Only count/count_distinct coalesce absence to zero. Emit epoch-ms bucket as `_t`/frame time, dimension column names from FieldRef.alias(), and measures with their current aliases/units.
 5. Full-window candidates for categorical top N use the same two stages with `_bucket=0` before ranking, not count-per-second or an average of displayed rates. Preserve existing confidence/sample-count eligibility for scalar percentiles/min/max/avg, count actual supported finite samples, and keep volume/first-measure direction/tie semantics. Determine top dimensions once per panel window; fold raw series identities into the chosen dimension/Other **only after Stage 1**, then run Stage 2 again for each folded group. Rates sum per-series rates; gauge means divide by number of series, not rows; count_distinct recomputes the union of values. Do not sum percentiles. Cap via existing orderAndLimit/distributionRows and retain NULL ordering.
 
-Dispatch from compileQuery after the visualization-specific checks: when `q.From=="metrics"`, call compileMetricQuery. In compileItems, use this same metric compiler with item dimensions, then apply its existing scatter/state row ordering/limits and state top-item selection. No separate rate implementation in items.go. measureSQL remains the span/log and raw count-expression helper; explicitly route its metric callers away from generic value/rate branches so a future caller cannot silently reinstate export frequency. Existing metric histogram compilation remains owned by Task 5.
+Dispatch from compileQuery after the visualization-specific checks: when `q.From=="metrics"`, call compileMetricQuery. In compileItems, use this same metric compiler with item dimensions, then apply its existing scatter/state row ordering/limits and state top-item selection. No separate rate implementation in items.go. measureSQL remains the span/log and raw count-expression helper; explicitly route its metric callers away from generic value/rate branches so a future caller cannot silently reinstate export frequency. Metric histogram distribution compilation already uses Task 3's builder; Task 5 adds histogram value-measure branches.
 
 For metrics table sparklines, clone the table panel/query, select only formatted measure aliases, assign a real time bucket at least 1 m and at most 240 points, run compileMetricQuery with its dimensions and normal scope, and execute with `metricReadScope`. Then retain attachTableTrends' existing row-key mapping/cell budget. Select displayed tuples **after** metric stage aggregation so share's denominator covers the complete checked scope. Comparison and stat/gauge totals already call runScope: they automatically inherit the shared path, including their independently shifted lookbacks.
 
@@ -926,14 +1087,14 @@ func metricFrameHasValue(f *Frame) bool {
 }
 ```
 
-Treat a structured metric frame with no non-NULL measures as empty while retaining its NULL cells. Before ordinary missing-filter diagnosis, query the filtered visible metrics window for `(name,type,count(*))`, bounded to at most 6 rows. metricKindDiagnosis uses the parsed measures and the explicit compatibility table: rate needs counter (or histogram once Task 5 lands), counter avg/quantile offers rate/last, histogram min/max/last offers avg/p95, summary offers count. Match the exact updown example in the regression; mixed compatible data must not be reported empty. Keep maxDiagnosedFilters and the existing error/operational-failure behavior.
+Call metricFrameHasValue from runPanel to treat a structured metric frame with no non-NULL measures as empty while retaining its NULL cells. Call metricKindDiagnosis before ordinary missing-filter diagnosis, querying the filtered visible metrics window for `(name,type,count(*))`, bounded to at most 6 rows. metricKindDiagnosis applies the explicit compatibility table to field-less rate and the actual value column only (Column=value, Key empty); other numeric fields cannot produce a kind mismatch: rate needs counter (or histogram once Task 5 lands), counter avg/quantile offers rate/last, histogram min/max/last offers avg/p95, summary offers count. Match the exact updown example in the regression; mixed compatible data must not be reported empty. Keep maxDiagnosedFilters and the existing error/operational-failure behavior.
 
 - [ ] **Extend the lookback test to the structured executor, and cover auxiliary aggregates.** Append the two-rate `[1,1]` assertion described in Task 3. Add this actual regression for item panels, whole-window totals, comparisons and table trends:
 
 ```go
 func TestMetricAuxiliaryAggregatesUseSeriesRates(t *testing.T) {
-    e,db:=m5Fixture(t)
-    for i:=-4;i<4;i++ {m5Insert(t,db,m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),float64(1000+60*(i+4))))}
+    e,db:=metricFixture(t)
+    for i:=-4;i<4;i++ {insertMetrics(t,db,metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),float64(1000+60*(i+4))))}
     start,end:=fixtureStart,fixtureStart.Add(3*time.Minute)
     panels:=[]Panel{
         {ID:"stat",Title:"Rate",Viz:"stat",Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"rate()"}}},
@@ -947,37 +1108,39 @@ func TestMetricAuxiliaryAggregatesUseSeriesRates(t *testing.T) {
     if got["stat"].Frame.Totals[len(got["stat"].Frame.Totals)-1]!=1.0||got["stat"].Previous==nil||got["stat"].Previous.Totals[len(got["stat"].Previous.Totals)-1]!=1.0 {t.Fatalf("stat=%+v",got["stat"])}
     if len(got["table"].Frame.Trends["rate"])!=1 {t.Fatal("missing table trend")}
     for _,v:=range got["table"].Frame.Trends["rate"][0] {if v!=nil&&v!=1.0 {t.Fatalf("trend=%v",v)}}
-    if m5Values(t,got["items"],"x")[0]!=1.0 {t.Fatalf("items=%+v",got["items"])}
-    for _,v:=range m5Values(t,got["states"],"rate") {if v!=1.0 {t.Fatalf("state=%v",v)}}
+    if metricValues(t,got["items"],"x")[0]!=1.0 {t.Fatalf("items=%+v",got["items"])}
+    for _,v:=range metricValues(t,got["states"],"rate") {if v!=1.0 {t.Fatalf("state=%v",v)}}
 }
 ```
 
-Task 5 extends this same compiler to histogram stages; Task 4 must already return NULL for histograms rather than aggregating their stored value. The no-name histogram distribution case retains count() as an observation-weight contract until Task 5's distribution rewrite; the new value aggregates require names now. Add these concrete metric top-N and half-open-window tests:
+Task 5 extends this same compiler to histogram stages; Task 4 must already return NULL for histogram value aggregates rather than aggregating their stored value; non-value numeric measures remain per-point. The no-name histogram distribution case keeps count() as its observation-weight contract on Task 3's shared renderer; value aggregates require names. Add these concrete metric top-N and half-open-window tests:
 
 ```go
 func TestMetricRankingRecomputesOtherFromSeriesRates(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,p:=range []struct{seconds int;value float64;id string}{{-60,0,"a"},{0,60,"a"},{30,120,"a"},{-60,0,"b"},{0,120,"b"},{90,300,"b"}} {
-        m:=m5Counter(fixtureStart.Add(time.Duration(p.seconds)*time.Second),p.value)
-        m.ServiceName=p.id;m5Insert(t,db,m)
+        m:=metricCounter(fixtureStart.Add(time.Duration(p.seconds)*time.Second),p.value)
+        m.ServiceName=p.id;insertMetrics(t,db,m)
     }
-    r:=m5Run(t,e,Panel{Viz:"timeseries",Options:&Options{Top:1},Query:&Query{
+    r:=runMetricPanel(t,e,Panel{Viz:"timeseries",Options:&Options{Top:1},Query:&Query{
         From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"rate()"},By:[]string{"service"},Bucket:"5m",
     }},fixtureStart,fixtureStart.Add(2*time.Minute))
-    dims,rates:=m5Values(t,r,"service"),m5Values(t,r,"rate")
+    dims,rates:=metricValues(t,r,"service"),metricValues(t,r,"rate")
     got:=map[string]any{};for i,d:=range dims {got[d.(string)]=rates[i]}
-    if got["b"]!=2.0||got["Other (1)"]!=120.0/90.0 {t.Fatalf("ranking=%v",got)}
+    increase, elapsed := 120.0, 90.0
+    wantOther := increase / elapsed
+    if got["b"]!=2.0||got["Other (1)"]!=wantOther {t.Fatalf("ranking=%v",got)}
 }
 
 func TestMetricWindowClipsPointsAfterComputingIncrease(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,p:=range []struct{offset time.Duration;value float64}{{-11*time.Minute,0},{-10*time.Minute,100},{0,160},{time.Minute,9999}} {
-        m5Insert(t,db,m5Counter(fixtureStart.Add(p.offset),p.value))
+        insertMetrics(t,db,metricCounter(fixtureStart.Add(p.offset),p.value))
     }
-    r:=m5Measure(t,e,[]string{"sum(value)"},"1m",nil,fixtureStart,fixtureStart.Add(time.Minute))
-    if !reflect.DeepEqual(m5Values(t,r,"sum"),[]any{60.0}) {t.Fatalf("clipped=%+v",r.Frame)}
-    r=m5Measure(t,e,[]string{"rate()"},"1m",nil,fixtureStart,fixtureStart.Add(time.Minute))
-    if !reflect.DeepEqual(m5Values(t,r,"rate"),[]any{.1}) {t.Fatalf("elapsed lookback=%+v",r.Frame)}
+    r:=runMetricMeasure(t,e,[]string{"sum(value)"},"1m",nil,fixtureStart,fixtureStart.Add(time.Minute))
+    if !reflect.DeepEqual(metricValues(t,r,"sum"),[]any{60.0}) {t.Fatalf("clipped=%+v",r.Frame)}
+    r=runMetricMeasure(t,e,[]string{"rate()"},"1m",nil,fixtureStart,fixtureStart.Add(time.Minute))
+    if !reflect.DeepEqual(metricValues(t,r,"rate"),[]any{.1}) {t.Fatalf("elapsed lookback=%+v",r.Frame)}
 }
 ```
 
@@ -992,9 +1155,9 @@ rtk just check
 
 - [ ] **Controller commit message:** `fix(panel): aggregate metric measures per series`
 
-## Task 5: Histogram measures and panels
+## Task 5: Histogram measures
 
-**Files:** Create `internal/panel/metric_histogram.go`, `internal/panel/metric_histogram_test.go`; modify `internal/panel/metric_measures.go`, `internal/panel/distribution.go`, `internal/panel/spec.go`, `internal/panel/validate.go`, `internal/panel/distribution_test.go`, `internal/mcp/panels.go`, `internal/mcp/panels_distribution_test.go`, `ui/panels/types.ts`; regenerate `site/src/content/docs/reference/mcp-tools.mdx` via `cmd/fanout-docgen` and refresh existing UI embeds only if the UI build changes their bytes. Test the existing `internal/mcp/panel_examples_test.go` and strict decoding in `internal/api/panels.go`.
+**Files:** Create `internal/panel/metric_histogram.go`, `internal/panel/metric_histogram_test.go`; modify `internal/panel/metric_measures.go`, `internal/panel/diagnose.go`. Reuse Task 3's distribution renderer, contract-removal tests and shared test helpers. No second renderer or authored temporality option is introduced.
 
 **Interfaces**
 
@@ -1003,37 +1166,30 @@ Consumes: Task 3's metricSeriesCTE; Task 4's compileMetricQuery and metricMeasur
 Produces (new):
 
 ```go
-func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error)
 func histogramQuantileSQL(source string, groupColumns []string, q float64) string
 ```
 
-Replace the old metricHistogramRaw signature `func metricHistogramRaw(dimSelect, where, temporality string, interval time.Duration, heat bool) string` entirely. Histogram spec contains only `Field string` and `Buckets string`; there is no Temporality field, alias or compatibility decoder.
+Task 3 already replaced metricHistogramRaw and removed Histogram.Temporality. This task adds only histogram measure stages and their compatibility diagnosis.
 
-- [ ] **Write golden histogram measure tests through Executor.Run.** Package panel imports bytes, encoding/json, reflect, strings, testing, time, telemetry. Helper m5Histogram is new and fully defined here; it uses the same canonical row and fixture insert as Tasks 1–4.
+- [ ] **Write golden histogram measure tests through Executor.Run.** Package panel imports testing, time, telemetry. Reuse Task 3's metricHistogram helper and Task 4's runMetricMeasure; do not redeclare them.
 
 ```go
-func m5Histogram(at time.Time, bounds,counts string, count int64, sum float64, series string) telemetry.Metric {
-    m:=m5Counter(at,0)
-    m.Type,m.Monotonic="histogram",false
-    m.HistBoundsJSON,m.HistCountsJSON,m.HistCount,m.HistSum=bounds,counts,count,sum
-    m.Attributes=map[string]any{"series":series}
-    return m
-}
-
 func TestHistogramMeasuresInterpolateSummedIncreases(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,m:=range []telemetry.Metric{
-        m5Histogram(fixtureStart.Add(-time.Minute),"[10,20]","[1,1,0]",2,20,"a"),
-        m5Histogram(fixtureStart,"[10,20]","[11,11,0]",22,320,"a"),
-        m5Histogram(fixtureStart.Add(-time.Minute),"[10,20]","[0,1,0]",1,20,"b"),
-        m5Histogram(fixtureStart,"[10,20]","[0,11,0]",11,220,"b"),
-    } {m5Insert(t,db,m)}
+        metricHistogram(fixtureStart.Add(-time.Minute),"[10,20]","[1,1,0]",2,20,"a"),
+        metricHistogram(fixtureStart,"[10,20]","[11,11,0]",22,320,"a"),
+        metricHistogram(fixtureStart.Add(-time.Minute),"[10,20]","[0,1,0]",1,20,"b"),
+        metricHistogram(fixtureStart,"[10,20]","[0,11,0]",11,220,"b"),
+    } {insertMetrics(t,db,m)}
+    sumIncrease, countIncrease := 500.0, 30.0
+    wantAverage := sumIncrease / countIncrease
     for _,tc:=range []struct{measure string;want any}{
-        {"rate()",.5},{"sum(value)",500.0},{"avg(value)",500.0/30.0},
-        {"p50(value)",12.5},{"p95(value)",19.25},{"p99(value)",19.85},
+        {"rate()",.5},{"sum(value)",500.0},{"avg(value)",wantAverage},
+        {"p50(value)",12.5},{"p75(value)",16.25},{"p95(value)",19.25},
         {"quantile(value, 0.95)",19.25},{"min(value)",nil},{"max(value)",nil},{"last(value)",nil},
     } {
-        r:=m5Measure(t,e,[]string{tc.measure},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+        r:=runMetricMeasure(t,e,[]string{tc.measure},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
         got:=r.Frame.Values[len(r.Frame.Columns)-1]
         if len(got)!=1||got[0]!=tc.want {t.Fatalf("%s=%v want %v",tc.measure,got,tc.want)}
     }
@@ -1050,79 +1206,44 @@ func TestHistogramQuantileHandlesZeroAndOverflow(t *testing.T) {
         {"exponential_shape","[0.5,1,2]","[4,2,4,0]",10,1.875},
     } {
         t.Run(tc.label,func(t *testing.T) {
-            e,db:=m5Fixture(t)
-            m:=m5Histogram(fixtureStart,tc.bounds,tc.counts,tc.count,10,"a")
+            e,db:=metricFixture(t)
+            m:=metricHistogram(fixtureStart,tc.bounds,tc.counts,tc.count,10,"a")
             m.Temporality="delta";m.StartTimeUnixNanos=fixtureStart.Add(-time.Minute).UnixNano()
             if tc.label=="exponential_shape" {m.Type="exponential_histogram"}
-            m5Insert(t,db,m)
-            r:=m5Measure(t,e,[]string{"p95(value)"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
-            if got:=m5Values(t,r,"p95");len(got)!=1||got[0]!=tc.want {t.Fatalf("p95=%v want=%v",got,tc.want)}
+            insertMetrics(t,db,m)
+            r:=runMetricMeasure(t,e,[]string{"p95(value)"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+            if got:=metricValues(t,r,"p95");len(got)!=1||got[0]!=tc.want {t.Fatalf("p95=%v want=%v",got,tc.want)}
         })
     }
 }
 
-func TestHistogramPanelsShareResetIncreases(t *testing.T) {
-    e,db:=m5Fixture(t)
-    for _,m:=range []telemetry.Metric{
-        m5Histogram(fixtureStart.Add(-time.Minute),"[10,20]","[10,20,30]",60,100,"a"),
-        m5Histogram(fixtureStart,"[10,20]","[12,23,35]",70,130,"a"),
-        m5Histogram(fixtureStart.Add(time.Minute),"[5,20]","[20,30,40]",90,200,"a"),
-        m5Histogram(fixtureStart.Add(2*time.Minute),"[5,20]","[1,2,3]",6,12,"a"),
-    } {m5Insert(t,db,m)}
-    for _,viz:=range []string{"histogram","heatmap"} {
-        q:=&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"count()"},Histogram:&Histogram{Field:"value",Buckets:"explicit"}}
-        if viz=="heatmap" {q.Bucket="1m"}
-        r:=m5Run(t,e,Panel{Viz:viz,Query:q},fixtureStart,fixtureStart.Add(3*time.Minute))
-        total:=0.0;for _,n:=range m5Values(t,r,"count") {total+=n.(float64)}
-        if total!=106 {t.Fatalf("%s count=%g want 106",viz,total)}
-        if viz=="heatmap" {
-            times:=m5Values(t,r,"time");counts:=m5Values(t,r,"count")
-            buckets:=map[int64]float64{};for i,n:=range counts {buckets[times[i].(int64)]+=n.(float64)}
-            if buckets[fixtureStart.UnixMilli()]!=10||buckets[fixtureStart.Add(time.Minute).UnixMilli()]!=90||buckets[fixtureStart.Add(2*time.Minute).UnixMilli()]!=6 {t.Fatalf("buckets=%v",buckets)}
-        }
-    }
-    // Single delta without elapsed contributes observations, never a rate.
-    if _,err:=db.Exec("DELETE FROM telemetry.metrics");err!=nil {t.Fatal(err)}
-    m:=m5Histogram(fixtureStart,"[10]","[3,2]",5,30,"a");m.Temporality="delta";m5Insert(t,db,m)
-    r:=m5Measure(t,e,[]string{"rate()"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
-    if !reflect.DeepEqual(m5Values(t,r,"rate"),[]any{nil}) {t.Fatalf("delta rate=%+v",r.Frame)}
-    h:=m5Run(t,e,Panel{Viz:"histogram",Query:&Query{From:"metrics",Where:[]string{"name='net'"},Measures:[]string{"count()"},Histogram:&Histogram{Field:"value",Buckets:"explicit"}}},fixtureStart,fixtureStart.Add(time.Minute))
-    if !reflect.DeepEqual(m5Values(t,h,"count"),[]any{3.0,2.0}) {t.Fatalf("delta counts=%+v",h.Frame)}
+func TestHistogramNegativeOnlyQuantileKeepsSign(t *testing.T) {
+    e,db:=metricFixture(t)
+    // Task 2's scale=0, negative offset=1, counts=[2,6], no positive/zero observations.
+    m:=metricHistogram(fixtureStart,"[-8,-4,-2,0]","[0,6,2,0,0]",8,-40,"a")
+    m.Type,m.Temporality="exponential_histogram","delta"
+    insertMetrics(t,db,m)
+    r:=runMetricMeasure(t,e,[]string{"p75(value)"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+    if got:=metricValues(t,r,"p75");len(got)!=1||got[0]!=-4.0 {t.Fatalf("negative quantile=%v want -4",got)}
 }
 
-func TestHistogramSpecRejectsRemovedTemporality(t *testing.T) {
-    raw:=[]byte(`{"name":"Hist","panels":[{"id":"h","title":"Hist","viz":"histogram","query":{"from":"metrics","where":["name='net'"],"measures":["count()"],"histogram":{"field":"value","buckets":"explicit","temporality":"delta"}}}]}`)
-    decoder:=json.NewDecoder(bytes.NewReader(raw));decoder.DisallowUnknownFields()
-    var d Dashboard
-    if err:=decoder.Decode(&d);err==nil||!strings.Contains(err.Error(),`unknown field "temporality"`) {t.Fatalf("decode=%v",err)}
+func TestHistogramDeltaWithoutElapsedHasNoRate(t *testing.T) {
+    e,db:=metricFixture(t)
+    m:=metricHistogram(fixtureStart,"[10]","[3,2]",5,30,"a");m.Temporality="delta"
+    insertMetrics(t,db,m)
+    r:=runMetricMeasure(t,e,[]string{"rate()"},"",nil,fixtureStart,fixtureStart.Add(time.Minute))
+    if got:=metricValues(t,r,"rate");len(got)!=1||got[0]!=nil {t.Fatalf("delta rate=%v",got)}
 }
 ```
 
-- [ ] **Run red:** current p95 uses value, resets clamp away observations, delta first-point distribution requires a panel override, and strict decode still accepts the obsolete field.
+- [ ] **Run red:** histogram value percentiles, rate/sum/mean are still undefined after Task 4; distribution and removed-option regressions are already green from Task 3.
 
 ```bash
-rtk bash scripts/with-duckdb.sh go test ./internal/panel -run 'TestHistogramMeasuresInterpolateSummedIncreases|TestHistogramQuantileHandlesZeroAndOverflow|TestHistogramPanelsShareResetIncreases|TestHistogramSpecRejectsRemovedTemporality' -count=1
+rtk bash scripts/with-duckdb.sh go test ./internal/panel -run 'TestHistogramMeasuresInterpolateSummedIncreases|TestHistogramQuantileHandlesZeroAndOverflow|TestHistogramNegativeOnlyQuantileKeepsSign|TestHistogramDeltaWithoutElapsedHasNoRate' -count=1
 ```
 
-- [ ] **Implement shared histogram increases, rate/sum/mean and interpolation.** For histogram metric rate, Stage 1 is `sum(count_increase ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0)/nullif(sum(elapsed_s ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0),0)`, then sum across series ordered by metricSeriesKey. Histogram sum(value) sums sum_increase; avg(value) divides total sum_increase by total count_increase **after** combining series, NULL on zero denominator. Keep scalar kinds on Task 4's path. The kind-aware table applies to value measures; retain explicit column/attribute projection through FieldRef for measures on other fields and require the name rule for those aggregates too.
+- [ ] **Implement histogram rate/sum/mean and interpolation over Task 3 increases.** For histogram metric rate, Stage 1 is `sum(count_increase ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0)/nullif(sum(elapsed_s ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0),0)`, then sum across series ordered by metricSeriesKey. Histogram sum(value) sums sum_increase; avg(value) divides total sum_increase by total count_increase **after** combining series, NULL on zero denominator. Keep scalar kinds on Task 4's path. Apply these new branches only when `m.Field != nil && m.Field.Column=="value" && m.Field.Key==""` (rate remains field-less); every other numeric field continues through Task 4's per-point planner without kind gating or series weighting. The name rule still applies to those aggregates.
 
-Expand Task 3's bound_increases with ordinality after reset handling; do not subtract exploded mismatched bounds. This is the complete replacement raw renderer:
-
-```go
-func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error) {
-    cte,args,err:=metricSeriesCTE(filters,scope)
-    if err!=nil {return "",nil,err}
-    text:=cte+` SELECT time AS t,`+dimSelect+`,_bucket,
-      CASE WHEN i=1 THEN NULL ELSE _bounds[i-1] END AS lo,
-      CASE WHEN i<=len(_bounds) THEN _bounds[i] END AS hi,
-      n AS n
-      FROM metric_increases,UNNEST(bound_increases) WITH ORDINALITY AS u(n,i)
-      WHERE type='histogram' AND n>=0`
-    return text,args,nil
-}
-```
-
-Update compileDistribution to request this renderer with filters/scope, accept its complete Args including output-window arguments, and wrap its result as existing raw. The heatmap uses later point time; histogram uses the whole window. Preserve group/top/Other/count/cell budgets and include the zero/negative folded observations from Task 2. Distribution display groups use `HAVING sum(n)>0`; retain zero-count bounds in the raw quantile input because they determine interpolation neighbors and the highest finite overflow bound.
 
 For percentile queries aggregate n by group and finite upper bound (hi); NULL hi is the overflow bucket. Sort upper bounds numerically, overflow last; cumulative counts are derived from **per-bucket weights**, not from stored cumulative-count arrays. For differing bucket grids the union of upper bounds is the interpolation grid; assign each observation weight to its exported upper bound, without fabricating observations by splitting coarse buckets. Different grids within a series still trigger the Task 3 reset first. The following real SQL renderer uses only compiler-produced source/group identifiers:
 
@@ -1151,22 +1272,8 @@ func histogramQuantileSQL(source string, groupColumns []string, q float64) strin
 
 Call the quantile renderer inside compileMetricQuery's per-measure branch on the summed per-bound rows, with `_bucket` and dimension aliases as its groupColumns. It must run before display caps/top folding. Keep all groups from Task 4's metric_groups even when zero total/no finite bounds yields no answer. Recompute Other's histogram weights before its quantile; averaging/summing quantiles is invalid. Kind diagnosis now considers histogram rate/sum/avg/percentiles compatible.
 
-- [ ] **Remove the option everywhere and regenerate contracts.** Delete Histogram.Temporality, its validator branch, the TS property, old helper parameters, old reflection-tag tests and old panel-option tests. Move temporality fixtures in distribution_test.go onto telemetry.Metric.Temporality and expect reset current weights. Update baseSpecGuide's distribution sentence to `{field: value, buckets: explicit}` and replace last-minus-first/reset-to-zero prose with stored temporality/shared increases. Replace the old MCP distribution guide regression with the following code in its existing test file:
 
-```go
-func TestDistributionSpecGuide(t *testing.T) {
-    for _,phrase:=range []string{"NaN is excluded","stored temporality","resets contribute current counts"} {
-        if !strings.Contains(specGuide,phrase) {t.Errorf("guide omits %q",phrase)}
-    }
-    for _,old:=range []string{"temporality: cumulative|delta","last minus first","counter resets mid-window contributes 0"} {
-        if strings.Contains(specGuide,old) {t.Errorf("obsolete guide phrase %q",old)}
-    }
-}
-```
-
-No custom decoder may consume and silently discard the removed property. Existing API DisallowUnknownFields, dashboard edit decoding and SDK closed JSON schema handle unknown fields; exercise the API/MCP suites as well as the strict unit test. Generated references are produced by `rtk just docs-generate`; never hand-edit mcp-tools.mdx. Use `rtk just ui` then `rtk just ui-check` to verify the shared types and embeds. If changing descriptions affects server eval goldens, use `rtk just dashboard-eval-generate`, not hand-written fixture edits.
-
-- [ ] **Run green:** native golden tests match the stated observations and interpolated percentiles; removed option is rejected; distribution caps and existing agent examples still pass.
+- [ ] **Run green:** native golden tests match interpolated percentiles (including a negative result) and histogram rates/sums/means; rerun Task 3 distribution and removed-option regressions.
 
 ```bash
 rtk bash scripts/with-duckdb.sh go test ./internal/panel ./internal/mcp ./internal/api ./internal/dashboard -run 'TestHistogram|TestMetric|TestDistribution|TestExamplesAndPreviewCoverNewTypes|Test.*Unknown' -count=1
@@ -1185,29 +1292,29 @@ rtk just check
 
 Consumes: `func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, error)`, `func (e *Executor) metricNames(ctx context.Context, start, end time.Time, namespace string) ([]MetricSchema, error)`, `func DescribeTools(ctx context.Context) ([]ToolDoc, error)`, existing `baseSpecGuide`, `specGuide`, `investigationExample`, `paymentExample` and `func renderMCPTools() ([]byte, error)`.
 
-Produces: MetricSchema adds `Kind string json:"kind"`, `Temporality string json:"temporality,omitempty"`; catalog lists semantic kinds and gains temporality/start_time. New constants `metricMeasureGuide`, `metricExample`; no new public function. The existing Type field stays the current semantic view discriminator, as the brief requests additive fields, not its removal; it never exposes old sum/sum_delta/exp_histogram values. Discovery groups by name/unit/kind/temporality rather than picking arbitrary metadata when the same name appears with multiple kinds.
+Produces: MetricSchema keeps its existing `Type string json:"type"` carrying the semantic kind and adds only `Temporality string json:"temporality,omitempty"`; no `kind` JSON field or Kind member. Catalog lists semantic kinds and gains temporality/start_time. New constants `metricMeasureGuide`, `metricExample`; no new public function. Type never exposes old sum/sum_delta/exp_histogram values. Discovery groups by name/unit/type/temporality rather than picking arbitrary metadata when the same name appears with multiple kinds.
 
 - [ ] **Write the discovery regression on querytest tables.** Package panel imports encoding/json, strings, testing and time.
 
 ```go
 func TestMetricSchemaExposesKindsAndTemporality(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for _,p:=range []struct{name,kind,temp string;mono bool}{
         {"network","sum","cumulative",true},{"network","sum","delta",true},
         {"memory","sum","cumulative",false},{"temperature","gauge","",false},
         {"latency","exponential_histogram","delta",false},{"summary","summary","",false},
     } {
-        m:=m5Counter(fixtureStart,1);m.Name,m.Type,m.Temporality,m.Monotonic=p.name,p.kind,p.temp,p.mono
-        m5Insert(t,db,m)
+        m:=metricCounter(fixtureStart,1);m.Name,m.Type,m.Temporality,m.Monotonic=p.name,p.kind,p.temp,p.mono
+        insertMetrics(t,db,m)
     }
     schema,err:=e.Schema(t.Context(),SchemaRequest{Window:"1h",Namespace:"test"});if err!=nil {t.Fatal(err)}
     seen:=map[string]bool{}
     for _,m:=range schema.Signals["metrics"].Metrics {
-        seen[m.Name+"/"+m.Kind+"/"+m.Temporality]=true
+        seen[m.Name+"/"+m.Type+"/"+m.Temporality]=true
         raw,err:=json.Marshal(m);if err!=nil {t.Fatal(err)}
-        if !strings.Contains(string(raw),`"kind":`) {t.Fatalf("kind missing: %s",raw)}
+        if !strings.Contains(string(raw),`"type":`) {t.Fatalf("type missing: %s",raw)}
+        if strings.Contains(string(raw),`"kind":`) {t.Fatalf("unexpected kind field: %s",raw)}
         if m.Temporality==""&&strings.Contains(string(raw),`"temporality":`) {t.Fatalf("empty temporality: %s",raw)}
-        if m.Type!=m.Kind {t.Fatalf("view type differs: %+v",m)}
     }
     for _,key:=range []string{"network/counter/cumulative","network/counter/delta","memory/updown/cumulative","temperature/gauge/","latency/histogram/delta","summary/summary/"} {
         if !seen[key] {t.Fatalf("missing %s: %v",key,seen)}
@@ -1223,7 +1330,7 @@ func TestMetricSchemaExposesKindsAndTemporality(t *testing.T) {
 ```go
 func TestMetricGuidanceIsConciseAndExamplesValidate(t *testing.T) {
     if utf8.RuneCountInString(metricMeasureGuide)>900 {t.Fatalf("metric guide has %d characters",utf8.RuneCountInString(metricMeasureGuide))}
-    for _,term:=range []string{"gauge/updown","counter","histogram","summary","rate()","sum(value)","avg(value)","last(value)","pNN","elapsed","All"} {
+    for _,term:=range []string{"gauge/updown","counter","histogram","summary","rate()","sum(value)","avg(value)","last(value)","pNN","elapsed","All","count_distinct()"} {
         if !strings.Contains(metricMeasureGuide,term) {t.Fatalf("missing %q",term)}
     }
     s:=newPanelServer(t)
@@ -1242,13 +1349,13 @@ func TestMetricGuidanceIsConciseAndExamplesValidate(t *testing.T) {
 }
 ```
 
-- [ ] **Run red:** MetricSchema fields, catalog columns, guide and metric example are absent.
+- [ ] **Run red:** MetricSchema temporality, catalog columns, guide and metric example are absent.
 
 ```bash
 rtk bash scripts/with-duckdb.sh go test ./internal/panel ./internal/mcp -run 'TestMetricSchemaExposesKindsAndTemporality|TestMetricGuidanceIsConciseAndExamplesValidate' -count=1
 ```
 
-- [ ] **Implement explicit discovery fields and catalog descriptions.** Add Kind/Temporality to MetricSchema. Replace metricNames' any_value(type) query with the following SQL, and scan Name, Unit, Kind, Temporality, Count, then set Type=Kind. Keep current TTL, limits, namespace binds and operational error handling.
+- [ ] **Implement explicit discovery fields and catalog descriptions.** Add only Temporality to MetricSchema; keep Type as the semantic kind. Replace metricNames' any_value(type) query with the following SQL, and scan Name, Unit, Type, Temporality, Count directly. Keep current TTL, limits, namespace binds and operational error handling.
 
 ```go
 rows, err := e.engine.QueryContext(ctx,
@@ -1261,14 +1368,14 @@ Add `str("type", "gauge, counter, updown, histogram or summary")`, `str("tempora
 - [ ] **Publish the bounded guide and two valid examples.** Append this exact table text to baseSpecGuide using metricMeasureGuide and append metricExample once to specGuide in panel_examples.go. Preserve guide pointers on the other tools and the two existing reference-shape labels.
 
 ```go
-const metricMeasureGuide = `Metrics: gauge/updown | counter | histogram. count(): points for all. rate(): undefined | sum of series increase/elapsed | sum of series count increase/elapsed. sum(value): sum of series averages | sum of increases | sum increase. avg(value): mean of series averages | undefined | total sum increase/total count increase. min/max(value): points | points | undefined. last(value): sum of series latest | same | undefined. pNN/quantile(value,q): points | undefined | interpolated summed bucket increases. summary: no value aggregates. Undefined is NULL. Rates divide by covered elapsed seconds, not bucket width; auto metrics buckets >=1m. Except count()/count_distinct, fix name with one literal or a single-value variable without All, or group by name. Read kind and temporality from get_telemetry_schema.`
+const metricMeasureGuide = `Metrics: gauge/updown | counter | histogram. count(): points for all. rate(): undefined | sum of series increase/elapsed | sum of series count increase/elapsed. sum(value): sum of series averages | sum of increases | sum increase. avg(value): mean of series averages | undefined | total sum increase/total count increase. min/max(value): points | points | undefined. last(value): sum of series latest | same | undefined. pNN/quantile(value,q): points | undefined | interpolated summed bucket increases. summary: no value aggregates. Undefined is NULL. Rates divide by covered elapsed seconds, not bucket width; auto metrics buckets >=1m. Except count()/count_distinct(), fix name with one literal or a single-value variable without All, or group by name. Read kind and temporality from get_telemetry_schema.`
 
 const metricExample = `{"name":"Metric measures","panels":[{"id":"network","title":"Network bytes per second","viz":"timeseries","query":{"from":"metrics","where":["name = 'system.network.io'"],"measures":["rate()"],"by":["attributes['direction']"],"bucket":"auto"}},{"id":"duration","title":"Request duration p95","viz":"timeseries","query":{"from":"metrics","where":["name = 'http.server.request.duration'"],"measures":["p95(value)"],"bucket":"auto"},"unit":"s"}]}`
 ```
 
-The guide has 805 Unicode characters; its schema facts decide whether each example applies. Update existing guide-presence/uniqueness tests to include both new constants and keep all prior assertions. Add metricExample to the examples-validation loop with expected two panels; retain the specific checks for investigationExample and paymentExample at their current indices. The existing examples contain 2564 characters and the new one adds 443. Change the existing examples budget assertion to `if size := len([]rune(investigationExample + paymentExample + metricExample)); size > 3343 { t.Errorf("examples have %d characters, maximum 3343", size) }` (the prior ceiling of 2900 plus 443). Keep m2SpecGuide's 1100-character cap and the dedicated metricMeasureGuide cap above. Do not trim prior contracts just to pass a size assertion.
+The guide has 807 Unicode characters; its schema facts decide whether each example applies. Update existing guide-presence/uniqueness tests to include both new constants and keep all prior assertions. Add metricExample to the examples-validation loop with expected two panels; retain the specific checks for investigationExample and paymentExample at their current indices. The existing examples contain 2564 characters and the new one adds 443. Change the existing examples budget assertion to `if size := len([]rune(investigationExample + paymentExample + metricExample)); size > 3343 { t.Errorf("examples have %d characters, maximum 3343", size) }` (the prior ceiling of 2900 plus 443). Keep m2SpecGuide's 1100-character cap and the dedicated metricMeasureGuide cap above. Do not trim prior contracts just to pass a size assertion.
 
-- [ ] **Write the metrics documentation section and regenerate references.** In build-dashboards.mdx include the exact Phase A table (all seven rows), semantic/stored kind distinction, summary NULLs, count_distinct/share meaning, the name rule with an All-capable-variable rejection example, per-series sums/means/last, 10-minute lookback, resets, first cumulative/delta points, covered elapsed seconds, automatic >=1 m buckets and histogram interpolation/overflow. Include the two metricExample panels as readable JSON. State that histogram panels read stored temporality and reject an authored temporality option. No Phase C approximate span-quantile claims are introduced in Phase A.
+- [ ] **Write the metrics documentation section and regenerate references.** In build-dashboards.mdx include the exact Phase A table (all seven rows), semantic/stored kind distinction, summary NULLs, count_distinct/share meaning, the explicit count()/count_distinct() name-rule exemption, the name rule with an All-capable-variable rejection example, per-series sums/means/last, 10-minute lookback, resets, first cumulative/delta points, covered elapsed seconds, automatic >=1 m buckets and histogram interpolation/overflow. Include the two metricExample panels as readable JSON. State that histogram panels read stored temporality and reject an authored temporality option. No Phase C approximate span-quantile claims are introduced in Phase A.
 
 ```bash
 rtk just docs-generate
@@ -1323,7 +1430,7 @@ func metricOracleSQL(histogram bool) string {
         AND ((type='counter' AND isfinite(value)) OR (type='histogram' AND isfinite(hist_sum) AND hist_count>=0))),
       valid AS (SELECT * FROM decoded WHERE type='counter' OR
         (b IS NOT NULL AND c IS NOT NULL AND len(c)=len(b)+1
-          AND coalesce(list_bool_and(list_transform(b,x->isfinite(x))),true))),
+          AND coalesce(list_bool_and(list_transform(b,lambda x: isfinite(x))),true))),
       samples AS (SELECT *,
         row_number() OVER (PARTITION BY namespace,service,name,unit,scope_name,scope_version,attributes,resource,time
           ORDER BY ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
@@ -1356,9 +1463,9 @@ func metricOracleSQL(histogram bool) string {
     return base+`, bound_steps AS (
         SELECT bucket,CASE WHEN i<=len(b) THEN b[i] END AS upper_bound,
           CASE WHEN temporality='delta' OR reset THEN c[i]::HUGEINT
-            ELSE c[i]::HUGEINT-previous_counts[i]::HUGEINT END AS weight
+            ELSE c[i]::HUGEINT-previous_counts[i]::HUGEINT END AS n
         FROM steps,UNNEST(c) WITH ORDINALITY AS points(unused,i) WHERE type='histogram'),
-      merged AS (SELECT bucket,upper_bound,sum(weight)::DOUBLE AS n FROM bound_steps GROUP BY bucket,upper_bound),
+      merged AS (SELECT bucket,upper_bound,sum(n)::DOUBLE AS n FROM bound_steps WHERE n>=0 GROUP BY bucket,upper_bound),
       cumulative AS (SELECT *,sum(n) OVER (PARTITION BY bucket ORDER BY upper_bound NULLS LAST ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS total,
         sum(n) OVER (PARTITION BY bucket ORDER BY upper_bound NULLS LAST ROWS UNBOUNDED PRECEDING) AS seen,
         lag(upper_bound) OVER (PARTITION BY bucket ORDER BY upper_bound NULLS LAST) AS lower_bound,
@@ -1377,8 +1484,8 @@ func crosscheckMetricFrame(t *testing.T, engine Engine, d Dashboard, histogram b
     results,err:=e.Run(t.Context(),RunRequest{Dashboard:d});if err!=nil {t.Fatal(err)}
     if len(results)!=1||results[0].Status==StatusError||results[0].Frame==nil {t.Fatalf("panel=%+v",results)}
     r:=results[0];alias:="rate";if histogram {alias="p95"}
-    times,values:=m5Values(t,r,"time"),m5Values(t,r,alias)
-    direction:=[]any(nil);if !histogram {direction=m5Values(t,r,"direction")}
+    times,values:=metricValues(t,r,"time"),metricValues(t,r,alias)
+    direction:=[]any(nil);if !histogram {direction=metricValues(t,r,"direction")}
     actual:=map[string]any{}
     key:=func(bucket int64,dir string)string{raw,_:=json.Marshal([]any{bucket,dir});return string(raw)}
     for i,v:=range values {
@@ -1427,12 +1534,12 @@ func TestMetricDemoDataMatchesIndependentWindowSQL(t *testing.T) {
 }
 
 func TestMetricOracleMatchesKnownFixture(t *testing.T) {
-    e,db:=m5Fixture(t)
+    e,db:=metricFixture(t)
     for i:=-1;i<3;i++ {
-        m:=m5Counter(fixtureStart.Add(time.Duration(i)*time.Minute),float64(100+60*(i+1)))
-        m.Attributes=map[string]any{"direction":"receive"};m5Insert(t,db,m)
-        h:=m5Histogram(fixtureStart.Add(time.Duration(i)*time.Minute),"[10,20]",fmt.Sprintf("[%d,%d,0]",10*(i+2),10*(i+2)),int64(20*(i+2)),float64(300*(i+2)),"a")
-        h.Name="latency";m5Insert(t,db,h)
+        m:=metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute),float64(100+60*(i+1)))
+        m.Attributes=map[string]any{"direction":"receive"};insertMetrics(t,db,m)
+        h:=metricHistogram(fixtureStart.Add(time.Duration(i)*time.Minute),"[10,20]",fmt.Sprintf("[%d,%d,0]",10*(i+2),10*(i+2)),int64(20*(i+2)),float64(300*(i+2)),"a")
+        h.Name="latency";insertMetrics(t,db,h)
     }
     end:=fixtureStart.Add(3*time.Minute)
     for _,tc:=range []struct{name string;hist bool}{{"net",false},{"latency",true}} {
@@ -1452,7 +1559,7 @@ rtk bash scripts/with-duckdb.sh go test ./internal/panel -run TestMetricRateUses
 
 Expected under rate mutation: 10 s rate is 6 instead of 1. Under value-percentile mutation: histogram returns 0 instead of its interpolated 19. No mutation command or git operation is prescribed.
 
-- [ ] **Implement the read-only copy and use controller-produced data.** This helper copies each batch after panelReplayMetadata has accepted all metadata as format 4, before opening a repository. It does no tiling, schema conversion or inferred-fidelity upgrade. Controller data is never opened by telemetrystore.Open in place.
+- [ ] **Implement the read-only copy and consume data supplied by private tooling.** This helper copies each batch after panelReplayMetadata has accepted all metadata as format 4, before opening a repository. It does no tiling, schema conversion or inferred-fidelity upgrade. Controller data is never opened by telemetrystore.Open in place.
 
 ```go
 func copyMetricCrosscheckData(tb testing.TB, input string) panelBenchData {
@@ -1490,24 +1597,24 @@ func copyMetricCrosscheckData(tb testing.TB, input string) panelBenchData {
 }
 ```
 
-Retain bytes of all source batches and source staging. The controller generates format 4 through OTLP ingest; if its demo source lost sum monotonicity, its **external replay** assigns monotonicity using the source metric's OpenTelemetry semantic convention before ingest, keeps updown memory metrics non-monotonic, and supplies original temporality/start-time facts. No guessed monotonicity is added to Fanout or to the copy helper. Missing source facts are recorded by the controller; they do not authorize relabelling existing format-3 Parquet as format 4.
+Retain bytes of all source batches and source staging. Outside this repository, private tooling generates format 4 through OTLP ingest; if its demo source lost sum monotonicity, that **external replay** assigns monotonicity using the source metric's OpenTelemetry semantic convention before ingest, keeps updown memory metrics non-monotonic, and supplies original temporality/start-time facts. No guessed monotonicity is added to Fanout or to the copy helper. This plan does not implement or modify that private replay. Missing source facts are recorded by the private tooling; they do not authorize relabelling existing format-3 Parquet as format 4.
 
 The existing tilePanelParquet format-4 helper must preserve and shift nonzero start_time_unix_nano. Add this actual test to panel_bench_test.go (readbench imports already include filepath/os and telemetry/store):
 
 ```go
 func TestMetricReplayCopyPreservesSourceAndStartTime(t *testing.T) {
     input:=t.TempDir();repo,err:=telemetrystore.Open(input);if err!=nil {t.Fatal(err)}
-    m:=m5Counter(fixtureStart,100);m.StartTimeUnixNanos=fixtureStart.Add(-time.Minute).UnixNano()+17
+    m:=metricCounter(fixtureStart,100);m.StartTimeUnixNanos=fixtureStart.Add(-time.Minute).UnixNano()+17
     if err:=repo.Commit(t.Context(),telemetrystore.Batch{ID:"metric",Metrics:[]telemetry.Metric{m}});err!=nil {t.Fatal(err)}
     if err:=repo.Close();err!=nil {t.Fatal(err)}
     metaPath:=filepath.Join(input,"parquet","batches","metric.batch","metadata.json")
     before,err:=os.ReadFile(metaPath);if err!=nil {t.Fatal(err)}
-    data:=copyMetricCrosscheckData(t,input);engine,_:=panelBenchEngine(t,data)
+    data:=copyMetricCrosscheckData(t,input);engine,cfg:=panelBenchEngine(t,data)
     var start int64
     if err:=engine.DB.QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='net'").Scan(&start);err!=nil||start!=m.StartTimeUnixNanos {t.Fatalf("start=%d err=%v",start,err)}
     after,err:=os.ReadFile(metaPath);if err!=nil||string(after)!=string(before) {t.Fatal("source metadata changed")}
     if _,err:=os.Stat(filepath.Join(input,"query"));!os.IsNotExist(err) {t.Fatal("source query directory created")}
-    raw:=filepath.Join(data.Dir,"shifted.parquet")
+    raw:=filepath.Join(cfg.QueryDir(),"shifted.parquet")
     metadata:=telemetry.BatchMetadata{Version:4,ID:"shifted"}
     if err:=tilePanelParquet(filepath.Join(input,"parquet","batches","metric.batch","metrics.parquet"),raw,"metrics","",fixtureStart,fixtureStart.Add(time.Minute),time.Hour,&metadata,map[string]bool{},map[string]bool{});err!=nil {t.Fatal(err)}
     var shifted int64
@@ -1532,40 +1639,40 @@ First command: demo SKIP, synthetic/copy PASS. Second command with controller da
 ### Spec coverage list
 
 - Storage columns: temporality dict string, monotonic bool, start_time_unix_nano int64 → Task 1 canonical rows, Parquet, querytest and round-trip/view tests.
-- OTLP-only stored kinds; delete sum_delta and exp_histogram; retain every point's start/monotonicity/temporality → Task 1 ingest and mechanical reader audit; unspecified aggregate temporality fails explicitly.
-- Format 4 only; reject/preserve format 3 before cleanup and schema rewrite; validate physical schema and decode all columns → Task 1 format/schema tests and existing verifier/repair guards.
-- Exponential explicit conversion has one more count than bounds and preserves zero/negative observations → Task 2 all required scales/offsets/zero-only/negative-only goldens; Task 5 exponential query shape.
-- Metrics view semantic gauge/counter/updown/histogram/summary, temporality and nullable nanosecond start_time → Task 1 view execution test; Task 6 catalog/schema fields.
+- OTLP-only stored kinds; delete sum_delta and exp_histogram; retain every point's start/monotonicity/temporality → Task 1 ingest and mechanical reader audit; unspecified aggregate temporality fails explicitly; Task 1 corrects the nesting fixture and readbench semantic/baseline fixtures.
+- Format 4 only; reject/preserve format 3 before cleanup and schema rewrite; validate physical schema and decode all columns → Task 1 format/schema tests and existing verifier/repair guards; storage-model.mdx format references update to 4.
+- Exponential explicit conversion has one more count than bounds and preserves zero/negative observations → Task 2 real ascending negative/positive bounds with independent offsets, zero-only/negative-only/empty goldens; Task 5 exact negative-only p75=-4 execution and exponential query shape.
+- Metrics view semantic gauge/counter/updown/histogram/summary, temporality and nullable nanosecond start_time → Task 1 view execution test; Task 6 catalog/schema fields, preserving MetricSchema.type and adding only temporality (no kind field).
 - Discover kind/temporality per observed metric metadata combination → Task 6 native schema discovery test, no arbitrary any_value selection.
 - Eight-field series identity; two-stage per-series/per-bucket then per-group measures → Tasks 3–4; all eight fields are grouped directly, not encoded via a lossy string/hash.
-- Ordered consecutive points, latest retry per timestamp, finite values, value/start/count/bounds resets → Task 3 builder/reset tests; Task 4 finite-value and restart executor tests; Task 5 shared distribution reset counts.
+- Ordered consecutive points, latest retry per timestamp, finite values, value/start/count/bounds resets → Task 3 builder/reset tests; Task 4 finite-value and restart executor tests; Task 3 shared distribution reset counts.
 - Ten-minute previous-window read, snapshot pruning and matching executor windows; discard outputs outside original half-open scope → Task 3 separate-batch regression; Task 4 structured lookback, comparison/totals/trends.
-- Cumulative first point baseline, delta sums/elapsed/start time and missing elapsed → Task 3 delta tests; Task 4 sum/rate test; Task 5 delta observation weights without rate.
+- Cumulative first point baseline, delta sums/elapsed/start time and missing elapsed → Task 3 delta tests; Task 4 sum/rate test; Task 3 delta distribution observation weights; Task 5 NULL rate without elapsed.
 - Counter rate sums each series' total increase/total covered elapsed; export interval independent of bucket width; no carry into empty buckets → Task 4 10 s/1 m/1 h, multiple-series/elapsed/restart tests; Task 7 independent demo oracle (S14).
 - Automatic metric bucket at least 1 minute, fixed sub-minute buckets allowed → Task 4 interval caller clamp and rate test; existing point/cell caps remain exercised.
-- Gauge/updown sum and avg over per-series averages; sum of latest; counter increase sum/latest; min/max/quantiles over supported raw points → Task 4 kind/series-weight goldens and auxiliary aggregate regression.
+- Gauge/updown sum and avg over per-series averages; sum of latest; counter increase sum/latest; min/max/quantiles over supported raw points → Task 4 kind/series-weight goldens and auxiliary aggregate regression; non-value numeric fields keep per-point aggregation for every kind in Tasks 4–5, verified by TestMetricNonValueFieldsKeepPerPointAggregates (including the literal attribute key value).
 - count/count_distinct/share keep point meanings; undefined pairs and summary value aggregates NULL, zero remains zero → Task 4 table goldens and NULL/empty diagnosis; Task 5 histogram incompatibility tests.
 - Name fixed by literal/single variable without All or grouping by name; count/count_distinct exception; All/multi/OR/field equality cannot qualify → Task 4 parsed-equality validation and All-selection rejection (Review Focus 5).
 - Empty kind mismatch names metric/kind and fitting measures → Task 4 exact updown diagnosis and Task 5 histogram compatibility update.
 - Histogram rate=count increase/elapsed, sum=sum increase, avg=total sum/total count → Task 5 two-series goldens, same Task 3 reset builder.
 - Histogram pNN/quantile linear interpolation over summed bound increases, first positive lower bound 0, overflow highest finite, zero total NULL → Task 5 known distributions/edge cases and Task 7 independent p95 oracle (S15).
-- Heatmap/histogram panels share increases and stored temporality; remove authored option everywhere and reject old specs → Task 5 distribution/strict-decode/MCP guide tests, TS contract and generated references.
+- Heatmap/histogram panels share increases and stored temporality; remove authored option everywhere and reject old specs → Task 3 production distribution integration, strict-decode/MCP exact guide tests, TS contract and generated references; Task 5 retains histogram measures.
 - Agent guide table <=900 characters and counter-rate/histogram-p95 examples kept valid → Task 6 character/validation/preview/uniqueness tests (Phase A groundwork for S22; paid S22 eval belongs to Phase E).
-- Dashboard guide metric section and current generated reference → Tasks 5–6 repo generator/gate; no hand-edit of generated MCP/eval bytes.
-- Demo source lost monotonicity restored by controller OTLP replay using semantic conventions; format-4 readbench cross-check, skip only when variable unset → Tasks 1/7 replay format changes/copy/oracle, no product legacy reader or inference.
+- Dashboard guide metric section and current generated reference → Tasks 3/6 repo generator/gate; no hand-edit of generated MCP/eval bytes.
+- Demo monotonicity restoration belongs only to private tooling outside the repository; format-4 readbench cross-check skips only when variable unset → Tasks 1/7 metadata/start-time compatibility and read-only copy/oracle. No committed replay implementation, product legacy reader or inference; shifted test output stays under cfg.QueryDir() and the oracle filters per-bound n>=0 like production.
 - S16 fidelity → Tasks 1–2 canonical ingest tests plus physical/view verification; S14 → Tasks 3–4/7; S15 → Tasks 3/5/7.
 - Phase A-relevant Testing bullets (native-engine execution; resets, interval changes, delta/late/out-of-order/new series, empty/overflow buckets) → Tasks 1–5/7. Summary-route equality, sketch approximation, summary lifecycle, scale benchmark, fixture-stack/browser/real-Collector evidence and S17–S21 remain Phases B–E; no claim that this plan implements or verifies them.
-- Review Focus 1 → Task 4; 2 → Tasks 3–4; 3 → Task 3; 4 → Tasks 3/5; 5 → Task 4. Every focus has an explicitly named behavior test with real fixture/assertion code.
+- Review Focus 1 → Task 4; 2 → Tasks 3–4; 3 → Task 3; 4 → Task 3; 5 → Task 4. Every focus has an explicitly named behavior test with real fixture/assertion code.
 
 ### Placeholder scan
 
-- No unfinished marker, deferred validation instruction, cross-task implementation shortcut or code-free test step. New private function/type signatures are declared in their owning tasks; test helpers are defined before downstream use. Existing signatures and file paths were verified locally. Create paths are explicitly new in verified directories.
+- No unfinished marker, deferred validation instruction, cross-task implementation shortcut or code-free test step. New private function/type signatures are declared in their owning tasks; Task 3 production distributions call metricHistogramRaw → metricSeriesCTE, Task 4 compiler/validation/diagnosis call their new helpers, Task 5 compiler calls histogramQuantileSQL, Task 6 guides attach to tool descriptions, and Task 7 adds test-only helpers. No non-test symbol waits for a later task to obtain a production caller under deadcode -test=false; test helpers are defined before downstream use. Existing signatures and file paths were verified locally. Create paths are explicitly new in verified directories.
 - Red/green commands use the pinned native wrapper and behavioral test names. All seven tasks require `rtk just check`; controller commit steps contain only commit messages. No planning-time Go execution, git mutation, network or browser work is claimed.
-- Every SQL code block states its actual input/output/bind contract. The implementation instructions specify integration into compiler, items, executor, totals/comparison, table trends, snapshot scope, diagnosis, discovery and generated contracts. Expected values are calculations for future tests, not reported execution results.
+- Every SQL code block states its actual input/output/bind contract. The implementation instructions specify integration into compiler, items, executor, totals/comparison, table trends, snapshot scope, diagnosis, discovery and generated contracts. Expected values are calculations for future tests, not reported execution results. Multi-operation floating-point expectations use typed runtime variables; exact quantile goldens use representable ranks/results (p75=65 over [10,30,100] and p75=16.25 for the weighted histogram), avoiding rounded p95/p99 constants.
 
 ### Type consistency
 
 - Canonical StartTimeUnixNanos is int64; physical StartTimeUnixNano maps exactly to start_time_unix_nano BIGINT; 0 maps to NULL public start_time TIMESTAMPTZ_NS. Both input/output windows bind time.Time.UTC through nanosecond casts; frame buckets are int64 Unix milliseconds.
-- Stored Type remains the OTLP kind, while view type/MetricSchema.Kind/MetricSchema.Type are semantic strings. Temporality is data, never a panel option; Monotonic is bool in canonical/Parquet/querytest rows. Histogram counts parse as UBIGINT, subtract via HUGEINT, expose DOUBLE; hist_count remains existing int64 storage.
+- Stored Type remains the OTLP kind, while view type/MetricSchema.Type are semantic strings. MetricSchema gains only Temporality, with no Kind member or kind JSON field. Temporality is data, never a panel option; Monotonic is bool in canonical/Parquet/querytest rows. Histogram counts parse as UBIGINT, subtract via HUGEINT, expose DOUBLE; hist_count remains existing int64 storage.
 - Scalar/count/sum increases and elapsed_s are nullable DOUBLE; only positive elapsed participates in rate numerator/denominator. Bounds are DOUBLE[], stored counts UBIGINT[], and bound increases HUGEINT[] internally, summed before conversion to DOUBLE for interpolation/frame counts; nested results become JSON only at the client/test boundary. Empty lists and NULL aggregates are distinguished from a numerical zero.
 - Measure aliases, Column/Frame roles/units and variable Value bindings retain existing contracts. Problems use JSON paths and hints; operational/protocol errors retain their existing envelopes. Existing generated docs and TS contracts are refreshed in the owning contract-change task, not through a second schema source.
