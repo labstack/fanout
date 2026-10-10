@@ -194,7 +194,11 @@ proportion to the overlap. Every series therefore contributes to every bucket
 its reporting interval spans: a counter exported every 60 s reads the same
 per-second rate in 10 s, 1 m and 1 h buckets, and a total across machines
 that report every minute, every five minutes, or at drifting times does not
-dip. Histogram count, sum and per-bound increases are spread the same way.
+dip. Histogram count, sum and per-bound increases are spread the same way. For
+`rate()` only, a series whose latest delta ends before a bucket carries that
+rate into the bucket while the delta's end is at most 5 minutes old, so the
+newest buckets of a live chart do not dip while reports are in flight;
+increases are never extended.
 Gauge and updown series in a bucket without a point use their latest earlier
 value when it is at most 5 minutes old, the staleness rule `last` uses. The
 automatic bucket for metric panels is never shorter than 1 minute.
