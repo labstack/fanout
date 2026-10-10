@@ -79,9 +79,14 @@ CASE WHEN duration_ms<pow(2,32) THEN CASE WHEN duration_ms<1 THEN 1 ELSE pow(2,f
 	return Compiled{SQL: text, Args: args, Columns: columns}, nil
 }
 
-func boundAnalysisFrame(f *Frame) {
+func boundAnalysisFrame(f *Frame) error {
 	if f == nil || len(f.Columns) == 0 || f.Columns[0].Role != "time" || f.Rows == 0 {
-		return
+		return nil
+	}
+	for _, value := range f.Values[0] {
+		if _, ok := value.(int64); !ok {
+			return fmt.Errorf("time column must contain non-null timestamps")
+		}
 	}
 	order := make([]int, f.Rows)
 	for i := range order {
@@ -118,4 +123,5 @@ func boundAnalysisFrame(f *Frame) {
 		}
 		f.Rows -= cut
 	}
+	return nil
 }

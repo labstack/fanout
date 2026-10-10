@@ -78,7 +78,7 @@ func TestRollupPanelsAggregateContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: []float64{10, 0}}
+	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: []float64{10, 0}, ErrorTrendTimes: []int64{at.UnixMilli(), at.Add(10 * time.Minute).UnixMilli()}}
 	if got[0].Frame == nil || !reflect.DeepEqual(got[0].Frame.Health, want) {
 		t.Fatalf("health aggregate got %+v want %+v", got, want)
 	}

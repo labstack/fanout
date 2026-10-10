@@ -175,6 +175,7 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "edge_type", "calls", "average_ms", "error_rate"}).
 			AddRow("checkout", "postgres", "call", int64(10), 12.5, 0.0))
 
+	mock.ExpectQuery(regexp.QuoteMeta(topologyExternalQuery)).WithArgs(start, end, "prod", "prod", "", "", "", start, end, start, end, 50).WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "calls", "average_ms", "error_rate", "spans", "peer_error_rate", "p50", "p95"}))
 	result, err := svc.Topology(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, 50)
 	if err != nil {
 		t.Fatalf("Topology: %v", err)

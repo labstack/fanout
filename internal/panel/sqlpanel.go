@@ -20,9 +20,9 @@ var (
 // expandMacros rewrites $__window(col) into the binding the AGENTS.md
 // timestamp rule requires and $__bucket(col) into a time_bucket call with the
 // panel's interval. Only identifier arguments are accepted, so a macro can
-// never carry SQL. Every SQL panel must filter time with $__window: the read
-// window prunes files, and a panel that ignored it would silently see only
-// the files that overlap the window.
+// never carry SQL. Every SQL panel must declare its selected time window.
+// Its snapshot includes all active files so explicit lookback predicates and
+// other authored time scopes remain visible.
 func expandMacros(sql string, interval time.Duration) (string, error) {
 	if !windowMacro.MatchString(sql) {
 		return "", errors.New("SQL panels must filter time with $__window(time_column)")

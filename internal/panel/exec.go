@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -295,13 +296,14 @@ func limitBatchFrames(results []Result) {
 				}
 			}
 			if f.Health != nil {
-				points := min(len(f.Health.ErrorTrend), remaining)
+				points := min(len(f.Health.ErrorTrend), remaining/2)
 				if points < len(f.Health.ErrorTrend) {
+					f.Health.ErrorTrendTimes = f.Health.ErrorTrendTimes[len(f.Health.ErrorTrendTimes)-points:]
 					f.Health.ErrorTrend = f.Health.ErrorTrend[len(f.Health.ErrorTrend)-points:]
 					f.Truncated = true
 					f.addNote("Health error trend was truncated to stay within the response budget.")
 				}
-				remaining -= points
+				remaining -= 2 * points
 			}
 			names := make([]string, 0, len(f.Trends))
 			for name := range f.Trends {
@@ -344,6 +346,8 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	reduces := vizSpecs[p.Viz].reduces
 	var interval time.Duration
 	switch {
+	case p.SQL != "" && p.Viz == "state_timeline":
+		interval = time.Minute
 	case reduces:
 		interval = AutoInterval(end.Sub(start), 240)
 	case p.Query != nil && p.Query.Bucket == "auto" && (p.Viz == "heatmap" || p.Viz == "state_timeline"):
@@ -365,7 +369,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	res.Frame, res.SQL = frame, sqlText
 	// Trend failures are recorded on the frame and preserve the main table.
 	_ = e.attachTableTrends(ctx, p, checked, scope, frame)
-	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline") {
+	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" || p.Viz == "health") {
 		res.AnnotationScope, err = e.annotationScope(ctx, p, checked.AnnotationFilters[p.ID], scope)
 		if err != nil {
 			res.AnnotationError = "Annotation scope is unavailable."
@@ -426,6 +430,10 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
 	read := metricReadScope(p, scope)
+	if p.SQL != "" {
+		read.Start = time.Unix(0, math.MinInt64+1).UTC()
+		read.End = time.Unix(0, math.MaxInt64-1).UTC()
+	}
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: read.Start, End: read.End})
 	if p.Options != nil && p.Options.Split == "deploy" {
 		return e.runDeploySplit(ctx, p, checked, scope)
@@ -467,7 +475,7 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 			}
 		}
 		if err == nil && (p.Viz == "heatmap" || p.Viz == "state_timeline") {
-			boundAnalysisFrame(frame)
+			err = boundAnalysisFrame(frame)
 		}
 		return frame, compiled.SQL, err
 	}
@@ -507,6 +515,14 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		return nil, query, err
 	}
 	frame, err := scanDynamicFrame(rows, serialized, sqlPanelRows)
+	if err == nil && p.Viz == "state_timeline" {
+		if frame.Rows > 0 {
+			err = validateTimelineColumns(frame.Columns)
+		}
+		if err == nil {
+			err = boundAnalysisFrame(frame)
+		}
+	}
 	return frame, query, err
 }
 

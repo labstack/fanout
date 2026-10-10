@@ -396,7 +396,9 @@ func TestDistributionTimePointBound(t *testing.T) {
 			f.Rows++
 		}
 	}
-	boundAnalysisFrame(f)
+	if err := boundAnalysisFrame(f); err != nil {
+		t.Fatal(err)
+	}
 	if !f.Truncated || f.Rows != 2*maxSeriesPoints || f.Values[0][0] != int64(1) || f.Values[0][f.Rows-1] != int64(maxSeriesPoints) {
 		t.Fatalf("time cap: rows=%d truncated=%v", f.Rows, f.Truncated)
 	}
@@ -404,6 +406,34 @@ func TestDistributionTimePointBound(t *testing.T) {
 		if count != float64(i+2) {
 			t.Fatalf("column alignment at %d: %v", i, count)
 		}
+	}
+}
+
+func TestDistributionRejectsInvalidTimeCells(t *testing.T) {
+	for _, value := range []any{nil, "invalid", float64(1)} {
+		f := newFrame([]Column{{Name: "time", Type: "time", Role: "time"}})
+		f.Values[0] = []any{int64(1), value}
+		f.Rows = 2
+		if err := boundAnalysisFrame(f); err == nil {
+			t.Fatalf("accepted time cell %v", value)
+		}
+	}
+}
+
+func TestSQLTimelineReturnsPanelErrorForNullTime(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := shopDashboard()
+	d.Panels = []Panel{{ID: "state", Title: "State", Viz: "state_timeline",
+		Thresholds: []Threshold{{Value: 1, Status: "bad"}},
+		SQL: `SELECT start_time AS time,service AS item,1::DOUBLE AS failure FROM spans WHERE $__window(start_time)
+		UNION ALL SELECT NULL::TIMESTAMPTZ_NS,'x',1::DOUBLE`,
+	}}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Status != StatusError || got[0].Error != "time column must contain non-null timestamps" || got[0].Frame != nil {
+		t.Fatalf("invalid timeline result: %+v", got)
 	}
 }
 

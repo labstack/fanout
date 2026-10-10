@@ -41,18 +41,18 @@ func TestTableSparklinesShareOneQueryAcrossRowsAndMeasures(t *testing.T) {
 func TestHealthBudgetNotesEveryFrame(t *testing.T) {
 	first := newFrame([]Column{{Name: "n", Type: "number", Role: "measure"}})
 	first.bucketed = true
-	for range 199999 {
+	for range 199998 {
 		appendPanelRow(first, float64(1))
 	}
-	current := &Frame{Note: "Current scope.", Health: &HealthFrame{ErrorTrend: []float64{1, 2, 3}}}
-	previous := &Frame{Note: "Previous scope.", Health: &HealthFrame{ErrorTrend: []float64{4, 5}}}
+	current := &Frame{Note: "Current scope.", Health: &HealthFrame{ErrorTrend: []float64{1, 2, 3}, ErrorTrendTimes: []int64{1, 2, 3}}}
+	previous := &Frame{Note: "Previous scope.", Health: &HealthFrame{ErrorTrend: []float64{4, 5}, ErrorTrendTimes: []int64{4, 5}}}
 	limitBatchFrames([]Result{{Frame: first}, {Frame: current, Previous: previous}})
 	for _, f := range []*Frame{current, previous} {
 		if !f.Truncated || !strings.Contains(f.Note, "Health error trend was truncated to stay within the response budget.") || !strings.Contains(f.Note, "scope.") {
 			t.Fatalf("missing health truncation note: %+v", f)
 		}
 	}
-	if len(current.Health.ErrorTrend) != 1 || current.Health.ErrorTrend[0] != 3 || len(previous.Health.ErrorTrend) != 0 {
+	if len(current.Health.ErrorTrendTimes) != 1 || current.Health.ErrorTrendTimes[0] != 3 || len(previous.Health.ErrorTrendTimes) != 0 || len(current.Health.ErrorTrend) != 1 || current.Health.ErrorTrend[0] != 3 || len(previous.Health.ErrorTrend) != 0 {
 		t.Fatalf("health budget: current=%v previous=%v", current.Health.ErrorTrend, previous.Health.ErrorTrend)
 	}
 }

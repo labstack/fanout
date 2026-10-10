@@ -172,7 +172,9 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 	if err != nil {
 		return err
 	}
-	boundAnalysisFrame(trend)
+	if err := boundAnalysisFrame(trend); err != nil {
+		return err
+	}
 	f.Trends = map[string][][]any{}
 	lo := alignedBucketMillis(scope.Start, interval)
 	points := int((scope.End.Add(-time.Nanosecond).UnixMilli()-lo)/interval.Milliseconds() + 1)

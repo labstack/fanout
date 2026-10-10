@@ -9,6 +9,7 @@ import (
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/queryrows"
 )
 
 // Parser is the slice of the query engine that checks SQL text. *query.Duck
@@ -95,7 +96,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 					problems.addHint(path+".options.split", SafeError(err), "use standalone service and optional namespace equalities")
 				}
 
-				if p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" {
+				if p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" || p.Viz == "health" {
 					projected, err := projectAnnotationFilter(ctx, parser, sig, earlier, f)
 					if err != nil {
 						if isOperational(err) {
@@ -168,5 +169,60 @@ func checkSQLPanel(ctx context.Context, parser Parser, p *Panel, vars map[string
 		return err
 	}
 	_, _, err = parser.PrepareTelemetrySQL(ctx, query, describe, 1)
-	return err
+	if err != nil || p.Viz != "state_timeline" {
+		return err
+	}
+	reader, ok := parser.(queryrows.Queryer)
+	if !ok {
+		return fmt.Errorf("SQL timeline description unavailable")
+	}
+	// Describe the projected SELECT through a zero-row execution. This keeps
+	// the normal snapshot wrapper (which only accepts SELECT) and read guards.
+	prepared, serialized, err := parser.PrepareTelemetrySQL(ctx, describe, describe, 0)
+	if err != nil {
+		return err
+	}
+	rows, err := reader.QueryContext(ctx, prepared)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	typed, ok := rows.(interface {
+		ColumnTypes() ([]*sql.ColumnType, error)
+	})
+	if !ok {
+		return fmt.Errorf("SQL timeline column types unavailable")
+	}
+	types, err := typed.ColumnTypes()
+	if err != nil {
+		return err
+	}
+	var columns []Column
+	for i, t := range types {
+		name, kind := t.Name(), t.DatabaseTypeName()
+		c := Column{Name: name, Type: "string", Role: "dimension"}
+		if i < len(serialized) && serialized[i] {
+			c.Type = "other"
+		} else if strings.HasPrefix(kind, "TIMESTAMP") {
+			c.Type = "time"
+			c.Role = "time"
+		} else if kind == "DOUBLE" || kind == "FLOAT" || strings.Contains(kind, "INT") || strings.HasPrefix(kind, "DECIMAL") {
+			c.Type = "number"
+			c.Role = "measure"
+		} else if kind != "VARCHAR" {
+			c.Type = "other"
+		}
+		columns = append(columns, c)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return validateTimelineColumns(columns)
+}
+
+func validateTimelineColumns(columns []Column) error {
+	if len(columns) < 3 || len(columns) > 4 || columns[0].Name != "time" || columns[0].Type != "time" || columns[1].Type != "string" || columns[2].Type != "number" || (len(columns) == 4 && (columns[3].Name != "state" || columns[3].Type != "string")) {
+		return fmt.Errorf("SQL state_timeline requires timestamp time, a string item, one numeric measure and optional string state")
+	}
+	return nil
 }

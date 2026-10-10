@@ -249,10 +249,11 @@ func totalsOf(f *Frame) []any {
 }
 
 type HealthFrame struct {
-	Health       string                     `json:"health"`
-	Counts       observability.HealthCounts `json:"counts"`
-	TotalSpans   int64                      `json:"total_spans"`
-	ErrorRate    float64                    `json:"error_rate"`
-	ServiceCount int                        `json:"service_count"`
-	ErrorTrend   []float64                  `json:"error_trend"`
+	Health          string                     `json:"health"`
+	Counts          observability.HealthCounts `json:"counts"`
+	TotalSpans      int64                      `json:"total_spans"`
+	ErrorRate       float64                    `json:"error_rate"`
+	ServiceCount    int                        `json:"service_count"`
+	ErrorTrendTimes []int64                    `json:"error_trend_times"`
+	ErrorTrend      []float64                  `json:"error_trend"`
 }

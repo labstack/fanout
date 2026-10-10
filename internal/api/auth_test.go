@@ -176,6 +176,8 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/api/dashboards/dashboard-1/versions/1/restore", routePolicyCapability, ManageOwnDashboards},
 		{http.MethodPost, "/api/agent/runs", routePolicyCapability, RunAgent},
 		{http.MethodPost, "/api/panels/variables/resolve", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/system", routePolicyCapability, ReadTelemetry},
+		{http.MethodHead, "/api/system", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
 		{http.MethodPost, "/api/settings/ingest/token/rotate", routePolicyCapability, ManageIngest},
 		{http.MethodPost, "/api/users/user-1/access/revoke", routePolicyCapability, ManageUsers},

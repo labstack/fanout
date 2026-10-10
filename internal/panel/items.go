@@ -81,7 +81,7 @@ func compileItems(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		text += fmt.Sprintf(" ORDER BY time DESC,2 LIMIT %d", n+1)
 	} else {
 		name, direction := measures[0].Alias, "DESC"
-		if p.Query.Sort != "" {
+		if p.Query != nil && p.Query.Sort != "" {
 			name = strings.TrimPrefix(p.Query.Sort, "+")
 			if strings.HasPrefix(p.Query.Sort, "+") {
 				direction = "ASC"
@@ -110,7 +110,7 @@ func validateItems(p *Panel, path string, problems *Problems) {
 	if p.Viz != "scatter" && p.Viz != "state_timeline" {
 		return
 	}
-	if p.Query == nil {
+	if p.Query == nil && p.Viz != "state_timeline" {
 		problems.add(path+".query", "item panels require structured queries")
 		return
 	}
@@ -118,10 +118,10 @@ func validateItems(p *Panel, path string, problems *Problems) {
 		problems.addHint(path+".query.measures", "scatter requires exactly two measures", "select x and y measures in that order")
 	}
 	if p.Viz == "state_timeline" {
-		if p.Query.Sort != "" {
+		if p.Query != nil && p.Query.Sort != "" {
 			problems.add(path+".query.sort", "state_timeline has fixed chronological ordering")
 		}
-		if len(p.Query.Measures) != 1 {
+		if p.Query != nil && len(p.Query.Measures) != 1 {
 			problems.add(path+".query.measures", "state_timeline requires one measure")
 		}
 		if len(p.Thresholds) == 0 {
