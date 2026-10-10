@@ -406,5 +406,18 @@ page shows it is needed.
   counter query. The benchmark includes counter shapes at 10 s intervals.
 - **Changed numbers.** Span quantiles move from exact to within 1%. The
   dashboards guide states it, and Inspect shows the path.
+- **Histogram percentile approximations.** Interpolation is linear within a
+  bucket, as in Prometheus. Two known effects: a quantile that falls in an
+  exponential histogram's zero bucket interpolates across
+  (−threshold, threshold], so positive-only data can read slightly below 0, by
+  at most the zero threshold (usually 0); and series with different bucket
+  layouts in one group are combined on the union of their bounds, which can
+  lean a quantile upward by up to one coarse bucket width.
+- **Metric query cost.** Phase A's per-series math costs more than the old
+  per-point math. Phase B measures, and Phase C fixes any miss of S7. Known
+  costs: decoding and comparing exponential histogram bucket lists per point
+  (about 600–740 ms at one hour for 160-bucket series), gauge and counter
+  panels also scanning for histogram rows, and stat panels running the series
+  builder for both the trend and the totals.
 - **Format break.** Format 4 refuses existing local data. Deployed instances
   are already on a release whose data needs a wipe before upgrading.
