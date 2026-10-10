@@ -109,7 +109,6 @@ func TestCollectRoutesCoversRoutesRegisteredOutsideInternalAPI(t *testing.T) {
 	for _, want := range []struct{ key, capability string }{
 		{"POST /api/agent/runs", "agent:run"},
 		{"GET /metrics", "operations:read"},
-		{"GET /api/system", "telemetry:read"},
 		{"GET /debug/pprof/", "operations:read"},
 		{"GET /debug/pprof/profile", "operations:read"},
 		{"Any /api/mcp", "telemetry:read"},

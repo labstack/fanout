@@ -21,8 +21,8 @@ var (
 // timestamp rule requires and $__bucket(col) into a time_bucket call with the
 // panel's interval. Only identifier arguments are accepted, so a macro can
 // never carry SQL. Every SQL panel must declare its selected time window.
-// Its snapshot includes all active files so explicit lookback predicates and
-// other authored time scopes remain visible.
+// Its snapshot covers that window plus the metric lookback before it, so an
+// explicit lookback predicate of up to ten minutes stays visible.
 func expandMacros(sql string, interval time.Duration) (string, error) {
 	if !windowMacro.MatchString(sql) {
 		return "", errors.New("SQL panels must filter time with $__window(time_column)")

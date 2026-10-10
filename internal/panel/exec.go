@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -431,8 +430,10 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
 	read := metricReadScope(p, scope)
 	if p.SQL != "" {
-		read.Start = time.Unix(0, math.MinInt64+1).UTC()
-		read.End = time.Unix(0, math.MaxInt64-1).UTC()
+		// SQL panels may look back up to the metric lookback before their
+		// window (the default dashboard does for CPU rates and reporting
+		// cadence), so their snapshot includes those files.
+		read.Start = scope.Start.Add(-metricLookback)
 	}
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: read.Start, End: read.End})
 	if p.Options != nil && p.Options.Split == "deploy" {

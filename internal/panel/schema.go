@@ -81,11 +81,31 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 	}
 	end := e.now().UTC()
 	start := end.Add(-span)
-	out, err := e.discoverSchema(ctx, start, end, req.Namespace)
-	if err != nil {
-		return nil, err
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: req.Namespace})
+	out := &Schema{Window: req.Window, Signals: map[string]SignalSchema{}, Measures: measureNames(), Units: unitNames()}
+	for _, name := range SignalNames() {
+		sig := signals[name]
+		values, err := e.lowCardinality(ctx, sig, start, end, req.Namespace)
+		if err != nil {
+			return nil, err
+		}
+		schema := SignalSchema{TimeColumn: sig.time}
+		for _, f := range sig.fields {
+			schema.Columns = append(schema.Columns, ColumnSchema{Field: f, Values: values[f.Name]})
+		}
+		if schema.Attributes, err = e.attributes(ctx, sig, start, end, req.Namespace); err != nil {
+			return nil, err
+		}
+		if name == "metrics" {
+			if schema.Metrics, err = e.metricNames(ctx, start, end, req.Namespace); err != nil {
+				return nil, err
+			}
+		}
+		if name == "spans" {
+			out.Services = values["service"]
+		}
+		out.Signals[name] = schema
 	}
-	out.Window = req.Window
 	e.mu.Lock()
 	now := e.now()
 	for k, v := range e.schemas {
@@ -98,36 +118,6 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 	}
 	e.schemas[key] = schemaEntry{schema: out, expires: now.Add(schemaTTL)}
 	e.mu.Unlock()
-	return out, nil
-}
-
-// discoverSchema is deliberately uncached for generated views.
-func (e *Executor) discoverSchema(ctx context.Context, start, end time.Time, namespace string) (*Schema, error) {
-	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: namespace})
-	out := &Schema{Signals: map[string]SignalSchema{}, Measures: measureNames(), Units: unitNames()}
-	for _, name := range SignalNames() {
-		sig := signals[name]
-		values, err := e.lowCardinality(ctx, sig, start, end, namespace)
-		if err != nil {
-			return nil, err
-		}
-		schema := SignalSchema{TimeColumn: sig.time}
-		for _, f := range sig.fields {
-			schema.Columns = append(schema.Columns, ColumnSchema{Field: f, Values: values[f.Name]})
-		}
-		if schema.Attributes, err = e.attributes(ctx, sig, start, end, namespace); err != nil {
-			return nil, err
-		}
-		if name == "metrics" {
-			if schema.Metrics, err = e.metricNames(ctx, start, end, namespace); err != nil {
-				return nil, err
-			}
-		}
-		if name == "spans" {
-			out.Services = values["service"]
-		}
-		out.Signals[name] = schema
-	}
 	return out, nil
 }
 

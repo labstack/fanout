@@ -267,7 +267,6 @@ func main() {
 	panels := panel.NewExecutor(q, cfg.RetentionDays)
 	panels.SetRollupReader(queries)
 	api.RegisterPanelRoutes(e, panels)
-	api.RegisterSystemRoutes(e, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
 	api.RegisterTraceRoutes(e, queries, cfg.RetentionDays)
 	api.RegisterIntelligenceRoutes(e, detector)
