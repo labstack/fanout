@@ -19,7 +19,7 @@ import (
 )
 
 // TestCompletedReadBenchmark measures actual dashboard methods over identical
-// immutable format-3 files. Run with the readbench tag on an otherwise idle
+// immutable format-4 files. Run with the readbench tag on an otherwise idle
 // machine; the normal test gate does not run this resource-intensive fixture.
 func TestCompletedReadBenchmark(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", DuckDBThreads: 4, DuckDBMaxConns: 4, RollupInterval: 100 * time.Millisecond}

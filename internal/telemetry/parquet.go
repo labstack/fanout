@@ -25,7 +25,7 @@ import (
 const (
 	BatchSuffix          = ".batch"
 	SchemaBatch          = "_schema" + BatchSuffix
-	batchMetadataVersion = 3
+	batchMetadataVersion = 4
 	parquetPageSize      = 64 << 10
 	parquetRowGroupRows  = 50_000
 	maxTraceQueryResults = 500
@@ -55,7 +55,7 @@ type BatchMetadata struct {
 	// Zero means not measured.
 	Bytes int64 `json:"-"`
 	// Event times come from fixed-schema Parquet footer statistics, not ingest
-	// timestamps. They are derived on publication/load and never change format 3.
+	// timestamps. They are derived on publication/load and never change format 4.
 	SpanTime   TimeRange `json:"-"`
 	LogTime    TimeRange `json:"-"`
 	MetricTime TimeRange `json:"-"`

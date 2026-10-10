@@ -118,10 +118,9 @@ func panelBenchmarkMetricShapes(tb testing.TB, names map[string]string) []Panel 
 		by                []string
 	}{
 		{"metric_gauge_avg_by_service", "gauge", "avg(value)", []string{"service"}},
-		// These are the existing structured measures: rate() counts points per
-		// second, and p95(hist_sum) takes the percentile of histogram point sums.
-		{"metric_counter_rate", "sum", "rate()", nil},
-		{"metric_histogram_p95", "histogram", "p95(hist_sum)", nil},
+		{"metric_updown_avg_by_service", "updown", "avg(value)", []string{"service"}},
+		{"metric_counter_rate", "counter", "rate()", nil},
+		{"metric_histogram_p95", "histogram", "p95(value)", nil},
 	} {
 		name, ok := names[shape.kind]
 		if !ok {
@@ -230,7 +229,10 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	}
 	start := time.Unix(0, int64(time.Hour)).UTC()
 	n := start.Add(time.Minute).UnixNano()
-	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}})
+	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}, Metrics: []telemetry.Metric{
+		{Namespace: "bench", ServiceName: "checkout", Name: "absent", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+		{Namespace: "bench", ServiceName: "checkout", Name: "started", Type: "sum", Monotonic: true, Temporality: "cumulative", StartTimeUnixNanos: n - int64(30*time.Second), TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,8 +246,8 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	m := telemetry.BatchMetadata{Version: 3, ID: "signed"}
-	for _, signal := range []string{"spans", "logs"} {
+	m := telemetry.BatchMetadata{Version: 4, ID: "signed"}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
 		err := tilePanelParquet(filepath.Join(seed, "parquet", "batches", "signed.batch", signal+".parquet"), filepath.Join(dst, signal+".parquet"), signal, "source_", start, start.Add(time.Hour), -3*time.Hour, &m, map[string]bool{}, map[string]bool{})
 		if err != nil {
 			t.Fatal(err)
@@ -269,7 +271,7 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 		t.Fatal(err)
 	}
 	data := preparePanelReplay(t, input, 2)
-	if data.End.Sub(data.Start) != 24*time.Hour || data.Spans != 48 || data.Logs != 48 {
+	if data.End.Sub(data.Start) != 24*time.Hour || data.Spans != 48 || data.Logs != 48 || data.Metrics != 96 {
 		t.Fatalf("wrong tiling: %+v", data)
 	}
 	issues, err := telemetrystore.VerifyBatches(filepath.Join(data.Dir, "telemetry"))
@@ -285,7 +287,11 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	if got, err := os.ReadFile(filepath.Join(dst, "metadata.json")); err != nil || string(got) != string(raw) {
 		t.Fatalf("source metadata changed: %v", err)
 	}
-	assertPanelReplay(t, data, 48)
+	engine := assertPanelReplay(t, data, 48)
+	var absent, shifted int64
+	if err := engine.DB.QueryRowContext(t.Context(), `SELECT count(*) FILTER (WHERE start_time IS NULL), count(*) FILTER (WHERE epoch_ns(time)-epoch_ns(start_time)=30000000000) FROM metrics`).Scan(&absent, &shifted); err != nil || absent != 48 || shifted != 48 {
+		t.Fatalf("metric starts: absent=%d shifted=%d err=%v", absent, shifted, err)
+	}
 }
 
 func TestPanelBenchmarkReplayRejectsUnsupportedInputBeforeCopy(t *testing.T) {
@@ -340,7 +346,24 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add := func(kind, name string, at time.Time, count int) {
 		for i := range count {
 			n := at.UnixNano()
-			metrics = append(metrics, telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1), HistSum: float64(i + 1), HistCount: 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,0]"})
+			m := telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1), HistSum: float64(i + 1), HistCount: 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,0]"}
+			if kind == "updown" {
+				m.Type = "sum"
+			}
+			if m.Type == "sum" || kind == "histogram" {
+				m.Temporality = "cumulative"
+				m.Monotonic = kind == "sum"
+			}
+			metrics = append(metrics, m)
+			if kind == "sum" || kind == "histogram" {
+				n = at.Add(time.Minute).UnixNano()
+				m.EventUnixNanos, m.TimeUnixNanos, m.IngestedAt = n, n, n
+				m.Value++
+				m.HistCount++
+				m.HistSum++
+				m.HistCountsJSON = "[2,0]"
+				metrics = append(metrics, m)
+			}
 		}
 	}
 	add("gauge", "rare", data.Start, 1)
@@ -349,21 +372,22 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add("gauge", "outside", data.End, 4)
 	add("sum", "requests", data.Start, 2)
 	add("sum", "rare", data.Start, 1)
+	add("updown", "inflight", data.Start, 2)
 	add("histogram", "z_latency", data.Start, 2)
 	add("histogram", "a_latency", data.Start, 2)
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-names", Metrics: metrics}); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"gauge": "cpu'usage", "sum": "requests", "histogram": "a_latency"}
+	want := map[string]string{"gauge": "cpu'usage", "counter": "requests", "updown": "inflight", "histogram": "a_latency"}
 	if got := panelBenchmarkMetricNames(t, engine, data); !reflect.DeepEqual(got, want) {
 		t.Fatalf("metric names = %v, want %v", got, want)
 	}
 	shapes := panelBenchmarkMetricShapes(t, want)
-	if len(shapes) != 3 {
-		t.Fatalf("metric shapes = %d, want 3", len(shapes))
+	if len(shapes) != 4 {
+		t.Fatalf("metric shapes = %d, want 4", len(shapes))
 	}
 	results, err := NewExecutor(engine, 30).Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Metric shapes", Time: Time{From: &data.Start, To: &data.End}, Panels: shapes}})
-	if err != nil || len(results) != 3 {
+	if err != nil || len(results) != 4 {
 		t.Fatalf("metric shape results = %v, error = %v", results, err)
 	}
 	for _, result := range results {

@@ -108,7 +108,7 @@ var signals = map[string]*signal{
 		ts("time", "Data point time"),
 		str("name", "Metric name"),
 		str("unit", "Metric unit as reported"),
-		str("type", "gauge, sum or histogram"),
+		str("type", "gauge, counter, updown, histogram or summary"),
 		num("value", "none", "Gauge or sum value"),
 		num("hist_count", "count", "Histogram point count"),
 		num("hist_sum", "none", "Histogram point sum"),

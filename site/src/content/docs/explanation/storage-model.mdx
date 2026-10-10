@@ -107,7 +107,7 @@ Discarded hashes force decoding; they do not establish a stored checksum.
 Verification failures such as memory exhaustion or cancellation never authorize
 quarantine.
 
-Telemetry batches use format 3. An older or unknown batch format makes startup
+Telemetry batches use format 4. An older or unknown batch format makes startup
 fail before cleanup or schema rewriting, leaving the files intact. This build
 has no reader or automatic conversion for previous formats. Start with an
 empty telemetry directory; retain previous data separately for its original
@@ -162,7 +162,7 @@ preserve candidate bounds without recomputation. Retention and incomplete
 replacements recompute only affected trace IDs from active contributions.
 A semantic version covers the cache schema and aggregation rules; a version
 change atomically discards all private
-read tables and rebuilds from authoritative format-3 Parquet. The background
+read tables and rebuilds from authoritative format-4 Parquet. The background
 worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
 trace backlog independently of the service and edge rollups' safety window.
 Completed-batch and analytical writers use separate gates and two connections

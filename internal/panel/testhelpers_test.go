@@ -1,12 +1,15 @@
 package panel
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/query/querytest"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -68,4 +71,93 @@ func shopSpans() []telemetry.Span {
 		add("frontend", "/api/cart", 20, "STATUS_CODE_OK")
 	}
 	return out
+}
+
+func metricFixture(t *testing.T) (*Executor, *sql.DB) {
+	t.Helper()
+	db, err := sql.Open("duckdb", "?threads=2&memory_limit=256MB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec("SET TimeZone='UTC'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := querytest.CreateTables(db, query.CreateCacheTables); err != nil {
+		t.Fatal(err)
+	}
+	if err := query.CreateViews(db); err != nil {
+		t.Fatal(err)
+	}
+	e := NewExecutor(&query.Duck{DB: db}, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	return e, db
+}
+
+func insertMetrics(t *testing.T, db *sql.DB, m telemetry.Metric) {
+	t.Helper()
+	encode := func(v map[string]any) string {
+		if v == nil {
+			return "{}"
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	_, err := db.Exec(`INSERT INTO telemetry.metrics
+      (namespace,service,name,unit,metric_type,temporality,monotonic,start_time_unix_nano,
+       metric_time,time_unix_nano,value,hist_bounds_json,hist_counts_json,hist_count,hist_sum,
+       scope_name,scope_version,attributes,resource,ingested_at,ingested_unix_nano)
+      VALUES (?,?,?,?,?,?,?,?,?::TIMESTAMP_NS,?,?,?,?,?,?,?, ?,?::JSON::VARIANT,?::JSON::VARIANT,?::TIMESTAMP_NS,?)`,
+		m.Namespace, m.ServiceName, m.Name, m.Unit, m.Type, m.Temporality, m.Monotonic, m.StartTimeUnixNanos,
+		time.Unix(0, m.TimeUnixNanos).UTC(), m.TimeUnixNanos, m.Value, m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum,
+		m.ScopeName, m.ScopeVersion, encode(m.Attributes), encode(m.Resource), time.Unix(0, m.IngestedAt).UTC(), m.IngestedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func metricCounter(at time.Time, value float64) telemetry.Metric {
+	return telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "net", Unit: "By",
+		Type: "sum", Monotonic: true, Temporality: "cumulative", Value: value,
+		TimeUnixNanos: at.UnixNano(), EventUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano(),
+		ScopeName: "scope", ScopeVersion: "1"}
+}
+
+func runMetricPanel(t *testing.T, e *Executor, p Panel, start, end time.Time) Result {
+	t.Helper()
+	e.now = func() time.Time { return end }
+	if p.ID == "" {
+		p.ID = "metric"
+	}
+	if p.Title == "" {
+		p.Title = "Metric"
+	}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: Dashboard{
+		Name: "Metrics", Time: Time{From: &start, To: &end}, Panels: []Panel{p},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Status == StatusError {
+		t.Fatalf("result: %+v", results)
+	}
+	return results[0]
+}
+
+func metricValues(t *testing.T, r Result, column string) []any {
+	t.Helper()
+	if r.Frame == nil {
+		t.Fatalf("missing frame: %+v", r)
+	}
+	for i, c := range r.Frame.Columns {
+		if c.Name == column {
+			return r.Frame.Values[i]
+		}
+	}
+	t.Fatalf("missing column %s", column)
+	return nil
 }

@@ -48,7 +48,7 @@ func testBatch() Batch {
 			StartUnixNanos: 100, EndUnixNanos: 200, DurationMS: 0.0001, StatusCode: "OK", IngestedAt: 300,
 		}},
 		Logs:    []telemetry.Log{{TimeUnixNanos: 110, Severity: "INFO", Body: "ready", ServiceName: "api", TraceID: "trace-1", IngestedAt: 300}},
-		Metrics: []telemetry.Metric{{TimeUnixNanos: 120, Name: "requests", Type: "sum", ServiceName: "api", Value: 1, IngestedAt: 300}},
+		Metrics: []telemetry.Metric{{TimeUnixNanos: 120, Name: "requests", Type: "sum", Monotonic: true, Temporality: "cumulative", ServiceName: "api", Value: 1, IngestedAt: 300}},
 	}
 }
 
