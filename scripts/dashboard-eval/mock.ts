@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { runEvaluation, type EvaluationConfig, type EditInput } from './main';
+import {startJudgeMock} from './judge-mock';
+import {MODELS} from './judge';
 import { type Ledger } from './transport';
 import { type Spec, normalizeAddedPanel, score } from './score';
 
 export const failures=['unsaved','invalid','unchecked','empty','duplicate_check','missing_terminal','truncated','duplicate_tool','error_mutation','usage_missing','usage_failure','wrong_title','neighbor_grid','metadata','field_array','slow','model_mismatch','mixed_models','record_metadata','version_jump','different_dashboard','unauthorized','rate_limited'] as const;
-export type Failure=typeof failures[number]|'configuration_missing'|'configuration_changed'|'last_truncated'|'multiple_saves'|'edit_model_mismatch'|'dated_model'|'iso_dated_model'|'wrong_suffix'|'invalid_date';
+export type Failure=typeof failures[number]|'configuration_missing'|'configuration_changed'|'last_truncated'|'multiple_saves'|'edit_model_mismatch'|'dated_model'|'iso_dated_model'|'wrong_suffix'|'invalid_date'|'answer_create'|'answer_replace'|'answer_restore'|'two_boards'|'thread_failure'|'blank_answer';
 const golden=()=>JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
 const spec=():Spec=>structuredClone(golden().saved_spec);
 const wireEvents=(wire:string):any[]=>wire.split('\n').filter(s=>s.startsWith('data: ')).map(s=>JSON.parse(s.slice(6)));
@@ -18,19 +20,20 @@ export const mockEdits=():EditInput[]=>[
   {operation:'remove',panel_id:'added_panel'},
   {operation:'unit',panel_index:0,value:'s'},
 ];
-export function startMock(failure?:Failure) {
+export function startMock(failure?:Failure,intents?:EvaluationConfig['prompts']) {
   const g=golden(),templates=wireEvents(g.incomplete_sse),errorEvents=wireEvents(g.error_sse);
   const boards=new Map<string,any>(),threads=new Map<string,any[]>(),statuses=new Map<string,string>();
   const stats={creates:0,edits:0,posts:0,status_reads:0,version_reads:0,queries:0};
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req) {
     const path=new URL(req.url).pathname;
     if(req.headers.get('Fanout-Request')!=='1')return new Response(null,{status:403});
+    if(path.startsWith('/api/agent/threads/')&&failure==='thread_failure')return Response.json({code:'unavailable',message:'Synthetic unavailable thread'},{status:503});
     if(path.startsWith('/api/agent/threads/'))return Response.json({id:path.split('/').at(-1)!,messages:threads.get(path.split('/').at(-1)!)??[],updated_at:'2026-10-01 13:00:00'});
     if(path.startsWith('/api/agent/runs/')&&req.method==='GET'){stats.status_reads++;return Response.json({status:statuses.get(path.split('/').at(-1)!)??'unknown'});}
     if(path.endsWith('/versions')) {stats.version_reads++;const id=path.split('/').at(-2)!;return Response.json({versions:Array.from({length:boards.get(id)?.version??0},(_,i)=>({version:i+1,author_kind:'agent'}))});}
     if(path==='/api/panels/query') {
       stats.queries++;const {dashboard}=await req.json();
-      if(failure==='invalid')return Response.json({problems:[{path:'panels'}]},{status:400});
+      if(failure==='invalid')return Response.json({code:'invalid_dashboard',message:'Synthetic validation',problems:[{path:'panels'}]},{status:400});
       if(failure==='unchecked')return Response.json({},{status:503});
       const results=dashboard.panels.map((p:any)=>({...structuredClone(p.viz==='text'?g.results.find((r:any)=>r.id==='actual_text'):p.viz==='timeseries'?g.added_results.find((r:any)=>r.id==='added_panel'):g.results.find((r:any)=>r.id==='actual_latency')),id:p.id}));
       if(failure==='empty'){results[0].status='empty';delete results[0].frame;delete results[0].diagnosis;}
@@ -38,6 +41,7 @@ export function startMock(failure?:Failure) {
     }
     if(path!=='/api/agent/runs'||req.method!=='POST')return new Response(null,{status:404});
     stats.posts++;if(failure==='unauthorized'||failure==='rate_limited')return new Response(null,{status:failure==='unauthorized'?401:429});const input=await req.json(),prompt=input.messages[0].content;
+    const answer=intents?.find(p=>p.prompt===prompt)?.expect==='answer'&&!['answer_create','answer_replace','answer_restore','two_boards'].includes(failure??'');
     const edit=threads.has(input.threadId);const history=threads.get(input.threadId)??[];threads.set(input.threadId,history);
     const events:any[]=[{...structuredClone(templates.find(e=>e.type==='RUN_STARTED')),runId:input.runId,threadId:input.threadId},{...structuredClone(templates.find(e=>e.name==='model_configuration')),value:{provider:'mock',model:'mock-no-provider'}}];
     if(failure==='configuration_missing')events.splice(1,1);
@@ -64,13 +68,15 @@ export function startMock(failure?:Failure) {
     if(failure==='record_metadata'&&stats.edits===1)record.name='Changed record';
       if(failure==='version_jump'&&stats.edits===1)record.version++;
       if(failure==='different_dashboard'&&stats.edits===1)record.id='different-board';
-    } else {stats.creates++;record={...structuredClone(g.saved_record),id:'board-'+stats.creates,spec:spec()};history.push({dashboard_id:record.id});}
-    boards.set(record.id,structuredClone(record));
-    if(failure!=='unsaved')emitCall(input.runId+'-save',edit?'edit_dashboard':'create_dashboard',{dashboard:record},failure==='error_mutation');
+    } else if(!answer) {stats.creates++;record={...structuredClone(g.saved_record),id:'board-'+stats.creates,spec:spec()};history.push({dashboard_id:record.id});}else record={...structuredClone(g.saved_record),spec:spec()};
+    if(!answer)boards.set(record.id,structuredClone(record));
+    if(failure!=='unsaved'&&!answer)emitCall(input.runId+'-save',edit?'edit_dashboard':failure==='answer_replace'?'replace_dashboard':failure==='answer_restore'?'restore_dashboard_version':'create_dashboard',{dashboard:record},failure==='error_mutation');
+    if(failure==='two_boards')emitCall(input.runId+'-other','create_dashboard',{dashboard:{...record,id:'other-board'}});
     if(failure==='multiple_saves'&&!edit){record.version=2;record.spec.description='Corrected fixture context.';boards.set(record.id,structuredClone(record));emitCall(input.runId+'-correction','edit_dashboard',{dashboard:record});}
     if(failure==='duplicate_tool')events.push({type:'TOOL_CALL_START',toolCallId:input.runId+'-save',toolCallName:'create_dashboard'});
     // A later unrelated read must never replace the immutable save observation.
     emitCall(input.runId+'-read','get_dashboard',{dashboard:{...record,id:'unrelated',version:999}});
+    events.push({type:'TEXT_MESSAGE_START',messageId:'final',role:'assistant'},{type:'TEXT_MESSAGE_CONTENT',messageId:'final',delta:failure==='blank_answer'?' ':answer?'Synthetic percentile explanation.':'Synthetic saved dashboard.'},{type:'TEXT_MESSAGE_END',messageId:'final'});
     if(failure!=='usage_missing'){
       const metered=structuredClone(templates.filter(e=>e.name==='model_call_usage').at(-1));
       metered.value={...metered.value,run_id:input.runId,step:1,provider:'mock',model:failure==='model_mismatch'||failure==='mixed_models'&&stats.posts===10||failure==='edit_model_mismatch'&&stats.edits===2?'different-model':'mock-no-provider',status:failure==='truncated'||failure==='last_truncated'&&stats.posts===10?'incomplete':failure==='usage_failure'?'error':'completed'};
@@ -87,18 +93,20 @@ export function startMock(failure?:Failure) {
   }});
   return {server,base:`http://127.0.0.1:${server.port}`,stats};
 }
-export async function mockEvaluation(failure?:Failure,options:Partial<Pick<EvaluationConfig,'model_label'|'ledger'|'mock'|'cap_usd'>>={}) {
-  const mock=startMock(failure);
+export async function mockEvaluation(failure?:Failure,options:Partial<Pick<EvaluationConfig,'model_label'|'ledger'|'mock'|'cap_usd'|'prompts'|'set'|'edits'>>&{judge?:boolean}={}) {
+  const mock=startMock(failure,options.prompts);
+  const judgeMock=options.judge?startJudgeMock():null;
   const ledger:Ledger={schema:1,rates:[{provider:'mock',model:'mock-no-provider',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:0,output:0,cache_read:0,cache_write:0},{provider:'mock',model:'different-model',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:0,output:0,cache_read:0,cache_write:0}],calls:[],prompts:[]};
+  if(judgeMock)for(const [provider,model] of Object.entries(MODELS))ledger.rates.push({...ledger.rates[0],provider,model,input_includes_cache:provider==='openai'});
   for(const suffix of ['20261008','2026-10-08','latest','20261399'])ledger.rates.push({...ledger.rates[0],model:'mock-no-provider-'+suffix});
   const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
   const end=BigInt(Date.now())*1_000_000n;
   const snapshot={source_hash:hash(JSON.stringify(spec())),start_ns:String(end-3_600_000_000_000n),end_ns:String(end),shift_ns:'0',replayed_at:new Date().toISOString()};
-  const config:EvaluationConfig={base:mock.base,cookies:'',model_label:'mock:mock-no-provider',prompts:Array.from({length:10},(_,i)=>({id:`mock-${i+1}`,prompt:`Simulate fixture ${i+1}.`})),edits:mockEdits(),ledger,cap_usd:0,mock:true,set:'benchmark',snapshot,snapshot_manifest_hash:hash(JSON.stringify(snapshot)),candidate_source_hash:hash('mock fixture candidate'),...options};
+  const config:EvaluationConfig={base:mock.base,cookies:'',model_label:'mock:mock-no-provider',prompts:Array.from({length:10},(_,i)=>({id:`mock-${i+1}`,prompt:`Simulate fixture ${i+1}.`,expect:'dashboard' as const,rationale:'Synthetic benchmark'})),edits:mockEdits(),ledger,cap_usd:0,mock:true,set:'benchmark',snapshot,snapshot_manifest_hash:hash(JSON.stringify(snapshot)),candidate_source_hash:hash('mock fixture candidate'),...options,judge:judgeMock?{env:{JUDGE_ANTHROPIC_KEY:'mock-only-anthropic',JUDGE_OPENAI_KEY:'mock-only-openai'},endpoints:{anthropic:judgeMock.base,openai:judgeMock.base},fetch,mock:true}:undefined};
   try {const result=await runEvaluation(config);
     // Inject a measured latency at the scorer boundary; no product clock override.
     if(failure==='slow'){for(const r of result.evidence.runs)r.elapsed_ms=45_001;result.evidence.score=score(result.evidence.runs,result.evidence.edits);result.exit_code=1;}
-    return {...result,stats:mock.stats};}finally{mock.server.stop(true);}
+    return {...result,stats:mock.stats};}finally{mock.server.stop(true);judgeMock?.server.stop(true);}
 }
 export async function verifyMock():Promise<number> {
   const good=await mockEvaluation();assert.equal(good.exit_code,0);assert.equal(good.stats.creates,10);assert.equal(good.stats.edits,5);assert.equal(good.stats.posts,15);assert.equal(good.evidence.actual_cost_usd,0);

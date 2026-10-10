@@ -1,7 +1,8 @@
 # Dashboard evaluation CLI
 
 Run from the repository root with the installed Bun and Git. There are no added
-packages, provider credentials, paid judges, or embedded benchmark prompts.
+packages or embedded benchmark prompts. Provider calls are controller-only;
+intent and optional paired judging are tested offline with synthetic usage.
 
 ```sh
 rtk proxy bun test scripts/dashboard-eval
@@ -33,7 +34,7 @@ rtk proxy bun scripts/dashboard-eval/main.ts \
   --snapshot-manifest "$FANOUT_EVAL_SNAPSHOT" --edits-file "$FANOUT_EVAL_EDITS"
 ```
 
-Options also include `--help`, `--mock`, `--no-output`, `--holdout-sha` and the
+Options also include `--help`, `--mock`, `--no-output`, `--judge`, `--holdout-sha` and the
 settlement operation below. A model label is a model name or `provider:model`;
 each component uses at most 80 ASCII letters/digits/dots/underscores/dashes,
 begins with a letter or digit, and cannot contain `..`. The label never selects
@@ -47,7 +48,9 @@ Origins reject credentials, paths, queries and fragments. Redirects are refused.
 Cookies follow Netscape expiry, domain, path, Secure and HttpOnly rules and are
 never copied into output, logs or committed fixtures.
 
-The prompt file is a JSON array of exactly ten unique `{id, prompt}` objects.
+The benchmark prompt file is a JSON array of exactly ten unique
+`{id, prompt, expect: "dashboard", rationale}` objects. Intent is required; there
+is no compatibility default. `rationale` must be a string and stays private.
 The controller supplies the ten private benchmark prompts from the spec.
 The edit file has five operations in exactly this order: `title`, `threshold`,
 `add`, `remove`, `unit`. It is prepared for the first successfully saved board.
@@ -62,7 +65,7 @@ Expected full specs and private edit prompts are constructed before submission.
 
 The immutable snapshot manifest supplies `source_hash` (SHA-256), signed decimal
 nanosecond strings `start_ns`, `end_ns`, `shift_ns`, and an absolute UTC
-`replayed_at`. One manifest covers the ten creates and five edits. The controller
+`replayed_at`. One manifest covers the whole selected set and its benchmark edits. The controller
 must replay the immutable source near the run's current time and verify these
 bounds against the instance. At startup, the CLI requires its start time to be
 inside the bounds (with a five-minute tolerance) and within five minutes of
@@ -99,7 +102,7 @@ as `status: "failed"`, keep their cost, fail S1 and continue under the gate.
 Only completed prompts contribute to p95. Conflicting correlation, missing
 usage/rates, gaps in steps and unknown settlements stop subsequent HTTP. Reuse the same ledger across
 invocations: the cap covers all creates, edits, Explain, targeted reruns and
-holdout activity in that task, rather than resetting for each CLI process.
+holdout and optional judge activity in that task, rather than resetting for each CLI process.
 
 Before every prompt, the gate requires `spent + estimate <= cap`. The estimate
 is nearest-rank p95 of completed whole-prompt costs, or exactly **$0.60 before
@@ -184,6 +187,72 @@ Exits: **0** complete pass, **1** measured failure, **2** invalid, incomplete or
 budget-blocked evidence. `--mock` exits 0 only when its positive fixture and all
 failure injections behave as expected.
 
+## Intent scoring and optional paired judges
+
+`--set holdout` accepts any positive number of unique explicit intents with
+`expect: "dashboard" | "answer"` and string `rationale`. It does not require,
+read or run the edits file. Benchmark retains the fixed ten saves, five exact
+edits and 45000 ms latency target; `score.ts:score` is unchanged. There is no
+parity set: the controller meters the two chat/collector parity prompts with the
+same admission, usage and settlement functions and retained ledger.
+
+Holdout reports dashboard outcomes over dashboard prompts, answer outcomes over
+answer prompts and intent accuracy over all prompts. S2's `good`/`total` counts
+use checked valid dashboard-intent panels; `checked_dashboards`,
+`validation_failures` and `validation_unchecked` expose S3's checked denominator
+and missing validation. Median save time uses checked valid dashboard outcomes;
+there is no benchmark latency threshold or S5 edit requirement on holdout.
+A full set must finish for a pass. Missing/duplicate checks and unexplained
+empty panels fail. Answers require a finished, metered, nonblank final assistant
+message and complete thread/mutation evidence. An attempted mutation (including
+create, replace or restore), ambiguous multiple dashboards, unavailable thread,
+missing terminal or persisted tool error cannot establish a successful answer.
+Mutation names come from the existing server-checked catalog. Product tool
+failures retain `error: {code, message}` and protocol/persisted error flags;
+executor panel `error?: string` remains separate.
+
+Add `--judge` to request the two evaluation-only identities
+`claude-fable-5-1` (Anthropic) and `gpt-5.6-terra` (OpenAI). These do not select or
+replace the authoring model. Set `JUDGE_ANTHROPIC_KEY`, `JUDGE_OPENAI_KEY`,
+`JUDGE_ANTHROPIC_BASE` and `JUDGE_OPENAI_BASE` at runtime, with provider origins
+supplied by the controller. Optional `JUDGE_ANTHROPIC_MODEL` and
+`JUDGE_OPENAI_MODEL` must match the frozen identities; a mismatch stops before
+transport. Keys appear only in request headers. Neither is written to artifacts.
+Both keys are required: otherwise the explicit result is
+`skipped / judge_keys_unconfigured`, null quality, no requests/reservations and
+$0 judge spend. Without the flag it is `skipped / not_requested`. A clean skip
+does not fail conclusive agent scoring and is never a quality PASS.
+
+Judges run after agent scoring with the same ledger, cap and atomic persistence.
+Supply verified rates for both judge identities; no prices are bundled. Admission
+uses the existing ledger gate plus a conservative byte-count input bound and
+maximum output reserve. Each attempt gets a unique `(run_id, step)` and is
+persisted before transport. Input/output/cache counts use normal ledger rates;
+OpenAI reasoning is an output subset. Paid usage is persisted before rubric
+validation, so malformed JSON, refusal and truncation remain charged. Transport,
+HTTP or malformed usage without known cost leaves an unsettled reservation,
+null judge cost and no further calls pending controller settlement. Known
+nonbillable provider rate rejection may retry at most three times; explicit
+unsupported-temperature rejection may remove temperature once. Every retry
+rechecks reserve and the same 120-second provider deadline. Unknown HTTP failures
+are never assumed free. Failed but fully metered quality retains its spend and
+independent other-judge result, with paired fields null.
+
+Both judges see byte-identical serialized evidence: question, intent, final
+assistant text, immutable checked saved spec and existing panel status/row
+count/diagnosis/sanitized error. Answers and unintended saves are not judged.
+The unchanged four-criterion rubric uses integer scores 0–5 and a nonblank
+rationale. Paired means require both valid judgments; any criterion difference
+of at least 2 marks disagreement. Coverage and judge cost are separate aggregates.
+Individual judge failure is visible privately; incomplete judging exits 2.
+
+`--mock --judge --no-output` adds paired judging to the existing benchmark mock
+using dummy headers, zero rates and ephemeral loopback endpoints. Tests also
+exercise a synthetic 11-dashboard/5-answer set through the CLI, strict benchmark
+validation, missing keys, malformed/truncated/refused scores, retry exhaustion,
+cache accounting, unknown-cost stop, unintended create/replace/restore, two
+boards and public sentinel leakage. Mock dollars never represent provider spend.
+
 ## Sealed set and cleanup
 
 Only the controller's final frozen-candidate invocation may use `--set holdout`
@@ -192,8 +261,13 @@ must never open sealed prompts or use aggregate results to tune the candidate.
 Set `FANOUT_HOLDOUT_OUT_ROOT` to a controller-owned location outside the worktree
 and `.superpowers/eval/`; the ledger must also be outside the worktree. Use a
 fresh label and output directory. Output is whitelisted to aggregate evidence
-and prompt IDs/hashes; it omits responses, tool inputs, specs, edit text and
-individual failure content. Keep these outputs inaccessible to later dispatches.
+and prompt IDs/hashes; it omits prompts, rationales, responses, tool inputs,
+specs, edit text and
+individual failure content. Non-skipped holdout judging retains only its minimal
+evidence and judgments in `judge-evidence.json` in that external output directory;
+the public summary contains only aggregate quality coverage/cost. Keep these
+outputs inaccessible to later dispatches. Sealed prompts are never runner
+dependencies; the private old tools remain historical sources only.
 
 The runner does not delete dashboards or threads. Use a disposable owned
 instance/account, and let the controller remove only that disposable instance

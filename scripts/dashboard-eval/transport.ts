@@ -4,8 +4,8 @@ import { stable, type Check, type Spec } from './score';
 import { mutatingTools } from './tool-catalog';
 
 export type ObjectValue = Record<string, any>;
-export type Tool = {id:string;name:string;args:string;result:any;is_error:boolean|null;ended:boolean;elapsed_ms:number};
-export type StreamState = {tools:Tool[];terminal:'RUN_FINISHED'|'RUN_ERROR'|null;incomplete:boolean;truncated:boolean;error_code:string|null;usage:CallUsage[];started_at:string;finished_at:string|null; configuration?:{provider:string;model:string}};
+export type Tool = {id:string;name:string;args:string;result:any;is_error:boolean|null;ended:boolean;elapsed_ms:number;error_code?:string;error_message?:string};
+export type StreamState = {tools:Tool[];terminal:'RUN_FINISHED'|'RUN_ERROR'|null;incomplete:boolean;truncated:boolean;error_code:string|null;usage:CallUsage[];started_at:string;finished_at:string|null; final_text:string;configuration?:{provider:string;model:string}};
 const decode=(v:any)=>{if(typeof v!=='string')return v;try{return JSON.parse(v)}catch{return null}};
 export function originURL(origin:string):URL {
   const url=new URL(origin);
@@ -65,21 +65,30 @@ export function cookieHeader(jar:string,url:URL,now=Date.now()/1000):string {
 // Consume through EOF: Fanout persists after the terminal event and before closing SSE.
 export async function readSSE(response:Response,signal:AbortSignal,onUsage?:(u:CallUsage)=>void):Promise<StreamState> {
   const started=performance.now();
-  const state:StreamState={tools:[],terminal:null,incomplete:false,truncated:false,error_code:null,usage:[],started_at:new Date().toISOString(),finished_at:null};
+  const state:StreamState={tools:[],terminal:null,incomplete:false,truncated:false,error_code:null,usage:[],final_text:'',started_at:new Date().toISOString(),finished_at:null};
   const fail=(code:string)=>{state.incomplete=true;state.error_code??=code};
   if(!response.body||!response.headers.get('content-type')?.includes('text/event-stream')) {fail('not_sse');return state;}
   const tools=new Map<string,Tool>(),reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
   let buffer='',data:string[]=[],eventName='',bytes=0;
+  const messages=new Map<string,{role:string;text:string}>();
   const tool=(id:any):Tool=>{if(typeof id!=='string'||!id)throw new Error('invalid_tool_id');if(!tools.has(id)){const t={id,name:'',args:'',result:null,is_error:null,ended:false,elapsed_ms:0};tools.set(id,t);state.tools.push(t);}return tools.get(id)!};
   const event=(e:ObjectValue)=>{
     if(state.terminal)throw new Error('event_after_terminal');
     switch(e.type) {
+      case 'TEXT_MESSAGE_START': {
+        if(typeof e.messageId!=='string'||messages.has(e.messageId))throw new Error('invalid_message_id');
+        messages.set(e.messageId,{role:e.role??'assistant',text:''});break;
+      }
+      case 'TEXT_MESSAGE_CONTENT': {
+        const m=messages.get(e.messageId);if(!m||typeof e.delta!=='string')throw new Error('invalid_message_content');
+        m.text+=e.delta;break;
+      }
       case 'TOOL_CALL_START': {const t=tool(e.toolCallId);if(t.name)throw new Error('duplicate_tool_id');if(typeof e.toolCallName!=='string'||!e.toolCallName)throw new Error('missing_tool_name');t.name=e.toolCallName;break;}
       case 'TOOL_CALL_ARGS':tool(e.toolCallId).args+=e.delta??'';break;
       case 'TOOL_CALL_END':tool(e.toolCallId).ended=true;break;
-      case 'TOOL_CALL_RESULT': {const t=tool(e.toolCallId);if(t.result!==null)throw new Error('duplicate_tool_result');t.result=structuredClone(decode(e.content));t.elapsed_ms=performance.now()-started;t.is_error=typeof e.isError==='boolean'?e.isError:typeof e.is_error==='boolean'?e.is_error:null;if(t.result?.error||t.result?.isError||t.result?.is_error)t.is_error=true;break;}
+      case 'TOOL_CALL_RESULT': {const t=tool(e.toolCallId);if(t.result!==null)throw new Error('duplicate_tool_result');t.result=structuredClone(decode(e.content));t.elapsed_ms=performance.now()-started;t.is_error=t.is_error===true||e.isError===true||e.is_error===true?true:typeof e.isError==='boolean'?e.isError:typeof e.is_error==='boolean'?e.is_error:null;if(t.result?.error||t.result?.isError||t.result?.is_error)t.is_error=true;if(typeof t.result?.error?.code==='string')t.error_code=t.result.error.code;if(typeof t.result?.error?.message==='string')t.error_message=t.result.error.message;break;}
       case 'ACTIVITY_SNAPSHOT': {
-        if(e.activityType==='mcp-app') {const c=e.content;const matches=state.tools.filter(t=>t.name===c?.tool_name&&stable(decode(t.args))===stable(c?.tool_input));if(matches.length===1&&typeof c.is_error==='boolean')matches[0].is_error=c.is_error;}
+        if(e.activityType==='mcp-app') {const c=e.content;const matches=state.tools.filter(t=>t.name===c?.tool_name&&stable(decode(t.args))===stable(c?.tool_input));if(matches.length===1&&typeof c.is_error==='boolean')matches[0].is_error=matches[0].is_error===true||c.is_error;}
         break;
       }
       case 'CUSTOM': {
@@ -102,13 +111,19 @@ export async function readSSE(response:Response,signal:AbortSignal,onUsage?:(u:C
     buffer+=decoder.decode();drain(true);
   }catch {fail('stream_invalid_or_disconnected')}
   finally {signal.removeEventListener('abort',abort);await reader.cancel().catch(()=>{});reader.releaseLock();state.finished_at=new Date().toISOString();}
+  state.final_text=[...messages.values()].filter(m=>m.role==='assistant').at(-1)?.text??'';
   if(!state.terminal)fail('missing_terminal');
   return state;
 }
 export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:ObjectValue;elapsed_ms:number;first_elapsed_ms:number;tool_id:string}|null {
   for(const t of state.tools) {
     const matches=messages.filter(m=>m.role==='tool'&&m.toolCallId===t.id);
-    if(matches.length===1)t.is_error=t.is_error===true||Boolean(matches[0].error);
+    if(matches.length===1) {
+      const m=matches[0];
+      const known=typeof m.error==='boolean'||typeof m.error==='string'||typeof m.isError==='boolean'||typeof m.is_error==='boolean';
+      if(t.is_error===true||m.error||m.isError===true||m.is_error===true)t.is_error=true;
+      else t.is_error=known?false:null;
+    }
     if(matches.length>1)t.is_error=true;
   }
   const saves=state.tools.filter(t=>mutatingTools.has(t.name)&&t.is_error===false&&t.result?.dashboard?.id&&Number.isInteger(t.result.dashboard.version)&&t.result.dashboard.spec?.panels);
@@ -117,6 +132,14 @@ export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:O
   if(new Set(saves.map(t=>t.result.dashboard.id)).size!==1)return null;
   const t=saves.at(-1)!;
   return {record:structuredClone(t.result.dashboard),elapsed_ms:t.elapsed_ms,first_elapsed_ms:saves[0].elapsed_ms,tool_id:t.id};
+}
+export function mutationEvidence(state:StreamState,messages:ObjectValue[]|undefined):{mutation_observed:boolean;mutation_evidence_complete:boolean} {
+  // An attempted write is conservative evidence even when its result claims failure.
+  const mutations=state.tools.filter(t=>mutatingTools.has(t.name));
+  const complete=messages!==undefined&&!state.incomplete&&state.tools.every(t=>t.name&&t.result!==null&&t.is_error===false&&messages.filter(m=>m.role==='tool'&&m.toolCallId===t.id).length===1)&&
+    mutations.every(t=>t.ended&&t.is_error!==null&&messages.filter(m=>m.role==='tool'&&m.toolCallId===t.id).length===1)&&
+    messages.every(m=>m.role!=='tool'||state.tools.some(t=>t.id===m.toolCallId));
+  return {mutation_observed:mutations.length>0,mutation_evidence_complete:complete};
 }
 export async function executePanels(request:(path:string,init?:RequestInit)=>Promise<any>,spec:Spec,signal:AbortSignal):Promise<{valid:boolean;checked:boolean;checks:Check[]}> {
   try {

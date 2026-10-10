@@ -2,14 +2,17 @@ import { closeSync, existsSync, openSync, readFileSync, renameSync, unlinkSync, 
 import { join, resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { changedPanels, compareEdit, score, stable, type Operation, type Run, type Spec } from './score';
-import { beginPrompt, canStartPrompt, cookieHeader, executePanels, findSaved, noSymlinks, originURL, privateFile, readSSE, recordUsage, requestJSON, requestResponse, safeOutput, validateOutput, manualSettlement, settlePrompt, spentUSD, validateLedger, type Ledger, type ObjectValue, type StreamState } from './transport';
+import { runJudges, judgeSummary, prepareJudgeEvidence, type JudgeConfig, type JudgeState } from './judge';
+import { scoreIntent, type IntentRun } from './intent';
+import { mutationEvidence, beginPrompt, canStartPrompt, cookieHeader, executePanels, findSaved, noSymlinks, originURL, privateFile, readSSE, recordUsage, requestJSON, requestResponse, safeOutput, validateOutput, manualSettlement, settlePrompt, spentUSD, validateLedger, type Ledger, type ObjectValue, type StreamState } from './transport';
 
-const flags=new Set(['help','mock','no-output']);
+const flags=new Set(['help','mock','no-output','judge']);
 const values=new Set(['base','cookies','model-label','out','prompts-file','set','budget-usd','cost-ledger','snapshot-manifest','edits-file','holdout-sha','settle','cost-usd','reason']);
 export const HELP=`Usage: bun scripts/dashboard-eval/main.ts [options]
   --help                         Print this help; no HTTP
   --mock                         Offline loopback fixtures; no provider, $0
   --no-output                    Skip mock artifact writes (CI)
+  --judge                        Optional paired judges; same retained ledger
   --settle ID --cost-usd USD --reason TEXT --cost-ledger PATH
                                  Controller settlement of unknown prompt cost
   --base ORIGIN                  Controller's disposable Fanout origin
@@ -41,7 +44,7 @@ export function parseOptions(args:string[]):ObjectValue {
   if(opts['holdout-sha']&&!/^[a-f0-9]{64}$/.test(opts['holdout-sha']))throw new Error('Invalid sealed hash');
   return opts;
 }
-export type Prompt={id:string;prompt:string};
+export type Prompt={id:string;prompt:string;expect:'dashboard'|'answer';rationale:string};
 export type EditInput={operation:Operation;panel_id?:string;panel_index?:number;field?:string;value?:any;panel?:ObjectValue;after?:string};
 export function buildEdit(before:Spec,input:EditInput):{expected:Spec;prompt:string} {
   const expected=structuredClone(before);
@@ -65,7 +68,7 @@ export function buildEdit(before:Spec,input:EditInput):{expected:Spec;prompt:str
 }
 export type Snapshot={source_hash:string;start_ns:string;end_ns:string;shift_ns:string;replayed_at:string};
 const snapshotEvidence=(s:Snapshot|undefined)=>s?{source_hash:s.source_hash,start_ns:s.start_ns,end_ns:s.end_ns,shift_ns:s.shift_ns,replayed_at:s.replayed_at}:undefined;
-export type EvaluationConfig={base:string;cookies:string;model_label?:string;prompts:Prompt[];edits:EditInput[];ledger:Ledger;cap_usd:number;snapshot:Snapshot;snapshot_manifest_hash:string;candidate_source_hash:string;set:string;mock?:boolean;persist_ledger?:()=>void};
+export type EvaluationConfig={base:string;cookies:string;model_label?:string;prompts:Prompt[];edits:EditInput[];ledger:Ledger;cap_usd:number;snapshot:Snapshot;snapshot_manifest_hash:string;candidate_source_hash:string;set:string;mock?:boolean;judge?:Omit<JudgeConfig,'ledger'|'cap_usd'|'persist_ledger'|'evidence'>;persist_ledger?:()=>void};
 export function exitCode(result:{passed:boolean},incomplete:boolean):number{return incomplete?2:result.passed?0:1}
 const blankRun=():Run=>({complete:false,saved:false,elapsed_ms:null,valid:false,checked:false,panels:[],checks:[]});
 const sha=(v:string|Uint8Array)=>createHash('sha256').update(v).digest('hex');
@@ -89,7 +92,7 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
   function headers(init:RequestInit,path:string):RequestInit {return {...init,headers:{'Content-Type':'application/json','Fanout-Request':'1',Cookie:cookieHeader(config.cookies,new URL(path,config.base)),...Object.fromEntries(new Headers(init.headers))}};}
   const turn=async(prompt:Prompt,thread_id=crypto.randomUUID()):Promise<ObjectValue>=>{
     const run_id=crypto.randomUUID(),observed_at=new Date().toISOString(),post_started=performance.now();
-    const result:ObjectValue={...blankRun(),prompt_id:prompt.id,prompt_sha:sha(prompt.prompt),thread_id,run_id,observed_at,saved_record:null,persisted_status:null,terminal_events:[],incomplete:false};
+    const result:ObjectValue={...blankRun(),prompt_id:prompt.id,prompt_sha:sha(prompt.prompt),thread_id,run_id,observed_at,saved_record:null,persisted_status:null,terminal_events:[],incomplete:false,expect:prompt.expect,prompt:prompt.prompt,rationale:prompt.rationale,final_text:'',mutation_observed:false,mutation_evidence_complete:false};
     if(!config.mock&&!canStartPrompt(config.ledger,config.cap_usd)){result.incomplete=true;result.error_code='budget_or_unsettled_usage';return result;}
     beginPrompt(config.ledger,run_id,prompt.id);config.persist_ledger?.();
     const signal=AbortSignal.timeout(240_000);
@@ -107,9 +110,11 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
       result.configured_model=configured;result.expected_model=expected;
       for(const call of state.usage){const observed=`${call.provider}:${call.model}`;if(!modelIdentityMatches(expected,observed)||call.provider==='unknown'||call.model==='unknown')model_mismatch.push({run_id,step:call.step,expected:expected??null,observed});}
       if(!modelIdentityMatches(expected,configured))model_mismatch.push({run_id,expected:expected??null,observed:configured??null});
-      let messages:ObjectValue[]=[];
-      try {const thread=await json('/api/agent/threads/'+encodeURIComponent(thread_id),{signal:AbortSignal.timeout(5000)});messages=thread.messages??[];}catch {result.thread_read_failed=true;}
+      result.final_text=state.final_text;
+      let messages:ObjectValue[]|undefined;
+      try {const thread=await json('/api/agent/threads/'+encodeURIComponent(thread_id),{signal:AbortSignal.timeout(5000)});if(!Array.isArray(thread.messages))throw new Error('missing_thread_messages');messages=thread.messages;}catch {result.thread_read_failed=true;}
       const save=findSaved(state,messages);
+      Object.assign(result,mutationEvidence(state,messages));
       if(save) {
         result.saved=true;result.saved_record=save.record;result.elapsed_ms=response_elapsed_ms+save.elapsed_ms;result.first_save_ms=response_elapsed_ms+save.first_elapsed_ms;result.panels=save.record.spec.panels;
         // Persisted version presence corroborates the immutable tool result. Never fetch the latest spec.
@@ -144,12 +149,12 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
   }
   // One recorded dashboard, one thread, and five immediate before/after versions.
   const target=runs.find(r=>r.complete&&r.saved_record);
-  if(!incomplete&&target) {
+  if(config.set==='benchmark'&&!incomplete&&target) {
     let before=target.saved_record;
     for(const [index,input] of config.edits.entries()) {
       let built:{expected:Spec;prompt:string};
       try {built=buildEdit(before.spec,input);}catch {incomplete=true;break;}
-      const r=await turn({id:`edit-${index+1}`,prompt:built.prompt},target.thread_id);
+      const r=await turn({id:`edit-${index+1}`,prompt:built.prompt,expect:'dashboard',rationale:'Exact authored edit'},target.thread_id);
       const after=r.saved_record;
       const diff=after?compareEdit(before.spec,after.spec,built.expected,input.operation):{passed:false,changed_ids:[],expected_ids:changedPanels(before.spec.panels,built.expected.panels),layout_changed:false,expected_diff:{before:before.spec,after:built.expected},actual_diff:null};
       const metadata=(record:ObjectValue)=>Object.fromEntries(Object.entries(record).filter(([k])=>!['spec','version','updated_at'].includes(k)));
@@ -159,19 +164,24 @@ export async function runEvaluation(config:EvaluationConfig):Promise<{exit_code:
       before=after;
     }
   }
-  const scored=score(runs as Run[],edits as any);
+  const scored=config.set==='holdout'?scoreIntent(runs as IntentRun[],config.prompts.length):score(runs as Run[],edits as any);
   const run_ids=new Set([...runs,...edits].map(r=>r.run_id));
   const observed_configuration=[...new Map(config.ledger.calls.filter(c=>run_ids.has(c.run_id)).map(c=>[`${c.provider}:${c.model}`,{provider:c.provider,model:c.model}])).values()];
+  const judgments:JudgeState=config.judge&&!incomplete?await runJudges({...config.judge,ledger:config.ledger,cap_usd:config.cap_usd,
+    persist_ledger:config.persist_ledger??(()=>{}),evidence:config.judge.env.JUDGE_ANTHROPIC_KEY&&config.judge.env.JUDGE_OPENAI_KEY?prepareJudgeEvidence(runs):[]}):
+    {status:'skipped',reason:config.judge?'agent_incomplete':'not_requested',records:[],cost_usd:0};
+  const judge_summary=judgeSummary(judgments);
+  if(judgments.status==='incomplete')incomplete=true;
   const cost_complete=config.ledger.prompts.every(p=>p.settled);
   if(model_mismatch.length){incomplete=true;Object.assign(scored,{s1:false,s2:false,s3:false,s4:false,s5:false,passed:false});}
   const manual_settlements=config.ledger.prompts.filter(p=>p.manual_settlement).map(p=>({run_id:p.run_id,prompt_id:p.prompt_id,...p.manual_settlement}));
-  const evidence={schema:3,set:config.set,started_at,finished_at:new Date().toISOString(),model_label:config.model_label??null,default_model,model_mismatch,manual_settlements,observed_configuration,candidate_source_hash:config.candidate_source_hash,snapshot_manifest_hash:config.snapshot_manifest_hash,snapshot:snapshotEvidence(config.snapshot),runs,edits,score:scored,actual_cost_usd:cost_complete?spentUSD(config.ledger):null,metered_cost_usd:spentUSD(config.ledger),cost_complete,incomplete};
+  const evidence={schema:3,set:config.set,started_at,finished_at:new Date().toISOString(),model_label:config.model_label??null,default_model,model_mismatch,manual_settlements,observed_configuration,candidate_source_hash:config.candidate_source_hash,snapshot_manifest_hash:config.snapshot_manifest_hash,snapshot:snapshotEvidence(config.snapshot),runs,edits,score:scored,judgments,judge_summary,actual_cost_usd:cost_complete?spentUSD(config.ledger):null,metered_cost_usd:spentUSD(config.ledger),cost_complete,incomplete};
   return {exit_code:exitCode(scored,incomplete),evidence};
 }
 export function publicEvidence(e:ObjectValue):ObjectValue {
   if(e.set!=='holdout')return e;
   // A whitelist prevents individual failure details, specs and tool inputs leaking.
-  return {schema:e.schema,set:e.set,started_at:e.started_at,finished_at:e.finished_at,model_label:e.model_label,default_model:e.default_model,model_mismatch_count:e.model_mismatch?.length??0,manual_settlement_count:e.manual_settlements?.length??0,observed_configuration:e.observed_configuration,candidate_source_hash:e.candidate_source_hash,snapshot_manifest_hash:e.snapshot_manifest_hash,snapshot:snapshotEvidence(e.snapshot),score:e.score,actual_cost_usd:e.actual_cost_usd,metered_cost_usd:e.metered_cost_usd,cost_complete:e.cost_complete,incomplete:e.incomplete,runs:e.runs.map((r:any)=>({prompt_id:r.prompt_id,prompt_sha:r.prompt_sha}))};
+  return {schema:e.schema,set:e.set,started_at:e.started_at,finished_at:e.finished_at,model_label:e.model_label,default_model:e.default_model,model_mismatch_count:e.model_mismatch?.length??0,manual_settlement_count:e.manual_settlements?.length??0,observed_configuration:e.observed_configuration,candidate_source_hash:e.candidate_source_hash,snapshot_manifest_hash:e.snapshot_manifest_hash,snapshot:snapshotEvidence(e.snapshot),score:e.score,judge_summary:e.judge_summary?Object.fromEntries(['status','reason','cost_usd','models','configured_models','records','paired','combined_overall','criterion_mean','disagreement_count','coverage'].filter(k=>k in e.judge_summary).map(k=>[k,e.judge_summary[k]])):undefined,actual_cost_usd:e.actual_cost_usd,metered_cost_usd:e.metered_cost_usd,cost_complete:e.cost_complete,incomplete:e.incomplete,runs:e.runs.map((r:any)=>({prompt_id:r.prompt_id,prompt_sha:r.prompt_sha}))};
 }
 function inputJSON(path:string):any {return JSON.parse(readFileSync(privateFile(path),'utf8'))}
 export function candidateSourceHash():string {
@@ -192,8 +202,10 @@ export function assertPromptHash(set:string,hash:string,expected?:string):void {
  if(set==='benchmark'&&hash.startsWith('a74ce656679ca792'))throw new Error('Sealed input refused');
  if(set==='holdout'&&(!expected||hash!==expected))throw new Error('Frozen sealed hash mismatch');
 }
-function validateInputs(prompts:any,edits:any,snapshot:any):void {
-  if(!Array.isArray(prompts)||prompts.length!==10||prompts.some(p=>typeof p.id!=='string'||!p.id.trim()||typeof p.prompt!=='string'||!p.prompt.trim())||new Set(prompts.map(p=>p.id)).size!==10)throw new Error('Ten unique private prompts required');
+export function validateInputs(prompts:any,edits:any,snapshot:any,set='benchmark'):void {
+  if(!['benchmark','holdout'].includes(set)||!Array.isArray(prompts)||!prompts.length||prompts.some(p=>!p||typeof p.id!=='string'||!p.id.trim()||typeof p.prompt!=='string'||!p.prompt.trim()||!['dashboard','answer'].includes(p.expect)||typeof p.rationale!=='string')||new Set(prompts.map(p=>p.id)).size!==prompts.length)throw new Error('Unique explicit private intents required');
+  if(set==='holdout'){validateSnapshot(snapshot);return;}
+  if(prompts.length!==10||prompts.some(p=>p.expect!=='dashboard'))throw new Error('Ten dashboard intents required');
   if(!Array.isArray(edits)||stable(edits.map(e=>e.operation))!==stable(['title','threshold','add','remove','unit']))throw new Error('Five consecutive edit operations required');
   if(typeof edits[2].panel?.id!=='string'||!edits[2].panel.id.trim()||edits[3].panel_id!==edits[2].panel.id)throw new Error('Remove must target the newly added panel');
   validateSnapshot(snapshot);
@@ -203,9 +215,9 @@ export async function main(args=process.argv.slice(2),log:(message:string)=>void
   try {
     const opts=parseOptions(args);if(opts.help){log(HELP);return 0;}
     if(opts.mock) {
-      if(Object.keys(opts).some(k=>!['mock','out','model-label','no-output'].includes(k)))throw new Error('Mock options');
+      if(Object.keys(opts).some(k=>!['mock','out','model-label','no-output','judge'].includes(k)))throw new Error('Mock options');
       category='mock_verification';const {mockEvaluation,verifyMock}=await import('./mock');
-      const checked=await verifyMock();const result=await mockEvaluation(undefined,opts['model-label']?{model_label:opts['model-label']}:{});result.evidence.candidate_source_hash=candidateSourceHash();
+      const checked=await verifyMock();const result=await mockEvaluation(undefined,{...(opts['model-label']?{model_label:opts['model-label']}:{}),judge:opts.judge?true:undefined});result.evidence.candidate_source_hash=candidateSourceHash();
       if(!opts['no-output']){
         category='output';const out=safeOutput(join(opts.out??`.superpowers/eval/mock-${crypto.randomUUID()}`,opts['model-label']??'mock'),'benchmark');
         writeFileSync(join(out,'summary.json'),JSON.stringify(result.evidence,null,2)+'\n',{flag:'wx',mode:0o600});
@@ -216,7 +228,7 @@ export async function main(args=process.argv.slice(2),log:(message:string)=>void
     if(opts['no-output'])throw new Error('Only mock can skip output');
     if(opts.settle){
       if(Object.keys(opts).some(k=>!['settle','cost-usd','reason','cost-ledger'].includes(k))||!opts['cost-ledger']||opts['cost-usd']===undefined||!opts.reason)throw new Error('Settlement inputs');
-    }else for(const k of ['base','cookies','out','prompts-file','budget-usd','cost-ledger','snapshot-manifest','edits-file'])if(opts[k]===undefined)throw new Error('Missing private input');
+    }else for(const k of ['base','cookies','out','prompts-file','budget-usd','cost-ledger','snapshot-manifest',...((opts.set??'benchmark')==='benchmark'?['edits-file']:[])])if(opts[k]===undefined)throw new Error('Missing private input');
     const set=opts.set??'benchmark';let out:string|undefined,prompts:any,edits:any,snapshot:Snapshot|undefined,snapshotRaw:Uint8Array|undefined,cookies='';
     if(!opts.settle){
       if(set==='holdout'){
@@ -228,8 +240,8 @@ export async function main(args=process.argv.slice(2),log:(message:string)=>void
       // Check the name before opening. Content identity also rejects renamed sealed inputs.
       if(set==='benchmark'&&promptPath.toLowerCase().includes('holdout'))throw new Error('Sealed filename refused');
       const raw=readFileSync(promptPath);assertPromptHash(set,sha(raw),opts['holdout-sha']);
-      category='private_inputs';prompts=JSON.parse(raw.toString());edits=inputJSON(opts['edits-file']);
-      category='snapshot_manifest';snapshotRaw=readFileSync(privateFile(opts['snapshot-manifest']));snapshot=JSON.parse(Buffer.from(snapshotRaw).toString());validateInputs(prompts,edits,snapshot);
+      category='private_inputs';prompts=JSON.parse(raw.toString());edits=set==='benchmark'?inputJSON(opts['edits-file']):[];
+      category='snapshot_manifest';snapshotRaw=readFileSync(privateFile(opts['snapshot-manifest']));snapshot=JSON.parse(Buffer.from(snapshotRaw).toString());validateInputs(prompts,edits,snapshot,set);
       cookies=readFileSync(privateFile(opts.cookies),'utf8');
     }
     category='ledger';const ledgerPath=privateFile(opts['cost-ledger']);
@@ -239,10 +251,11 @@ export async function main(args=process.argv.slice(2),log:(message:string)=>void
     const persist=()=>{noSymlinks(ledgerPath);const temp=noSymlinks(ledgerPath+'.'+crypto.randomUUID()+'.tmp');writeFileSync(temp,JSON.stringify(ledger,null,2)+'\n',{flag:'wx',mode:0o600});renameSync(temp,ledgerPath);};
     if(opts.settle){category='settlement';manualSettlement(ledger,opts.settle,Number(opts['cost-usd']),opts.reason);persist();log(`Settlement recorded; total ledger spend $${spentUSD(ledger).toFixed(6)}`);return 0;}
     category='output';safeOutput(out!,set);
-    category='evaluation';const result=await runEvaluation({base:opts.base,cookies,model_label:opts['model-label'],prompts,edits,ledger,cap_usd:Number(opts['budget-usd']),snapshot:snapshot!,snapshot_manifest_hash:sha(snapshotRaw!),candidate_source_hash:candidateSourceHash(),set,persist_ledger:persist});
+    category='evaluation';const result=await runEvaluation({base:opts.base,cookies,model_label:opts['model-label'],prompts,edits,ledger,cap_usd:Number(opts['budget-usd']),snapshot:snapshot!,snapshot_manifest_hash:sha(snapshotRaw!),candidate_source_hash:candidateSourceHash(),set,persist_ledger:persist,judge:opts.judge?{env:process.env,endpoints:{anthropic:process.env.JUDGE_ANTHROPIC_BASE??'',openai:process.env.JUDGE_OPENAI_BASE??''},fetch}:undefined});
     if(candidateSourceHash()!==result.evidence.candidate_source_hash){result.exit_code=2;result.evidence.incomplete=true;result.evidence.candidate_changed=true;}
+    if(set==='holdout'&&opts.judge&&result.evidence.judgments.status!=='skipped')writeFileSync(join(out!,'judge-evidence.json'),JSON.stringify({evidence:prepareJudgeEvidence(result.evidence.runs),judgments:result.evidence.judgments},null,2)+'\n',{flag:'wx',mode:0o600});
     writeFileSync(join(out!,'summary.json'),JSON.stringify(publicEvidence(result.evidence),null,2)+'\n',{flag:'wx',mode:0o600});
-    log(`Evaluation exit ${result.exit_code}; aggregate S1-S5 ${result.evidence.score.passed?'pass':'fail'}; cost ${result.evidence.actual_cost_usd===null?'incomplete':('$'+result.evidence.actual_cost_usd.toFixed(6))}`);
+    log(`Evaluation exit ${result.exit_code}; aggregate scoring ${result.evidence.score.passed?'pass':'fail'}; cost ${result.evidence.actual_cost_usd===null?'incomplete':('$'+result.evidence.actual_cost_usd.toFixed(6))}; judges ${result.evidence.judge_summary.status}/${result.evidence.judge_summary.reason??'paired'}`);
     return result.exit_code;
   }catch {log(`Evaluation exit 2; category: ${category}.`);return 2;}
   finally {if(lockFD!==undefined){closeSync(lockFD);if(lock)unlinkSync(lock);}}
