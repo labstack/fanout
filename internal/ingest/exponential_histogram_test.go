@@ -4,6 +4,7 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"time"
 
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 )
@@ -72,5 +73,25 @@ func TestExponentialHistogramRetainsEveryObservation(t *testing.T) {
 				t.Fatalf("total=%d count=%d", total, dp.Count)
 			}
 		})
+	}
+}
+
+func TestExponentialHistogramWithManyOverflowingBucketsConvertsInLinearTime(t *testing.T) {
+	positive := make([]uint64, 1_000_000)
+	for i := range positive {
+		positive[i] = 1
+	}
+	dp := &metricspb.ExponentialHistogramDataPoint{
+		Scale:    -10,
+		Count:    uint64(len(positive)),
+		Positive: &metricspb.ExponentialHistogramDataPoint_Buckets{BucketCounts: positive},
+	}
+	started := time.Now()
+	bounds, counts := explicitExpHistogram(dp)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("conversion took %s", elapsed)
+	}
+	if !reflect.DeepEqual(bounds, []float64{1}) || !reflect.DeepEqual(counts, []uint64{0, uint64(len(positive))}) {
+		t.Fatalf("bounds=%v counts=%v", bounds, counts)
 	}
 }

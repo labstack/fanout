@@ -866,18 +866,19 @@ func explicitExpHistogram(dp *metricspb.ExponentialHistogramDataPoint) ([]float6
 	}
 	counts = append(counts, 0)
 	// Extreme scales and offsets overflow float64 or underflow to zero. Such a
-	// bound cannot separate float64 observations, so removing it merges the two
-	// buckets it separated and every count is kept.
-	for i := 0; i < len(bounds); {
-		if math.IsInf(bounds[i], 0) || math.IsNaN(bounds[i]) || (i > 0 && bounds[i] <= bounds[i-1]) {
-			counts[i] += counts[i+1]
-			counts = append(counts[:i+1], counts[i+2:]...)
-			bounds = append(bounds[:i], bounds[i+1:]...)
+	// bound cannot separate float64 observations, so dropping it merges the
+	// bucket above it into the one below and every count is kept. One pass, so
+	// a point with many such bounds costs linear time.
+	keptBounds, keptCounts := bounds[:0], counts[:1]
+	for i, b := range bounds {
+		if math.IsInf(b, 0) || math.IsNaN(b) || (len(keptBounds) > 0 && b <= keptBounds[len(keptBounds)-1]) {
+			keptCounts[len(keptCounts)-1] += counts[i+1]
 			continue
 		}
-		i++
+		keptBounds = append(keptBounds, b)
+		keptCounts = append(keptCounts, counts[i+1])
 	}
-	return bounds, counts
+	return keptBounds, keptCounts
 }
 
 func summaryQuantiles(dp *metricspb.SummaryDataPoint) []float64 {
