@@ -99,21 +99,30 @@ func BenchmarkPanelQueries24Hours(b *testing.B) {
 	b.StopTimer()
 	var data panelBenchData
 	input := os.Getenv("FANOUT_PANEL_BENCH_DATA_DIR")
-	if input != "" {
-		volume := 1
-		if raw := os.Getenv("FANOUT_PANEL_BENCH_VOLUME"); raw != "" {
-			var err error
-			volume, err = strconv.Atoi(raw)
-			if err != nil || (volume != 1 && volume != 10) {
-				b.Fatal("FANOUT_PANEL_BENCH_VOLUME must be 1 or 10")
+	if output := os.Getenv("FANOUT_PANEL_BENCH_OUTPUT_DIR"); output != "" {
+		data, _ = loadPanelScale(b, output)
+	} else {
+		for _, name := range []string{"FANOUT_PANEL_BENCH_SPANS_PER_SECOND", "FANOUT_PANEL_BENCH_HOURS", "FANOUT_PANEL_BENCH_HOSTS", "FANOUT_PANEL_BENCH_CONTAINERS_PER_HOST"} {
+			if os.Getenv(name) != "" {
+				b.Fatal("scale measurement requires completed output directory")
 			}
 		}
-		data = preparePanelReplay(b, input, volume)
-	} else {
-		if os.Getenv("FANOUT_PANEL_BENCH_VOLUME") != "" {
-			b.Fatal("volume requires replay input")
+		if input != "" {
+			volume := 1
+			if raw := os.Getenv("FANOUT_PANEL_BENCH_VOLUME"); raw != "" {
+				var err error
+				volume, err = strconv.Atoi(raw)
+				if err != nil || (volume != 1 && volume != 10) {
+					b.Fatal("FANOUT_PANEL_BENCH_VOLUME must be 1 or 10")
+				}
+			}
+			data = preparePanelReplay(b, input, volume)
+		} else {
+			if os.Getenv("FANOUT_PANEL_BENCH_VOLUME") != "" {
+				b.Fatal("volume requires replay input")
+			}
+			data = preparePanelRegression(b)
 		}
-		data = preparePanelRegression(b)
 	}
 	engine, cfg := panelBenchEngine(b, data)
 	var version, memory string
@@ -303,9 +312,10 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	}
 	start := time.Unix(0, int64(time.Hour)).UTC()
 	n := start.Add(time.Minute).UnixNano()
-	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}, Metrics: []telemetry.Metric{
-		{Namespace: "bench", ServiceName: "checkout", Name: "absent", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
-		{Namespace: "bench", ServiceName: "checkout", Name: "started", Type: "sum", Monotonic: true, Temporality: "cumulative", StartTimeUnixNanos: n - int64(30*time.Second), TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+	resource := map[string]any{"service.namespace": "bench", "host.name": "bench-source", "nested": map[string]any{"ok": true}}
+	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", Resource: resource, TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", Resource: resource, TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}, Metrics: []telemetry.Metric{
+		{Namespace: "bench", ServiceName: "checkout", Resource: resource, Name: "absent", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+		{Namespace: "bench", ServiceName: "checkout", Resource: resource, Name: "started", Type: "sum", Monotonic: true, Temporality: "cumulative", StartTimeUnixNanos: n - int64(30*time.Second), TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -362,6 +372,12 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 		t.Fatalf("source metadata changed: %v", err)
 	}
 	engine := assertPanelReplay(t, data, 48)
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		var mismatched int64
+		if err := engine.DB.QueryRowContext(t.Context(), "SELECT count(*) FROM "+signal+" WHERE namespace<>'bench' OR resource['service.namespace']::VARCHAR<>namespace OR resource['host.name']::VARCHAR<>'bench-source' OR resource['nested']['ok']::BOOLEAN<>true").Scan(&mismatched); err != nil || mismatched != 0 {
+			t.Fatalf("legacy signed namespace/resource changed: %s count=%d err=%v", signal, mismatched, err)
+		}
+	}
 	var absent, shifted int64
 	if err := engine.DB.QueryRowContext(t.Context(), `SELECT count(*) FILTER (WHERE start_time IS NULL), count(*) FILTER (WHERE epoch_ns(time)-epoch_ns(start_time)=30000000000) FROM metrics`).Scan(&absent, &shifted); err != nil || absent != 48 || shifted != 48 {
 		t.Fatalf("metric starts: absent=%d shifted=%d err=%v", absent, shifted, err)
