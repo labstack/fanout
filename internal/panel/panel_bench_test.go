@@ -3,6 +3,7 @@
 package panel
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,6 +19,79 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func TestMetricReplayCopyPreservesSourceAndStartTime(t *testing.T) {
+	input := t.TempDir()
+	repo, err := telemetrystore.Open(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := metricCounter(fixtureStart, 100)
+	m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano() + 17
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric", Metrics: []telemetry.Metric{m}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+	canary := filepath.Join(input, "parquet", "staging", "keep")
+	if err := os.MkdirAll(filepath.Dir(canary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canary, []byte("immutable source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Include schema, metadata, every source Parquet file and staging canary;
+	// comparing the inventories also catches created or removed source files.
+	snapshot := func() map[string][32]byte {
+		t.Helper()
+		files := map[string][32]byte{}
+		if err := filepath.WalkDir(input, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(input, path)
+			files[rel] = sha256.Sum256(raw)
+			return err
+		}); err != nil {
+			t.Fatal("cannot snapshot cross-check source")
+		}
+		return files
+	}
+	before := snapshot()
+	data := copyMetricCrosscheckData(t, input)
+	if data.Start != fixtureStart || data.End != fixtureStart.Add(time.Nanosecond) || data.Metrics != 1 {
+		t.Fatal("copy did not retain exact metric event-time bounds and count")
+	}
+	engine, cfg := panelBenchEngine(t, data)
+	var start int64
+	if err := engine.DB.QueryRowContext(t.Context(), "SELECT epoch_ns(start_time) FROM metrics WHERE name='net'").Scan(&start); err != nil || start != m.StartTimeUnixNanos {
+		t.Fatalf("start=%d err=%v", start, err)
+	}
+	// All derived Parquet stays under the engine's configured query directory.
+	raw := filepath.Join(cfg.QueryDir(), "shifted.parquet")
+	metadata := telemetry.BatchMetadata{Version: 4, ID: "shifted"}
+	if err := tilePanelParquet(filepath.Join(input, "parquet", "batches", "metric.batch", "metrics.parquet"), raw, "metrics", "", fixtureStart, fixtureStart.Add(time.Minute), time.Hour, &metadata, map[string]bool{}, map[string]bool{}); err != nil {
+		t.Fatal("cannot shift private metric fixture")
+	}
+	var shifted int64
+	if err := engine.DB.QueryRowContext(t.Context(), "SELECT start_time_unix_nano FROM read_parquet(?)", raw).Scan(&shifted); err != nil || shifted != m.StartTimeUnixNanos+int64(time.Hour) {
+		t.Fatalf("shifted=%d err=%v", shifted, err)
+	}
+	if !reflect.DeepEqual(snapshot(), before) {
+		t.Fatal("source files changed")
+	}
+	if _, err := os.Stat(filepath.Join(input, "query")); !os.IsNotExist(err) {
+		t.Fatal("source query directory created")
+	}
+}
 
 // BenchmarkPanelQueries24Hours measures the existing executor directly. The
 // generated dataset is regression-only; representative runs require replay.

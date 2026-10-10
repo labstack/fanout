@@ -112,6 +112,80 @@ func panelReplayMetadata(input string) ([]telemetry.BatchMetadata, error) {
 	return out, nil
 }
 
+// Copy accepted batches byte for byte before opening a repository. Like the
+// replay harness, input is the telemetry root containing parquet/batches.
+// Opening only the private copy leaves source schema and staging untouched.
+func copyMetricCrosscheckData(tb testing.TB, input string) panelBenchData {
+	tb.Helper()
+	metadata, err := panelReplayMetadata(input)
+	if err != nil {
+		tb.Fatal("cross-check input needs valid format-4 batch metadata")
+	}
+	data := panelBenchData{Dir: filepath.Join(panelBenchScratch(tb), "state")}
+	for _, m := range metadata {
+		names := []string{"metadata.json"}
+		if m.Spans > 0 {
+			names = append(names, "spans.parquet", "trace.fidx")
+		}
+		if m.Logs > 0 {
+			names = append(names, "logs.parquet")
+		}
+		if m.Metrics > 0 {
+			names = append(names, "metrics.parquet")
+		}
+		dst := filepath.Join(data.Dir, "telemetry", "parquet", "batches", m.ID+telemetry.BatchSuffix)
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			tb.Fatal("cannot create cross-check batch directory")
+		}
+		for _, name := range names {
+			in, err := os.Open(filepath.Join(input, "parquet", "batches", m.ID+telemetry.BatchSuffix, name))
+			if err != nil {
+				tb.Fatal("cannot open cross-check input")
+			}
+			info, err := in.Stat()
+			if err != nil || !info.Mode().IsRegular() {
+				in.Close()
+				tb.Fatal("cross-check files must be regular")
+			}
+			out, err := os.Create(filepath.Join(dst, name))
+			if err != nil {
+				in.Close()
+				tb.Fatal("cannot create cross-check copy")
+			}
+			_, copyErr := io.Copy(out, in)
+			if err := errors.Join(copyErr, out.Close(), in.Close()); err != nil {
+				tb.Fatal("cannot copy cross-check input")
+			}
+		}
+		data.Spans += int64(m.Spans)
+		data.Logs += int64(m.Logs)
+		data.Metrics += int64(m.Metrics)
+	}
+	// Repository metadata derives each signal's bounds from its event footer.
+	repo, err := telemetrystore.Open(filepath.Join(data.Dir, "telemetry"))
+	if err != nil {
+		tb.Fatal("cannot open cross-check copy")
+	}
+	low, high := int64(math.MaxInt64), int64(math.MinInt64)
+	for _, m := range repo.Parquet.BatchMetadata() {
+		if m.Metrics > 0 && m.MetricTime.Known {
+			low = min(low, m.MetricTime.MinNanos)
+			high = max(high, m.MetricTime.MaxNanos)
+		}
+	}
+	if err := repo.Close(); err != nil {
+		tb.Fatal("cannot close cross-check copy")
+	}
+	if low > high || high == math.MaxInt64 {
+		tb.Fatal("cross-check fixture needs usable metric event-time bounds")
+	}
+	data.Start, data.End = time.Unix(0, low).UTC(), time.Unix(0, high+1).UTC()
+	if data.End.Sub(data.Start) > 24*time.Hour {
+		data.Start = data.End.Add(-24 * time.Hour)
+	}
+	return data
+}
+
 func panelBenchScratch(tb testing.TB) string {
 	tb.Helper()
 	root, err := os.Getwd()
