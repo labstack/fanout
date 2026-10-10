@@ -3,12 +3,172 @@ package panel
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func TestMetricGapDeltasAttributeWholeIncreaseAndBoundExpansion(t *testing.T) {
+	for _, kind := range []string{"counter", "histogram"} {
+		t.Run(kind, func(t *testing.T) {
+			e, db := metricFixture(t)
+			first := fixtureStart.Add(time.Second)
+			later := first.Add(24 * time.Hour)
+			if kind == "counter" {
+				insertMetrics(t, db, metricCounter(first, 100))
+				insertMetrics(t, db, metricCounter(later, 86500))
+			} else {
+				insertMetrics(t, db, metricHistogram(first, "[10,20]", "[10,10,0]", 20, 300, "a"))
+				insertMetrics(t, db, metricHistogram(later, "[10,20]", "[43210,43210,0]", 86420, 1296300, "a"))
+			}
+			scope := Scope{Start: fixtureStart, End: later.Add(6 * time.Minute), Interval: 10 * time.Second}
+			cte, args, err := metricSeriesCTE(nil, scope, []string{kind})
+			if err != nil {
+				t.Fatal(err)
+			}
+			spread, spreadArgs := metricSpreadCTE(scope)
+			cte += spread
+			args = append(args, spreadArgs...)
+			// Count the expansion CTE itself, before clipping or aggregation
+			// could conceal amplification. This is an engine assertion, not a
+			// time or output-size proxy.
+			var deltas, maxRows int64
+			if err := db.QueryRowContext(t.Context(), cte+` SELECT count(*),max(n) FROM (
+                SELECT series_id,time,count(*) AS n FROM metric_interval_buckets GROUP BY series_id,time)`, args...).Scan(&deltas, &maxRows); err != nil {
+				t.Fatal(err)
+			}
+			limit := int64(math.Ceil(600/scope.Interval.Seconds())) + 1
+			if deltas != 1 || maxRows != 1 || maxRows > limit {
+				t.Fatalf("expanded deltas=%d max_rows=%d bound=%d", deltas, maxRows, limit)
+			}
+			var bucket int64
+			var covered, increase, sum float64
+			var weights string
+			if err := db.QueryRowContext(t.Context(), cte+` SELECT _bucket,elapsed_s,
+                coalesce(increase,count_increase),coalesce(sum_increase,0),
+                coalesce(to_json(bound_increases)::VARCHAR,'null') FROM metric_spread`, args...).Scan(&bucket, &covered, &increase, &sum, &weights); err != nil {
+				t.Fatal(err)
+			}
+			wantBucket := alignedBucketMillis(later, scope.Interval)
+			if bucket != wantBucket || covered != 86400 || increase != 86400 {
+				t.Fatalf("gap bucket=%d covered=%v increase=%v", bucket, covered, increase)
+			}
+			if kind == "histogram" && (sum != 1296000 || weights != "[43200.0,43200.0,0.0]") {
+				t.Fatalf("histogram gap sum=%v weights=%s", sum, weights)
+			}
+			measures := []string{"sum(value)"}
+			wantSum := 86400.0
+			if kind == "histogram" {
+				measures = append(measures, "avg(value)", "p95(value)")
+				wantSum = 1296000
+			}
+			r := runMetricMeasure(t, e, measures, "10s", nil, scope.Start, scope.End)
+			// The original baseline point keeps its existing NULL panel cell.
+			if !reflect.DeepEqual(metricValues(t, r, "time"), []any{fixtureStart.UnixMilli(), wantBucket}) ||
+				!reflect.DeepEqual(metricValues(t, r, "sum"), []any{nil, wantSum}) {
+				t.Fatalf("gap increase escaped its point bucket: %+v", r.Frame)
+			}
+			if kind == "histogram" && (metricValues(t, r, "avg")[1] != 15.0 || metricValues(t, r, "p95")[1] != 19.0) {
+				t.Fatalf("gap distribution=%+v", r.Frame)
+			}
+			// Execute the fixed 10-second scope directly: full-window panel
+			// execution may automatically widen buckets to respect its limit.
+			var rows, carried, firstBucket, lastBucket int64
+			var minRate, maxRate, totalIncrease float64
+			if err := db.QueryRowContext(t.Context(), cte+metricRateCarryCTE(scope)+` SELECT
+                count(*),count(*) FILTER (WHERE _carry),min(_bucket),max(_bucket),
+                min(_rate_share/_rate_covered),max(_rate_share/_rate_covered),
+                sum(coalesce(increase,count_increase)) FROM metric_rate_rows`, args...).Scan(
+				&rows, &carried, &firstBucket, &lastBucket, &minRate, &maxRate, &totalIncrease); err != nil {
+				t.Fatal(err)
+			}
+			if rows != 31 || carried != 30 || firstBucket != wantBucket || lastBucket != wantBucket+300000 ||
+				minRate != 1 || maxRate != 1 || totalIncrease != 86400 {
+				t.Fatalf("gap carry rows=%d carried=%d buckets=%d..%d rate=%v..%v increase=%v",
+					rows, carried, firstBucket, lastBucket, minRate, maxRate, totalIncrease)
+			}
+		})
+	}
+}
+
+func TestMetricExactlyLookbackDeltasStillSpread(t *testing.T) {
+	for _, kind := range []string{"counter", "histogram"} {
+		t.Run(kind, func(t *testing.T) {
+			e, db := metricFixture(t)
+			first := fixtureStart.Add(time.Second)
+			later := first.Add(10 * time.Minute)
+			if kind == "counter" {
+				insertMetrics(t, db, metricCounter(first, 100))
+				insertMetrics(t, db, metricCounter(later, 700))
+			} else {
+				insertMetrics(t, db, metricHistogram(first, "[10,20]", "[10,10,0]", 20, 300, "a"))
+				insertMetrics(t, db, metricHistogram(later, "[10,20]", "[310,310,0]", 620, 9300, "a"))
+			}
+			scope := Scope{Start: fixtureStart, End: later.Add(time.Second), Interval: 10 * time.Second}
+			cte, args, err := metricSeriesCTE(nil, scope, []string{kind})
+			if err != nil {
+				t.Fatal(err)
+			}
+			spread, spreadArgs := metricSpreadCTE(scope)
+			cte += spread
+			args = append(args, spreadArgs...)
+			var expanded int64
+			var covered, increase float64
+			if err := db.QueryRowContext(t.Context(), cte+` SELECT
+                (SELECT count(*) FROM metric_interval_buckets),sum(elapsed_s),
+                sum(coalesce(increase,count_increase)) FROM metric_spread`, args...).Scan(&expanded, &covered, &increase); err != nil {
+				t.Fatal(err)
+			}
+			if expanded != 61 || covered != 600 || increase != 600 {
+				t.Fatalf("lookback boundary expanded=%d covered=%v increase=%v", expanded, covered, increase)
+			}
+			r := runMetricMeasure(t, e, []string{"rate()", "sum(value)"}, "10s", nil, scope.Start, scope.End)
+			if r.Frame.Rows != 61 {
+				t.Fatalf("lookback boundary buckets=%d want 61", r.Frame.Rows)
+			}
+			for i, rate := range metricValues(t, r, "rate") {
+				want := 10.0
+				if i == 0 {
+					want = 9
+				} else if i == 60 {
+					want = 1
+				}
+				if kind == "histogram" {
+					want *= 15
+				}
+				if rate != 1.0 || metricValues(t, r, "sum")[i] != want {
+					t.Fatalf("lookback boundary bucket %d: %+v", i, r.Frame)
+				}
+			}
+		})
+	}
+}
+
+func TestMetricGapDeltaAtWindowStartRetainsFullElapsed(t *testing.T) {
+	for _, kind := range []string{"counter", "histogram"} {
+		t.Run(kind, func(t *testing.T) {
+			e, db := metricFixture(t)
+			later := fixtureStart.Add(7 * time.Second)
+			m := metricCounter(later, 86400)
+			wantSum := 86400.0
+			if kind == "histogram" {
+				m = metricHistogram(later, "[10,20]", "[43200,43200,0]", 86400, 1296000, "a")
+				wantSum = 1296000
+			}
+			m.Temporality, m.StartTimeUnixNanos = "delta", later.Add(-24*time.Hour).UnixNano()
+			insertMetrics(t, db, m)
+			for _, bucket := range []string{"", "10s"} {
+				r := runMetricMeasure(t, e, []string{"rate()", "sum(value)"}, bucket, nil, later, later.Add(time.Second))
+				if r.Frame.Rows != 1 || metricValues(t, r, "rate")[0] != 1.0 || metricValues(t, r, "sum")[0] != wantSum {
+					t.Fatalf("gap at clipped window start bucket=%q: %+v", bucket, r.Frame)
+				}
+			}
+		})
+	}
+}
 
 func TestMetricCounterTotalsHoldAcrossStaggeredExportIntervals(t *testing.T) {
 	e, db := metricFixture(t)

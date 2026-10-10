@@ -196,9 +196,12 @@ is not a reset, because observations can be negative.
 
 Each cumulative increase covers the interval from its previous point to its
 current point. A delta uses its usable start time, or its preceding point's
-time. Fanout spreads each increase across the buckets that interval overlaps,
-in proportion to the overlap, clipping buckets to the selected window.
-Histogram count, sum and every bound's increase use the same proportion.
+time. For intervals of at most 10 minutes, Fanout spreads each increase across
+the buckets that interval overlaps, in proportion to the overlap, clipping
+buckets to the selected window. Longer intervals are gaps: the whole increase
+belongs to the current point's bucket, with covered time equal to the full
+elapsed interval. Histogram count, sum and every bound's increase follow the
+same rule.
 
 `rate()` is per-second increase over **covered elapsed time**, not bucket width.
 For each series, Fanout divides the sum of its overlap shares by their covered

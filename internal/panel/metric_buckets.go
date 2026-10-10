@@ -31,8 +31,9 @@ func metricBucketWindowCTE(scope Scope) (string, []any) {
 		metricBucketIndexSQL("_window_end-1", scope.Interval) + `+1)) AS indexes(i))`, []any{scope.Start.UTC(), scope.End.UTC()}
 }
 
-// Each delta expands only into its overlapped bucket indexes. There is no
-// deltas-by-buckets range join. Interval-less deltas retain point attribution.
+// Deltas within the lookback expand only into their overlapped bucket indexes.
+// Longer gaps and interval-less deltas retain point attribution, bounding each
+// expansion to at most ceil(metricLookback/interval)+1 bucket rows.
 func metricSpreadCTE(scope Scope) (string, []any) {
 	cte, args := metricBucketWindowCTE(scope)
 	start, end := fmt.Sprint(scope.Start.UnixNano()), fmt.Sprint(scope.End.UnixNano())
@@ -42,27 +43,29 @@ func metricSpreadCTE(scope Scope) (string, []any) {
 		lo = fmt.Sprintf("greatest(_lo,i*%d)", scope.Interval.Nanoseconds())
 		hi = fmt.Sprintf("least(_hi,(i+1)*%d)", scope.Interval.Nanoseconds())
 	}
-	indexes := `CASE WHEN elapsed_s IS NULL THEN [` + metricBucketIndexSQL("epoch_ns(time::TIMESTAMP_NS)", scope.Interval) + `]
+	indexes := `CASE WHEN elapsed_s IS NULL OR _gap THEN [` + metricBucketIndexSQL("epoch_ns(time::TIMESTAMP_NS)", scope.Interval) + `]
         ELSE range(` + metricBucketIndexSQL("_lo", scope.Interval) + `,` + metricBucketIndexSQL("_hi-1", scope.Interval) + `+1) END`
 	// A stat has exactly one bucket; no per-delta list expansion is needed.
 	expansion := ",unnest(" + indexes + ") AS i"
 	if scope.Interval <= 0 {
 		expansion = ""
 	}
+	lookback := fmt.Sprint(metricLookback.Seconds())
 	cte += `,
-      metric_intervals AS (SELECT *,greatest(epoch_ns(_elapsed_from::TIMESTAMP_NS),` + start + `) AS _lo,
+      metric_intervals AS (SELECT *,elapsed_s>` + lookback + ` AS _gap,
+        greatest(epoch_ns(_elapsed_from::TIMESTAMP_NS),` + start + `) AS _lo,
         least(epoch_ns(time::TIMESTAMP_NS),` + end + `) AS _hi
-        FROM metric_deltas WHERE (elapsed_s>0 AND time>make_timestamp_ns(` + start + `)::TIMESTAMPTZ_NS)
-          OR (elapsed_s IS NULL AND time>=make_timestamp_ns(` + start + `)::TIMESTAMPTZ_NS)),
-      metric_interval_buckets AS (SELECT *` + expansion + ` FROM metric_intervals WHERE elapsed_s IS NULL OR _hi>_lo),
+        FROM metric_deltas WHERE (elapsed_s>0 AND elapsed_s<=` + lookback + ` AND time>make_timestamp_ns(` + start + `)::TIMESTAMPTZ_NS)
+          OR ((elapsed_s IS NULL OR elapsed_s>` + lookback + `) AND time>=make_timestamp_ns(` + start + `)::TIMESTAMPTZ_NS)),
+      metric_interval_buckets AS (SELECT *` + expansion + ` FROM metric_intervals WHERE elapsed_s IS NULL OR _gap OR _hi>_lo),
       metric_overlaps AS (SELECT *,` + bucket + ` AS _spread_bucket,
-        CASE WHEN elapsed_s>0 THEN (` + hi + `-` + lo + `)::DOUBLE/1e9 END AS _covered
+        CASE WHEN _gap THEN elapsed_s WHEN elapsed_s>0 THEN (` + hi + `-` + lo + `)::DOUBLE/1e9 END AS _covered
         FROM metric_interval_buckets),
       metric_spread AS MATERIALIZED (SELECT * EXCLUDE (_bucket,increase,count_increase,sum_increase,bound_increases,elapsed_s),
-        _spread_bucket AS _bucket,CASE WHEN elapsed_s IS NULL THEN increase ELSE increase*_covered/elapsed_s END AS increase,
-        CASE WHEN elapsed_s IS NULL THEN count_increase ELSE count_increase*_covered/elapsed_s END AS count_increase,
-        CASE WHEN elapsed_s IS NULL THEN sum_increase ELSE sum_increase*_covered/elapsed_s END AS sum_increase,
-        CASE WHEN elapsed_s IS NULL THEN list_transform(bound_increases,lambda n: n::DOUBLE)
+        _spread_bucket AS _bucket,CASE WHEN elapsed_s IS NULL OR _gap THEN increase ELSE increase*_covered/elapsed_s END AS increase,
+        CASE WHEN elapsed_s IS NULL OR _gap THEN count_increase ELSE count_increase*_covered/elapsed_s END AS count_increase,
+        CASE WHEN elapsed_s IS NULL OR _gap THEN sum_increase ELSE sum_increase*_covered/elapsed_s END AS sum_increase,
+        CASE WHEN elapsed_s IS NULL OR _gap THEN list_transform(bound_increases,lambda n: n::DOUBLE)
           ELSE list_transform(bound_increases,lambda n: n::DOUBLE*_covered/elapsed_s) END AS bound_increases,
         _covered AS elapsed_s FROM metric_overlaps WHERE elapsed_s IS NULL OR _covered>0)`
 	return cte, args
@@ -106,7 +109,7 @@ func metricCarryCandidatesCTE(scope Scope, points, covered, eligible string, inc
 }
 
 // Rates alone may extend a completed delta. Covered buckets win outright;
-// a delta ending exactly on the boundary covers no new duration.
+// a spread delta ending exactly on the boundary covers no new duration.
 func metricRateCarryCTE(scope Scope) string {
 	return metricCarryCandidatesCTE(scope, "metric_deltas", "metric_spread", "elapsed_s>0", true) + `,
       metric_rate_carry AS (SELECT p.* EXCLUDE (_bucket,increase,count_increase,sum_increase,bound_increases,elapsed_s),

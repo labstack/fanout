@@ -113,17 +113,21 @@ func metricOracleSQL(measure string) string {
 	if measure == "rate()" {
 		// Ordinary joins and a recency rank keep this independent of the
 		// compiler's index expansion and ASOF carry implementation.
+		// Gaps over 600 seconds enter as whole point shares with their full
+		// elapsed time; only shorter intervals participate in overlap joins.
 		return base + `, deltas AS (
           SELECT *,CASE WHEN temporality='delta' OR restarted OR value<previous_value THEN value
             ELSE value-previous_value END AS increase FROM steps WHERE elapsed>0),
         interval_shares AS (
           SELECT d.*,b.bucket,
             (least(epoch_ns(time::TIMESTAMP_NS),bucket_end)-greatest(epoch_ns(covered_from::TIMESTAMP_NS),bucket_start))::DOUBLE/1e9 AS covered
-          FROM deltas d JOIN buckets b ON epoch_ns(time::TIMESTAMP_NS)>bucket_start
+          FROM deltas d JOIN buckets b ON elapsed<=600 AND epoch_ns(time::TIMESTAMP_NS)>bucket_start
             AND epoch_ns(covered_from::TIMESTAMP_NS)<bucket_end),
         shares AS (
           SELECT bucket,series_id,time,ingested_unix_nano,attributes,
-            increase*covered/elapsed AS share,covered FROM interval_shares WHERE covered>0),
+            increase*covered/elapsed AS share,covered FROM interval_shares WHERE covered>0
+          UNION ALL SELECT point_bucket,series_id,time,ingested_unix_nano,attributes,increase,elapsed
+          FROM deltas,settings WHERE elapsed>600 AND time>=visible_start),
         recent AS (
           SELECT d.*,b.bucket,row_number() OVER (PARTITION BY bucket,series_id ORDER BY time DESC) AS recency
           FROM buckets b JOIN deltas d ON epoch_ns(time::TIMESTAMP_NS)<=bucket_start
@@ -160,10 +164,10 @@ func metricOracleSQL(measure string) string {
       interval_shares AS (
         SELECT b.bucket,i.upper_bound,
           i.n::DOUBLE*((least(epoch_ns(time::TIMESTAMP_NS),bucket_end)-greatest(epoch_ns(covered_from::TIMESTAMP_NS),bucket_start))::DOUBLE/1e9)/elapsed AS n
-        FROM increases i JOIN buckets b ON elapsed>0 AND epoch_ns(time::TIMESTAMP_NS)>bucket_start
+        FROM increases i JOIN buckets b ON elapsed>0 AND elapsed<=600 AND epoch_ns(time::TIMESTAMP_NS)>bucket_start
           AND epoch_ns(covered_from::TIMESTAMP_NS)<bucket_end
         UNION ALL SELECT point_bucket,upper_bound,n::DOUBLE FROM increases,settings
-          WHERE elapsed IS NULL AND time>=visible_start),
+          WHERE (elapsed IS NULL OR elapsed>600) AND time>=visible_start),
       merged AS (
         SELECT bucket,upper_bound,sum(n)::DOUBLE AS n FROM interval_shares WHERE n>=0 GROUP BY bucket,upper_bound),
       cumulative AS (
@@ -406,6 +410,29 @@ func TestMetricOracleMatchesDeltaStartsAndMultipleSeries(t *testing.T) {
 	for _, tc := range []struct{ name, measure string }{{"net", "rate()"}, {"latency", "p95(value)"}} {
 		t.Run(tc.measure, func(t *testing.T) {
 			crosscheckMetricFrame(t, e.engine, tc.name, tc.measure, fixtureStart, end)
+		})
+	}
+}
+
+func TestMetricOracleMatchesGapsAndLookbackBoundary(t *testing.T) {
+	for _, elapsed := range []time.Duration{10 * time.Minute, 10*time.Minute + time.Nanosecond, 24 * time.Hour} {
+		t.Run(elapsed.String(), func(t *testing.T) {
+			e, db := metricFixture(t)
+			first := fixtureStart.Add(time.Second)
+			later := first.Add(elapsed)
+			insertMetrics(t, db, metricCounter(first, 100))
+			insertMetrics(t, db, metricCounter(later, 86500))
+			h := metricHistogram(first, "[10,20]", "[10,10,0]", 20, 300, "a")
+			h.Name = "latency"
+			insertMetrics(t, db, h)
+			h = metricHistogram(later, "[10,20]", "[43210,43210,0]", 86420, 1296300, "a")
+			h.Name = "latency"
+			insertMetrics(t, db, h)
+			for _, tc := range []struct{ name, measure string }{{"net", "rate()"}, {"latency", "p95(value)"}} {
+				t.Run(tc.measure, func(t *testing.T) {
+					crosscheckMetricFrame(t, e.engine, tc.name, tc.measure, fixtureStart, later.Add(6*time.Minute))
+				})
+			}
 		})
 	}
 }
