@@ -98,7 +98,7 @@ jobs:
         run: just test-race
 
   e2e:
-    name: Browser smoke
+    name: Browser smoke, performance and accessibility
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -119,11 +119,11 @@ jobs:
         run: just ui-deps
       - name: just e2e
         run: just e2e
-      - name: Upload browser failures
-        if: failure()
+      - name: Upload browser evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: browser-smoke-failure
+          name: browser-evidence
           path: |
             ui/host/playwright-report/
             ui/host/test-results/

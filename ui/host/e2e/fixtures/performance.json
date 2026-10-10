@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "name": "Dashboard performance",
+  "time": {
+    "range": "24h",
+    "refresh": "off"
+  },
+  "variables": [
+    {
+      "name": "service",
+      "kind": "query",
+      "from": "spans",
+      "field": "service",
+      "default": "$__all",
+      "include_all": true
+    }
+  ],
+  "annotations": {
+    "deploys": true,
+    "anomalies": true
+  },
+  "panels": [
+    {
+      "id": "traces_all",
+      "title": "Distinct traces",
+      "viz": "table",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "count_distinct(trace_id)"
+        ],
+        "where": [
+          "trace_id <> ''"
+        ]
+      }
+    },
+    {
+      "id": "traces_checkout",
+      "title": "Checkout traces",
+      "viz": "table",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "count_distinct(trace_id)"
+        ],
+        "where": [
+          "trace_id <> ''",
+          "service = 'checkout'"
+        ]
+      }
+    },
+    {
+      "id": "traces_selected",
+      "title": "Selected traces",
+      "viz": "table",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "count_distinct(trace_id)"
+        ],
+        "where": [
+          "trace_id <> ''",
+          "service = $service"
+        ]
+      }
+    },
+    {
+      "id": "count",
+      "title": "Spans",
+      "viz": "stat",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "count()"
+        ]
+      }
+    },
+    {
+      "id": "rate",
+      "title": "Request rate",
+      "viz": "stat",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "rate()"
+        ]
+      }
+    },
+    {
+      "id": "logs",
+      "title": "Log count",
+      "viz": "stat",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "logs",
+        "measures": [
+          "count()"
+        ]
+      }
+    },
+    {
+      "id": "traffic",
+      "title": "Traffic by service",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "count()"
+        ],
+        "by": [
+          "service"
+        ],
+        "bucket": "auto"
+      }
+    },
+    {
+      "id": "latency",
+      "title": "p95 latency",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "p95(duration_ms)"
+        ],
+        "bucket": "auto"
+      }
+    },
+    {
+      "id": "errors",
+      "title": "Error rate",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "error_rate()"
+        ],
+        "bucket": "auto"
+      }
+    },
+    {
+      "id": "log_volume",
+      "title": "Log volume",
+      "viz": "timeseries",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "logs",
+        "measures": [
+          "count()"
+        ],
+        "bucket": "auto"
+      }
+    },
+    {
+      "id": "service_counts",
+      "title": "Spans by service",
+      "viz": "bar",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "spans",
+        "measures": [
+          "count()"
+        ],
+        "by": [
+          "service"
+        ]
+      }
+    },
+    {
+      "id": "severity_counts",
+      "title": "Logs by severity",
+      "viz": "bar",
+      "width": 4,
+      "height": "s",
+      "query": {
+        "from": "logs",
+        "measures": [
+          "count()"
+        ],
+        "by": [
+          "severity"
+        ]
+      }
+    }
+  ]
+}

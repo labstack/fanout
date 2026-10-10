@@ -10,6 +10,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { diagnosticTail, installSignalCleanup, readinessCause, safeRequest, waitUntilReady } from "./setup-support";
 
+import { performanceReadinessCause } from "./performance-support";
+
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
 
@@ -130,6 +132,21 @@ export default async function globalSetup() {
     const { response: created, body: record } = await requestJSON("/api/dashboards", { spec });
     if (created.status() !== 201) throw new Error(`HTTP ${created.status()} /api/dashboards`);
     if (typeof record.id !== "string") throw new Error("Created dashboard has no id");
+    // The seed emits only event-time bounds, never credentials. Freeze the exact
+    // 24-hour window so setup/runtime delay cannot clip its earliest minute.
+    const seedWindow = (await readFile(seedLog, "utf8")).match(/seed_window=([^,\s]+),([^\s]+)/);
+    if (!seedWindow || Date.parse(seedWindow[2]) - Date.parse(seedWindow[1]) !== 24 * 60 * 60_000) throw new Error("Seed did not report a 24-hour window");
+    const performanceSpec = JSON.parse(await readFile(join(root, "ui/host/e2e/fixtures/performance.json"), "utf8"));
+    performanceSpec.time = { from: seedWindow[1], to: seedWindow[2], refresh: "off" };
+    const performanceDeadline = Date.now() + 90_000;
+    await waitUntilReady(performanceDeadline, async () => {
+      const { body } = await requestJSON("/api/panels/query", { dashboard: performanceSpec }, Math.max(1, Math.min(20_000, performanceDeadline - Date.now())));
+      return performanceReadinessCause(body, performanceSpec.panels.map((panel: { id: string }) => panel.id));
+    });
+    const { response: performanceCreated, body: performanceRecord } = await requestJSON("/api/dashboards", { spec: performanceSpec });
+    if (performanceCreated.status() !== 201 || typeof performanceRecord.id !== "string") throw new Error("Performance dashboard was not created");
+    process.env.FANOUT_E2E_PERFORMANCE_ID = performanceRecord.id;
+    process.env.FANOUT_E2E_PERFORMANCE_WINDOW = JSON.stringify(performanceSpec.time);
     const state = join(dir, "storage-state.json");
     await writeFile(state, JSON.stringify(await api.storageState()), { mode: 0o600 });
     process.env.FANOUT_E2E_BASE_URL = base;
