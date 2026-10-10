@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/labstack/fanout/internal/config"
@@ -65,5 +66,26 @@ func TestMetricIngestRejectsInvalidAggregateTemporalityBeforeSubmit(t *testing.T
 				}
 			})
 		}
+	}
+}
+
+func TestExponentialHistogramRejectsInvalidZeroThresholdBeforeSubmit(t *testing.T) {
+	for _, threshold := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -0.5} {
+		t.Run(fmt.Sprint(threshold), func(t *testing.T) {
+			ch := make(chan telemetry.Metric, 2)
+			srv := NewServer(config.Config{DefaultNamespace: "test"}, newTestSubmitter(nil, nil, ch))
+			_, err := srv.exportMetrics(t.Context(), &collectormetrics.ExportMetricsServiceRequest{
+				ResourceMetrics: []*metricspb.ResourceMetrics{{ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{
+					{Name: "valid", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{}}}}},
+					{Name: "sizes", Data: &metricspb.Metric_ExponentialHistogram{ExponentialHistogram: &metricspb.ExponentialHistogram{
+						AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE,
+						DataPoints:             []*metricspb.ExponentialHistogramDataPoint{{ZeroThreshold: threshold, ZeroCount: 1, Count: 1}},
+					}}},
+				}}}}},
+			})
+			if status.Code(err) != codes.InvalidArgument || len(ch) != 0 {
+				t.Fatalf("error=%v submitted=%d", err, len(ch))
+			}
+		})
 	}
 }

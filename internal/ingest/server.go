@@ -334,6 +334,9 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						if err != nil {
 							return nil, status.Error(codes.InvalidArgument, err.Error())
 						}
+						if math.IsNaN(dp.ZeroThreshold) || math.IsInf(dp.ZeroThreshold, 0) || dp.ZeroThreshold < 0 {
+							return nil, status.Error(codes.InvalidArgument, "exponential histogram zero_threshold must be a finite, non-negative number")
+						}
 						bounds, counts := explicitExpHistogram(dp)
 						histSum := 0.0
 						if dp.Sum != nil {
