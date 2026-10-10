@@ -125,8 +125,10 @@ SELECT
        WHEN metric_type='exponential_histogram' THEN 'histogram'
        ELSE metric_type END AS type,
   temporality,
+  -- The int64 extremes are the engine's infinity sentinels and do not convert;
+  -- TRY keeps one such client-supplied point from failing every query.
   CASE WHEN start_time_unix_nano=0 THEN NULL
-       ELSE make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS END AS start_time,
+       ELSE TRY(make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS) END AS start_time,
   service,
   value,
   hist_bounds_json,

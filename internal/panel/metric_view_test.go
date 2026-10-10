@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -51,5 +52,20 @@ func TestMetricViewMapsKindsAndKeepsNanosecondStart(t *testing.T) {
 	var exact int64
 	if err := db.QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='metric1'").Scan(&exact); err != nil || exact != fixtureStart.Add(-time.Minute).UnixNano()+17 {
 		t.Fatalf("nanoseconds=%d err=%v", exact, err)
+	}
+}
+
+func TestMetricViewUnconvertibleStartIsNullNotAnError(t *testing.T) {
+	e, db := metricFixture(t)
+	for i, start := range []int64{math.MaxInt64, math.MinInt64 + 1, math.MinInt64} {
+		m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Second), 1)
+		m.Name = fmt.Sprintf("edge%d", i)
+		m.StartTimeUnixNanos = start
+		insertMetrics(t, db, m)
+	}
+	r := runMetricPanel(t, e, Panel{Viz: "table", SQL: `SELECT name,epoch_ns(start_time)::DOUBLE AS start_nanos
+        FROM metrics WHERE $__window(time) ORDER BY name`}, fixtureStart, fixtureStart.Add(time.Minute))
+	if got := metricValues(t, r, "start_nanos"); !reflect.DeepEqual(got, []any{nil, nil, float64(math.MinInt64)}) {
+		t.Fatalf("start_nanos: %v", got)
 	}
 }
