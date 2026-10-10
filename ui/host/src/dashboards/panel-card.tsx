@@ -199,7 +199,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         </Box>
         : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
-          <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
+          <Text size="sm" c="dimmed" ta="center" style={{overflowWrap:"anywhere"}}>{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
