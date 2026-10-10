@@ -365,26 +365,38 @@ holds 126 batches, 2,220,983 spans and 860,377 logs over about 41 hours. Run A u
 most recent 24 hours. Run B tiles the same 24 hours to 10x volume. Each shape has 100
 warm samples.
 
-These numbers were taken while other build jobs loaded the machine, so they are upper
-bounds. Task 11 repeats them on an idle machine.
+Measured on an idle machine (Apple silicon, 14 logical CPUs, default production DuckDB
+sizing):
 
 | Shape | Run A p95 (ms) | Run B p95 (ms) |
 |---|---:|---:|
-| traces_all | 30.4 | 207.0 |
-| count | 55.3 | 362.6 |
-| rate | 54.2 | 1,255.8 |
-| logs | 23.7 | 236.4 |
-| traffic | 57.5 | 462.9 |
-| latency | 40.2 | 262.9 |
-| errors | 40.8 | 459.8 |
-| p95_by_service | 37.1 | 340.2 |
-| error_rate_window | 55.5 | 314.1 |
-| twelve panels in one request | 272.8 | 2,019.9 |
+| traces_all | 24.4 | 176.8 |
+| traces_checkout | 23.4 | 164.2 |
+| traces_selected | 24.0 | 191.4 |
+| count | 47.1 | 304.3 |
+| rate | 42.2 | 292.5 |
+| logs | 17.4 | 105.8 |
+| traffic | 38.5 | 265.9 |
+| latency | 31.0 | 219.6 |
+| errors | 30.0 | 215.2 |
+| log_volume | 12.6 | 71.0 |
+| service_counts | 23.8 | 139.5 |
+| severity_counts | 6.6 | 38.1 |
+| p95_by_service | 26.1 | 184.8 |
+| error_rate_window | 19.0 | 130.1 |
+| twelve panels in one request | 199.9 | 1,588.0 |
 
-Run A meets S7: the slowest panel shape has a p95 of 57.5 ms against the 500 ms target.
+Run A meets S7: the slowest panel shape has a p95 of 47.1 ms against the 500 ms target.
 **Rollup routing is not needed.** M3 left only the trace-candidate read caches
 (`readCacheVersion` 4), and the raw path already meets S7, so M4 adds no routing or cache.
 
-At 10x volume, one panel shape (the span-rate stat) crosses 500 ms and none crosses
-1.5 s. A complete twelve-panel request takes about 2 s at p95. These figures are inputs
-for the design of larger, whole-system views; they are not an M4 gate.
+At 10x volume no panel shape crosses 500 ms; the slowest is the span-count stat at
+304 ms. A complete twelve-panel request takes 1.59 s at p95. An earlier run on a loaded
+machine measured up to 1.26 s for one shape, which shows how much contention matters.
+The replay has no metric points, so these figures cover trace and log panels only. They
+are inputs for the design of larger, whole-system views; they are not an M4 gate.
+
+Final rerun on the M4 candidate, idle machine, same settings: PASS in 334 s; 0 unexpected
+failures; 13 anomaly writes succeeded and 1 was delayed at admission (its findings carry
+into the next write); the backlog drained in 56 s with exact span and log counts
+(2,113,536 / 792,576); peak resident memory 3.21 GB.
