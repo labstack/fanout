@@ -157,7 +157,7 @@ func TestFormatFourRequiresNewMetricPhysicalSchema(t *testing.T) {
 
 func TestPartiallyRemovedRetiredBatchDoesNotStopOpen(t *testing.T) {
 	for _, suffix := range []string{".retired", ".retired-replacement"} {
-		for _, missing := range []string{"spans.parquet", "logs.parquet", "metrics.parquet", "trace.fidx"} {
+		for _, missing := range []string{"spans.parquet", "logs.parquet", "metrics.parquet", "trace.fidx", "metadata.json"} {
 			t.Run(suffix+"/"+missing, func(t *testing.T) {
 				root := t.TempDir()
 				store, err := OpenParquetStore(root)
