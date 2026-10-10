@@ -354,3 +354,36 @@ threads, five read connections), measured with `/usr/bin/time -l`:
 | Peak resident memory | 3.42 GB |
 
 No out-of-memory error occurred at this scale.
+
+## Task 6: raw-path panel latency at 24 hours and at 10x volume
+
+The opt-in `readbench` benchmark `BenchmarkPanelQueries24Hours` runs the production panel
+executor on the raw path, with a warm read cache and default production settings. It has
+two inputs: a generated regression fixture, and replayed demo telemetry. The replay
+holds 126 batches, 2,220,983 spans and 860,377 logs over about 41 hours. Run A uses its
+most recent 24 hours. Run B tiles the same 24 hours to 10x volume. Each shape has 100
+warm samples.
+
+These numbers were taken while other build jobs loaded the machine, so they are upper
+bounds. Task 11 repeats them on an idle machine.
+
+| Shape | Run A p95 (ms) | Run B p95 (ms) |
+|---|---:|---:|
+| traces_all | 30.4 | 207.0 |
+| count | 55.3 | 362.6 |
+| rate | 54.2 | 1,255.8 |
+| logs | 23.7 | 236.4 |
+| traffic | 57.5 | 462.9 |
+| latency | 40.2 | 262.9 |
+| errors | 40.8 | 459.8 |
+| p95_by_service | 37.1 | 340.2 |
+| error_rate_window | 55.5 | 314.1 |
+| twelve panels in one request | 272.8 | 2,019.9 |
+
+Run A meets S7: the slowest panel shape has a p95 of 57.5 ms against the 500 ms target.
+**Rollup routing is not needed.** M3 left only the trace-candidate read caches
+(`readCacheVersion` 4), and the raw path already meets S7, so M4 adds no routing or cache.
+
+At 10x volume, one panel shape (the span-rate stat) crosses 500 ms and none crosses
+1.5 s. A complete twelve-panel request takes about 2 s at p95. These figures are inputs
+for the design of larger, whole-system views; they are not an M4 gate.
