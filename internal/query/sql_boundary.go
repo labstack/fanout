@@ -14,6 +14,22 @@ import (
 
 // querySQL validates, describes and executes one statement on one connection
 // while holding the same immutable Parquet snapshot throughout.
+
+// blockedSQLFunctions are built-ins telemetry SQL must not call: they mutate
+// state, read files or settings, or return catalog contents and file paths.
+// sql_functions_test.go fails when an engine upgrade adds or changes built-ins,
+// so each new one is reviewed against this list.
+var blockedSQLFunctions = map[string]bool{
+	"nextval": true, "setval": true, "setseed": true,
+	"query": true, "query_table": true, "json_execute_serialized_sql": true,
+	"current_setting": true, "getvariable": true, "getenv": true,
+	"read_csv": true, "read_csv_auto": true, "read_json": true, "read_json_auto": true,
+	"read_text": true, "read_blob": true, "read_parquet": true, "glob": true,
+	"http_get": true, "write_file": true, "write_log": true,
+	"current_query": true, "current_query_id": true,
+	"pg_get_viewdef": true, "pg_get_constraintdef": true, "format_type": true, "get_block_size": true,
+}
+
 func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain bool) (queryrows.Rows, []bool, error) {
 	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return nil, nil, err
@@ -228,12 +244,8 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 				return fmt.Errorf("table function %q is not available to telemetry SQL", name)
 			}
 		}
-		if name, ok := node["function_name"].(string); ok {
-			switch strings.ToLower(name) {
-			case "nextval", "setval", "setseed", "query", "query_table", "json_execute_serialized_sql", "current_setting", "getvariable", "getenv", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_text", "read_blob", "read_parquet", "glob", "http_get", "write_file",
-				"current_query", "current_query_id", "pg_get_viewdef", "pg_get_constraintdef", "format_type", "get_block_size", "write_log":
-				return fmt.Errorf("function %q is not available to telemetry SQL", name)
-			}
+		if name, ok := node["function_name"].(string); ok && blockedSQLFunctions[strings.ToLower(name)] {
+			return fmt.Errorf("function %q is not available to telemetry SQL", name)
 		}
 		for key, child := range node {
 			if key == "cte_map" {
