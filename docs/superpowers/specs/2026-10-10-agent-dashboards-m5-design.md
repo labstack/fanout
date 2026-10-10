@@ -186,13 +186,18 @@ apply the same rule per bound, with a reset detected on the total count.
 | `last(value)` | Σ series value at bucket end | Σ series value at bucket end | not defined |
 | `pNN`/`quantile(value, q)` | over data points | not defined | linear interpolation over Σ bound increases |
 
-A series' rate in a bucket is its increase divided by the time those
-increases cover: the sum of `time - previous time` over the deltas whose later
-point falls in the bucket. A bucket narrower than the export interval would
-otherwise multiply the rate, so a counter exported every 60 s reads the same
-per-second rate in 10 s and 1 h buckets. A series with no point in a bucket
-contributes nothing to that bucket, and the automatic bucket for metric
-panels is never shorter than 1 minute.
+Each delta between consecutive points of a cumulative series covers the
+interval (previous time, time] at the rate increase ÷ elapsed. A series' rate
+in a bucket is the time-weighted mean of that rate over the part of the bucket
+its deltas cover, and its increase in a bucket is each delta's increase in
+proportion to the overlap. Every series therefore contributes to every bucket
+its reporting interval spans: a counter exported every 60 s reads the same
+per-second rate in 10 s, 1 m and 1 h buckets, and a total across machines
+that report every minute, every five minutes, or at drifting times does not
+dip. Histogram count, sum and per-bound increases are spread the same way.
+Gauge and updown series in a bucket without a point use their latest earlier
+value when it is at most 5 minutes old, the staleness rule `last` uses. The
+automatic bucket for metric panels is never shorter than 1 minute.
 
 A series' value at a bucket's end is its latest point strictly before the
 earlier of the bucket end and the window end (both ends are exclusive, so a
