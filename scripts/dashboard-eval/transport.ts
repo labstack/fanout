@@ -120,9 +120,8 @@ export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:O
     const matches=messages.filter(m=>m.role==='tool'&&m.toolCallId===t.id);
     if(matches.length===1) {
       const m=matches[0];
-      const known=typeof m.error==='boolean'||typeof m.error==='string'||typeof m.isError==='boolean'||typeof m.is_error==='boolean';
       if(t.is_error===true||m.error||m.isError===true||m.is_error===true)t.is_error=true;
-      else t.is_error=known?false:null;
+      else t.is_error=false;
     }
     if(matches.length>1)t.is_error=true;
   }

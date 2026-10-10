@@ -172,10 +172,19 @@ it('reads stable tool error codes and messages while preserving error flags from
  }
 });
 
-it('does not infer a successful mutation from a missing or malformed persisted error flag',async()=>{
- for(const flag of [{},{error:null},{isError:'false'}]) {
+it('recognises a save from the server encoded persisted thread without an error field',async()=>{
+ const g=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
+ expect(g.saved_thread).toHaveLength(1);
+ expect(Object.keys(g.saved_thread[0]).sort()).toEqual(['content','id','role','toolCallId']);
+ const output=JSON.parse(g.saved_thread[0].content);
+ const s=await readSSE(response(frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame({...result,content:g.saved_thread[0].content,isError:undefined})+frame(finish)),new AbortController().signal);
+ expect(findSaved(s,g.saved_thread)?.record).toEqual(output.dashboard);
+ expect(mutationEvidence(s,g.saved_thread)).toEqual({mutation_observed:true,mutation_evidence_complete:true});
+});
+it('recognises persisted success when the optional error field is absent or empty',async()=>{
+ for(const flag of [{},{error:null},{error:''}]) {
   const s=await readSSE(response(frame(start)+frame({...result,isError:undefined})+frame(finish)),new AbortController().signal);
-  expect(findSaved(s,[{role:'tool',toolCallId:'save',...flag}])).toBeNull();
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',...flag}])?.record).toEqual(saved);
  }
 });
 it('does not certify answer mutation evidence when persisted tool errors or results are unknown',async()=>{

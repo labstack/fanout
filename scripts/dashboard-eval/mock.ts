@@ -50,7 +50,7 @@ export function startMock(failure?:Failure,intents?:EvaluationConfig['prompts'])
       const args=JSON.stringify({id:result?.dashboard?.id});
       const template=(type:string)=>({...structuredClone(templates.find(e=>e.type===type)),toolCallId:id});
       events.push({...template('TOOL_CALL_START'),toolCallName:name},{...template('TOOL_CALL_ARGS'),delta:args.slice(0,2)},{...template('TOOL_CALL_ARGS'),delta:args.slice(2)},template('TOOL_CALL_END'),{...template('TOOL_CALL_RESULT'),content:JSON.stringify(result)});
-      history.push({role:'tool',toolCallId:id,error:isError?'failed':''});
+      history.push({id:`tool-${id}`,role:'tool',toolCallId:id,content:JSON.stringify(result),...(isError?{error:'failed'}:{})});
     };
     let record:any;
     if(edit) {

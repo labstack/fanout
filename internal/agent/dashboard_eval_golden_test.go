@@ -140,6 +140,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	evalStableSave(savedOutput)
+	var savedThread []map[string]any
 	wire := func(terminal StreamEvent) string {
 		terminal.Usage = &TokenUsage{InputTokens: 2, OutputTokens: 1}
 		wireSpec := authored
@@ -166,6 +167,19 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 				if err := json.Unmarshal([]byte(messageText(message.Content)), &result); err != nil {
 					t.Fatalf("tool response: %s: %v", messageText(message.Content), err)
 				}
+				persisted := evalObject(t, message)
+				persisted["id"] = "saved_message"
+				var content map[string]any
+				if err := json.Unmarshal([]byte(messageText(message.Content)), &content); err != nil {
+					t.Fatal(err)
+				}
+				evalStableSave(content)
+				raw, err := json.Marshal(content)
+				if err != nil {
+					t.Fatal(err)
+				}
+				persisted["content"] = string(raw)
+				savedThread = []map[string]any{persisted}
 			}
 		}
 		if result.Dashboard.ID == "" {
@@ -204,6 +218,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	sort.Strings(mutations)
 	value["mutating_tools"] = mutations
 	value["tool_errors"] = evalToolErrors(t)
+	value["saved_thread"] = savedThread
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		t.Fatal(err)
