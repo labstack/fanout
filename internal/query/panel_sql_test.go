@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,122 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func TestTelemetrySQLRejectsCatalogMacrosAndSideEffects(t *testing.T) {
+	d, _ := newBatchCacheTest(t)
+	for name, args := range map[string]string{
+		"current_query": "", "current_query_id": "", "pg_get_viewdef": "22636",
+		"pg_get_constraintdef": "1", "format_type": "1, NULL",
+		"get_block_size": "current_database()", "write_log": "'boundary probe'",
+	} {
+		for _, spelling := range []string{name, strings.ToUpper(name), `"` + name + `"`, "main." + name, `"main"."` + strings.ToUpper(name) + `"`, "telemetry." + name, "memory.main." + name} {
+			t.Run(spelling, func(t *testing.T) {
+				statement := fmt.Sprintf("SELECT %s(%s)", spelling, args)
+				_, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10)
+				if err == nil || !strings.Contains(err.Error(), "not available to telemetry SQL") {
+					t.Fatalf("function boundary for %s: %v", statement, err)
+				}
+				response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement})
+				if !strings.Contains(response.Error, "not available to telemetry SQL") {
+					t.Fatalf("direct SQL function boundary: %+v", response)
+				}
+			})
+		}
+	}
+}
+
+func TestSQLRenderingPreservesExactNumbersAndSamples(t *testing.T) {
+	d, _ := newBatchCacheTest(t)
+	for _, test := range []struct {
+		name, statement string
+		want            int64
+	}{
+		{"integer", "SELECT 9007199254740993 AS n", 9007199254740993},
+		{"nanoseconds", "SELECT epoch_ns(make_timestamp_ns(1791370800000000001)) AS n", 1791370800000000001},
+		{"query_sample", "SELECT count(*) AS n FROM range(10) USING SAMPLE 100 PERCENT (bernoulli)", 10},
+		{"table_sample", "SELECT count(*) AS n FROM range(10) TABLESAMPLE 100 PERCENT (bernoulli)", 10},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			node, err := d.ParseSQL(t.Context(), test.statement)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered, err := d.RenderSQL(t.Context(), node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared, _, err := d.PrepareTelemetrySQL(t.Context(), rendered, rendered, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got int64
+			if err := d.QueryRowScan(t.Context(), []any{&got}, prepared); err != nil || got != test.want {
+				t.Fatalf("executed %s: %d, %v; want %d", rendered, got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestSnapshotExecutionMatchesDescribedColumnBindings(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "bindings", Logs: []telemetry.Log{{Body: "fixture body", TimeUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano()}}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at, End: at.Add(time.Hour)})
+	t.Run("struct", func(t *testing.T) {
+		statement := "SELECT telemetry.logs.body AS b FROM (SELECT {'body': 42} AS logs) AS telemetry, logs"
+		var name, logicalType string
+		var rest [4]any
+		if err := d.DB.QueryRowContext(t.Context(), "DESCRIBE "+statement).Scan(&name, &logicalType, &rest[0], &rest[1], &rest[2], &rest[3]); err != nil {
+			t.Fatal(err)
+		}
+		if logicalType != "INTEGER" {
+			t.Fatalf("described type = %s", logicalType)
+		}
+		prepared, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := d.QueryContext(ctx, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var got any
+		if !rows.Next() {
+			t.Fatalf("missing row: %v", rows.Err())
+		}
+		if err := rows.Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != int32(42) {
+			t.Fatalf("described INTEGER 42, executed %T %v", got, got)
+		}
+	})
+	for _, statement := range []string{
+		"SELECT main.logs.body AS b FROM main.logs",
+		"SELECT main.logs.body AS b FROM logs",
+		"SELECT telemetry.logs.body AS b FROM telemetry.logs",
+	} {
+		t.Run(statement, func(t *testing.T) {
+			response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement})
+			if response.Error != "" || len(response.Results) != 1 || response.Results[0]["b"] != "fixture body" {
+				t.Fatalf("direct SQL: %+v", response)
+			}
+			prepared, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range []string{statement, prepared} {
+				var body string
+				if err := d.QueryRowScan(ctx, []any{&body}, query); err != nil || body != "fixture body" {
+					t.Fatalf("snapshot SQL: %q %v", body, err)
+				}
+			}
+		})
+	}
+}
 
 func TestParseSQLReturnsTheStatementNode(t *testing.T) {
 	d, _ := newBatchCacheTest(t)

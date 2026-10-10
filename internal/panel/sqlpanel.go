@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 var (
@@ -50,6 +52,7 @@ func canonicalSQL(ctx context.Context, parser Parser, expanded string) (string, 
 	if err != nil {
 		return "", err
 	}
+	query.NormalizeLogQualifiers(node)
 	if err := redactSQLLogTables(ctx, parser, node, nil); err != nil {
 		return "", err
 	}

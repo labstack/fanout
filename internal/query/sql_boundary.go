@@ -71,7 +71,9 @@ func parseStatement(ctx context.Context, db rowQueryer, query string) (map[strin
 			Node map[string]any `json:"node"`
 		} `json:"statements"`
 	}
-	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
 		return nil, err
 	}
 	if parsed.Error {
@@ -228,7 +230,8 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 		}
 		if name, ok := node["function_name"].(string); ok {
 			switch strings.ToLower(name) {
-			case "nextval", "setval", "setseed", "query", "query_table", "json_execute_serialized_sql", "current_setting", "getvariable", "getenv", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_text", "read_blob", "read_parquet", "glob", "http_get", "write_file":
+			case "nextval", "setval", "setseed", "query", "query_table", "json_execute_serialized_sql", "current_setting", "getvariable", "getenv", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_text", "read_blob", "read_parquet", "glob", "http_get", "write_file",
+				"current_query", "current_query_id", "pg_get_viewdef", "pg_get_constraintdef", "format_type", "get_block_size", "write_log":
 				return fmt.Errorf("function %q is not available to telemetry SQL", name)
 			}
 		}
