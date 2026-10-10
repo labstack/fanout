@@ -79,12 +79,12 @@ func TestMetricKindMismatchHasActionableDiagnosis(t *testing.T) {
 	}
 }
 
-func TestMetricHistogramDiagnosisSuggestsCountWithoutAliases(t *testing.T) {
+func TestMetricHistogramDiagnosisSuggestsCompatibleMeasuresWithoutAliases(t *testing.T) {
 	for _, alias := range []string{"AS r", "as r"} {
 		e, db := metricFixture(t)
 		insertMetrics(t, db, metricHistogram(fixtureStart, "[10]", "[1,0]", 1, 5, "a"))
-		r := runMetricMeasure(t, e, []string{"avg(value) " + alias}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
-		if r.Status != StatusEmpty || r.Diagnosis != "avg(value) is not defined for net (histogram); use count()" {
+		r := runMetricMeasure(t, e, []string{"last(value) " + alias}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
+		if r.Status != StatusEmpty || r.Diagnosis != "last(value) is not defined for net (histogram); use rate(), avg(value) or p95(value)" {
 			t.Fatalf("%s: %+v", alias, r)
 		}
 	}

@@ -396,10 +396,10 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 		}
 		values := result.Frame.Values[len(result.Frame.Values)-1]
 		if result.ID == "metric_histogram_p95" {
-			// Task 4 leaves histogram value measures undefined; Task 5
-			// supplies observation-weighted percentile interpolation.
-			if result.Status != StatusEmpty || !reflect.DeepEqual(values, []any{nil, nil}) {
-				t.Fatalf("histogram placeholder=%+v", result)
+			// The first cumulative point is a baseline. The next point's
+			// single observation in [0,10] interpolates to 9.5.
+			if result.Status != StatusOK || !reflect.DeepEqual(values, []any{nil, 9.5}) {
+				t.Fatalf("histogram percentiles=%+v", result)
 			}
 			continue
 		}

@@ -20,7 +20,7 @@ func metricReadScope(p *Panel, scope Scope) Scope {
 	} else {
 		var ignored Problems
 		for _, m := range parseMeasures(signals["metrics"], p.Query.Measures, "", &ignored) {
-			if m.Func == "rate" || (m.Func == "sum" && metricValueMeasure(m)) {
+			if metricHistogramMeasure(m) {
 				lookback = metricLookback
 			}
 			if m.Func == "last" && metricValueMeasure(m) {
@@ -135,12 +135,13 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
 	if err != nil {
 		return "", nil, err
 	}
-	text := cte + ` SELECT time AS t,` + dimSelect + `,_bucket,
-      CASE WHEN i=1 THEN NULL ELSE _bounds[i-1] END AS lo,
-      CASE WHEN i<=len(_bounds) THEN _bounds[i] END AS hi,
-      n AS n
-      FROM metric_increases,UNNEST(bound_increases) WITH ORDINALITY AS u(n,i)
-      WHERE type='histogram' AND n>=0`
+	// Zipped select-list unnests avoid the lateral join WITH ORDINALITY plans;
+	// bucket k spans (bounds[k-1], bounds[k]], open at both ends.
+	text := cte + ` SELECT * FROM (SELECT time AS t,` + dimSelect + `,_bucket,
+      unnest(list_prepend(NULL::DOUBLE,_bounds)) AS lo,
+      unnest(list_append(_bounds,NULL::DOUBLE)) AS hi,
+      unnest(bound_increases) AS n
+      FROM metric_increases WHERE type='histogram') WHERE n>=0`
 	return text, args, nil
 }
 

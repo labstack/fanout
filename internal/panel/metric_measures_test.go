@@ -555,7 +555,7 @@ func TestMetricPointOnlyMeasuresSkipLookback(t *testing.T) {
 			t.Fatalf("point measure %d=%v", i, r.Frame.Values[i])
 		}
 	}
-	for _, measure := range []string{"avg(value)", "min(value)", "max(value)", "p95(value)"} {
+	for _, measure := range []string{"min(value)", "max(value)", "avg(hist_sum)", "p95(hist_sum)"} {
 		p := Panel{Query: &Query{From: "metrics", Measures: []string{measure}}}
 		scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Minute)}
 		if read := metricReadScope(&p, scope); !reflect.DeepEqual(read, scope) {

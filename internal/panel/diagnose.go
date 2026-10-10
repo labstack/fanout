@@ -200,7 +200,7 @@ func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []
 		case "counter":
 			suggestion = "rate() or last(value)"
 		case "histogram":
-			suggestion = "count()"
+			suggestion = "rate(), avg(value) or p95(value)"
 		case "summary":
 			suggestion = "count()"
 		}

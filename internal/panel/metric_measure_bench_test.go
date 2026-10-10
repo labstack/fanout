@@ -42,7 +42,7 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 	e := NewExecutor(&query.Duck{DB: db}, 30)
 	start, end := fixtureStart, fixtureStart.Add(time.Hour)
 	e.now = func() time.Time { return end }
-	for _, kind := range []string{"gauge", "counter"} {
+	for _, kind := range []string{"gauge", "counter", "histogram"} {
 		store, err := telemetry.OpenParquetStore(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
@@ -57,6 +57,10 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			if kind == "gauge" {
 				m.Type, m.Temporality, m.Monotonic = "gauge", "", false
 			}
+			if kind == "histogram" {
+				m.Type, m.Monotonic = "histogram", false
+				m.HistBoundsJSON = "[10,20]"
+			}
 			m.SeriesID = telemetry.MetricSeriesID(m)
 			base[series] = m
 		}
@@ -67,6 +71,11 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 				for series, m := range base {
 					m.TimeUnixNanos, m.EventUnixNanos, m.IngestedAt = at.UnixNano(), at.UnixNano(), at.UnixNano()
 					m.Value = float64((minute+10)*60 + step*10 + series%11)
+					if kind == "histogram" {
+						n := int64((minute+10)*6 + step + 1)
+						m.HistCount, m.HistSum = 10*n, float64(100*n)
+						m.HistCountsJSON = fmt.Sprintf("[%d,%d,%d]", 2*n, 3*n, 5*n)
+					}
 					points = append(points, m)
 				}
 			}
@@ -102,6 +111,17 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			}{
 				{"rate_by_service", "timeseries", []string{"rate()"}, []string{"service"}, time.Minute},
 				{"stat_rate", "stat", []string{"rate()"}, nil, 0},
+			}
+		}
+		if kind == "histogram" {
+			shapes = []struct {
+				id, viz      string
+				measures, by []string
+				interval     time.Duration
+			}{
+				{"table_histogram_five", "table", []string{"rate()", "sum(value)", "avg(value)", "p50(value)", "p95(value)"}, []string{"service"}, 0},
+				{"timeseries_histogram_three", "timeseries", []string{"rate()", "avg(value)", "p95(value)"}, nil, time.Minute},
+				{"stat_histogram_p95", "stat", []string{"p95(value)"}, nil, 0},
 			}
 		}
 		for _, shape := range shapes {

@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -30,11 +31,11 @@ func metricMeasurePlan(m Measure) (source, perSeries, acrossSeries string) {
 	case "share":
 		return "metric_raw_window", "count(*)::DOUBLE", "100.0*sum(_v)/nullif(sum(sum(_v)) OVER (_partition),0)"
 	case "rate":
-		return "metric_increases", "sum(CASE WHEN type='counter' AND elapsed_s>0 THEN increase END ORDER BY time,ingested_unix_nano)/nullif(sum(CASE WHEN type='counter' AND elapsed_s>0 THEN elapsed_s END ORDER BY time,ingested_unix_nano),0)", "sum(_v ORDER BY " + metricSeriesKey + ")::DOUBLE"
+		return "metric_increases", "sum(CASE WHEN type='histogram' THEN count_increase ELSE increase END ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0)/nullif(sum(elapsed_s ORDER BY time,ingested_unix_nano) FILTER (WHERE elapsed_s>0),0)", "sum(_v ORDER BY " + metricSeriesKey + ")::DOUBLE"
 	case "sum":
-		return "metric_value_rows", "CASE WHEN type IN ('gauge','updown') THEN avg(_value) WHEN type='counter' THEN sum(increase) END", "sum(_v)::DOUBLE"
+		return "metric_value_rows", "CASE WHEN type IN ('gauge','updown') THEN avg(_value) WHEN type='counter' THEN sum(increase) WHEN type='histogram' THEN sum(sum_increase) END", "sum(_v)::DOUBLE"
 	case "avg":
-		return "metric_window_points", "avg(" + gauge + ")", "avg(_v)::DOUBLE"
+		return "metric_window_points", "CASE WHEN type='histogram' THEN sum(sum_increase) ELSE avg(" + gauge + ") END", "sum(_v)/nullif(sum(_weight),0)::DOUBLE"
 	case "last":
 		return "metric_last_points", "arg_max(" + scalar + ",(time,ingested_unix_nano))", "sum(_v)::DOUBLE"
 	case "min", "max":
@@ -52,14 +53,19 @@ func metricValueMeasure(m Measure) bool {
 }
 
 func metricMeasureKinds(m Measure) []string {
+	var kinds []string
 	switch m.Func {
 	case "rate":
-		return []string{"counter"}
+		kinds = []string{"counter"}
 	case "sum", "last", "min", "max":
-		return []string{"gauge", "updown", "counter"}
+		kinds = []string{"gauge", "updown", "counter"}
 	default:
-		return []string{"gauge", "updown"}
+		kinds = []string{"gauge", "updown"}
 	}
+	if metricHistogramMeasure(m) {
+		kinds = append(kinds, "histogram")
+	}
+	return kinds
 }
 
 func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
@@ -136,9 +142,16 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		return name, nil
 	}
 	sources, per, across := make([]string, len(measures)), make([]string, len(measures)), make([]string, len(measures))
+	histograms := make([]string, len(measures))
 	for i, m := range measures {
 		source, perSeries, acrossSeries := metricMeasurePlan(m)
 		prefix := fmt.Sprintf("metric_m%d_", i)
+		if metricHistogramMeasure(m) {
+			histograms[i], err = builder("metric_increases", []string{"histogram"})
+			if err != nil {
+				return Compiled{}, err
+			}
+		}
 		if source == "metric_value_rows" {
 			gaugeRows, err := builder("metric_window_points", []string{"gauge", "updown"})
 			if err != nil {
@@ -154,10 +167,19 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 				" UNION ALL BY NAME SELECT * FROM "+counterRows+")")
 			source = prefix + "rows"
 		} else if source != "metric_raw_window" {
-			source, err = builder(source, metricMeasureKinds(m))
+			kinds := metricMeasureKinds(m)
+			if metricHistogramMeasure(m) {
+				kinds = slices.DeleteFunc(slices.Clone(kinds), func(kind string) bool { return kind == "histogram" })
+			}
+			source, err = builder(source, kinds)
 			if err != nil {
 				return Compiled{}, err
 			}
+		}
+		if histograms[i] != "" && !metricHistogramQuantile(m) {
+			combined := prefix + "combined"
+			ctes = append(ctes, combined+" AS (SELECT * FROM "+source+" UNION ALL BY NAME SELECT * FROM "+histograms[i]+")")
+			source = combined
 		}
 
 		projection := "NULL::DOUBLE"
@@ -206,7 +228,14 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			}
 			sample = "CASE WHEN type IN (" + strings.Join(qs, ",") + ") THEN _value END"
 		}
-		selects = append(selects, "count("+sample+") AS _n")
+		if metricHistogramMeasure(m) && !metricHistogramQuantile(m) {
+			selects = append(selects, "CASE WHEN type='histogram' THEN sum(count_increase) ELSE count("+sample+") END AS _n")
+		} else {
+			selects = append(selects, "count("+sample+") AS _n")
+		}
+		if m.Func == "avg" && metricValueMeasure(m) {
+			selects = append(selects, "CASE WHEN type='histogram' THEN sum(count_increase) ELSE 1 END AS _weight")
+		}
 		if m.Func == "last" && !metricValueMeasure(m) {
 			selects = append(selects, "max((time,ingested_unix_nano)) FILTER (WHERE _value IS NOT NULL) AS _last_order")
 		}
@@ -215,6 +244,38 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			where = fmt.Sprintf(" WHERE _bucket=%d", alignedBucketMillis(scope.End.Add(-time.Nanosecond), scope.Interval))
 		}
 		ctes = append(ctes, name+" AS (SELECT "+strings.Join(selects, ",")+" FROM "+sources[i]+where+" GROUP BY "+strings.Join(groups, ",")+")")
+	}
+	// Quantiles run from weights at both ranking and display scope. Display
+	// dimensions are folded before interpolation so Other gets a new quantile.
+	groupStage := func(i int, series, name, bucketExpr string, names, exprs []string, partition string) {
+		keys := append([]string{"_bucket"}, names...)
+		expression := strings.ReplaceAll(across[i], "_partition", partition)
+		scalar := "SELECT " + strings.Join(keys, ",") + "," + expression + " AS _v,sum(_n) AS _n FROM " + series + " GROUP BY " + strings.Join(keys, ",")
+		if !metricHistogramQuantile(measures[i]) {
+			ctes = append(ctes, name+" AS ("+scalar+")")
+			return
+		}
+		weights, answers, samples := name+"_weights", name+"_answers", name+"_samples"
+		selects := []string{bucketExpr + " AS _bucket"}
+		for j, d := range names {
+			selects = append(selects, exprs[j]+" AS "+d)
+		}
+		// Zipped select-list unnests avoid the lateral join that WITH
+		// ORDINALITY plans, and one pre-aggregation feeds both consumers.
+		selects = append(selects, "unnest(list_append(_bounds,NULL::DOUBLE)) AS hi", "unnest(bound_increases) AS n")
+		grouped := strings.Join(keys, ",") + ",hi"
+		ctes = append(ctes,
+			weights+" AS (SELECT "+grouped+",sum(n) AS n FROM (SELECT "+strings.Join(selects, ",")+" FROM "+histograms[i]+") WHERE n>=0 GROUP BY "+grouped+")",
+			answers+" AS ("+histogramQuantileSQL(weights, keys, measures[i].Q)+")",
+			samples+" AS (SELECT "+strings.Join(keys, ",")+",sum(n)::DOUBLE AS _n FROM "+weights+" GROUP BY "+strings.Join(keys, ",")+")",
+			name+"_scalar AS ("+scalar+")")
+		selects, join := []string{}, []string{}
+		for _, key := range keys {
+			selects = append(selects, "coalesce(s."+key+",h."+key+") AS "+key)
+			join = append(join, "s."+key+" IS NOT DISTINCT FROM h."+key)
+		}
+		selects = append(selects, "coalesce(h.quantile,s._v) AS _v", "coalesce(s._n,0)+coalesce(h._n,0) AS _n")
+		ctes = append(ctes, name+" AS (SELECT "+strings.Join(selects, ",")+" FROM "+name+"_scalar s FULL OUTER JOIN (SELECT * FROM "+samples+" LEFT JOIN "+answers+" USING ("+strings.Join(keys, ",")+")) h ON "+strings.Join(join, " AND ")+")")
 	}
 	if top > 0 {
 		seriesStage(0, "metric_rank_series", "0::BIGINT", []string{"d"}, []string{dimExprs[fold]})
@@ -238,13 +299,13 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		default:
 			samples = "r.n"
 		}
-		expr := strings.ReplaceAll(across[0], "_partition", "")
+		groupStage(0, "metric_rank_series", "metric_rank_groups", "0::BIGINT", []string{"d"}, []string{dimExprs[fold]}, "")
 		rankSource := "metric_raw_window"
 		if first.Func == "last" && metricValueMeasure(first) {
 			rankSource = sources[0]
 		}
 		ctes = append(ctes,
-			"metric_rank_values AS (SELECT d,"+expr+" AS value,sum(_n) AS n FROM metric_rank_series GROUP BY d)",
+			"metric_rank_values AS (SELECT d,_v AS value,_n AS n FROM metric_rank_groups)",
 			"metric_rank_keys AS (SELECT "+dimExprs[fold]+" AS d,count(*) AS n FROM "+rankSource+" GROUP BY 1)",
 			"candidates AS (SELECT r.d,v.value,"+samples+" AS n FROM metric_rank_keys r LEFT JOIN metric_rank_values v ON r.d IS NOT DISTINCT FROM v.d)",
 			fmt.Sprintf("top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", order, top))
@@ -279,13 +340,15 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			ctes = append(ctes, folded+" AS (SELECT "+strings.Join(selects, ",")+" FROM "+name+")")
 			name = folded
 		}
-		keys := append([]string{"_bucket"}, dimNames...)
 		partition := ""
 		if bucketed {
 			partition = "PARTITION BY _bucket"
 		}
-		expression := strings.ReplaceAll(across[i], "_partition", partition)
-		ctes = append(ctes, fmt.Sprintf("metric_group_%d AS (SELECT %s,%s AS _v FROM %s GROUP BY %s)", i, strings.Join(keys, ","), expression, name, strings.Join(keys, ",")))
+		exprs := append([]string{}, dimExprs...)
+		if top > 0 && !selectNames {
+			exprs[fold] = foldExpr(exprs[fold])
+		}
+		groupStage(i, name, fmt.Sprintf("metric_group_%d", i), "_bucket", dimNames, exprs, partition)
 	}
 	selects, joins := []string{}, []string{}
 	if bucketed {
