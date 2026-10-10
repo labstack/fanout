@@ -134,3 +134,40 @@ func TestDetectorAnnotationMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectorWritesFailedFindingsWithTheNextBatch(t *testing.T) {
+	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := make(chan []annotations.Anomaly, 2)
+	attempt := 0
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.persistAnnotations(ctx, func(_ context.Context, findings []annotations.Anomaly, _ time.Time) error {
+			calls <- append([]annotations.Anomaly(nil), findings...)
+			attempt++
+			if attempt == 1 {
+				return context.DeadlineExceeded
+			}
+			return nil
+		})
+	}()
+	defer func() { cancel(); <-done }()
+	now := time.Now().UTC()
+	spike := annotations.Anomaly{Namespace: "shop", Service: "cart", Kind: "latency", From: now.Add(-2 * time.Minute), To: now.Add(-time.Minute)}
+	later := annotations.Anomaly{Namespace: "shop", Service: "cart", Kind: "error_rate", From: now.Add(-time.Minute), To: now}
+	d.annotationBatches <- annotationBatch{findings: []annotations.Anomaly{spike}, at: now}
+	if got := <-calls; len(got) != 1 || got[0] != spike {
+		t.Fatalf("first write: %+v", got)
+	}
+	d.annotationBatches <- annotationBatch{findings: []annotations.Anomaly{later}, at: now.Add(time.Minute)}
+	select {
+	case got := <-calls:
+		if len(got) != 2 || got[0] != spike || got[1] != later {
+			t.Fatalf("failed findings were not carried: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second write did not happen")
+	}
+}

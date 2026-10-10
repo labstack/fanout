@@ -124,7 +124,15 @@ func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
 	d.annotationBatches <- batch
 }
 
+// maxCarriedAnomalies bounds findings kept across failed writes; it matches the
+// anomaly history the store retains.
+const maxCarriedAnomalies = 10000
+
 func (d *Detector) persistAnnotations(ctx context.Context, record func(context.Context, []annotations.Anomaly, time.Time) error) {
+	// A write can miss the write gate while ingest catches up on a backlog. Its
+	// findings are kept and written with the next batch, so a short spike seen
+	// during the backlog is not lost; the store merges overlapping episodes.
+	var carried []annotations.Anomaly
 	for {
 		if ctx.Err() != nil {
 			return
@@ -133,8 +141,14 @@ func (d *Detector) persistAnnotations(ctx context.Context, record func(context.C
 		case <-ctx.Done():
 			return
 		case batch := <-d.annotationBatches:
-			if err := record(ctx, batch.findings, batch.at); err != nil && ctx.Err() == nil {
-				slog.Error("persist detector annotations", "error", err)
+			findings := append(carried, batch.findings...)
+			carried = nil
+			if err := record(ctx, findings, batch.at); err != nil && ctx.Err() == nil {
+				slog.Error("persist detector annotations", "error", err, "carried", len(findings))
+				if len(findings) > maxCarriedAnomalies {
+					findings = findings[len(findings)-maxCarriedAnomalies:]
+				}
+				carried = findings
 			}
 		}
 	}

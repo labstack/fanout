@@ -335,11 +335,12 @@ gates do not override the five live anomaly deadlines.
 
 ### Task 3 controller verification
 
-The controller accepted the five remaining 4096-batch anomaly admission timeouts as
-degradation rather than a defect. A detector batch that cannot get the write gate within
-10 s is dropped, and the detector re-detects any ongoing anomaly on its next pass. The
-panel probe now counts these drops separately, still fails on any other panel,
-publication, version or anomaly error, and requires at least one anomaly write to succeed.
+The five remaining 4096-batch anomaly admission timeouts are delays, not losses. When a
+detector write cannot get the write gate within 10 s, the detector keeps its findings
+and writes them with its next batch (up to the 10,000 episodes the store retains), and
+the store merges overlapping episodes. The panel probe, which calls the store directly,
+counts admission timeouts separately, still fails on any other panel, publication,
+version or anomaly error, and requires at least one anomaly write to succeed.
 
 Rerun of `TestPanelsRemainUsableDuringBacklog` at 4096 batches (same settings: 4 GB, four
 threads, five read connections), measured with `/usr/bin/time -l`:
@@ -348,7 +349,7 @@ threads, five read connections), measured with `/usr/bin/time -l`:
 |---|---|
 | Outcome | PASS in 316 s |
 | Unexpected failures | 0 |
-| Anomaly batches dropped at admission | 3 |
+| Anomaly writes delayed at admission | 3 |
 | Drain | complete in 51 s after the combined phase |
 | Spans / logs (raw = rolled = expected) | 2,113,536 / 792,576 |
 | Peak resident memory | 3.42 GB |

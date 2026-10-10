@@ -414,9 +414,9 @@ func runPanelPressure(t *testing.T, assertUsable bool) {
 			started := time.Now()
 			err := d.RecordAnomalies(work, []annotations.Anomaly{{Namespace: "pressure", Service: "svc0", Kind: "latency", From: end.Add(-time.Minute), To: end, Title: "Pressure probe", Severity: "warning"}}, end)
 			pressureError(t, "anomaly_log/combined", started, err)
-			// A detector batch that cannot get the write gate in time is
-			// dropped and re-detected on the next pass, so admission timeouts
-			// are counted as degradation. Any other anomaly error fails.
+			// The detector writes a batch that misses the write gate with its
+			// next batch, so admission timeouts here are delays, counted
+			// separately. Any other anomaly error fails.
 			switch {
 			case err == nil:
 				anomalies.Add(1)
