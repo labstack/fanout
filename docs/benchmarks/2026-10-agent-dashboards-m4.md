@@ -3,9 +3,11 @@
 Task 1 audit, 2026-10-09. Source: `82ab72e9629475af52aadb337b63d91bc61138a9`,
 branch `feat/agent-dashboards-m4`. Task 1 initialized the evidence for the M4
 candidate and made no product changes ($0). Task 11 replaced its PENDING
-verdicts with the final measurements below. **M4 does not meet every
-criterion:** S9, S11, S12 and S13 FAIL, S1–S5 are BLOCKED by an evaluation
-runner defect, and the S6 CI ceiling and S7 cells belong to the controller.
+verdicts. A Task 11 rerun on the corrected candidate then replaced the first
+run's verdicts with the measurements below. **Every criterion the rerun
+measured passes:** S1–S5, S8, S9, S11, S12 and S13. S6 (local) and S10 keep
+their first-run PASS, and S7 passes on the raw path. The S6 CI ceiling is set from
+three runner measurements.
 
 Requirements: [design spec](../superpowers/specs/2026-10-04-agent-dashboards-design.md)
 and [M4 plan](../superpowers/plans/2026-10-09-agent-dashboards-m4.md), subject to
@@ -17,99 +19,129 @@ Their measurements, screenshots and PASS labels do not establish an M4 PASS.
 
 ## S1–S13 final verification
 
-Task 11, 2026-10-10 UTC. Frozen candidate: HEAD
-`fed0a916cfef31bd7e0c213831467e1fa66e2aac`. The production binary was built
-from `1fd54332`, which differs from HEAD only in this document; the collector
-used a development audit build of the same tree. Native engine
-`SELECT version()`: `v2.0.0-alpha43763`. Platform: darwin/arm64, 14 logical
-CPUs, default DuckDB sizing (about 22 GB, 14 connections). The machine was
-shared: other workloads kept the load average between 10 and 52 during the
-runs. Model: `claude-sonnet-5-5` only. Paid spend: **$2.087733** on one shared
-ledger, $5 cap ($1.667786 benchmark, $0.419947 parity). Holdout: unrun, budget
-reserved for benchmark and parity. Judge: skipped, `judge_keys_unconfigured`.
+Task 11 rerun, 2026-10-10 UTC.
 
-Telemetry: the immutable fanout-demo format-2 source (483 files, 2,213,782
-spans, 860,377 logs, 14,302,306 metric points, 40.8 hours) was replayed over
-OTLP/HTTP into a fresh local instance with fresh control state. One signed
-shift (+387,651,540,613,673 ns) was shared by all signals and twelve parallel
-converter processes. It placed the newest event 60 s after replay start; the
-replay took 167 s. Read back from the instance: exact source counts in 71
-format-3 batches (1,881,413,858 bytes), event time from 2026-10-08T11:36:51Z
-to 2026-10-10T04:26:02Z, one namespace and 17 span services. Metrics: 342
-names (gauge 95, histogram 35, sum 213 by type and name). The pool metrics are
-`db.client.connection.count`/`.max` (npgsql) and `db.sql.connection.open`,
-`.max_open`, `.wait` and `.wait_duration` (database/sql), with typed
-attributes such as `attributes['db.client.connection.state']` = `idle`/`used`.
-The source has no `service.version` change. Before the parity prompts and the
-collector, a labelled synthetic deploy was injected: 7,201 `cart` server spans
-at version 2.3.0 over the last four hours, 432 of them errors, marked
-`fanout.synthetic=deploy-verification`.
+- **Candidate:** HEAD `ae10f2f67969b0f6ded4a49ea3d799188f16ee31`. It carries the
+  first run's corrections D1, D2 and D4 and the card-corner fix. It differs from
+  `2d17645a` only in a panel benchmark test.
+- **Binaries:** the production binary was built from the clean tree with its
+  committed browser assets. The collector used the
+  development audit build of the same tree.
+- **Engine:** the pin is unchanged since the first run (`SELECT version()`:
+  `v2.0.0-alpha43763`).
+- **Platform:** darwin/arm64, 14 logical CPUs, default DuckDB sizing (22,118 MB,
+  14 connections). The machine was shared, with a load average of 7–20 during
+  the benchmark and collector runs.
+- **Model and spend:** `claude-sonnet-5-5` only. Paid spend was **$1.905655**
+  on a new rerun ledger with a $2.80 cap. The first run spent $2.087733 on its
+  own ledger, so both runs together spent $3.993388.
+- **Holdout and judge:** the holdout was not run. The judge was skipped
+  (`judge_keys_unconfigured`).
+- **Product changes:** none in the rerun. Two corrections went to the browser
+  collector instead (see the first-run history below).
+
+Telemetry:
+
+- **Source:** the same immutable fanout-demo format-2 source (483 files,
+  2,213,782 spans, 860,377 logs, 14,302,306 metric points).
+- **Replay:** it was replayed again, with the same converter and transport
+  groups, into a fresh local instance with fresh control state. The first
+  run's copy was older than the evaluation runner's five-minute freshness gate
+  allows.
+- **Shift:** one signed shift (+394,040,685,048,673 ns), shared by all signals
+  and twelve converter processes. The newest event landed 60 s after the replay
+  started, and the replay took 160.6 s.
+- **Read back from the instance:** exact source counts. Event time runs from
+  2026-10-08T13:23:21Z to 2026-10-10T06:12:31Z, with one namespace and 17 span
+  services. There are 342 metric names (gauge 95, histogram 35, sum 213),
+  including the first run's pool metrics.
+- **Timing:** the benchmark started 1.8 s after the replay ended.
+- **Synthetic deploy:** injected after the benchmark, as in the first run:
+  7,201 `cart` server spans at version 2.3.0 over the last four hours, 432 of
+  them errors, marked `fanout.synthetic=deploy-verification`.
+- **Edge rollup:** the backlog and lag were 0 eight minutes after the replay,
+  and the one-hour service map returned 20 services and 23 routes.
 
 | Criterion and literal target | Measured on the M4 candidate | Evidence | Verdict |
 |---|---|---|---|
-| **S1:** Benchmark prompts produce a saved dashboard, **10 of 10** | Runner: **0/10** recognised (exit 1). Persisted threads and version lists: 10/10 saved, each one immutable version 1. | The runner recognises a save only when the persisted tool message carries an explicit `error` flag. The AG-UI Go `Message` omits an empty `error`, so no save is recognised (finding D1). A read-only reconstruction applied the runner's mutation catalogue and single-dashboard rule to the persisted tool results and confirmed each version. | **BLOCKED** (D1) |
-| **S2:** Panels return rows, or carry an explained empty state, at save time, **100%** | Runner: no checks. Executor checks of the ten saved specs, run 3–6 minutes after save: **66/66** (63 with rows, 3 authored explained-empty). | Post-hoc, not at save time. The agent's own save-time check hit its 8 s bound during the replay backlog on 2 of 10 boards and recorded `not_run`. | **BLOCKED** (D1) |
-| **S3:** Specs fail validation after the agent's own correction loop, **0** | Runner: unchecked. Post-hoc: 10/10 saved specs valid, **0** invalid. | Same reconstruction. | **BLOCKED** (D1) |
-| **S4:** Median prompt to saved dashboard, default model, **≤ 45 s** | Runner: no save timing. Run end (request to end of stream, an upper bound on the last save): median **24.6 s**, range 18.3–52.4 s. | Bound only; the runner measures the save itself. | **BLOCKED** (D1) |
-| **S5:** Only named panels change over **5 consecutive edits, 100%** | Not run. | The runner starts the edits on the first recognised save, and none was recognised. | **BLOCKED** (D1) |
-| **S6:** First full render, **12 panels / 24 hours, ≤ 1.5 s p95** | Real data, local: light **634 ms**, dark **582 ms** p95 (24 fresh loads each). Controller's local e2e: 361 / 393 ms. CI ceiling: controller. | The checked-in 12-panel fixture on the replay instance, timed with the in-page `allPanelsPainted` callback imported from the performance spec. Each load made one panel batch; all 12 panels returned rows; zero console, page or network faults. | **PASS** (local); CI: **controller** |
-| **S7:** Warm-cache panel query latency, **≤ 500 ms p95** | controller | controller | controller |
-| **S8:** **1 batch + 1 annotations request per refresh; variable options once per range change** | Collector: **6/6** refresh cycles on the 23-panel board (3 per theme) each made exactly 1 panel batch and 1 annotations request. | The controller's `just e2e` performance spec also passed refresh and range-change counts. The drill re-request is reported under S12. | **PASS** |
-| **S9:** **15 visualization types** listed in the spec | Collector: 30/30 type/theme rows visible, labelled and inspectable. The `service_map` rendering assertion failed in both themes ("Map must mark its entry services"): 20 services and 0 routes in the last 24 hours at capture. Page smoke: 60/60 across 15 dashboards. | The map was empty because edge-rollup catch-up after a bulk replay is slow (finding D4), not because of the renderer. Routes appeared later in the same run. | **FAIL** (2/30 rows, D4) |
-| **S10:** **WCAG AA in both themes; categorical palette passes CVD validation** | Task 8 guards: axe-core 4.13.0 scans of every dashboard and chat panel type in both themes within the controller's passing `just e2e`, and the six-slot CVD unit test (Machado 2009, OKLab thresholds). | Screenshot review at 1100 and 1440 px in both themes found no contrast failure. One clipping defect (D2) is listed separately. | **PASS** |
-| **S11:** Shared link reproduces **time, variables, comparison and focused panel** | Collector: `panel_time`, `brush_history` and `empty_multiselect` (copied URL with comparison and an explicit empty selection reopens exactly) PASS. `fullscreen_panel` (focused-panel link) FAIL: not executed. | The collector's chat/full-screen seeds mock the thread list in its pre-#292 shape, which crashes the shell (H1). The focused-panel link was therefore not observed live. | **FAIL** (H1) |
-| **S12:** #232 **items 1, 9, 12, 14, 17, 24, 30 resolved** | 1: `stat_sparkline` PASS. 9: `empty` PASS on 14 types. 14: `column_formats`, `legend_geometry` PASS. 17 and 24: `preview_geometry`, `resize_geometry`, `route_scroll` PASS. 30: refresh counts PASS, but `drill_url` FAIL. 12: the missing-panel case in `fullscreen_panel` was not executed (H1). | `drill_url`: after a reload and Back from the recent-logs drill, all 23 loaded panels were requested again (one aborted, one complete). The slow-traces sequence did not repeat them (finding D3). | **FAIL** (D3, H1) |
-| **S13:** **Every in-scope preview capability shipped; checkout-incident and payments-database boards rebuilt from prompts** | Both prompts saved valid boards (13 and 8 panels; 21/21 checks good). Five of eight capabilities PASS; deploy markers, database statement detail and trace drill FAIL. | Side-by-side comparison below. | **FAIL** |
+| **S1:** Benchmark prompts produce a saved dashboard, **10 of 10** | **10/10** saved, each as one immutable version 1. The runner recognised every save (exit 0, aggregate pass). | Ten-prompt benchmark with the five edits: `--set benchmark` with the plan's Task 11 Step 4 inputs and a $2.80 cap. | **PASS** |
+| **S2:** Panels return rows, or carry an explained empty state, at save time, **100%** | **65/65** panels good at save time: 63 with rows and 2 authored explained-empty. | The runner's save-time executor checks. Both empty panels filter `severity_number >= 17`, which matches no demo logs, and each panel's description says so. | **PASS** |
+| **S3:** Specs fail validation after the agent's own correction loop, **0** | **0** invalid. 10/10 final specs valid and checked. | Runner validation. | **PASS** |
+| **S4:** Median prompt to saved dashboard, default model, **≤ 45 s** | Median first save **21.5 s** (range 10.7–54.9 s). | Runner save timing. The slowest prompt, `db-cache`, took 54.9 s. | **PASS** |
+| **S5:** Only named panels change over **5 consecutive edits, 100%** | **5/5** exact: title, threshold, add, remove and unit (versions 2–6). Only the named panel changed. Layout changed only for add and remove. | Runner edit comparison. | **PASS** |
+| **S6:** First full render, **12 panels / 24 hours, ≤ 1.5 s p95** | Not re-measured. First run, real data, local: light **634 ms**, dark **582 ms** p95 (24 fresh loads each). Controller's local e2e: 361 / 393 ms. CI ceiling: controller. | First run: the checked-in 12-panel fixture on the replay instance, timed with the performance spec's in-page `allPanelsPainted` callback. Each load made one panel batch with zero faults. Since then, the product changes are the empty-state wrap, card corners and edge rollup. | **PASS** (local, first run); CI: **controller** |
+| **S7:** Warm-cache panel query latency, **≤ 500 ms p95** | Slowest shape **47.1 ms** p95 on the traces-and-logs replay; **33.1 ms** on the three-signal replay, including metric panels (gauge 33.1, counter 27.4, histogram 23.2 ms). 100 warm samples per shape, idle machine. | `BenchmarkPanelQueries24Hours` (readbench) on replayed demo data, 24 hours, default production sizing. See Task 6 below. | **PASS** |
+| **S8:** **1 batch + 1 annotations request per refresh; variable options once per range change** | Collector: **6/6** refresh cycles on the 23-panel board (3 per theme). Each made exactly 1 panel batch and 1 annotations request. | `drill_url`: opening and closing drills, including Back after a reload, sent 0 panel requests. The controller's `just e2e` performance spec covers range-change counts. | **PASS** |
+| **S9:** **15 visualization types** listed in the spec | Collector: **30/30** type/theme rows visible, labelled, inspectable and passing their rendering assertions. Page smoke: 56/56 across 14 dashboards at 1100 and 1440 px. | The service map showed 20 services and 23 routes in both themes. Its top and bottom overflow fades were drawn, and the whole-graph control removed the overflow. | **PASS** |
+| **S10:** **WCAG AA in both themes; categorical palette passes CVD validation** | Not re-measured. First run: Task 8 guards (axe-core 4.13.0 scans of every dashboard and chat panel type in both themes, in the controller's passing `just e2e`) and the six-slot CVD unit test (Machado 2009, OKLab thresholds). | First-run screenshot review at 1100 and 1440 px found no contrast failure. The clipping it found (D2) is fixed. | **PASS** (first run) |
+| **S11:** Shared link reproduces **time, variables, comparison and focused panel** | Collector: `panel_time`, `brush_history`, `empty_multiselect` and `fullscreen_panel` PASS. | `fullscreen_panel` checked the focused-panel dashboard URL, shared links, a missing panel and Esc/Close/Back in both themes. `empty_multiselect` reopened a copied URL with comparison and an explicit empty selection exactly. | **PASS** |
+| **S12:** #232 **items 1, 9, 12, 14, 17, 24, 30 resolved** | 1: `stat_sparkline` PASS. 9: `empty` PASS on 14 types. 12: the missing-panel case in `fullscreen_panel` PASS. 14: `column_formats` and `legend_geometry` PASS. 17 and 24: `preview_geometry`, `resize_geometry` and `route_scroll` PASS. 30: refresh counts and `drill_url` PASS. | Collector: 33/33 checks, zero defects. | **PASS** |
+| **S13:** **Every in-scope preview capability shipped; checkout-incident and payments-database boards rebuilt from prompts** | All eight in-scope capabilities PASS. Five come from the first run's prompt-built boards. Deploy markers, database statement detail and trace/log drill were re-measured on this candidate. | Side-by-side comparison below. | **PASS** |
 
 ### S13 side-by-side comparison
 
-The two exact preview prompts ran once through the agent chat endpoint, metered by
-the runner's admission, usage and settlement functions on the same ledger.
-The rebuilt boards were captured at 1100 and 1440 px in both themes, next to a
-network-free copy of the private preview. Capabilities are compared, not values.
-The preview's error-budget board is out of scope (SLO).
+In the first run, the two exact preview prompts each ran once through the agent
+chat endpoint. They were metered on that run's ledger and saved valid boards
+(13 and 8 panels; 21/21 checks good). The rebuilt boards were captured at 1100
+and 1440 px in both themes, next to a network-free copy of the private preview.
+The rerun spent nothing on parity. It re-measured the three capabilities that
+had failed, using the collector and the product's `preview_panels` tool, and
+re-rendered the first run's checkout board on this build. Capabilities are
+compared, not values. The preview's error-budget board is out of scope (SLO).
 
-| Capability | Preview | Rebuilt from the prompt | Live evidence | Verdict |
+| Capability | Preview | Product evidence | Live evidence | Verdict |
 |---|---|---|---|---|
-| Heatmap | Log2 latency distribution with exemplar drill | Checkout: log2 duration heatmap with trace drill (421 cells) | Heatmap type rows, both themes | PASS |
-| Contextual log patterns | Error and warning patterns with trends | Checkout: `body_template` patterns with log drill | `pattern_context` PASS on dashboard and chat, both themes | PASS |
-| Deploy markers and anomaly bands | Deploy line and anomaly shading on latency and pool charts | Both boards enable deploys and anomalies; an anomaly band shows on payment latency. Checkout panels show no marker because only `cart` deployed. | Screenshot shows the `cart 2.3.0` marker and an anomaly band; `anomaly_areas` PASS; `deploy_markers` FAIL on its twin-colour precondition (H2) | FAIL (H2) |
-| Before/since bars | Downstream calls split at the deploy | Checkout: operations bar with `split: deploy`; notes that no deploy falls in its scope | `deploy_split` PASS (cart Before/Since series) | PASS |
-| Database and cache detail | Share of p99 by statement, duration against rows, statements in timeout traces | Payments: database calls by service and system (cart Redis, product-reviews PostgreSQL) and an explained-empty panel for payment, which has no database spans. No statement breakdown, although `db.statement` exists for product-reviews. | Benchmark board "Database and cache calls by service" | FAIL |
-| Trace and log drill | Exemplar traces, trace table, logs from a trace | Trace drill on heatmap, timeline, latency and tables; log drill on patterns; traces panel | `waterfall_logs`, `cancel_drill` PASS; `drill_url` FAIL (D3) | FAIL (D3) |
-| Table formats | Trace link, duration bar, template chips | Bar and unit column formats; trace links and duration bars in the traces panel; no template chips | `column_formats` PASS | PASS |
-| Pool metrics | Pool in-use time series with a pool-max threshold, peak stat | Payments: table of six real pool series and their peaks, with typed attributes. No time series or threshold; the source pools never exceed 2 in use. | Verified pool names and attributes on the instance | PASS |
+| Heatmap | Log2 latency distribution with exemplar drill | Checkout (first run): log2 duration heatmap with trace drill | Heatmap type rows, both themes | PASS |
+| Contextual log patterns | Error and warning patterns with trends | Checkout (first run): `body_template` patterns with log drill | `pattern_context` PASS on dashboard and chat, both themes | PASS |
+| Deploy markers and anomaly bands | Deploy line and anomaly shading on latency and pool charts | Both rebuilt boards enable deploys and anomalies. The checkout board, re-rendered on this build, lists `cart` 2.3.0 and an anomaly band, and shows no marker because only `cart` deployed. | `deploy_markers` PASS: one aligned 1-px `cart 2.3.0` band, and no band at that time on checkout. `anomaly_areas` PASS. | PASS |
+| Before/since bars | Downstream calls split at the deploy | Checkout (first run): operations bar with `split: deploy` | `deploy_split` PASS (cart Before/Since series) | PASS |
+| Database and cache detail | Share of p99 by statement, duration against rows, statements in timeout traces | `preview_panels` (no model call) ran three structured `product-reviews` panels, all `ok`: p99 by `db.statement` (3.8 ms), share by statement (100%), and a table of statement, database, rows (6,421), share, average, p99 and maximum duration. They rendered as a board in both themes at 1100 and 1440 px. | `preview_panels` over the session MCP route on the replay | PASS |
+| Trace and log drill | Exemplar traces, trace table, logs from a trace | Trace drill on the heatmap, state timeline and traces panel; log drill on patterns. The re-rendered checkout board shows all of them. | `drill_url`, `waterfall_logs` and `cancel_drill` PASS | PASS |
+| Table formats | Trace link, duration bar, template chips | Bar and unit column formats; trace links and duration bars in the traces panel | `column_formats` PASS | PASS |
+| Pool metrics | Pool in-use time series with a pool-max threshold, peak stat | Payments (first run): table of six real pool series and their peaks, with typed attributes | Verified pool names and attributes on both replays | PASS |
 
-### Findings to correct
+### First run (history)
 
-| ID | Kind | Evidence | Smallest correction |
-|---|---|---|---|
-| D1 | Eval runner | `findSaved` sets `is_error` to null unless the persisted tool message has an `error`/`isError`/`is_error` key. The AG-UI Go `Message.Error` is `omitempty`, so successful tool messages have no flag. Every benchmark and parity save went unrecognised. The mock writes `error: ''`, so mock tests pass. | Treat an absent `error` on a single persisted tool message as success (as before Task 9). Make the mock omit `error` on success, and pin a real persisted thread read in the server golden. |
-| D2 | UI | An empty panel's diagnosis with a long unbroken token (`name IN ('db.client.connection.count',…)`) overflows and is clipped at both card edges, in both themes and widths. | Add `overflowWrap: "anywhere"` to the empty-state diagnosis text in `panel-card.tsx`, as the error text already has, with a rendering test. |
-| D3 | UI (cause not isolated) | `drill_url`: closing the recent-logs drill with Back after a reload re-requested all 23 loaded panels. | Rerun `drill_url` alone on an idle machine and log the panel query key around the close. If the relative window re-anchors on close, reuse the existing anchor. |
-| D4 | Backlog robustness | After a 41-hour bulk replay, edge rollup processes one ≤ 30-minute start-time sub-window per one-minute pass, so it needs at least 82 passes. Recent windows had no routes for over an hour. Progress gauges reported watermark 0 and 497,669 backlog chunks during the first window. | Bound each edge pass by elapsed time while no writer waits, instead of a fixed single sub-window. Report progress from the window start or sub-cursor instead of zero. |
-| H1 | Collector | The receipt and full-screen seeds return `{threads, nextCursor}`; the current list contract is `{items, next_cursor}`. The rail then throws "Cannot read properties of undefined (reading 'updated_at')", and seven checks (five receipt checks, `fullscreen_panel`, `explain_panel`) time out on the theme toggle. | Return `{items: [], next_cursor: null}` from both seeds and rerun the seven checks. |
-| H2 | Collector | The `deploy_markers` twin precondition compares colour strings (`#3987e5` against `rgba(57,135,229,1)`, the same colour), with a tooltip left open on the twin. | Normalize colours before comparing and move the pointer off the chart before the twin capture. |
+The first run (HEAD `fed0a916`, production binary from `1fd54332`, $2.087733)
+measured these verdicts:
 
-The first collector run was BLOCKED by a 12-second screenshot timeout under
-machine load, after the light type rows completed. The rerun is the run
-reported above: 24/33 checks pass.
+- S1–S5: BLOCKED.
+- S9, S11, S12 and S13: FAIL.
+- S6 (local), S8 and S10: PASS.
+
+Its findings and their outcomes:
+
+| ID | Finding | Outcome |
+|---|---|---|
+| D1 | Eval runner: `findSaved` required an explicit `error` flag, and the AG-UI Go message omits an empty one, so no save was recognised. | Fixed in `bbfa48dc`. The rerun scored S1–S5. |
+| D2 | UI: a long unbroken empty-state diagnosis overflowed its card. | Fixed in `2d17645a`. |
+| D3 | `drill_url`: Back after a drill reload re-requested all 23 panels. | Not a product defect. In 28 diagnostic trials on the unchanged UI, Back after a reload stayed in the reloaded document and sent 0 panel requests, including with 6 s stale data and under 6× CPU throttling. The first run's traffic (`panels:aborted, panels:200, annotations:200`, 23 ids, page at the top) matches a Back that lands in a new document. The browser automation launches Chromium with the back/forward cache disabled, so that document must load every panel. The collector now marks the reloaded document and classifies a Back into a new document as a fresh load, as it already did for the reload. |
+| D4 | Edge rollup took over an hour to catch up after a bulk replay. | Fixed in `bbfa48dc`. Backlog 0 within eight minutes; map routes present. |
+| H1, H2 | Collector: a stale thread-list mock, and a colour-string comparison. | Fixed in the collector. |
+| H3 | Collector (found in the rerun): the service-map overflow assertions still required the M2 fade element and the "+N below" hint, which M3 replaced with `data-map-overflow` / `data-map-fade`. | The collector now reads the current markers and still fails an overflow without a drawn fade. |
+| H4 | Collector (found in the rerun): the deploy-marker negative check counted raw pixel differences. The marker board's annotation label strip shortens its plot and rescales every series point against the twin (939 px). | The collector now applies the positive check's narrow-band rule at the `cart` deploy time (largest column 3 rows, threshold 22.4). It still fails when a marker is drawn there. |
+
+The first collector rerun, with only the D3 correction, passed 32/33 checks
+and failed on H3 and H4. The run reported above includes all three collector
+corrections. Each correction has node tests showing it still fails on the
+defect it guards.
 
 ### Limitations
 
-- S1–S5 have no valid runner score on this candidate. Post-hoc evidence
-  suggests S1–S4 would pass; S5 is unmeasured. Spending more requires the
-  controller's authorization after D1 is corrected.
-- Parity data is the demo: `payment` has no database spans and no pool
-  pressure, and the only deploy is the labelled synthetic `cart` injection.
-  The checkout board therefore cannot show a checkout deploy. The payments
-  board correctly reports that the premise does not hold.
+- S6 and S10 were not re-measured on this candidate.
+- Parity data is the demo:
+  - `payment` has no database spans.
+  - `product-reviews` issues one distinct statement, so its share is 100%.
+  - The only deploy is the labelled synthetic `cart` injection, so the
+    checkout board cannot show a checkout deploy.
+- Statement detail was verified with `preview_panels` and a hand-written
+  structured spec, not by rerunning the payments prompt.
 - The rebuilt boards use no variables, click-to-filter or saved comparison,
   which the preview shows. These are outside the brief's capability list.
-- Anomalies are written for all namespaces (empty namespace), so an
-  annotation request scoped to `otel-demo` returns none. Unscoped panels show
-  them.
-- The machine was shared and heavily loaded. S6 timings are conservative.
+- In the first run, anomalies were written for all namespaces (empty namespace),
+  so an annotation request scoped to `otel-demo` returned none. Unscoped panels
+  show them.
+- The machine was shared.
 
 ## S12 item provenance and limits
 
@@ -474,3 +506,30 @@ Final rerun on the M4 candidate, idle machine, same settings: PASS in 334 s; 0 u
 failures; 13 anomaly writes succeeded and 1 was delayed at admission (its findings carry
 into the next write); the backlog drained in 56 s with exact span and log counts
 (2,113,536 / 792,576); peak resident memory 3.21 GB.
+
+### Metric panels
+
+A second replay carries all three signals: 8,221,759 metric points in the 24-hour window,
+alongside traces and logs. The benchmark adds three metric shapes, each on the most
+common metric of its type in the replay (the gauge is `container.cpu.utilization`).
+
+| Shape | Demo volume p95 (ms) | 10x volume p95 (ms) |
+|---|---:|---:|
+| gauge average by service | 33.1 | 256.7 |
+| counter rate | 27.4 | 212.7 |
+| histogram p95 | 23.2 | 166.7 |
+| twelve panels in one request | 120.2 | 1,098.7 |
+
+Two limits of the metric measures show up here. A counter's rate is the rate of
+data points, not the rate of the counter's increase, and a histogram's p95 is computed
+from each point's sum, not from its buckets.
+
+## Scale limit and next step
+
+The replayed demo carries about 15 spans per second. At 10x, about 150 spans per second,
+every single panel stays under 500 ms, but a complete twelve-panel request takes 1.1 to
+1.6 s on the server alone, at or past S6's 1.5 s budget for the whole first render, on a
+14-core development machine. A larger system will need precomputed per-minute summaries
+for spans, logs and metrics, which milestone 3 removed. They are planned for the next
+milestone, together with a whole-system view, and sized against a target rate of 1,000 to
+5,000 spans per second with host metrics. M4 adds no summaries or routing.
