@@ -194,8 +194,9 @@ per-second rate in 10 s and 1 h buckets. A series with no point in a bucket
 contributes nothing to that bucket, and the automatic bucket for metric
 panels is never shorter than 1 minute.
 
-A series' value at a bucket's end is its latest point at or before the
-earlier of the bucket end and the window end, and the series counts only if
+A series' value at a bucket's end is its latest point strictly before the
+earlier of the bucket end and the window end (both ends are exclusive, so a
+point exactly on a boundary belongs to the next bucket), and the series counts only if
 that point is at most 5 minutes old, as Prometheus treats staleness. A
 container that stopped or restarted therefore stops adding to `last` after
 5 minutes, and a stat over a whole day shows what is reporting now.
@@ -248,7 +249,11 @@ raw-path p95 per panel, the twelve-panel request time, ingest throughput, and,
 for Phase C sizing, the number of distinct summary keys per minute for each
 candidate dimension set.
 
-Results go into `docs/benchmarks/2026-10-agent-dashboards-m5.md`.
+Results go into `docs/benchmarks/2026-10-agent-dashboards-m5.md`. The
+metric shapes include the system page's: CPU from counter rates, memory and
+filesystem from updown `last`, container CPU and memory from gauges, each at
+24 hours. If any metric shape misses S7 at the S18 volume, Phase C adds a
+metric fix, designed from those numbers, before Phase D starts.
 
 ## Phase C: per-minute summaries
 
