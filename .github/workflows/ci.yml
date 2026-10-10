@@ -97,10 +97,24 @@ jobs:
       - name: just test-race
         run: just test-race
 
+  # The performance spec runs in its own job so neither group nears Playwright's
+  # 12-minute global timeout; one worker keeps its timings uncontended.
   e2e:
-    name: Browser smoke
+    name: Browser ${{ matrix.group }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: smoke and accessibility
+            slug: smoke
+            skip_performance: "1"
+            args: ""
+          - group: performance
+            slug: performance
+            skip_performance: ""
+            args: e2e/performance.spec.ts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -118,12 +132,14 @@ jobs:
       - name: just ui-deps
         run: just ui-deps
       - name: just e2e
-        run: just e2e
-      - name: Upload browser failures
-        if: failure()
+        run: just e2e ${{ matrix.args }}
+        env:
+          FANOUT_E2E_SKIP_PERFORMANCE: ${{ matrix.skip_performance }}
+      - name: Upload browser evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: browser-smoke-failure
+          name: browser-evidence-${{ matrix.slug }}
           path: |
             ui/host/playwright-report/
             ui/host/test-results/

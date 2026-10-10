@@ -187,24 +187,21 @@ func compileRelations(ctx context.Context, db snapshotSQL, query string, sources
 			return "", fmt.Errorf("reserved snapshot CTE name %s", name)
 		}
 	}
+	// Resolve qualifiers in their original lexical scopes before table replacement.
+	// Struct fields and aliases must retain the bindings used by DESCRIBE, and a
+	// name a CTE shadows is never a physical relation.
+	physical := make(map[string]string, len(sources))
+	for key, body := range sources {
+		if !shadowed[key] {
+			physical[key] = body
+		}
+	}
+	normalizeRelationQualifiers(root, physical)
 	templates := map[string]map[string]any{}
 	var walk func(any) error
 	walk = func(value any) error {
 		switch v := value.(type) {
 		case map[string]any:
-			if v["class"] == "COLUMN_REF" {
-				if names, ok := v["column_names"].([]any); ok && len(names) == 3 {
-					schema, _ := names[0].(string)
-					table, _ := names[1].(string)
-					key := strings.ToLower(schema + "." + table)
-					if schema == "main" {
-						key = strings.ToLower(table)
-					}
-					if _, ok := sources[key]; ok {
-						v["column_names"] = names[1:]
-					}
-				}
-			}
 			if v["type"] == "BASE_TABLE" {
 				catalog, _ := v["catalog_name"].(string)
 				if catalog != "" {

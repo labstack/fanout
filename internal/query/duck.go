@@ -588,7 +588,7 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	if n, err := d.refreshEdgeRollup(ctx); err != nil {
+	if n, err := drainEdgeRollup(ctx, d.cfg.RollupInterval/2, d.refreshEdgeRollupPass); err != nil {
 		errs = append(errs, fmt.Errorf("edge rollup: %w", err))
 	} else {
 		affected += n
@@ -844,11 +844,11 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 
 	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
 	if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, args...); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("service_rollup/delete: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, args...)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("service_rollup/insert: %w", err)
 	}
 
 	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
@@ -875,7 +875,28 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	return rows, nil
 }
 
-func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
+// The tick budget bounds starting further passes. Finish each admitted
+// sub-window so a slow pass commits its cursor rather than retrying forever.
+// Each refresh returns after releasing the write gate, admitting queued writers.
+func drainEdgeRollup(ctx context.Context, budget time.Duration, refresh func(context.Context) (int64, bool, error)) (int64, error) {
+	deadline := time.Now().Add(budget)
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		n, pending, err := refresh(ctx)
+		if err != nil {
+			return total, err
+		}
+		total += n
+		if !pending || !time.Now().Before(deadline) {
+			return total, nil
+		}
+	}
+}
+
+func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 	start := time.Now()
 	result := metrics.RollupError
 	var recordedRows int64
@@ -889,29 +910,29 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
 	defer unlock()
 	if err := d.lockRollupParquetRead(ctx); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer d.parquetMu.RUnlock()
 
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	lastWatermark, err := rollupWatermark(ctx, tx, edgeRollupStateKey)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, edgeRollupRawMaxKey)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	rawWatermark, err := maxEdgeRollupWatermark(ctx, tx)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	sourceMax = rawWatermark
 
@@ -921,11 +942,11 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	// watermark is allowed past it.
 	subCursor, err := rollupWatermark(ctx, tx, edgeRollupSubCursorKey)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	resumeEnd, err := rollupWatermark(ctx, tx, edgeRollupSubWindowKey)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	resuming := subCursor > 0 && resumeEnd > lastWatermark
 
@@ -935,15 +956,18 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 			result = metrics.RollupNoop
 			updateRollupProgress(metrics.RollupEdge, true, lastWatermark, rawWatermark)
 		}
-		return 0, err
+		return 0, false, err
 	}
 	minIngested := int64(0)
 	if lastWatermark == 0 {
 		if minIngested, err = minEdgeRollupIngested(ctx, tx); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 	}
 	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
+	// Before the first committed ingest watermark, there are no source rows
+	// below windowStart. Report that known-empty prefix instead of epoch lag.
+	watermark = windowStart
 	if resuming {
 		windowEnd = resumeEnd
 		chunked = windowEnd < rawWatermark
@@ -981,7 +1005,7 @@ WHERE ingested_unix_nano > ?
   AND ingested_unix_nano <= ?
   AND start_time IS NOT NULL`, windowStart, windowEnd).Scan(&minStartT, &maxStartT)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	var totalAffected int64
@@ -1003,9 +1027,6 @@ WHERE ingested_unix_nano > ?
 			// moment every arriving query waits out whatever is left of it.
 			//
 			// The trigger is the grace running out, not a publisher existing.
-			// A publication queues every ten seconds under compaction, and
-			// yielding on sight would cut a pass from eight sub-windows to one
-			// whenever ingest is busy — which is when the eight are needed.
 			// While the grace holds, readers are still being admitted and
 			// nothing is waiting on this pass.
 			//
@@ -1019,14 +1040,14 @@ WHERE ingested_unix_nano > ?
 			}
 			subHi, err := edgeSubWindowEnd(ctx, tx, windowStart, windowEnd, subLo, maxT, maxEdgeSpansPerSubWindow)
 			if err != nil {
-				return 0, err
+				return 0, false, err
 			}
 			if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd, subLo, subHi); err != nil {
-				return 0, err
+				return 0, false, err
 			}
 			res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, windowStart, windowEnd, subLo, subHi)
 			if err != nil {
-				return 0, err
+				return 0, false, err
 			}
 			rows, err := res.RowsAffected()
 			if err != nil {
@@ -1045,31 +1066,34 @@ WHERE ingested_unix_nano > ?
 	storedWatermark := newWatermark
 	if completed {
 		if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		if err := storeRollupWatermark(ctx, tx, edgeRollupRawMaxKey, rawMaxProcessed); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		if err := clearEdgeRollupCursor(ctx, tx); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 	} else {
 		storedWatermark = lastWatermark
 		if err := storeRollupWatermark(ctx, tx, edgeRollupSubCursorKey, nextCursor); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 		if err := storeRollupWatermark(ctx, tx, edgeRollupSubWindowKey, windowEnd); err != nil {
-			return 0, err
+			return 0, false, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	result = metrics.RollupSuccess
 	recordedRows = totalAffected
-	updateRollupProgress(metrics.RollupEdge, true, storedWatermark, rawWatermark)
-	return totalAffected, nil
+	updateRollupProgress(metrics.RollupEdge, true, max(storedWatermark, windowStart), rawWatermark)
+	// A completed source window may intentionally retain the publication lag.
+	// Leave its plateau shortcut for the next tick rather than consuming that
+	// safety window immediately in this tick's catch-up loop.
+	return totalAffected, !completed || chunked, nil
 }
 
 // clearEdgeRollupCursor drops the resume point once its window is fully
@@ -1114,8 +1138,9 @@ const maxEdgeSpansPerSubWindow int64 = 250_000
 // the pass instead stops at a fixed number of sub-windows, persists where to
 // resume, and leaves the ingested watermark where it was. Combined with the
 // adaptive row limit above, every pass makes bounded forward progress without
-// assuming a uniform event rate.
-const maxEdgeSubWindowsPerPass = 8
+// assuming a uniform event rate. One sub-window per pass keeps each hold short
+// enough for version and anomaly writes to get the gate during a backlog.
+const maxEdgeSubWindowsPerPass = 1
 
 func edgeSubWindowEnd(ctx context.Context, tx *sql.Tx, windowStart, windowEnd int64, subLo, maxT time.Time, rowLimit int64) (time.Time, error) {
 	maxEnd := maxT.Add(time.Minute)

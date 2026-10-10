@@ -620,6 +620,14 @@
       }
     ]
   },
+  "saved_thread": [
+    {
+      "content": "{\"dashboard\":{\"created_at\":\"2026-10-01T12:00:00Z\",\"description\":\"\",\"id\":\"golden_board\",\"is_default\":false,\"name\":\"Eval fixture error\",\"spec\":{\"name\":\"Eval fixture error\",\"panels\":[{\"grid\":{\"h\":4,\"w\":6,\"x\":0,\"y\":0},\"height\":\"s\",\"id\":\"actual_latency\",\"query\":{\"from\":\"spans\",\"measures\":[\"p95(duration_ms)\"],\"where\":[\"service = 'checkout'\",\"namespace = 'shop'\"]},\"reduce\":\"window\",\"thresholds\":[{\"status\":\"warn\",\"value\":100}],\"title\":\"Latency\",\"unit\":\"ms\",\"viz\":\"stat\",\"width\":3},{\"content\":\"Seeded checkout request.\",\"description\":\"Fixture context.\",\"grid\":{\"h\":4,\"w\":6,\"x\":6,\"y\":0},\"height\":\"s\",\"id\":\"actual_text\",\"title\":\"Explanation\",\"viz\":\"text\",\"width\":4}],\"time\":{\"from\":\"2026-10-01T12:00:00Z\",\"refresh\":\"30s\",\"to\":\"2026-10-01T13:00:00Z\"},\"version\":1},\"updated_at\":\"2026-10-01T12:00:00Z\",\"version\":1},\"receipt\":{\"base_version\":0,\"changes\":[{\"kind\":\"added\",\"panel_id\":\"actual_latency\",\"title\":\"Latency\"},{\"kind\":\"added\",\"panel_id\":\"actual_text\",\"title\":\"Explanation\"}],\"layout_changed\":false,\"save_check\":{\"checked\":true,\"elapsed_ms\":0,\"panels\":[{\"elapsed_ms\":0,\"id\":\"actual_latency\",\"rows\":1,\"status\":\"ok\"},{\"elapsed_ms\":0,\"id\":\"actual_text\",\"rows\":1,\"status\":\"ok\"}]},\"version\":1}}",
+      "id": "saved_message",
+      "role": "tool",
+      "toolCallId": "save"
+    }
+  ],
   "stat_add_panel": {
     "id": "added_stat",
     "query": {

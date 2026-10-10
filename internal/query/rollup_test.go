@@ -397,10 +397,20 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 			ingested:  100,
 		})
 	}
-	// First pass rolls the parents up, so the second pass's affected set
-	// contains only the children's bucket.
+	// Drain the parents' start-time sub-windows before publishing children,
+	// so the next ingested window contains only the children's bucket.
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
+	}
+	for pass := 0; pass < 5; pass++ {
+		if _, err := d.refreshEdgeRollup(ctx); err != nil {
+			t.Fatalf("parent drain pass: %v", err)
+		}
+		if watermark, cursor := readEdgeRollupState(t, d); watermark == 100 && cursor == 0 {
+			break
+		} else if pass == 4 {
+			t.Fatalf("parent backlog did not drain: watermark=%d cursor=%d", watermark, cursor)
+		}
 	}
 	for _, ns := range []string{"ns-far", "ns-near"} {
 		insertRollupTestSpan(t, db, rollupTestSpan{

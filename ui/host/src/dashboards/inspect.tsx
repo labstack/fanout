@@ -5,7 +5,12 @@ import { brand, info, ok, chart, fonts } from "../../../tokens";
 
 export function PanelData({ panel, result }: { panel: Panel; result?: PanelResult }) {
   const frame = result?.frame;
-  return <div data-panel-data>{frame ? <Table fz={12} striped>
+  return <div data-panel-data>
+    {result?.error && <Text data-panel-error-detail size="sm" role="status"
+      style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",userSelect:"text"}}>
+      {result.error}
+    </Text>}
+    {frame ? <Table fz={12} striped>
     <Table.Thead><Table.Tr>{frame.columns.map(c => <Table.Th key={c.name} ff={fonts.display}>{c.name}</Table.Th>)}</Table.Tr></Table.Thead>
     <Table.Tbody>{Array.from({ length: Math.min(frame.rows, 500) }, (_, r) => <Table.Tr key={r}>{frame.columns.map((c, i) => {
       const v = frame.values[i][r];
@@ -13,7 +18,7 @@ export function PanelData({ panel, result }: { panel: Panel; result?: PanelResul
     })}</Table.Tr>)}</Table.Tbody>
   </Table> : <Text c="dimmed" size="sm">No data.</Text>}
     <Text c="dimmed" fz={12} mt={8}>Ran in {result?.elapsed_ms ?? 0} ms{result?.interval ? `, one point per ${result.interval}` : ""}{frame ? `, ${frame.rows} rows${frame.truncated ? " (truncated)" : ""}` : ""}.</Text>
-    {(result?.sql ?? panel.sql) && <Code block mt={8}>{result?.sql ?? panel.sql}</Code>}
+    {(result?.sql ?? panel.sql) && <Code block tabIndex={0} mt={8}>{result?.sql ?? panel.sql}</Code>}
   </div>;
 }
 
@@ -24,6 +29,9 @@ export function PanelSpec({ panel, dark }: { panel: Panel; dark: boolean }) {
     const key = part.startsWith('"') && /^\s*:/.test(parts[i + 1] ?? "");
     const kind = key ? "key" : part.startsWith('"') ? "string" : /^(true|false|null)$/.test(part) ? "literal" : /^-?\d/.test(part) ? "number" : "punctuation";
     const color = kind === "key" ? brand[dark ? 4 : 7] : kind === "string" ? ok[dark ? 4 : 8] : kind === "number" || kind === "literal" ? info[dark ? 4 : 8] : undefined;
+    // Punctuation takes the block's own colour, so it stays plain text: a span
+    // around a multi-line run of braces leaves contrast checks no line box to measure.
+    if (kind === "punctuation") return part;
     return <span key={i} data-json-token={kind} style={{ color }}>{part}</span>;
   })}</pre>;
 }

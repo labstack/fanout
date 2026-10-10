@@ -125,6 +125,13 @@ export const fanoutThemeConfig = {
     Tabs: { styles: (_theme: unknown, props: { color?: string }) => ({ tab: primaryOnly(props.color, "--tabs-text-color") }) },
     Pagination: { styles: (_theme: unknown, props: { color?: string }) => ({ control: primaryOnly(props.color, "--pagination-active-color") }) },
     Badge: { vars: (_theme: unknown, props: { size?: string }) => ({ root: badgeFloor(props.size) }) },
+    /* Mantine's initial-focus placeholder is a focusable role="presentation"
+       child, which a role="menu" may not own. Without it, opening a menu
+       focuses its first item, as the ARIA menu-button pattern expects. */
+    Menu: { defaultProps: { withInitialFocusPlaceholder: false } },
+    /* Mantine's close button is an icon with no accessible name. */
+    Drawer: { defaultProps: { closeButtonProps: { "aria-label": "Close" } } },
+    Modal: { defaultProps: { closeButtonProps: { "aria-label": "Close" } } },
   },
 } as const;
 

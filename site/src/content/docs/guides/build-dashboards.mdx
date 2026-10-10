@@ -1,0 +1,243 @@
+---
+title: Build and refine dashboards
+description: Build a telemetry dashboard from chat, refine its panels, and share the current view.
+summary: Chat authoring, fifteen panel types, variables, comparison, view links, saved versions and keyboard controls.
+read_when:
+  - You want to build or change a dashboard from chat.
+  - You want to inspect a failed panel, share a view or restore a saved version.
+status: preview
+---
+
+Open chat and describe the system view you need. For example: “Build a dashboard
+of checkout latency and errors by service.” Fanout reads the telemetry schema,
+previews the panels and saves a dashboard. The save receipt records the saved
+version and reports panels that need attention. **Open dashboard** opens the
+current dashboard.
+
+To refine the result, name the panel and the change: “On the checkout latency
+panel, add a warning threshold at 500 ms.” Use the receipt's changes and version
+history to inspect what changed.
+
+## Build, check and refine
+
+Chat needs a configured AI provider. When it is available, you can start in chat
+or use **Create with AI** on the empty dashboards page. Describe the question,
+services and time window you care about. Fanout discovers the available fields
+and values, previews its draft, and corrects invalid panels before saving.
+Missing telemetry should have an explanation in the panel description; an empty
+panel is not evidence that the system is healthy.
+
+Expand **Details** in the receipt to see the stages, preview results, corrections
+and saved-panel checks. A saved version can still contain empty or failing
+panels. An incomplete save check means the panels were not all executed; it
+does not undo the save or establish that they work.
+
+A follow-up edit reads the dashboard and changes the named panels, preserving
+the others. Ask explicitly for a redesign when you want the whole board replaced.
+You can also ask to add a variable, change the default time range or remove a
+panel.
+
+The panel menu's **Explain in chat** asks for an answer about the observed window,
+resolved variables and panel state. It cannot save dashboard changes. **Ask Fanout
+to fix it** is a separate edit request for a failed panel, available to the
+dashboard's manager when chat is enabled. It asks Fanout to correct only that
+panel. All current account roles can manage their own dashboards; see
+[roles](/reference/roles).
+
+## Choose panels for the question
+
+The same panel types render in chat views and saved dashboards:
+
+| Type | Use it for |
+|---|---|
+| Stat (`stat`) | One headline measure, with a trend and comparison when available. |
+| Gauge (`gauge`) | One measure against a defined minimum, maximum and thresholds. |
+| Time series (`timeseries`) | Change over time, as lines, areas or bars. |
+| Bar (`bar`) | Comparing categories; a deploy split can compare before and since a deploy. |
+| Table (`table`) | Ranked details and multiple measures, with unit, bar, status, sparkline and link formats. |
+| Text (`text`) | Markdown context and explanations. |
+| Heatmap (`heatmap`) | How a distribution, such as latency, changes over time. |
+| Histogram (`histogram`) | The distribution of span durations or metric histogram observations. |
+| Scatter (`scatter`) | The relationship between two measures per item, with optional colour grouping. |
+| State timeline (`state_timeline`) | Threshold states over time per item; missing values remain unknown. |
+| Logs (`logs`) | Individual redacted log events and their trace context. |
+| Log patterns (`log_patterns`) | Repeated redacted message templates, counts, trends, dominant severity and top service. |
+| Traces (`traces`) | Slow or erroring traces that you can open for evidence. |
+| Service map (`service_map`) | Service dependencies and traffic, latency and error context. |
+| Health (`health`) | Service health totals, error trend and health distribution. |
+
+Structured stat and gauge panels default to the measure over the **whole selected
+window**.
+A window p95 is computed from that window's observations, not by averaging the
+trend's bucket p95 values. Ask for a last, mean, minimum, maximum or sum reduction
+when that is the value you intend instead.
+
+Units include milliseconds, seconds, nanoseconds, percent, ratio, count, rates
+per second or minute, bytes and unitless values. Structured measures carry their
+own units. Scatter can use different units on its two axes. Keep unrelated unit
+families in separate panels.
+
+Log patterns group by message template. Their severity is the most frequent
+severity, with ties choosing the higher severity; their service is the most
+frequent service, with ties choosing the name that sorts first. These describe
+the matching redacted events, rather than splitting each template into extra
+severity or service groups.
+
+Ask for a trace or log drill when you need evidence behind a chart. A configured
+panel can apply a variable filter when clicked, or open matching logs or exemplar
+traces. Deploy markers and anomaly bands provide context; they do not establish
+the cause of a change.
+
+For queries that need it, a panel can use guarded SQL: one read-only `SELECT`
+over approved telemetry relations, with a required time-window filter. Logs,
+log patterns, traces, scatter and state timelines use structured queries.
+SQL is an authoring escape hatch. **Spec** is a read-only inspection view;
+there is no SQL or chart-style editor there.
+
+## Inspect empty or failed panels
+
+Use **Data** to inspect returned rows, execution time, interval and executed SQL
+when present. **A failed panel's full sanitized error appears in Data**, even
+when the compact Chart preview cuts it short. On a narrow card, choose Data from
+the panel menu. **Spec** shows the authored panel definition. Text panels expose
+Content and Spec instead of Data.
+
+Empty panels show their diagnosis in Chart. Check the time range, selected
+variables and the panel's description before treating the absence as meaningful.
+Truncation and other result notes remain visible below the panel. If a refresh
+fails after data was loaded, the old data can remain on screen with a warning;
+it is not a fresh successful result. Use **Retry** for a request failure, or
+the separate fix action for an authored panel error.
+
+## Time, variables and comparison
+
+The time picker offers relative ranges from five minutes through thirty days.
+For a fixed investigation, enter **From** and **To** under **Absolute (your time
+zone)** and choose **Apply range**. **Zoom out** widens the window.
+
+**Refresh now** reloads the panels. Auto refresh offers Off, 10s, 30s, 1m and 5m;
+the default is 30s unless the dashboard specifies another interval. Refresh is
+paused while selecting a chart range.
+
+Ask chat to add variables for filters you want to reuse:
+
+| Kind | Behaviour |
+|---|---|
+| Query | Choices discovered from telemetry in the selected window. |
+| Custom | A saved list of choices. |
+| Constant | A saved read-only value. |
+| Text | Free-form input, applied on blur or Enter. |
+
+Query and custom variables can allow multiple selections. **All** removes filters
+that use that variable. Clearing a multi-select chooses All if it is enabled;
+otherwise **None** is an empty selection that matches no values. All and None
+have different meanings. A query variable can depend on an earlier variable,
+so selecting a service can narrow a later route selector. Options resolve in
+saved variable order and change with the window and dependencies.
+
+Turn on **Compare with previous period** to compare with the preceding window of
+the same duration. Time series draw the previous series; stats display a previous
+value as a delta when available. Other panel types do not draw this comparison;
+a bar's deploy split is a separate before/since view.
+An individual panel can have its own range or time shift; its header labels that
+override. Ask chat to set it when a panel needs a different window from the board.
+
+## Share the current view
+
+Copy the address bar to share the current time, variables, comparison, focused
+panel and drill state. The panel menu's **Copy link** preserves that state and
+opens the selected panel in full-screen, leaving layout edit mode out of the link.
+The auto-refresh selection is local to the page and is not carried in the URL.
+
+Use an absolute range when the recipient needs the same time bounds. A relative
+range moves with the time the link is opened. Links open the current saved
+dashboard and query its data; they do not freeze a historical version or result.
+
+The recipient needs an account and access to that dashboard. Dashboards are
+currently owner-scoped: another account cannot open your dashboard just because
+you copied its link. A view link grants no access and is not a public snapshot.
+
+## Layout and saved versions
+
+Choose **Edit layout** on a wide screen, drag panels by their titles and resize
+from a corner. Choose **Save layout** to persist the grid as a new version;
+**Done** leaves layout mode. Duplicate and Remove panel are available in panel
+menus while editing. Those actions save immediately, including any pending
+layout changes. Narrow screens stack panels and do not allow layout editing.
+
+Edits use the version that was read to detect competing saves. If the board
+changed meanwhile, use **Load latest**, then redo the change. An MCP client
+should likewise read the latest dashboard and supply `base_version` when editing
+or replacing it.
+
+Open **History** to inspect retained immutable versions, their author, message,
+changes and saved spec. Historical inspection does not query historical data.
+If the preceding version is no longer retained, the changes are unavailable
+but the selected spec can still be inspected.
+
+Choose **Restore version** on an older entry to save that spec as a **new version**.
+For example, restoring v2 while v5 is current creates v6; it does not rewrite
+v2 or remove v3–v5. The dashboard reloads the restored panels. History and restore
+have the same owner scope as the dashboard.
+
+## Keyboard controls
+
+Open **Keyboard shortcuts** for help and the **Single-key shortcuts** switch.
+The help uses these labels:
+
+| Key | Action |
+|---|---|
+| `r` | Refresh now |
+| `e` | Toggle layout mode |
+| `h` | Open history |
+| `f` | Open the focused panel in full-screen; Exit full-screen when already there |
+| `?` | Open keyboard shortcuts |
+| Escape | Cancel a range, then leave the chart or close full-screen |
+| `/` | Focus the chat composer |
+
+Focus a chart or panel control before pressing `f`; without a focused panel it
+does nothing. In full-screen, `r`, `f` and `?` work; `e` and `h` are inactive.
+Dashboard shortcuts pause while typing, using menus or opening other dialogs
+and drawers. Repeated keys and modifier combinations are ignored, apart from
+Shift for `?`. Turning off single-key shortcuts keeps visible controls and
+chart navigation available. The global `/` chat shortcut works outside text
+entry when chat is available; Escape in the composer clears it and leaves focus.
+
+Tab directly to a chart. Left/Right moves between points; Up/Down changes series
+at the same time or category; Home/End goes to the first/last point. Enter drills
+or applies the configured panel filter when that point supports selection.
+Comparison and Other values can be read even when selection is unavailable.
+
+On time charts, Shift+Left/Right extends a range and pauses auto-refresh. Review
+the shaded range and UTC label, then choose **Zoom to range**. **Cancel** or Escape
+cancels the selection and resumes refresh. The next Escape leaves the chart or
+closes full-screen. Use the time picker for precise edits after zooming;
+**Reset zoom**, **Zoom out** and browser Back preserve comparison and filters.
+
+## Build through MCP
+
+An external agent can use the same workflow after
+[connecting over MCP](/guides/connect-over-mcp). The
+[generated MCP reference](/reference/mcp-tools) owns the full inputs and semantics.
+
+| Tool | Purpose |
+|---|---|
+| `get_telemetry_schema` | Discover signals, fields, common values, attributes, metrics and units. |
+| `preview_panels` | Validate and execute a draft without saving; correct invalid panels and explain empty ones. |
+| `query_telemetry` | Display one executable panel as a chat view. |
+| `create_dashboard` | Save a complete dashboard for the authenticated user. |
+| `get_dashboard` / `list_dashboards` | Read an owned dashboard and version, or list owned dashboards. |
+| `edit_dashboard` | Apply typed operations atomically; unnamed panels stay unchanged. |
+| `replace_dashboard` | Replace the whole spec for a redesign; omitted panels are removed. |
+| `list_dashboard_versions` | List retained versions, newest first, with author and message. |
+| `restore_dashboard_version` | Append a historical spec as a new version on explicit request. |
+
+All remote calls require `telemetry:read`. The dashboard tools, including their
+reads and version list, also require `dashboard:manage`, bound to your account's
+own dashboards. These are delegated scopes, separate from the capability that
+allows Fanout's built-in chat to run.
+
+Apps-enabled clients additionally use `query_panel_fragment`,
+`resolve_panel_variables` and `list_panel_exemplars` to refresh complete views,
+resolve options and drill to traces. These three helpers are not offered to the
+model. There is no MCP dashboard deletion tool.

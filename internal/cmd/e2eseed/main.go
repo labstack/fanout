@@ -47,7 +47,8 @@ func run(endpoint, tokenFile string) error {
 	if strings.TrimSpace(string(token)) == "" {
 		return errors.New("empty token file")
 	}
-	data, err := payloads(13, time.Now().UTC())
+	base := time.Now().UTC()
+	data, err := payloads(13, base)
 	if err != nil {
 		return err
 	}
@@ -74,6 +75,7 @@ func run(endpoint, tokenFile string) error {
 			return fmt.Errorf("read %s response failed", signal)
 		}
 	}
+	fmt.Printf("seed_window=%s,%s\n", base.Add(-24*time.Hour).Format(time.RFC3339Nano), base.Format(time.RFC3339Nano))
 	return nil
 }
 
@@ -93,8 +95,8 @@ func payloads(seed int64, base time.Time) (map[string][]byte, error) {
 	logRequest := &collectorlogs.ExportLogsServiceRequest{}
 	services := []string{"frontend", "checkout", "payment", "inventory", "shipping", "notifications"}
 	// One complete distributed trace each minute. Versions split exactly one hour ago.
-	for minute := range 120 {
-		at := base.Add(-2*time.Hour + time.Duration(minute)*time.Minute)
+	for minute := range 1440 {
+		at := base.Add(-24*time.Hour + time.Duration(minute)*time.Minute)
 		traceID := identifier(uint64(minute+1), 16)
 		for i, service := range services {
 			version := "1.0.0"

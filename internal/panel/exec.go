@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/queryrows"
@@ -507,6 +508,21 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 
 // stopped is the batch context's error: nil while the panel's own timeout
 // governs, context.Canceled when the caller went away.
+// maxPanelErrorBytes keeps a full diagnostic readable in the Data view while
+// bounding errors that echo a long statement.
+const maxPanelErrorBytes = 4096
+
+func boundError(message string) string {
+	if len(message) <= maxPanelErrorBytes {
+		return message
+	}
+	cut := maxPanelErrorBytes
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut] + "…"
+}
+
 func failed(res Result, err error, stopped error) Result {
 	ownTimeout := stopped == nil
 	res.Status = StatusError
@@ -530,11 +546,7 @@ func failed(res Result, err error, stopped error) Result {
 		res.Error = QueryTimeoutError
 		res.Retryable = true
 	default:
-		message := RedactPaths(err.Error())
-		if len(message) > 500 {
-			message = message[:500] + "…"
-		}
-		res.Error = strings.TrimSpace(message)
+		res.Error = strings.TrimSpace(boundError(RedactPaths(err.Error())))
 	}
 	return res
 }

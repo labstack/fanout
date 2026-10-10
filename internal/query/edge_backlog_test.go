@@ -104,10 +104,21 @@ FROM range(?, ?) t(i), input`,
 	}
 
 	// rollupOnce must succeed. Before the fix, the call_edges join over 180
-	// minutes of start_time OOMed at 1GB. The sub-windowed fix loops over
-	// 30-minute slices, keeping the hash-build bounded.
+	// minutes of start_time OOMed at 1GB. Each committed pass now processes
+	// one 30-minute slice, keeping the hash-build and gate hold bounded.
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("rollupOnce() error = %v (possible OOM or sub-window bug)", err)
+	}
+	for pass := 0; ; pass++ {
+		if _, cursor := readEdgeRollupState(t, d); cursor == 0 {
+			break
+		}
+		if pass == 10 {
+			t.Fatal("edge backlog did not drain")
+		}
+		if _, err := d.refreshEdgeRollup(ctx); err != nil {
+			t.Fatalf("edge drain pass: %v", err)
+		}
 	}
 
 	// At least some edge rows must have been inserted.

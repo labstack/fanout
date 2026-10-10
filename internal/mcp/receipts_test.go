@@ -22,6 +22,7 @@ func (e receiptExecutor) Run(ctx context.Context, req panel.RunRequest) ([]panel
 }
 
 func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
+	longError := "cannot read /private/data/file: " + strings.Repeat("details; ", 100) + "final diagnostic"
 	for _, tc := range []struct {
 		name    string
 		results []panel.Result
@@ -34,7 +35,7 @@ func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
 		{name: "not_run", results: []panel.Result{{ID: "notes", Status: "not_run"}}},
 		{name: "engine", err: errors.New("cannot open /private/data/telemetry.parquet")},
 		{name: "timeout", err: context.DeadlineExceeded},
-		{name: "failing_panel", results: []panel.Result{{ID: "notes", Status: "error", Error: "cannot read /private/data/file", ElapsedMS: 17}}, checked: true},
+		{name: "failing_panel", results: []panel.Result{{ID: "notes", Status: "error", Error: longError, ElapsedMS: 17}}, checked: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newToolServer(t, structural{}, nil)
@@ -61,6 +62,9 @@ func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
 			}
 			if tc.name == "failing_panel" && (check.Panels[0].Status != "error" || *check.Panels[0].ElapsedMS != 17 || len(out.Warnings) != 1) {
 				t.Fatal(out)
+			}
+			if tc.name == "failing_panel" && (check.Panels[0].Error != panel.RedactPaths(longError) || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "final diagnostic")) {
+				t.Fatal("receipt lost the complete sanitized diagnostic")
 			}
 			versions, err := s.dashboards.Versions(t.Context(), "owner", out.Dashboard.ID)
 			if err != nil || len(versions) != 1 {

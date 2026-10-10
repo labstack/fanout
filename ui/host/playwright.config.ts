@@ -3,6 +3,8 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
+  // CI runs the performance spec in its own job.
+  testIgnore: process.env.FANOUT_E2E_SKIP_PERFORMANCE === "1" ? ["**/performance.spec.ts"] : [],
   globalSetup: "./e2e/global-setup.ts",
   workers: 1,
   retries: 0,

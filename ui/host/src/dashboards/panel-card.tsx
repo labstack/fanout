@@ -184,7 +184,11 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
       </Menu>
       </Group>
     </Group>
-    <Box ref={body} data-panel-body className="dashboard-panel-padding" style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column" }}>
+    {/* Data and Spec scroll static text, so the body takes focus for keyboard
+        scrolling. It paints the card's own ground so the scrolled content has
+        an opaque backdrop that spans it, which contrast checks need, and keeps
+        the card's rounded bottom corners so that ground does not square them. */}
+    <Box ref={body} data-panel-body className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
       {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" aria-label="Loading panel" /></Center>
         : result?.status === "error" ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
           <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
@@ -195,11 +199,11 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         </Box>
         : result?.status === "empty" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Stack align="center" gap={4} maw={420}>
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
-          <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
+          <Text size="sm" c="dimmed" ta="center" style={{overflowWrap:"anywhere"}}>{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
         : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
-    {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)" }}>
+    {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
     </Box>}
     {refreshDescription && <span id={refreshDescriptionId} hidden>{refreshDescription}</span>}

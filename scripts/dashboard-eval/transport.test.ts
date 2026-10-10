@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, type Ledger } from './transport';
+import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, mutationEvidence, executePanels, type Ledger } from './transport';
 import { mutatingTools } from './tool-catalog';
 it('matches the server registered mutating tools exactly',()=>{
  const server=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
@@ -18,9 +18,27 @@ const response=(s:string,split=1)=>new Response(new ReadableStream({start(c){con
 const finish={type:'RUN_FINISHED',outcome:{type:'success'}};
 const start={type:'TOOL_CALL_START',toolCallId:'save',toolCallName:'create_dashboard'};
 const saved={id:'board',version:1,spec:{panels:[{id:'a'}]}};
+it('keeps the executor error in a completed failing panel check', async () => {
+  const message = 'Out of Memory Error: ' + 'details '.repeat(100) + 'final diagnostic';
+  const spec = {panels:[{id:'p'}]};
+  const got = await executePanels(async () => ({results:[
+    {id:'p',status:'error',elapsed_ms:12,error:message},
+  ]}), spec, new AbortController().signal);
+  expect(got.checked).toBe(true);
+  expect(got.valid).toBe(true);
+  expect(got.checks[0]).toEqual({id:'p',status:'error',rows:0,error:message});
+});
+it('does not invent an executor error for successful panel checks', async () => {
+  for (const error of [undefined, null, 42, {message:'not a wire string'}]) {
+    const got = await executePanels(async () => ({results:[
+      {id:'p',status:'ok',frame:{rows:1},error},
+    ]}), {panels:[{id:'p'}]}, new AbortController().signal);
+    expect(got).toEqual({checked:true,valid:true,checks:[{id:'p',status:'ok',rows:1}]});
+  }
+});
 const result={type:'TOOL_CALL_RESULT',toolCallId:'save',content:JSON.stringify({dashboard:saved}),isError:false};
 it('decodes split UTF-8, multiline frames, assistant call names and immutable saves',async()=>{
-  const s=await readSSE(response(': ping\r\nevent: TEXT_MESSAGE_CONTENT\r\ndata: {"delta":\r\ndata: "✓"}\r\n\r\n'+frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'read',toolCallName:'get_dashboard'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'read',content:JSON.stringify({dashboard:{...saved,id:'unrelated',version:9}})})+frame(finish)),new AbortController().signal);
+  const s=await readSSE(response(frame({type:'TEXT_MESSAGE_START',messageId:'text',role:'assistant'})+': ping\r\nevent: TEXT_MESSAGE_CONTENT\r\ndata: {"messageId":"text","delta":\r\ndata: "✓"}\r\n\r\n'+frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'read',toolCallName:'get_dashboard'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'read',content:JSON.stringify({dashboard:{...saved,id:'unrelated',version:9}})})+frame(finish)),new AbortController().signal);
   expect(s.incomplete).toBe(false);expect(s.tools[0].name).toBe('create_dashboard');expect(findSaved(s)?.record).toEqual(saved);
 });
 it('rejects duplicate tool IDs and error mutations',async()=>{
@@ -123,4 +141,66 @@ it('blocks missing usage, unsettled prompts, conflicting correlation and over-16
   const other=ledger();beginPrompt(other,'run');expect(()=>recordUsage(other,call('run',17))).toThrow();recordUsage(other,call('run'));expect(()=>recordUsage(other,{...call('run'),usage:{...call('run').usage,input_tokens:1}})).toThrow();
   const missing=ledger();missing.rates=[];expect(canStartPrompt(missing,100)).toBe(false);
   const partial=ledger();beginPrompt(partial,'run');expect(()=>recordUsage(partial,{...call('run'),usage:{input_tokens:1} as any})).toThrow();
+});
+
+it('collects only the final assistant message by its stream ID',async()=>{
+ const events=[{type:'TEXT_MESSAGE_START',messageId:'earlier',role:'assistant'},
+ {type:'TEXT_MESSAGE_CONTENT',messageId:'earlier',delta:'Earlier'},
+ {type:'TEXT_MESSAGE_START',messageId:'user',role:'user'},
+ {type:'TEXT_MESSAGE_CONTENT',messageId:'user',delta:'Ignore'},
+ {type:'TEXT_MESSAGE_START',messageId:'final',role:'assistant'},
+ {type:'TEXT_MESSAGE_CONTENT',messageId:'final',delta:'Final ✓'},finish];
+ const s=await readSSE(response(events.map(frame).join('')),new AbortController().signal);
+ expect(s.final_text).toBe('Final ✓');expect(s.incomplete).toBe(false);
+});
+it('preserves nested tool errors and persisted flags without allowing saves or answers',async()=>{
+ for(const content of [{error:{code:'tool_failed',message:'Synthetic invalid spec'}},
+ {error:{code:'tool_failed',message:'Synthetic operation failed'}},{dashboard:saved}]) {
+  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify(content),isError:true})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:false}])).toBeNull();
+  expect(s.tools[0].is_error).toBe(true);
+ }
+ const s=await readSSE(response(frame(start)+frame(result)+frame(finish)),new AbortController().signal);
+ expect(findSaved(s,[{role:'tool',toolCallId:'save',isError:true}])).toBeNull();
+});
+
+it('reads stable tool error codes and messages while preserving error flags from all sources',async()=>{
+ for(const message of ['Synthetic invalid spec','Synthetic operation failed']) {
+  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({dashboard:saved,error:{code:'tool_failed',message}}),isError:false})+frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:false}})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:false}])).toBeNull();
+  expect(s.tools[0]).toMatchObject({is_error:true,error_code:'tool_failed',error_message:message});
+ }
+});
+
+it('recognises a save from the server encoded persisted thread without an error field',async()=>{
+ const g=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
+ expect(g.saved_thread).toHaveLength(1);
+ expect(Object.keys(g.saved_thread[0]).sort()).toEqual(['content','id','role','toolCallId']);
+ const output=JSON.parse(g.saved_thread[0].content);
+ const s=await readSSE(response(frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame({...result,content:g.saved_thread[0].content,isError:undefined})+frame(finish)),new AbortController().signal);
+ expect(findSaved(s,g.saved_thread)?.record).toEqual(output.dashboard);
+ expect(mutationEvidence(s,g.saved_thread)).toEqual({mutation_observed:true,mutation_evidence_complete:true});
+});
+it('recognises persisted success when the optional error field is absent or empty',async()=>{
+ for(const flag of [{},{error:null},{error:''}]) {
+  const s=await readSSE(response(frame(start)+frame({...result,isError:undefined})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',...flag}])?.record).toEqual(saved);
+ }
+});
+it('does not certify answer mutation evidence when persisted tool errors or results are unknown',async()=>{
+ const s=await readSSE(response(frame({...start,toolCallName:'get_telemetry_schema'})+frame({...result,content:JSON.stringify({services:[]})})+frame(finish)),new AbortController().signal);
+ const messages=[{role:'tool',toolCallId:'save',error:{code:'tool_failed',message:'Synthetic operation failed'}}];
+ findSaved(s,messages);expect(mutationEvidence(s,messages).mutation_evidence_complete).toBe(false);
+});
+
+it('marks assistant content without a started message ID as incomplete',async()=>{
+ const s=await readSSE(response(frame({type:'TEXT_MESSAGE_CONTENT',delta:'Synthetic prose'})+frame(finish)),new AbortController().signal);
+ expect(s.incomplete).toBe(true);expect(s.final_text).toBe('');
+});
+
+it('never clears an earlier activity error or conflicting protocol error flag',async()=>{
+ for(const prefix of [frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:true}}),'']) {
+  const s=await readSSE(response(frame(start)+prefix+frame({...result,...(prefix?{}:{is_error:true})})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:false}])).toBeNull();
+ }
 });

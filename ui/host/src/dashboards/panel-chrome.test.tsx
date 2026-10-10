@@ -46,6 +46,21 @@ async function render(panel:Panel=p,result:PanelResult=r,onSelect:((value:string
   await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={panel} title={panel.title} result={result} staleAt={staleAt} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect} vars={vars} onVariable={onVariable}/></MantineProvider>));
   return host;
 }
+it.each(["light", "dark"] as const)("wraps a long unbroken empty diagnosis inside narrow cards in %s", async theme => {
+  const diagnosis = "db.client.connection.state=" + "unbroken".repeat(100);
+  for (const width of [240, 420]) {
+    const host = document.createElement("div"); document.body.append(host);
+    host.style.width = `${width}px`;
+    const root = createRoot(host); cleanup.push(() => root.unmount());
+    await act(async () => root.render(<MantineProvider env="test" forceColorScheme={theme}><PanelCard panel={p} title={p.title} result={{id:p.id,status:"empty",elapsed_ms:0,diagnosis}} loading={false} height={300} group="g" editing={false} agentAvailable={false}/></MantineProvider>));
+    const text = within(host).getByText(diagnosis);
+    expect(text.textContent).toBe(diagnosis);
+    // happy-dom has no layout. Pin the CSS min-content contract: anywhere
+    // allows this unbroken text to shrink to one character in either width.
+    expect(getComputedStyle(text).overflowWrap).toBe("anywhere");
+    expect(text.hasAttribute("data-truncate")).toBe(false);
+  }
+});
 it.each([120,159,160,238,300])("gauge fills its measured body, readable untruncated value and separate status at %ipx",width=>{
   const height=76, o=gaugeOption({...p,viz:"gauge",min:0,max:10,unit:"percent",thresholds:[{value:1,status:"warn"}]},1.74,chartThemeFor(false),"percent",{width,height}) as any;
   expect(o.series).toEqual([]);const value=o.graphic.find((g:any)=>g.id==="gauge-value");

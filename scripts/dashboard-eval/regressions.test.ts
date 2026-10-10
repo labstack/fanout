@@ -155,7 +155,7 @@ it('blocks unknown HTTP usage until settlement and preserves the cap across CLI 
   const root=resolve('.superpowers/eval/http-settlement-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
   const file=(n:string,v:any)=>{const p=join(root,n);writeFileSync(p,JSON.stringify(v));return p;};const path=file('ledger.json',ledger());const cookies=join(root,'cookies.txt');writeFileSync(cookies,'');
   const end=BigInt(Date.now())*1_000_000n;const snapshot=file('snapshot.json',{source_hash:'0'.repeat(64),start_ns:String(end-3_600_000_000_000n),end_ns:String(end),shift_ns:'0',replayed_at:new Date().toISOString()});
-  const prompts=file('prompts.json',Array.from({length:10},(_,i)=>({id:String(i),prompt:'Fixture '+i})));const edits=file('edits.json',mockEdits());const mock=startMock(failure as any);
+  const prompts=file('prompts.json',Array.from({length:10},(_,i)=>({id:String(i),prompt:'Fixture '+i,expect:'dashboard',rationale:'Synthetic benchmark'})));const edits=file('edits.json',mockEdits());const mock=startMock(failure as any);
   const args=(name:string,cap:string)=>['--base',mock.base,'--cookies',cookies,'--out',join(root,name),'--prompts-file',prompts,'--budget-usd',cap,'--cost-ledger',path,'--snapshot-manifest',snapshot,'--edits-file',edits];
   try{
    expect(await cli.main(args('first','1'),()=>{})).toBe(2);expect(mock.stats.posts).toBe(1);
