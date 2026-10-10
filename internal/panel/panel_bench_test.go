@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -55,6 +56,7 @@ func BenchmarkPanelQueries24Hours(b *testing.B) {
 	dashboard := panelBenchmarkDashboard(data)
 	shapes := append([]Panel(nil), dashboard.Panels...)
 	shapes = append(shapes, Panel{ID: "p95_by_service", Title: "p95 by service", Viz: "table", Query: &Query{From: "spans", Measures: []string{"p95(duration_ms)"}, By: []string{"service"}}}, Panel{ID: "error_rate_window", Title: "Whole window error rate", Viz: "table", Query: &Query{From: "spans", Measures: []string{"error_rate()"}}})
+	shapes = append(shapes, panelBenchmarkMetricShapes(b, panelBenchmarkMetricNames(b, engine, data))...)
 	var failing []string
 	for _, shape := range shapes {
 		var p95 float64
@@ -102,6 +104,35 @@ func panelBenchmarkDashboard(data panelBenchData) Dashboard {
 	add("service_counts", "bar", "spans", []string{"count()"}, nil, []string{"service"}, "")
 	add("severity_counts", "bar", "logs", []string{"count()"}, nil, []string{"severity"}, "")
 	return d
+}
+
+func panelBenchmarkMetricShapes(tb testing.TB, names map[string]string) []Panel {
+	tb.Helper()
+	if len(names) == 0 {
+		tb.Log("skipping metric shapes: no metrics in benchmark window")
+		return nil
+	}
+	var shapes []Panel
+	for _, shape := range []struct {
+		id, kind, measure string
+		by                []string
+	}{
+		{"metric_gauge_avg_by_service", "gauge", "avg(value)", []string{"service"}},
+		// These are the existing structured measures: rate() counts points per
+		// second, and p95(hist_sum) takes the percentile of histogram point sums.
+		{"metric_counter_rate", "sum", "rate()", nil},
+		{"metric_histogram_p95", "histogram", "p95(hist_sum)", nil},
+	} {
+		name, ok := names[shape.kind]
+		if !ok {
+			tb.Logf("skipping metric shape=%s: no %s metrics in benchmark window", shape.id, shape.kind)
+			continue
+		}
+		literal := "'" + strings.ReplaceAll(name, "'", "''") + "'"
+		shapes = append(shapes, Panel{ID: shape.id, Title: shape.id, Viz: "timeseries", Query: &Query{From: "metrics", Measures: []string{shape.measure}, Where: []string{"type = '" + shape.kind + "'", "name = " + literal}, By: shape.by, Bucket: "auto"}})
+		tb.Logf("metric shape=%s type=%s name=%q measure=%s", shape.id, shape.kind, name, shape.measure)
+	}
+	return shapes
 }
 
 func measurePanelBenchmark(b *testing.B, engine Engine, spec Dashboard, end time.Time) float64 {
@@ -294,4 +325,60 @@ func TestPanelBenchmarkReplayClipsEmptySignalsWithinMixedBatches(t *testing.T) {
 		t.Fatalf("clipped counts: %+v", data)
 	}
 	panelBenchEngine(t, data) // Repository rejects empty files with zero metadata counts.
+}
+
+func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	data := panelBenchData{Start: fixtureStart.Add(time.Nanosecond), End: fixtureStart.Add(time.Hour + time.Nanosecond)}
+	if got := panelBenchmarkMetricNames(t, engine, data); len(got) != 0 {
+		t.Fatalf("empty metrics selected names: %v", got)
+	}
+	if shapes := panelBenchmarkMetricShapes(t, nil); len(shapes) != 0 {
+		t.Fatalf("empty metrics produced shapes: %v", shapes)
+	}
+	var metrics []telemetry.Metric
+	add := func(kind, name string, at time.Time, count int) {
+		for i := range count {
+			n := at.UnixNano()
+			metrics = append(metrics, telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1), HistSum: float64(i + 1), HistCount: 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,0]"})
+		}
+	}
+	add("gauge", "rare", data.Start, 1)
+	add("gauge", "cpu'usage", data.End.Add(-time.Nanosecond), 3)
+	add("gauge", "outside", data.Start.Add(-time.Nanosecond), 4)
+	add("gauge", "outside", data.End, 4)
+	add("sum", "requests", data.Start, 2)
+	add("sum", "rare", data.Start, 1)
+	add("histogram", "z_latency", data.Start, 2)
+	add("histogram", "a_latency", data.Start, 2)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-names", Metrics: metrics}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"gauge": "cpu'usage", "sum": "requests", "histogram": "a_latency"}
+	if got := panelBenchmarkMetricNames(t, engine, data); !reflect.DeepEqual(got, want) {
+		t.Fatalf("metric names = %v, want %v", got, want)
+	}
+	shapes := panelBenchmarkMetricShapes(t, want)
+	if len(shapes) != 3 {
+		t.Fatalf("metric shapes = %d, want 3", len(shapes))
+	}
+	results, err := NewExecutor(engine, 30).Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Metric shapes", Time: Time{From: &data.Start, To: &data.End}, Panels: shapes}})
+	if err != nil || len(results) != 3 {
+		t.Fatalf("metric shape results = %v, error = %v", results, err)
+	}
+	for _, result := range results {
+		if result.Status != StatusOK || result.Frame == nil || result.Frame.Rows == 0 {
+			t.Fatalf("metric shape did not execute: %+v", result)
+		}
+		for _, value := range result.Frame.Values[len(result.Frame.Values)-1] {
+			if value == nil {
+				t.Fatalf("metric shape %s returned a null measure", result.ID)
+			}
+		}
+	}
+	data.End = data.Start.Add(time.Nanosecond)
+	want["gauge"] = "rare"
+	if got := panelBenchmarkMetricNames(t, engine, data); !reflect.DeepEqual(got, want) {
+		t.Fatalf("narrow window metric names = %v, want %v", got, want)
+	}
 }

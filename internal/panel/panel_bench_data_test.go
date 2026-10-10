@@ -19,6 +19,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/parquet-go/parquet-go"
@@ -35,6 +36,40 @@ type panelBenchData struct {
 	Files                              int
 	Bytes                              int64
 	Services, Namespaces               []string
+}
+
+// Select names from the same pinned, half-open window as the measured panels.
+// Frequency is point count across services; lexical ordering makes ties stable.
+func panelBenchmarkMetricNames(tb testing.TB, engine Engine, data panelBenchData) map[string]string {
+	tb.Helper()
+	ctx := queryrows.WithWindow(tb.Context(), queryrows.Window{Start: data.Start, End: data.End})
+	rows, err := engine.QueryContext(ctx, `SELECT type, name FROM (
+  SELECT type, name, row_number() OVER (PARTITION BY type ORDER BY count(*) DESC, name) AS rank
+  FROM metrics
+  WHERE time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND type IN ('gauge', 'sum', 'histogram')
+  GROUP BY type, name
+) WHERE rank = 1 ORDER BY type`, data.Start, data.End)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			tb.Error(err)
+		}
+	}()
+	names := map[string]string{}
+	for rows.Next() {
+		var kind, name string
+		if err := rows.Scan(&kind, &name); err != nil {
+			tb.Fatal(err)
+		}
+		names[kind] = name
+	}
+	if err := rows.Err(); err != nil {
+		tb.Fatal(err)
+	}
+	return names
 }
 
 // Do not open the controller's repository: Open can clean staging and rewrite
