@@ -20,7 +20,9 @@
 
 - Use the pinned DuckDB 2 engine in `internal/duckdb`, built with
   `scripts/with-duckdb.sh`. A Go driver version does not identify its bundled
-  native engine; verify `SELECT version()` when changing the pin.
+  native engine; verify `SELECT version()` when changing the pin. A pin change
+  also fails the built-in function snapshot test: review every added or changed
+  built-in against the telemetry SQL blocklist before regenerating it.
 - Build and test on native Linux or macOS, AMD64 or ARM64. The wrapper verifies
   each platform archive's checksum and uses its matching headers and statically
   linked core, JSON, Parquet, and time-zone extensions. Do not add dynamic
