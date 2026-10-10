@@ -138,9 +138,14 @@ The metrics Parquet schema gains:
 only accepted format; format 3 files are refused like any unsupported format,
 with no reader or conversion.
 
-Exponential histograms convert to explicit bounds correctly: the zero bucket
-and the negative buckets become the lowest buckets, and counts have exactly
-one more entry than bounds. The conversion keeps every observation's count.
+Exponential histograms convert to explicit bounds correctly: the negative
+buckets keep their own negative bounds below the zero bucket, and counts have
+exactly one more entry than bounds. The conversion keeps every observation's
+count.
+
+A sum or histogram point with unspecified temporality is invalid OTLP. The
+export is rejected with `InvalidArgument`, as ingest already does for other
+invalid input.
 
 ### The metrics view
 
@@ -192,8 +197,8 @@ empty-panel diagnosis names the kind and the measures that fit, for example
 avg(value)". OTLP summary metrics have no aggregate measures, because their
 stored quantiles cannot be combined.
 
-Validation adds one rule: an aggregate metric query other than `count()` must
-fix the metric per group, with a `name = ...` filter on one value or `name`
+Validation adds one rule: an aggregate metric query with any measure other
+than `count()` or `count_distinct()` must fix the metric per group, with a `name = ...` filter on one value or `name`
 among `by`. A `name = $var` filter counts only when the variable is
 single-valued and has no All option, because All drops the filter. Different
 metrics never sum into one number.
@@ -210,8 +215,10 @@ option is removed, because the data now carries it.
 - The agent's spec guide and examples teach metric kinds and the measure
   table, including one counter-rate and one histogram-percentile example.
 - The dashboards guide documents metric kinds and measures.
-- The benchmark replay infers monotonicity for the stored demo data from
-  OpenTelemetry's semantic conventions, because that source lost it.
+- Outside the repository, the private benchmark replay restores monotonicity
+  for the stored demo data from OpenTelemetry's semantic conventions, because
+  that source lost it. The committed demo-data cross-check runs when that data
+  is supplied and skips otherwise, like milestone 4's read benchmarks.
 
 ## Phase B: the scale benchmark
 
