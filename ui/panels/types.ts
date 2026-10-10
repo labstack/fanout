@@ -11,7 +11,7 @@ export type ColumnFormat = { field: string; format: "unit"|"bar"|"status"|"spark
 
 export type Threshold = { value: number; status: Status; label?: string };
 
-export type Query = { from: "spans" | "logs" | "metrics"; where?: string[]; measures?: string[]; by?: string[]; bucket?: string; histogram?: { field: string; buckets: "log2" | "explicit"; temporality?: "cumulative" | "delta" }; sort?: string; limit?: number };
+export type Query = { from: "spans" | "logs" | "metrics"; where?: string[]; measures?: string[]; by?: string[]; bucket?: string; histogram?: { field: string; buckets: "log2" | "explicit" }; sort?: string; limit?: number };
 
 export type Panel = {
   id: string;

@@ -161,3 +161,11 @@ func metricValues(t *testing.T, r Result, column string) []any {
 	t.Fatalf("missing column %s", column)
 	return nil
 }
+
+func metricHistogram(at time.Time, bounds, counts string, count int64, sum float64, series string) telemetry.Metric {
+	m := metricCounter(at, 0)
+	m.Type, m.Monotonic = "histogram", false
+	m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum = bounds, counts, count, sum
+	m.Attributes = map[string]any{"series": series}
+	return m
+}

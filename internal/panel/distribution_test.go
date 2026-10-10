@@ -41,7 +41,7 @@ func TestDistributionCounts(t *testing.T) {
 	e = NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d.Variables = nil
-	d.Panels[0].Query = &Query{From: "metrics", Where: []string{"name = 'latency'"}, Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit", Temporality: "delta"}}
+	d.Panels[0].Query = &Query{From: "metrics", Where: []string{"name = 'latency'"}, Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}
 	got, err = e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +68,7 @@ func TestMetricHistogramTemporality(t *testing.T) {
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := Dashboard{Name: "Hist", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "h", Title: "H", Viz: "histogram", Unit: "ms", Query: &Query{From: "metrics", Where: []string{"name = 'latency'"}, Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}}}}
-	for _, temporality := range []string{"", "cumulative", "delta"} {
+	for _, temporality := range []string{"cumulative", "delta"} {
 		if temporality == "delta" {
 			engine, repo = newTestEngine(t)
 			for i := range metrics {
@@ -80,7 +80,6 @@ func TestMetricHistogramTemporality(t *testing.T) {
 			e = NewExecutor(engine, 30)
 			e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 		}
-		d.Panels[0].Query.Histogram.Temporality = temporality
 		got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 		if err != nil || got[0].Status != "ok" {
 			t.Fatalf("hist: %+v %v", got, err)
@@ -99,16 +98,15 @@ func TestMetricHistogramTemporality(t *testing.T) {
 			}
 		}
 	}
-	// A resetting series contributes max(last-first,0), not unsigned underflow.
-	d.Panels[0].Query.Histogram.Temporality = ""
+	// A resetting series contributes current counts on every channel.
 	n := fixtureStart.UnixNano()
-	reset := []telemetry.Metric{{ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: "[20,30]"}, {ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n + int64(time.Minute), IngestedAt: n + 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,2]"}}
+	reset := []telemetry.Metric{{ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: "[20,30]", HistCount: 50}, {ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n + int64(time.Minute), IngestedAt: n + 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,2]", HistCount: 3}}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "reset", Metrics: reset}); err != nil {
 		t.Fatal(err)
 	}
 	d.Panels[0].Query.Where = []string{"name = 'reset'"}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
-	if err != nil || got[0].Status != "empty" {
+	if err != nil || got[0].Status != "ok" || !slices.Equal(got[0].Frame.Values[2], []any{float64(1), float64(2)}) {
 		t.Fatalf("reset: %+v %v", got, err)
 	}
 }
@@ -217,7 +215,7 @@ func TestDistributionMalformedHistogram(t *testing.T) {
 			}
 			e := NewExecutor(engine, 30)
 			e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-			d := Dashboard{Name: "Hist", Panels: []Panel{{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: "metrics", Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit", Temporality: "delta"}}}}}
+			d := Dashboard{Name: "Hist", Panels: []Panel{{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: "metrics", Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}}}}
 			got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 			if err != nil || got[0].Status != "ok" || got[0].Frame == nil {
 				t.Fatalf("malformed histogram: %+v %v", got, err)
@@ -289,8 +287,6 @@ func TestDistributionSpanOther(t *testing.T) {
 func TestDistributionSchemaDescriptions(t *testing.T) {
 	for _, tc := range []struct{ field, phrase string }{
 		{"Field", "NaN is excluded"},
-		{"Temporality", "last minus first"},
-		{"Temporality", "counter resets mid-window contributes 0"},
 	} {
 		field, ok := reflect.TypeFor[Histogram]().FieldByName(tc.field)
 		if !ok || !strings.Contains(field.Tag.Get("jsonschema"), tc.phrase) {
@@ -305,7 +301,7 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 	for i, counts := range []string{"[10,20]", "[12,24]", "[15,30]", "[18,36]"} {
 		minute := []int{0, 1, 5, 6}[i]
 		n := fixtureStart.Add(time.Duration(minute) * time.Minute).UnixNano()
-		metrics = append(metrics, telemetry.Metric{ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: counts})
+		metrics = append(metrics, telemetry.Metric{ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: counts, HistCount: []int64{30, 36, 45, 54}[i]})
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "heat-scrapes", Metrics: metrics}); err != nil {
 		t.Fatal(err)
@@ -313,7 +309,7 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := Dashboard{Name: "Heat", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "h", Title: "H", Viz: "heatmap", Unit: "ms", Query: &Query{From: "metrics", Measures: []string{"count()"}, Bucket: "5m", Histogram: &Histogram{Field: "value", Buckets: "explicit"}}}}}
-	for _, temporality := range []string{"", "delta"} {
+	for _, temporality := range []string{"cumulative", "delta"} {
 		if temporality == "delta" {
 			engine, repo = newTestEngine(t)
 			for i := range metrics {
@@ -325,13 +321,12 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 			e = NewExecutor(engine, 30)
 			e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 		}
-		d.Panels[0].Query.Histogram.Temporality = temporality
 		got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 		if err != nil || got[0].Status != "ok" {
 			t.Fatalf("heat: %+v %v", got, err)
 		}
 		f := got[0].Frame
-		want := []any{float64(2), float64(4), float64(3), float64(6)}
+		want := []any{float64(2), float64(4), float64(6), float64(12)}
 		if temporality == "delta" {
 			want = []any{float64(22), float64(44), float64(33), float64(66)}
 		}
@@ -372,6 +367,7 @@ func TestMetricHistogramSeriesIdentity(t *testing.T) {
 			m := metric
 			n := fixtureStart.Add(time.Duration(scrape) * time.Minute).UnixNano()
 			m.EventUnixNanos, m.IngestedAt, m.HistCountsJSON = n, n, counts
+			m.HistCount = []int64{30, 33}[scrape]
 			metrics = append(metrics, m)
 		}
 	}
@@ -388,21 +384,6 @@ func TestMetricHistogramSeriesIdentity(t *testing.T) {
 	f := got[0].Frame
 	if f.Rows != 2 || !slices.Equal(f.Values[2], []any{float64(8), float64(16)}) {
 		t.Fatalf("series merged: %+v", f)
-	}
-}
-
-func TestDistributionTemporalityValidation(t *testing.T) {
-	for _, tc := range []struct{ from, field, buckets, temporality string }{
-		{"spans", "duration_ms", "log2", "delta"},
-		{"spans", "duration_ms", "log2", "cumulative"},
-		{"metrics", "value", "explicit", "unknown"},
-	} {
-		d := Dashboard{Name: "Rule", Panels: []Panel{{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: tc.from, Measures: []string{"count()"}, Histogram: &Histogram{Field: tc.field, Buckets: tc.buckets, Temporality: tc.temporality}}}}}
-		Normalize(&d)
-		want := Problem{Path: "panels[0].query.histogram.temporality", Message: "temporality applies to metric histograms and must be cumulative or delta", Hint: "omit for the OTel cumulative default"}
-		if got := Validate(&d); !slices.Contains(got, want) {
-			t.Fatalf("got %+v want %+v", got, want)
-		}
 	}
 }
 
@@ -423,5 +404,67 @@ func TestDistributionTimePointBound(t *testing.T) {
 		if count != float64(i+2) {
 			t.Fatalf("column alignment at %d: %v", i, count)
 		}
+	}
+}
+
+func TestMetricDistributionMixedKinds(t *testing.T) {
+	e, db := metricFixture(t)
+	for _, kind := range []string{"gauge", "sum"} {
+		m := metricCounter(fixtureStart, 100)
+		m.Type = kind
+		m.Name = kind
+		insertMetrics(t, db, m)
+	}
+	// 419,996 scalar rows plus four histogram points: exactly 420,000 rows.
+	// Generate locally in SQL so fixture setup does not dominate the query.
+	if _, err := db.Exec(`INSERT INTO telemetry.metrics
+		SELECT * EXCLUDE (i) REPLACE (
+		  metric_time + (i % 60) * INTERVAL '1 minute' AS metric_time,
+		  time_unix_nano + (i % 60) * 60000000000 AS time_unix_nano,
+		  ingested_at + (i % 60) * INTERVAL '1 minute' AS ingested_at,
+		  ingested_unix_nano + (i % 60) * 60000000000 AS ingested_unix_nano,
+		  'svc' || (i // 60)::VARCHAR AS service,
+		  value + i AS value)
+		FROM telemetry.metrics, range(1,209998) AS r(i)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, series := range []string{"a", "b"} {
+		insertMetrics(t, db, metricHistogram(fixtureStart, "[10,20]", "[10,20,30]", 60, 100, series))
+		insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Minute), "[10,20]", "[12,23,35]", 70, 130, series))
+	}
+	var rows int
+	if err := db.QueryRow("SELECT count(*) FROM metrics").Scan(&rows); err != nil || rows != 420000 {
+		t.Fatalf("rows=%d err=%v", rows, err)
+	}
+	for _, viz := range []string{"histogram", "heatmap"} {
+		q := &Query{From: "metrics", Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}
+		if viz == "heatmap" {
+			q.Bucket = "1m"
+		}
+		started := time.Now()
+		r := runMetricPanel(t, e, Panel{Viz: viz, Query: q}, fixtureStart, fixtureStart.Add(time.Hour))
+		t.Logf("420k-row %s query: %s", viz, time.Since(started))
+		if !reflect.DeepEqual(metricValues(t, r, "count"), []any{4.0, 6.0, 10.0}) {
+			t.Fatalf("%s counts=%+v", viz, r.Frame)
+		}
+	}
+}
+
+func TestMetricDistributionOtherCountsContributingSeries(t *testing.T) {
+	e, db := metricFixture(t)
+	for i := range 9 {
+		series := fmt.Sprintf("s%d", i)
+		increase := 9 - i
+		if i >= 7 {
+			increase = 0
+		}
+		insertMetrics(t, db, metricHistogram(fixtureStart.Add(-time.Minute), "[10]", "[10,0]", 10, 100, series))
+		insertMetrics(t, db, metricHistogram(fixtureStart, "[10]", fmt.Sprintf("[%d,0]", 10+increase), int64(10+increase), float64(100+increase), series))
+	}
+	q := &Query{From: "metrics", By: []string{"attributes['series']"}, Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "explicit"}}
+	r := runMetricPanel(t, e, Panel{Viz: "histogram", Options: &Options{Top: 5}, Query: q}, fixtureStart, fixtureStart.Add(time.Minute))
+	if !reflect.DeepEqual(metricValues(t, r, "series"), []any{"Other (2)", "s0", "s1", "s2", "s3", "s4"}) ||
+		!reflect.DeepEqual(metricValues(t, r, "count"), []any{7.0, 9.0, 8.0, 7.0, 6.0, 5.0}) {
+		t.Fatalf("folded counts=%+v", r.Frame)
 	}
 }

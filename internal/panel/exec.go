@@ -422,7 +422,8 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 }
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
-	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
+	read := metricReadScope(p, scope)
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: read.Start, End: read.End})
 	if p.Options != nil && p.Options.Split == "deploy" {
 		return e.runDeploySplit(ctx, p, checked, scope)
 	}

@@ -93,6 +93,14 @@ func TestPanelQueryOperationalErrors(t *testing.T) {
 	}
 }
 
+func TestPanelQueryRejectsUnknownHistogramTemporality(t *testing.T) {
+	engine := &fakePanels{}
+	rec := servePanels(t, engine, http.MethodPost, "/api/panels/query", `{"dashboard":{"name":"Hist","panels":[{"id":"h","title":"Hist","viz":"histogram","query":{"from":"metrics","measures":["count()"],"histogram":{"field":"value","buckets":"explicit","temporality":"delta"}}}]}}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "temporality") || engine.run.Dashboard.Name != "" {
+		t.Fatalf("removed option reached executor: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestVariableAndSchemaRoutes(t *testing.T) {
 	rec := servePanels(t, &fakePanels{}, http.MethodPost, "/api/panels/variables/resolve", `{"dashboard":{"name":"x","panels":[]}}`)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"checkout"`) {

@@ -86,9 +86,8 @@ type Query struct {
 }
 
 type Histogram struct {
-	Temporality string `json:"temporality,omitempty" jsonschema:"metric histograms: cumulative (also unknown/default) or delta; cumulative uses last minus first per bound, clamped at zero; a series whose counter resets mid-window contributes 0 for that window"`
-	Field       string `json:"field" jsonschema:"spans duration_ms with log2 buckets or metrics value with explicit buckets; negative span durations clamp to [0,1), +Inf goes to overflow, NaN is excluded because it is not a measurement"`
-	Buckets     string `json:"buckets,omitempty"`
+	Field   string `json:"field" jsonschema:"spans duration_ms with log2 buckets or metrics value with explicit buckets; negative span durations clamp to [0,1), +Inf goes to overflow, NaN is excluded because it is not a measurement"`
+	Buckets string `json:"buckets,omitempty"`
 }
 
 type Threshold struct {

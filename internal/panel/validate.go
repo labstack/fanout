@@ -481,9 +481,6 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 			(q.From != "metrics" || q.Histogram.Field != "value" || q.Histogram.Buckets != "explicit") {
 			problems.add(path+".histogram", "use spans duration_ms/log2 or metrics value/explicit")
 		}
-		if q.Histogram != nil && q.Histogram.Temporality != "" && (q.From != "metrics" || (q.Histogram.Temporality != "cumulative" && q.Histogram.Temporality != "delta")) {
-			problems.addHint(path+".histogram.temporality", "temporality applies to metric histograms and must be cumulative or delta", "omit for the OTel cumulative default")
-		}
 		if len(q.Measures) != 1 || q.Measures[0] != "count()" {
 			problems.addHint(path+".measures", "distribution counts require count()", "use count() as the observation weight")
 		}
