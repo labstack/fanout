@@ -86,10 +86,10 @@ to 4 and format 3 files are refused, which is explicit. The product is
 pre-release and the deployed instances already need a wipe, so the cost is
 local data only. **Chosen: format 4 with new columns.**
 
-**The system page: a fixed React page, or a generated dashboard.** A fixed
-page would be a second renderer. A dashboard spec generated on the server and
-run through the panel executor reuses everything, including S8's single batch
-request. **Chosen: generated dashboard, read-only.**
+**The system page: a new page, or the existing default dashboard.** Every
+user already gets a default dashboard, "System overview", on first visit, and
+`/dashboards` opens it. A separate generated page would duplicate it. **Chosen:
+the default dashboard gains the system sections, and `/` opens it.**
 
 ## Phase A: metric fidelity and series-aware measures
 
@@ -215,12 +215,14 @@ option is removed, because the data now carries it.
 
 ## Phase B: the system page
 
-`/` opens the system page, and the rail gains a System entry. The page is a
-dashboard spec generated on the server from what telemetry exists in the
-selected range and namespace, run through the panel executor in one batch
-request, and rendered by the dashboard renderer. It is read-only. A section
-whose data is absent is replaced by one text panel naming the Collector
-receiver that supplies it, linked to the setup guide.
+The system page is the existing default dashboard, "System overview"
+(`internal/dashboard/defaults.go`), extended with the sections below. `/`
+always opens it (through `/dashboards`), whether or not an agent is
+configured. There is no separate page, route or rail entry. It stays an
+ordinary saved dashboard: run through the panel executor in one batch request,
+rendered by the dashboard renderer, editable by its owner. A panel whose
+receiver sends no data shows the empty state, and its description names the
+Collector receiver that supplies it, linked to the setup guide.
 
 Sections, in the page's question order:
 
