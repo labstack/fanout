@@ -245,8 +245,12 @@ option is removed, because the data now carries it.
 
 ## Phase B: the scale benchmark
 
-Measure before building. A generator writes realistic telemetry through OTLP
-ingest:
+Measure before building. Query measurements use a data directory built by
+tiling the replayed demo's Parquet batches, as milestone 4's read benchmark
+does, extended to this volume; rewritten host and container identities get a
+recomputed `series_id`. Ingest headroom (S19) is measured separately through
+the OTLP ingest server at twice the S18 rate for a fixed duration. The tiled
+data has:
 
 - spans and logs at 1,000 spans per second for 24 hours, built by tiling the
   demo replay across namespaces and hosts, keeping its shape of services,
