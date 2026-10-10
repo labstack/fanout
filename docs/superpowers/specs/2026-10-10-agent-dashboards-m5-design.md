@@ -356,6 +356,10 @@ Sections, in the page's question order:
    `container.cpu.utilization`, memory as `container.memory.usage.total` over
    `container.memory.usage.limit`. These are SQL panels written by the server
    over the metrics view, using the Phase A increase and latest-value rules.
+   A host or container with no data for two of its reporting intervals shows
+   "not reporting" in the bad state: Phase A carries a stopped series in
+   totals for up to 5 minutes so totals do not dip, and this row is what
+   makes a crash visible at once.
 4. **What changed.** Deploy markers on the health trend, and a versions table:
    service, `service.version` and when it was first seen, runtime name and
    version, and SDK language and version, from resource attributes.
@@ -370,10 +374,10 @@ can report it, so Fanout itself still needs an outside monitor.
 ### The self-observation test
 
 The page is right if it would have shown the problems a real stack had. S20's
-fixture stack replays the demo plus five scenarios through OTLP: a filesystem
+fixture stack replays the demo plus six scenarios through OTLP: a filesystem
 filling past 90%, an external dependency returning errors, an `httpcheck`
-target going down, a check that stops reporting, and a new
-`service.version`. Playwright checks that each
+target going down, a check that stops reporting, a host that stops
+reporting, and a new `service.version`. Playwright checks that each
 appears in its section within two refreshes. Once, on a development machine, a
 real Collector observing real local containers confirms the same page.
 
