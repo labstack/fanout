@@ -1,10 +1,11 @@
-# Milestone 5: correct metrics, per-minute summaries and the system page
+# Milestone 5: correct metrics and the system page
 
 Status: draft for review · 2026-10-10 · branch `feat/agent-dashboards-m5`
 
 This extends `2026-10-04-agent-dashboards-design.md`. Milestones 1 to 4 are
 merged. Its success criteria S1 to S13 stay in force; this milestone adds S14
-to S22.
+to S16, S20 and S22. Performance work (a scale benchmark, per-minute summaries
+and metric query speed) is deferred to a later milestone.
 
 ## Goal
 
@@ -29,7 +30,7 @@ Then the user drills into traces and logs, or asks the agent.
 
 ## Why now
 
-Three facts from milestone 4 decide the scope.
+Two facts from milestone 4 decide the scope.
 
 1. **Metric measures are wrong for counters and histograms.** `rate()` counts
    data points per second, so for a counter it reports how often the Collector
@@ -43,12 +44,6 @@ Three facts from milestone 4 decide the scope.
    demo data holds 213 sum metrics of both kinds. Exponential histograms are
    converted with one bound per count instead of one fewer, so every metric
    histogram query silently drops them.
-3. **The raw path stops being fast enough.** The replayed demo carries about
-   15 spans per second. At 10x that volume a twelve-panel request takes 1.1 to
-   1.6 s on the server, at or past S6's 1.5 s budget for the whole render.
-   Milestone 3 removed the per-minute summaries. A system worth watching runs
-   at 1,000 to 5,000 spans per second.
-
 ## Success criteria
 
 | ID | Criterion | Target | Evidence |
@@ -56,11 +51,7 @@ Three facts from milestone 4 decide the scope.
 | S14 | Counter rate | `rate()` on a counter equals the per-second increase across resets, export-interval changes, delta temporality and many series | engine-executed golden tests; demo-data cross-check against an independent window query |
 | S15 | Histogram percentiles | `pNN`/`quantile` on a metric histogram equals linear interpolation over the summed bucket increases | engine-executed golden tests with known distributions |
 | S16 | Metric fidelity | every OTLP metric kind keeps its kind, temporality and monotonicity; exponential histograms keep zero and negative counts | ingest round-trip tests |
-| S17 | Route-invariant results | every measure the summaries serve returns identical values from summaries and from raw rows; span quantiles are within 1% relative error of the exact rank value (`quantile_disc`) | equality tests on the pinned engine; demo-data comparison |
-| S18 | Scale | at 1,000 spans/s for 24 h with host and container metrics from 20 hosts: S7 (≤ 500 ms p95 per panel) for every routed shape, a twelve-panel request ≤ 1.0 s on the server, S6 (≤ 1.5 s first render) in the browser | Go benchmark and Playwright on generated data |
-| S19 | Ingest headroom | sustained ingest at 2x the S18 rate with summaries on; summary upkeep adds ≤ 10% CPU | ingest benchmark |
 | S20 | The system page shows real trouble | through one Collector, the page shows a filesystem above 90%, a failing external dependency, an unreachable endpoint, a check that stopped reporting and a version change within two refreshes | Playwright on a fixture stack; one local run with a real Collector |
-| S21 | System page speed | first render ≤ 1.5 s p95 at the S18 volume | Playwright performance test |
 | S22 | The agent uses metrics correctly | on host-metric prompts, counters use `rate()`, up-down counters and gauges use `last`/`avg`, histograms use percentiles; S1–S5 still hold | eval harness (public prompts; the sealed holdout is untouched) |
 
 Paid model spend for the milestone stays within $5, all of it in the final
@@ -94,27 +85,6 @@ misreading. New columns change the physical schema, so the batch format moves
 to 4 and format 3 files are refused, which is explicit. The product is
 pre-release and the deployed instances already need a wipe, so the cost is
 local data only. **Chosen: format 4 with new columns.**
-
-**Quantiles under summaries: exact raw, approximate summaries, or one sketch
-on both paths.** Exact `quantile_cont` on raw rows with sketches in summaries
-makes a panel's value depend on which path served it. One logarithmic sketch
-used by both paths makes results identical by construction and testable by
-equality, at a stated 1% relative error. Prometheus histogram quantiles are far
-coarser, and DDSketch-based products use the same bound. **Chosen: one sketch,
-both paths.**
-
-**Where summaries live: per batch, or global per minute.** A global table
-needs rewrites when late or compacted data arrives. Per-batch partial
-summaries follow the existing trace-cache rules: they are written with the
-batch's cache marker, compaction derives output contributions from cached
-inputs, and retention drops them with the batch. Uncached batches and partial
-edge minutes are read raw. **Chosen: per batch.**
-
-**Metric summaries.** At the Collector's default 60 s interval each series has
-one point per minute, so a per-minute metric summary saves nothing, and a
-series' increase spans batches. **Chosen: no metric value summaries.** The
-benchmark decides whether metric panels meet S7 raw; if they do not, the fix
-is designed then, from numbers.
 
 **The system page: a fixed React page, or a generated dashboard.** A fixed
 page would be a second renderer. A dashboard spec generated on the server and
@@ -243,101 +213,7 @@ option is removed, because the data now carries it.
   that source lost it. The committed demo-data cross-check runs when that data
   is supplied and skips otherwise, like milestone 4's read benchmarks.
 
-## Phase B: the scale benchmark
-
-Measure before building. Query measurements use a data directory built by
-tiling the replayed demo's Parquet batches, as milestone 4's read benchmark
-does, extended to this volume; rewritten host and container identities get a
-recomputed `series_id`. Ingest headroom (S19) is measured separately through
-the OTLP ingest server at twice the S18 rate for a fixed duration. The tiled
-data has:
-
-- spans and logs at 1,000 spans per second for 24 hours, built by tiling the
-  demo replay across namespaces and hosts, keeping its shape of services,
-  operations, routes and errors;
-- host and container metrics for 20 hosts with 24 containers each, at the
-  Collector's 10 s and 60 s intervals, using the demo's `hostmetrics` and
-  `docker_stats` names;
-- a 6-hour informational run at 5,000 spans per second.
-
-The run checks free disk first and refuses to start below twice its estimated
-output. It records, for every M4 benchmark shape plus the new metric shapes:
-raw-path p95 per panel, the twelve-panel request time, ingest throughput, and,
-for Phase C sizing, the number of distinct summary keys per minute for each
-candidate dimension set.
-
-Results go into `docs/benchmarks/2026-10-agent-dashboards-m5.md`. The
-metric shapes include the system page's: CPU from counter rates, memory and
-filesystem from updown `last`, container CPU and memory from gauges, each at
-24 hours. If any metric shape misses S7 at the S18 volume, Phase C adds a
-metric fix, designed from those numbers, before Phase D starts.
-
-## Phase C: per-minute summaries
-
-### What is summarised
-
-Per batch and per minute, three private read tables:
-
-- **Spans.** Keys: namespace, minute, and the dimension set below. Values:
-  span count, error count, served-span count, duration sum, minimum and
-  maximum, and a duration sketch.
-- **Logs.** Keys: namespace, minute, service, severity, severity number.
-  Value: count.
-- **Metric counts.** Keys: namespace, minute, service. Value: data points.
-
-The span dimension set starts as service, operation, kind, status,
-`http_method`, `http_status_code`, `http_route`, `rpc_service`, `rpc_method`,
-`db_system`, `messaging_system`, `peer_service`, `service_version` and
-`deployment_env`. Phase B's key counts confirm it. The rule: summary rows per
-minute stay at or below one twentieth of spans per minute at the S18 rate. A
-dimension that breaks the rule is dropped, and panels that use it read raw.
-
-### The sketch
-
-Durations are bucketed logarithmically with relative accuracy α = 0.01:
-γ = (1 + α) / (1 − α), and a positive duration `x` falls in bucket
-`ceil(log_γ(x))`. Zero and negative durations share one bucket valued 0; NaN
-is excluded, as today. A quantile walks the summed bucket counts and returns
-the bucket's representative value, `2γ^i / (γ + 1)`. Raw-path span quantiles
-use exactly this computation, so both paths return the same number.
-
-### Routing
-
-The compiler serves a query from summaries when all of these hold:
-
-- the signal is spans or logs, and the panel is an aggregate visualization
-  (stat, gauge, timeseries, bar or table);
-- every `by` field and every column referenced by a filter is a summary key;
-  attribute lookups always read raw;
-- every measure is `count`, `rate`, `error_rate`, `share`, or `avg`, `sum`,
-  `min`, `max`, `pNN` or `quantile` of `duration_ms`;
-- the bucket is a whole number of minutes.
-
-A routed query reads summaries for whole minutes of cached batches, and raw
-rows for uncached batches and for the partial minutes at each end of the
-window. The read happens in one transaction under the pinned file snapshot,
-as the trace caches do. Panel results report which path served them, for the
-Inspect view and for tests.
-
-### Lifecycle
-
-Summaries follow the read-cache rules in `AGENTS.md`. They are written with
-the batch's cache marker in one transaction. Compaction derives the output
-batch's summaries from its inputs' summaries. Retention drops them with the
-batch. `readCacheVersion` moves to 5, and a version mismatch rebuilds every
-private read table.
-
-### `service_rollup` retires as a table
-
-Two per-minute span aggregates would be redundant. `service_rollup` and its
-refresh loop are removed. Health, overview, dependencies, latency and the
-alert engine read the span, log and metric-count summaries through one Go
-reader. The public SQL relation `service_rollup` stays as a view with the same
-columns, computed from the summary tables; p50 and p95 come from the merged
-sketch. `edge_rollup` stays, because caller and callee pairs join spans across
-batches.
-
-## Phase D: the system page
+## Phase B: the system page
 
 `/` opens the system page, and the rail gains a System entry. The page is a
 dashboard spec generated on the server from what telemetry exists in the
@@ -389,44 +265,40 @@ reporting, and a new `service.version`. Playwright checks that each
 appears in its section within two refreshes. Once, on a development machine, a
 real Collector observing real local containers confirms the same page.
 
-## Phase E: final verification
+## Phase C: final verification
 
-S1 to S22 run on the final commit: the eval harness (within $5, with new
-public host-metric prompts for S22), the browser collector, the Playwright
-performance and accessibility tests, the Go benchmarks at the S18 volume, and
-the equality tests. Results complete the M5 benchmark document.
+S1 to S16, S20 and S22 run on the final commit: the eval harness (within $5,
+with new public host-metric prompts for S22), the browser collector, the
+Playwright smoke, accessibility and performance tests at demo volume, and the
+demo-data metric cross-check. Results go into
+`docs/benchmarks/2026-10-agent-dashboards-m5.md`.
 
 ## Testing
 
 - Every SQL-producing change is tested by executing on the pinned engine,
   not by comparing SQL text.
-- Counter, histogram and sketch logic have golden tests with known answers:
+- Counter and histogram logic have golden tests with known answers:
   resets, interval changes, delta series, late and out-of-order points,
   series first seen inside a window, empty buckets and overflow buckets.
-- Route equality: each routed shape runs both ways on the same snapshot and
-  must return identical frames.
-- Lifecycle: compaction, retention and late batches never double count or
-  lose a summary contribution.
 - The fixture-stack e2e test runs in CI. The real-Collector run is recorded
-  in the benchmark document.
+  in the results document.
 
 ## Out of scope
 
 Alert rules created from system-page sections, incidents and notifications,
 reachability checks run by Fanout itself (a Collector with `httpcheck` on an
 outside machine covers them), cost and usage tracking, vulnerability matching for runtime
-versions, and summaries for metric values. Each is designed separately if the
-page shows it is needed.
+versions. Each is designed separately if the page shows it is needed.
+
+Performance is deferred to a later milestone: a benchmark at a realistic
+volume (1,000 to 5,000 spans per second), per-minute summaries for spans and
+logs, and making metric queries faster. Phase A's correct per-series metric
+math costs 1.5 to 2.6 times the old per-point math on the measured shapes.
 
 ## Risks
 
-- **Summary cardinality.** A route-rich service can produce many keys per
-  minute. Phase B measures it, and the one-twentieth rule drops dimensions
-  rather than letting summaries grow.
 - **Lookback cost.** Reading 10 minutes before the window adds work to every
-  counter query. The benchmark includes counter shapes at 10 s intervals.
-- **Changed numbers.** Span quantiles move from exact to within 1%. The
-  dashboards guide states it, and Inspect shows the path.
+  counter query.
 - **Histogram percentile approximations.** Interpolation is linear within a
   bucket, as in Prometheus. Two known effects: a quantile that falls in an
   exponential histogram's zero bucket interpolates across
@@ -435,7 +307,7 @@ page shows it is needed.
   layouts in one group are combined on the union of their bounds, which can
   lean a quantile upward by up to one coarse bucket width.
 - **Metric query cost.** Phase A's per-series math costs more than the old
-  per-point math. Phase B measures, and Phase C fixes any miss of S7. Known
+  per-point math, and its speed work is deferred with the rest of performance. Known
   costs: decoding and comparing exponential histogram bucket lists per point
   (about 600–740 ms at one hour for 160-bucket series), gauge and counter
   panels also scanning for histogram rows, and stat panels running the series

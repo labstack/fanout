@@ -387,12 +387,6 @@ func preparePanelReplay(tb testing.TB, input string, volume int) panelBenchData 
 // Raw row rewriting retains the exact physical schema and all VARIANT bytes.
 // The disk-backed sorting writer bounds setup memory even for compacted input.
 func tilePanelParquet(input, output, signal, prefix string, start, end time.Time, shift time.Duration, m *telemetry.BatchMetadata, services, namespaces map[string]bool) (err error) {
-	return tilePanelParquetRewrite(input, output, signal, prefix, start, end, shift, m, services, namespaces, nil)
-}
-
-// The hook reconstructs typed identities through the input physical schema.
-// Existing callers keep the raw transformation and signature.
-func tilePanelParquetRewrite(input, output, signal, prefix string, start, end time.Time, shift time.Duration, m *telemetry.BatchMetadata, services, namespaces map[string]bool, rewrite *panelScaleRowRewrite) (err error) {
 	in, err := os.Open(input)
 	if err != nil {
 		return err
@@ -400,13 +394,6 @@ func tilePanelParquetRewrite(input, output, signal, prefix string, start, end ti
 	defer func() { err = errors.Join(err, in.Close()) }()
 	reader := parquet.NewReader(in)
 	defer func() { err = errors.Join(err, reader.Close()) }()
-	rewriteSchema := reader.Schema()
-	if rewrite != nil {
-		rewriteSchema, err = panelScaleBindSchema(reader.Schema(), signal)
-		if err != nil {
-			return err
-		}
-	}
 	cols := map[string]int{}
 	for i, path := range reader.Schema().Columns() {
 		if len(path) == 1 {
@@ -430,12 +417,7 @@ func tilePanelParquetRewrite(input, output, signal, prefix string, start, end ti
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if rewrite != nil {
-			err = errors.Join(err, out.Sync())
-		}
-		err = errors.Join(err, out.Close())
-	}()
+	defer func() { err = errors.Join(err, out.Close()) }()
 	options := []parquet.WriterOption{reader.Schema(), parquet.Compression(&zstd.Codec{Level: zstd.SpeedFastest, Concurrency: 1}), parquet.MaxRowsPerRowGroup(50000), parquet.PageBufferSize(64 << 10)}
 	type rowWriter interface {
 		WriteRows([]parquet.Row) (int, error)
@@ -461,19 +443,6 @@ func tilePanelParquetRewrite(input, output, signal, prefix string, start, end ti
 			if at < start.UnixNano() || at >= end.UnixNano() {
 				continue
 			}
-			if rewrite != nil && signal == "metrics" && panelScaleInfrastructure(panelRowValue(row, cols["scope_name"]).String()) != rewrite.Infrastructure {
-				continue
-			}
-			if rewrite != nil {
-				var keep bool
-				row, keep, err = rewrite.row(rewriteSchema, row, signal)
-				if err != nil {
-					return err
-				}
-				if !keep {
-					continue
-				}
-			}
 			service := panelRowValue(row, cols["service"]).String()
 			if service != "" {
 				services[service] = true
@@ -485,19 +454,8 @@ func tilePanelParquetRewrite(input, output, signal, prefix string, start, end ti
 					v := value.Int64()
 					// Zero optional raw timestamps remain absent; native event
 					// timestamps, including signed and zero instants, are shifted.
-					// ingested_at and ingested_unix_nano hold the same instant, so
-					// both shift even at zero.
-					if v != 0 || name == event || name == "end_time" || name == "start_time" || name == "start_unix_nano" || name == "end_unix_nano" || name == "observed_time" || name == "ingested_at" || name == "ingested_unix_nano" {
-						shifted, shiftErr := panelScaleShift(v, int64(shift))
-						if shiftErr != nil {
-							return shiftErr
-						}
-						// Zero is the absent-start sentinel; a present start must
-						// not shift onto it.
-						if name == "start_time_unix_nano" && v != 0 && shifted == 0 {
-							return fmt.Errorf("metric start time %d shifted by %s lands on the absent-start sentinel", v, shift)
-						}
-						row[i] = parquet.Int64Value(shifted).Level(value.RepetitionLevel(), value.DefinitionLevel(), column)
+					if v != 0 || name == event || name == "end_time" || name == "start_time" {
+						row[i] = parquet.Int64Value(v+int64(shift)).Level(value.RepetitionLevel(), value.DefinitionLevel(), column)
 					}
 				}
 				if identityColumns[column] && value.String() != "" {
@@ -521,26 +479,6 @@ func tilePanelParquetRewrite(input, output, signal, prefix string, start, end ti
 				m.Logs++
 			} else {
 				m.Metrics++
-			}
-			bounds := map[string]*telemetry.TimeRange{"spans": &m.SpanTime, "logs": &m.LogTime, "metrics": &m.MetricTime}[signal]
-			shiftedAt := panelRowValue(row, cols[event]).Int64()
-			if !bounds.Known {
-				bounds.MinNanos, bounds.MaxNanos, bounds.Known = shiftedAt, shiftedAt, true
-			}
-			bounds.MinNanos, bounds.MaxNanos = min(bounds.MinNanos, shiftedAt), max(bounds.MaxNanos, shiftedAt)
-			if rewrite != nil && rewrite.Counts != nil {
-				counts := rewrite.Counts
-				if shiftedAt < rewrite.WindowStart.UnixNano() {
-					counts = rewrite.LookbackCounts
-				}
-				switch signal {
-				case "spans":
-					counts.Spans++
-				case "logs":
-					counts.Logs++
-				case "metrics":
-					counts.Metrics++
-				}
 			}
 			ingested := panelRowValue(row, cols["ingested_unix_nano"]).Int64()
 			if m.Spans+m.Logs+m.Metrics == 1 {
