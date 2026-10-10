@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -108,11 +109,11 @@ func insertMetrics(t *testing.T, db *sql.DB, m telemetry.Metric) {
 		return string(b)
 	}
 	_, err := db.Exec(`INSERT INTO telemetry.metrics
-      (namespace,service,name,unit,metric_type,temporality,monotonic,start_time_unix_nano,
+      (series_id,namespace,service,name,unit,metric_type,temporality,monotonic,start_time_unix_nano,
        metric_time,time_unix_nano,value,hist_bounds_json,hist_counts_json,hist_count,hist_sum,
        scope_name,scope_version,attributes,resource,ingested_at,ingested_unix_nano)
-      VALUES (?,?,?,?,?,?,?,?,?::TIMESTAMP_NS,?,?,?,?,?,?,?, ?,?::JSON::VARIANT,?::JSON::VARIANT,?::TIMESTAMP_NS,?)`,
-		m.Namespace, m.ServiceName, m.Name, m.Unit, m.Type, m.Temporality, m.Monotonic, m.StartTimeUnixNanos,
+      VALUES (?::UBIGINT, ?,?,?,?,?,?,?,?,?::TIMESTAMP_NS,?,?,?,?,?,?,?, ?,?::JSON::VARIANT,?::JSON::VARIANT,?::TIMESTAMP_NS,?)`,
+		strconv.FormatUint(telemetry.MetricSeriesID(m), 10), m.Namespace, m.ServiceName, m.Name, m.Unit, m.Type, m.Temporality, m.Monotonic, m.StartTimeUnixNanos,
 		time.Unix(0, m.TimeUnixNanos).UTC(), m.TimeUnixNanos, m.Value, m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum,
 		m.ScopeName, m.ScopeVersion, encode(m.Attributes), encode(m.Resource), time.Unix(0, m.IngestedAt).UTC(), m.IngestedAt)
 	if err != nil {
@@ -121,10 +122,12 @@ func insertMetrics(t *testing.T, db *sql.DB, m telemetry.Metric) {
 }
 
 func metricCounter(at time.Time, value float64) telemetry.Metric {
-	return telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "net", Unit: "By",
+	m := telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "net", Unit: "By",
 		Type: "sum", Monotonic: true, Temporality: "cumulative", Value: value,
 		TimeUnixNanos: at.UnixNano(), EventUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano(),
 		ScopeName: "scope", ScopeVersion: "1"}
+	m.SeriesID = telemetry.MetricSeriesID(m)
+	return m
 }
 
 func runMetricPanel(t *testing.T, e *Executor, p Panel, start, end time.Time) Result {
@@ -167,5 +170,14 @@ func metricHistogram(at time.Time, bounds, counts string, count int64, sum float
 	m.Type, m.Monotonic = "histogram", false
 	m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum = bounds, counts, count, sum
 	m.Attributes = map[string]any{"series": series}
+	m.SeriesID = telemetry.MetricSeriesID(m)
 	return m
+}
+
+// Direct Parquet fixtures finalize their identity just like OTLP ingest.
+func metricSeriesIDs(metrics []telemetry.Metric) []telemetry.Metric {
+	for i := range metrics {
+		metrics[i].SeriesID = telemetry.MetricSeriesID(metrics[i])
+	}
+	return metrics
 }

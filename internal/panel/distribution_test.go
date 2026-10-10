@@ -62,7 +62,7 @@ func TestMetricHistogramTemporality(t *testing.T) {
 		n := fixtureStart.Add(time.Duration(scrape) * time.Minute).UnixNano()
 		metrics = append(metrics, telemetry.Metric{Namespace: "shop", ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", Unit: "ms", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10,20]", HistCountsJSON: counts, HistCount: []int64{300, 303, 306}[scrape], Attributes: map[string]any{"series": "b"}})
 	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "scrapes", Metrics: metrics}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "scrapes", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
 	}
 	e := NewExecutor(engine, 30)
@@ -74,7 +74,7 @@ func TestMetricHistogramTemporality(t *testing.T) {
 			for i := range metrics {
 				metrics[i].Temporality = "delta"
 			}
-			if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "delta-scrapes", Metrics: metrics}); err != nil {
+			if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "delta-scrapes", Metrics: metricSeriesIDs(metrics)}); err != nil {
 				t.Fatal(err)
 			}
 			e = NewExecutor(engine, 30)
@@ -101,7 +101,7 @@ func TestMetricHistogramTemporality(t *testing.T) {
 	// A resetting series contributes current counts on every channel.
 	n := fixtureStart.UnixNano()
 	reset := []telemetry.Metric{{ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: "[20,30]", HistCount: 50}, {ServiceName: "reset", Name: "reset", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n + int64(time.Minute), IngestedAt: n + 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,2]", HistCount: 3}}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "reset", Metrics: reset}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "reset", Metrics: metricSeriesIDs(reset)}); err != nil {
 		t.Fatal(err)
 	}
 	d.Panels[0].Query.Where = []string{"name = 'reset'"}
@@ -303,7 +303,7 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 		n := fixtureStart.Add(time.Duration(minute) * time.Minute).UnixNano()
 		metrics = append(metrics, telemetry.Metric{ServiceName: "checkout", Name: "latency", Type: "histogram", Temporality: "cumulative", EventUnixNanos: n, IngestedAt: n, HistBoundsJSON: "[10]", HistCountsJSON: counts, HistCount: []int64{30, 36, 45, 54}[i]})
 	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "heat-scrapes", Metrics: metrics}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "heat-scrapes", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
 	}
 	e := NewExecutor(engine, 30)
@@ -315,7 +315,7 @@ func TestMetricHistogramHeatmap(t *testing.T) {
 			for i := range metrics {
 				metrics[i].Temporality = "delta"
 			}
-			if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "delta-scrapes", Metrics: metrics}); err != nil {
+			if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "delta-scrapes", Metrics: metricSeriesIDs(metrics)}); err != nil {
 				t.Fatal(err)
 			}
 			e = NewExecutor(engine, 30)
@@ -371,7 +371,7 @@ func TestMetricHistogramSeriesIdentity(t *testing.T) {
 			metrics = append(metrics, m)
 		}
 	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "identity", Metrics: metrics}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "identity", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
 	}
 	e := NewExecutor(engine, 30)

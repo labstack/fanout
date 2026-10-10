@@ -121,6 +121,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 				}
 
 			}
+			validateMetricName(p, checked.Filters[p.ID], earlier, path, &problems)
 			if p.Options != nil && p.Options.Split == "deploy" {
 				found := false
 				for _, f := range checked.Filters[p.ID] {

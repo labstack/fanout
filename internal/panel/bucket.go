@@ -6,6 +6,7 @@ import (
 )
 
 const maxSeriesPoints = 2000
+const bucketOrigin = "'1970-01-01'::TIMESTAMP_NS"
 
 var autoIntervals = []time.Duration{
 	10 * time.Second, 30 * time.Second, time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute,

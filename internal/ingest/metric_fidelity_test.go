@@ -3,7 +3,10 @@ package ingest
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"testing"
+
+	"github.com/parquet-go/parquet-go"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -38,10 +41,37 @@ func TestMetricIngestKeepsKindTemporalityAndStart(t *testing.T) {
 	}
 	kinds := []string{"gauge", "sum", "sum", "sum", "histogram", "exponential_histogram", "summary"}
 	temps := []string{"", "cumulative", "delta", "cumulative", "delta", "cumulative", ""}
+	store, err := telemetry.OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	captured := []telemetry.Metric{}
 	for i := range metrics {
 		got := <-ch
+		if got.SeriesID != telemetry.MetricSeriesID(got) {
+			t.Fatalf("ingest series id=%d", got.SeriesID)
+		}
+		captured = append(captured, got)
 		if got.Type != kinds[i] || got.Temporality != temps[i] || got.Monotonic != (i == 1 || i == 2) || got.StartTimeUnixNanos != int64(start) {
 			t.Fatalf("point %d: %+v", i, got)
+		}
+	}
+	if err := store.CommitBatch(t.Context(), telemetry.BatchMetadata{ID: "ingest_series"}, nil, nil, captured); err != nil {
+		t.Fatal(err)
+	}
+	physical, err := parquet.ReadFile[struct {
+		SeriesID uint64 `parquet:"series_id"`
+	}](filepath.Join(store.BatchPath("ingest_series"), "metrics.parquet"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(physical) != len(captured) {
+		t.Fatalf("physical rows=%d", len(physical))
+	}
+	for i, row := range physical {
+		if row.SeriesID != captured[i].SeriesID {
+			t.Fatalf("physical series id=%d want %d", row.SeriesID, captured[i].SeriesID)
 		}
 	}
 }

@@ -353,6 +353,9 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	default:
 		interval = AutoInterval(end.Sub(start), width)
 	}
+	if p.Query != nil && p.Query.From == "metrics" && (reduces || p.Query.Bucket == "auto") {
+		interval = max(interval, time.Minute)
+	}
 	scope := Scope{Start: start, End: end, Interval: interval, Vars: vars}
 	frame, sqlText, err := e.runScope(ctx, p, checked, scope)
 	if err != nil {
@@ -394,7 +397,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			res.ShiftMS = shift.Milliseconds()
 		}
 	}
-	if frame.Rows == 0 {
+	if frame.Rows == 0 || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !metricFrameHasValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
 	}
@@ -550,4 +553,20 @@ func failed(res Result, err error, stopped error) Result {
 		res.Error = strings.TrimSpace(boundError(RedactPaths(err.Error())))
 	}
 	return res
+}
+
+func metricFrameHasValue(f *Frame) bool {
+	if f == nil {
+		return false
+	}
+	for i, c := range f.Columns {
+		if c.Role == "measure" {
+			for _, v := range f.Values[i] {
+				if v != nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

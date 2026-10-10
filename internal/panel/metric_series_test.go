@@ -209,6 +209,10 @@ func TestMetricReadScopeIncludesSeparateLookbackBatch(t *testing.T) {
 	if !reflect.DeepEqual(metricValues(t, r, "increase"), []any{60.0, 60.0}) {
 		t.Fatalf("snapshot=%+v", r.Frame)
 	}
+	structured := runMetricPanel(t, e, p, original.Start, original.End)
+	if !reflect.DeepEqual(metricValues(t, structured, "rate"), []any{1.0, 1.0}) {
+		t.Fatalf("structured lookback=%+v", structured.Frame)
+	}
 }
 
 func TestHistogramPanelsShareResetIncreases(t *testing.T) {

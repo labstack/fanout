@@ -254,6 +254,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:       scopeVer,
 							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Sum:
@@ -285,6 +286,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:       scopeVer,
 							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Histogram:
@@ -322,6 +324,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:       scopeVer,
 							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_ExponentialHistogram:
@@ -363,6 +366,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:       scopeVer,
 							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Summary:
@@ -390,6 +394,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:       scopeVer,
 							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				}

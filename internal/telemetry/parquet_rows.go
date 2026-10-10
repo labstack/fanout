@@ -122,6 +122,7 @@ func makeLogParquetRow(r Log) logParquetRow {
 }
 
 type metricParquetRow struct {
+	SeriesID          uint64  `parquet:"series_id"`
 	Namespace         string  `parquet:"namespace,dict"`
 	MetricTime        int64   `parquet:"metric_time,timestamp(nanosecond)"`
 	TimeUnixNano      int64   `parquet:"time_unix_nano"`
@@ -149,6 +150,7 @@ type metricParquetRow struct {
 
 func makeMetricParquetRow(r Metric) metricParquetRow {
 	return metricParquetRow{
+		SeriesID:  r.SeriesID,
 		Namespace: r.Namespace, MetricTime: FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		Name: r.Name, Description: r.Description, Unit: r.Unit, MetricType: r.Type, Service: r.ServiceName,
 		Temporality: r.Temporality, Monotonic: r.Monotonic, StartTimeUnixNano: r.StartTimeUnixNanos,

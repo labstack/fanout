@@ -6,6 +6,9 @@ import (
 )
 
 func compileItems(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
+	if p.Query.From == "metrics" {
+		return compileMetricQuery(p, measures, filters, scope)
+	}
 	sig, _ := lookupSignal(p.Query.From)
 	where, args, err := buildWhere(sig, filters, scope)
 	if err != nil {

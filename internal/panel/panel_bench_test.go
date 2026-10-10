@@ -375,7 +375,7 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add("updown", "inflight", data.Start, 2)
 	add("histogram", "z_latency", data.Start, 2)
 	add("histogram", "a_latency", data.Start, 2)
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-names", Metrics: metrics}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-names", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{"gauge": "cpu'usage", "counter": "requests", "updown": "inflight", "histogram": "a_latency"}
@@ -391,15 +391,35 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 		t.Fatalf("metric shape results = %v, error = %v", results, err)
 	}
 	for _, result := range results {
-		if result.Status != StatusOK || result.Frame == nil || result.Frame.Rows == 0 {
+		if result.Frame == nil || result.Frame.Rows == 0 {
 			t.Fatalf("metric shape did not execute: %+v", result)
 		}
-		for _, value := range result.Frame.Values[len(result.Frame.Values)-1] {
+		values := result.Frame.Values[len(result.Frame.Values)-1]
+		if result.ID == "metric_histogram_p95" {
+			// Task 4 leaves histogram value measures undefined; Task 5
+			// supplies observation-weighted percentile interpolation.
+			if result.Status != StatusEmpty || !reflect.DeepEqual(values, []any{nil, nil}) {
+				t.Fatalf("histogram placeholder=%+v", result)
+			}
+			continue
+		}
+		if result.Status != StatusOK {
+			t.Fatalf("metric shape did not execute: %+v", result)
+		}
+		if result.ID == "metric_counter_rate" {
+			// The first cumulative point is a baseline, not a zero rate.
+			if !reflect.DeepEqual(values, []any{nil, 2.0 / 60.0}) {
+				t.Fatalf("counter rates=%v", values)
+			}
+			continue
+		}
+		for _, value := range values {
 			if value == nil {
 				t.Fatalf("metric shape %s returned a null measure", result.ID)
 			}
 		}
 	}
+
 	data.End = data.Start.Add(time.Nanosecond)
 	want["gauge"] = "rare"
 	if got := panelBenchmarkMetricNames(t, engine, data); !reflect.DeepEqual(got, want) {

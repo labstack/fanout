@@ -75,6 +75,7 @@ type Log struct {
 }
 
 type Metric struct {
+	SeriesID           uint64
 	Namespace          string
 	EventUnixNanos     int64
 	TimeUnixNanos      int64

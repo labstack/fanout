@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS telemetry.logs (
 
 const createMetricsTable = `
 CREATE TABLE IF NOT EXISTS telemetry.metrics (
+  series_id UBIGINT,
   namespace VARCHAR,
   metric_time TIMESTAMP_NS,
   time_unix_nano BIGINT,

@@ -7,21 +7,46 @@ import (
 )
 
 const metricLookback = 10 * time.Minute
-const metricSeriesKey = "namespace,service,name,unit,scope_name,scope_version,attributes,resource"
+const metricStaleness = 5 * time.Minute
+const metricSeriesKey = "series_id"
 
 func metricReadScope(p *Panel, scope Scope) Scope {
-	if p.Query != nil && p.Query.From == "metrics" {
-		scope.Start = scope.Start.Add(-metricLookback)
+	if p.Query == nil || p.Query.From != "metrics" {
+		return scope
 	}
+	lookback := time.Duration(0)
+	if p.Viz == "heatmap" || p.Viz == "histogram" {
+		lookback = metricLookback
+	} else {
+		var ignored Problems
+		for _, m := range parseMeasures(signals["metrics"], p.Query.Measures, "", &ignored) {
+			if m.Func == "rate" || (m.Func == "sum" && metricValueMeasure(m)) {
+				lookback = metricLookback
+			}
+			if m.Func == "last" && metricValueMeasure(m) {
+				lookback = max(lookback, metricStaleness)
+			}
+		}
+	}
+	scope.Start = scope.Start.Add(-lookback)
 	return scope
 }
 
-func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
+func metricBucketSQL(interval time.Duration) string {
+	if interval <= 0 {
+		return "0::BIGINT"
+	}
+	return fmt.Sprintf("epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS,%s))::BIGINT", int64(interval/time.Second), bucketOrigin)
+}
+
+// Point-only builders never lag or decode a ten-minute history. Separate SQL
+// scopes let callers share a builder without rewriting authored filter text.
+func metricPointsCTE(filters []Filter, scope Scope, kinds []string, lookback time.Duration) (string, []any, error) {
 	if len(kinds) == 0 {
 		return "", nil, fmt.Errorf("metric series requires at least one kind")
 	}
 	read := scope
-	read.Start = read.Start.Add(-metricLookback)
+	read.Start = read.Start.Add(-lookback)
 	where, args, err := buildWhere(signals["metrics"], filters, read)
 	if err != nil {
 		return "", nil, err
@@ -30,16 +55,7 @@ func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []a
 	for i, kind := range kinds {
 		quoted[i] = sqlString(kind)
 	}
-	// Keep the read window first for snapshot pruning. Callers select only
-	// the semantic kinds needed by their measures before decoding or lagging.
 	where += " AND type IN (" + strings.Join(quoted, ",") + ")"
-	bucket := "0::BIGINT"
-	if scope.Interval > 0 {
-		bucket = fmt.Sprintf("epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS))::BIGINT", int64(scope.Interval/time.Second))
-	}
-	// Re-bin only whole previous buckets into the current layout, using
-	// infinite endpoints for the underflow and overflow buckets. Unassigned
-	// observations or negative differences reset all histogram channels together.
 	text := `WITH metric_input AS (SELECT * FROM metrics WHERE ` + where + `),
       metric_decoded AS (SELECT *,
         CASE WHEN type='histogram' THEN TRY(from_json(hist_bounds_json,'["DOUBLE"]')) END AS _bounds,
@@ -57,7 +73,18 @@ func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []a
           ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
           hist_counts_json DESC,hist_bounds_json DESC,start_time DESC NULLS LAST) AS _retry
         FROM metric_valid) WHERE _retry=1),
-      metric_points AS (SELECT *,` + bucket + ` AS _bucket FROM metric_unique),
+      metric_points AS (SELECT *,` + metricBucketSQL(scope.Interval) + ` AS _bucket FROM metric_unique)`
+	return strings.TrimSpace(text), args, nil
+}
+
+func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
+	text, args, err := metricPointsCTE(filters, scope, kinds, metricLookback)
+	if err != nil {
+		return "", nil, err
+	}
+	// Re-bin only whole previous buckets into the current layout. Unassigned
+	// observations or negative differences reset all channels together.
+	text += `,
       metric_previous AS (SELECT *,
         lag(time) OVER w AS _previous_time,
         lag(value) OVER w AS _previous_value,
@@ -115,4 +142,31 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
       FROM metric_increases,UNNEST(bound_increases) WITH ORDINALITY AS u(n,i)
       WHERE type='histogram' AND n>=0`
 	return text, args, nil
+}
+
+// A series' value at a bucket's exclusive end is its latest point strictly
+// before that end, found per series by an ASOF join so the cost follows
+// series times buckets rather than points times buckets.
+func metricLastCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
+	read := scope
+	if scope.Interval <= 0 {
+		read.Start = scope.End
+	}
+	cte, args, err := metricPointsCTE(filters, read, kinds, metricStaleness)
+	if err != nil {
+		return "", nil, err
+	}
+	ends := "SELECT 0::BIGINT AS _bucket,?::TIMESTAMP_NS::TIMESTAMPTZ_NS AS _at"
+	if scope.Interval > 0 {
+		lo := alignedBucketMillis(scope.Start, scope.Interval)
+		hi := alignedBucketMillis(scope.End.Add(-time.Nanosecond), scope.Interval)
+		ends = fmt.Sprintf("SELECT b AS _bucket,least(make_timestamp_ns((b+%d)*1000000)::TIMESTAMPTZ_NS,?::TIMESTAMP_NS::TIMESTAMPTZ_NS) AS _at FROM generate_series(%d::BIGINT,%d::BIGINT,%d::BIGINT) AS buckets(b)", scope.Interval.Milliseconds(), lo, hi, scope.Interval.Milliseconds())
+	}
+	args = append(args, scope.End.UTC())
+	cte += `, metric_bucket_ends AS (` + ends + `),
+        metric_grid AS (SELECT s.series_id AS _sid,b._bucket AS _end_bucket,b._at FROM (SELECT DISTINCT series_id FROM metric_points) s CROSS JOIN metric_bucket_ends b),
+        metric_last_points AS (SELECT p.* EXCLUDE (_bucket),g._end_bucket AS _bucket FROM metric_grid g ASOF JOIN metric_points p
+          ON g._sid=p.series_id AND p.time<g._at
+          WHERE p.time>=make_timestamp_ns(epoch_ns(g._at::TIMESTAMP_NS)-300000000000)::TIMESTAMPTZ_NS)`
+	return cte, args, nil
 }

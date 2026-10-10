@@ -114,6 +114,7 @@ FROM telemetry.logs;`
 const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
 SELECT
+  series_id,
   namespace,
   metric_time::TIMESTAMPTZ_NS AS time,
   time_unix_nano,

@@ -18,11 +18,12 @@ func TestMetricPhysicalRowKeepsFidelityColumns(t *testing.T) {
 	defer store.Close()
 	metric := Metric{Name: "net", Type: "sum", Temporality: "delta", Monotonic: true,
 		StartTimeUnixNanos: 1790855940000000017, TimeUnixNanos: 1790856000000000009, IngestedAt: 1790856000000000010}
+	metric.SeriesID = MetricSeriesID(metric)
 	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "fidelity"}, nil, nil, []Metric{metric}); err != nil {
 		t.Fatal(err)
 	}
 	got := readOneParquetRow[metricParquetRow](t, filepath.Join(store.BatchPath("fidelity"), "metrics.parquet"))
-	if got.MetricType != "sum" || got.Temporality != "delta" || !got.Monotonic || got.StartTimeUnixNano != metric.StartTimeUnixNanos {
+	if got.SeriesID != metric.SeriesID || got.MetricType != "sum" || got.Temporality != "delta" || !got.Monotonic || got.StartTimeUnixNano != metric.StartTimeUnixNanos {
 		t.Fatalf("physical=%+v", got)
 	}
 	if err := ValidatePublishedBatch(store.BatchPath("fidelity")); err != nil {
@@ -206,6 +207,8 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 		if (i/6)%2 == 0 {
 			m.StartTimeUnixNanos = 1790855940000000017 + int64(i)
 		}
+		m.Attributes = map[string]any{"series": int64(i)}
+		m.SeriesID = MetricSeriesID(m)
 		metrics[i] = m
 	}
 	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "readback"}, nil, nil, metrics); err != nil {
@@ -216,7 +219,7 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer verifier.Close()
-	rows, err := verifier.db.QueryContext(t.Context(), `SELECT metric_type, temporality, monotonic, start_time_unix_nano, time_unix_nano
+	rows, err := verifier.db.QueryContext(t.Context(), `SELECT series_id, metric_type, temporality, monotonic, start_time_unix_nano, time_unix_nano
 		FROM read_parquet(?, hive_partitioning=false, union_by_name=false) ORDER BY time_unix_nano`,
 		filepath.ToSlash(filepath.Join(store.BatchPath("readback"), "metrics.parquet")))
 	if err != nil {
@@ -228,14 +231,15 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 		if count >= len(metrics) {
 			t.Fatal("unexpected extra metric row")
 		}
+		var seriesID uint64
 		var kind, temporality string
 		var monotonic bool
 		var start, at int64
-		if err := rows.Scan(&kind, &temporality, &monotonic, &start, &at); err != nil {
+		if err := rows.Scan(&seriesID, &kind, &temporality, &monotonic, &start, &at); err != nil {
 			t.Fatal(err)
 		}
 		want := metrics[count]
-		if kind != want.Type || temporality != want.Temporality || monotonic != want.Monotonic || start != want.StartTimeUnixNanos || at != want.TimeUnixNanos {
+		if seriesID != want.SeriesID || kind != want.Type || temporality != want.Temporality || monotonic != want.Monotonic || start != want.StartTimeUnixNanos || at != want.TimeUnixNanos {
 			t.Fatalf("row %d: got (%q, %q, %t, %d, %d), want (%q, %q, %t, %d, %d)",
 				count, kind, temporality, monotonic, start, at, want.Type, want.Temporality, want.Monotonic, want.StartTimeUnixNanos, want.TimeUnixNanos)
 		}
