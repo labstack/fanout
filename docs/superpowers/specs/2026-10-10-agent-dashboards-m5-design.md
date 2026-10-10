@@ -132,6 +132,7 @@ The metrics Parquet schema gains:
 | `temporality` | dict string | `cumulative`, `delta`, or empty for gauges and summaries |
 | `monotonic` | boolean | true for monotonic sums; false otherwise |
 | `start_time_unix_nano` | int64 | the data point's start time; 0 when absent |
+| `series_id` | uint64 | a hash of the series identity, computed once at ingest |
 
 `metric_type` becomes the OTLP data kind only: `gauge`, `sum`, `histogram`,
 `exponential_histogram`, `summary`. `sum_delta` is removed. Format 4 is the
@@ -159,7 +160,9 @@ chooses measures from facts.
 
 A series is one combination of namespace, service, name, unit, scope name,
 scope version, attributes and resource, as metric histogram panels already
-use. Metric measures work in two stages, the way PromQL's
+use. Ingest hashes that identity into `series_id` from a canonical encoding
+(sorted keys, typed values), so queries partition by one integer instead of
+comparing attribute maps on every row. Metric measures work in two stages, the way PromQL's
 `sum by (x) (rate(m[1m]))` does: first per series and bucket, then across the
 series in each group.
 
@@ -180,7 +183,7 @@ apply the same rule per bound, with a reset detected on the total count.
 | `sum(value)` | Σ series bucket average | Σ series increase | Σ sum increase |
 | `avg(value)` | mean of series bucket averages | not defined | Σ sum increase ÷ Σ count increase |
 | `min`/`max(value)` | over data points | over data points | not defined |
-| `last(value)` | Σ series latest value | Σ series latest value | not defined |
+| `last(value)` | Σ series value at bucket end | Σ series value at bucket end | not defined |
 | `pNN`/`quantile(value, q)` | over data points | not defined | linear interpolation over Σ bound increases |
 
 A series' rate in a bucket is its increase divided by the time those
@@ -190,6 +193,12 @@ otherwise multiply the rate, so a counter exported every 60 s reads the same
 per-second rate in 10 s and 1 h buckets. A series with no point in a bucket
 contributes nothing to that bucket, and the automatic bucket for metric
 panels is never shorter than 1 minute.
+
+A series' value at a bucket's end is its latest point at or before the
+earlier of the bucket end and the window end, and the series counts only if
+that point is at most 5 minutes old, as Prometheus treats staleness. A
+container that stopped or restarted therefore stops adding to `last` after
+5 minutes, and a stat over a whole day shows what is reporting now.
 
 A measure that is not defined for the series' kind returns no value, and the
 empty-panel diagnosis names the kind and the measures that fit, for example
