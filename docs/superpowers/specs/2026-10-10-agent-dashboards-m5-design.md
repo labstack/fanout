@@ -59,7 +59,7 @@ Three facts from milestone 4 decide the scope.
 | S17 | Route-invariant results | every measure the summaries serve returns identical values from summaries and from raw rows; span quantiles are within 1% relative error of the exact rank value (`quantile_disc`) | equality tests on the pinned engine; demo-data comparison |
 | S18 | Scale | at 1,000 spans/s for 24 h with host and container metrics from 20 hosts: S7 (≤ 500 ms p95 per panel) for every routed shape, a twelve-panel request ≤ 1.0 s on the server, S6 (≤ 1.5 s first render) in the browser | Go benchmark and Playwright on generated data |
 | S19 | Ingest headroom | sustained ingest at 2x the S18 rate with summaries on; summary upkeep adds ≤ 10% CPU | ingest benchmark |
-| S20 | The system page shows real trouble | through one Collector, the page shows a filesystem above 90%, a failing external dependency, an unreachable endpoint and a version change within two refreshes | Playwright on a fixture stack; one local run with a real Collector |
+| S20 | The system page shows real trouble | through one Collector, the page shows a filesystem above 90%, a failing external dependency, an unreachable endpoint, a check that stopped reporting and a version change within two refreshes | Playwright on a fixture stack; one local run with a real Collector |
 | S21 | System page speed | first render ≤ 1.5 s p95 at the S18 volume | Playwright performance test |
 | S22 | The agent uses metrics correctly | on host-metric prompts, counters use `rate()`, up-down counters and gauges use `last`/`avg`, histograms use percentiles; S1–S5 still hold | eval harness (public prompts; the sealed holdout is untouched) |
 
@@ -311,7 +311,12 @@ receiver that supplies it, linked to the setup guide.
 Sections, in the page's question order:
 
 1. **Reachable.** From `httpcheck` metrics: a state timeline per endpoint and
-   a latency timeseries.
+   a latency timeseries. Each check names where it ran from, the reporting
+   Collector's `host.name`. A check with no result for two of its intervals
+   shows "no recent result" in the bad state, never a blank: silence is not
+   health. A check run on the same machine as the services cannot see DNS,
+   CDN or proxy failures that outside visitors hit, so the section says when
+   every check runs on a host that also runs observed services.
 2. **Failing or slow.** The health panel and the service map, which already
    show external dependencies from client spans.
 3. **Running out.** Two tables, worst first, with warning at 80% and bad at
@@ -327,14 +332,18 @@ Sections, in the page's question order:
 
 The documentation gains a guide to watching a system: a Collector
 configuration with `hostmetrics`, `docker_stats`, `httpcheck` and OTLP
-forwarding, and what each section needs.
+forwarding, and what each section needs. It recommends running `httpcheck`
+from a second Collector on a machine outside the observed stack, and states
+the limit plainly: if the machine running Fanout fails, nothing on the page
+can report it, so Fanout itself still needs an outside monitor.
 
 ### The self-observation test
 
 The page is right if it would have shown the problems a real stack had. S20's
-fixture stack replays the demo plus four scenarios through OTLP: a filesystem
+fixture stack replays the demo plus five scenarios through OTLP: a filesystem
 filling past 90%, an external dependency returning errors, an `httpcheck`
-target going down, and a new `service.version`. Playwright checks that each
+target going down, a check that stops reporting, and a new
+`service.version`. Playwright checks that each
 appears in its section within two refreshes. Once, on a development machine, a
 real Collector observing real local containers confirms the same page.
 
@@ -362,8 +371,8 @@ the equality tests. Results complete the M5 benchmark document.
 ## Out of scope
 
 Alert rules created from system-page sections, incidents and notifications,
-outside reachability checks run by Fanout itself (the Collector's `httpcheck`
-does this), cost and usage tracking, vulnerability matching for runtime
+reachability checks run by Fanout itself (a Collector with `httpcheck` on an
+outside machine covers them), cost and usage tracking, vulnerability matching for runtime
 versions, and summaries for metric values. Each is designed separately if the
 page shows it is needed.
 
