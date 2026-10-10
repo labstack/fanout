@@ -9,6 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 type slowBatchEngine struct {
@@ -216,6 +219,33 @@ func TestPanelErrorsRedactPaths(t *testing.T) {
 	}
 }
 
+func TestPanelErrorsKeepTheCompleteRedactedMessage(t *testing.T) {
+	detail := strings.Repeat("memory pressure; ", 80) + "final diagnostic"
+	got := failed(Result{ID: "p"}, fmt.Errorf("IO Error at /srv/fanout/private.parquet: %s", detail), nil)
+	if strings.Contains(got.Error, "/srv/fanout/private.parquet") ||
+		!strings.Contains(got.Error, "<path>") || !strings.HasSuffix(got.Error, "final diagnostic") {
+		t.Fatalf("message lost or leaked: %q", got.Error)
+	}
+}
+
+func TestPanelErrorsKeepLongLogBindingDiagnosticsRedacted(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, nil, []telemetry.Log{{Namespace: "shop", Body: "token=bodysecret failed", BodyTemplate: "token=templatesecret failed", EventUnixNanos: n, IngestedAt: n}})
+	e := NewExecutor(engine, 30)
+	missing := strings.Repeat("missing_detail_", 60) + " /srv/fanout/private.parquet final diagnostic"
+	p := Panel{ID: "p", Title: "SQL", Viz: "table", SQL: fmt.Sprintf(`SELECT body, body_template, %q FROM logs WHERE $__window(time)`, missing)}
+	// Exercise the execution error boundary directly: Run's validation normally
+	// catches binding failures before execution, using the same native binder.
+	got := e.runPanel(t.Context(), &p, nil, Time{Range: "1h"}, fixtureStart.Add(time.Hour), nil, 800, false)
+	if got.Status != StatusError || !strings.Contains(got.Error, "Binder Error") || len(got.Error) <= 500 || !strings.Contains(got.Error, "final diagnostic") {
+		t.Fatalf("binding diagnostic lost: %+v", got)
+	}
+	if !strings.Contains(got.Error, "<path>") || strings.Contains(got.Error, "/srv/fanout/private.parquet") || strings.Contains(got.Error, "bodysecret") || strings.Contains(got.Error, "templatesecret") {
+		t.Fatalf("unsafe binding diagnostic: %q", got.Error)
+	}
+}
+
 func TestNormalizeBetter(t *testing.T) {
 	for _, tc := range []struct{ measure, filter, want string }{
 		{"p95(duration_ms)", "", "lower"}, {"error_rate()", "", "lower"}, {"count()", "status = 'STATUS_CODE_ERROR'", "lower"},
@@ -232,5 +262,12 @@ func TestNormalizeBetter(t *testing.T) {
 		if inferBetter(&d.Panels[0]) != tc.want {
 			t.Errorf("%s %s better=%q want=%q", tc.measure, tc.filter, inferBetter(&d.Panels[0]), tc.want)
 		}
+	}
+}
+
+func TestPanelErrorsStopAtTheByteBoundOnARuneBoundary(t *testing.T) {
+	got := failed(Result{ID: "p"}, errors.New(strings.Repeat("界", maxPanelErrorBytes)), nil)
+	if !utf8.ValidString(got.Error) || !strings.HasSuffix(got.Error, "…") || len(got.Error) > maxPanelErrorBytes+len("…") {
+		t.Fatalf("unbounded or split error: %d bytes", len(got.Error))
 	}
 }

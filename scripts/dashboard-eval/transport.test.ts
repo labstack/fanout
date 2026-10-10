@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, type Ledger } from './transport';
+import { readSSE, requestJSON, cookieHeader, safeOutput, canStartPrompt, recordUsage, beginPrompt, settlePrompt, manualSettlement, findSaved, executePanels, type Ledger } from './transport';
 import { mutatingTools } from './tool-catalog';
 it('matches the server registered mutating tools exactly',()=>{
  const server=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
@@ -18,6 +18,24 @@ const response=(s:string,split=1)=>new Response(new ReadableStream({start(c){con
 const finish={type:'RUN_FINISHED',outcome:{type:'success'}};
 const start={type:'TOOL_CALL_START',toolCallId:'save',toolCallName:'create_dashboard'};
 const saved={id:'board',version:1,spec:{panels:[{id:'a'}]}};
+it('keeps the executor error in a completed failing panel check', async () => {
+  const message = 'Out of Memory Error: ' + 'details '.repeat(100) + 'final diagnostic';
+  const spec = {panels:[{id:'p'}]};
+  const got = await executePanels(async () => ({results:[
+    {id:'p',status:'error',elapsed_ms:12,error:message},
+  ]}), spec, new AbortController().signal);
+  expect(got.checked).toBe(true);
+  expect(got.valid).toBe(true);
+  expect(got.checks[0]).toEqual({id:'p',status:'error',rows:0,error:message});
+});
+it('does not invent an executor error for successful panel checks', async () => {
+  for (const error of [undefined, null, 42, {message:'not a wire string'}]) {
+    const got = await executePanels(async () => ({results:[
+      {id:'p',status:'ok',frame:{rows:1},error},
+    ]}), {panels:[{id:'p'}]}, new AbortController().signal);
+    expect(got).toEqual({checked:true,valid:true,checks:[{id:'p',status:'ok',rows:1}]});
+  }
+});
 const result={type:'TOOL_CALL_RESULT',toolCallId:'save',content:JSON.stringify({dashboard:saved}),isError:false};
 it('decodes split UTF-8, multiline frames, assistant call names and immutable saves',async()=>{
   const s=await readSSE(response(': ping\r\nevent: TEXT_MESSAGE_CONTENT\r\ndata: {"delta":\r\ndata: "✓"}\r\n\r\n'+frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'read',toolCallName:'get_dashboard'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'read',content:JSON.stringify({dashboard:{...saved,id:'unrelated',version:9}})})+frame(finish)),new AbortController().signal);

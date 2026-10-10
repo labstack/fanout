@@ -1,5 +1,5 @@
 export type SavedPanel = { id:string; description?:string; viz?:string; content?:string };
-export type Check = { id:string; status:string; rows:number; diagnosis?:string };
+export type Check = { id:string; status:string; rows:number; diagnosis?:string; error?:string };
 export type Run = {
   complete:boolean; saved:boolean; elapsed_ms:number|null; valid:boolean; checked:boolean;
   panels:SavedPanel[]; checks:Check[];

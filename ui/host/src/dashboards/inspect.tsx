@@ -5,7 +5,12 @@ import { brand, info, ok, chart, fonts } from "../../../tokens";
 
 export function PanelData({ panel, result }: { panel: Panel; result?: PanelResult }) {
   const frame = result?.frame;
-  return <div data-panel-data>{frame ? <Table fz={12} striped>
+  return <div data-panel-data>
+    {result?.error && <Text data-panel-error-detail size="sm" role="status"
+      style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",userSelect:"text"}}>
+      {result.error}
+    </Text>}
+    {frame ? <Table fz={12} striped>
     <Table.Thead><Table.Tr>{frame.columns.map(c => <Table.Th key={c.name} ff={fonts.display}>{c.name}</Table.Th>)}</Table.Tr></Table.Thead>
     <Table.Tbody>{Array.from({ length: Math.min(frame.rows, 500) }, (_, r) => <Table.Tr key={r}>{frame.columns.map((c, i) => {
       const v = frame.values[i][r];

@@ -122,7 +122,7 @@ export async function executePanels(request:(path:string,init?:RequestInit)=>Pro
   try {
     const data=await request('/api/panels/query',{method:'POST',body:JSON.stringify({dashboard:spec}),signal});
     if(!Array.isArray(data.results))throw new Error('missing_checks');
-    const checks=data.results.map((r:any)=>({id:r.id,status:r.status,rows:r.frame?.rows??0,...(typeof r.diagnosis==='string'?{diagnosis:r.diagnosis}:{})}));
+    const checks=data.results.map((r:any)=>({id:r.id,status:r.status,rows:r.frame?.rows??0,...(typeof r.diagnosis==='string'?{diagnosis:r.diagnosis}:{}),...(typeof r.error==='string'?{error:r.error}:{})}));
     if(checks.some((c:Check)=>typeof c.id!=='string'||typeof c.status!=='string'||!Number.isFinite(c.rows)||c.rows<0))throw new Error('invalid_checks');
     const checked=checks.length===spec.panels.length&&new Set(checks.map((c:Check)=>c.id)).size===spec.panels.length&&spec.panels.every(p=>checks.some((c:Check)=>c.id===p.id));
     return {valid:true,checked,checks};

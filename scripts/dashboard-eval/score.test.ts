@@ -1,7 +1,14 @@
 import { expect, it } from 'bun:test';
-import { score, changedPanels, compareEdit, type Run } from './score';
+import { score, panelPass, changedPanels, compareEdit, type Run } from './score';
 const run = (): Run => ({ complete:true, saved:true, elapsed_ms:45000, valid:true, checked:true, panels:[{id:'latency'}], checks:[{id:'latency',status:'ok',rows:2}] });
 const edits = () => Array.from({length:5}, () => ({passed:true,changed_ids:['latency'],expected_ids:['latency']}));
+it('fails an error panel even when its diagnostic is retained', () => {
+  const check = {id:'latency',status:'error',rows:2,error:'Out of Memory: final diagnostic',diagnosis:'No matching spans'};
+  expect(panelPass({id:'latency',description:'Explained'}, [check])).toBe(false);
+  const runs=Array.from({length:10},run);
+  runs[0].checks=[check];
+  expect(score(runs,edits()).s2).toBe(false);
+});
 it('requires all ten saves and all five consecutive edits', () => {
   expect(score(Array.from({length:10},run),edits()).passed).toBe(true);
   expect(score(Array.from({length:9},run),edits()).s1).toBe(false);

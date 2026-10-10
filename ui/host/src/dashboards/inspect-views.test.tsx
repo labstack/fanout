@@ -10,12 +10,54 @@ vi.mock("./echart-canvas",()=>({EChartCanvas:()=> <div/>}));
 const cleanups:(()=>void)[]=[];
 afterEach(async()=>{await act(async()=>cleanups.splice(0).forEach(fn=>fn()));vi.restoreAllMocks();document.body.innerHTML="";});
 const result:PanelResult={id:"p",status:"ok",elapsed_ms:1,frame:{columns:[{name:"calls",type:"number",role:"measure"}],values:[[1]],rows:1}};
-async function render(panel:Panel, r:PanelResult=result, onSelect?: (value:string)=>void) {
+it.each([false,true])('Data exposes the full refresh error as safe text (stale=%s)',async stale=>{
+  const message='Out of Memory: '+'details '.repeat(120)+'<b id="injected">final diagnostic</b>';
+  const h=await render({id:'p',title:'Requests',viz:'table'},
+    {...result,status:'error',frame:stale?result.frame:undefined,error:message});
+  const button=h.querySelector<HTMLButtonElement>('[data-panel-view="Data"]');
+  expect(button).not.toBeNull();
+  await act(async()=>button!.click());
+  const detail=h.querySelector<HTMLElement>('[data-panel-error-detail]');
+  expect(detail?.textContent).toBe(message);
+  expect(detail?.style.userSelect).toBe('text');
+  expect(detail?.style.whiteSpace).toBe('pre-wrap');
+  expect(detail?.style.overflowWrap).toBe('anywhere');
+  expect(h.querySelector('#injected')).toBeNull();
+  expect(h.querySelector('[data-panel-data] tbody tr')!==null).toBe(stale);
+});
+async function render(panel:Panel, r:PanelResult=result, onSelect?: (value:string)=>void, height=300) {
  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
- await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={r} loading={false} height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect}/></MantineProvider>));
+ await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={r} loading={false} height={height} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} onSelect={onSelect}/></MantineProvider>));
  return host;
 }
+
+it.each([false,true])('short narrow error cards expose Data through keyboard menu navigation (stale=%s)',async stale=>{
+  const observer=globalThis.ResizeObserver;
+  vi.stubGlobal('ResizeObserver',class {
+    constructor(private callback:ResizeObserverCallback){}
+    observe(target:Element){this.callback([{target,contentRect:{width:300,height:92}} as ResizeObserverEntry],this as unknown as ResizeObserver);}
+    disconnect(){} unobserve(){}
+  });
+  try {
+    const message='Out of Memory: '+'details '.repeat(120)+'final diagnostic';
+    const h=await render({id:'p',title:'Requests',viz:'table'},
+      {...result,status:'error',frame:stale?result.frame:undefined,error:message},undefined,180);
+    expect(h.querySelector('[data-compact-views="true"]')).not.toBeNull();
+    expect(h.querySelector('[data-panel-view="Data"]')).toBeNull();
+    const menu=h.querySelector<HTMLButtonElement>('[aria-label^="Requests menu"]')!;
+    // DOM key dispatch does not synthesize native button activation.
+    await act(async()=>{menu.focus();menu.click();});
+    await vi.waitFor(()=>expect(document.querySelector('[role="menuitemradio"][data-panel-view="Chart"]')).not.toBeNull());
+    await act(async()=>document.querySelector<HTMLElement>('[role="menuitemradio"][data-panel-view="Chart"]')!.focus());
+    await act(async()=>document.activeElement!.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})));
+    expect(document.activeElement?.getAttribute('data-panel-view')).toBe('Data');
+    await act(async()=>(document.activeElement as HTMLElement).click());
+    expect(h.querySelector('[data-panel-error-detail]')?.textContent).toBe(message);
+    expect(h.querySelector('[data-panel-data] tbody tr')!==null).toBe(stale);
+    expect(h.querySelector<HTMLElement>('[data-panel-body]')?.style.overflow).toBe('auto');
+  } finally {vi.stubGlobal('ResizeObserver',observer);}
+});
 
 it.each([{width:219,height:180},{width:300,height:139},{width:238,height:56}])("renders a meter in short and narrow bodies (%j)", size => {
   const option = gaugeOption({id:"g",title:"Gauge",viz:"gauge",min:0,max:10,thresholds:[{value:1,status:"warn"}]},1.76,chartThemeFor(false),"percent",size) as any;
