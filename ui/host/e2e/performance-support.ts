@@ -1,6 +1,8 @@
 // Controller calibration: max of three ubuntu-24.04 run p95s (worse theme),
 // plus 25%, rounded UP to 50 ms. Null records latency without enforcing it.
-export const CI_RENDER_CEILING_MS: number | null = null;
+// Measured 1025, 1410 and 1239 ms. The spec's 1.5 s target is measured on real
+// data locally, not on these smaller runners.
+export const CI_RENDER_CEILING_MS: number | null = 1800;
 
 export function p95(values: number[]): number {
   if (values.length < 20 || values.some(value => !Number.isFinite(value) || value < 0)) {

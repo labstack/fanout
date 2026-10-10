@@ -6,8 +6,8 @@ candidate and made no product changes ($0). Task 11 replaced its PENDING
 verdicts. A Task 11 rerun on the corrected candidate then replaced the first
 run's verdicts with the measurements below. **Every criterion the rerun
 measured passes:** S1–S5, S8, S9, S11, S12 and S13. S6 (local) and S10 keep
-their first-run PASS, and S7 passes on the raw path. The S6 CI ceiling is set from
-three runner measurements.
+their first-run PASS, and S7 passes on the raw path. The S6 CI ceiling is 1,800 ms,
+calibrated from three runner measurements.
 
 Requirements: [design spec](../superpowers/specs/2026-10-04-agent-dashboards-design.md)
 and [M4 plan](../superpowers/plans/2026-10-09-agent-dashboards-m4.md), subject to
@@ -69,7 +69,7 @@ Telemetry:
 | **S3:** Specs fail validation after the agent's own correction loop, **0** | **0** invalid. 10/10 final specs valid and checked. | Runner validation. | **PASS** |
 | **S4:** Median prompt to saved dashboard, default model, **≤ 45 s** | Median first save **21.5 s** (range 10.7–54.9 s). | Runner save timing. The slowest prompt, `db-cache`, took 54.9 s. | **PASS** |
 | **S5:** Only named panels change over **5 consecutive edits, 100%** | **5/5** exact: title, threshold, add, remove and unit (versions 2–6). Only the named panel changed. Layout changed only for add and remove. | Runner edit comparison. | **PASS** |
-| **S6:** First full render, **12 panels / 24 hours, ≤ 1.5 s p95** | Not re-measured. First run, real data, local: light **634 ms**, dark **582 ms** p95 (24 fresh loads each). Controller's local e2e: 361 / 393 ms. CI ceiling: controller. | First run: the checked-in 12-panel fixture on the replay instance, timed with the performance spec's in-page `allPanelsPainted` callback. Each load made one panel batch with zero faults. Since then, the product changes are the empty-state wrap, card corners and edge rollup. | **PASS** (local, first run); CI: **controller** |
+| **S6:** First full render, **12 panels / 24 hours, ≤ 1.5 s p95** | Not re-measured. First run, real data, local: light **634 ms**, dark **582 ms** p95 (24 fresh loads each). Controller's local e2e: 361 / 393 ms. CI: three ubuntu-24.04 runs gave a worse-theme p95 of 1,025, 1,410 and 1,239 ms; the enforced CI ceiling is 1,800 ms (max x 1.25, rounded up to 50 ms). | First run: the checked-in 12-panel fixture on the replay instance, timed with the performance spec's in-page `allPanelsPainted` callback. Each load made one panel batch with zero faults. Since then, the product changes are the empty-state wrap, card corners and edge rollup. | **PASS** (local, first run); CI: **controller** |
 | **S7:** Warm-cache panel query latency, **≤ 500 ms p95** | Slowest shape **47.1 ms** p95 on the traces-and-logs replay; **33.1 ms** on the three-signal replay, including metric panels (gauge 33.1, counter 27.4, histogram 23.2 ms). 100 warm samples per shape, idle machine. | `BenchmarkPanelQueries24Hours` (readbench) on replayed demo data, 24 hours, default production sizing. See Task 6 below. | **PASS** |
 | **S8:** **1 batch + 1 annotations request per refresh; variable options once per range change** | Collector: **6/6** refresh cycles on the 23-panel board (3 per theme). Each made exactly 1 panel batch and 1 annotations request. | `drill_url`: opening and closing drills, including Back after a reload, sent 0 panel requests. The controller's `just e2e` performance spec covers range-change counts. | **PASS** |
 | **S9:** **15 visualization types** listed in the spec | Collector: **30/30** type/theme rows visible, labelled, inspectable and passing their rendering assertions. Page smoke: 56/56 across 14 dashboards at 1100 and 1440 px. | The service map showed 20 services and 23 routes in both themes. Its top and bottom overflow fades were drawn, and the whole-graph control removed the overflow. | **PASS** |
