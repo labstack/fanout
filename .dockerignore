@@ -21,6 +21,26 @@ ui/host/dist/
 # Dev files
 .env
 .env.*
+.tmp/
+tmp/
+
+# Local agent research, indexes, transcripts, and browser evidence.
+.claude/
+.codegraph/
+.serena/
+.superpowers/
+.playwright-mcp/
+.firecrawl/
+
+# Local documentation-site outputs.
+site/node_modules/
+site/dist/
+site/.astro/
+
+# Local browser-test outputs.
+ui/host/playwright-report/
+ui/host/test-results/
+ui/host/tsconfig.tsbuildinfo
 
 # Docs
 *.md

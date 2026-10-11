@@ -1,5 +1,12 @@
 # Agent instructions
 
+## Public repository
+
+- Keep credentials, private telemetry, local workstation paths, and private AI
+  session links out of tracked files, commit messages, and pull request descriptions.
+- Keep local agent caches, indexes, evaluation records, and browser evidence out
+  of both Git and the Docker build context. Git ignores do not exclude Docker inputs.
+
 ## Control database
 
 - Keep SQLite with `modernc.org/sqlite` through `database/sql`, sqlc-generated

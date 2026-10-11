@@ -42,6 +42,8 @@ cover.out
 # Local environment scratch files. Fanout runtime configuration uses explicit
 # YAML documents and process environment; it does not load dotenv files.
 .env
+.env.*
+!.env.example
 
 # Root-scoped for the same reason as testdata/: a bare `*.png` would silently
 # swallow committed image assets anywhere in the tree.
@@ -52,6 +54,7 @@ cover.out
 .serena/
 .superpowers/
 .playwright-mcp/
+.firecrawl/
 
 # Ad-hoc output from `go build` without -o (named after the package).
 /bench

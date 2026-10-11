@@ -110,6 +110,12 @@ review than one large one.
 If a change affects runtime behavior, public contracts, data, or security, say
 so explicitly in the description.
 
+Keep credentials, private telemetry, local workstation paths, and private AI
+session links out of source files, documentation, commit messages, and pull
+request descriptions. Local agent caches and evaluation records belong in
+ignored directories. CI scans the repository source tree for secrets as well
+as scanning the runtime container.
+
 ## Reporting bugs
 
 Include the version (`fanout --version`), how Fanout is configured, and what
