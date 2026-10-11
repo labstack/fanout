@@ -21,8 +21,8 @@ Tasks 1–2 are one backend dependency checkpoint: write Task 1's failing contra
 - Use RTK for every command. Before future Go checks, create the prescribed temporary/cache directories, then use the environment prefix shown in each command. Do not run Go or create caches during this planning dispatch.
 
   ```bash
-  rtk mkdir -p .superpowers/go-cache /private/tmp/claude-501/fanout-m5-gotmp
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel
+  rtk mkdir -p .superpowers/go-cache "${TMPDIR:-/tmp}/fanout-gotmp"
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel
   ```
 
 - Execute every SQL-producing test on the pinned engine, including at least one format-4 Parquet snapshot test. Fake API engines test HTTP behavior only. Each task ends with relevant targeted checks and `rtk just fmt`; regenerate affected docs/UI before their freshness checks. The final gate is `just check` with the same Go environment. Dependency installation and browser/Collector runs belong to the controller when unavailable in a restricted dispatch; a skipped check is not a pass.
@@ -126,8 +126,8 @@ HTTP: `GET /api/system?range=1h&namespace=shop`, or `from`/`to` RFC3339Nano inst
 - [ ] **Run targeted checks and regenerate references.**
 
   ```bash
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel ./internal/api ./cmd/fanout-docgen
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just docs-generate
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel ./internal/api ./cmd/fanout-docgen
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just docs-generate
   rtk just fmt
   ```
 
@@ -272,7 +272,7 @@ They return existing `state_timeline`, `timeseries`, `health`, `service_map` and
 - [ ] **Run targeted native gates.**
 
   ```bash
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel ./internal/query ./internal/observability ./internal/annotations ./internal/mcp
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel ./internal/query ./internal/observability ./internal/annotations ./internal/mcp
   rtk just fmt
   ```
 
@@ -354,7 +354,7 @@ It uses existing OTLP protobufs and `proto.MarshalOptions{Deterministic:true}`. 
 - [ ] **Run seeder checks; controller runs the browser fixture.**
 
   ```bash
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/cmd/e2eseed
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/cmd/e2eseed
   rtk proxy sh -c 'cd ui/host && rtk bun run test && rtk bun run lint'
   rtk just fmt
   ```
@@ -381,7 +381,7 @@ It uses existing OTLP protobufs and `proto.MarshalOptions{Deterministic:true}`. 
   Controller, with installed Chrome/Collector and the prescribed Go environment:
 
   ```bash
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just e2e e2e/system.spec.ts
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just e2e e2e/system.spec.ts
   ```
 
 ## Task 5: Document watching a system and complete existing metric guidance
@@ -494,9 +494,9 @@ Guide URL `/guides/watch-your-system`. Existing `get_telemetry_schema`, `preview
 - [ ] **Regenerate and validate docs/examples.**
 
   ```bash
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/mcp ./internal/agent ./cmd/fanout-docgen
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just docs-generate
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just dashboard-eval-generate
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/mcp ./internal/agent ./cmd/fanout-docgen
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just docs-generate
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just dashboard-eval-generate
   rtk just script-tests
   rtk just fmt
   ```
@@ -518,9 +518,9 @@ Existing `just check`, `just e2e`, browser collector, `TestMetricDemoDataMatches
 - [ ] **Run native and full deterministic gates on the final candidate.** Controller freezes/reviews the commit; the implementing agent performs no git writes. Record commit/build identity, platform, `SELECT version()` result from the existing engine evidence, dependencies, test commands and exit codes. UI, docs and eval goldens must be regenerated before freezing. Run:
 
   ```bash
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just check
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just e2e
-  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR=/private/tmp/claude-501/fanout-m5-gotmp GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel -run TestMetricDemoDataMatchesIndependentWindowSQL -count=1
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just check
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just e2e
+  rtk proxy env GOCACHE="$PWD/.superpowers/go-cache" GOTMPDIR="${TMPDIR:-/tmp}/fanout-gotmp" GOFLAGS=-mod=readonly GOPROXY=off just test ./internal/panel -run TestMetricDemoDataMatchesIndependentWindowSQL -count=1
   ```
 
   Supply the existing `FANOUT_PANEL_BENCH_DATA_DIR` with local format-4 replay data for the cross-check. If missing, its skip is incomplete real-data evidence. Do not use a legacy reader or substitute synthetic CI data as a demo-data cross-check. Run existing demo-volume accessibility/performance tests and browser collector; report their actual targets/results without introducing scale benchmarks or tuning scope. Retain Phase A S14–S16 tests and S1–S13 guards.
