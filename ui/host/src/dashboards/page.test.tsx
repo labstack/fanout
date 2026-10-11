@@ -274,13 +274,14 @@ describe("DashboardPage", () => {
       edge.getBoundingClientRect=()=>DOMRect.fromRect({x:Math.min(...xs),y:Math.min(...ys),width:Math.max(...xs)-Math.min(...xs),height:Math.max(...ys)-Math.min(...ys)});
     }
     const label=viewport.querySelector<HTMLElement>('[data-service-uncalled-label]')!;
-    label.getBoundingClientRect=()=>DOMRect.fromRect({x:(width-198)/2,y:parseFloat(label.style.top),width:198,height:11});
-    expect(assertServiceMapDOM(viewport,{requireNames:true})).toMatchObject({nodes:20,edges:23,body:{width,height}});
+    label.getBoundingClientRect=()=>DOMRect.fromRect({x:(width-198)/2,y:parseFloat(label.style.top),width:198,height:parseFloat(label.style.fontSize)*parseFloat(label.style.lineHeight)+2*parseFloat(label.style.paddingTop)});
+    // Dense maps preserve readable cards in a pan canvas instead of shrinking text.
+    expect(assertServiceMapDOM(viewport,{requireNames:true,allowOverflow:true})).toMatchObject({nodes:20,edges:23,body:{width,height}});
     const name=viewport.querySelector<HTMLElement>('[data-service-name]')!;
     name.parentElement!.style.visibility="hidden";
-    expect(()=>assertServiceMapDOM(viewport,{requireNames:true})).toThrow(/name is hidden/);
+    expect(()=>assertServiceMapDOM(viewport,{requireNames:true,allowOverflow:true})).toThrow(/name is hidden/);
     name.parentElement!.style.visibility="visible";name.textContent="truncated…";
-    expect(()=>assertServiceMapDOM(viewport,{requireNames:true})).toThrow(/name is missing or abbreviated/);
+    expect(()=>assertServiceMapDOM(viewport,{requireNames:true,allowOverflow:true})).toThrow(/name is missing or abbreviated/);
   });
   it.each([1100, 1440])("keeps a fitted service-map dashboard alive through queued pan/zoom at width %s", async width => {
     vi.stubGlobal("ResizeObserver", class {

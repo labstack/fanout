@@ -7,7 +7,7 @@ import { formatValue } from "../../../../panels/units";
 import { brand, fonts, typeScale } from "../../../../tokens";
 import type { AnalysisProps } from "./analysis-chart";
 import ServiceMapWorker from "./service-map.worker?worker&inline";
-import { fitServiceMap, layoutServiceMapRaw, nodeMetrics, serviceCardLabels, serviceMapStructure, type MapLayout } from "./service-map-layout";
+import { fitServiceMap, layoutServiceMapRaw, nodeMetrics, serviceCardLabels, serviceMapLineHeight, serviceMapStructure, type MapLayout } from "./service-map-layout";
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 export type MapView = { canFit: boolean; overview: boolean; fit(): void };
 const fittedView = { x: 0, y: 0, zoom: 1 };
@@ -58,7 +58,7 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
     if (graph.uncalledLabel) {
       const labelWidth = measureText?.("No traced calls in this window", `${typeScale.micro}px ${fonts.display}`) ?? 29 * typeScale.micro * .6;
       xs.push((graph.contentWidth - labelWidth / textZoom) / 2, (graph.contentWidth + labelWidth / textZoom) / 2);
-      ys.push(graph.uncalledLabel.y, graph.uncalledLabel.y + typeScale.micro / textZoom);
+      ys.push(graph.uncalledLabel.y, graph.uncalledLabel.y + (typeScale.micro * serviceMapLineHeight + 2) / textZoom);
     }
     return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
   }, [graph, measureText, textZoom]);
@@ -116,17 +116,17 @@ export function ServiceMapViz({ panel, title = panel.title, result, dark, height
         </g>
       </svg>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, fontSize: typeScale.micro / textZoom, lineHeight: 1, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
+        {graph.uncalledLabel && <span {...(import.meta.env.DEV ? { "data-service-uncalled-label": true } : {})} style={{ position: "absolute", left: "50%", top: graph.uncalledLabel.y, transform: "translateX(-50%)", color: theme.muted, background: theme.surface, fontSize: typeScale.micro / textZoom, lineHeight: serviceMapLineHeight, padding: `${1 / textZoom}px 0`, whiteSpace: "nowrap" }}>No traced calls in this window</span>}
         {graph.nodes.map(n => {
           const color = n.health === "unhealthy" ? theme.status.bad : n.health === "degraded" ? theme.status.warn : n.health === "healthy" ? theme.status.ok : theme.muted;
           const label = serviceCardLabels(n, { width: n.width / graph.scale, scale: graph.scale * textZoom, compact:graph.compact, measureText });
           return <button type="button" key={n.id} {...(import.meta.env.DEV ? { "data-service-node": n.id, "data-service-entry": n.entry } : {})} title={`${n.id} · ${n.health}\n${nodeMetrics(n)}`} aria-label={`${n.id}, ${n.health}, ${nodeMetrics(n)}`} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(undefined)} onFocus={() => setFocused(n.id)} onBlur={() => setFocused(undefined)} onClick={() => select(n.id)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); suppressClick.current = false; select(n.id); } }}
             style={{ position: "absolute", left: n.x, top: n.y, width: n.width, height: n.height, display: "flex", flexDirection:"column", justifyContent:"center", gap: 3 / textZoom, boxSizing: "border-box", border: `${1 / textZoom}px solid ${n.health === "unhealthy" || n.health === "degraded" ? color : theme.border}`, borderRadius: 6, padding: `0 ${5 / textZoom}px`, background: theme.surface, color: theme.text, textAlign: "left", opacity: 1, outline: focused === n.id ? `2px solid ${ring}` : undefined, outlineOffset: -2, pointerEvents: "auto", cursor: "pointer", fontFamily: fonts.display }}>
-            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / textZoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / textZoom, 12 * graph.scale), lineHeight: 1, whiteSpace: "nowrap" }}>
+            <span {...(import.meta.env.DEV ? { "data-service-text": true } : {})} style={{ display: "flex", alignItems: "center", gap: 4 / textZoom, width: "100%", minWidth: 0, fontSize: Math.max(typeScale.micro / textZoom, 12 * graph.scale), lineHeight: serviceMapLineHeight, whiteSpace: "nowrap" }}>
               <span aria-hidden="true" style={{ color, flex: "none" }}>{healthGlyph[n.health] ?? "○"}</span>
               <span {...(import.meta.env.DEV ? { "data-service-name": true } : {})} style={{ flex: "none", fontWeight: 600, whiteSpace: "nowrap" }}>{label.name}</span>
             </span>
-            {!graph.compact && <span {...(import.meta.env.DEV ? { "data-service-text": true, "data-service-metric": true } : {})} style={{ width:"100%", fontSize:label.metricSize*graph.scale, lineHeight:1, color: theme.muted, whiteSpace:"nowrap" }}>{label.metric}</span>}
+            {!graph.compact && <span {...(import.meta.env.DEV ? { "data-service-text": true, "data-service-metric": true } : {})} style={{ width:"100%", fontSize:label.metricSize*graph.scale, lineHeight:serviceMapLineHeight, color: theme.muted, whiteSpace:"nowrap" }}>{label.metric}</span>}
           </button>;
         })}
       </div>

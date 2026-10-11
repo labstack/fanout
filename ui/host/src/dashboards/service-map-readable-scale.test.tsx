@@ -15,7 +15,7 @@ it.each([1,2,3])("caps %s-service fit at natural scale and centres it",n=>{
 });
 it("starts a dense 20-service fanout at the readable floor with its entry centred",()=>{
  const nodes=[node("gateway"),...Array.from({length:19},(_,i)=>node(`service-${i}-backend`))],m={nodes,edges:nodes.slice(1).map(n=>edge("gateway",n.id))};
- const fit=fitServiceMap(layoutServiceMapRaw(m,size),m,size);expect(fit.scale).toBe(.65);expect(fit.contentHeight).toBeGreaterThan(220);
+ const fit=fitServiceMap(layoutServiceMapRaw(m,size),m,size);expect(fit.scale).toBe(.9);expect(fit.contentHeight).toBeGreaterThan(220);
  const root=fit.nodes.find(n=>n.entry)!;expect(root.y+root.height/2+fit.initialView.y).toBeCloseTo(size.height/2);expect(root.y+fit.initialView.y).toBeGreaterThanOrEqual(0);expect(root.y+root.height+fit.initialView.y).toBeLessThanOrEqual(220);
  const leaves=fit.nodes.filter(n=>!n.entry).sort((a,b)=>a.y-b.y);
  for(let i=0;i<leaves.length;i++){expect(leaves[i].height).toBeCloseTo(20*fit.scale);if(i)expect(leaves[i].y-leaves[i-1].y).toBeGreaterThanOrEqual(24*fit.scale-.01);}
@@ -32,7 +32,12 @@ it("keeps dense fanout labels in their boxes and allows pan then Fit",async()=>{
  const host=document.createElement("div"),root=createRoot(host);cleanup=()=>root.unmount();const view=vi.fn();
  await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:0,frame}} dark={false} height={244} onMapView={view}/></MantineProvider>));
  const viewport=host.querySelector<HTMLElement>('[data-service-viewport]')!,content=host.querySelector<HTMLElement>('[data-service-content]')!,initial=content.style.transform;
- for(const card of host.querySelectorAll<HTMLElement>('[data-service-node]')) {expect(parseFloat(card.querySelector<HTMLElement>('[data-service-text]')!.style.fontSize)).toBeGreaterThanOrEqual(11);expect(parseFloat(card.style.height)).toBeGreaterThanOrEqual(parseFloat(card.querySelector<HTMLElement>('[data-service-text]')!.style.fontSize)+2-.01);}
+ for(const card of host.querySelectorAll<HTMLElement>('[data-service-node]')) {
+  const line=card.querySelector<HTMLElement>('[data-service-text]')!,fontSize=parseFloat(line.style.fontSize);
+  expect(fontSize).toBeGreaterThanOrEqual(11);
+  expect(parseFloat(line.style.lineHeight)).toBeGreaterThanOrEqual(1.3); // Bundled Geist Mono ascent + descent / em.
+  expect(parseFloat(card.style.height)).toBeGreaterThanOrEqual(fontSize*parseFloat(line.style.lineHeight)+2-.01);
+ }
  await act(async()=>{viewport.dispatchEvent(new PointerEvent("pointerdown",{button:0,clientY:100,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointermove",{clientY:-100,bubbles:true}));viewport.dispatchEvent(new PointerEvent("pointerup",{bubbles:true}));});
  expect(content.style.transform).not.toBe(initial);await act(async()=>view.mock.lastCall![0].fit());
  expect(view.mock.lastCall![0].overview).toBe(true);

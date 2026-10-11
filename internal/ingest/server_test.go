@@ -329,60 +329,6 @@ func TestExemplarsToJSON(t *testing.T) {
 	}
 }
 
-func TestExpHistBuckets(t *testing.T) {
-	tests := []struct {
-		name   string
-		dp     *metricspb.ExponentialHistogramDataPoint
-		nilOut bool
-	}{
-		{"nil positive", &metricspb.ExponentialHistogramDataPoint{}, true},
-		{"empty bucket counts", &metricspb.ExponentialHistogramDataPoint{
-			Positive: &metricspb.ExponentialHistogramDataPoint_Buckets{BucketCounts: []uint64{}},
-		}, true},
-		{"with buckets", &metricspb.ExponentialHistogramDataPoint{
-			Scale:    0,
-			Positive: &metricspb.ExponentialHistogramDataPoint_Buckets{Offset: 0, BucketCounts: []uint64{1, 2, 3}},
-		}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := expHistBuckets(tc.dp)
-			if tc.nilOut && result != nil {
-				t.Errorf("expHistBuckets() = %v, want nil", result)
-			}
-			if !tc.nilOut && result == nil {
-				t.Error("expHistBuckets() = nil, want non-nil")
-			}
-		})
-	}
-}
-
-func TestExpHistCounts(t *testing.T) {
-	tests := []struct {
-		name   string
-		dp     *metricspb.ExponentialHistogramDataPoint
-		nilOut bool
-	}{
-		{"nil positive", &metricspb.ExponentialHistogramDataPoint{}, true},
-		{"with counts", &metricspb.ExponentialHistogramDataPoint{
-			Positive: &metricspb.ExponentialHistogramDataPoint_Buckets{BucketCounts: []uint64{1, 2, 3}},
-		}, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := expHistCounts(tc.dp)
-			if tc.nilOut && result != nil {
-				t.Errorf("expHistCounts() = %v, want nil", result)
-			}
-			if !tc.nilOut && result == nil {
-				t.Error("expHistCounts() = nil, want non-nil")
-			}
-		})
-	}
-}
-
 func TestSummaryQuantiles(t *testing.T) {
 	dp := &metricspb.SummaryDataPoint{
 		QuantileValues: []*metricspb.SummaryDataPoint_ValueAtQuantile{

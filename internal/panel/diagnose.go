@@ -43,6 +43,18 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 			return fmt.Sprintf("No logs contain %q in this range", p.Options.Highlight)
 		}
 	}
+	if diagnosis := e.metricKindDiagnosis(ctx, p, active, scope); diagnosis != "" {
+		return diagnosis
+	}
+	if sig.name == "metrics" && p.Viz != "heatmap" && p.Viz != "histogram" {
+		matching, err := e.count(ctx, sig, active, scope)
+		if err != nil {
+			return ""
+		}
+		if matching > 0 {
+			return "The selected metric points have no defined values for these measures in this time range."
+		}
+	}
 	total, err := e.count(ctx, sig, nil, scope)
 	if err != nil {
 		return ""
@@ -116,4 +128,83 @@ func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string,
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
+	if p.Query == nil || p.Query.From != "metrics" || p.Viz == "heatmap" || p.Viz == "histogram" {
+		return ""
+	}
+	var ignored Problems
+	measures := parseMeasures(signals["metrics"], p.Query.Measures, "", &ignored)
+	relevant := []Measure{}
+	for _, m := range measures {
+		if m.Func == "rate" || metricValueMeasure(m) {
+			relevant = append(relevant, m)
+		}
+	}
+	if len(relevant) == 0 {
+		return ""
+	}
+	where, args, err := buildWhere(signals["metrics"], filters, scope)
+	if err != nil {
+		return ""
+	}
+	rows, err := e.engine.QueryContext(ctx, "SELECT name,type,count(*) FROM metrics WHERE "+where+" GROUP BY 1,2 ORDER BY 3 DESC,1,2 LIMIT 6", args...)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	type metricKind struct{ name, kind string }
+	kinds := []metricKind{}
+	for rows.Next() {
+		var k metricKind
+		var n int64
+		if rows.Scan(&k.name, &k.kind, &n) != nil {
+			return ""
+		}
+		kinds = append(kinds, k)
+	}
+	if rows.Err() != nil || len(kinds) == 0 {
+		return ""
+	}
+	for _, m := range relevant {
+		compatible := false
+		for _, k := range kinds {
+			for _, supported := range metricMeasureKinds(m) {
+				if k.kind == supported {
+					compatible = true
+				}
+			}
+		}
+		if compatible {
+			continue
+		}
+		k := kinds[0]
+		measure := m.Func + "()"
+		if m.Field != nil {
+			measure = m.Func + "(" + m.Field.Text + ")"
+			if m.Func == "quantile" {
+				measure = m.Func + "(" + m.Field.Text + ", " + sqlFloat(m.Q) + ")"
+			}
+		}
+
+		if m.Func == "rate" && (k.kind == "updown" || k.kind == "gauge") {
+			article := "a"
+			if k.kind == "updown" {
+				article = "an"
+			}
+			return fmt.Sprintf("rate() needs a counter; %s is %s %s; use last(value) or avg(value)", k.name, article, k.kind)
+		}
+		suggestion := "last(value) or avg(value)"
+		switch k.kind {
+		case "counter":
+			suggestion = "rate() or last(value)"
+		case "histogram":
+			suggestion = "rate(), avg(value) or p95(value)"
+		case "summary":
+			suggestion = "count()"
+		}
+		return fmt.Sprintf("%s is not defined for %s (%s); use %s", measure, k.name, k.kind, suggestion)
+	}
+	return ""
 }

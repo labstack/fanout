@@ -43,7 +43,7 @@ func writeTelemetryColumns[T any](writer *parquet.GenericWriter[T], rows []T) er
 		}
 		kind := typ.Field(field).Type.Kind()
 		switch kind {
-		case reflect.String, reflect.Int64, reflect.Uint64, reflect.Float64:
+		case reflect.Bool, reflect.String, reflect.Int64, reflect.Uint64, reflect.Float64:
 		default:
 			return fmt.Errorf("unsupported scalar Parquet field %q", path[0])
 		}
@@ -87,6 +87,10 @@ func writeTelemetryColumns[T any](writer *parquet.GenericWriter[T], rows []T) er
 		for c := range scalars {
 			column := &scalars[c]
 			switch column.kind {
+			case reflect.Bool:
+				for i := start; i < end; i++ {
+					column.values[i-start] = parquet.BooleanValue(reflected[i-start].Field(column.field).Bool()).Level(0, 0, column.column)
+				}
 			case reflect.String:
 				for i := start; i < end; i++ {
 					offset := len(column.bytes)

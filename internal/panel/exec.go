@@ -295,13 +295,14 @@ func limitBatchFrames(results []Result) {
 				}
 			}
 			if f.Health != nil {
-				points := min(len(f.Health.ErrorTrend), remaining)
+				points := min(len(f.Health.ErrorTrend), remaining/2)
 				if points < len(f.Health.ErrorTrend) {
+					f.Health.ErrorTrendTimes = f.Health.ErrorTrendTimes[len(f.Health.ErrorTrendTimes)-points:]
 					f.Health.ErrorTrend = f.Health.ErrorTrend[len(f.Health.ErrorTrend)-points:]
 					f.Truncated = true
 					f.addNote("Health error trend was truncated to stay within the response budget.")
 				}
-				remaining -= points
+				remaining -= 2 * points
 			}
 			names := make([]string, 0, len(f.Trends))
 			for name := range f.Trends {
@@ -344,6 +345,8 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	reduces := vizSpecs[p.Viz].reduces
 	var interval time.Duration
 	switch {
+	case p.SQL != "" && p.Viz == "state_timeline":
+		interval = time.Minute
 	case reduces:
 		interval = AutoInterval(end.Sub(start), 240)
 	case p.Query != nil && p.Query.Bucket == "auto" && (p.Viz == "heatmap" || p.Viz == "state_timeline"):
@@ -352,6 +355,9 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		interval = bucketInterval(p.Query.Bucket, end.Sub(start), width)
 	default:
 		interval = AutoInterval(end.Sub(start), width)
+	}
+	if p.Query != nil && p.Query.From == "metrics" && (reduces || p.Query.Bucket == "auto") {
+		interval = max(interval, time.Minute)
 	}
 	scope := Scope{Start: start, End: end, Interval: interval, Vars: vars}
 	frame, sqlText, err := e.runScope(ctx, p, checked, scope)
@@ -362,7 +368,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	res.Frame, res.SQL = frame, sqlText
 	// Trend failures are recorded on the frame and preserve the main table.
 	_ = e.attachTableTrends(ctx, p, checked, scope, frame)
-	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline") {
+	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" || p.Viz == "health") {
 		res.AnnotationScope, err = e.annotationScope(ctx, p, checked.AnnotationFilters[p.ID], scope)
 		if err != nil {
 			res.AnnotationError = "Annotation scope is unavailable."
@@ -394,7 +400,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			res.ShiftMS = shift.Milliseconds()
 		}
 	}
-	if frame.Rows == 0 {
+	if frame.Rows == 0 || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !metricFrameHasValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
 	}
@@ -422,7 +428,14 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 }
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
-	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
+	read := metricReadScope(p, scope)
+	if p.SQL != "" {
+		// SQL panels may look back up to the metric lookback before their
+		// window (the default dashboard does for CPU rates and reporting
+		// cadence), so their snapshot includes those files.
+		read.Start = scope.Start.Add(-metricLookback)
+	}
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: read.Start, End: read.End})
 	if p.Options != nil && p.Options.Split == "deploy" {
 		return e.runDeploySplit(ctx, p, checked, scope)
 	}
@@ -463,7 +476,7 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 			}
 		}
 		if err == nil && (p.Viz == "heatmap" || p.Viz == "state_timeline") {
-			boundAnalysisFrame(frame)
+			err = boundAnalysisFrame(frame)
 		}
 		return frame, compiled.SQL, err
 	}
@@ -503,6 +516,14 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		return nil, query, err
 	}
 	frame, err := scanDynamicFrame(rows, serialized, sqlPanelRows)
+	if err == nil && p.Viz == "state_timeline" {
+		if frame.Rows > 0 {
+			err = validateTimelineColumns(frame.Columns)
+		}
+		if err == nil {
+			err = boundAnalysisFrame(frame)
+		}
+	}
 	return frame, query, err
 }
 
@@ -549,4 +570,20 @@ func failed(res Result, err error, stopped error) Result {
 		res.Error = strings.TrimSpace(boundError(RedactPaths(err.Error())))
 	}
 	return res
+}
+
+func metricFrameHasValue(f *Frame) bool {
+	if f == nil {
+		return false
+	}
+	for i, c := range f.Columns {
+		if c.Role == "measure" {
+			for _, v := range f.Values[i] {
+				if v != nil {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

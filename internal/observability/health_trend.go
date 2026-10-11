@@ -7,10 +7,15 @@ import (
 	"time"
 )
 
-func (s *Service) HealthErrorTrend(ctx context.Context, scope Scope) ([]float64, error) {
+type HealthTrend struct {
+	Times  []int64
+	Values []float64
+}
+
+func (s *Service) HealthErrorTrend(ctx context.Context, scope Scope) (HealthTrend, error) {
 	scope, err := s.normalizeScope(scope)
 	if err != nil {
-		return nil, err
+		return HealthTrend{}, err
 	}
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: scope.Service})
 	sql := fmt.Sprintf(`SELECT time_bucket(INTERVAL '%s',bucket) AS point_time,
@@ -20,20 +25,21 @@ func (s *Service) HealthErrorTrend(ctx context.Context, scope Scope) ([]float64,
       GROUP BY point_time ORDER BY point_time`, timelineBucketWidth(scope.End.Sub(scope.Start)))
 	rows, err := s.db.QueryContext(ctx, sql, scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Service, scope.Service)
 	if err != nil {
-		return nil, fmt.Errorf("query health trend: %w", err)
+		return HealthTrend{}, fmt.Errorf("query health trend: %w", err)
 	}
 	defer rows.Close()
-	out := []float64{}
+	out := HealthTrend{Times: []int64{}, Values: []float64{}}
 	for rows.Next() {
 		var at time.Time
 		var rate float64
 		if err := rows.Scan(&at, &rate); err != nil {
-			return nil, fmt.Errorf("scan health trend: %w", err)
+			return HealthTrend{}, fmt.Errorf("scan health trend: %w", err)
 		}
-		out = append(out, rate)
+		out.Times = append(out.Times, at.UnixMilli())
+		out.Values = append(out.Values, rate)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate health trend: %w", err)
+		return HealthTrend{}, fmt.Errorf("iterate health trend: %w", err)
 	}
 	return out, nil
 }

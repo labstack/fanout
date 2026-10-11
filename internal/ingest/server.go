@@ -238,27 +238,29 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							return nil, status.Error(codes.InvalidArgument, err.Error())
 						}
 						row := telemetry.Metric{
-							Namespace:     namespace,
-							TimeUnixNanos: int64(dp.TimeUnixNano),
-							Name:          m.Name,
-							Description:   m.Description,
-							Unit:          m.Unit,
-							Type:          "gauge",
-							ServiceName:   svc,
-							Value:         number(dp.Value),
-							ExemplarsJSON: exemplarsToJSON(dp.Exemplars),
-							Attributes:    attrs,
-							Resource:      resources,
-							ScopeName:     scopeName,
-							ScopeVersion:  scopeVer,
-							IngestedAt:    now,
+							Namespace:          namespace,
+							TimeUnixNanos:      int64(dp.TimeUnixNano),
+							StartTimeUnixNanos: int64(dp.StartTimeUnixNano),
+							Name:               m.Name,
+							Description:        m.Description,
+							Unit:               m.Unit,
+							Type:               "gauge",
+							ServiceName:        svc,
+							Value:              number(dp.Value),
+							ExemplarsJSON:      exemplarsToJSON(dp.Exemplars),
+							Attributes:         attrs,
+							Resource:           resources,
+							ScopeName:          scopeName,
+							ScopeVersion:       scopeVer,
+							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Sum:
-					kind := "sum"
-					if d.Sum.AggregationTemporality == metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA {
-						kind = "sum_delta"
+					temporality, err := metricTemporality(d.Sum.AggregationTemporality)
+					if err != nil {
+						return nil, status.Error(codes.InvalidArgument, err.Error())
 					}
 					for _, dp := range d.Sum.DataPoints {
 						attrs, err := attributes(dp.Attributes)
@@ -266,24 +268,32 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							return nil, status.Error(codes.InvalidArgument, err.Error())
 						}
 						row := telemetry.Metric{
-							Namespace:     namespace,
-							TimeUnixNanos: int64(dp.TimeUnixNano),
-							Name:          m.Name,
-							Description:   m.Description,
-							Unit:          m.Unit,
-							Type:          kind,
-							ServiceName:   svc,
-							Value:         number(dp.Value),
-							ExemplarsJSON: exemplarsToJSON(dp.Exemplars),
-							Attributes:    attrs,
-							Resource:      resources,
-							ScopeName:     scopeName,
-							ScopeVersion:  scopeVer,
-							IngestedAt:    now,
+							Namespace:          namespace,
+							TimeUnixNanos:      int64(dp.TimeUnixNano),
+							StartTimeUnixNanos: int64(dp.StartTimeUnixNano),
+							Name:               m.Name,
+							Description:        m.Description,
+							Unit:               m.Unit,
+							Type:               "sum",
+							Temporality:        temporality,
+							Monotonic:          d.Sum.IsMonotonic,
+							ServiceName:        svc,
+							Value:              number(dp.Value),
+							ExemplarsJSON:      exemplarsToJSON(dp.Exemplars),
+							Attributes:         attrs,
+							Resource:           resources,
+							ScopeName:          scopeName,
+							ScopeVersion:       scopeVer,
+							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Histogram:
+					temporality, err := metricTemporality(d.Histogram.AggregationTemporality)
+					if err != nil {
+						return nil, status.Error(codes.InvalidArgument, err.Error())
+					}
 					for _, dp := range d.Histogram.DataPoints {
 						attrs, err := attributes(dp.Attributes)
 						if err != nil {
@@ -294,55 +304,69 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							histSum = *dp.Sum
 						}
 						row := telemetry.Metric{
-							Namespace:      namespace,
-							TimeUnixNanos:  int64(dp.TimeUnixNano),
-							Name:           m.Name,
-							Description:    m.Description,
-							Unit:           m.Unit,
-							Type:           "histogram",
-							ServiceName:    svc,
-							HistBoundsJSON: toJSON(dp.ExplicitBounds),
-							HistCountsJSON: toJSON(dp.BucketCounts),
-							HistCount:      int64(dp.Count),
-							HistSum:        histSum,
-							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							Attributes:     attrs,
-							Resource:       resources,
-							ScopeName:      scopeName,
-							ScopeVersion:   scopeVer,
-							IngestedAt:     now,
+							Namespace:          namespace,
+							TimeUnixNanos:      int64(dp.TimeUnixNano),
+							StartTimeUnixNanos: int64(dp.StartTimeUnixNano),
+							Name:               m.Name,
+							Description:        m.Description,
+							Unit:               m.Unit,
+							Type:               "histogram",
+							Temporality:        temporality,
+							ServiceName:        svc,
+							HistBoundsJSON:     toJSON(dp.ExplicitBounds),
+							HistCountsJSON:     toJSON(dp.BucketCounts),
+							HistCount:          int64(dp.Count),
+							HistSum:            histSum,
+							ExemplarsJSON:      exemplarsToJSON(dp.Exemplars),
+							Attributes:         attrs,
+							Resource:           resources,
+							ScopeName:          scopeName,
+							ScopeVersion:       scopeVer,
+							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_ExponentialHistogram:
+					temporality, err := metricTemporality(d.ExponentialHistogram.AggregationTemporality)
+					if err != nil {
+						return nil, status.Error(codes.InvalidArgument, err.Error())
+					}
 					for _, dp := range d.ExponentialHistogram.DataPoints {
 						attrs, err := attributes(dp.Attributes)
 						if err != nil {
 							return nil, status.Error(codes.InvalidArgument, err.Error())
 						}
+						if math.IsNaN(dp.ZeroThreshold) || math.IsInf(dp.ZeroThreshold, 0) || dp.ZeroThreshold < 0 {
+							return nil, status.Error(codes.InvalidArgument, "exponential histogram zero_threshold must be a finite, non-negative number")
+						}
+						bounds, counts := explicitExpHistogram(dp)
 						histSum := 0.0
 						if dp.Sum != nil {
 							histSum = *dp.Sum
 						}
 						row := telemetry.Metric{
-							Namespace:      namespace,
-							TimeUnixNanos:  int64(dp.TimeUnixNano),
-							Name:           m.Name,
-							Description:    m.Description,
-							Unit:           m.Unit,
-							Type:           "exp_histogram",
-							ServiceName:    svc,
-							HistBoundsJSON: toJSON(expHistBuckets(dp)),
-							HistCountsJSON: toJSON(expHistCounts(dp)),
-							HistCount:      int64(dp.Count),
-							HistSum:        histSum,
-							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							Attributes:     attrs,
-							Resource:       resources,
-							ScopeName:      scopeName,
-							ScopeVersion:   scopeVer,
-							IngestedAt:     now,
+							Namespace:          namespace,
+							TimeUnixNanos:      int64(dp.TimeUnixNano),
+							StartTimeUnixNanos: int64(dp.StartTimeUnixNano),
+							Name:               m.Name,
+							Description:        m.Description,
+							Unit:               m.Unit,
+							Type:               "exponential_histogram",
+							Temporality:        temporality,
+							ServiceName:        svc,
+							HistBoundsJSON:     toJSON(bounds),
+							HistCountsJSON:     toJSON(counts),
+							HistCount:          int64(dp.Count),
+							HistSum:            histSum,
+							ExemplarsJSON:      exemplarsToJSON(dp.Exemplars),
+							Attributes:         attrs,
+							Resource:           resources,
+							ScopeName:          scopeName,
+							ScopeVersion:       scopeVer,
+							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Summary:
@@ -352,23 +376,25 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							return nil, status.Error(codes.InvalidArgument, err.Error())
 						}
 						row := telemetry.Metric{
-							Namespace:      namespace,
-							TimeUnixNanos:  int64(dp.TimeUnixNano),
-							Name:           m.Name,
-							Description:    m.Description,
-							Unit:           m.Unit,
-							Type:           "summary",
-							ServiceName:    svc,
-							HistBoundsJSON: toJSON(summaryQuantiles(dp)),
-							HistCountsJSON: toJSON(summaryValues(dp)),
-							HistCount:      int64(dp.Count),
-							HistSum:        dp.Sum,
-							Attributes:     attrs,
-							Resource:       resources,
-							ScopeName:      scopeName,
-							ScopeVersion:   scopeVer,
-							IngestedAt:     now,
+							Namespace:          namespace,
+							TimeUnixNanos:      int64(dp.TimeUnixNano),
+							StartTimeUnixNanos: int64(dp.StartTimeUnixNano),
+							Name:               m.Name,
+							Description:        m.Description,
+							Unit:               m.Unit,
+							Type:               "summary",
+							ServiceName:        svc,
+							HistBoundsJSON:     toJSON(summaryQuantiles(dp)),
+							HistCountsJSON:     toJSON(summaryValues(dp)),
+							HistCount:          int64(dp.Count),
+							HistSum:            dp.Sum,
+							Attributes:         attrs,
+							Resource:           resources,
+							ScopeName:          scopeName,
+							ScopeVersion:       scopeVer,
+							IngestedAt:         now,
 						}
+						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
 					}
 				}
@@ -379,6 +405,17 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 		return nil, ingestStatusError(err)
 	}
 	return &collectormetrics.ExportMetricsServiceResponse{}, nil
+}
+
+func metricTemporality(t metricspb.AggregationTemporality) (string, error) {
+	switch t {
+	case metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE:
+		return "cumulative", nil
+	case metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA:
+		return "delta", nil
+	default:
+		return "", fmt.Errorf("sum and histogram metrics require cumulative or delta temporality")
+	}
 }
 
 // ---- helpers ----
@@ -810,26 +847,54 @@ func exemplarsToJSON(exemplars []*metricspb.Exemplar) string {
 	return string(b)
 }
 
-func expHistBuckets(dp *metricspb.ExponentialHistogramDataPoint) []float64 {
-	// Convert exponential histogram to explicit buckets for simplified storage
-	// This is a lossy conversion but provides compatibility with standard histogram queries
-	if dp.Positive == nil || len(dp.Positive.BucketCounts) == 0 {
-		return nil
+func explicitExpHistogram(dp *metricspb.ExponentialHistogramDataPoint) ([]float64, []uint64) {
+	// bound returns base^index, with base = 2^(2^-scale), as one exponent so
+	// powers of two stay exact.
+	bound := func(index float64) float64 { return math.Exp2(index * math.Exp2(-float64(dp.Scale))) }
+	bounds := make([]float64, 0)
+	counts := make([]uint64, 0)
+	if dp.Negative != nil && len(dp.Negative.BucketCounts) > 0 {
+		negative := dp.Negative.BucketCounts
+		counts = append(counts, 0)
+		for i := len(negative); i >= 0; i-- {
+			bounds = append(bounds, -bound(float64(dp.Negative.Offset)+float64(i)))
+			if i > 0 {
+				counts = append(counts, negative[i-1])
+			}
+		}
+		counts = append(counts, 0) // gap between the negatives and zero bucket
+	} else {
+		counts = append(counts, 0) // underflow below the zero bucket
 	}
-	base := math.Pow(2, math.Pow(2, float64(-dp.Scale)))
-	offset := int(dp.Positive.Offset)
-	buckets := make([]float64, len(dp.Positive.BucketCounts))
-	for i := range dp.Positive.BucketCounts {
-		buckets[i] = math.Pow(base, float64(offset+i))
+	// Fix the zero bucket independently of either exponential range. With a
+	// zero threshold of zero, (zlo, 0] contains exactly float64 zeros.
+	zlo := -dp.ZeroThreshold
+	if dp.ZeroThreshold == 0 {
+		zlo = -math.SmallestNonzeroFloat64
 	}
-	return buckets
-}
-
-func expHistCounts(dp *metricspb.ExponentialHistogramDataPoint) []uint64 {
-	if dp.Positive == nil {
-		return nil
+	bounds = append(bounds, zlo, dp.ZeroThreshold)
+	counts = append(counts, dp.ZeroCount, 0)
+	if dp.Positive != nil && len(dp.Positive.BucketCounts) > 0 {
+		for i := 0; i <= len(dp.Positive.BucketCounts); i++ {
+			bounds = append(bounds, bound(float64(dp.Positive.Offset)+float64(i)))
+		}
+		counts = append(counts, dp.Positive.BucketCounts...)
+		counts = append(counts, 0)
 	}
-	return dp.Positive.BucketCounts
+	// Extreme scales and offsets overflow float64 or underflow to zero. Such a
+	// bound cannot separate float64 observations, so dropping it merges the
+	// bucket above it into the one below and every count is kept. One pass, so
+	// a point with many such bounds costs linear time.
+	keptBounds, keptCounts := bounds[:0], counts[:1]
+	for i, b := range bounds {
+		if math.IsInf(b, 0) || math.IsNaN(b) || (len(keptBounds) > 0 && b <= keptBounds[len(keptBounds)-1]) {
+			keptCounts[len(keptCounts)-1] += counts[i+1]
+			continue
+		}
+		keptBounds = append(keptBounds, b)
+		keptCounts = append(keptCounts, counts[i+1])
+	}
+	return keptBounds, keptCounts
 }
 
 func summaryQuantiles(dp *metricspb.SummaryDataPoint) []float64 {

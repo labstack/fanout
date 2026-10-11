@@ -3,6 +3,7 @@
 package panel
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,6 +19,79 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func TestMetricReplayCopyPreservesSourceAndStartTime(t *testing.T) {
+	input := t.TempDir()
+	repo, err := telemetrystore.Open(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := metricCounter(fixtureStart, 100)
+	m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano() + 17
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric", Metrics: []telemetry.Metric{m}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Close(); err != nil {
+		t.Fatal(err)
+	}
+	canary := filepath.Join(input, "parquet", "staging", "keep")
+	if err := os.MkdirAll(filepath.Dir(canary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canary, []byte("immutable source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Include schema, metadata, every source Parquet file and staging canary;
+	// comparing the inventories also catches created or removed source files.
+	snapshot := func() map[string][32]byte {
+		t.Helper()
+		files := map[string][32]byte{}
+		if err := filepath.WalkDir(input, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(input, path)
+			files[rel] = sha256.Sum256(raw)
+			return err
+		}); err != nil {
+			t.Fatal("cannot snapshot cross-check source")
+		}
+		return files
+	}
+	before := snapshot()
+	data := copyMetricCrosscheckData(t, input)
+	if data.Start != fixtureStart || data.End != fixtureStart.Add(time.Nanosecond) || data.Metrics != 1 {
+		t.Fatal("copy did not retain exact metric event-time bounds and count")
+	}
+	engine, cfg := panelBenchEngine(t, data)
+	var start int64
+	if err := engine.DB.QueryRowContext(t.Context(), "SELECT epoch_ns(start_time) FROM metrics WHERE name='net'").Scan(&start); err != nil || start != m.StartTimeUnixNanos {
+		t.Fatalf("start=%d err=%v", start, err)
+	}
+	// All derived Parquet stays under the engine's configured query directory.
+	raw := filepath.Join(cfg.QueryDir(), "shifted.parquet")
+	metadata := telemetry.BatchMetadata{Version: 4, ID: "shifted"}
+	if err := tilePanelParquet(filepath.Join(input, "parquet", "batches", "metric.batch", "metrics.parquet"), raw, "metrics", "", fixtureStart, fixtureStart.Add(time.Minute), time.Hour, &metadata, map[string]bool{}, map[string]bool{}); err != nil {
+		t.Fatal("cannot shift private metric fixture")
+	}
+	var shifted int64
+	if err := engine.DB.QueryRowContext(t.Context(), "SELECT start_time_unix_nano FROM read_parquet(?)", raw).Scan(&shifted); err != nil || shifted != m.StartTimeUnixNanos+int64(time.Hour) {
+		t.Fatalf("shifted=%d err=%v", shifted, err)
+	}
+	if !reflect.DeepEqual(snapshot(), before) {
+		t.Fatal("source files changed")
+	}
+	if _, err := os.Stat(filepath.Join(input, "query")); !os.IsNotExist(err) {
+		t.Fatal("source query directory created")
+	}
+}
 
 // BenchmarkPanelQueries24Hours measures the existing executor directly. The
 // generated dataset is regression-only; representative runs require replay.
@@ -118,10 +192,9 @@ func panelBenchmarkMetricShapes(tb testing.TB, names map[string]string) []Panel 
 		by                []string
 	}{
 		{"metric_gauge_avg_by_service", "gauge", "avg(value)", []string{"service"}},
-		// These are the existing structured measures: rate() counts points per
-		// second, and p95(hist_sum) takes the percentile of histogram point sums.
-		{"metric_counter_rate", "sum", "rate()", nil},
-		{"metric_histogram_p95", "histogram", "p95(hist_sum)", nil},
+		{"metric_updown_avg_by_service", "updown", "avg(value)", []string{"service"}},
+		{"metric_counter_rate", "counter", "rate()", nil},
+		{"metric_histogram_p95", "histogram", "p95(value)", nil},
 	} {
 		name, ok := names[shape.kind]
 		if !ok {
@@ -230,7 +303,10 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	}
 	start := time.Unix(0, int64(time.Hour)).UTC()
 	n := start.Add(time.Minute).UnixNano()
-	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}})
+	err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "signed", Spans: []telemetry.Span{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", SpanID: "span", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: 1, Attributes: map[string]any{"literal.dot": int64(7)}}}, Logs: []telemetry.Log{{Namespace: "bench", ServiceName: "checkout", TraceID: "trace", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: 1, Severity: "INFO", Body: "complete"}}, Metrics: []telemetry.Metric{
+		{Namespace: "bench", ServiceName: "checkout", Name: "absent", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+		{Namespace: "bench", ServiceName: "checkout", Name: "started", Type: "sum", Monotonic: true, Temporality: "cumulative", StartTimeUnixNanos: n - int64(30*time.Second), TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: 1},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,8 +320,8 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	m := telemetry.BatchMetadata{Version: 3, ID: "signed"}
-	for _, signal := range []string{"spans", "logs"} {
+	m := telemetry.BatchMetadata{Version: 4, ID: "signed"}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
 		err := tilePanelParquet(filepath.Join(seed, "parquet", "batches", "signed.batch", signal+".parquet"), filepath.Join(dst, signal+".parquet"), signal, "source_", start, start.Add(time.Hour), -3*time.Hour, &m, map[string]bool{}, map[string]bool{})
 		if err != nil {
 			t.Fatal(err)
@@ -269,7 +345,7 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 		t.Fatal(err)
 	}
 	data := preparePanelReplay(t, input, 2)
-	if data.End.Sub(data.Start) != 24*time.Hour || data.Spans != 48 || data.Logs != 48 {
+	if data.End.Sub(data.Start) != 24*time.Hour || data.Spans != 48 || data.Logs != 48 || data.Metrics != 96 {
 		t.Fatalf("wrong tiling: %+v", data)
 	}
 	issues, err := telemetrystore.VerifyBatches(filepath.Join(data.Dir, "telemetry"))
@@ -285,7 +361,11 @@ func TestPanelBenchmarkReplayTilesSignedTimesAndDistinctIdentities(t *testing.T)
 	if got, err := os.ReadFile(filepath.Join(dst, "metadata.json")); err != nil || string(got) != string(raw) {
 		t.Fatalf("source metadata changed: %v", err)
 	}
-	assertPanelReplay(t, data, 48)
+	engine := assertPanelReplay(t, data, 48)
+	var absent, shifted int64
+	if err := engine.DB.QueryRowContext(t.Context(), `SELECT count(*) FILTER (WHERE start_time IS NULL), count(*) FILTER (WHERE epoch_ns(time)-epoch_ns(start_time)=30000000000) FROM metrics`).Scan(&absent, &shifted); err != nil || absent != 48 || shifted != 48 {
+		t.Fatalf("metric starts: absent=%d shifted=%d err=%v", absent, shifted, err)
+	}
 }
 
 func TestPanelBenchmarkReplayRejectsUnsupportedInputBeforeCopy(t *testing.T) {
@@ -340,7 +420,24 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add := func(kind, name string, at time.Time, count int) {
 		for i := range count {
 			n := at.UnixNano()
-			metrics = append(metrics, telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1), HistSum: float64(i + 1), HistCount: 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,0]"})
+			m := telemetry.Metric{ServiceName: fmt.Sprintf("svc%d", i%2), Type: kind, Name: name, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: n, Value: float64(i + 1), HistSum: float64(i + 1), HistCount: 1, HistBoundsJSON: "[10]", HistCountsJSON: "[1,0]"}
+			if kind == "updown" {
+				m.Type = "sum"
+			}
+			if m.Type == "sum" || kind == "histogram" {
+				m.Temporality = "cumulative"
+				m.Monotonic = kind == "sum"
+			}
+			metrics = append(metrics, m)
+			if kind == "sum" || kind == "histogram" {
+				n = at.Add(time.Minute).UnixNano()
+				m.EventUnixNanos, m.TimeUnixNanos, m.IngestedAt = n, n, n
+				m.Value++
+				m.HistCount++
+				m.HistSum++
+				m.HistCountsJSON = "[2,0]"
+				metrics = append(metrics, m)
+			}
 		}
 	}
 	add("gauge", "rare", data.Start, 1)
@@ -349,33 +446,55 @@ func TestPanelBenchmarkMetricNamesSelectMostCommonInWindow(t *testing.T) {
 	add("gauge", "outside", data.End, 4)
 	add("sum", "requests", data.Start, 2)
 	add("sum", "rare", data.Start, 1)
+	add("updown", "inflight", data.Start, 2)
 	add("histogram", "z_latency", data.Start, 2)
 	add("histogram", "a_latency", data.Start, 2)
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-names", Metrics: metrics}); err != nil {
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-names", Metrics: metricSeriesIDs(metrics)}); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"gauge": "cpu'usage", "sum": "requests", "histogram": "a_latency"}
+	want := map[string]string{"gauge": "cpu'usage", "counter": "requests", "updown": "inflight", "histogram": "a_latency"}
 	if got := panelBenchmarkMetricNames(t, engine, data); !reflect.DeepEqual(got, want) {
 		t.Fatalf("metric names = %v, want %v", got, want)
 	}
 	shapes := panelBenchmarkMetricShapes(t, want)
-	if len(shapes) != 3 {
-		t.Fatalf("metric shapes = %d, want 3", len(shapes))
+	if len(shapes) != 4 {
+		t.Fatalf("metric shapes = %d, want 4", len(shapes))
 	}
 	results, err := NewExecutor(engine, 30).Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Metric shapes", Time: Time{From: &data.Start, To: &data.End}, Panels: shapes}})
-	if err != nil || len(results) != 3 {
+	if err != nil || len(results) != 4 {
 		t.Fatalf("metric shape results = %v, error = %v", results, err)
 	}
 	for _, result := range results {
-		if result.Status != StatusOK || result.Frame == nil || result.Frame.Rows == 0 {
+		if result.Frame == nil || result.Frame.Rows == 0 {
 			t.Fatalf("metric shape did not execute: %+v", result)
 		}
-		for _, value := range result.Frame.Values[len(result.Frame.Values)-1] {
+		values := result.Frame.Values[len(result.Frame.Values)-1]
+		if result.ID == "metric_histogram_p95" {
+			// The next point's observation spreads across both buckets,
+			// including the nanosecond overlap after the minute boundary.
+			if result.Status != StatusOK || !reflect.DeepEqual(values, []any{9.5, 9.5}) {
+				t.Fatalf("histogram percentiles=%+v", result)
+			}
+			continue
+		}
+		if result.Status != StatusOK {
+			t.Fatalf("metric shape did not execute: %+v", result)
+		}
+		if result.ID == "metric_counter_rate" {
+			// Covered buckets have both series; the live edge carries their
+			// rate through minute six and disappears after five-minute expiry.
+			if !reflect.DeepEqual(values, []any{2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0, 2.0 / 60.0}) {
+				t.Fatalf("counter rates=%v", values)
+			}
+			continue
+		}
+		for _, value := range values {
 			if value == nil {
 				t.Fatalf("metric shape %s returned a null measure", result.ID)
 			}
 		}
 	}
+
 	data.End = data.Start.Add(time.Nanosecond)
 	want["gauge"] = "rare"
 	if got := panelBenchmarkMetricNames(t, engine, data); !reflect.DeepEqual(got, want) {

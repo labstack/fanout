@@ -19,7 +19,11 @@ type Filter struct {
 	InParams map[string]bool `json:"-"`
 	// EqField is the field compared when the filter is `field = value`; the
 	// empty-panel diagnosis lists values seen for it.
-	EqField string `json:"-"`
+	EqField   string `json:"-"`
+	EqLiteral string `json:"-"`
+	EqParam   string `json:"-"`
+	EqValue   bool   `json:"-"`
+	NameInAnd bool   `json:"-"`
 }
 
 var (
@@ -67,6 +71,11 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 		}
 	}
 	f.EqField = equalityField(node["where_clause"])
+	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(node["where_clause"])
+	f.NameInAnd = nameEqualityInAnd(node["where_clause"])
+	if f.EqValue {
+		f.EqField = "name"
+	}
 	rewriteContainsAsIn(node["where_clause"])
 	node["where_clause"] = castParameters(node["where_clause"], sig, "")
 	canonical, err := canonicalFilter(ctx, parser, sig, vars, node, f)
@@ -555,4 +564,57 @@ func castNode(param map[string]any, typeName string) map[string]any {
 			"type_name": typeName, "qualified_name": map[string]any{"path": []any{typeName}},
 		},
 	}
+}
+
+func equalityValue(n any) (literal, parameter string, ok bool) {
+	v, _ := n.(map[string]any)
+	if v["class"] != "COMPARISON" || v["type"] != "COMPARE_EQUAL" {
+		return "", "", false
+	}
+	var other any
+	directName := func(n any) bool {
+		field, _ := n.(map[string]any)
+		names, _ := field["column_names"].([]any)
+		return field["class"] == "COLUMN_REF" && len(names) == 1 && names[0] == "name"
+	}
+	if directName(v["left"]) {
+		other = v["right"]
+	} else if directName(v["right"]) {
+		other = v["left"]
+	} else {
+		return "", "", false
+	}
+	for {
+		node, _ := other.(map[string]any)
+		if node["class"] == "CAST" {
+			other = node["child"]
+			continue
+		}
+		if node["class"] == "PARAMETER" {
+			id, _ := node["identifier"].(string)
+			return "", id, id != ""
+		}
+		if node["class"] == "CONSTANT" {
+			value, _ := node["literal"].(map[string]any)
+			if value["kind"] == "STRING" {
+				text, _ := value["text"].(string)
+				return text, "", true
+			}
+		}
+		return "", "", false
+	}
+}
+
+func nameEqualityInAnd(n any) bool {
+	v, _ := n.(map[string]any)
+	if v["class"] != "CONJUNCTION" || v["type"] != "CONJUNCTION_AND" {
+		return false
+	}
+	children, _ := v["children"].([]any)
+	for _, child := range children {
+		if _, _, ok := equalityValue(child); ok || nameEqualityInAnd(child) {
+			return true
+		}
+	}
+	return false
 }

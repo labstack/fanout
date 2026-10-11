@@ -180,6 +180,7 @@ func TestExemplarProblems(t *testing.T) {
 			case "metrics":
 				req.Dashboard.Panels[0].Query.From = "metrics"
 				req.Dashboard.Panels[0].Query.Measures = []string{"sum(value)"}
+				req.Dashboard.Panels[0].Query.Where = append(req.Dashboard.Panels[0].Query.Where, "name = 'net'")
 			case "outside":
 				req.From = fixtureStart.Add(-time.Hour)
 				req.To = fixtureStart

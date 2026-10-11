@@ -75,25 +75,29 @@ type Log struct {
 }
 
 type Metric struct {
-	Namespace      string
-	EventUnixNanos int64
-	TimeUnixNanos  int64
-	Name           string
-	Description    string
-	Unit           string
-	Type           string
-	ServiceName    string
-	Value          float64
-	HistBoundsJSON string
-	HistCountsJSON string
-	HistCount      int64
-	HistSum        float64
-	ExemplarsJSON  string
-	Attributes     map[string]any
-	Resource       map[string]any
-	ScopeName      string
-	ScopeVersion   string
-	IngestedAt     int64
+	SeriesID           uint64
+	Namespace          string
+	EventUnixNanos     int64
+	TimeUnixNanos      int64
+	Name               string
+	Description        string
+	Unit               string
+	Type               string
+	Temporality        string
+	Monotonic          bool
+	StartTimeUnixNanos int64
+	ServiceName        string
+	Value              float64
+	HistBoundsJSON     string
+	HistCountsJSON     string
+	HistCount          int64
+	HistSum            float64
+	ExemplarsJSON      string
+	Attributes         map[string]any
+	Resource           map[string]any
+	ScopeName          string
+	ScopeVersion       string
+	IngestedAt         int64
 }
 
 func NormalizeNamespace(namespace string) string {

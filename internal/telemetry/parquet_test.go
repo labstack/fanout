@@ -188,7 +188,7 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 	}
 	metricRow := Metric{
 		Namespace: "tenant", EventUnixNanos: 21, TimeUnixNanos: 22, Name: "request.duration",
-		Description: "request latency", Unit: "ms", Type: "histogram", ServiceName: "checkout", Value: 23.5,
+		Description: "request latency", Unit: "ms", Type: "histogram", Temporality: "cumulative", ServiceName: "checkout", Value: 23.5,
 		HistBoundsJSON: `[1,5,10]`, HistCountsJSON: `[2,3,4,5]`, HistCount: 14, HistSum: 47,
 		ExemplarsJSON: `[{"trace_id":"trace"}]`, Attributes: map[string]any{"route": "/pay"},
 		Resource: map[string]any{"host": "one"}, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,

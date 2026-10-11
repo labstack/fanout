@@ -6,8 +6,10 @@ import { fonts, typeScale } from "../../../../tokens";
 const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 const compactHeight = 20, fullHeight = 44;
-// A compact card must hold micro text plus its two one-pixel borders.
-const compactReadableScale = (typeScale.micro + 2) / compactHeight;
+export const serviceMapLineHeight = 1.4;
+// Contain Geist Mono's ascent/descent as well as the two one-pixel borders.
+// A font-size-only floor lets text extend beyond the card's opaque background.
+const compactReadableScale = Math.ceil(typeScale.micro * serviceMapLineHeight + 2) / compactHeight;
 export type Point = { x: number; y: number };
 export type CardWidths = Record<string, {full:number;compact:number}>;
 export type Box = ServiceNode & Point & { width: number; height: number; entry: boolean; uncalled: boolean };

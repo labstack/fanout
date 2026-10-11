@@ -47,7 +47,7 @@ func panelBenchmarkMetricNames(tb testing.TB, engine Engine, data panelBenchData
   SELECT type, name, row_number() OVER (PARTITION BY type ORDER BY count(*) DESC, name) AS rank
   FROM metrics
   WHERE time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND type IN ('gauge', 'sum', 'histogram')
+    AND type IN ('gauge', 'updown', 'counter', 'histogram')
   GROUP BY type, name
 ) WHERE rank = 1 ORDER BY type`, data.Start, data.End)
 	if err != nil {
@@ -95,7 +95,7 @@ func panelReplayMetadata(input string) ([]telemetry.BatchMetadata, error) {
 		if err := json.Unmarshal(raw, &m); err != nil {
 			return nil, err
 		}
-		if m.Version != 3 {
+		if m.Version != 4 {
 			return nil, fmt.Errorf("%w: version %d", telemetry.ErrUnsupportedBatchFormat, m.Version)
 		}
 		if err := telemetry.ValidateBatchID(m.ID); err != nil {
@@ -107,9 +107,83 @@ func panelReplayMetadata(input string) ([]telemetry.BatchMetadata, error) {
 		out = append(out, m)
 	}
 	if len(out) == 0 {
-		return nil, errors.New("replay contains no format-3 batches")
+		return nil, errors.New("replay contains no format-4 batches")
 	}
 	return out, nil
+}
+
+// Copy accepted batches byte for byte before opening a repository. Like the
+// replay harness, input is the telemetry root containing parquet/batches.
+// Opening only the private copy leaves source schema and staging untouched.
+func copyMetricCrosscheckData(tb testing.TB, input string) panelBenchData {
+	tb.Helper()
+	metadata, err := panelReplayMetadata(input)
+	if err != nil {
+		tb.Fatal("cross-check input needs valid format-4 batch metadata")
+	}
+	data := panelBenchData{Dir: filepath.Join(panelBenchScratch(tb), "state")}
+	for _, m := range metadata {
+		names := []string{"metadata.json"}
+		if m.Spans > 0 {
+			names = append(names, "spans.parquet", "trace.fidx")
+		}
+		if m.Logs > 0 {
+			names = append(names, "logs.parquet")
+		}
+		if m.Metrics > 0 {
+			names = append(names, "metrics.parquet")
+		}
+		dst := filepath.Join(data.Dir, "telemetry", "parquet", "batches", m.ID+telemetry.BatchSuffix)
+		if err := os.MkdirAll(dst, 0o755); err != nil {
+			tb.Fatal("cannot create cross-check batch directory")
+		}
+		for _, name := range names {
+			in, err := os.Open(filepath.Join(input, "parquet", "batches", m.ID+telemetry.BatchSuffix, name))
+			if err != nil {
+				tb.Fatal("cannot open cross-check input")
+			}
+			info, err := in.Stat()
+			if err != nil || !info.Mode().IsRegular() {
+				in.Close()
+				tb.Fatal("cross-check files must be regular")
+			}
+			out, err := os.Create(filepath.Join(dst, name))
+			if err != nil {
+				in.Close()
+				tb.Fatal("cannot create cross-check copy")
+			}
+			_, copyErr := io.Copy(out, in)
+			if err := errors.Join(copyErr, out.Close(), in.Close()); err != nil {
+				tb.Fatal("cannot copy cross-check input")
+			}
+		}
+		data.Spans += int64(m.Spans)
+		data.Logs += int64(m.Logs)
+		data.Metrics += int64(m.Metrics)
+	}
+	// Repository metadata derives each signal's bounds from its event footer.
+	repo, err := telemetrystore.Open(filepath.Join(data.Dir, "telemetry"))
+	if err != nil {
+		tb.Fatal("cannot open cross-check copy")
+	}
+	low, high := int64(math.MaxInt64), int64(math.MinInt64)
+	for _, m := range repo.Parquet.BatchMetadata() {
+		if m.Metrics > 0 && m.MetricTime.Known {
+			low = min(low, m.MetricTime.MinNanos)
+			high = max(high, m.MetricTime.MaxNanos)
+		}
+	}
+	if err := repo.Close(); err != nil {
+		tb.Fatal("cannot close cross-check copy")
+	}
+	if low > high || high == math.MaxInt64 {
+		tb.Fatal("cross-check fixture needs usable metric event-time bounds")
+	}
+	data.Start, data.End = time.Unix(0, low).UTC(), time.Unix(0, high+1).UTC()
+	if data.End.Sub(data.Start) > 24*time.Hour {
+		data.Start = data.End.Add(-24 * time.Hour)
+	}
+	return data
 }
 
 func panelBenchScratch(tb testing.TB) string {
@@ -227,7 +301,7 @@ func preparePanelReplay(tb testing.TB, input string, volume int) panelBenchData 
 				if err := os.MkdirAll(dst, 0o755); err != nil {
 					tb.Fatal(err)
 				}
-				next := telemetry.BatchMetadata{Version: 3, ID: prefix + m.ID, Generation: m.Generation}
+				next := telemetry.BatchMetadata{Version: 4, ID: prefix + m.ID, Generation: m.Generation}
 				for _, signal := range []string{"spans", "logs", "metrics"} {
 					count := map[string]int{"spans": m.Spans, "logs": m.Logs, "metrics": m.Metrics}[signal]
 					if count == 0 {
@@ -328,7 +402,7 @@ func tilePanelParquet(input, output, signal, prefix string, start, end time.Time
 	}
 	event := map[string]string{"spans": "start_time", "logs": "log_time", "metrics": "metric_time"}[signal]
 	timeColumns := map[int]string{}
-	for _, name := range []string{"start_time", "end_time", "start_unix_nano", "end_unix_nano", "log_time", "observed_time", "time_unix_nano", "observed_time_unix_nano", "metric_time", "ingested_at", "ingested_unix_nano"} {
+	for _, name := range []string{"start_time", "end_time", "start_unix_nano", "end_unix_nano", "log_time", "observed_time", "time_unix_nano", "observed_time_unix_nano", "metric_time", "start_time_unix_nano", "ingested_at", "ingested_unix_nano"} {
 		if column, ok := cols[name]; ok {
 			timeColumns[column] = name
 		}
@@ -433,7 +507,7 @@ func panelRowValue(row parquet.Row, column int) parquet.Value {
 	return parquet.Value{}
 }
 
-// Same format-3 sidecar contract as the production writer, streamed from the
+// Same format-4 sidecar contract as the production writer, streamed from the
 // sorted output. No private production symbol or new product API is needed.
 func panelTraceIndex(dir string) (err error) {
 	in, err := os.Open(filepath.Join(dir, "spans.parquet"))
@@ -525,7 +599,7 @@ func panelBenchEngine(tb testing.TB, data panelBenchData) (*query.Duck, config.C
 	return engine, cfg
 }
 
-func assertPanelReplay(t *testing.T, data panelBenchData, want int64) {
+func assertPanelReplay(t *testing.T, data panelBenchData, want int64) *query.Duck {
 	t.Helper()
 	engine, _ := panelBenchEngine(t, data)
 	var count, distinct int64
@@ -539,4 +613,5 @@ func assertPanelReplay(t *testing.T, data panelBenchData, want int64) {
 	if err := engine.DB.QueryRowContext(t.Context(), "SELECT attributes['literal.dot']::BIGINT FROM spans LIMIT 1").Scan(&value); err != nil || value != 7 {
 		t.Fatalf("typed dotted attribute=%d error=%v", value, err)
 	}
+	return engine
 }

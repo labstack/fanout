@@ -55,7 +55,7 @@
   Analytical service/edge watermark lag is separate. Completed-batch writes
   have their own gate and write-pool slot; analytical writes use disjoint tables.
   Maintenance must hold both gates for checkpointing.
-- Batch format 3, including its physical schema, is the only accepted telemetry
+- Batch format 4, including its physical schema, is the only accepted telemetry
   format. Schema changes require a format version change. Disable schema unioning
   and Hive partition inference; use native Parquet binding so VARIANT extracts
   can reach the scan. Pre-project hot messaging fields into scalar read-view

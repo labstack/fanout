@@ -29,6 +29,13 @@ func validateBatchFormats(dir string) error {
 			continue
 		}
 		if _, err := readBatchMetadata(filepath.Join(dir, name, "metadata.json")); err != nil {
+			// A retired directory without metadata was partly removed by
+			// retention or compaction cleanup and has no format left to
+			// preserve. Cleanup reclaims it, or compaction recovery reports the
+			// missing input through its runbook.
+			if retired && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return err
 		}
 	}

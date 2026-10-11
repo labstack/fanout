@@ -75,6 +75,8 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// The shared loader checks the format-4 metadata and complete physical
+	// schema before native decoding; unsupported formats are never corruption.
 	batch, err := loadRegisteredBatch(dir)
 	if err != nil {
 		return batchDataError(err)

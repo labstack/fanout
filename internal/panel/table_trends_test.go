@@ -201,10 +201,10 @@ func TestTableTrendsBatchRowsHealthAndDeterminism(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		f := newFrame([]Column{{Name: "n", Type: "number", Role: "measure"}})
 		appendPanelRow(f, float64(1))
-		f.Health = &HealthFrame{ErrorTrend: []float64{1, 2}}
+		f.Health = &HealthFrame{ErrorTrend: []float64{1, 2}, ErrorTrendTimes: []int64{1, 2}}
 		f.Trends = map[string][][]any{"z": {{1}}, "a": {{1}}}
 		limitBatchFrames([]Result{{Frame: first}, {Frame: f}})
-		if len(f.Health.ErrorTrend) != 2 || len(f.Trends["a"][0]) != 1 || f.Trends["z"][0] != nil {
+		if len(f.Health.ErrorTrend) != 1 || len(f.Health.ErrorTrendTimes) != 1 || f.Health.ErrorTrendTimes[0] != 2 || len(f.Trends["a"][0]) != 1 || f.Trends["z"][0] != nil {
 			t.Fatalf("nondeterministic budget: %+v", f)
 		}
 	}

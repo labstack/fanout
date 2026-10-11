@@ -1,0 +1,1 @@
+import{r as e}from"./useRouter-ByJ6_rwb.js";import{t}from"./useNavigate-B1zgPEUp.js";var n=e();function r(){return(0,n.jsx)(t,{to:`/dashboards`,replace:!0})}export{r as component};

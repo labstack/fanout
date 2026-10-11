@@ -114,13 +114,22 @@ FROM telemetry.logs;`
 const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
 SELECT
+  series_id,
   namespace,
   metric_time::TIMESTAMPTZ_NS AS time,
   time_unix_nano,
   name,
   description,
   unit,
-  metric_type AS type,
+  CASE WHEN metric_type='sum' AND monotonic THEN 'counter'
+       WHEN metric_type='sum' THEN 'updown'
+       WHEN metric_type='exponential_histogram' THEN 'histogram'
+       ELSE metric_type END AS type,
+  temporality,
+  -- The int64 extremes are the engine's infinity sentinels and do not convert;
+  -- TRY keeps one such client-supplied point from failing every query.
+  CASE WHEN start_time_unix_nano=0 THEN NULL
+       ELSE TRY(make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS) END AS start_time,
   service,
   value,
   hist_bounds_json,
@@ -167,7 +176,7 @@ func CreateCacheTables(db *sql.DB) error {
 	return createBatchCaches(db)
 }
 
-// CreateParquetViews exposes the fixed format-3 schema. Binding one file
+// CreateParquetViews exposes the fixed format-4 schema. Binding one file
 // rather than unioning every footer bounds binder memory. Supplying a schema
 // MAP suppresses DuckDB 2's VARIANT extraction pushdown, so read the physical
 // schema directly; startup rejects mismatched batch schemas before this point.

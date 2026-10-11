@@ -12,7 +12,7 @@ it.each([{width:460,height:360},{width:760,height:360},{width:1100,height:420}])
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const model = serviceMapModel(wallFrame), graph = fitServiceMap(layoutServiceMapRaw(model, size), model, size);
   expect(graph.nodes).toHaveLength(18); expect(graph.edges).toHaveLength(23);
-  expect(graph.scale).toBeGreaterThanOrEqual(.65);
+  expect(graph.scale).toBeGreaterThanOrEqual(.9);
   const entry=graph.nodes.find(n=>n.entry)!;
   expect(entry.x+entry.width/2+graph.initialView.x).toBeGreaterThanOrEqual(8);
   expect(entry.x+entry.width/2+graph.initialView.x).toBeLessThanOrEqual(size.width-8);
@@ -28,7 +28,7 @@ it.each([{width:460,height:360},{width:760,height:360},{width:1100,height:420}])
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function(this: HTMLElement) {
     if (this.hasAttribute("data-service-viewport")) return DOMRect.fromRect(size);
     if (this.hasAttribute("data-service-node")) return DOMRect.fromRect({x:parseFloat(this.style.left),y:parseFloat(this.style.top),width:parseFloat(this.style.width),height:parseFloat(this.style.height)});
-    if (this.hasAttribute("data-service-uncalled-label")) return DOMRect.fromRect({x:graph.uncalledLabel!.x,y:graph.uncalledLabel!.y,width:174,height:11});
+    if (this.hasAttribute("data-service-uncalled-label")) return DOMRect.fromRect({x:graph.uncalledLabel!.x,y:graph.uncalledLabel!.y,width:174,height:parseFloat(this.style.fontSize)*parseFloat(this.style.lineHeight)+2*parseFloat(this.style.paddingTop)});
     return original.call(this);
   });
   vi.spyOn(SVGElement.prototype,"getBoundingClientRect").mockImplementation(function(this: SVGElement) {
@@ -42,7 +42,9 @@ it.each([{width:460,height:360},{width:760,height:360},{width:1100,height:420}])
     await act(async()=>root.render(<MantineProvider><ServiceMapViz panel={{id:"m",title:"Map",viz:"service_map"}} result={{id:"m",status:"ok",elapsed_ms:1,frame:wallFrame}} dark={false} height={size.height+24} onMapView={view}/></MantineProvider>));
     const content=host.querySelector<HTMLElement>('[data-service-content]')!, initial=content.style.transform;
     expect(initial).toBe(`translate(${graph.initialView.x}px, ${graph.initialView.y}px) scale(1)`);
-    expect(view.mock.lastCall![0].canFit).toBe(graph.contentWidth > size.width || graph.contentHeight > size.height);
+    // Extra canvas margins do not require Fit when the actual graph is visible.
+    const clipped = graph.nodes.some(n => n.x+graph.initialView.x < 0 || n.y+graph.initialView.y < 0 || n.x+n.width+graph.initialView.x > size.width || n.y+n.height+graph.initialView.y > size.height);
+    expect(view.mock.lastCall![0].canFit).toBe(clipped);
     expect(assertServiceMapDOM(host.querySelector('[data-service-viewport]')!,{requireNames:true,allowOverflow:true})).toMatchObject({nodes:18,edges:23});
     await act(async()=>view.mock.lastCall![0].fit());
     if (view.mock.lastCall![0].overview) await act(async()=>view.mock.lastCall![0].fit());

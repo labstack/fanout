@@ -148,6 +148,10 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		return compileItems(p, measures, filters, scope)
 	}
 
+	if p.Query.From == "metrics" {
+		return compileMetricQuery(p, measures, filters, scope)
+	}
+
 	q := p.Query
 	sig, ok := lookupSignal(q.From)
 	if !ok {
@@ -250,6 +254,9 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 }
 
 func measureSQL(m Measure, sig *signal, seconds float64, partition string) string {
+	if sig.name == "metrics" && m.Func != "count" && m.Func != "count_distinct" && m.Func != "share" {
+		panic("metric value and rate measures require compileMetricQuery")
+	}
 	switch m.Func {
 	case "count":
 		return "count(*)::DOUBLE"

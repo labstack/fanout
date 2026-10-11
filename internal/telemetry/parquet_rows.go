@@ -122,32 +122,38 @@ func makeLogParquetRow(r Log) logParquetRow {
 }
 
 type metricParquetRow struct {
-	Namespace        string  `parquet:"namespace,dict"`
-	MetricTime       int64   `parquet:"metric_time,timestamp(nanosecond)"`
-	TimeUnixNano     int64   `parquet:"time_unix_nano"`
-	Name             string  `parquet:"name,dict"`
-	Description      string  `parquet:"description,dict"`
-	Unit             string  `parquet:"unit,dict"`
-	MetricType       string  `parquet:"metric_type,dict"`
-	Service          string  `parquet:"service,dict"`
-	Value            float64 `parquet:"value"`
-	HistBoundsJSON   string  `parquet:"hist_bounds_json,dict"`
-	HistCountsJSON   string  `parquet:"hist_counts_json,dict"`
-	HistCount        int64   `parquet:"hist_count"`
-	HistSum          float64 `parquet:"hist_sum"`
-	ExemplarsJSON    string  `parquet:"exemplars_json"`
-	Attributes       any     `parquet:"attributes,variant"`
-	Resource         any     `parquet:"resource,variant"`
-	ScopeName        string  `parquet:"scope_name,dict"`
-	ScopeVersion     string  `parquet:"scope_version,dict"`
-	IngestedAt       int64   `parquet:"ingested_at,timestamp(nanosecond)"`
-	IngestedUnixNano int64   `parquet:"ingested_unix_nano"`
+	SeriesID          uint64  `parquet:"series_id"`
+	Namespace         string  `parquet:"namespace,dict"`
+	MetricTime        int64   `parquet:"metric_time,timestamp(nanosecond)"`
+	TimeUnixNano      int64   `parquet:"time_unix_nano"`
+	Name              string  `parquet:"name,dict"`
+	Description       string  `parquet:"description,dict"`
+	Unit              string  `parquet:"unit,dict"`
+	MetricType        string  `parquet:"metric_type,dict"`
+	Temporality       string  `parquet:"temporality,dict"`
+	Monotonic         bool    `parquet:"monotonic"`
+	StartTimeUnixNano int64   `parquet:"start_time_unix_nano"`
+	Service           string  `parquet:"service,dict"`
+	Value             float64 `parquet:"value"`
+	HistBoundsJSON    string  `parquet:"hist_bounds_json,dict"`
+	HistCountsJSON    string  `parquet:"hist_counts_json,dict"`
+	HistCount         int64   `parquet:"hist_count"`
+	HistSum           float64 `parquet:"hist_sum"`
+	ExemplarsJSON     string  `parquet:"exemplars_json"`
+	Attributes        any     `parquet:"attributes,variant"`
+	Resource          any     `parquet:"resource,variant"`
+	ScopeName         string  `parquet:"scope_name,dict"`
+	ScopeVersion      string  `parquet:"scope_version,dict"`
+	IngestedAt        int64   `parquet:"ingested_at,timestamp(nanosecond)"`
+	IngestedUnixNano  int64   `parquet:"ingested_unix_nano"`
 }
 
 func makeMetricParquetRow(r Metric) metricParquetRow {
 	return metricParquetRow{
+		SeriesID:  r.SeriesID,
 		Namespace: r.Namespace, MetricTime: FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		Name: r.Name, Description: r.Description, Unit: r.Unit, MetricType: r.Type, Service: r.ServiceName,
+		Temporality: r.Temporality, Monotonic: r.Monotonic, StartTimeUnixNano: r.StartTimeUnixNanos,
 		Value: r.Value, HistBoundsJSON: r.HistBoundsJSON, HistCountsJSON: r.HistCountsJSON,
 		HistCount: r.HistCount, HistSum: r.HistSum, ExemplarsJSON: r.ExemplarsJSON,
 		Attributes: r.Attributes, Resource: r.Resource, ScopeName: r.ScopeName,

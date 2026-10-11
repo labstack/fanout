@@ -155,7 +155,8 @@ func TestItemsSpecGuide(t *testing.T) {
 		"Scatter supports options.x_scale and options.y_scale (log or linear)",
 		"distinct x_unit for x and unit for y",
 		"Rows returned use the count unit",
-		"SQL panels cannot use scatter or state_timeline",
+		"Scatter requires a structured query",
+		"SQL state_timeline requires timestamp time",
 		"Items rank by volume (row count) for top N",
 		"Previous-period comparison is not drawn for scatter or state_timeline",
 	} {

@@ -82,7 +82,7 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 	for (scope.End.Add(-time.Nanosecond).UnixMilli()-alignedBucketMillis(scope.Start, interval))/interval.Milliseconds()+1 > 240 {
 		interval *= 2
 	}
-	bucket := fmt.Sprintf("time_bucket(INTERVAL '%d seconds',%s::TIMESTAMP_NS,'1970-01-01'::TIMESTAMP_NS)", int64(interval/time.Second), quoteIdent(sig.time))
+	bucket := fmt.Sprintf("time_bucket(INTERVAL '%d seconds',%s::TIMESTAMP_NS,%s)", int64(interval/time.Second), quoteIdent(sig.time), bucketOrigin)
 	selects := []string{"epoch_ms(" + bucket + ")::BIGINT AS _t"}
 	groups := []string{bucket}
 	columns := []Column{{Name: "time", Type: "time", Role: "time"}}
@@ -95,7 +95,10 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 	share := false
 	for _, m := range checked.Measures[p.ID] {
 		if wanted[m.Alias] {
-			expression := measureSQL(m, sig, interval.Seconds(), "PARTITION BY "+bucket)
+			expression := "NULL::DOUBLE"
+			if sig.name != "metrics" {
+				expression = measureSQL(m, sig, interval.Seconds(), "PARTITION BY "+bucket)
+			}
 			if m.Func == "share" {
 				share = true
 				expression = "100.0*count(*)/nullif(max(_trend_total),0)"
@@ -118,7 +121,50 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 		}
 		text = "WITH _trend_scope AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + originalWhere + "), _trend_totals AS (SELECT " + bucket + " AS _trend_bucket,count(*) AS _trend_total FROM _trend_scope GROUP BY 1) SELECT " + strings.Join(selects, ",") + " FROM _trend_scope JOIN _trend_totals ON " + bucket + "=_trend_bucket WHERE " + tupleWhere + " GROUP BY " + strings.Join(groups, ",") + fmt.Sprintf(" ORDER BY _t DESC LIMIT %d", limit+1)
 	}
-	rows, err := e.engine.QueryContext(queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End}), text, args...)
+
+	if sig.name == "metrics" {
+		clone, query := *p, *p.Query
+		clone.Query = &query
+		query.Measures = nil
+		selected := []Measure{}
+		for _, m := range checked.Measures[p.ID] {
+			if wanted[m.Alias] {
+				query.Measures = append(query.Measures, m.Text)
+				selected = append(selected, m)
+			}
+		}
+		trendScope := scope
+		trendScope.Interval = interval
+		compiled, err := compileMetricQuery(&clone, selected, checked.Filters[p.ID], trendScope)
+		if err != nil {
+			return err
+		}
+		// Filter displayed tuples after aggregation so share retains the
+		// complete checked scope as its denominator.
+		tupleWhere := "TRUE"
+		tupleArgs := []any{}
+		aliases := []string{}
+		for _, ref := range dimensions {
+			aliases = append(aliases, quoteIdent(ref.alias()))
+		}
+		if len(aliases) > 0 {
+			tupleWhere = "(" + strings.Join(aliases, ",") + ") IN (" + strings.Join(tuples, ",") + ")"
+			for r := 0; r < f.Rows; r++ {
+				for _, index := range indices {
+					tupleArgs = append(tupleArgs, f.Values[index][r])
+				}
+			}
+		}
+		// The table limit must not cut groups before the displayed tuples
+		// are selected. The final query applies the existing trend cell cap.
+		at := strings.LastIndex(compiled.SQL, " ORDER BY ")
+		text = "SELECT * FROM (" + compiled.SQL[:at] + ") WHERE " + tupleWhere + fmt.Sprintf(" ORDER BY _t DESC LIMIT %d", limit+1)
+		args = append(compiled.Args, tupleArgs...)
+		columns = compiled.Columns
+	}
+
+	read := metricReadScope(p, scope)
+	rows, err := e.engine.QueryContext(queryrows.WithWindow(ctx, queryrows.Window{Start: read.Start, End: read.End}), text, args...)
 	if err != nil {
 		return err
 	}
@@ -126,7 +172,9 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 	if err != nil {
 		return err
 	}
-	boundAnalysisFrame(trend)
+	if err := boundAnalysisFrame(trend); err != nil {
+		return err
+	}
 	f.Trends = map[string][][]any{}
 	lo := alignedBucketMillis(scope.Start, interval)
 	points := int((scope.End.Add(-time.Nanosecond).UnixMilli()-lo)/interval.Milliseconds() + 1)

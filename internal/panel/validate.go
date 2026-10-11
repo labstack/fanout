@@ -481,9 +481,6 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 			(q.From != "metrics" || q.Histogram.Field != "value" || q.Histogram.Buckets != "explicit") {
 			problems.add(path+".histogram", "use spans duration_ms/log2 or metrics value/explicit")
 		}
-		if q.Histogram != nil && q.Histogram.Temporality != "" && (q.From != "metrics" || (q.Histogram.Temporality != "cumulative" && q.Histogram.Temporality != "delta")) {
-			problems.addHint(path+".histogram.temporality", "temporality applies to metric histograms and must be cumulative or delta", "omit for the OTel cumulative default")
-		}
 		if len(q.Measures) != 1 || q.Measures[0] != "count()" {
 			problems.addHint(path+".measures", "distribution counts require count()", "use count() as the observation weight")
 		}
@@ -562,3 +559,46 @@ func inferBetter(p *Panel) string {
 }
 
 var errorCountFilter = regexp.MustCompile(`(?i)^\s*\(*\s*(?:status\s*=\s*'(?:STATUS_CODE_ERROR|ERROR)'|status\s+IN\s*\(\s*'(?:STATUS_CODE_ERROR|ERROR)'(?:\s*,\s*'(?:STATUS_CODE_ERROR|ERROR)')*\s*\)|(?:severity|upper\s*\(\s*severity\s*\))\s*=\s*'(?:ERROR|FATAL|CRITICAL)'|(?:severity|upper\s*\(\s*severity\s*\))\s+IN\s*\(\s*'(?:ERROR|FATAL|CRITICAL)'(?:\s*,\s*'(?:ERROR|FATAL|CRITICAL)')*\s*\)|severity_number\s*>=\s*17|http_status_code\s*>=\s*500)\s*\)*\s*$`)
+
+func validateMetricName(p *Panel, filters []Filter, vars map[string]Variable, path string, problems *Problems) {
+	if p.Query == nil || p.Query.From != "metrics" {
+		return
+	}
+	for _, by := range p.Query.By {
+		if by == "name" {
+			return
+		}
+	}
+	sig := signals["metrics"]
+	var ignored Problems
+	measures := parseMeasures(sig, p.Query.Measures, "", &ignored)
+	needs := false
+	for _, m := range measures {
+		if m.Func != "count" && m.Func != "count_distinct" {
+			needs = true
+		}
+	}
+	if !needs {
+		return
+	}
+	for _, f := range filters {
+		if f.EqField != "name" || !f.EqValue {
+			continue
+		}
+		if f.EqParam == "" {
+			return
+		}
+		v, ok := vars[f.EqParam]
+		if ok && !v.Multi && !v.IncludeAll {
+			return
+		}
+	}
+	hint := "filter name to one literal or a single-value variable without All, or group by name"
+	for _, f := range filters {
+		if f.NameInAnd {
+			hint += "; put the name filter in its own where entry"
+			break
+		}
+	}
+	problems.addHint(path+".query.where", "metric aggregates need one metric per group", hint)
+}

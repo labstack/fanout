@@ -87,6 +87,105 @@ export, so it can sit directly behind them — but if you already run a Collecto
 for sampling, enrichment or fan-out to a second backend, Fanout is just another
 exporter in the pipeline.
 
+## Watch hosts, containers and endpoints
+
+The default **System overview** dashboard combines application traces with
+Collector metrics. Use the Collector contrib distribution for `hostmetrics`,
+`docker_stats` and `httpcheck`. Run one Collector on each observed host, with
+access to the host filesystem and Docker socket:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu: {}
+      memory: {}
+      filesystem: {}
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 30s
+  httpcheck:
+    collection_interval: 30s
+    targets:
+      - endpoint: https://app.example.com/health
+        method: GET
+
+processors:
+  resourcedetection:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+  resource:
+    attributes:
+      - key: service.namespace
+        value: storefront
+        action: upsert
+  batch: {}
+
+exporters:
+  otlp/fanout:
+    endpoint: https://fanout.example.com:443
+    headers:
+      Authorization: "Bearer ${env:INGEST_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/fanout]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/fanout]
+    metrics:
+      receivers: [otlp, hostmetrics, docker_stats, httpcheck]
+      processors: [resourcedetection, resource, batch]
+      exporters: [otlp/fanout]
+```
+
+Set `INGEST_TOKEN` in the Collector environment. Use your Fanout address and
+namespace, and the plaintext exporter settings above when TLS is absent.
+If the Collector runs in a container, mount the host filesystem read-only and
+set `hostmetrics.root_path` to that mount; give the Collector the observed
+host's `host.name`, rather than its own container hostname. Mount the Docker
+socket only where container metrics are needed.
+
+**Run `httpcheck` from a second machine outside the observed stack.** On that
+Collector, reuse the exporter and resource processors, but use a metrics
+pipeline with `receivers: [httpcheck]`. Its `host.name` identifies where the
+check ran. A check on the application host cannot see every DNS, CDN or proxy
+failure that outside visitors encounter; the dashboard warns when all checks
+run on hosts that also run observed services.
+
+- **Is it reachable?** uses `httpcheck.status` and `httpcheck.duration`, with
+  the target's `http.url` and the reporting Collector's `host.name`.
+- **Is anything failing or slow?** uses application spans. Client spans with
+  `peer.service` or `server.address` identify uninstrumented dependencies;
+  error status makes their failures visible.
+- **Is anything running out?** uses host CPU counters, memory and filesystem
+  usage by state and mountpoint, plus container CPU and memory usage and limits.
+  Capacity warns at 80% and is bad at 90%.
+- **What changed?** uses `service.version` on application resources, along with
+  runtime and SDK attributes. Send a new version when deploying a service.
+
+Silence is not health. After two reporting intervals, an endpoint with no
+result shows **no recent result**, and a host or container shows **not reporting**,
+both in the bad state. A receiver that has never sent data shows an empty panel.
+If the machine running Fanout fails, Fanout cannot report that failure on its
+own page: monitor Fanout itself from outside that machine.
+
+Existing users keep their saved copy of the default dashboard. New system
+sections appear in newly created default dashboards; existing copies are not
+automatically replaced.
+
 ## Namespaces
 
 Fanout reads `service.namespace` from each OTLP resource, falling back to

@@ -30,6 +30,15 @@
   },
   "results": [
     {
+      "annotation_scope": {
+        "services": [
+          {
+            "namespace": "shop",
+            "service": "checkout"
+          }
+        ],
+        "namespace_scoped": true
+      },
       "id": "health",
       "status": "ok",
       "frame": {
@@ -43,6 +52,9 @@
           "total_spans": 30,
           "error_rate": 10,
           "service_count": 1,
+          "error_trend_times": [
+            1791400500000
+          ],
           "error_trend": [
             10
           ]

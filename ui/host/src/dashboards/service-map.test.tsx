@@ -277,10 +277,16 @@ it("invalidates measured geometry when card widths change",()=>{
   const model=serviceMapModel(frame(4),{from_ms:0,to_ms:3600000});
   expect(serviceMapStructure(model,t=>t.length*6).key).not.toBe(serviceMapStructure(model,t=>t.length*9).key);
 });
-it("contains a narrow resize and fits further resizes without Dagre",async()=>{
+it("preserves readable cards in a narrow pan canvas and fits further resizes without Dagre",async()=>{
   const {viewport,resize}=await mount(4);
   await resize(270,280);
-  for (const node of viewport.querySelectorAll<HTMLElement>("button")) expect(parseFloat(node.style.left)+parseFloat(node.style.width)).toBeLessThanOrEqual(270);
+  const content=viewport.querySelector<HTMLElement>('[data-service-content]')!;
+  expect(parseFloat(content.style.width)).toBeGreaterThan(270);
+  expect(viewport.dataset.mapOverflow).not.toBe("");
+  for (const node of viewport.querySelectorAll<HTMLElement>("button")) {
+    expect(parseFloat(node.style.left)).toBeGreaterThanOrEqual(0);
+    expect(parseFloat(node.style.left)+parseFloat(node.style.width)).toBeLessThanOrEqual(parseFloat(content.style.width));
+  }
   const layouts=calls.layout.mock.calls.length;
   await resize(260,270); expect(calls.layout).toHaveBeenCalledTimes(layouts);
 });

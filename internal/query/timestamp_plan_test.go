@@ -12,7 +12,7 @@ import (
 )
 
 func TestNativeTimestampPredicatesPruneParquetAndPreserveNanoseconds(t *testing.T) {
-	// Use real format-3 files with three disjoint row groups, and a non-UTC
+	// Use real format-4 files with three disjoint row groups, and a non-UTC
 	// process timezone. Nanosecond window parameters must not lose precision.
 	t.Setenv("TZ", "America/Los_Angeles")
 	store, err := telemetry.OpenParquetStore(t.TempDir())

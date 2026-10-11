@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import type { AgentSubscriber, Message } from "@ag-ui/client";
 import { QueryClient } from "@tanstack/react-query";
-import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import App from "./App";
 import { ChatPage } from "./chat";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { parseSearch, toSearchParams } from "./dashboards/search";
+import { Route as indexRoute } from "./routes/index";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -32,10 +33,11 @@ vi.mock("@ag-ui/client", () => ({
 
 const defaultViewer = { id: "viewer-1", email: "v@example.com", display_name: "Vee", status: "active" as const, role: "admin" };
 const viewerMock = vi.hoisted(() => ({ current: { id: "viewer-1", email: "v@example.com", display_name: "Vee", status: "active" as const, role: "admin" } }));
+const runtimeMock = vi.hoisted(() => ({ agentAvailable: true }));
 
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
-  useRuntimeStatus: () => ({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false }),
+  useRuntimeStatus: () => ({ setup_required: false, auth_mode: "local", agent_available: runtimeMock.agentAvailable, smtp_configured: true, self_signup: false }),
   useViewer: () => viewerMock.current,
   authorizedFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
   logout: vi.fn(async () => undefined),
@@ -85,6 +87,25 @@ describe("Session", () => {
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
     viewerMock.current = defaultViewer;
+    runtimeMock.agentAvailable = true;
+  });
+
+  it.each([true, false])("opens dashboards from / with agent_available=%s and replaces the root history entry", async (available) => {
+    runtimeMock.agentAvailable = available;
+    const rootRoute = createRootRoute({ component: App });
+    const index = createRoute({ getParentRoute: () => rootRoute, path: "/", component: indexRoute.options.component });
+    const dashboards = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: () => <div>System overview</div> });
+    const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat", component: () => <div>Chat</div> });
+    const history = createMemoryHistory({ initialEntries: ["/chat", "/"] });
+    const router = createRouter({ routeTree: rootRoute.addChildren([index, dashboards, chat]), history });
+    const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+    try {
+      await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+      await vi.waitFor(() => expect(router.state.location.pathname).toBe("/dashboards"));
+      expect(host.textContent).toContain("System overview");
+      await act(async () => history.back());
+      await vi.waitFor(() => expect(router.state.location.pathname).toBe("/chat"));
+    } finally { await act(async () => root.unmount()); }
   });
 
   it.each(["create_dashboard", "edit_dashboard", "replace_dashboard", "restore_dashboard_version"])("refreshes the rail and links the saved dashboard at the streamed %s result", async (name) => {

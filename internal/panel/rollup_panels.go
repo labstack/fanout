@@ -11,7 +11,7 @@ import (
 type RollupReader interface {
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
-	HealthErrorTrend(context.Context, observability.Scope) ([]float64, error)
+	HealthErrorTrend(context.Context, observability.Scope) (observability.HealthTrend, error)
 }
 
 func (e *Executor) SetRollupReader(reader RollupReader) { e.rollups = reader }
@@ -105,7 +105,7 @@ func (e *Executor) runRollupPanel(ctx context.Context, p *Panel, filters []Filte
 		if err != nil {
 			return nil, "", err
 		}
-		f.Health = &HealthFrame{Health: string(result.Data.Health), Counts: result.Data.Counts, TotalSpans: result.Data.TotalSpans, ErrorRate: result.Data.ErrorRate * 100, ServiceCount: result.Data.ServiceCount, ErrorTrend: trend}
+		f.Health = &HealthFrame{Health: string(result.Data.Health), Counts: result.Data.Counts, TotalSpans: result.Data.TotalSpans, ErrorRate: result.Data.ErrorRate * 100, ServiceCount: result.Data.ServiceCount, ErrorTrend: trend.Values, ErrorTrendTimes: trend.Times}
 		for _, s := range result.Data.Services {
 			appendPanelRow(f, s.Service, string(s.Health), float64(s.Spans), s.ErrorRate*100, s.P50MS, s.P95MS, float64(s.LogCount), float64(s.MetricCount))
 		}
