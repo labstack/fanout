@@ -43,7 +43,7 @@ it.each([190,220])("protects all names in a twenty-node graph with nine leaf lan
   for(const n of graph.nodes) {
     const labelScale=1,font=Math.max(typeScale.micro,12*graph.scale);
     expect(font).toBeGreaterThanOrEqual(11);
-    expect(n.height).toBeGreaterThanOrEqual(font+2*labelScale-.01);
+    expect(n.height).toBeGreaterThanOrEqual(font*1.4+2*labelScale-.01);
     expect(n.width).toBeGreaterThanOrEqual(measure(n.id+"●",`${font}px monospace`)+16*labelScale);
   }
 });
@@ -99,7 +99,7 @@ it("keeps separated entries and leaves readable in the pan canvas",()=>{
     for(let i=0;i<20;i++){const child=`${id}-callee-${i}`;nodes.push({...model.nodes[0],id:child});edges.push({...model.edges[0],id:child,caller:id,callee:child});}
   }
   const m={nodes,edges},graph=fitServiceMap(layoutServiceMapRaw(m,{width:1100,height:180}),m,{width:1100,height:180});
-  expect(graph.scale).toBe(.65);expect(graph.contentHeight).toBeGreaterThan(180);
+  expect(graph.scale).toBe(.9);expect(graph.contentHeight).toBeGreaterThan(180);
   const entries=graph.nodes.filter(n=>n.entry);expect(entries.some(n=>n.y+graph.initialView.y>=8 && n.y+n.height+graph.initialView.y<=172)).toBe(true);
   for(const n of graph.nodes) {expect(n.height).toBeCloseTo(20*graph.scale);for(const o of graph.nodes) if(o!==n) expect(n.x>=o.x+o.width||o.x>=n.x+n.width||n.y>=o.y+o.height||o.y>=n.y+n.height).toBe(true);}
 });
@@ -127,7 +127,9 @@ for(const [width,height] of [[1100,220],[1100,190],[1600,700],[1440,480]]) for(c
     const nameWidth=measure(name.textContent!,`600 ${fontSize}px sans-serif`);
     const healthWidth=measure(line.firstElementChild!.textContent!,`${fontSize}px sans-serif`);
     expect(nameWidth+healthWidth+14).toBeLessThanOrEqual(parseFloat(card.style.width)+.01);
-    expect(fontSize+2).toBeLessThanOrEqual(parseFloat(card.style.height)+.01);
+    const lineHeight=parseFloat(line.style.lineHeight);
+    expect(lineHeight).toBeGreaterThanOrEqual(1.3); // Bundled Geist Mono ascent + descent / em.
+    expect(fontSize*lineHeight+2).toBeLessThanOrEqual(parseFloat(card.style.height)+.01);
     expect(card.title).toContain("p95");expect(card.title).toContain("err");
     if(viewport.dataset.cardMode==="compact") expect(card.querySelector('[data-service-metric]')).toBeNull();
     else {const metric=card.querySelector<HTMLElement>('[data-service-metric]')!;expect(metric).not.toBeNull();expect(measure(metric.textContent!,`${parseFloat(metric.style.fontSize)}px sans-serif`)+10).toBeLessThanOrEqual(parseFloat(card.style.width)+.01);}
