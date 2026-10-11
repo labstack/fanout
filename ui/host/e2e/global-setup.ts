@@ -128,6 +128,10 @@ export default async function globalSetup() {
       // Counts can precede log flushes and edge publication; inspect kind, not total rows.
       return readinessCause(body);
     });
+    // A first visit gives the owner the default "System overview" before the
+    // fixtures below, which every other spec opens by id, so / reaches it.
+    const listed = await safeRequest("/api/dashboards", () => api!.get("/api/dashboards", { timeout: 20_000 }));
+    if (listed.status() !== 200) throw new Error(`HTTP ${listed.status()} /api/dashboards`);
     const spec = JSON.parse(await readFile(join(root, "ui/host/e2e/fixtures/all-panels.json"), "utf8"));
     const { response: created, body: record } = await requestJSON("/api/dashboards", { spec });
     if (created.status() !== 201) throw new Error(`HTTP ${created.status()} /api/dashboards`);

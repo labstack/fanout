@@ -10,16 +10,21 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/ingest"
+	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	metrics "go.opentelemetry.io/proto/otlp/metrics/v1"
 	trace "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -37,7 +42,7 @@ func TestSeedPayloadsAreDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range []string{"traces", "logs"} {
+	for _, signal := range []string{"traces", "logs", "metrics"} {
 		if len(a[signal]) == 0 || !bytes.Equal(a[signal], b[signal]) {
 			t.Fatalf("%s payload differs", signal)
 		}
@@ -213,7 +218,7 @@ func TestSeedCoversDistributedTelemetry(t *testing.T) {
 			}
 		}
 	}
-	if len(ids) != 8640 || parents != 7200 || errors != 432 || count != 8640 || len(services) != 6 || len(severities) != 4 || len(versions) != 2 || !db || !producer || !consumer || !routes {
+	if len(ids) != 8640 || parents != 7200 || errors != 492 || count != 8640 || len(services) != 6 || len(severities) != 4 || len(versions) != 2 || !db || !producer || !consumer || !routes {
 		t.Fatalf("incomplete seed: spans=%d parents=%d errors=%d logs=%d services=%d severities=%d versions=%d", len(ids), parents, errors, count, len(services), len(severities), len(versions))
 	}
 	for _, count := range bodies {
@@ -230,7 +235,7 @@ func TestSeedPostsAuthenticatedProtobuf(t *testing.T) {
 			t.Error("incorrect OTLP request")
 		}
 		switch r.URL.Path {
-		case "/v1/traces", "/v1/logs":
+		case "/v1/traces", "/v1/logs", "/v1/metrics":
 			seen[r.URL.Path] = true
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
@@ -245,8 +250,73 @@ func TestSeedPostsAuthenticatedProtobuf(t *testing.T) {
 	if err := run(server.URL, file); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 2 {
-		t.Fatal("both signals must be posted")
+	if len(seen) != 3 {
+		t.Fatal("all three signals must be posted")
+	}
+}
+
+func TestSeedUsesCollectorMetricKindsScopesAndCadence(t *testing.T) {
+	base := time.Date(2026, 10, 10, 12, 0, 0, 123456789, time.UTC)
+	data, err := payloads(13, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request collectormetrics.ExportMetricsServiceRequest
+	if err := proto.Unmarshal(data["metrics"], &request); err != nil {
+		t.Fatal(err)
+	}
+	const receiver = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/"
+	want := map[string]struct{ scope, kind, unit string }{
+		"system.cpu.time":              {"hostmetricsreceiver/internal/scraper/cpuscraper", "counter", "s"},
+		"system.memory.usage":          {"hostmetricsreceiver/internal/scraper/memoryscraper", "updown", "By"},
+		"system.filesystem.usage":      {"hostmetricsreceiver/internal/scraper/filesystemscraper", "updown", "By"},
+		"container.cpu.utilization":    {"dockerstatsreceiver", "gauge", "%"},
+		"container.memory.usage.total": {"dockerstatsreceiver", "gauge", "By"},
+		"container.memory.usage.limit": {"dockerstatsreceiver", "gauge", "By"},
+		"httpcheck.status":             {"httpcheckreceiver", "updown", "1"},
+		"httpcheck.duration":           {"httpcheckreceiver", "gauge", "ms"},
+	}
+	seen := map[string]bool{}
+	for _, resource := range request.ResourceMetrics {
+		stopped := false
+		for _, a := range resource.Resource.Attributes {
+			stopped = stopped || a.Key == "host.name" && a.Value.GetStringValue() == "stopped-host"
+		}
+		for _, scope := range resource.ScopeMetrics {
+			for _, m := range scope.Metrics {
+				w, ok := want[m.Name]
+				if !ok || scope.Scope.Name != receiver+w.scope || m.Unit != w.unit {
+					t.Fatalf("unexpected Collector metadata: %s %+v", scope.Scope.Name, m)
+				}
+				seen[m.Name] = true
+				points := m.GetGauge().GetDataPoints()
+				if w.kind != "gauge" {
+					sum := m.GetSum()
+					if sum == nil || sum.IsMonotonic != (w.kind == "counter") || sum.AggregationTemporality != metrics.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE {
+						t.Fatalf("wrong sum semantics: %+v", m)
+					}
+					points = sum.DataPoints
+				}
+				if len(points) < 3 {
+					t.Fatalf("missing cadence: %s", m.Name)
+				}
+				for i, p := range points {
+					for _, a := range p.Attributes {
+						stopped = stopped || a.Key == "http.url" && a.Value.GetStringValue() == "https://stopped.example.test/health"
+					}
+					if p.TimeUnixNano >= uint64(base.UnixNano()) || i > 0 && p.TimeUnixNano-points[i-1].TimeUnixNano != uint64(30*time.Second) || w.kind == "gauge" && p.StartTimeUnixNano != 0 || w.kind != "gauge" && (p.StartTimeUnixNano == 0 || p.StartTimeUnixNano >= p.TimeUnixNano) {
+						t.Fatalf("invalid point: %s %+v", m.Name, p)
+					}
+				}
+				age := base.Sub(time.Unix(0, int64(points[len(points)-1].TimeUnixNano)))
+				if stopped && age <= time.Minute || !stopped && age != 15*time.Second {
+					t.Fatalf("%s stopped=%v age=%s", m.Name, stopped, age)
+				}
+			}
+		}
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("missing metric families: %v", seen)
 	}
 }
 
@@ -295,7 +365,7 @@ func TestSeedCoversTwentyFourHoursDeterministically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range []string{"traces", "logs"} {
+	for _, signal := range []string{"traces", "logs", "metrics"} {
 		if !bytes.Equal(data[signal], again[signal]) {
 			t.Fatalf("%s is not deterministic", signal)
 		}
@@ -353,6 +423,7 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 	}
 	var spans collectortrace.ExportTraceServiceRequest
 	var logs collectorlogs.ExportLogsServiceRequest
+	var metricRequest collectormetrics.ExportMetricsServiceRequest
 	if err := proto.Unmarshal(payload["traces"], &spans); err != nil {
 		t.Fatal(err)
 	}
@@ -363,6 +434,12 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := collectorlogs.NewLogsServiceClient(conn).Export(t.Context(), &logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := proto.Unmarshal(payload["metrics"], &metricRequest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := collectormetrics.NewMetricsServiceClient(conn).Export(t.Context(), &metricRequest); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := query.NewDuck(t.Context(), cfg, repo)
@@ -401,4 +478,56 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 			t.Fatalf("missing panel %s", p.ID)
 		}
 	}
+	t.Run("system scenarios through OTLP", func(t *testing.T) {
+		system := dashboard.DefaultSpec()
+		// Execute the system SQL panels and the existing external-peer reader.
+		system.Panels = system.Panels[8:]
+		system.Panels = append(system.Panels[:2], system.Panels[3:]...)
+		executor := panel.NewExecutor(engine, 30)
+		executor.SetRollupReader(observability.New(engine, engine, 30))
+		from := base.Add(-time.Hour)
+		results, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: system, Vars: map[string]panel.Value{"service": {All: true}}, Time: &panel.Time{From: &from, To: &base}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := map[string][]map[string]any{}
+		for _, result := range results {
+			if result.Status != panel.StatusOK || result.Frame == nil {
+				t.Fatalf("%s: %+v", result.ID, result)
+			}
+			for i := range result.Frame.Rows {
+				row := map[string]any{}
+				for j, column := range result.Frame.Columns {
+					row[column.Name] = result.Frame.Values[j][i]
+				}
+				rows[result.ID] = append(rows[result.ID], row)
+			}
+		}
+		find := func(id string, match func(map[string]any) bool) map[string]any {
+			t.Helper()
+			for _, row := range rows[id] {
+				if match(row) {
+					return row
+				}
+			}
+			t.Fatalf("%s missing scenario: %+v", id, rows[id])
+			return nil
+		}
+		find("hosts", func(r map[string]any) bool {
+			return r["host"] == "disk-full-host" && r["filesystem_percent"] == 95.0 && r["mountpoint"] == "/data" && r["status"] == 95.0 && r["reporting"] == "reporting"
+		})
+		find("hosts", func(r map[string]any) bool {
+			return r["host"] == "stopped-host" && r["reporting"] == "not reporting" && r["status"] == 100.0
+		})
+		find("check_states", func(r map[string]any) bool {
+			return strings.Contains(fmt.Sprint(r["endpoint_from"]), "down.example.test") && r["state"] == "down" && r["failure"] == 1.0
+		})
+		find("check_states", func(r map[string]any) bool {
+			return strings.Contains(fmt.Sprint(r["endpoint_from"]), "stopped.example.test") && r["state"] == "no recent result" && r["failure"] == 2.0
+		})
+		find("versions", func(r map[string]any) bool { return r["service"] == "checkout" && r["version"] == "1.1.0" })
+		find("service_map", func(r map[string]any) bool {
+			return r["service"] == "warehouse-api.example.test" && r["health"] == "unhealthy"
+		})
+	})
 }
