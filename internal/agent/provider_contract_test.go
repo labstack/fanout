@@ -55,8 +55,8 @@ func TestOpenAIOutputItemsReplayVerbatim(t *testing.T) {
 	// Test request replay independently of parser failures: retained output must
 	// replace rebuilt text/calls and calls without executed results must vanish.
 	unsafe := json.RawMessage(`{"type":"function_call","call_id":"not_executed","name":"status","arguments":"{}"}`)
-	body := captureRequestBody(t, lines(`data: {"type":"response.completed","response":{}}`), func(url string) error {
-		p, err := NewProvider("openai", "test", "", url)
+	body := captureRequestBody(t, lines(`data: {"type":"response.completed","response":{}}`), "/v1/responses", func(url string) error {
+		p, err := NewProvider("openai", "test", "", url+"/v1")
 		if err != nil {
 			return err
 		}
@@ -134,13 +134,13 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":{"message":"reasoning.encrypted_content is unsupported by this model"}}`)
 	}))
 	defer server.Close()
-	p, err := NewProvider("openai", "test", "custom-model", server.URL)
+	p, err := NewProvider("openai", "test", "custom-model", server.URL+"/v1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = p.Stream(context.Background(), StreamParams{}, func(StreamEvent) error { return nil })
 	var apiErr *APIError
-	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "ai.model") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "FANOUT_AI_MODEL") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Errorf("configuration error = %v", err)
 	}
 	if got := clientErrorMessage(err); got != "Fanout could not reach the model provider. Please try again." {
@@ -149,8 +149,8 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 }
 
 func TestNewProviderNewestDefaults(t *testing.T) {
-	for _, kind := range []string{"", "anthropic", "openai"} {
-		p, err := NewProvider(kind, "test", "", "")
+	for _, kind := range []string{"anthropic", "openai"} {
+		p, err := NewProvider(kind, "test", "", "https://provider.example/gateway")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,6 +167,14 @@ func TestNewProviderNewestDefaults(t *testing.T) {
 	}
 }
 
+func TestNewProviderRejectsUnsupportedNames(t *testing.T) {
+	for _, kind := range []string{"", "OpenAI", " OpenAI ", " openai ", "Anthropic", "unsupported"} {
+		if _, err := NewProvider(kind, "test", "", "https://provider.example"); err == nil {
+			t.Errorf("provider %q must be rejected", kind)
+		}
+	}
+}
+
 func TestAnthropicCacheBreakpoints(t *testing.T) {
 	for _, finalRole := range []Role{RoleUser, RoleTool} {
 		t.Run(string(finalRole), func(t *testing.T) {
@@ -176,7 +184,7 @@ func TestAnthropicCacheBreakpoints(t *testing.T) {
 			} else {
 				messages = append(messages, ProviderMessage{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: "b", Content: "last"}})
 			}
-			body := captureRequestBody(t, lines(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`), func(url string) error {
+			body := captureRequestBody(t, lines(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`), "/v1/messages", func(url string) error {
 				p, err := NewProvider("anthropic", "test", "", url)
 				if err != nil {
 					return err
@@ -268,7 +276,7 @@ func TestRuntimeOpenAITerminalNotices(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.sse) }))
 			defer server.Close()
-			p, err := NewProvider("openai", "test", "", server.URL)
+			p, err := NewProvider("openai", "test", "", server.URL+"/v1")
 			if err != nil {
 				t.Fatal(err)
 			}

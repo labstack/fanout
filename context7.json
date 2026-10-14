@@ -15,6 +15,6 @@
     "Telemetry arrives over OTLP/gRPC or OTLP/HTTP on port 7520. Point an OpenTelemetry SDK or Collector at it; do not invent a bespoke ingest protocol.",
     "Parquet is the authoritative telemetry store. DuckDB query state and rollups are rebuildable from it, and SQLite is reserved for transactional product state.",
     "Fanout exposes an MCP server, and the browser client, the in-process agent and any external MCP host all reach the same typed observability contract rather than issuing raw SQL.",
-    "Configuration is by `FANOUT_*` environment variables or a YAML file; see fanout.example.yaml. The Go module path is `github.com/labstack/fanout`."
+    "Configuration uses process environment over built-in defaults; see .env.example. Custom names use `FANOUT_`; AI keys and endpoints use documented vendor names. Secret variables also accept `_FILE` paths. The Go module path is `github.com/labstack/fanout`."
   ]
 }

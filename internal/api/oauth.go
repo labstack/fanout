@@ -71,7 +71,7 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, re
 		// registration). Bound how many clients one source can create before
 		// the janitor collects the abandoned ones. The budget is per client
 		// IP, which collapses to one bucket when Fanout sits behind a proxy
-		// and server.trusted_proxy_cidrs is unset, so it is set well above a
+		// and FANOUT_TRUSTED_PROXY_CIDRS is unset, so it is set well above a
 		// plausible team rollout rather than at the tightest defensible value.
 		registerLimiter: appauth.NewKeyedLimiter(60, 15*time.Minute),
 	}, nil

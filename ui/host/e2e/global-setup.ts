@@ -73,13 +73,15 @@ export default async function globalSetup() {
   try {
     const base = `http://127.0.0.1:${await freePort()}`;
     // Ignore inherited product configuration and keys; this instance is disposable.
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("FANOUT_") && !/(?:API_KEY|TOKEN|SECRET)$/.test(key)));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      !key.startsWith("FANOUT_") && !key.startsWith("ANTHROPIC_") && !key.startsWith("OPENAI_") &&
+      !/(?:API_KEY|TOKEN|SECRET)$/.test(key)));
     const startDeadline = Date.now() + 30_000;
     const fd = openSync(serverLog, "a", 0o600);
     child = spawn(resolve(process.env.FANOUT_E2E_BINARY ?? join(root, "bin/fanout")), [], {
       cwd: dir,
       env: { ...env, FANOUT_DATA_DIR: join(dir, "data"), FANOUT_ADDR: new URL(base).host,
-        FANOUT_AUTH_CODE_SECRET: randomBytes(32).toString("hex"), FANOUT_AI_API_KEY: "",
+        FANOUT_AUTH_CODE_SECRET: randomBytes(32).toString("hex"),
         FANOUT_ROLLUP_INTERVAL: "1s" },
       stdio: ["ignore", fd, fd],
     });

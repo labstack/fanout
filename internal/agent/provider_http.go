@@ -15,23 +15,17 @@ import (
 )
 
 func NewProvider(kind, apiKey, model, baseURL string) (Provider, error) {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", "anthropic":
+	switch kind {
+	case "anthropic":
 		if model == "" {
 			model = "claude-sonnet-5-5"
 		}
-		if baseURL == "" {
-			baseURL = "https://api.anthropic.com"
-		}
-		return &anthropicProvider{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/"), client: modelHTTPClient()}, nil
+		return &anthropicProvider{apiKey: apiKey, model: model, baseURL: baseURL, client: modelHTTPClient()}, nil
 	case "openai":
 		if model == "" {
 			model = "gpt-6.1-sol"
 		}
-		if baseURL == "" {
-			baseURL = "https://api.openai.com"
-		}
-		return &openAIProvider{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/"), client: modelHTTPClient()}, nil
+		return &openAIProvider{apiKey: apiKey, model: model, baseURL: baseURL, client: modelHTTPClient()}, nil
 	default:
 		return nil, fmt.Errorf("unsupported AI provider %q", kind)
 	}
@@ -106,11 +100,11 @@ func (p *openAIProvider) Stream(ctx context.Context, params StreamParams, cb fun
 		}
 		body["tools"] = tools
 	}
-	response, err := postModel(ctx, p.client, p.baseURL+"/v1/responses", p.apiKey, "openai", body)
+	response, err := postModel(ctx, p.client, p.baseURL+"/responses", p.apiKey, "openai", body)
 	if err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(apiErr.Body), "encrypted") {
-			return fmt.Errorf("OpenAI configuration error: ai.model must select a reasoning model supporting reasoning.encrypted_content (default gpt-6.1-sol): %w", err)
+			return fmt.Errorf("OpenAI configuration error: FANOUT_AI_MODEL must select a reasoning model supporting reasoning.encrypted_content (default gpt-6.1-sol): %w", err)
 		}
 		return err
 	}

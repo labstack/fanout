@@ -46,7 +46,6 @@ LABEL org.opencontainers.image.title="Fanout" \
       org.opencontainers.image.version="${VERSION}"
 
 COPY --from=build /app/fanout /usr/local/bin/fanout
-COPY fanout.docker.yaml /etc/fanout/fanout.yaml
 COPY LICENSE NOTICE THIRD_PARTY_NOTICES TRADEMARK.md /usr/share/licenses/fanout/
 COPY --from=build --chown=nonroot:nonroot /runtime/var/lib/fanout /var/lib/fanout
 
@@ -54,6 +53,8 @@ COPY --from=build --chown=nonroot:nonroot /runtime/var/lib/fanout /var/lib/fanou
 # be writable by UID/GID 65532, or the process cannot open its data directory.
 USER nonroot:nonroot
 WORKDIR /var/lib/fanout
+
+ENV FANOUT_ADDR=:7520 FANOUT_DATA_DIR=/var/lib/fanout/data
 
 EXPOSE 7520
 
@@ -64,4 +65,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD ["fanout", "healthcheck"]
 
 ENTRYPOINT ["fanout"]
-CMD ["--config", "/etc/fanout/fanout.yaml"]

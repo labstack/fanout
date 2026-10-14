@@ -78,7 +78,7 @@ func TestReadiness_NilDuck(t *testing.T) {
 func TestReadinessReportsSizingResolvedByLoader(t *testing.T) {
 	environ := []string{
 		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
-		"FANOUT_AI_API_KEY=sk-test",
+		"ANTHROPIC_API_KEY=sk-test",
 		"FANOUT_SMTP_HOST=smtp.example.com",
 		"FANOUT_SMTP_USERNAME=user",
 		"FANOUT_SMTP_PASSWORD=pass",

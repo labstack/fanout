@@ -153,7 +153,7 @@ func duckDBPoolSize(cfg config.Config) int {
 // of a constant that's wrong everywhere but the box it was tuned for.
 func duckDSN(dbPath, mem string, threads int) (string, error) {
 	if strings.ContainsAny(mem, "&?'\"\\; ") {
-		return "", fmt.Errorf("invalid storage.duckdb.memory value: %q", mem)
+		return "", fmt.Errorf("invalid FANOUT_DUCKDB_MEMORY value: %q", mem)
 	}
 	params := make([]string, 0, 2)
 	if threads > 0 {
@@ -292,7 +292,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return tags
 	})
 	if cfg.DuckDBMemory == "" {
-		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
+		// Only when the operator hasn't pinned FANOUT_DUCKDB_MEMORY: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
 		// small ones, so the kernel doesn't OOM-kill the whole process.
 		if err := applyMemoryHeadroom(ctx, db); err != nil {

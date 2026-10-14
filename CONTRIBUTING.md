@@ -14,8 +14,15 @@ You need Go 1.27.2 and a C/C++ toolchain on native Linux or macOS (amd64 or arm6
 [Bun](https://bun.sh), [just](https://just.systems),
 [golangci-lint](https://golangci-lint.run/), and
 [Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
-also requires a 32-character authentication code secret; SMTP and an AI key are
-optional — see [README](README.md#requirements).
+also requires a 32-character authentication code secret. SMTP and AI chat are
+optional; selecting an AI provider requires its key — see [README](README.md#requirements).
+
+Copy `.env.example` to ignored `.env` for personal development settings and
+credentials. Every entry is commented out; uncomment only values you want to
+supply. Copying the template sets nothing. After building, `just run` loads it with Node's native dotenv
+parser; inherited environment values win. The binary validates the settings.
+Keep this file out of Git and Docker inputs. See
+[runtime secret delivery](docs/operations.md#runtime-secret-delivery).
 
 The DuckDB wrapper downloads the pinned, checksum-verified engine from
 [Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha43763)
@@ -83,10 +90,18 @@ PNG in the same change. The recipe fails when the
 font is missing rather than shipping a card in a substitute face, which typst
 would otherwise do without complaint.
 
-**Runtime configuration is strict.** [`fanout.example.yaml`](fanout.example.yaml)
-is the complete schema. New settings need a YAML key, a `FANOUT_` environment
-name, a test, and matching documentation; unknown names deliberately fail
-startup.
+**Runtime configuration is strict.** `internal/config/config.go` owns the
+schema. New settings need an environment name, a documentation `group` tag,
+a purpose comment, a test, and matching documentation. Custom settings use
+`FANOUT_` plus a clear name, adding the area only when it clarifies; vendor
+credentials and endpoints keep the vendor's documented names. Unknown owned
+names fail startup, while unrelated shared-vendor/tool variables are ignored.
+Secrets use `secret:"true"` and automatically accept an `_FILE` form; do not
+set both forms nonempty. Run `just docs-generate` to regenerate the settings
+reference and `.env.example`; `just docs-generate-check` verifies them. The
+template leaves all values empty and documents defaults in comments.
+Personal environment files and operator profiles stay ignored and outside
+Docker. Never shell-source dotenv.
 
 **SQLite migrations own the control schema.** Write forward SQL changes in
 `internal/db/migrations` using Goose annotations. `just db-migrate-create NAME`

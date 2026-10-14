@@ -83,7 +83,7 @@ trace index. First stop Fanout and back up `telemetry/`, then verify the full
 authoritative set:
 
 ```sh
-fanout --config /etc/fanout/fanout.yaml repair verify
+fanout repair verify
 ```
 
 The command is read-only and names every unreadable batch. Restore each named
@@ -92,7 +92,7 @@ only its telemetry is preferable to leaving the instance offline, set it aside
 explicitly:
 
 ```sh
-fanout --config /etc/fanout/fanout.yaml repair quarantine --batch <id>
+fanout repair quarantine --batch <id>
 ```
 
 Quarantine is an atomic rename beside the authoritative batch set, not a
@@ -137,7 +137,7 @@ operator with shell access to the same configuration and data directory then
 mints a link directly:
 
 ```sh
-fanout --config /etc/fanout/fanout.yaml login-link user@example.com
+fanout login-link user@example.com
 ```
 
 The link expires after 15 minutes, works once, and is recorded in the

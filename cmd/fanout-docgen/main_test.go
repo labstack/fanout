@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/config"
 )
 
 const configSource = "../../internal/config/config.go"
@@ -22,15 +24,73 @@ func TestCollectCrossChecksReflectionAgainstSource(t *testing.T) {
 	}
 
 	for _, f := range fields {
-		if f.Key == "" || f.Env == "" {
-			t.Errorf("%s: koanf and env tags are both required", f.GoName)
-		}
-		if !strings.HasPrefix(f.Env, "FANOUT_") {
-			t.Errorf("%s: environment variable %q lacks the FANOUT_ prefix the loader requires", f.GoName, f.Env)
+		if f.Group == "" || f.Env == "" {
+			t.Errorf("%s: group and env tags are both required", f.GoName)
 		}
 		if f.Type == "" {
 			t.Errorf("%s: no rendered type", f.GoName)
 		}
+		if f.Doc == "" {
+			t.Errorf("%s: setting purpose must be documented in the authoritative schema", f.GoName)
+		}
+	}
+}
+
+func TestEnvironmentTemplateMatchesSchema(t *testing.T) {
+	fields, err := collect(configSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := renderEnvironment(fields)
+	written, err := os.ReadFile("../../.env.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != string(body) {
+		t.Error(".env.example is stale; run just docs-generate")
+	}
+	var env []string
+	seen := map[string]string{}
+	for _, line := range strings.Split(string(body), "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "#") {
+			t.Fatalf("template must contain only comments: %q", line)
+		}
+		entry := strings.TrimPrefix(line, "# ")
+		if !strings.HasSuffix(entry, "=") {
+			continue
+		}
+		name, value, ok := strings.Cut(entry, "=")
+		if _, duplicate := seen[name]; !ok || duplicate {
+			t.Fatal("invalid or duplicate template entry")
+		}
+		seen[name] = value
+	}
+	if len(seen) != len(fields) {
+		t.Fatalf("template has %d settings, schema has %d", len(seen), len(fields))
+	}
+	for _, f := range fields {
+		if f.Secret && !strings.Contains(string(body), f.Env+"_FILE") {
+			t.Errorf("missing file form for %s", f.Env)
+		}
+		value, exists := seen[f.Env]
+		if !exists || value != "" {
+			t.Errorf("template must leave %s empty so it preserves defaults", f.Env)
+		}
+		if f.Default != "" && !f.Secret && !strings.Contains(string(body), "# Default: "+f.Default+"\n# "+f.Env+"=\n") {
+			t.Errorf("template must document the default for %s", f.Env)
+		}
+	}
+	// A copied template contributes no overrides to the image environment.
+	env = append(env, "FANOUT_ADDR=:7520", "FANOUT_DATA_DIR=/var/lib/fanout/data", "FANOUT_AUTH_CODE_SECRET="+strings.Repeat("x", 32))
+	cfg, err := config.Load(config.LoadOptions{Environ: env})
+	if err != nil {
+		t.Fatalf("template rejected by the runtime loader: %v", err)
+	}
+	if cfg.Addr != ":7520" || cfg.DataDir != "/var/lib/fanout/data" {
+		t.Fatal("template must preserve image environment values")
 	}
 }
 
@@ -53,7 +113,7 @@ func TestEverySettingGroupIsRegistered(t *testing.T) {
 			t.Errorf(
 				"setting %q is in group %q, which has no entry in the groups registry; "+
 					"add a title and description for it",
-				f.Key, f.group(),
+				f.Env, f.group(),
 			)
 		}
 	}
@@ -74,13 +134,16 @@ func TestRenderProducesOnePageWithFrontmatterPerGroup(t *testing.T) {
 
 	for name, body := range pages {
 		text := string(body)
+		if strings.Contains(text, "Fanout also recognizes") != (name == "settings/ai.mdx") {
+			t.Errorf("%s: vendor-variable paragraph belongs only on the AI settings page", name)
+		}
 		if !strings.HasPrefix(text, "---\n") {
 			t.Errorf("%s: does not open with frontmatter", name)
 		}
 		if !strings.Contains(text, "generated: true") {
 			t.Errorf("%s: missing the generated marker, so the site cannot tell it apart from an authored page", name)
 		}
-		if !strings.Contains(text, "| Setting | Environment variable | Type | Default |") {
+		if !strings.Contains(text, "| Environment variable | Type | Default |") {
 			t.Errorf("%s: missing the settings table", name)
 		}
 		// Every page is indexed in llms.txt, which fails the site build when a

@@ -1,7 +1,0 @@
-# One listener for the browser, API, MCP and both OTLP transports.
-# Runtime environment variables override these container defaults.
-server:
-  addr: ":7520"
-
-storage:
-  data_dir: /var/lib/fanout/data

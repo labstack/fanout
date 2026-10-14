@@ -107,11 +107,8 @@ Discarded hashes force decoding; they do not establish a stored checksum.
 Verification failures such as memory exhaustion or cancellation never authorize
 quarantine.
 
-Telemetry batches use format 4. An older or unknown batch format makes startup
-fail before cleanup or schema rewriting, leaving the files intact. This build
-has no reader or automatic conversion for previous formats. Start with an
-empty telemetry directory; retain previous data separately for its original
-reader. SQLite control state is independent of this telemetry format change.
+Telemetry batches use format 4. An unsupported batch format makes startup
+fail before cleanup or schema rewriting, leaving the files intact.
 
 ## Small files are bounded by compaction
 
@@ -175,7 +172,7 @@ Narrow file selections use explicit lists from footer bounds. Broad selections
 use a glob with a captured-batch-ID filter, which excludes files published after
 snapshot capture. Only signals referenced by a query are bound.
 
-`storage.rollup_skip_to_latest` skips historical service and edge aggregation.
+`FANOUT_ROLLUP_SKIP_TO_LATEST` skips historical service and edge aggregation.
 Completed-batch trace caches still rebuild retained history
 in bounded passes; uncached files remain immediately queryable.
 

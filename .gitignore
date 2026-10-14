@@ -39,11 +39,11 @@ coverage.out
 coverage.html
 cover.out
 
-# Local environment scratch files. Fanout runtime configuration uses explicit
-# YAML documents and process environment; it does not load dotenv files.
-.env
-.env.*
-!.env.example
+# Personal environment files and operator secret profiles remain private.
+.env*
+!/.env.example
+/secrets/
+/.sops.yaml
 
 # Root-scoped for the same reason as testdata/: a bare `*.png` would silently
 # swallow committed image assets anywhere in the tree.

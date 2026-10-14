@@ -96,7 +96,7 @@ Fanout.
 - A 32-character **authentication code secret**
 
 SMTP and an AI provider are optional. Without SMTP, an operator can mint a
-short-lived login link from the local Fanout binary. Without an AI key, ingest,
+short-lived login link from the local Fanout binary. With no AI provider selected, ingest,
 dashboards, traces, logs, metrics, and MCP continue to work; only investigation
 chat and AI-assisted controls are hidden.
 
@@ -155,17 +155,18 @@ hostname reachable from that Collector.
 
 The equivalent OTLP/gRPC endpoint is `localhost:7520` (plaintext locally).
 Behind a TLS proxy, both transports use the public origin; gRPC requires
-HTTP/2 to Fanout. See the [single-port migration notes](docs/operations.md#single-port-migration).
+HTTP/2 to Fanout.
 For later sign-in
 without SMTP, mint a 15-minute, single-use link against the running
 container's control database:
 
 ```sh
-docker exec fanout fanout --config /etc/fanout/fanout.yaml \
-  login-link admin@example.com
+docker exec fanout fanout login-link admin@example.com
 ```
 
-Add `FANOUT_AI_API_KEY` to enable chat. Configure all four SMTP settings
+Select `FANOUT_AI_PROVIDER=anthropic` and inject `ANTHROPIC_API_KEY`, or select
+`FANOUT_AI_PROVIDER=openai` and inject `OPENAI_API_KEY`, to enable chat. The
+selected provider requires its key at startup. Configure all four SMTP settings
 (`FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`, `FANOUT_SMTP_PASSWORD`, and
 `FANOUT_SMTP_FROM`) to enable email-code login.
 
@@ -173,20 +174,10 @@ The distroless image runs unprivileged as UID 65532. A bind-mounted host directo
 `/var/lib/fanout/data` must be writable by that user; a named volume, as above,
 needs no such handling.
 
-The image selects `/etc/fanout/fanout.yaml` by default. That file contains only
-the container listener and data-directory defaults; it does not contain
-credentials. Start a container-specific document from that file so it retains
-the shared listener and persistent data-directory settings:
-
-```sh
-cp fanout.docker.yaml fanout.yaml
-# Add the remaining settings, then mount it over the image document:
-docker run -v ./fanout.yaml:/etc/fanout/fanout.yaml:ro \
-  labstack/fanout:latest
-```
-
-All surfaces use `server.addr` (`:7520` by default). Publish only that
-port; OTLP/HTTP and OTLP/gRPC use the same address as the application.
+The image sets `FANOUT_ADDR=:7520` and
+`FANOUT_DATA_DIR=/var/lib/fanout/data`. Override settings with deployment
+environment values or mounted secret files. Publish port `7520`; the UI, API,
+MCP, OTLP/HTTP, and OTLP/gRPC share this listener.
 
 ### From source
 
@@ -205,8 +196,9 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) # must be 32+ characters
 ./bin/fanout
 ```
 
-Optionally set `FANOUT_AI_API_KEY` for chat and the SMTP variables shown above
-for email-code login. Without SMTP, run `./bin/fanout login-link
+Optionally select `FANOUT_AI_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or
+`FANOUT_AI_PROVIDER=openai` with `OPENAI_API_KEY`, for chat. Set the SMTP variables shown above for
+email-code login. Without SMTP, run `./bin/fanout login-link
 admin@example.com` from the same configuration and data directory.
 
 Fanout serves the UI, API, MCP, OTLP/gRPC and OTLP/HTTP on
@@ -220,43 +212,60 @@ capacity tests.
 
 ## Configuration
 
-Configuration is resolved once at startup and validated before Fanout opens
-data files or listeners. Sources apply in this order: built-in defaults, an
-optional YAML document selected with `--config`, then `FANOUT_` environment
-variables. Fanout does not search for configuration or load `.env` files.
+Configuration is resolved once at startup from built-in defaults followed by
+nonempty process environment values, and validated before data files or
+listeners open. Every change requires a restart. Native installs bind
+`127.0.0.1:7520` by default; set `FANOUT_ADDR=:7520` for other hosts to reach it.
 
-[`fanout.example.yaml`](fanout.example.yaml) is the complete commented schema:
+Custom settings use `FANOUT_` plus a clear name, adding the area only when it
+clarifies. Vendor credentials and endpoints keep their documented names:
+`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and
+`OPENAI_BASE_URL`. Unknown `FANOUT_` variables fail startup, except for
+platform-injected service-discovery names. Unrelated vendor/tool variables are
+ignored. Empty values mean unset. Bools, integers, and Go durations are parsed
+as their declared types.
 
-```sh
-cp fanout.example.yaml fanout.yaml
-./bin/fanout --config ./fanout.yaml
-```
+[`.env.example`](.env.example) is generated from
+[`internal/config/config.go`](internal/config/config.go), with every value
+empty and every entry commented out. Types, defaults, and secret file forms
+are documented in comments. Copying it sets nothing and preserves image ENV.
+Copy it to ignored `.env` and uncomment personal settings and development
+credentials as needed. After building, `just run` uses Node's
+`parseEnv` to load optional `./.env`, then lets inherited environment values
+win, including empty values. The binary itself reads only process environment;
+production launchers and deployments supply their own values.
 
-Environment variables override the corresponding YAML values and are useful
-for container injection and secrets. An empty environment value means "no
-override"; use YAML for an explicit empty string. Unknown YAML keys and unknown
-`FANOUT_` variables are startup errors, except for the service-discovery names
-Kubernetes and Docker link-style networking inject for a Service named
-`fanout`. All environment variables outside the `FANOUT_` namespace are
-ignored.
+Every secret also accepts a file path through `<ENV>_FILE`:
+`FANOUT_AUTH_CODE_SECRET_FILE`, `FANOUT_OIDC_CLIENT_SECRET_FILE`,
+`FANOUT_SMTP_PASSWORD_FILE`, `FANOUT_METRICS_TOKEN_FILE`,
+`ANTHROPIC_API_KEY_FILE`, and `OPENAI_API_KEY_FILE`. Set either the value or
+its file path. Setting both nonempty fails startup. Fanout strips exactly one
+trailing LF or CRLF from a secret file and rejects an empty result.
 
-YAML null values are rejected. Boolean values must use YAML 1.2 `true` or
-`false` (not `yes`, `no`, `on`, or `off`). If a YAML document contains a
-credential, Fanout requires that the file not be accessible by group or others
-(for example, mode `0600`). The definitions live in
-[`internal/config/config.go`](internal/config/config.go); the settings most
-operators touch are:
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `FANOUT_ADDR` | `127.0.0.1:7520` | UI, API, MCP, and both OTLP transports |
+| `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
+| `FANOUT_AUTH_MODE` | `local` | Login link or SMTP, or `oidc` |
+| `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
+| `FANOUT_AI_PROVIDER` | — | Empty disables chat; `anthropic` or `openai` enables it |
+| `ANTHROPIC_API_KEY` | — | Required for Anthropic chat |
+| `OPENAI_API_KEY` | — | Required for OpenAI chat |
+| `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
+| `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 
-| YAML key | Environment override | Default | Purpose |
-| --- | --- | --- | --- |
-| `server.addr` | `FANOUT_ADDR` | `:7520` | UI, API, MCP, and both OTLP transports |
-| `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
-| `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
-| `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
-| `ai.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `ai.api_key` | `FANOUT_AI_API_KEY` | — | Enables AI investigation chat |
-| `storage.retention_days` | `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
-| `mcp.enabled` | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
+Chat requires an explicit provider and its credential. Inherited keys never
+enable it. Only the selected provider's endpoint is validated and used.
+`FANOUT_AI_MODEL` selects the model. `ANTHROPIC_BASE_URL` defaults to
+`https://api.anthropic.com`; Fanout appends `/v1/messages`. `OPENAI_BASE_URL`
+defaults to `https://api.openai.com/v1`; Fanout appends `/responses`.
+Both preserve gateway prefixes and accept a trailing slash. The selected URL
+must use HTTP(S) without credentials, a query, or a fragment.
+
+See [runtime secret delivery](docs/operations.md#runtime-secret-delivery) for
+deployment examples. This public repository excludes operator secret profiles
+and private recipient policy. Run `just docs-generate` after changing the
+schema; `just docs-generate-check` verifies `.env.example` and the reference.
 
 ### Advanced DuckDB sizing
 
@@ -270,14 +279,14 @@ These variables are escape hatches for measured, unusual workloads:
 
 | Variable | Automatic behavior | When to override |
 | --- | --- | --- |
-| `storage.duckdb.memory` / `FANOUT_DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
-| `storage.duckdb.max_connections` / `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
-| `storage.duckdb.threads` / `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
+| `FANOUT_DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
+| `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
+| `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
 
 An explicit value always wins. Startup logs and `/readyz` report the detected
 host and cgroup limits, the selected source, and whether detection was
 incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
-set `storage.duckdb.memory` or `FANOUT_DUCKDB_MEMORY` for a guaranteed bound.
+set `FANOUT_DUCKDB_MEMORY` for a guaranteed bound.
 
 For TLS and reverse proxies, health checks, backups and restores, upgrades,
 retention, and recovery, see the [operator runbook](docs/operations.md).

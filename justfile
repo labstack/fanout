@@ -32,6 +32,10 @@ embedded := "internal/ui/dist internal/mcp/apps"
 default:
     @just --list
 
+# Load optional ignored .env, then inherited values. Build with `just build` first.
+run *ARGS='':
+    node scripts/run-fanout.mjs -- ./bin/fanout {{ARGS}}
+
 # Split out so CI installs exactly what a contributor does, without also
 # writing git hooks into the runner.
 

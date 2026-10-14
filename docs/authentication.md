@@ -1,8 +1,7 @@
 # Authentication and access operations
 
-Operator reference for running Fanout's authentication safely. Every setting
-below is available as an environment variable and as a key in the layered
-configuration file.
+Operator reference for running Fanout's authentication safely. Settings are
+environment variables; see the [settings reference](https://fanout.run/reference/configuration).
 
 ## First run
 
@@ -55,10 +54,10 @@ login link remains available when delivery fails.
 ### Local self-signup
 
 Local accounts are invitation-only by default. To let any verified email
-address create an account, enable `auth.self_signup` or
-`FANOUT_SELF_SIGNUP=true`. Fanout sends the existing email code and
-creates an active `viewer` only after that code is successfully verified. The
-role is fixed: self-signup can never create an operator or administrator.
+address create an account, set `FANOUT_SELF_SIGNUP=true`. Fanout sends the
+existing email code and creates an active `viewer` only after that code is
+successfully verified. The role is fixed: self-signup can never create an
+operator or administrator.
 The setting requires complete SMTP configuration and local auth mode.
 
 Self-signup remains unavailable until the first administrator completes setup.
@@ -72,13 +71,13 @@ If you are locked out in local mode, run the command with the same configuration
 and data directory as the server:
 
 ```sh
-fanout --config /etc/fanout/fanout.yaml login-link admin@example.com
+fanout login-link admin@example.com
 ```
 
-For a container using the bundled configuration:
+For a running container:
 
 ```sh
-docker exec <container> fanout --config /etc/fanout/fanout.yaml \
+docker exec <container> fanout \
   login-link admin@example.com
 ```
 
@@ -167,19 +166,17 @@ asserts a verified email. This keeps sessions, conversations, dashboards, and
 audit attribution isolated without shared credentials or an anonymous
 authorization bypass:
 
-```yaml
-auth:
-  mode: oidc
-  oidc:
-    email_verification: required
-    auto_provision: true
-    allowed_domains: "*"
-    default_role: viewer
+```sh
+FANOUT_AUTH_MODE=oidc
+FANOUT_OIDC_EMAIL_VERIFICATION=required
+FANOUT_OIDC_AUTO_PROVISION=true
+FANOUT_OIDC_ALLOWED_DOMAINS="*"
+FANOUT_OIDC_DEFAULT_ROLE=viewer
 ```
 
 The wildcard is deliberately explicit and is rejected with
-`email_verification: issuer`. Use a specific domain or group allowlist for a
-private installation. A wildcard makes the installation available to every
+`FANOUT_OIDC_EMAIL_VERIFICATION=issuer`. Use a specific domain or group allowlist
+for a private installation. A wildcard makes the installation available to every
 identity accepted by the configured provider, so rate-limit public traffic and
 budget AI usage at the deployment edge.
 
