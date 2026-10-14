@@ -16,9 +16,9 @@ against one service's rollup for the current window. These are the values it
 can read — the names below match the variables declared and bound by the
 evaluator.
 
-Rules are type-checked against these declared variables when saved through the
-API. Unknown variables, type mistakes, and non-boolean results are rejected
-before the rule is saved.
+Nonempty expressions supplied when creating or replacing rules through the
+API are type-checked against these declared variables. Unknown variables,
+type mistakes, and non-boolean results are rejected before the rule is saved.
 
 Use CEL's standard operators and functions, such as `&&`, `||`, `!`, and
 `service.startsWith("checkout")`. Numeric variables are doubles; cross-type
@@ -27,16 +27,16 @@ numeric comparisons let you compare them with integer literals, as in
 
 | Variable | Type | Means |
 |---|---|---|
-| `error_rate` | number | Errors as a proportion of requests over the evaluation window, from 0 to 1. |
-| `error_rate_delta` | number | Change in error rate against the baseline, as a proportion. |
-| `health_score` | number | A composite 0-100 score combining errors, latency and traffic. Convenient for a single catch-all rule; too coarse to explain why it moved. |
+| `error_rate` | number | Mean of minute-rollup span error proportions over the evaluation window, from 0 to 1; not a request-weighted whole-window error rate. |
+| `error_rate_delta` | number | Relative change in error rate against the preceding rollup window, as a percentage; zero when the baseline is missing or zero. |
+| `health_score` | number | The detector's instance-wide composite 0-100 health score. Every service receives the same score; it is not a per-service value. |
 | `log_count` | number | Log records recorded for the service over the window. |
-| `p50` | number | Median request latency in milliseconds. |
-| `p95` | number | 95th-percentile request latency in milliseconds. The usual latency signal: it moves when a meaningful share of requests slow down, where the median does not. |
-| `p95_delta` | number | Change in p95 latency against the baseline, in milliseconds. |
+| `p50` | number | Mean of approximate minute-rollup median span latencies in milliseconds. |
+| `p95` | number | Mean of approximate minute-rollup 95th-percentile span latencies in milliseconds; not the whole-window p95. Latency prefers served work, falling back to outbound spans when no served work is available. |
+| `p95_delta` | number | Relative change in p95 latency against the preceding rollup window, as a percentage; zero when the baseline is missing or zero. |
 | `service` | string | The service name being evaluated, as a string. Compare it when one rule needs to behave differently for one service. |
-| `throughput` | number | Requests per second. Worth pairing with any rate threshold — a service handling two requests a minute reaches a 50% error rate on one failure. |
-| `throughput_delta` | number | Change in throughput against the baseline, in requests per second. Negative when traffic drops, which is how a rule catches a service that has stopped receiving requests rather than started failing them. |
+| `throughput` | number | Total span count over the current rollup window, not requests per second. Pair it with an error threshold to avoid firing on very little traffic. |
+| `throughput_delta` | number | Relative change in span count against the preceding rollup window, as a percentage. Negative when traffic drops; zero when the baseline is missing or zero. |
 | `z_score` | number | How far the service's current behaviour sits from its own recent baseline, in standard deviations. Use it to catch a service that has changed without committing to an absolute threshold that fits every service. |
 
 See [Set up alerts](/guides/set-up-alerts) for the rule model these sit in,

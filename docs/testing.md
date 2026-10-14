@@ -29,7 +29,7 @@ pixels to match the host, and messages must stop for five seconds after the firs
 settled frame. CI pins Node 24.19.0 and limits the job to 15 minutes. It runs the same recipe on
 pull requests and pushes. Failures write `ui/host/playwright-report/index.html`
 and retain traces/screenshots in `ui/host/test-results/`; both directories are
-ignored by git and uploaded only on CI failure.
+ignored by git. CI uploads available browser evidence after every run.
 
 For browser-free verification, run `bunx playwright test --list` in `ui/host`.
 `bun run test` runs unit tests and excludes Playwright specs.
@@ -37,8 +37,11 @@ For browser-free verification, run `bunx playwright test --list` in `ui/host`.
 ## Dashboard performance measurements
 
 Correct rendering and fast rendering need separate evidence. The checked-in
-smoke suite verifies populated panels, geometry and bounded fragments; it does
-not currently enforce a dashboard latency ceiling. A passing native-engine
+smoke suite verifies populated panels, geometry and bounded fragments. A
+separate performance spec records twenty navigation-to-paint samples
+per theme for a twelve-panel, 24-hour fixture and enforces a calibrated
+1800 ms p95 ceiling in CI. The local representative-data target remains
+1500 ms. A passing native-engine
 correctness test is not a timing measurement either.
 
 For a performance run, use a disposable instance with a recorded telemetry
@@ -93,8 +96,8 @@ The existing theme, chart-unit and row-formatting tests check semantic text and
 mark contrast in both schemes. Keyboard tests cover dashboard focus, chart
 navigation, range cancellation, full-screen and shortcut preferences. The exact
 palette-order test preserves six categorical colour slots; its name alone does
-not prove colour-vision-deficiency separation. There is currently no automated
-axe scan or CVD validator in the checked-in smoke suite.
+not prove colour-vision-deficiency separation. The checked-in suite runs axe-core
+WCAG AA scans; it has no automated CVD validator.
 
 For an accessibility review, inspect dashboard and chat panels in both themes
 at both smoke widths. Tab through controls and charts; exercise arrows, Enter,

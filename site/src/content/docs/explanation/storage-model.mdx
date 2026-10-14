@@ -56,10 +56,16 @@ Trace lookup binary-searches a fixed-width sidecar on disk, seeks directly to th
 matching Parquet row ranges, and verifies the complete trace ID after hashing.
 The sidecar is an index, not another telemetry representation.
 
-Dashboard rollups are rebuildable DuckDB caches. SQLite remains independent and
-stores only transactional product state.
+Dashboard rollups are rebuildable DuckDB caches. SQLite stores only
+transactional product state and never holds telemetry rows. Ingest
+authentication still reads the ingest token hash from it on every export, so an
+unreadable control database rejects OTLP requests.
 
 ## Attributes retain their types
+
+Attribute and resource values support up to 128 nested arrays or objects.
+An export that exceeds this limit is rejected in full with OTLP
+`INVALID_ARGUMENT` (HTTP 400); accepted values retain their original types.
 
 Span, log, and metric attributes and resource attributes use Parquet VARIANT
 columns. Frequently queried resource and messaging fields also have typed

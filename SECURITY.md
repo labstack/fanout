@@ -32,7 +32,7 @@ interchangeable. A finding that crosses those boundaries is in scope.
 
 ## Supported versions
 
-Fanout is pre-1.0 and moves quickly. Fixes land on `main`, and only the latest
+Fanout uses CalVer and moves quickly. Fixes land on `main`, and only the latest
 release is supported. There are no backports to earlier tags.
 
 ## Operating Fanout safely

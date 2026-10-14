@@ -13,6 +13,7 @@
   validate only the selected provider's endpoint.
 - Every `secret:"true"` field accepts `<ENV>_FILE`. Both forms nonempty fail;
   secret files lose exactly one trailing LF or CRLF and must remain nonempty.
+  Unselected AI providers' value and file forms are ignored.
   Errors name variables and paths, never secret contents. No file-mode check.
 - `group` tags serve docgen only, using ai, alerts, auth, ingest, mcp, metrics,
   server, smtp, and storage. Run `just docs-generate` after schema changes and

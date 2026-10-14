@@ -11,12 +11,14 @@ status: preview
 ## The process will not start
 
 Fanout validates its whole configuration before opening any listener, so a
-startup refusal is a configuration message rather than a crash. Read the error:
-it names the setting.
+configuration refusal names the setting. Other startup errors can report
+storage, listener, or identity-provider failures; read the error before changing
+settings.
 
-The one that surprises people is an unrecognised variable. Fanout rejects any
-`FANOUT_`-prefixed name it does not know, so a typo — or a setting renamed in a
-release — stops the process instead of being ignored. That is deliberate; see
+The one that surprises people is an unrecognised variable. Fanout rejects
+unknown `FANOUT_`-prefixed setting names, except platform-injected service-discovery
+names, so a typo stops the process instead of being ignored. That is deliberate;
+see
 [configuration](/reference/configuration).
 
 ## An unresolved compaction blocks startup
@@ -83,12 +85,15 @@ trace index. First stop Fanout and back up `telemetry/`, then verify the full
 authoritative set:
 
 ```sh
+# Use the same environment and data directory as the server.
 fanout repair verify
 ```
 
-The command is read-only and names every unreadable batch. Restore each named
-batch from backup when possible. If one cannot be recovered and discarding
-only its telemetry is preferable to leaving the instance offline, set it aside
+The command is read-only and reports confirmed corrupt batches. Unsupported
+formats and operational errors stop verification; they do not authorize
+quarantine. Restore each reported corrupt batch from backup when possible. If
+one cannot be recovered and discarding only its telemetry is preferable to
+leaving the instance offline, set it aside
 explicitly:
 
 ```sh
@@ -119,7 +124,7 @@ Work down this list in order:
    `fo_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
 3. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
-   (`:7520` by default).
+   (`127.0.0.1:7520` by default; the image sets `:7520`).
    Check container port mappings, bind address and firewall rules.
 4. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
    any proxy. Use `grpc` or `http/protobuf` consistently with the exporter

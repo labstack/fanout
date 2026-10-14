@@ -21,7 +21,7 @@ Rules are managed over HTTP. There is no browser page for them yet — see
 | `GET /api/alerts/summary` | Counts by state |
 | `GET /api/alerting/rules` | List rules |
 | `POST /api/alerting/rules` | Create and compile a rule |
-| `PUT /api/alerting/rules/:id` | Replace and recompile a rule |
+| `PUT /api/alerting/rules/:id` | Replace a rule; recompile it when enabled |
 
 Reading takes `telemetry:read`; creating and replacing takes `alerts:manage`,
 which starts at the `operator` role. See [roles](/reference/roles).
@@ -32,6 +32,8 @@ An expression, an optional service to scope it to, timing, and delivery:
 
 | Field | Means |
 |---|---|
+| `name` | Required rule name |
+| `enabled` | Set `true` to evaluate the rule; omitted means disabled |
 | `expression` | The condition, in [CEL](https://cel.dev) |
 | `service` | Evaluate only for this service; omit for all |
 | `for_seconds` | How long the condition must hold before firing |
@@ -42,9 +44,10 @@ An expression, an optional service to scope it to, timing, and delivery:
 | `webhook_template` | Custom payload body; omit for the default |
 | `notify_on_resolve` | Also deliver when the alert clears |
 
-When you create or replace a rule through the API, its expression is type-checked
-against the declared variables and must return a boolean. An unknown variable or
-a type mistake is rejected at save time.
+Nonempty expressions supplied when creating or replacing a rule are type-checked
+against the declared variables and must return a boolean. An unknown variable
+or a type mistake is rejected at save time. Supply a complete rule body when
+replacing it; omitted fields take their zero values.
 
 ## Variables available to an expression
 
@@ -60,9 +63,9 @@ So a rule body reads like the thing it means:
 error_rate > 0.02 && throughput > 10
 ```
 
-The throughput clause matters more than it looks. A service handling two
-requests a minute reaches a 50% error rate on one failure, and without a floor
-every quiet service pages you.
+The throughput clause matters more than it looks. Here `throughput` is the
+total span count in the current rollup window, not requests per second. Without
+a traffic floor, a single failure on a quiet service can trigger the rule.
 
 ## The lifecycle
 

@@ -15,8 +15,7 @@ acceptable.
 
 ## What it checks
 
-Every duration and size has a floor, and the auth settings are checked as a
-group rather than individually:
+Timing, batch sizing and auth settings are checked together:
 
 - Addresses and the data directory must not be empty.
 - `FANOUT_ROLLUP_INTERVAL` must be at least `1s`;
@@ -31,7 +30,8 @@ group rather than individually:
 - In `oidc` mode the issuer URL and `FANOUT_PUBLIC_URL` must both be HTTPS, and
   a client ID and secret are required.
 
-An unrecognised `FANOUT_`-prefixed variable is an error too. A typo in a setting
+An unknown `FANOUT_` setting name is an error too, except platform-injected
+service-discovery names. A typo in a setting
 name is otherwise indistinguishable from a setting you never made, and the
 failure surfaces months later as a default nobody chose.
 
@@ -73,7 +73,9 @@ fresh data directory if you cannot account for who has seen it.
 ## Signing in afterwards
 
 Local mode has no passwords. Once SMTP is configured, active users receive
-short-lived codes by email. OIDC deployments use the provider's flow instead.
+short-lived codes by email. Without SMTP, run `fanout login-link <email>` with
+the server's environment and data directory to mint a 15-minute, single-use
+link for an existing active user. OIDC deployments use the provider's flow instead.
 
 ## Next
 

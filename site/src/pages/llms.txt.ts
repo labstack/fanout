@@ -65,10 +65,10 @@ export const GET: APIRoute = async ({ site }) => {
     "",
     "- Fanout reads built-in defaults and process environment. Native installs listen on 127.0.0.1:7520; the image supplies FANOUT_ADDR=:7520. Secret variables accept _FILE paths. Commands: `fanout [flags]`, `fanout version`, `fanout login-link <email>` (local recovery with host access), `fanout healthcheck [url]`, `fanout repair verify`, and `fanout repair quarantine --batch <id>`. Product operations use HTTP or MCP.",
     "- MCP is the intended agent interface. The server exposes its tools at `/mcp`.",
-    "- MCP and the HTTP API authenticate with an API key, which is not the same credential as the ingest token. Both are `fo_`-prefixed; the routes tell them apart by prefix.",
+    "- External MCP clients authenticate with resource-bound OAuth tokens. The browser API uses browser sessions; `/api/mcp` uses the same session. These credentials do not authorize OTLP ingest.",
     "- Telemetry goes in over OTLP only: gRPC and HTTP on the same port as the application (7520 by default). There is no bespoke ingest API to script against.",
     "- Ingest always requires the ingest token, and rejects everything until the first administrator exists — a collector started before setup will fail until setup completes.",
-    "- Configuration is environment-first, and every variable is `FANOUT_`-prefixed. An unrecognised `FANOUT_` variable is a startup error rather than a silently ignored one.",
+    "- Configuration is environment-only: built-in defaults followed by nonempty process environment values. Custom settings use FANOUT_; AI credentials and endpoints use ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, OPENAI_API_KEY and OPENAI_BASE_URL. Unknown FANOUT_ setting names fail startup, except platform-injected service-discovery names. Chat is off unless FANOUT_AI_PROVIDER selects anthropic or openai and its required key is supplied; OPENAI_BASE_URL includes /v1.",
     "",
   ];
 

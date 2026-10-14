@@ -14,7 +14,7 @@ jobs and are worth separating before changing any of them.
 ## How long data is kept
 
 ```sh
-FANOUT_RETENTION_DAYS=30
+export FANOUT_RETENTION_DAYS=30
 ```
 
 Zero means keep everything. Changing it does not delete anything immediately —
@@ -28,7 +28,7 @@ automatically uses wider timeline buckets for windows longer than 24 hours.
 ## The maintenance cycle
 
 ```sh
-FANOUT_MAINTENANCE_INTERVAL=1h
+export FANOUT_MAINTENANCE_INTERVAL=1h
 ```
 
 This is the expensive pass: retention deletes plus full compaction. Lower it to
@@ -40,7 +40,7 @@ The target number of telemetry rows that concurrent small requests may share in
 one atomic Parquet batch:
 
 ```sh
-FANOUT_INGEST_BATCH_SIZE=50000
+export FANOUT_INGEST_BATCH_SIZE=50000
 ```
 
 A larger target can improve sustained write throughput and create fewer files

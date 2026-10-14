@@ -6,21 +6,25 @@ Thanks for your interest. Issues and pull requests are both welcome.
 
 ```sh
 just install   # browser dependencies and git hooks
-just build     # browser assets, then the binaries
+just build     # browser assets, then the binary
 just check     # the full gate
 ```
 
 You need Go 1.27.2 and a C/C++ toolchain on native Linux or macOS (amd64 or arm64),
-[Bun](https://bun.sh), [just](https://just.systems),
+[Bun](https://bun.sh), Node.js 24.19.0, [just](https://just.systems),
 [golangci-lint](https://golangci-lint.run/), and
 [Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
 also requires a 32-character authentication code secret. SMTP and AI chat are
-optional; selecting an AI provider requires its key — see [README](README.md#requirements).
+optional; selecting an AI provider requires its key — see [README](README.md#build-from-source).
 
 Copy `.env.example` to ignored `.env` for personal development settings and
-credentials. Every entry is commented out; uncomment only values you want to
-supply. Copying the template sets nothing. After building, `just run` loads it with Node's native dotenv
-parser; inherited environment values win. The binary validates the settings.
+credentials. Every entry is commented out, with types, defaults, and secret file
+forms in comments; uncomment only values you want to supply. Copying the template
+sets nothing and preserves the image's environment defaults. After building,
+`just run` loads optional `./.env` with Node's native dotenv
+parser (`parseEnv`); inherited environment values win, including empty values.
+The binary itself reads only process environment and validates the settings;
+production launchers and deployments supply their own values.
 Keep this file out of Git and Docker inputs. See
 [runtime secret delivery](docs/operations.md#runtime-secret-delivery).
 
@@ -57,9 +61,11 @@ and browser tests, then the Go suite under the race detector.
 Run `just e2e` with Google Chrome installed for the separate CI browser smoke
 suite. See [browser smoke testing](docs/testing.md) for coverage and failure artifacts.
 
-`just install` also installs [Lefthook](https://lefthook.dev), which runs
+`just install` also installs [Lefthook](https://lefthook.dev)'s Git hooks, which run
 formatting and linting on commit and the full gate on push. That is the fastest
 way to avoid a red CI run.
+The pre-push hook may be skipped when Lefthook detects no changed files;
+CI runs the same `just check` unconditionally and enforces the gate.
 
 The browser workspace uses `package.json` overrides for transitive security
 fixes that their direct dependencies have not locked yet. Keep those overrides
@@ -72,8 +78,9 @@ only the existing build-only braces advisory exception documented in the justfil
 and its MCP app builds into `internal/mcp/apps`; both outputs are tracked in
 git because `go:embed` needs them present in a source checkout. If you change
 anything under `ui/`, run `just ui` and commit the regenerated output.
+The binary is only as fresh as the last UI build.
 `just ui-check` fails when the embedded bytes do not match a fresh build, so
-CI catches this, but it is friendlier to catch it yourself.
+CI catches this; it is part of `just check`.
 
 **Diagrams are generated.** `docs/diagrams/*.svg` is rendered from the `.d2`
 source beside it. Edit the `.d2`, run `just diagrams`, and commit both. The
@@ -98,8 +105,8 @@ credentials and endpoints keep the vendor's documented names. Unknown owned
 names fail startup, while unrelated shared-vendor/tool variables are ignored.
 Secrets use `secret:"true"` and automatically accept an `_FILE` form; do not
 set both forms nonempty. Run `just docs-generate` to regenerate the settings
-reference and `.env.example`; `just docs-generate-check` verifies them. The
-template leaves all values empty and documents defaults in comments.
+reference and `.env.example`; `just docs-generate-check` verifies them.
+The template leaves all values empty.
 Personal environment files and operator profiles stay ignored and outside
 Docker. Never shell-source dotenv.
 
@@ -115,6 +122,15 @@ Fanout embeds and applies them at startup; `just db-migrate-apply DB` applies
 them manually with the same database guard used at startup. A version table
 without a positive applied version does not make an existing schema managed.
 DuckDB maintains its own query schema.
+
+## Project layout
+
+```text
+cmd/fanout/        process composition and the single entry point
+internal/          ingest, storage, query, agent, MCP, auth, alerts
+ui/host/           React browser host and shared MCP app renderer (build-time)
+docs/diagrams/     d2 sources and rendered SVG
+```
 
 ## Commits and pull requests
 

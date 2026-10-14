@@ -37,6 +37,8 @@ or `FANOUT_AI_PROVIDER=openai` with `OPENAI_API_KEY`, to enable the chat
 investigator. Chat is optional and disabled when no provider is selected, even
 with inherited vendor credentials or endpoints. Selecting a provider requires
 its key at startup and validates only its endpoint.
+Without a selected provider, ingest, dashboards, traces, logs, metrics, and MCP
+continue to work; only investigation chat and AI-assisted controls are hidden.
 
 :::caution[Use a named volume, or fix the ownership yourself]
 The image is distroless and runs unprivileged as UID/GID 65532. A **named
@@ -106,10 +108,11 @@ runner, because DuckDB needs cgo.
 |---|---|
 | `labstack/fanout:latest` | the newest release |
 | `labstack/fanout:2026.8.0` | that exact release |
-| `labstack/fanout:main` | the tip of `main` |
-| `labstack/fanout:sha-<commit>` | one specific commit |
+| `ghcr.io/labstack/fanout:main` | the tip of `main` |
+| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 
-Every tag above also exists under `ghcr.io/labstack/fanout`.
+Release and `latest` tags also exist under `ghcr.io/labstack/fanout`.
+Development tags are GHCR-only.
 
 Standalone signatures and SBOMs are deliberately not published yet — the
 reasoning is in the repository's release contract.

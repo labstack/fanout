@@ -19,7 +19,7 @@ panel previews, targeted edits and saved-version restore through chat or MCP.
 ## Set the public URL first
 
 ```sh
-FANOUT_PUBLIC_URL=https://fanout.example.com
+export FANOUT_PUBLIC_URL=https://fanout.example.com
 ```
 
 Fanout derives the MCP resource URI from this — the canonical, externally
@@ -35,7 +35,8 @@ The resource is derived from `FANOUT_PUBLIC_URL`; there is no separate MCP
 public-origin setting. An unrecognised `FANOUT_`-prefixed variable is a startup
 error rather than something ignored.
 
-`FANOUT_MCP_ENABLED` (default `true`) turns the endpoint off entirely.
+Set `FANOUT_MCP_ENABLED=false` to turn the endpoint off entirely; it defaults
+to `true`.
 
 ## What the client does
 

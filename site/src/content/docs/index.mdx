@@ -136,7 +136,7 @@ None of them is a roadmap item phrased as a virtue.
 - **Not multi-tenant:** namespaces scope queries, not access. Anyone who can query the instance can query every namespace in it; an instance is one trust domain.
 - **No horizontal scale:** ingest, query and maintenance share a process and a machine. There is no scaling one without the others, because they are the same thing.
 - **No universal capacity number:** the benchmark above describes one release, host and workload. Your payload cardinality, query mix and disk decide the capacity of your instance. [Measure your own hardware](/explanation/performance).
-- **No migration paths:** Fanout is pre-release. A renamed setting is renamed, not aliased, which is why an unknown variable stops the process rather than being ignored.
+- **No migration paths:** Fanout is pre-release. Storage-format changes may require a fresh data directory; preserve backups before upgrading.
 
 </Refusals>
 

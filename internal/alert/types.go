@@ -45,16 +45,17 @@ type Alert struct {
 // field here adds a row to the reference; describe it in a sentence a rule
 // author would find useful, not in terms of how it is computed.
 type AlertEnv struct {
-	// Errors as a proportion of requests over the evaluation window, from 0 to 1.
+	// Mean of minute-rollup span error proportions over the evaluation window,
+	// from 0 to 1; not a request-weighted whole-window error rate.
 	ErrorRate float64 `expr:"error_rate"`
-	// Median request latency in milliseconds.
+	// Mean of approximate minute-rollup median span latencies in milliseconds.
 	P50 float64 `expr:"p50"`
-	// 95th-percentile request latency in milliseconds. The usual latency signal:
-	// it moves when a meaningful share of requests slow down, where the median
-	// does not.
+	// Mean of approximate minute-rollup 95th-percentile span latencies in
+	// milliseconds; not the whole-window p95. Latency prefers served work,
+	// falling back to outbound spans when no served work is available.
 	P95 float64 `expr:"p95"`
-	// Requests per second. Worth pairing with any rate threshold — a service
-	// handling two requests a minute reaches a 50% error rate on one failure.
+	// Total span count over the current rollup window, not requests per second.
+	// Pair it with an error threshold to avoid firing on very little traffic.
 	Throughput float64 `expr:"throughput"`
 	// Log records recorded for the service over the window.
 	LogCount float64 `expr:"log_count"`
@@ -62,16 +63,18 @@ type AlertEnv struct {
 	// in standard deviations. Use it to catch a service that has changed without
 	// committing to an absolute threshold that fits every service.
 	ZScore float64 `expr:"z_score"`
-	// A composite 0-100 score combining errors, latency and traffic. Convenient
-	// for a single catch-all rule; too coarse to explain why it moved.
+	// The detector's instance-wide composite 0-100 health score. Every service
+	// receives the same score; it is not a per-service value.
 	HealthScore float64 `expr:"health_score"`
-	// Change in error rate against the baseline, as a proportion.
+	// Relative change in error rate against the preceding rollup window, as a
+	// percentage; zero when the baseline is missing or zero.
 	ErrorRateDelta float64 `expr:"error_rate_delta"`
-	// Change in p95 latency against the baseline, in milliseconds.
+	// Relative change in p95 latency against the preceding rollup window, as a
+	// percentage; zero when the baseline is missing or zero.
 	P95Delta float64 `expr:"p95_delta"`
-	// Change in throughput against the baseline, in requests per second. Negative
-	// when traffic drops, which is how a rule catches a service that has stopped
-	// receiving requests rather than started failing them.
+	// Relative change in span count against the preceding rollup window, as a
+	// percentage. Negative when traffic drops; zero when the baseline is missing
+	// or zero.
 	ThroughputDelta float64 `expr:"throughput_delta"`
 	// The service name being evaluated, as a string. Compare it when one rule
 	// needs to behave differently for one service.
