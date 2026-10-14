@@ -172,7 +172,7 @@ Narrow file selections use explicit lists from footer bounds. Broad selections
 use a glob with a captured-batch-ID filter, which excludes files published after
 snapshot capture. Only signals referenced by a query are bound.
 
-`storage.rollup_skip_to_latest` skips historical service and edge aggregation.
+`FANOUT_ROLLUP_SKIP_TO_LATEST` skips historical service and edge aggregation.
 Completed-batch trace caches still rebuild retained history
 in bounded passes; uncached files remain immediately queryable.
 
