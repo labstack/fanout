@@ -62,8 +62,8 @@ Two conditions guard it, and both matter:
 Self-provisioned users are `viewer`. Be clear about what that grants before
 turning this on: a viewer can read **all** telemetry the instance holds, keep
 their own dashboards, and **run the chat investigator** — which calls your model
-provider and spends money. What it cannot do is change anything: no alert rules,
-no ingest token, no user administration.
+provider and spends money. It can change its own dashboards, but cannot manage
+alert rules, rotate the ingest token, or administer users.
 
 If that is more than you want to hand to anyone who can receive an email, leave
 self-signup off and create accounts deliberately. The full matrix is in
@@ -87,10 +87,14 @@ locally instead.
 
 ### Verified identities can be auto-provisioned as viewers
 
-`FANOUT_OIDC_AUTO_PROVISION` admits a verified identity as a `viewer` on first
-login, with no shared credential and no account created ahead of time. Chat, MCP
-tools and owned dashboards stay available to them; everything an operator does
-stays behind the capabilities that require it.
+`FANOUT_OIDC_AUTO_PROVISION` creates an eligible identity's account on first
+login, after administrator setup. Its role comes from the configured admin or
+operator group mapping, falling back to `FANOUT_OIDC_DEFAULT_ROLE` (`viewer`).
+With the default `FANOUT_OIDC_EMAIL_VERIFICATION=required`, the identity must
+have a verified email. The `issuer` policy trusts the configured issuer instead
+and requires an allowlist. Auto-provisioning always requires an allowed group
+or domain. Chat, MCP tools and owned dashboards are available to viewers;
+operator actions still require the corresponding capabilities.
 
 This is the OIDC counterpart to local self-signup above, and it obeys the same
 allow policy: if `FANOUT_OIDC_ALLOWED_GROUPS` or `FANOUT_OIDC_ALLOWED_DOMAINS`

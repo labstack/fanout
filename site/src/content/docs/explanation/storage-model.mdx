@@ -58,8 +58,13 @@ The sidecar is an index, not another telemetry representation.
 
 Dashboard rollups are rebuildable DuckDB caches. SQLite remains independent and
 stores only transactional product state.
+It never sits on the telemetry write path.
 
 ## Attributes retain their types
+
+Attribute and resource values support up to 128 nested arrays or objects.
+An export that exceeds this limit is rejected in full with OTLP
+`INVALID_ARGUMENT` (HTTP 400); accepted values retain their original types.
 
 Span, log, and metric attributes and resource attributes use Parquet VARIANT
 columns. Frequently queried resource and messaging fields also have typed

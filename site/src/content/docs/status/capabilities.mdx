@@ -44,7 +44,7 @@ directory.
 | OTLP ingest over gRPC and HTTP | shipped | Both transports, one port and one ingest token. |
 | Parquet storage, trace indexes, and DuckDB analytics | shipped | Authoritative local Parquet; rebuildable DuckDB query state. |
 | Browser client | preview | Ships in the binary; surfaces still moving. |
-| Chat investigator | preview | Requires an AI provider key; disabled and logged without one. |
+| Chat investigator | preview | Disabled unless `FANOUT_AI_PROVIDER` selects `anthropic` or `openai`; the selected provider's key is required at startup. |
 | Agent-built dashboards | preview | [Build and refine from chat](/guides/build-dashboards): fifteen panel types, variables, comparison, saved grids and immutable versions with restore. View links retain filters and time; dashboard access remains owner-scoped. |
 | MCP tools | preview | Served at `/mcp`; the tool set is not frozen. |
 | Alerts | preview | Rules evaluate on an interval against rollups. |
@@ -62,9 +62,8 @@ directory.
 ## What "no migration path" means in practice
 
 It means what it says. A storage-format change may require starting from an
-empty data directory, and a renamed setting is renamed rather than aliased. The
-configuration loader rejects unrecognised `FANOUT_`-prefixed variables, so a
-setting that has moved surfaces as a refusal to start rather than as a silently
-ignored value — which is the one guarantee that makes the rest survivable.
+empty data directory. The configuration loader rejects unknown `FANOUT_`
+setting names, except platform-injected service-discovery names, so a typo
+surfaces as a refusal to start rather than as a silently ignored value.
 
 Do not run a Fanout instance as the only copy of data you need to keep.

@@ -12,7 +12,7 @@ stderr containing a **setup URL**:
 ============================================================
  FANOUT SETUP
 
- Open:  http://127.0.0.1:8080/login?setup_token=<credential>
+ Open:  http://127.0.0.1:7520/login?setup_token=<credential>
  Valid: one-time use, expires in 1 hour
  Note:  this URL disappears after the first admin is created
  Warn:  it contains an administrator credential — this output may
@@ -27,8 +27,9 @@ Properties worth knowing:
 - It is consumed the moment the first administrator is committed, before any
   other setup work. A later failure in that request does not leave a live
   credential behind.
-- It creates exactly **one** administrator. Presenting it again after setup is
-  complete returns `403` and establishes no session.
+- It creates exactly **one** administrator. A consumed credential returns `410`
+  and establishes no session; a concurrent request reaching account creation
+  after the administrator already exists returns `403`.
 - Ingest stays closed until setup succeeds.
 - The banner is printed once. Restarting only reopens setup while the user
   count is still zero.
@@ -47,7 +48,8 @@ without them, an operator with access to the control database can mint a login
 link. OIDC mode instead requires an HTTPS issuer, a client, and an HTTPS
 `FANOUT_PUBLIC_URL`.
 
-If you configure SMTP, send yourself a code and confirm it arrives. Credentials
+After setup in local mode, send yourself a code if SMTP is configured and
+confirm it arrives. Credentials
 can be wrong, the relay can refuse the sender, and mail can land in spam. A
 login link remains available when delivery fails.
 
@@ -167,11 +169,11 @@ audit attribution isolated without shared credentials or an anonymous
 authorization bypass:
 
 ```sh
-FANOUT_AUTH_MODE=oidc
-FANOUT_OIDC_EMAIL_VERIFICATION=required
-FANOUT_OIDC_AUTO_PROVISION=true
-FANOUT_OIDC_ALLOWED_DOMAINS="*"
-FANOUT_OIDC_DEFAULT_ROLE=viewer
+export FANOUT_AUTH_MODE=oidc
+export FANOUT_OIDC_EMAIL_VERIFICATION=required
+export FANOUT_OIDC_AUTO_PROVISION=true
+export FANOUT_OIDC_ALLOWED_DOMAINS="*"
+export FANOUT_OIDC_DEFAULT_ROLE=viewer
 ```
 
 The wildcard is deliberately explicit and is rejected with

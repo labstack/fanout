@@ -31,8 +31,8 @@ Supplies the namespace for telemetry without one.
 
 ### `FANOUT_INGEST_BATCH_SIZE`
 
-Limits telemetry rows per batch; valid values are 1–50000.
+Sets the group-commit row target; valid values are 1–50000. Individual requests remain atomic and can exceed this target.
 
 ### `FANOUT_INGEST_MAX_IN_FLIGHT_BYTES`
 
-Caps the decoded telemetry the process will hold across concurrent requests. Concurrency is HTTP/2 streams times connections and each handler holds its batch until the commit is durable, so without a ceiling a burst is bounded only by memory. Zero is unbounded, which is the behaviour that predates this setting.
+Caps the decoded telemetry the process will hold across concurrent requests. Concurrency is HTTP/2 streams times connections and each handler holds its batch until the commit is durable, so without a ceiling a burst is bounded only by memory. Zero is unbounded. A single request is admitted when no other request holds budget, even if it exceeds the limit.

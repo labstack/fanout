@@ -53,13 +53,15 @@ type Config struct {
 	Addr string `group:"server" env:"FANOUT_ADDR" default:"127.0.0.1:7520"`
 	// DataDir stores telemetry, query state, and the control database.
 	DataDir string `group:"storage" env:"FANOUT_DATA_DIR" default:"./data"`
-	// IngestBatchSize limits telemetry rows per batch; valid values are 1–50000.
+	// IngestBatchSize sets the group-commit row target; valid values are 1–50000.
+	// Individual requests remain atomic and can exceed this target.
 	IngestBatchSize int `group:"ingest" env:"FANOUT_INGEST_BATCH_SIZE" default:"50000"`
 	// IngestMaxInFlightBytes caps the decoded telemetry the process will hold
 	// across concurrent requests. Concurrency is HTTP/2 streams times
 	// connections and each handler holds its batch until the commit is
 	// durable, so without a ceiling a burst is bounded only by memory. Zero is
-	// unbounded, which is the behaviour that predates this setting.
+	// unbounded. A single request is admitted when no other request holds budget,
+	// even if it exceeds the limit.
 	IngestMaxInFlightBytes int `group:"ingest" env:"FANOUT_INGEST_MAX_IN_FLIGHT_BYTES" default:"268435456"`
 	// RollupInterval schedules analytical rollups; use a Go duration of at least 1s.
 	RollupInterval time.Duration `group:"storage" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
@@ -106,7 +108,7 @@ type Config struct {
 	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
 	// DuckDB's own default in place (one worker per core). Set it to leave
 	// cores free for ingest on a query-heavy co-tenant host.
-	DuckDBThreads int `group:"storage" env:"FANOUT_DUCKDB_THREADS"`
+	DuckDBThreads int `group:"storage" env:"FANOUT_DUCKDB_THREADS" default:"0"`
 	// DuckDBMaxConns caps the DuckDB connection pool. Reads scan immutable Parquet
 	// concurrently; rollup-cache writes are serialized by the query write gate.
 	// Zero means "size it from the machine" — the same spelling DuckDBThreads

@@ -45,6 +45,7 @@ provider's endpoint is validated and used. Inherited credentials never select
 a provider. `FANOUT_AI_MODEL` selects the model; unrelated vendor/tool settings
 such as `ANTHROPIC_MODEL` and `OPENAI_MODEL` are ignored. See
 [AI settings](/reference/settings/ai) for base URL meanings.
+Both provider base URLs accept a trailing slash.
 
 ## Unknown names
 
@@ -70,6 +71,7 @@ Setting both forms nonempty fails startup. File contents lose exactly one
 trailing LF or CRLF; an empty result fails. Errors name variables and paths,
 never contents. The deployment controls file access; Fanout performs no
 file-mode check. Secrets are redacted from startup logs.
+Unselected AI providers' value and file forms are ignored.
 
 Use deployment environment injection, Docker/Compose secrets, Kubernetes
 Secrets, or a private selected SOPS profile. This public repository ships no
@@ -79,7 +81,29 @@ for examples.
 
 ## Validation
 
-The whole configuration is validated before any listener opens. A value the
+The whole configuration is validated before data files or listeners open. A value the
 binary cannot accept stops startup. [First boot](/start/first-boot) lists what
 is checked. The healthcheck command derives its probe from the listener and
 TLS environment settings without validating unrelated settings or secrets.
+
+## DuckDB sizing
+
+Most deployments should not set DuckDB variables. Give the process or
+container the CPU and memory limits it may use; at startup Fanout reserves
+headroom for Go and sizes the DuckDB connection pool from available CPUs. The
+resolved values and whether Fanout chose them are available in the
+`runtime_sizing` block returned by `/readyz`.
+
+These variables are escape hatches for measured, unusual workloads:
+
+| Variable | Automatic behavior | When to override |
+|---|---|---|
+| `FANOUT_DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
+| `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
+| `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
+
+An explicit value always wins. Startup logs and `/readyz` report the detected
+host and cgroup limits, the selected source, and whether detection was
+incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
+set `FANOUT_DUCKDB_MEMORY` for a guaranteed bound. See
+[storage settings](/reference/settings/storage) for types and defaults.

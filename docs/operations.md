@@ -39,6 +39,7 @@ Both forms nonempty fail startup. Fanout strips exactly one trailing LF or CRLF
 from file contents, then rejects an empty result. Errors identify the variable
 and path, never the contents. Fanout performs no file-mode check; the deployment
 controls mount access. Do not bake credentials into images or frontend bundles.
+Unselected AI providers' value and file forms are ignored.
 
 For Docker, mount a provisioned secret and inject its path:
 
