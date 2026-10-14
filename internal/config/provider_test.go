@@ -4,9 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDefaultAddrMatchesSchema(t *testing.T) {
+	field, ok := reflect.TypeOf(Config{}).FieldByName("Addr")
+	if !ok || field.Tag.Get("default") != DefaultAddr {
+		t.Fatalf("Addr default tag = %q, want %q", field.Tag.Get("default"), DefaultAddr)
+	}
+}
 
 func TestLoadIgnoresInactiveProviderSecretFiles(t *testing.T) {
 	emptyPath := filepath.Join(t.TempDir(), "empty")

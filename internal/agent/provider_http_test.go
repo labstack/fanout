@@ -351,10 +351,13 @@ func TestParseAnthropicSkipsNonDataLines(t *testing.T) {
 
 // captureRequestBody serves one canned SSE response and returns the decoded
 // request body the provider sent.
-func captureRequestBody(t *testing.T, sseBody string, run func(baseURL string) error) map[string]any {
+func captureRequestBody(t *testing.T, sseBody, requestPath string, run func(baseURL string) error) map[string]any {
 	t.Helper()
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != requestPath {
+			t.Errorf("request path = %q, want %q", r.URL.Path, requestPath)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("decode request body: %v", err)
 		}
@@ -369,8 +372,8 @@ func captureRequestBody(t *testing.T, sseBody string, run func(baseURL string) e
 }
 
 func TestOpenAIResponsesRequestBodyShape(t *testing.T) {
-	body := captureRequestBody(t, lines(`data: {"type":"response.completed","response":{}}`), func(baseURL string) error {
-		provider, err := NewProvider("openai", "sk-test", "", baseURL+"/v1/")
+	body := captureRequestBody(t, lines(`data: {"type":"response.completed","response":{}}`), "/v1/responses", func(baseURL string) error {
+		provider, err := NewProvider("openai", "sk-test", "", baseURL+"/v1")
 		if err != nil {
 			return err
 		}
@@ -493,7 +496,7 @@ func TestAnthropicRequestBodyShape(t *testing.T) {
 		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
 		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
 	)
-	body := captureRequestBody(t, sseBody, func(baseURL string) error {
+	body := captureRequestBody(t, sseBody, "/v1/messages", func(baseURL string) error {
 		provider := &anthropicProvider{apiKey: "sk-test", model: "claude-sonnet-5-5", baseURL: baseURL, client: http.DefaultClient}
 		params := StreamParams{
 			System: "be helpful",

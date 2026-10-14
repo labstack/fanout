@@ -114,24 +114,6 @@ Every tag above also exists under `ghcr.io/labstack/fanout`.
 Standalone signatures and SBOMs are deliberately not published yet — the
 reasoning is in the repository's release contract.
 
-## Configuration upgrades
-
-Apply these deployment changes before restarting with the new binary or image.
-Every setting requires a restart.
-
-| Previous setup | Current setup |
-|---|---|
-| YAML configuration and `--config` | Configuration comes from built-in defaults and nonempty environment values. Set deployment environment variables for your settings. |
-| A mount at `/etc/fanout/fanout.yaml` | The new image silently ignores this file. Transfer its settings to environment variables before upgrading. |
-| `FANOUT_AI_API_KEY` and `FANOUT_AI_BASE_URL` | Use the selected provider's `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` or `OPENAI_API_KEY` / `OPENAI_BASE_URL`. |
-| Chat enabled by an inherited key | Set `FANOUT_AI_PROVIDER` to exactly `anthropic` or `openai` and supply its key. Empty disables chat. Model selection remains `FANOUT_AI_MODEL`. |
-| OpenAI base without an API version | Include `/v1` in `OPENAI_BASE_URL`; Fanout appends `/responses`. Anthropic still appends `/v1/messages`. Both preserve gateway prefixes. |
-| Native listener on all interfaces | Native default is `127.0.0.1:7520`. Set `FANOUT_ADDR=:7520` for remote access. The container image supplies `:7520`. |
-| Tracked `.env` defaults | Only generated `.env.example` is tracked, with empty values. Personal `.env` is ignored; `just run` loads it optionally and inherited values win. |
-
-Secrets also accept `<ENV>_FILE` paths for managed mounts. Set either the value
-or the path, never both nonempty. See [runtime secret delivery](https://github.com/labstack/fanout/blob/main/docs/operations.md#runtime-secret-delivery).
-
 ## What an instance opens
 
 | Port or path | Purpose | Native default |
@@ -147,8 +129,8 @@ Exporters use the shared port `7520` or the public HTTPS origin. Every OTLP
 export requires the ingest token. A private collector hostname can be entered
 on **Connect telemetry** before copying its generated configuration.
 
-Separate interface bindings are also removed. If the dashboard is public but
-ingest must remain LAN-only, keep Fanout's backend port private and deny
+If the dashboard is public but ingest must remain LAN-only, keep Fanout's
+backend port private and deny
 `/v1`, `/v1/*`, and `/opentelemetry.proto.collector.*` on the public proxy.
 Allow collectors through the private network or a restricted proxy route,
 and verify that neither OTLP transport is reachable through the public origin.

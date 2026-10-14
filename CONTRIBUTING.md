@@ -18,7 +18,8 @@ also requires a 32-character authentication code secret. SMTP and AI chat are
 optional; selecting an AI provider requires its key — see [README](README.md#requirements).
 
 Copy `.env.example` to ignored `.env` for personal development settings and
-credentials. After building, `just run` loads it with Node's native dotenv
+credentials. Every entry is commented out; uncomment only values you want to
+supply. Copying the template sets nothing. After building, `just run` loads it with Node's native dotenv
 parser; inherited environment values win. The binary validates the settings.
 Keep this file out of Git and Docker inputs. See
 [runtime secret delivery](docs/operations.md#runtime-secret-delivery).

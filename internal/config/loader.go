@@ -55,8 +55,7 @@ func Load(options LoadOptions) (Config, error) {
 	for _, spec := range specs {
 		// Shared vendor settings, including secret mounts, belong only to the
 		// explicitly selected provider. Fanout-owned secrets always resolve.
-		if strings.HasPrefix(spec.env, "ANTHROPIC_") && values["FANOUT_AI_PROVIDER"] != "anthropic" ||
-			strings.HasPrefix(spec.env, "OPENAI_") && values["FANOUT_AI_PROVIDER"] != "openai" {
+		if provider := providerForEnvironment(spec.env); provider != "" && provider != values["FANOUT_AI_PROVIDER"] {
 			continue
 		}
 		text := values[spec.env]
@@ -117,7 +116,7 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 		if name == "" {
 			return nil, fmt.Errorf("configuration field %s must declare an env tag", field.Name)
 		}
-		if !strings.HasPrefix(name, "FANOUT_") && !isProviderEnvironment(name) {
+		if !strings.HasPrefix(name, "FANOUT_") && providerForEnvironment(name) == "" {
 			return nil, fmt.Errorf("environment variable %s is outside the supported configuration contract", name)
 		}
 		secret := field.Tag.Get("secret") == "true"
@@ -178,17 +177,6 @@ func environmentValues(environ []string, known map[string]bool) (map[string]stri
 		return nil, fmt.Errorf("unknown Fanout environment variables: %s", strings.Join(unknown, ", "))
 	}
 	return values, nil
-}
-
-// Vendor namespaces are shared with other consumers. Accept these exact names;
-// only Fanout's own namespace rejects unknown names.
-func isProviderEnvironment(name string) bool {
-	switch name {
-	case "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL":
-		return true
-	default:
-		return false
-	}
 }
 
 func isPlatformInjectedEnvironment(name string) bool {

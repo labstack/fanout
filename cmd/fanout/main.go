@@ -11,10 +11,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
-	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -60,7 +60,7 @@ type repairCommand struct {
 }
 
 func main() {
-	showVersion, loginEmail, healthURL, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
+	showVersion, loginEmail, healthURL, derivedProbe, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -71,8 +71,14 @@ func main() {
 		fmt.Println(version)
 		return
 	}
-	if healthURL != "" {
-		derivedProbe := len(os.Args) == 2 && os.Args[1] == "healthcheck"
+	if derivedProbe {
+		healthURL, err = healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	if healthURL != "" || derivedProbe {
 		if err := checkHealth(healthURL, derivedProbe); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -426,19 +432,15 @@ func main() {
 	}
 }
 
-func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginEmail, healthURL string, repair *repairCommand, err error) {
+func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginEmail, healthURL string, derivedProbe bool, repair *repairCommand, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return true, "", "", nil, nil
+		return true, "", "", false, nil, nil
 	}
 	if len(args) >= 1 && len(args) <= 2 && args[0] == "healthcheck" {
 		if len(args) == 2 {
-			return false, "", args[1], nil, nil
+			return false, "", args[1], false, nil, nil
 		}
-		healthURL, err := healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
-		if err != nil {
-			fmt.Fprintln(output, err)
-		}
-		return false, "", healthURL, nil, err
+		return false, "", "", true, nil, nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
@@ -457,22 +459,22 @@ func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginE
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return false, "", "", nil, err
+		return false, "", "", false, nil, err
 	}
 	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
-		return false, flags.Arg(1), "", nil, nil
+		return false, flags.Arg(1), "", false, nil, nil
 	}
 	if flags.NArg() > 0 && flags.Arg(0) == "repair" {
 		repair, err := parseRepairCommand(flags.Args()[1:], output)
-		return false, "", "", repair, err
+		return false, "", "", false, repair, err
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return false, "", "", nil, err
+		return false, "", "", false, nil, err
 	}
-	return showVersion, "", "", nil, nil
+	return showVersion, "", "", false, nil, nil
 }
 
 func parseRepairCommand(args []string, output io.Writer) (*repairCommand, error) {
@@ -526,8 +528,7 @@ func runRepair(root string, command repairCommand, output io.Writer) error {
 
 func healthcheckURL(addr, certFile string) (string, error) {
 	if addr == "" {
-		field, _ := reflect.TypeOf(config.Config{}).FieldByName("Addr")
-		addr = field.Tag.Get("default")
+		addr = config.DefaultAddr
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -538,9 +539,6 @@ func healthcheckURL(addr, certFile string) (string, error) {
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
 		host = "127.0.0.1"
-		if ip.To4() == nil {
-			host = "::1"
-		}
 	}
 	scheme := "http"
 	if certFile != "" {
@@ -552,12 +550,18 @@ func healthcheckURL(addr, certFile string) (string, error) {
 func checkHealth(healthURL string, derivedProbe bool) error {
 	client := &http.Client{Timeout: 3 * time.Second}
 	if derivedProbe {
-		// A derived probe targets this process's own listener directly, whose
-		// certificate may name its public hostname rather than any bind IP.
-		// Explicit URLs retain environment proxies and certificate verification.
+		// Derived probes bypass proxies. IP literals skip certificate verification
+		// because the certificate may name the public hostname instead of a bind IP.
+		// Hostnames verify normally; explicit URLs retain all default behaviour.
+		probe, err := url.Parse(healthURL)
+		if err != nil {
+			return fmt.Errorf("healthcheck: %w", err)
+		}
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		if _, err := netip.ParseAddr(probe.Hostname()); err == nil {
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		}
 		defer transport.CloseIdleConnections()
 		client.Transport = transport
 	}

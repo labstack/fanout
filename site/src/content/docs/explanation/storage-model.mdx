@@ -107,11 +107,8 @@ Discarded hashes force decoding; they do not establish a stored checksum.
 Verification failures such as memory exhaustion or cancellation never authorize
 quarantine.
 
-Telemetry batches use format 4. An older or unknown batch format makes startup
-fail before cleanup or schema rewriting, leaving the files intact. This build
-has no reader or automatic conversion for previous formats. Start with an
-empty telemetry directory; retain previous data separately for its original
-reader. SQLite control state is independent of this telemetry format change.
+Telemetry batches use format 4. An unsupported batch format makes startup
+fail before cleanup or schema rewriting, leaving the files intact.
 
 ## Small files are bounded by compaction
 

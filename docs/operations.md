@@ -9,7 +9,9 @@ give ingest credentials only to trusted services and collectors.
 Runtime configuration uses built-in defaults followed by nonempty process
 environment values. Every setting requires a restart. Fanout reads no
 configuration document or dotenv file. Generated `.env.example` lists the
-settings with empty values and defaults in comments. For development, `just run`
+settings as commented-out empty entries, with types, defaults, and secret file
+forms in comments. Copying the template sets nothing and preserves image ENV;
+uncomment only settings you want to supply. For development, `just run`
 loads optional ignored `./.env` with Node's native `parseEnv`; inherited values
 win, including empty values. Personal development credentials may live there.
 Personal environment files and operator profiles are excluded from Git and Docker.
@@ -111,25 +113,17 @@ The profile supplies environment values to the child; ordinary settings may
 also come from deployment inputs. A dotenv parser neither decrypts SOPS nor
 resolves 1Password references. Verify synthetic values containing dollars,
 quotes, spaces, and newlines through the actual deployment parser before
-migrating a profile. Keep private age identities out of Git, restrict their
+using a profile. Keep private age identities out of Git, restrict their
 local files to mode `0600`, and document key recovery in the existing 1Password
 item. 1Password holds recovery rather than a second maintained copy of
 SOPS-owned application secrets.
-
-Existing vault/platform delivery remains authoritative until consumers and
-recovery are verified. Before retiring a vault field or old name, inventory
-local, CI, deployment, shared-project, supported-version, and recovery consumers
-using names and safe metadata. Update mappings, verify real consumers, and
-verify recovery from the destination before removing the old authority. Private
-migration sources stay ignored and are never loaded automatically.
 
 AI chat is disabled by default. Select exactly `anthropic` or `openai` with
 `FANOUT_AI_PROVIDER`, then deliver its required `ANTHROPIC_API_KEY` or
 `OPENAI_API_KEY`. A selected provider without its key fails startup. Inherited
 keys never enable chat. Only the selected endpoint is validated and used.
 Overrides are `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`; the OpenAI base
-includes `/v1`, while Anthropic's excludes it. See the
-[configuration upgrade table](../site/src/content/docs/start/install.mdx#configuration-upgrades).
+includes `/v1`, while Anthropic's excludes it.
 
 ## Network surface
 
@@ -180,12 +174,12 @@ original host.
 ## Health and monitoring
 
 `fanout healthcheck` derives `/healthz` from `FANOUT_ADDR` or its built-in
-default. Empty and unspecified bind hosts become loopback, including IPv6.
-`FANOUT_TLS_CERT_FILE` selects HTTPS. The local loopback probe skips certificate
-verification because the certificate may be issued for the public hostname.
-Healthcheck reads only these two settings and does not require valid secrets.
-An explicit `fanout healthcheck <url>` overrides URL derivation.
-
+default. Empty, `0.0.0.0`, and `::` bind hosts become `127.0.0.1`.
+`FANOUT_TLS_CERT_FILE` selects HTTPS. Derived probes bypass environment proxies.
+IP-literal probes skip certificate verification because the certificate may be
+issued for the public hostname; hostname probes verify normally. Healthcheck
+reads only these two settings and does not require valid secrets. An explicit
+`fanout healthcheck <url>` uses default proxy and certificate verification behaviour.
 
 - `/healthz` is the liveness check.
 - `/readyz` includes storage readiness and resolved runtime sizing.
@@ -202,16 +196,6 @@ its configured cycle rather than immediately when the setting changes.
 Fanout uses SQLite with the modernc driver, sqlc query bindings, and embedded
 Goose SQL migrations. Pending migrations run forward at startup. PostgreSQL
 and pgx are not required.
-
-This preview replaces the Atlas migration history with a fresh Goose baseline.
-Existing Atlas-managed control databases are unsupported; startup rejects them
-without converting or resetting their data. To start fresh, stop Fanout, back
-up the complete data directory, and move `data/control` aside (under your
-configured data directory). Startup creates a new control database. Complete
-first-admin setup again and reconfigure the ingest token, users, alert rules,
-and dashboards; prior sessions, OAuth grants, and agent history remain only in
-the saved control database. Telemetry and query files stay in place. Restore
-the saved directory with the previous binary if you need the previous state.
 
 ## Backup
 
@@ -247,34 +231,6 @@ view of the entire data directory.
 Never recover an account by deleting its row from the control database; that
 cascades to sessions, OAuth grants, and owned dashboards. Use `fanout login-link
 <email>` as documented in [authentication.md](authentication.md).
-
-## Single-port migration
-
-All transports use `FANOUT_ADDR`. Exporters use port `7520` or the public
-HTTPS origin and port; the ingest token and signal paths remain the same.
-Enable HTTP/2 backend forwarding for gRPC at proxies and remove obsolete ingest
-port mappings and upstreams. A separate ingest hostname may still route to the
-same Fanout port if required by the edge configuration.
-
-Set `FANOUT_PUBLIC_URL` to the external origin. If collectors use a different
-private hostname, edit the endpoint on **Connect telemetry** before copying the
-configuration.
-
-Local comparison results are in [the single-port benchmark report](benchmarks/single-port-2026-09-08.md).
-
-### Network isolation changes
-
-Ingest can no longer bind to a different interface from the application.
-For an internet-facing dashboard with LAN-only ingest, keep the backend port
-private and configure the public proxy to deny `/v1`, `/v1/*`, and the OTLP
-gRPC service paths under `/opentelemetry.proto.collector.*`. Allow collectors
-through the private network or an explicitly restricted proxy route. Verify
-that both OTLP transports are inaccessible through the public origin; the
-ingest token is still required on the private path.
-
-Single-port removes the need for a proxy solely to combine listeners. Splitting
-public application access from private ingest still requires network-aware
-routing. The shared listener keeps one network topology for this pre-release product.
 
 ## Upgrade and rollback
 

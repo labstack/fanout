@@ -17,10 +17,6 @@ Unknown `FANOUT_` names fail startup; platform-injected service names are tolera
 Custom names use `FANOUT_` plus a clear name, adding the area only when it clarifies.
 Vendor credentials and endpoints keep the vendor's documented names.
 
-Fanout also recognizes `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
-`OPENAI_API_KEY`, and `OPENAI_BASE_URL`. Other vendor/tool variables are
-ignored; only the explicitly selected AI provider's key and endpoint are used.
-
 | Environment variable | Type | Default |
 |---|---|---|
 | `FANOUT_DATA_DIR` | string | `./data` |

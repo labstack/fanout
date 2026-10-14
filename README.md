@@ -155,7 +155,7 @@ hostname reachable from that Collector.
 
 The equivalent OTLP/gRPC endpoint is `localhost:7520` (plaintext locally).
 Behind a TLS proxy, both transports use the public origin; gRPC requires
-HTTP/2 to Fanout. See the [single-port migration notes](docs/operations.md#single-port-migration).
+HTTP/2 to Fanout.
 For later sign-in
 without SMTP, mint a 15-minute, single-use link against the running
 container's control database:
@@ -227,8 +227,10 @@ as their declared types.
 
 [`.env.example`](.env.example) is generated from
 [`internal/config/config.go`](internal/config/config.go), with every value
-empty and defaults in comments. Copy it to ignored `.env` for personal
-settings and development credentials. After building, `just run` uses Node's
+empty and every entry commented out. Types, defaults, and secret file forms
+are documented in comments. Copying it sets nothing and preserves image ENV.
+Copy it to ignored `.env` and uncomment personal settings and development
+credentials as needed. After building, `just run` uses Node's
 `parseEnv` to load optional `./.env`, then lets inherited environment values
 win, including empty values. The binary itself reads only process environment;
 production launchers and deployments supply their own values.
@@ -260,8 +262,7 @@ defaults to `https://api.openai.com/v1`; Fanout appends `/responses`.
 Both preserve gateway prefixes and accept a trailing slash. The selected URL
 must use HTTP(S) without credentials, a query, or a fragment.
 
-See the [configuration upgrade table](https://fanout.run/start/install/#configuration-upgrades)
-and [runtime secret delivery](docs/operations.md#runtime-secret-delivery) for
+See [runtime secret delivery](docs/operations.md#runtime-secret-delivery) for
 deployment examples. This public repository excludes operator secret profiles
 and private recipient policy. Run `just docs-generate` after changing the
 schema; `just docs-generate-check` verifies `.env.example` and the reference.

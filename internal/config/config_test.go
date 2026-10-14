@@ -73,7 +73,7 @@ func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
 }
 
 func TestLoadRejectsUnknownAndMalformedEnvironment(t *testing.T) {
-	for _, entry := range []string{"FANOUT_HTPP_ADDR=:1111", "FANOUT_SERVICE_PORTAL=7520", "FANOUT_ADDR", "FANOUT_ADDR_FILE=/unused", "FANOUT_AI_API_KEY=synthetic-private-value"} {
+	for _, entry := range []string{"FANOUT_HTPP_ADDR=:1111", "FANOUT_SERVICE_PORTAL=7520", "FANOUT_ADDR", "FANOUT_ADDR_FILE=/unused", "FANOUT_UNKNOWN_SETTING=synthetic-private-value"} {
 		_, err := Load(LoadOptions{Environ: append(validEnvironment(), entry)})
 		name, _, _ := strings.Cut(entry, "=")
 		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "synthetic-private-value") {
@@ -164,8 +164,7 @@ func TestLoadSecretFiles(t *testing.T) {
 					}
 				}
 				env = append(env, name+"=", name+"_FILE="+path)
-				if isProviderEnvironment(name) {
-					provider, _, _ := strings.Cut(strings.ToLower(name), "_")
+				if provider := providerForEnvironment(name); provider != "" {
 					env = append(env, "FANOUT_AI_PROVIDER="+provider)
 				}
 				cfg, err := Load(LoadOptions{Environ: env})

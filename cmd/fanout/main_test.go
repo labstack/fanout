@@ -31,15 +31,16 @@ import (
 )
 
 func TestParseCommandLine(t *testing.T) {
-	t.Setenv("FANOUT_ADDR", "")
-	t.Setenv("FANOUT_TLS_CERT_FILE", "")
-	t.Setenv("FANOUT_AUTH_CODE_SECRET", "")
+	t.Setenv("FANOUT_ADDR", "invalid")
+	t.Setenv("FANOUT_TLS_CERT_FILE", "cert.pem")
+	t.Setenv("FANOUT_AUTH_CODE_SECRET_FILE", "/missing")
 	tests := []struct {
 		name        string
 		args        []string
 		wantVersion bool
 		wantEmail   string
 		wantHealth  string
+		wantDerived bool
 		wantRepair  *repairCommand
 		wantErr     bool
 	}{
@@ -48,7 +49,7 @@ func TestParseCommandLine(t *testing.T) {
 		{name: "version flag", args: []string{"--version"}, wantVersion: true},
 		{name: "short version flag", args: []string{"-v"}, wantVersion: true},
 		{name: "login link", args: []string{"login-link", "admin@example.com"}, wantEmail: "admin@example.com"},
-		{name: "default healthcheck", args: []string{"healthcheck"}, wantHealth: "http://127.0.0.1:7520/healthz"},
+		{name: "default healthcheck", args: []string{"healthcheck"}, wantDerived: true},
 		{name: "custom healthcheck", args: []string{"healthcheck", "http://fanout:8080/healthz"}, wantHealth: "http://fanout:8080/healthz"},
 		{name: "repair verify", args: []string{"repair", "verify"}, wantRepair: &repairCommand{action: "verify"}},
 		{name: "repair quarantine", args: []string{"repair", "quarantine", "--batch", "broken"}, wantRepair: &repairCommand{action: "quarantine", batch: "broken"}},
@@ -60,12 +61,12 @@ func TestParseCommandLine(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			showVersion, email, healthURL, repair, err := parseCommandLine(test.args, io.Discard)
+			showVersion, email, healthURL, derivedProbe, repair, err := parseCommandLine(test.args, io.Discard)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
 			}
-			if showVersion != test.wantVersion || email != test.wantEmail || healthURL != test.wantHealth {
-				t.Fatalf("result = (%v, %q, %q), want (%v, %q, %q)", showVersion, email, healthURL, test.wantVersion, test.wantEmail, test.wantHealth)
+			if showVersion != test.wantVersion || email != test.wantEmail || healthURL != test.wantHealth || derivedProbe != test.wantDerived {
+				t.Fatalf("result = (%v, %q, %q, %v), want (%v, %q, %q, %v)", showVersion, email, healthURL, derivedProbe, test.wantVersion, test.wantEmail, test.wantHealth, test.wantDerived)
 			}
 			if repair == nil != (test.wantRepair == nil) || repair != nil && *repair != *test.wantRepair {
 				t.Fatalf("repair = %#v, want %#v", repair, test.wantRepair)
@@ -75,7 +76,7 @@ func TestParseCommandLine(t *testing.T) {
 }
 
 func TestParseCommandLineHelp(t *testing.T) {
-	_, _, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
+	_, _, _, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("error = %v, want flag.ErrHelp", err)
 	}
@@ -83,7 +84,7 @@ func TestParseCommandLineHelp(t *testing.T) {
 
 func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	var output bytes.Buffer
-	_, _, _, _, err := parseCommandLine([]string{"serve"}, &output)
+	_, _, _, _, _, err := parseCommandLine([]string{"serve"}, &output)
 	if err == nil {
 		t.Fatal("expected unexpected-argument error")
 	}
@@ -220,7 +221,7 @@ func TestHealthcheckURL(t *testing.T) {
 		{"", "", "http://127.0.0.1:7520/healthz"},
 		{":8080", "", "http://127.0.0.1:8080/healthz"},
 		{"0.0.0.0:8080", "", "http://127.0.0.1:8080/healthz"},
-		{"[::]:8080", "", "http://[::1]:8080/healthz"},
+		{"[::]:8080", "", "http://127.0.0.1:8080/healthz"},
 		{"[::1]:8080", "", "http://[::1]:8080/healthz"},
 		{"[2001:db8::1]:8080", "", "http://[2001:db8::1]:8080/healthz"},
 		{"127.0.0.1:9000", "cert.pem", "https://127.0.0.1:9000/healthz"},
@@ -241,8 +242,8 @@ func TestHealthcheckUsesEnvironmentWithoutValidatingSecrets(t *testing.T) {
 	t.Setenv("FANOUT_ADDR", "[::]:9090")
 	t.Setenv("FANOUT_TLS_CERT_FILE", "cert.pem")
 	t.Setenv("FANOUT_AUTH_CODE_SECRET_FILE", "/missing")
-	_, _, probe, _, err := parseCommandLine([]string{"healthcheck"}, io.Discard)
-	if err != nil || probe != "https://[::1]:9090/healthz" {
+	probe, err := healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
+	if err != nil || probe != "https://127.0.0.1:9090/healthz" {
 		t.Fatalf("probe = %s, %v", probe, err)
 	}
 }
@@ -255,6 +256,11 @@ func TestCheckHealthWithLocalTLS(t *testing.T) {
 	}
 	if err := checkHealth(server.URL+"/healthz", false); err == nil {
 		t.Fatal("explicit URL must verify the certificate")
+	}
+	probe := strings.Replace(server.URL, "127.0.0.1", "localhost", 1) + "/healthz"
+	var authorityError x509.UnknownAuthorityError
+	if err := checkHealth(probe, true); !errors.As(err, &authorityError) {
+		t.Fatalf("derived hostname probe must verify certificate trust, got %v", err)
 	}
 }
 
@@ -283,13 +289,13 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 	defer server.Close()
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
-	for _, addr := range []string{"192.0.2.10:7520", "[2001:db8::10]:7520"} {
+	for _, addr := range []string{"192.0.2.10:7520", "[2001:db8::10]:7520", "[fe80::1%eth0]:7520", "fanout.example.com:7520", "wrong.example.com:7520"} {
 		t.Run(addr, func(t *testing.T) {
 			original := http.DefaultTransport
 			transport := original.(*http.Transport).Clone()
 			transport.TLSClientConfig = &tls.Config{RootCAs: roots}
-			// Route the interface bind to a local test listener so both IP families
-			// exercise real TLS without requiring those addresses on the test host.
+			// Route binds to a local test listener to exercise real TLS without
+			// requiring those addresses or DNS entries on the test host.
 			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 				if address != addr {
 					t.Errorf("probe address = %q, want %q", address, addr)
@@ -304,19 +310,29 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 			})
 			t.Setenv("FANOUT_ADDR", addr)
 			t.Setenv("FANOUT_TLS_CERT_FILE", "cert.pem")
-			_, _, probe, _, err := parseCommandLine([]string{"healthcheck"}, io.Discard)
+			probe, err := healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := checkHealth(probe, true); err != nil {
+			err = checkHealth(probe, true)
+			var hostnameError x509.HostnameError
+			if addr == "wrong.example.com:7520" {
+				if !errors.As(err, &hostnameError) {
+					t.Fatalf("derived hostname probe must verify the hostname, got %v", err)
+				}
+			} else if err != nil {
 				t.Fatalf("derived TLS probe: %v", err)
 			}
-			_, _, explicitProbe, _, err := parseCommandLine([]string{"healthcheck", probe}, io.Discard)
+			_, _, explicitProbe, derivedProbe, _, err := parseCommandLine([]string{"healthcheck", probe}, io.Discard)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var hostnameError x509.HostnameError
-			if err := checkHealth(explicitProbe, false); !errors.As(err, &hostnameError) {
+			err = checkHealth(explicitProbe, derivedProbe)
+			if addr == "fanout.example.com:7520" {
+				if err != nil {
+					t.Fatalf("explicit hostname probe: %v", err)
+				}
+			} else if !errors.As(err, &hostnameError) {
 				t.Fatalf("explicit TLS probe must verify the hostname, got %v", err)
 			}
 		})
@@ -347,8 +363,12 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 		}
 		return
 	}
-	for _, scheme := range []string{"http", "https"} {
-		t.Run(scheme, func(t *testing.T) {
+	for _, tc := range []struct{ scheme, addr string }{
+		{"http", "192.0.2.10:7520"}, {"https", "192.0.2.10:7520"},
+		{"http", "fanout.example.com:7520"}, {"https", "example.com:7520"},
+	} {
+		t.Run(tc.scheme+"/"+tc.addr, func(t *testing.T) {
+			scheme, addr := tc.scheme, tc.addr
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 				if request.URL.Path != "/healthz" {
 					t.Errorf("probe path = %q, want /healthz", request.URL.Path)
@@ -363,9 +383,13 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 				server.Start()
 			}
 			defer server.Close()
-			const addr = "192.0.2.10:7520"
 			original := http.DefaultTransport
 			transport := original.(*http.Transport).Clone()
+			if scheme == "https" {
+				roots := x509.NewCertPool()
+				roots.AddCert(server.Certificate())
+				transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+			}
 			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 				if address == addr {
 					address = server.Listener.Addr().String()
@@ -382,7 +406,7 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 			})
 			t.Setenv("FANOUT_ADDR", addr)
 			t.Setenv("FANOUT_TLS_CERT_FILE", certFile)
-			_, _, probe, _, err := parseCommandLine([]string{"healthcheck"}, io.Discard)
+			probe, err := healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
 			if err != nil {
 				t.Fatal(err)
 			}

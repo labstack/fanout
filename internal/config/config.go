@@ -15,9 +15,35 @@ import (
 const maxIngestBatchSize = 50_000
 
 const (
+	DefaultAddr             = "127.0.0.1:7520"
 	DefaultAnthropicBaseURL = "https://api.anthropic.com"
 	DefaultOpenAIBaseURL    = "https://api.openai.com/v1"
 )
+
+type providerSettings struct {
+	keyEnv, baseURLEnv, defaultBaseURL string
+	key, baseURL                       func(Config) string
+}
+
+var providers = map[string]providerSettings{
+	"anthropic": {
+		keyEnv: "ANTHROPIC_API_KEY", baseURLEnv: "ANTHROPIC_BASE_URL", defaultBaseURL: DefaultAnthropicBaseURL,
+		key: func(c Config) string { return c.AnthropicAPIKey }, baseURL: func(c Config) string { return c.AnthropicBaseURL },
+	},
+	"openai": {
+		keyEnv: "OPENAI_API_KEY", baseURLEnv: "OPENAI_BASE_URL", defaultBaseURL: DefaultOpenAIBaseURL,
+		key: func(c Config) string { return c.OpenAIAPIKey }, baseURL: func(c Config) string { return c.OpenAIBaseURL },
+	},
+}
+
+func providerForEnvironment(name string) string {
+	for provider, settings := range providers {
+		if name == settings.keyEnv || name == settings.baseURLEnv {
+			return provider
+		}
+	}
+	return ""
+}
 
 // Config is Fanout's canonical configuration schema. Custom environment names
 // use FANOUT_; provider credentials and endpoints use their vendor's names.
@@ -328,23 +354,18 @@ func (c Config) Validate() error {
 			return fmt.Errorf("OIDC auto-provisioning requires FANOUT_OIDC_ALLOWED_GROUPS or FANOUT_OIDC_ALLOWED_DOMAINS")
 		}
 	}
-	switch c.AIProvider {
-	case "", "anthropic", "openai":
-	default:
+	provider, supported := providers[c.AIProvider]
+	if c.AIProvider != "" && !supported {
 		return fmt.Errorf("FANOUT_AI_PROVIDER must be anthropic or openai")
 	}
 	if c.AgentConfigured() {
-		key, endpoint := "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"
-		if c.AIProvider == "openai" {
-			key, endpoint = "OPENAI_API_KEY", "OPENAI_BASE_URL"
-		}
 		if strings.TrimSpace(c.AIAPIKey()) == "" {
-			return fmt.Errorf("%s is required when FANOUT_AI_PROVIDER is %s", key, c.AIProvider)
+			return fmt.Errorf("%s is required when FANOUT_AI_PROVIDER is %s", provider.keyEnv, c.AIProvider)
 		}
 		baseURL := c.AIBaseURL()
 		u, err := url.Parse(baseURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(baseURL, "#") {
-			return fmt.Errorf("%s must be an HTTP(S) base URL without credentials, query, or fragment", endpoint)
+			return fmt.Errorf("%s must be an HTTP(S) base URL without credentials, query, or fragment", provider.baseURLEnv)
 		}
 	}
 	for _, raw := range strings.Split(c.TrustedProxyCIDRs, ",") {
@@ -397,29 +418,21 @@ func (c Config) AgentConfigured() bool {
 
 // AIAPIKey returns only the explicitly selected provider's credential.
 func (c Config) AIAPIKey() string {
-	switch c.AIProvider {
-	case "anthropic":
-		return c.AnthropicAPIKey
-	case "openai":
-		return c.OpenAIAPIKey
-	default:
-		return ""
+	if provider, ok := providers[c.AIProvider]; ok {
+		return provider.key(c)
 	}
+	return ""
 }
 
 // AIBaseURL returns the selected provider's API base, including its default.
 func (c Config) AIBaseURL() string {
-	var baseURL, fallback string
-	switch c.AIProvider {
-	case "anthropic":
-		baseURL, fallback = c.AnthropicBaseURL, DefaultAnthropicBaseURL
-	case "openai":
-		baseURL, fallback = c.OpenAIBaseURL, DefaultOpenAIBaseURL
-	default:
+	provider, ok := providers[c.AIProvider]
+	if !ok {
 		return ""
 	}
+	baseURL := provider.baseURL(c)
 	if strings.TrimSpace(baseURL) == "" {
-		return fallback
+		return provider.defaultBaseURL
 	}
 	return strings.TrimRight(strings.TrimSpace(baseURL), "/")
 }

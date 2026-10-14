@@ -52,15 +52,21 @@ func TestEnvironmentTemplateMatchesSchema(t *testing.T) {
 	var env []string
 	seen := map[string]string{}
 	for _, line := range strings.Split(string(body), "\n") {
-		if line == "" || strings.HasPrefix(line, "#") {
+		if line == "" {
 			continue
 		}
-		name, value, ok := strings.Cut(line, "=")
+		if !strings.HasPrefix(line, "#") {
+			t.Fatalf("template must contain only comments: %q", line)
+		}
+		entry := strings.TrimPrefix(line, "# ")
+		if !strings.HasSuffix(entry, "=") {
+			continue
+		}
+		name, value, ok := strings.Cut(entry, "=")
 		if _, duplicate := seen[name]; !ok || duplicate {
 			t.Fatal("invalid or duplicate template entry")
 		}
 		seen[name] = value
-		env = append(env, line)
 	}
 	if len(seen) != len(fields) {
 		t.Fatalf("template has %d settings, schema has %d", len(seen), len(fields))
@@ -73,17 +79,18 @@ func TestEnvironmentTemplateMatchesSchema(t *testing.T) {
 		if !exists || value != "" {
 			t.Errorf("template must leave %s empty so it preserves defaults", f.Env)
 		}
-		if f.Default != "" && !strings.Contains(string(body), "# Default: "+f.Default+"\n"+f.Env+"=\n") {
+		if f.Default != "" && !f.Secret && !strings.Contains(string(body), "# Default: "+f.Default+"\n# "+f.Env+"=\n") {
 			t.Errorf("template must document the default for %s", f.Env)
 		}
 	}
-	for i, entry := range env {
-		if entry == "FANOUT_AUTH_CODE_SECRET=" {
-			env[i] += strings.Repeat("x", 32)
-		}
-	}
-	if _, err := config.Load(config.LoadOptions{Environ: env}); err != nil {
+	// A copied template contributes no overrides to the image environment.
+	env = append(env, "FANOUT_ADDR=:7520", "FANOUT_DATA_DIR=/var/lib/fanout/data", "FANOUT_AUTH_CODE_SECRET="+strings.Repeat("x", 32))
+	cfg, err := config.Load(config.LoadOptions{Environ: env})
+	if err != nil {
 		t.Fatalf("template rejected by the runtime loader: %v", err)
+	}
+	if cfg.Addr != ":7520" || cfg.DataDir != "/var/lib/fanout/data" {
+		t.Fatal("template must preserve image environment values")
 	}
 }
 
@@ -127,6 +134,9 @@ func TestRenderProducesOnePageWithFrontmatterPerGroup(t *testing.T) {
 
 	for name, body := range pages {
 		text := string(body)
+		if strings.Contains(text, "Fanout also recognizes") != (name == "settings/ai.mdx") {
+			t.Errorf("%s: vendor-variable paragraph belongs only on the AI settings page", name)
+		}
 		if !strings.HasPrefix(text, "---\n") {
 			t.Errorf("%s: does not open with frontmatter", name)
 		}
