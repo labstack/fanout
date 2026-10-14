@@ -1,9 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Change product maturity (alpha, beta, rc, or empty for GA) when the product graduates.
+readonly PRODUCT_MATURITY=alpha
+
 die() {
   printf 'release: %s\n' "$1" >&2
   exit 1
+}
+
+next_release_number() {
+  local series=$1
+  local tag
+  local number=0
+  local published
+
+  while IFS= read -r tag; do
+    [[ "$tag" =~ ^v([0-9]{4})\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)(-(alpha|beta|rc))?$ ]] || continue
+    [ "v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" = "$series" ] || continue
+    published=${BASH_REMATCH[3]}
+    if ((published >= number)); then
+      number=$((published + 1))
+    fi
+  done
+  printf '%s\n' "$number"
 }
 
 create_release_tag() {
@@ -16,7 +36,7 @@ create_release_tag() {
   local candidate
 
   while ((attempts < 1000)); do
-    candidate="${series}.${number}"
+    candidate="${series}.${number}${PRODUCT_MATURITY:+-${PRODUCT_MATURITY}}"
     if response=$(gh api --silent --method POST "repos/${repo}/git/refs" \
       -f "ref=refs/tags/${candidate}" -f "sha=${head}" 2>&1); then
       git fetch origin "refs/tags/${candidate}:refs/tags/${candidate}" >/dev/null
@@ -72,7 +92,6 @@ main() {
   local year
   local month
   local series
-  local last
   local number
   local repo
   local created_tag
@@ -80,16 +99,11 @@ main() {
   month=$(date +%m)
   month=${month#0}
   series="v${year}.${month}"
-  last=$(git tag --list "${series}.*" --sort=-v:refname | grep -E "^${series}\.[0-9]+$" | head -1 || true)
-  if [ -z "$last" ]; then
-    number=0
-  else
-    number=$((${last##*.} + 1))
-  fi
+  number=$(git tag --list "${series}.*" | next_release_number "$series")
   repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 
-  printf 'release: %s -> searching from %s.%s at %s\n' \
-    "${last:-<first this month>}" "$series" "$number" "$head_before"
+  printf 'release: searching from %s.%s%s at %s\n' \
+    "$series" "$number" "${PRODUCT_MATURITY:+-${PRODUCT_MATURITY}}" "$head_before"
   created_tag=$(create_release_tag "$repo" "$head_before" "$series" "$number") ||
     die "could not create a release tag"
   printf 'release: %s is ready\n' "$created_tag"

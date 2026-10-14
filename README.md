@@ -56,7 +56,7 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
 fanout
 ```
 
-Set `FANOUT_VERSION=v{YYYY.M}.{N}` to pin a release and `FANOUT_PREFIX` to choose the installation
+Set `FANOUT_VERSION=v2026.10.1-alpha` to pin a release and `FANOUT_PREFIX` to choose the installation
 directory. Native installs bind `127.0.0.1:7520`; set `FANOUT_ADDR=:7520` for remote access, then
 follow the same first-boot setup.
 
@@ -205,16 +205,18 @@ generated assets, hooks, and project layout.
 
 ## Releases
 
-Versions are CalVer — `v{YYYY.M}.{N}`, numbered from 0 within each month. Tagged releases publish
+Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
+maturity suffixes. Fanout is currently alpha (for example, `v2026.10.1-alpha`); GA has no suffix.
+Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.
 
 | Image tag | Points at |
 | --- | --- |
 | `labstack/fanout:latest` | the newest release, mirrored on Docker Hub |
-| `labstack/fanout:2026.8.0` | that exact release, mirrored on Docker Hub |
+| `labstack/fanout:2026.10.1-alpha` | that exact release, mirrored on Docker Hub |
 | `ghcr.io/labstack/fanout:latest` | the newest release |
-| `ghcr.io/labstack/fanout:2026.8.0` | that exact release |
+| `ghcr.io/labstack/fanout:2026.10.1-alpha` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 

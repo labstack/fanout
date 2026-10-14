@@ -63,8 +63,10 @@ against it before extracting**, and installs to `/usr/local/bin` when that is
 writable or `~/.local/bin` otherwise. Set `FANOUT_PREFIX` to choose the
 directory, or `FANOUT_VERSION` to pin a tag instead of taking the latest.
 
-Versions are CalVer — `v{YYYY.M}.{N}`, numbered from 0 within each month, so
-`v2026.8.1` is the second release of August 2026.
+Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each
+month across all maturity suffixes. Fanout is currently alpha, so
+`v2026.10.1-alpha` is the second release of October 2026. GA has no suffix.
+Container tags omit the leading `v`, and every release moves `latest`.
 
   </TabItem>
   <TabItem label="Native binary">
@@ -89,7 +91,7 @@ page by hand, check it yourself — both the checksum and the build provenance:
 
 ```sh
 sha256sum -c SHA256SUMS
-gh attestation verify fanout_v2026.8.0_linux_amd64.tar.gz \
+gh attestation verify fanout_v2026.10.1-alpha_linux_amd64.tar.gz \
   --repo labstack/fanout
 ```
 
@@ -97,7 +99,7 @@ For containers, record or pin the digest the registry returns rather than
 trusting a moving tag:
 
 ```sh
-docker buildx imagetools inspect labstack/fanout:2026.8.0
+docker buildx imagetools inspect labstack/fanout:2026.10.1-alpha
 ```
 
 Release images are multi-architecture for `linux/amd64` and `linux/arm64`, and
@@ -107,7 +109,7 @@ runner, because DuckDB needs cgo.
 | Image tag | Points at |
 |---|---|
 | `labstack/fanout:latest` | the newest release |
-| `labstack/fanout:2026.8.0` | that exact release |
+| `labstack/fanout:2026.10.1-alpha` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 
