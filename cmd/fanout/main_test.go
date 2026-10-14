@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"io"
@@ -120,7 +121,7 @@ func TestCheckHealth(t *testing.T) {
 				writer.WriteHeader(test.statusCode)
 			}))
 			defer server.Close()
-			if err := checkHealth(server.URL, false); (err != nil) != test.wantErr {
+			if err := checkHealth(server.URL, false, ""); (err != nil) != test.wantErr {
 				t.Fatalf("checkHealth() error = %v, wantErr %v", err, test.wantErr)
 			}
 		})
@@ -251,32 +252,136 @@ func TestHealthcheckUsesEnvironmentWithoutValidatingSecrets(t *testing.T) {
 func TestCheckHealthWithLocalTLS(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer server.Close()
-	if err := checkHealth(server.URL+"/healthz", true); err != nil {
+	certFile := writeHealthcheckCertificate(t, server.Certificate().Raw)
+	if err := checkHealth(server.URL+"/healthz", true, certFile); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkHealth(server.URL+"/healthz", false); err == nil {
-		t.Fatal("explicit URL must verify the certificate")
+	var verificationError *tls.CertificateVerificationError
+	if err := checkHealth(server.URL+"/healthz", false, certFile); !errors.As(err, &verificationError) {
+		t.Fatalf("explicit URL must verify the certificate, got %v", err)
+	}
+	other := *server.Certificate()
+	other.SerialNumber = big.NewInt(2)
+	other.SignatureAlgorithm = x509.UnknownSignatureAlgorithm
+	other.PublicKey = nil
+	otherCertificate := newHealthcheckCertificate(t, &other)
+	otherFile := writeHealthcheckCertificate(t, otherCertificate.Certificate[0])
+	// Only the first certificate is trusted, even when the listener's leaf follows it.
+	chain := append(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: otherCertificate.Certificate[0]}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})...)
+	if err := os.WriteFile(otherFile, chain, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkHealth(server.URL+"/healthz", true, otherFile); !errors.As(err, &verificationError) {
+		t.Fatalf("derived IP probe must reject a different certificate, got %v", err)
 	}
 	probe := strings.Replace(server.URL, "127.0.0.1", "localhost", 1) + "/healthz"
-	var authorityError x509.UnknownAuthorityError
-	if err := checkHealth(probe, true); !errors.As(err, &authorityError) {
-		t.Fatalf("derived hostname probe must verify certificate trust, got %v", err)
+	if err := checkHealth(probe, true, certFile); !errors.As(err, &verificationError) {
+		t.Fatalf("derived hostname probe must verify the certificate, got %v", err)
 	}
 }
 
-func TestCheckHealthWithInterfaceTLS(t *testing.T) {
+func writeHealthcheckCertificate(t *testing.T, der []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "cert.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func newHealthcheckCertificate(t *testing.T, certificate *x509.Certificate) tls.Certificate {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+func TestCheckHealthCertificateFileErrors(t *testing.T) {
+	const contents = "private file contents must not appear in errors"
+	for _, test := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "unreadable"},
+		{name: "non-certificate", data: []byte(contents)},
+		{name: "other PEM block", data: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte(contents)})},
+		{name: "invalid certificate", data: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte(contents)})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "cert.pem")
+			if test.data != nil {
+				if err := os.WriteFile(path, test.data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := checkHealth("https://127.0.0.1:7520/healthz", true, path)
+			if err == nil || !strings.HasPrefix(err.Error(), "healthcheck:") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), contents) {
+				t.Fatalf("certificate file error must name its path without contents, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckHealthTLSCertificate(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		dnsNames   []string
+		ips        []net.IP
+		expired    bool
+		clientOnly bool
+		wantErr    bool
+	}{
+		{name: "IP SAN", ips: []net.IP{net.ParseIP("192.0.2.10")}},
+		{name: "DNS before IP SAN", dnsNames: []string{"fanout.example.com", "other.example.com"}, ips: []net.IP{net.ParseIP("192.0.2.10")}},
+		{name: "no SAN", wantErr: true},
+		{name: "expired", dnsNames: []string{"fanout.example.com"}, expired: true, wantErr: true},
+		{name: "client usage", dnsNames: []string{"fanout.example.com"}, clientOnly: true, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			certificate := &x509.Certificate{
+				SerialNumber: big.NewInt(1), DNSNames: test.dnsNames, IPAddresses: test.ips,
+				NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+				KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			}
+			if test.expired {
+				certificate.NotAfter = time.Now().Add(-time.Minute)
+			}
+			if test.clientOnly {
+				certificate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				if len(test.dnsNames) > 0 && request.TLS.ServerName != test.dnsNames[0] {
+					t.Errorf("TLS server name = %q, want %q", request.TLS.ServerName, test.dnsNames[0])
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			server.TLS = &tls.Config{Certificates: []tls.Certificate{newHealthcheckCertificate(t, certificate)}}
+			server.StartTLS()
+			defer server.Close()
+			certFile := writeHealthcheckCertificate(t, server.Certificate().Raw)
+			err := checkHealth(server.URL+"/healthz", true, certFile)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("checkHealth() error = %v, wantErr %v", err, test.wantErr)
+			}
+			if test.name == "no SAN" && (!strings.HasPrefix(err.Error(), "healthcheck:") || !strings.Contains(err.Error(), certFile)) {
+				t.Fatalf("missing SAN error must name the certificate path, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 	certificate := &x509.Certificate{
 		SerialNumber: big.NewInt(1), DNSNames: []string{"fanout.example.com"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
 	}
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/healthz" {
@@ -284,16 +389,14 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	server.TLS = &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{newHealthcheckCertificate(t, certificate)}}
 	server.StartTLS()
 	defer server.Close()
-	roots := x509.NewCertPool()
-	roots.AddCert(server.Certificate())
+	certFile := writeHealthcheckCertificate(t, server.Certificate().Raw)
 	for _, addr := range []string{"192.0.2.10:7520", "[2001:db8::10]:7520", "[fe80::1%eth0]:7520", "fanout.example.com:7520", "wrong.example.com:7520"} {
 		t.Run(addr, func(t *testing.T) {
 			original := http.DefaultTransport
 			transport := original.(*http.Transport).Clone()
-			transport.TLSClientConfig = &tls.Config{RootCAs: roots}
 			// Route binds to a local test listener to exercise real TLS without
 			// requiring those addresses or DNS entries on the test host.
 			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -309,16 +412,16 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 				transport.CloseIdleConnections()
 			})
 			t.Setenv("FANOUT_ADDR", addr)
-			t.Setenv("FANOUT_TLS_CERT_FILE", "cert.pem")
+			t.Setenv("FANOUT_TLS_CERT_FILE", certFile)
 			probe, err := healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = checkHealth(probe, true)
-			var hostnameError x509.HostnameError
-			if addr == "wrong.example.com:7520" {
-				if !errors.As(err, &hostnameError) {
-					t.Fatalf("derived hostname probe must verify the hostname, got %v", err)
+			err = checkHealth(probe, true, certFile)
+			var verificationError *tls.CertificateVerificationError
+			if strings.HasSuffix(addr, "example.com:7520") {
+				if !errors.As(err, &verificationError) {
+					t.Fatalf("derived hostname probe must use system verification, got %v", err)
 				}
 			} else if err != nil {
 				t.Fatalf("derived TLS probe: %v", err)
@@ -327,13 +430,9 @@ func TestCheckHealthWithInterfaceTLS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = checkHealth(explicitProbe, derivedProbe)
-			if addr == "fanout.example.com:7520" {
-				if err != nil {
-					t.Fatalf("explicit hostname probe: %v", err)
-				}
-			} else if !errors.As(err, &hostnameError) {
-				t.Fatalf("explicit TLS probe must verify the hostname, got %v", err)
+			err = checkHealth(explicitProbe, derivedProbe, certFile)
+			if !errors.As(err, &verificationError) {
+				t.Fatalf("explicit TLS probe must use system verification, got %v", err)
 			}
 		})
 	}
@@ -378,14 +477,14 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 			certFile := ""
 			if scheme == "https" {
 				server.StartTLS()
-				certFile = "cert.pem"
+				certFile = writeHealthcheckCertificate(t, server.Certificate().Raw)
 			} else {
 				server.Start()
 			}
 			defer server.Close()
 			original := http.DefaultTransport
 			transport := original.(*http.Transport).Clone()
-			if scheme == "https" {
+			if scheme == "https" && addr == "example.com:7520" {
 				roots := x509.NewCertPool()
 				roots.AddCert(server.Certificate())
 				transport.TLSClientConfig = &tls.Config{RootCAs: roots}
@@ -410,10 +509,10 @@ func TestCheckHealthDerivedIgnoresEnvironmentProxy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := checkHealth(probe, true); err != nil {
+			if err := checkHealth(probe, true, certFile); err != nil {
 				t.Fatalf("derived %s probe with unreachable proxy: %v", scheme, err)
 			}
-			if err := checkHealth(probe, false); err == nil || !strings.Contains(err.Error(), strings.TrimPrefix(os.Getenv("HTTP_PROXY"), "http://")) {
+			if err := checkHealth(probe, false, certFile); err == nil || !strings.Contains(err.Error(), strings.TrimPrefix(os.Getenv("HTTP_PROXY"), "http://")) {
 				t.Fatalf("explicit %s probe must use the unreachable proxy, got %v", scheme, err)
 			}
 		})

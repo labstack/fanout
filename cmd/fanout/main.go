@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
@@ -79,7 +81,7 @@ func main() {
 		}
 	}
 	if healthURL != "" || derivedProbe {
-		if err := checkHealth(healthURL, derivedProbe); err != nil {
+		if err := checkHealth(healthURL, derivedProbe, os.Getenv("FANOUT_TLS_CERT_FILE")); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -547,11 +549,11 @@ func healthcheckURL(addr, certFile string) (string, error) {
 	return (&url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port), Path: "/healthz"}).String(), nil
 }
 
-func checkHealth(healthURL string, derivedProbe bool) error {
+func checkHealth(healthURL string, derivedProbe bool, certFile string) error {
 	client := &http.Client{Timeout: 3 * time.Second}
 	if derivedProbe {
-		// Derived probes bypass proxies. IP literals skip certificate verification
-		// because the certificate may name the public hostname instead of a bind IP.
+		// Derived probes bypass proxies. HTTPS IP literals trust only the configured
+		// certificate and verify its first DNS or IP SAN instead of the bind IP.
 		// Hostnames verify normally; explicit URLs retain all default behaviour.
 		probe, err := url.Parse(healthURL)
 		if err != nil {
@@ -559,8 +561,36 @@ func checkHealth(healthURL string, derivedProbe bool) error {
 		}
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
-		if _, err := netip.ParseAddr(probe.Hostname()); err == nil {
-			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		if _, err := netip.ParseAddr(probe.Hostname()); probe.Scheme == "https" && err == nil {
+			data, err := os.ReadFile(certFile)
+			if err != nil {
+				return fmt.Errorf("healthcheck: read certificate %q: %w", certFile, err)
+			}
+			var block *pem.Block
+			for len(data) > 0 {
+				block, data = pem.Decode(data)
+				if block == nil || block.Type == "CERTIFICATE" {
+					break
+				}
+			}
+			if block == nil || block.Type != "CERTIFICATE" {
+				return fmt.Errorf("healthcheck: no certificate in %q", certFile)
+			}
+			leaf, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return fmt.Errorf("healthcheck: parse certificate %q: %w", certFile, err)
+			}
+			var serverName string
+			if len(leaf.DNSNames) > 0 {
+				serverName = leaf.DNSNames[0]
+			} else if len(leaf.IPAddresses) > 0 {
+				serverName = leaf.IPAddresses[0].String()
+			} else {
+				return fmt.Errorf("healthcheck: certificate %q has no DNS or IP SAN", certFile)
+			}
+			roots := x509.NewCertPool()
+			roots.AddCert(leaf)
+			transport.TLSClientConfig = &tls.Config{RootCAs: roots, ServerName: serverName}
 		}
 		defer transport.CloseIdleConnections()
 		client.Transport = transport

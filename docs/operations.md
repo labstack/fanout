@@ -176,10 +176,11 @@ original host.
 `fanout healthcheck` derives `/healthz` from `FANOUT_ADDR` or its built-in
 default. Empty, `0.0.0.0`, and `::` bind hosts become `127.0.0.1`.
 `FANOUT_TLS_CERT_FILE` selects HTTPS. Derived probes bypass environment proxies.
-IP-literal probes skip certificate verification because the certificate may be
-issued for the public hostname; hostname probes verify normally. Healthcheck
-reads only these two settings and does not require valid secrets. An explicit
-`fanout healthcheck <url>` uses default proxy and certificate verification behaviour.
+HTTPS IP-literal probes trust only the configured certificate and verify its
+first DNS or IP SAN, which may differ from the bind IP; hostname probes verify
+normally. Healthcheck reads only these two settings and does not require valid
+secrets. An explicit `fanout healthcheck <url>` uses default proxy and
+certificate verification behaviour.
 
 - `/healthz` is the liveness check.
 - `/readyz` includes storage readiness and resolved runtime sizing.
