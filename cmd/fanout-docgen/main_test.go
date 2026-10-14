@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/config"
 )
 
 const configSource = "../../internal/config/config.go"
@@ -25,11 +27,115 @@ func TestCollectCrossChecksReflectionAgainstSource(t *testing.T) {
 		if f.Key == "" || f.Env == "" {
 			t.Errorf("%s: koanf and env tags are both required", f.GoName)
 		}
-		if !strings.HasPrefix(f.Env, "FANOUT_") {
-			t.Errorf("%s: environment variable %q lacks the FANOUT_ prefix the loader requires", f.GoName, f.Env)
+		if !strings.HasPrefix(f.Env, "FANOUT_") && !strings.HasPrefix(f.Key, "ai.anthropic.") && !strings.HasPrefix(f.Key, "ai.openai.") {
+			t.Errorf("%s: custom environment variable %q lacks FANOUT_ prefix", f.GoName, f.Env)
 		}
 		if f.Type == "" {
 			t.Errorf("%s: no rendered type", f.GoName)
+		}
+		if f.Doc == "" {
+			t.Errorf("%s: setting purpose must be documented in the authoritative schema", f.GoName)
+		}
+	}
+}
+
+func TestEnvironmentTemplateMatchesSchema(t *testing.T) {
+	fields, err := collect(configSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := renderEnvironment(fields)
+	written, err := os.ReadFile("../../.env.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != string(body) {
+		t.Error(".env.example is stale; run just docs-generate")
+	}
+	var env []string
+	seen := map[string]string{}
+	for _, line := range strings.Split(string(body), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, value, ok := strings.Cut(line, "=")
+		if _, duplicate := seen[name]; !ok || duplicate {
+			t.Fatal("invalid or duplicate template entry")
+		}
+		seen[name] = value
+		env = append(env, line)
+	}
+	if len(seen) != len(fields) {
+		t.Fatalf("template has %d settings, schema has %d", len(seen), len(fields))
+	}
+	for _, f := range fields {
+		value, exists := seen[f.Env]
+		if !exists || value != f.Default || f.Secret && value != "" {
+			t.Errorf("template does not match the safe schema default for %s", f.Env)
+		}
+	}
+	env = append(env, "FANOUT_AUTH_CODE_SECRET="+strings.Repeat("x", 32))
+	if _, err := config.Load(config.LoadOptions{Environ: env}); err != nil {
+		t.Fatalf("template rejected by the runtime loader: %v", err)
+	}
+}
+
+func TestPublicEnvironmentDefaultsExcludeSecrets(t *testing.T) {
+	fields, err := collect(configSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path       string
+		production bool
+		addr       string
+	}{
+		{"../../.env", false, "127.0.0.1:7520"},
+		{"../../.env.production", true, ":7520"},
+	} {
+		body := renderDefaults(fields, tc.production)
+		written, err := os.ReadFile(tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(written) != string(body) {
+			t.Errorf("%s is stale; run just docs-generate", tc.path)
+		}
+		for _, f := range fields {
+			if f.Secret && strings.Contains(string(body), f.Env+"=") {
+				t.Errorf("public defaults must exclude secret setting %s", f.Env)
+			}
+		}
+		if !strings.Contains(string(body), "FANOUT_ADDR="+tc.addr+"\n") {
+			t.Errorf("%s has the wrong listener scope", tc.path)
+		}
+		if err := validateGeneratedDefaults(tc.path, fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPublicDefaultGenerationPreservesPrivateFiles(t *testing.T) {
+	fields, err := collect(configSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), ".env")
+	for _, content := range []string{
+		"AI_API_KEY=synthetic-private-value\n",
+		"# Generated nonsecret configuration by cmd/fanout-docgen.\nANTHROPIC_API_KEY=synthetic-private-value\n",
+		"# Generated nonsecret configuration by cmd/fanout-docgen.\nFANOUT_AI_API_KEY=synthetic-private-value\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := validateGeneratedDefaults(path, fields)
+		if err == nil || strings.Contains(err.Error(), "synthetic-private-value") {
+			t.Fatal("expected redacted refusal to replace a private file")
+		}
+		unchanged, err := os.ReadFile(path)
+		if err != nil || string(unchanged) != content {
+			t.Fatal("private dotenv file was modified")
 		}
 	}
 }

@@ -19,6 +19,38 @@ func lines(ss ...string) string {
 	return strings.Join(ss, "\n") + "\n"
 }
 
+func TestProviderBaseURLPreservesGatewayPath(t *testing.T) {
+	for _, tc := range []struct {
+		provider, basePath, requestPath, response string
+	}{
+		{"openai", "/gateway/v1", "/gateway/v1/responses", lines(`data: {"type":"response.completed","response":{}}`)},
+		{"anthropic", "/gateway", "/gateway/v1/messages", lines(`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}`, `data: {"type":"message_stop"}`)},
+	} {
+		for _, slash := range []string{"", "/"} {
+			t.Run(tc.provider+slash, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodPost || r.URL.Path != tc.requestPath {
+						t.Errorf("request = %s %s, want POST %s", r.Method, r.URL.Path, tc.requestPath)
+					}
+					if tc.provider == "openai" && r.Header.Get("Authorization") != "Bearer test-key" || tc.provider == "anthropic" && r.Header.Get("X-Api-Key") != "test-key" {
+						t.Error("provider credential was not mapped to the correct header")
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, tc.response)
+				}))
+				defer server.Close()
+				p, err := NewProvider(tc.provider, "test-key", "", server.URL+tc.basePath+slash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := p.Stream(context.Background(), StreamParams{}, func(StreamEvent) error { return nil }); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
 // collect runs a parser over SSE input and buckets the emitted events.
 func collect(t *testing.T, parse func(io.Reader, func(StreamEvent) error) error, input string) (texts []string, toolCalls []ToolCall, stopReasons []string, errs []string, parseErr error) {
 	t.Helper()
@@ -53,7 +85,7 @@ func openAIStream(t *testing.T) func(io.Reader, func(StreamEvent) error) error {
 			_, _ = io.Copy(w, reader)
 		}))
 		defer server.Close()
-		provider := &openAIProvider{apiKey: "sk-test", model: "gpt-6.1-sol", baseURL: server.URL, client: server.Client()}
+		provider := &openAIProvider{apiKey: "sk-test", model: "gpt-6.1-sol", baseURL: server.URL + "/v1", client: server.Client()}
 		return provider.Stream(context.Background(), StreamParams{}, cb)
 	}
 }
@@ -336,7 +368,7 @@ func captureRequestBody(t *testing.T, sseBody string, run func(baseURL string) e
 
 func TestOpenAIResponsesRequestBodyShape(t *testing.T) {
 	body := captureRequestBody(t, lines(`data: {"type":"response.completed","response":{}}`), func(baseURL string) error {
-		provider, err := NewProvider("openai", "sk-test", "", baseURL+"/")
+		provider, err := NewProvider("openai", "sk-test", "", baseURL+"/v1/")
 		if err != nil {
 			return err
 		}
@@ -414,7 +446,7 @@ func TestOpenAIResponsesReasoningReplayWithinRun(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	provider := &openAIProvider{apiKey: "sk-test", model: "gpt-6.1-sol", baseURL: server.URL, client: server.Client()}
+	provider := &openAIProvider{apiKey: "sk-test", model: "gpt-6.1-sol", baseURL: server.URL + "/v1", client: server.Client()}
 	runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: `{"ok":true}`}}, nil)
 	emitter, output := newTestEmitter()
 	messages := []agtypes.Message{{ID: "user-1", Role: agtypes.RoleUser, Content: "status?"}}

@@ -165,7 +165,8 @@ docker exec fanout fanout --config /etc/fanout/fanout.yaml \
   login-link admin@example.com
 ```
 
-Add `FANOUT_AI_API_KEY` to enable chat. Configure all four SMTP settings
+Add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` with `FANOUT_AI_PROVIDER=openai`)
+to enable chat. Configure all four SMTP settings
 (`FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`, `FANOUT_SMTP_PASSWORD`, and
 `FANOUT_SMTP_FROM`) to enable email-code login.
 
@@ -205,8 +206,9 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) # must be 32+ characters
 ./bin/fanout
 ```
 
-Optionally set `FANOUT_AI_API_KEY` for chat and the SMTP variables shown above
-for email-code login. Without SMTP, run `./bin/fanout login-link
+Optionally set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` with
+`FANOUT_AI_PROVIDER=openai`) for chat and the SMTP variables shown above for
+email-code login. Without SMTP, run `./bin/fanout login-link
 admin@example.com` from the same configuration and data directory.
 
 Fanout serves the UI, API, MCP, OTLP/gRPC and OTLP/HTTP on
@@ -222,8 +224,9 @@ capacity tests.
 
 Configuration is resolved once at startup and validated before Fanout opens
 data files or listeners. Sources apply in this order: built-in defaults, an
-optional YAML document selected with `--config`, then `FANOUT_` environment
+optional YAML document selected with `--config`, then recognized environment
 variables. Fanout does not search for configuration or load `.env` files.
+All runtime settings are read once at startup and require a restart to change.
 
 [`fanout.example.yaml`](fanout.example.yaml) is the complete commented schema:
 
@@ -237,8 +240,42 @@ for container injection and secrets. An empty environment value means "no
 override"; use YAML for an explicit empty string. Unknown YAML keys and unknown
 `FANOUT_` variables are startup errors, except for the service-discovery names
 Kubernetes and Docker link-style networking inject for a Service named
-`fanout`. All environment variables outside the `FANOUT_` namespace are
-ignored.
+`fanout`. Fanout also recognizes `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,
+`OPENAI_API_KEY`, and `OPENAI_BASE_URL`. Other environment variables, including
+other settings in those shared vendor namespaces, are ignored. In particular,
+`ANTHROPIC_MODEL` and `OPENAI_MODEL` do not select Fanout's model.
+
+[`.env.example`](.env.example) is generated from the same configuration schema
+as the settings reference, with types, defaults, and empty secret placeholders.
+The shared [`.env`](.env) contains nonsecret local defaults; the generated
+[`.env.production`](.env.production) overrides the local listener for production.
+Personal nonsecret overrides belong in ignored `.env.local`. This public
+repository excludes operator `secrets/` profiles and private recipient policy.
+
+After building, use `just run` locally or `just run-production` for an explicit
+production launch. The Node launcher parses dotenv without shell execution:
+local loading is `.env`, then optional `.env.local`, then injected values;
+production loading is `.env`, then required `.env.production`, then injected
+values. Production never reads `.local` files. A missing required file fails;
+no other environment is substituted. Credentials must be injected separately,
+and secret entries or unknown names in nonsecret dotenv files are rejected.
+
+For example, after selecting a private, complete credential profile:
+
+```sh
+sops exec-env secrets/fanout.env 'just run'
+sops exec-env secrets/fanout.production.env 'just run-production'
+```
+
+Select only a profile that actually exists for the intended resources. An
+ordinary dotenv loader does not resolve 1Password references or decrypt SOPS.
+The binary retains its YAML/environment precedence: every nonempty dotenv value
+injected by the launcher overrides the corresponding `--config` YAML value.
+For YAML-only ordinary settings, launch the binary directly with injected secrets.
+See [runtime secret delivery](docs/operations.md#runtime-secret-delivery) for
+SOPS injection and migration precautions. Run `just docs-generate` after changing
+the schema; `just docs-generate-check` verifies all three dotenv artifacts and
+the reference. The generator refuses to overwrite private or unmanaged defaults.
 
 YAML null values are rejected. Boolean values must use YAML 1.2 `true` or
 `false` (not `yes`, `no`, `on`, or `off`). If a YAML document contains a
@@ -254,9 +291,29 @@ operators touch are:
 | `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
 | `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
 | `ai.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `ai.api_key` | `FANOUT_AI_API_KEY` | — | Enables AI investigation chat |
+| `ai.anthropic.api_key` | `ANTHROPIC_API_KEY` | — | Enables chat when `ai.provider=anthropic` |
+| `ai.openai.api_key` | `OPENAI_API_KEY` | — | Enables chat when `ai.provider=openai` |
 | `storage.retention_days` | `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
 | `mcp.enabled` | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
+
+Only the selected AI provider's credential and endpoint are used. Without its
+key, chat is disabled even if the other provider's key is present. Unsupported
+provider names fail at startup, including when no key is configured.
+`FANOUT_AI_MODEL` remains the application model selector.
+
+`ANTHROPIC_BASE_URL` defaults to `https://api.anthropic.com`; Fanout appends
+`/v1/messages`. `OPENAI_BASE_URL` defaults to `https://api.openai.com/v1`;
+Fanout appends `/responses`. Both retain gateway path prefixes and accept a
+trailing slash. The selected base URL must use HTTP(S) without embedded
+credentials, a query, or a fragment.
+
+When upgrading, replace `FANOUT_AI_API_KEY` with the selected vendor's key and
+move YAML `ai.api_key` to `ai.anthropic.api_key` or `ai.openai.api_key`.
+Replace `FANOUT_AI_BASE_URL` and YAML `ai.base_url` with the matching vendor
+setting. For OpenAI, append `/v1` to the old base URL to preserve the request
+destination; Anthropic's base URL keeps its previous meaning. Retired settings
+are rejected. Coordinate the new names with launchers, deployment inputs, and
+secret-store fields before restarting; they have no aliases.
 
 ### Advanced DuckDB sizing
 

@@ -1,7 +1,7 @@
 # Fanout runtime configuration.
 #
 # Start with: fanout --config /path/to/fanout.yaml
-# Every value can be overridden by its documented FANOUT_ environment variable.
+# Every value can be overridden by its documented environment variable.
 # Secrets are intentionally omitted below; inject them through the environment
 # or add them to a suitably protected copy of this file.
 # Use YAML 1.2 true/false for booleans; yes/no/on/off are strings and rejected.
@@ -43,9 +43,16 @@ alerts:
 ai:
   provider: anthropic # FANOUT_AI_PROVIDER
   model: "" # FANOUT_AI_MODEL
-  base_url: "" # FANOUT_AI_BASE_URL
-  # Optional; enables investigation chat: FANOUT_AI_API_KEY
-  # api_key: ""
+  anthropic:
+    # Defaults to https://api.anthropic.com; Fanout appends /v1/messages.
+    base_url: "" # ANTHROPIC_BASE_URL
+    # Optional; enables chat when provider is anthropic: ANTHROPIC_API_KEY
+    # api_key: ""
+  openai:
+    # Defaults to https://api.openai.com/v1; Fanout appends /responses.
+    base_url: "" # OPENAI_BASE_URL
+    # Optional; enables chat when provider is openai: OPENAI_API_KEY
+    # api_key: ""
 
 smtp:
   host: "" # FANOUT_SMTP_HOST

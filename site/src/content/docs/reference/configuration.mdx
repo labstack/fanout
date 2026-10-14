@@ -13,21 +13,48 @@ keys. Every setting is listed under [Settings](/reference/settings/server),
 grouped by the part of the product it belongs to.
 
 Those pages are generated from `internal/config` by `cmd/fanout-docgen`, and
-`just check` fails when a committed page no longer matches the type the loader
+the root `.env`, `.env.production`, and `.env.example` are generated from the
+same schema. `just check` fails
+when a committed page or template no longer matches the type the loader
 binds. That is the whole point of generating them: the reference cannot describe
 a setting the binary does not accept, and cannot omit one it does.
 
 ## Where a value comes from
 
-An environment variable wins over the YAML file, and the file wins over the
-built-in default. A setting with no default and no value is empty, which for
-most settings means the feature it configures is off.
+A nonempty recognized environment variable wins over the YAML file, and the file
+wins over the built-in default. Empty environment values mean no override.
+All settings are read once at startup and require restart. Fanout does not load
+dotenv files itself. The generated `.env.example` documents types, defaults,
+and empty credential placeholders; `.env` and `.env.production` omit secret fields.
+
+For a source checkout, build the binary and use `just run` for local development
+or `just run-production` for an explicit production launch. Local order is
+`.env`, optional ignored `.env.local`, then injected environment values.
+Production order is `.env`, required `.env.production`, then injected values;
+personal files are excluded. The Node launcher uses the native dotenv parser
+without shell execution or variable interpolation. Missing required files,
+unknown names, and secret entries in ordinary dotenv files fail before launch.
+
+Inject credentials from a private selected SOPS profile or the deployment's
+secret service. This public repository ships no operator secrets or recipients.
+Dotenv values are injected as environment, so nonempty values override the
+corresponding `--config` YAML. Launch the binary directly for YAML-only ordinary
+configuration.
 
 ## Naming
 
-Every environment variable is `FANOUT_`-prefixed. The YAML key is the dotted
-path in the first column of each settings table — `storage.duckdb.memory` is
-`FANOUT_DUCKDB_MEMORY`, and the two are the same setting.
+Custom environment settings use the `FANOUT_` prefix. Provider keys and endpoints
+use `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and
+`OPENAI_BASE_URL`. The YAML key is the dotted path in the first column of each
+settings table — `storage.duckdb.memory` maps to `FANOUT_DUCKDB_MEMORY`.
+Provider settings map to native structured keys under `ai.anthropic` or `ai.openai`.
+
+`FANOUT_AI_PROVIDER` selects the provider and `FANOUT_AI_MODEL` selects its model.
+Only the selected provider's key and endpoint are used. Without that key, chat is
+disabled. Other vendor/tool settings, including `ANTHROPIC_MODEL` and
+`OPENAI_MODEL`, are ignored. See [AI settings](/reference/settings/ai) for
+the different base URL meanings and [upgrade instructions](/start/install#ai-configuration-upgrades)
+for migrating the retired generic key and base URL settings.
 
 ## An unknown variable is an error
 

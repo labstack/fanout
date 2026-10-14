@@ -21,6 +21,10 @@ ui/host/dist/
 # Dev files
 .env
 .env.*
+**/.env
+**/.env.*
+secrets/
+.sops.yaml
 .tmp/
 tmp/
 

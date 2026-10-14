@@ -139,8 +139,8 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 		if previous, exists := envs[envName]; exists {
 			return nil, fmt.Errorf("configuration fields %s and %s share environment variable %q", previous, field.Name, envName)
 		}
-		if !strings.HasPrefix(envName, "FANOUT_") {
-			return nil, fmt.Errorf("configuration field %s environment variable %q lacks FANOUT_ prefix", field.Name, envName)
+		if !strings.HasPrefix(envName, "FANOUT_") && !isProviderEnvironment(envName) {
+			return nil, fmt.Errorf("configuration field %s environment variable %q is outside the supported configuration contract", field.Name, envName)
 		}
 		defaultText, hasDefault := field.Tag.Lookup("default")
 		var defaultValue any
@@ -273,7 +273,7 @@ func environmentOverrides(environ []string, known map[string]fieldSpec) (map[str
 			}
 			continue
 		}
-		if !strings.HasPrefix(name, "FANOUT_") {
+		if !isKnown && !strings.HasPrefix(name, "FANOUT_") {
 			continue
 		}
 		spec, exists := known[name]
@@ -300,6 +300,17 @@ func environmentOverrides(environ []string, known map[string]fieldSpec) (map[str
 		return nil, fmt.Errorf("unknown Fanout environment variables: %s", strings.Join(unknown, ", "))
 	}
 	return overrides, nil
+}
+
+// Vendor namespaces are shared with other consumers. Accept these exact names;
+// only Fanout's own namespace rejects unknown names.
+func isProviderEnvironment(name string) bool {
+	switch name {
+	case "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL":
+		return true
+	default:
+		return false
+	}
 }
 
 func isPlatformInjectedEnvironment(name string) bool {

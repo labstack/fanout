@@ -83,10 +83,19 @@ PNG in the same change. The recipe fails when the
 font is missing rather than shipping a card in a substitute face, which typst
 would otherwise do without complaint.
 
-**Runtime configuration is strict.** [`fanout.example.yaml`](fanout.example.yaml)
-is the complete schema. New settings need a YAML key, a `FANOUT_` environment
-name, a test, and matching documentation; unknown names deliberately fail
-startup.
+**Runtime configuration is strict.** `internal/config/config.go` owns the
+schema, documented in [`fanout.example.yaml`](fanout.example.yaml). New settings
+need a YAML key, a consumer-defined environment name (or `FANOUT_` for custom
+settings), a purpose comment, a test, and matching documentation. Unknown YAML
+keys and owned `FANOUT_` names deliberately fail startup. Recognized provider
+names are explicit; unrelated shared-vendor/tool variables are ignored.
+Run `just docs-generate` to regenerate the settings reference, `.env`,
+`.env.production`, and `.env.example`; `just docs-generate-check` verifies them.
+Public defaults exclude secret fields, and templates use empty placeholders.
+Private overrides and operator secret profiles stay ignored and outside Docker.
+After building, `just run` loads shared/local nonsecret settings with the Node
+launcher; `just run-production` excludes personal files. Inject credentials
+explicitly. Never introduce aliases for retired names or shell-source dotenv.
 
 **SQLite migrations own the control schema.** Write forward SQL changes in
 `internal/db/migrations` using Goose annotations. `just db-migrate-create NAME`

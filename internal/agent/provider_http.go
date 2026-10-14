@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/config"
 )
 
 func NewProvider(kind, apiKey, model, baseURL string) (Provider, error) {
@@ -21,7 +23,7 @@ func NewProvider(kind, apiKey, model, baseURL string) (Provider, error) {
 			model = "claude-sonnet-5-5"
 		}
 		if baseURL == "" {
-			baseURL = "https://api.anthropic.com"
+			baseURL = config.DefaultAnthropicBaseURL
 		}
 		return &anthropicProvider{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/"), client: modelHTTPClient()}, nil
 	case "openai":
@@ -29,7 +31,7 @@ func NewProvider(kind, apiKey, model, baseURL string) (Provider, error) {
 			model = "gpt-6.1-sol"
 		}
 		if baseURL == "" {
-			baseURL = "https://api.openai.com"
+			baseURL = config.DefaultOpenAIBaseURL
 		}
 		return &openAIProvider{apiKey: apiKey, model: model, baseURL: strings.TrimRight(baseURL, "/"), client: modelHTTPClient()}, nil
 	default:
@@ -106,7 +108,7 @@ func (p *openAIProvider) Stream(ctx context.Context, params StreamParams, cb fun
 		}
 		body["tools"] = tools
 	}
-	response, err := postModel(ctx, p.client, p.baseURL+"/v1/responses", p.apiKey, "openai", body)
+	response, err := postModel(ctx, p.client, p.baseURL+"/responses", p.apiKey, "openai", body)
 	if err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(apiErr.Body), "encrypted") {

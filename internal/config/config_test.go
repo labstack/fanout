@@ -16,7 +16,7 @@ import (
 func validEnvironment() []string {
 	return []string{
 		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
-		"FANOUT_AI_API_KEY=sk-test",
+		"ANTHROPIC_API_KEY=sk-test",
 		"FANOUT_SMTP_HOST=smtp.example.com",
 		"FANOUT_SMTP_USERNAME=user",
 		"FANOUT_SMTP_PASSWORD=pass",
@@ -182,7 +182,8 @@ func TestExampleConfigurationMatchesSchema(t *testing.T) {
 		t.Fatalf("field specs: %v", err)
 	}
 	wantSecrets := map[string]bool{
-		"ai.api_key":              true,
+		"ai.anthropic.api_key":    true,
+		"ai.openai.api_key":       true,
 		"smtp.password":           true,
 		"auth.code_secret":        true,
 		"auth.oidc.client_secret": true,
@@ -329,6 +330,8 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 		for _, test := range []struct {
 			key, document string
 		}{
+			{"ai.api_key", "ai:\n  api_key: secret\n"},
+			{"ai.base_url", "ai:\n  base_url: https://ai.example.com\n"},
 			{"agent.provider", "agent:\n  provider: anthropic\n"},
 			{"agent.api_key", "agent:\n  api_key: secret\n"},
 			{"agent.model", "agent:\n  model: test\n"},
@@ -355,6 +358,8 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 
 	t.Run("removed environment variables", func(t *testing.T) {
 		for _, name := range []string{
+			"FANOUT_AI_API_KEY",
+			"FANOUT_AI_BASE_URL",
 			"FANOUT_ROLLUP_EVERY_SECONDS",
 			"FANOUT_MERGE_EVERY_SECONDS",
 			"FANOUT_MERGE_INTERVAL",
@@ -556,7 +561,7 @@ func TestLoadErrorsDoNotContainSecrets(t *testing.T) {
 
 func TestLoadRequiresPrivatePermissionsForConfigSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	if err := os.WriteFile(path, []byte("ai:\n  api_key: secret-from-file\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("ai:\n  anthropic:\n    api_key: secret-from-file\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
@@ -577,7 +582,7 @@ func TestValidate(t *testing.T) {
 		AlertEvaluationInterval: 30 * time.Second,
 		AlertHistoryDays:        7,
 		AIProvider:              "anthropic",
-		AIAPIKey:                "sk-test",
+		AnthropicAPIKey:         "sk-test",
 		SMTPHost:                "smtp.example.com",
 		SMTPPort:                587,
 		SMTPUser:                "user",
@@ -659,8 +664,8 @@ func TestValidate(t *testing.T) {
 	t.Run("local mode allows absent SMTP and agent", func(t *testing.T) {
 		c := valid
 		c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom = "", "", "", ""
-		c.AIAPIKey = ""
-		c.AIProvider = "ignored-without-a-key"
+		c.AnthropicAPIKey = ""
+		c.AIProvider = "anthropic"
 		if err := c.Validate(); err != nil {
 			t.Fatalf("minimal local config should pass: %v", err)
 		}
@@ -780,7 +785,7 @@ func TestFieldSpecsRejectInvalidSchemas(t *testing.T) {
 			typ: reflect.TypeOf(struct {
 				A string `koanf:"a" env:"A"`
 			}{}),
-			want: "lacks FANOUT_ prefix",
+			want: "outside the supported configuration contract",
 		},
 	}
 	for _, test := range tests {

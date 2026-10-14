@@ -56,7 +56,7 @@ func TestOpenAIOutputItemsReplayVerbatim(t *testing.T) {
 	// replace rebuilt text/calls and calls without executed results must vanish.
 	unsafe := json.RawMessage(`{"type":"function_call","call_id":"not_executed","name":"status","arguments":"{}"}`)
 	body := captureRequestBody(t, lines(`data: {"type":"response.completed","response":{}}`), func(url string) error {
-		p, err := NewProvider("openai", "test", "", url)
+		p, err := NewProvider("openai", "test", "", url+"/v1")
 		if err != nil {
 			return err
 		}
@@ -134,7 +134,7 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 		_, _ = io.WriteString(w, `{"error":{"message":"reasoning.encrypted_content is unsupported by this model"}}`)
 	}))
 	defer server.Close()
-	p, err := NewProvider("openai", "test", "custom-model", server.URL)
+	p, err := NewProvider("openai", "test", "custom-model", server.URL+"/v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestRuntimeOpenAITerminalNotices(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, tc.sse) }))
 			defer server.Close()
-			p, err := NewProvider("openai", "test", "", server.URL)
+			p, err := NewProvider("openai", "test", "", server.URL+"/v1")
 			if err != nil {
 				t.Fatal(err)
 			}

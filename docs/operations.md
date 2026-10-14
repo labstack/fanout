@@ -4,6 +4,89 @@ Fanout is one process and one persistent data directory. Operate those two
 things as a unit: preserve the directory, pin the binary or image version, and
 give ingest credentials only to trusted services and collectors.
 
+## Runtime secret delivery
+
+Runtime configuration uses built-in defaults, then an explicit `--config` YAML
+document, then recognized nonempty environment values. Every setting requires
+a restart. Fanout does not load dotenv files itself. The generated root
+`.env.example` documents every setting with empty credential placeholders;
+`.env` and `.env.production` contain only nonsecret settings.
+
+| File | Use | Public Git policy |
+| --- | --- | --- |
+| `.env` | Shared defaults with a loopback local listener | Committed; generated; no secret fields |
+| `.env.production` | Production listener override | Committed; generated; no deployment-specific credentials or origins |
+| `.env.example` | Complete configuration template | Committed; generated; empty secret placeholders |
+| `.env.local` / `.env.production.local` | Personal nonsecret files | Ignored; production never loads them |
+| `secrets/fanout.env` | Private complete SOPS credential profile, when used | Operator-owned; ignored and excluded from Docker |
+| `secrets/fanout.production.env` | Private production profile, when credentials differ | Operator-owned; ignored and excluded from Docker |
+
+Build the binary, then use `just run` locally or `just run-production` for
+production. The Node launcher uses `node:util.parseEnv`; dotenv is not shell code
+and values are not interpolated. Local order is `.env`, optional `.env.local`,
+then inherited/injected values. Production order is `.env`, required
+`.env.production`, then inherited/injected values; no personal files are loaded.
+Unknown names, secret entries, and unresolved `op://` references in ordinary
+dotenv files fail before launch. A missing required file never selects another
+profile. Empty values retain Fanout's no-override semantics.
+
+The launcher injects dotenv settings as environment values, so they override
+the native binary's `--config` YAML. Launch the binary directly for YAML-only
+ordinary configuration. Supported binary flags are forwarded unchanged.
+
+Keep ordinary YAML/dotenv configuration nonsecret where possible. Deliver
+credentials through deployment environment injection, restricted managed mounts,
+or a platform secret service. Do not bake credentials into images or frontend
+bundles. Local dotenv scratch files stay ignored and outside Docker inputs.
+
+For repository-managed application secrets adopting Canon, use one authoritative
+SOPS-encrypted profile per workload/credential set, such as
+`secrets/fanout.env`, or `secrets/fanout.production.env` when production actually
+uses different credentials. Select one complete profile explicitly; do not layer
+production credentials over development credentials or fall back on a missing
+profile. Platform-owned credentials remain platform-owned.
+
+Operator profiles and recipient policy are excluded from this public product
+repository. Create them only for actual credential sets; do not ship working
+development credentials or invent environment profiles. Existing private
+credential migration sources remain ignored and are never loaded automatically.
+
+With a provisioned SOPS key and an existing encrypted profile, use
+[SOPS runtime injection](https://getsops.io/docs/usage/advanced/#passing-secrets-to-other-processes)
+to launch without writing decrypted credentials to disk:
+
+```sh
+sops exec-env secrets/fanout.env './bin/fanout --config fanout.yaml'
+# Or use the shared nonsecret dotenv defaults:
+sops exec-env secrets/fanout.env 'just run'
+# Select a complete profile for actual production resources:
+sops exec-env secrets/fanout.production.env 'just run-production'
+```
+
+This example injects only secrets; ordinary settings remain in `fanout.yaml`
+or deployment inputs. SOPS supplies the profile's environment to the child;
+avoid conflicting secret values in inherited shell variables. Verify synthetic
+values containing dollars, quotes, spaces, and newlines through the actual
+deployment parser before migrating a profile. Keep private age identities out
+of Git, restrict their local files to mode `0600`, and document recovery in the
+product's existing 1Password item. 1Password holds key recovery rather than a
+second independently maintained copy of SOPS-owned application secrets.
+
+Existing vault-owned delivery remains valid until its migration is verified.
+Before retiring a vault field or old variable name, inventory local, CI,
+deployment, shared-project, supported-version, and recovery consumers using
+names and safe metadata. Update their mappings, verify the real consumers, and
+verify recovery from the destination before removing the old authority. This
+repository ships no credential profiles or decryption keys.
+
+For AI, deliver only the selected provider's `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`. Provider endpoint overrides are `ANTHROPIC_BASE_URL` and
+`OPENAI_BASE_URL`; the OpenAI base includes `/v1`, while Anthropic's excludes it.
+The old generic key/base URL names and YAML keys are rejected; the
+[configuration upgrade instructions](../README.md#configuration) describe
+their exact replacements. Verify authentication and request paths against the
+configured provider after rollout, without logging credentials.
+
 ## Network surface
 
 | Default | Purpose | Exposure |

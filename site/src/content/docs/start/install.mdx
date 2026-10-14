@@ -32,7 +32,8 @@ pick whichever registry your hosts already pull from.
 `FANOUT_AUTH_CODE_SECRET` is required in the default `local` auth mode and must
 be at least 32 characters — the container refuses to start without it. It is the
 only setting the command above adds; the image ships listener and data-directory
-defaults of its own. Add `FANOUT_AI_API_KEY` to enable the chat investigator,
+defaults of its own. Add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` with
+`FANOUT_AI_PROVIDER=openai`) to enable the chat investigator,
 which is optional: without a key the process starts normally and logs that the
 agent is disabled.
 
@@ -109,6 +110,21 @@ Every tag above also exists under `ghcr.io/labstack/fanout`.
 
 Standalone signatures and SBOMs are deliberately not published yet — the
 reasoning is in the repository's release contract.
+
+## AI configuration upgrades
+
+Replace `FANOUT_AI_API_KEY` with `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` when
+`FANOUT_AI_PROVIDER=openai`. Move YAML `ai.api_key` to the corresponding
+`ai.anthropic.api_key` or `ai.openai.api_key`. The other provider's key does not
+enable chat; provider and model choices remain `FANOUT_AI_PROVIDER` and
+`FANOUT_AI_MODEL`.
+
+Replace `FANOUT_AI_BASE_URL` with the matching `ANTHROPIC_BASE_URL` or
+`OPENAI_BASE_URL` (YAML `ai.anthropic.base_url` or `ai.openai.base_url`). For
+OpenAI, append `/v1` to the old origin/path: Fanout now appends `/responses`
+instead of `/v1/responses`. Anthropic still appends `/v1/messages`. Both preserve
+gateway prefixes and accept a trailing slash. Retired names are startup errors;
+update deployment/secret inputs with the binary. All settings require restart.
 
 ## What an instance opens
 

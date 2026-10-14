@@ -359,7 +359,7 @@ func main() {
 		slog.Info("browser MCP server enabled", "path", "/api/mcp", "auth", "session")
 	}
 	if cfg.AgentConfigured() {
-		provider, err := agent.NewProvider(cfg.AIProvider, cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+		provider, err := agent.NewProvider(cfg.AIProvider, cfg.AIAPIKey(), cfg.AIModel, cfg.AIBaseURL())
 		if err != nil {
 			slog.Error("agent provider init failed", "err", err)
 			os.Exit(1)
@@ -373,7 +373,7 @@ func main() {
 		agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
 		slog.Info("AG-UI agent enabled", "path", "/api/agent/runs", "provider", cfg.AIProvider)
 	} else {
-		slog.Info("AG-UI agent disabled", "reason", "ai.api_key is not configured")
+		slog.Info("AG-UI agent disabled", "reason", "selected AI provider API key is not configured")
 	}
 
 	// The compiled browser client is an embedded asset, not a second runtime.

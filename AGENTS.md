@@ -1,5 +1,32 @@
 # Agent instructions
 
+## Configuration conventions
+
+- Follow Canon's consumer-first environment naming: custom product settings use
+  `FANOUT_`; AI keys and endpoints use `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
+  Provider and model selection remain `FANOUT_AI_PROVIDER` and `FANOUT_AI_MODEL`.
+- `internal/config/config.go` is the authoritative schema. Run
+  `just docs-generate` after configuration changes and verify
+  `just docs-generate-check`; the generator owns `.env`, `.env.production`,
+  `.env.example`, and site references. Public defaults exclude all secret fields.
+- Preserve the explicit YAML/process-environment loader. Fanout does not load
+  dotenv files; launchers and deployments own file loading and secret injection.
+  Only Fanout's owned namespace rejects unknown environment names; shared vendor
+  namespaces recognize the documented names and ignore unrelated consumers.
+- The Node launcher used by `just run` loads `.env`, then optional `.env.local`,
+  then explicitly injected values. `just run-production` loads `.env` and required
+  `.env.production`, then injected values, and excludes all personal files.
+  Use Node's native dotenv parser; never source dotenv as shell code. Secret
+  entries and unknown names are rejected in these nonsecret files.
+- Repository-managed secret profiles adopt SOPS authority through a verified
+  migration, with key recovery in 1Password. Existing vault/platform delivery
+  remains authoritative until all consumers and recovery are verified. Follow
+  `docs/operations.md` for delivery; never commit credential profiles in plaintext.
+- This public product repository ships no operator secrets or recipients. Keep
+  operator `secrets/`, personal files, and private migration sources ignored and
+  outside Docker inputs; select private SOPS profiles explicitly at launch.
+
 ## Public repository
 
 - Keep credentials, private telemetry, local workstation paths, and private AI

@@ -32,6 +32,15 @@ embedded := "internal/ui/dist internal/mcp/apps"
 default:
     @just --list
 
+# Launch with shared nonsecret defaults, personal overrides, then injected values.
+# Build the binary first with `just build`; secrets must be injected explicitly.
+run *ARGS='':
+    node scripts/run-fanout.mjs --environment local -- ./bin/fanout {{ARGS}}
+
+# Production explicitly excludes every developer-local dotenv file.
+run-production *ARGS='':
+    node scripts/run-fanout.mjs --environment production -- ./bin/fanout {{ARGS}}
+
 # Split out so CI installs exactly what a contributor does, without also
 # writing git hooks into the runner.
 
