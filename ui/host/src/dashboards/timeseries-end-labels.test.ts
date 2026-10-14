@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { timeseriesOption, chartThemeFor } from "../../../panels/compile";
+import { timeseriesOption, chartThemeFor, layoutThresholdLabels } from "../../../panels/compile";
 import { withAnnotations } from "../../../panels/annotations";
 import type { Panel, PanelResult } from "../../../panels/types";
 
@@ -16,7 +16,7 @@ describe("timeseries end labels", () => {
       expect(series.labelLayout).toEqual({ dy: expect.any(Number), hideOverlap: true });
       expect(series.endLabel).toMatchObject({ lineHeight: 14, padding: [1, 0] });
     }
-    expect((option.series as Series[])[0].markLine.data[0].label).toMatchObject({ formatter: "p99 budget 1.5 s", position: "insideStartTop", fontSize: 12 });
+    expect((option.series as Series[])[0].markLine.data[0].label).toMatchObject({ show: false, formatter: "p99 budget 1.5 s", position: "insideEndBottom", fontSize: 12 });
   });
   it("omits end labels for more than six source series", () => {
     const columns = Array.from({ length: 7 }, (_, i) => ({ name: `s${i}`, type: "number" as const, role: "measure" as const }));
@@ -79,4 +79,43 @@ it("retains bounded direct labels on logarithmic axes without explicit extents",
  const o=timeseriesOption({...panel,options:{scale:"log"}},result,chartThemeFor(false),{width:500,height:248}) as any;
  expect(o.series[0].endLabel.show).toBe(true);expect(Number.isFinite(o.series[0].labelLayout.dy)).toBe(true);
  expect(o.legend.show).toBe(true);
+});
+
+it.each([false, true])("keeps top, bottom and coincident thresholds in disjoint plot slots (%s)", dark => {
+ const p: Panel = {...panel, thresholds: [2000, 2000, 0, 0].map(value => ({value, status: "bad", label: "A long threshold label"}))};
+ const base = timeseriesOption(p, result, chartThemeFor(dark));
+ const rect = {y: 42, height: 80, width: 220};
+ const project = (_index: number, value: number) => rect.y + rect.height * (1 - value / 2000);
+ const option = layoutThresholdLabels(base, rect, project) as any;
+ const marks = option.series[0].markLine.data;
+ const centres = marks.map((mark: any) => project(0, mark.yAxis) + mark.label.distance[1]);
+ expect(marks.every((mark: any) => mark.label.show)).toBe(true);
+ for (const [i, centre] of centres.entries()) {
+  expect(centre - 10).toBeGreaterThanOrEqual(rect.y);
+  expect(centre + 10).toBeLessThanOrEqual(rect.y + rect.height);
+  for (const other of centres.slice(i + 1)) expect(Math.abs(centre - other)).toBeGreaterThanOrEqual(20);
+ }
+ for (const mark of marks) expect(mark.label).toMatchObject({position: "insideEndBottom", verticalAlign: "middle", distance: [6, expect.any(Number)], width: 208, overflow: "truncate"});
+ expect(marks.map((mark: any) => mark.yAxis)).toEqual([2000, 2000, 0, 0]);
+ expect((base.series as any[])[0].markLine.data.every((mark: any) => !mark.label.show)).toBe(true);
+ expect(option.series.map((line: any) => line.endLabel)).toEqual((base.series as any[]).map(line => line.endLabel));
+});
+
+it("omits only threshold text when the plot cannot fit it and restores it after resize", () => {
+ const base = timeseriesOption({...panel, thresholds: [1500, 1500, 1500].map(value => ({value, status: "bad"}))}, result, chartThemeFor(false)) as any;
+ const deploy = {xAxis: 1000, label: {show: false}};
+ base.series[0].markLine.data.push(deploy);
+ for (const [height, width, count] of [[20, 100, 1], [19, 100, 0], [100, 23, 0], [100, 100, 3]]) {
+  const option = layoutThresholdLabels(base, {y: 40, height, width}, () => 40) as any;
+  const marks = option.series[0].markLine.data;
+  expect(marks.slice(0, 3).filter((mark: any) => mark.label.show)).toHaveLength(count);
+  expect(marks).toHaveLength(4);
+  expect(marks[3]).toBe(deploy);
+  const restored = layoutThresholdLabels(option, {y: 40, height: 100, width: 100}, () => 40) as any;
+  expect(restored.series[0].markLine.data.slice(0, 3).every((mark: any) => mark.label.show)).toBe(true);
+ }
+ for (const value of [NaN, Infinity, -Infinity]) {
+  const option = layoutThresholdLabels(base, {y: 40, height: 100, width: 100}, () => value) as any;
+  expect(option.series[0].markLine.data.slice(0, 3).every((mark: any) => !mark.label.show)).toBe(true);
+ }
 });

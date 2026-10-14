@@ -5,7 +5,7 @@ import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, Gri
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { layoutEndLabels, type ChartSize } from "../../../panels/compile";
+import { layoutEndLabels, layoutThresholdLabels, type ChartSize } from "../../../panels/compile";
 import { keyboardPoints, type KeyboardPoint, type PointEvent } from "../../../panels/keyboard";
 import { formatValue } from "../../../panels/units";
 import { ChartKeyboard } from "./chart-keyboard";
@@ -125,8 +125,8 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { toolbox: { show: false }, brush: { xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
     // ECharts containment can shrink the nominal plot. Recompute numeric tick
     // density once from the native rect, including any annotation/legend band.
-    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number}}}}};
-    const rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
+    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}}}}};
+    let rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
     const plotHeight=rect?.height;
     if(plotHeight && compiled.yAxis) {
       const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
@@ -134,11 +134,19 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
       if(updated.some((axis,i)=>axis.splitNumber!==axes[i].splitNumber || axis.interval!==axes[i].interval)) {
         compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
         chart.current?.setOption({yAxis:compiled.yAxis});
+        rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
       }
     }
     if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
       compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
         const pixel = chart.current?.convertToPixel({seriesIndex}, value);
+        return Array.isArray(pixel) ? pixel[1] : NaN;
+      });
+      chart.current?.setOption({series: compiled.series});
+    }
+    if (rect && (compiled.series as {markLine?: {data?: {yAxis?: number}[]}}[] | undefined)?.some(line => line.markLine?.data?.some(mark => typeof mark.yAxis === "number"))) {
+      compiled = layoutThresholdLabels(compiled, rect, (seriesIndex, value) => {
+        const pixel = chart.current?.convertToPixel({seriesIndex}, [0, value]);
         return Array.isArray(pixel) ? pixel[1] : NaN;
       });
       chart.current?.setOption({series: compiled.series});

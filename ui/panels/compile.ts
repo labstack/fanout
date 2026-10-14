@@ -98,10 +98,35 @@ function baseOption(theme: ChartTheme, unit?: string): Option {
   };
 }
 
+/** Threshold text occupies the plot's right interior; end labels use the lane
+ * outside it. Project after native axis containment, and omit text when no
+ * padded slot fits. The dashed line remains at the exact threshold value. */
+export function layoutThresholdLabels<T extends Option>(option: T, rect: {y: number; height: number; width: number}, project: (seriesIndex: number, value: number) => number): T {
+  if (!Array.isArray(option.series)) return option;
+  const occupied: number[] = [];
+  const half = 10, inset = 6;
+  const series = option.series.map((line: Record<string, unknown>, index: number) => {
+    const markLine = line.markLine as {data?: Record<string, unknown>[]} | undefined;
+    if (!markLine?.data) return line;
+    const data = markLine.data.map(mark => {
+      const label = mark.label as Record<string, unknown> | undefined;
+      if (typeof mark.yAxis !== "number" || typeof label?.formatter !== "string") return mark;
+      const desired = project(index, mark.yAxis);
+      const candidates = [Math.max(rect.y + half, Math.min(rect.y + rect.height - half, desired)), ...occupied.flatMap(y => [y - half * 2, y + half * 2])];
+      const y = rect.width >= inset * 2 + 12 ? candidates.filter(y => Number.isFinite(y) && y - half >= rect.y && y + half <= rect.y + rect.height && occupied.every(other => Math.abs(other - y) >= half * 2)).sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired))[0] : undefined;
+      if (!Number.isFinite(desired) || y === undefined) return {...mark, label: {...label, show: false}};
+      occupied.push(y);
+      return {...mark, label: {...label, show: true, position: "insideEndBottom", verticalAlign: "middle", distance: [inset, y - desired], width: rect.width - inset * 2, overflow: "truncate", ellipsis: "…"}};
+    });
+    return {...line, markLine: {...markLine, data}};
+  });
+  return {...option, series};
+}
+
 function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
   return (panel.thresholds ?? []).map((t) => ({
     yAxis: t.value,
-    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideStartTop", color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontSize: 12 },
+    label: { show: false, formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideEndBottom", color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontFamily: theme.font, fontSize: 12, lineHeight: 14, padding: [1, 0] },
     lineStyle: { color: theme.status[t.status], type: [4, 3], width: 1 },
   }));
 }
@@ -156,7 +181,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
       itemStyle: { ...markStyle(color,theme), borderRadius: style === "bars" || style === "stacked" ? [2, 2, 0, 0] : undefined },
       barMaxWidth: 12,
       emphasis: { focus: "series" },
-      markLine: i === 0 && (panel.thresholds?.length ?? 0) > 0 ? { symbol: ["none", "none"], silent: true, data: thresholdLines(panel, theme, unit) } : undefined,
+      markLine: i === 0 && (panel.thresholds?.length ?? 0) > 0 ? { symbol: ["none", "none"], silent: true, animation: false, data: thresholdLines(panel, theme, unit) } : undefined,
     };
   });
   const previous = period !== undefined ? previousSeries.map((s) => ({
