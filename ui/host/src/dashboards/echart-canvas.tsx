@@ -5,7 +5,7 @@ import { AriaComponent, BrushComponent, DataZoomComponent, GraphicComponent, Gri
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { layoutEndLabels, layoutThresholdLabels, type ChartSize } from "../../../panels/compile";
+import { layoutEndLabels, type ChartSize } from "../../../panels/compile";
 import { keyboardPoints, type KeyboardPoint, type PointEvent } from "../../../panels/keyboard";
 import { formatValue } from "../../../panels/units";
 import { ChartKeyboard } from "./chart-keyboard";
@@ -102,65 +102,9 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     rangeBarHeight.current = height; apply.current();
   }, []);
   const auditInput = useRef<{ compiled: EChartsCoreOption; size: ChartSize } | null>(null);
-  const layoutInput = useRef(option);
-  const relayout = useRef<() => void>(() => undefined);
   const context = useRef<CanvasRenderingContext2D | null | undefined>(undefined);
   const responsive = useRef(false);
   responsive.current = Boolean(optionForSize);
-  relayout.current = () => {
-    // Keep the pre-layout series so labels omitted in a smaller plot can return.
-    let compiled = layoutInput.current;
-    // ECharts containment can shrink the nominal plot. Recompute numeric tick
-    // density once from the native rect, including any annotation/legend band.
-    const native = chart.current as unknown as {getModel?():{
-      getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}};isSelected?(name:string):boolean};
-      getSeriesByIndex?(index:number):{getData():{getLayout(name:string):ArrayLike<number> | undefined}};
-    }};
-    let rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
-    const plotHeight=rect?.height;
-    if(plotHeight && compiled.yAxis) {
-      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
-      const updated=axes.map(axis=>adaptValueAxis(axis,plotHeight));
-      if(updated.some((axis,i)=>axis.splitNumber!==axes[i].splitNumber || axis.interval!==axes[i].interval)) {
-        compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
-        chart.current?.setOption({yAxis:compiled.yAxis});
-        rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
-      }
-    }
-    layoutInput.current = compiled;
-    if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
-      // Hidden series must not acquire offsets against the rescaled axis or
-      // reserve collision slots. Keep their authored labels in layoutInput.
-      const legend = native?.getModel?.().getComponent("legend");
-      compiled = {...compiled, series: (compiled.series as {name?: string; endLabel?: {show?: boolean}}[]).map(line =>
-        line.name && legend?.isSelected?.(line.name) === false && line.endLabel?.show
-          ? {...line, endLabel: {...line.endLabel, show: false}} : line)};
-      compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
-        // Match the native end label's last valid point after zoom filtering,
-        // retaining the authored series index for legend and axis selection.
-        const points = native?.getModel?.().getSeriesByIndex?.(seriesIndex)?.getData().getLayout("points");
-        if (points) {
-          for (let i = points.length - 2; i >= 0; i -= 2) {
-            if (Number.isFinite(points[i]) && Number.isFinite(points[i + 1])) return points[i + 1];
-          }
-          return NaN;
-        }
-        const pixel = chart.current?.convertToPixel({seriesIndex}, value);
-        return Array.isArray(pixel) ? pixel[1] : NaN;
-      });
-    }
-    if (rect && (compiled.series as {markLine?: {data?: {yAxis?: number}[]}}[] | undefined)?.some(line => line.markLine?.data?.some(mark => typeof mark.yAxis === "number"))) {
-      compiled = layoutThresholdLabels(compiled, rect, (seriesIndex, value) => {
-        const pixel = chart.current?.convertToPixel({seriesIndex}, [0, value]);
-        return Array.isArray(pixel) ? pixel[1] : NaN;
-      });
-    }
-    // Apply both layouts together so a second update cannot move end labels.
-    if (compiled !== layoutInput.current) chart.current?.setOption({series: compiled.series});
-    displayedRef.current = compiled;
-    if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
-    if (import.meta.env.DEV && auditInput.current) auditInput.current = { ...auditInput.current, compiled };
-  };
   apply.current = () => {
     if (context.current === undefined) context.current = document.createElement("canvas").getContext("2d");
     const ctx = context.current;
@@ -179,12 +123,32 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     // ECharts 6 brush preprocessing always creates a toolbox, even without
     // buttons. Register it and hide it; activation uses takeGlobalCursor.
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { toolbox: { show: false }, brush: { xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
-    layoutInput.current = compiled;
-    if (import.meta.env.DEV) auditInput.current = { compiled, size };
-    relayout.current();
+    // ECharts containment can shrink the nominal plot. Recompute numeric tick
+    // density once from the native rect, including any annotation/legend band.
+    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number}}}}};
+    const rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
+    const plotHeight=rect?.height;
+    if(plotHeight && compiled.yAxis) {
+      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
+      const updated=axes.map(axis=>adaptValueAxis(axis,plotHeight));
+      if(updated.some((axis,i)=>axis.splitNumber!==axes[i].splitNumber || axis.interval!==axes[i].interval)) {
+        compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
+        chart.current?.setOption({yAxis:compiled.yAxis});
+      }
+    }
+    if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
+      compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
+        const pixel = chart.current?.convertToPixel({seriesIndex}, value);
+        return Array.isArray(pixel) ? pixel[1] : NaN;
+      });
+      chart.current?.setOption({series: compiled.series});
+    }
     if (highlighted.current) highlight(highlighted.current);
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
     if (zoom.current && brushRange.current) paintRange();
+    displayedRef.current = compiled;
+    if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
+    if (import.meta.env.DEV) auditInput.current = { compiled, size };
   };
 
   useEffect(() => {
@@ -211,10 +175,8 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     });
     instance.on("legendselectchanged", (params) => {
       selected.current = { ...(params as { selected: Record<string, boolean> }).selected };
-      relayout.current();
     });
-    instance.on("datazoom", () => relayout.current());
-    const observer = new ResizeObserver(() => { instance.resize(); if (responsive.current) apply.current(); else relayout.current(); });
+    const observer = new ResizeObserver(() => { instance.resize(); if (responsive.current) apply.current(); });
     observer.observe(ref.current);
     return () => { observer.disconnect(); removeAudit?.(); if (highlighted.current) highlight(undefined); instance.dispose(); chart.current = null; };
   }, []);

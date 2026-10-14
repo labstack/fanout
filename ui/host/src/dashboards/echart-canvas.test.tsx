@@ -198,19 +198,3 @@ it.each([120,170,400,16])("bounds native end labels by priority in a %ipx grid a
   expect(option.legend).toMatchObject({show:true});
  } finally {await act(async()=>root.unmount());container.remove();}
 });
-
-it.each(["line", "bars", "stacked"] as const)("lays out threshold text from the native plot for %s series", async style => {
- const instance = fresh(), rect = {y: 60, height: 40, width: 120};
- const project = vi.fn(() => [120, 60]);
- Object.assign(instance, {getModel: () => ({getComponent: () => ({coordinateSystem: {getRect: () => rect}})}), convertToPixel: project});
- const option = timeseriesOption({id: "p", title: "Latency", viz: "timeseries", options: {style}, thresholds: [2000, 2000, 2000].map(value => ({value, status: "bad"}))}, {id: "p", status: "ok", elapsed_ms: 0, frame: {columns: [{name: "time", type: "time", role: "time"}, {name: "p95", type: "number", role: "measure"}], values: [[0, 1000], [2000, 2000]], rows: 2}}, chartThemeFor(false));
- const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
- try {
-  await act(async () => root.render(<EChartCanvas option={option} height={200} label="Thresholds" />));
-  const marks = instance.setOption.mock.calls.filter(([o]) => o.series).at(-1)![0].series[0].markLine.data;
-  expect(project).toHaveBeenCalledWith({seriesIndex: 0}, [0, 2000]);
-  expect(marks.map((mark: any) => mark.label.show)).toEqual([true, true, false]);
-  expect(marks.slice(0, 2).map((mark: any) => mark.label.distance)).toEqual([[6, 10], [6, 30]]);
-  expect(marks[0].label.width).toBe(rect.width - 12);
- } finally {await act(async () => root.unmount()); container.remove();}
-});
