@@ -7,12 +7,12 @@ import { chartThemeFor, timeseriesOption } from "../../../panels/compile";
 import { nativeAudit } from "./chart-measurements";
 import { EChartCanvas } from "./echart-canvas";
 
-const native = vi.hoisted(() => ({ chart: null as EChartsType | null, resize: () => {} }));
+const native = vi.hoisted(() => ({ chart: null as EChartsType | null, height: 210, resize: () => {} }));
 // Exercise the real engine and component events without a native canvas library.
 vi.mock("echarts/core", async importOriginal => {
   const core = await importOriginal<typeof import("echarts/core")>();
   return { ...core, init: (element: HTMLElement) => {
-    native.chart = core.init(element, undefined, { renderer: "svg", width: 320, height: 210 });
+    native.chart = core.init(element, undefined, { renderer: "svg", width: 320, height: native.height });
     return native.chart;
   } };
 });
@@ -20,6 +20,7 @@ use([SVGRenderer]);
 setPlatformAPI({ measureText: text => ({ width: String(text ?? "").length * 7 }) });
 
 beforeEach(() => {
+  native.height = 210;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("ResizeObserver", class {
     constructor(callback: () => void) { native.resize = callback; }
@@ -65,6 +66,46 @@ function assertLabels(chart: EChartsType, compiled: EChartsCoreOption) {
     expect(text.bottom).toBeLessThanOrEqual(rect.y + rect.height);
   }
 }
+
+it("keeps compact native log-chart labels contained and separate with default animations", async () => {
+  native.height = 120;
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const names = ["A", "B", "C", "D"];
+  const compiled = timeseriesOption({
+    id: "p", title: "Latency", viz: "timeseries", unit: "ms", options: { scale: "log" },
+    thresholds: [{ value: 100, status: "bad", label: "Budget" }],
+  }, {
+    id: "p", status: "ok", elapsed_ms: 0, from_ms: 0, to_ms: 1000,
+    frame: {
+      columns: [{ name: "time", type: "time", role: "time" }, ...names.map(name => ({ name, type: "number" as const, role: "measure" as const, unit: "ms" }))],
+      values: [[0, 1000], [1, 100], [1, 100], [1, 100], [1, 10000]], rows: 2,
+    },
+  }, chartThemeFor(false), { width: 320, height: 120 });
+  try {
+    await act(async () => root.render(<EChartCanvas option={compiled} height={120} label="Latency" />));
+    const chart = native.chart!;
+    // Inspect the settled native renderer after its default line animations.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)); });
+    const rect = (chart as unknown as { getModel(): { getComponent(name: string): { coordinateSystem: { getRect(): { x: number; y: number; width: number; height: number } } } } }).getModel().getComponent("grid").coordinateSystem.getRect();
+    const texts = nativeAudit(chart, compiled, { width: chart.getWidth(), height: chart.getHeight() }, rect).texts;
+    const ends = texts.filter(text => names.includes(text.text) && text.left >= rect.x + rect.width);
+    const thresholds = texts.filter(text => text.text.startsWith("Budget "));
+    expect(ends.map(text => text.text)).toContain("C");
+    expect(thresholds).toHaveLength(1);
+    const labels = [...ends, ...thresholds];
+    for (const [index, text] of labels.entries()) {
+      expect(text.top, text.text).toBeGreaterThanOrEqual(rect.y);
+      expect(text.bottom, text.text).toBeLessThanOrEqual(rect.y + rect.height);
+      for (const other of labels.slice(index + 1)) {
+        expect(text.left < other.right && text.right > other.left && text.top < other.bottom && text.bottom > other.top, JSON.stringify([text, other])).toBe(false);
+      }
+    }
+    for (const text of thresholds) {
+      expect(text.left).toBeGreaterThanOrEqual(rect.x);
+      expect(text.right).toBeLessThanOrEqual(rect.x + rect.width);
+    }
+  } finally { await act(async () => root.unmount()); }
+});
 
 it.each([false, true])("keeps native threshold and end labels inside the plot after legend toggles (dark=%s)", async dark => {
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);

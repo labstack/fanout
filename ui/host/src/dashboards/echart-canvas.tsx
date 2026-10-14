@@ -130,15 +130,15 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
         const pixel = chart.current?.convertToPixel({seriesIndex}, value);
         return Array.isArray(pixel) ? pixel[1] : NaN;
       });
-      chart.current?.setOption({series: compiled.series});
     }
     if (rect && (compiled.series as {markLine?: {data?: {yAxis?: number}[]}}[] | undefined)?.some(line => line.markLine?.data?.some(mark => typeof mark.yAxis === "number"))) {
       compiled = layoutThresholdLabels(compiled, rect, (seriesIndex, value) => {
         const pixel = chart.current?.convertToPixel({seriesIndex}, [0, value]);
         return Array.isArray(pixel) ? pixel[1] : NaN;
       });
-      chart.current?.setOption({series: compiled.series});
     }
+    // Apply both layouts together so a second update cannot move end labels.
+    if (compiled !== layoutInput.current) chart.current?.setOption({series: compiled.series});
     displayedRef.current = compiled;
     if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
     if (import.meta.env.DEV && auditInput.current) auditInput.current = { ...auditInput.current, compiled };
