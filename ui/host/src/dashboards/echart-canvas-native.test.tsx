@@ -111,6 +111,48 @@ it("keeps compact native log-chart labels contained and separate with default an
   } finally { await act(async () => root.unmount()); }
 });
 
+it("keeps visible native end labels contained and separate after hiding A, B, C and restoring A", async () => {
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const names = ["A", "B", "C", "D"];
+  const compiled = timeseriesOption({
+    id: "p", title: "Latency", viz: "timeseries", unit: "ms", options: { scale: "log" },
+    thresholds: [{ value: 100, status: "bad", label: "Budget" }],
+  }, {
+    id: "p", status: "ok", elapsed_ms: 0, from_ms: 0, to_ms: 1000,
+    frame: {
+      columns: [{ name: "time", type: "time", role: "time" }, ...names.map(name => ({ name, type: "number" as const, role: "measure" as const, unit: "ms" }))],
+      values: [[0, 500, 1000], [1, 100, 10000], [1, 10, 1000], [1, 2, 100], [1, 3, 50]], rows: 3,
+    },
+  }, chartThemeFor(false), { width: 320, height: 210 });
+  try {
+    await act(async () => root.render(<EChartCanvas option={compiled} height={210} label="Latency" />));
+    const chart = native.chart!;
+    const visible = new Set(names);
+    const assertVisibleLabels = async () => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)); });
+      const rect = (chart as unknown as { getModel(): { getComponent(name: string): { coordinateSystem: { getRect(): { x: number; y: number; width: number; height: number } } } } }).getModel().getComponent("grid").coordinateSystem.getRect();
+      const texts = nativeAudit(chart, compiled, { width: chart.getWidth(), height: chart.getHeight() }, rect).texts;
+      const ends = texts.filter(text => names.includes(text.text) && text.left >= rect.x + rect.width);
+      expect(ends.length).toBeGreaterThan(0);
+      if (visible.has("A")) expect(ends.map(text => text.text)).toContain("A");
+      for (const [index, text] of ends.entries()) {
+        expect(visible.has(text.text), text.text).toBe(true);
+        expect(text.top, text.text).toBeGreaterThanOrEqual(rect.y);
+        expect(text.bottom, text.text).toBeLessThanOrEqual(rect.y + rect.height);
+        for (const other of ends.slice(index + 1)) {
+          expect(text.top < other.bottom && text.bottom > other.top, JSON.stringify([text, other])).toBe(false);
+        }
+      }
+    };
+    await assertVisibleLabels();
+    for (const name of ["A", "B", "C", "A"]) {
+      await act(async () => chart.dispatchAction({ type: "legendToggleSelect", name }));
+      if (visible.has(name)) visible.delete(name); else visible.add(name);
+      await assertVisibleLabels();
+    }
+  } finally { await act(async () => root.unmount()); }
+}, 10000);
+
 it.each([false, true])("keeps native threshold and end labels inside the plot after legend toggles (dark=%s)", async dark => {
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   const compiled = option(dark);

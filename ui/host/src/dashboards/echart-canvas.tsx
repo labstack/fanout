@@ -113,7 +113,7 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     // ECharts containment can shrink the nominal plot. Recompute numeric tick
     // density once from the native rect, including any annotation/legend band.
     const native = chart.current as unknown as {getModel?():{
-      getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}}};
+      getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}};isSelected?(name:string):boolean};
       getSeriesByIndex?(index:number):{getData():{getLayout(name:string):ArrayLike<number> | undefined}};
     }};
     let rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
@@ -129,6 +129,12 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     }
     layoutInput.current = compiled;
     if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
+      // Hidden series must not acquire offsets against the rescaled axis or
+      // reserve collision slots. Keep their authored labels in layoutInput.
+      const legend = native?.getModel?.().getComponent("legend");
+      compiled = {...compiled, series: (compiled.series as {name?: string; endLabel?: {show?: boolean}}[]).map(line =>
+        line.name && legend?.isSelected?.(line.name) === false && line.endLabel?.show
+          ? {...line, endLabel: {...line.endLabel, show: false}} : line)};
       compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
         // Match the native end label's last valid point after zoom filtering,
         // retaining the authored series index for legend and axis selection.
