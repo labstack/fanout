@@ -36,4 +36,4 @@ jobs:
           # a bot commit into the release history and trigger a CI run plus an
           # image publish every time somebody signs.
           branch: cla-signatures
-          allowlist: vishr,dependabot[bot],renovate[bot]
+          allowlist: vishr,dependabot[bot]
