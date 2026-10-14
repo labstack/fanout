@@ -25,7 +25,7 @@ history—lives in SQLite.
   <a href="/diagrams/persistence.svg" class="docs-diagram__asset" aria-label="Open the Fanout persistence diagram at full size">
     <img
       src="/diagrams/persistence.svg"
-      alt="Fanout persistence flow: authenticated OTLP requests enter bounded group admission and parallel commit workers, publish immutable Parquet batches atomically, then serve indexed trace reads and DuckDB SQL while native maintenance prepares and swaps compacted replacements."
+      alt="Telemetry durability and query flow: authenticated OTLP rows pass through group admission, parallel commit workers, and durable publication into immutable Parquet batches; indexed trace reads, DuckDB SQL, retention, and compaction use those batches, while service and edge rollups populate rebuildable query state."
       loading="lazy"
       decoding="async"
     />

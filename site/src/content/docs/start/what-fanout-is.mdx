@@ -17,7 +17,7 @@ investigator and MCP tools, and hosts the browser client.
   <a href="/diagrams/architecture.svg" class="docs-diagram__asset" aria-label="Open the Fanout architecture diagram at full size">
     <img
       src="/diagrams/architecture.svg"
-      alt="Fanout architecture: collectors, browsers, and MCP hosts connect to one process containing ingest, query, maintenance, alerts, agent, and UI components backed by Parquet, DuckDB query state, and SQLite control state."
+      alt="Fanout runtime architecture: OTLP ingest and commit workers publish Parquet; the browser API, agent runtime, and MCP server share queries and dashboards, with DuckDB query state, SQLite control state, anomaly detection, and webhook alerts."
       loading="lazy"
       decoding="async"
     />

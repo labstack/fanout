@@ -82,10 +82,19 @@ The binary is only as fresh as the last UI build.
 `just ui-check` fails when the embedded bytes do not match a fresh build, so
 CI catches this; it is part of `just check`.
 
-**Diagrams are generated.** `docs/diagrams/*.svg` is rendered from the `.d2`
-source beside it. Edit the `.d2`, run `just diagrams`, and commit both. The
-committed SVG comes from d2 0.7.1; a different version re-renders every file
-and produces a large diff that is not a real change.
+**Diagrams are generated.** Edit the JSON source in `docs/diagrams/`, run
+`just diagrams`, and commit the JSON and both SVG copies: `docs/diagrams/`
+and `site/public/diagrams/`. Each component cites repository evidence at the
+revision pinned in `meta.repository`. Rendering requires archify v3.1.0 from
+a local install (`ARCHIFY_HOME`, default `$HOME/.agents/skills/archify`), the
+Playwright dependencies in `ui/host/node_modules`, and Chrome for the dual-theme
+SVG export. Archify is never installed through npm. Committed SVGs serve the
+README and docs site, so only diagram editors need the rendering environment.
+The evidence checkout defaults to this repository. If your `origin` points to
+a fork, use `DIAGRAMS_EVIDENCE_ROOT=/path/to/upstream-clone just diagrams`, where
+the clone is labstack/fanout and contains the pinned revision. Archify normalizes
+and verifies repository identity and the pinned revision during `finalize`.
+JSON inputs, SVG outputs, and the site copy still use your contributor checkout.
 
 **The social preview card is generated.** `site/public/social-card.png` is
 rendered from `docs/media/social-card.typ` by `just social-card`, which needs Inter on a
@@ -129,7 +138,7 @@ DuckDB maintains its own query schema.
 cmd/fanout/        process composition and the single entry point
 internal/          ingest, storage, query, agent, MCP, auth, alerts
 ui/host/           React browser host and shared MCP app renderer (build-time)
-docs/diagrams/     d2 sources and rendered SVG
+docs/diagrams/     archify JSON sources and exported dual-theme SVGs
 ```
 
 ## Commits and pull requests

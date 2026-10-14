@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "How telemetry becomes durable and queryable",
+    "output": "persistence.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/labstack/fanout.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "681d46ba8cf0a92ea85764bfa4736a8e2739a8c9"
+    }
+  },
+  "stages": [
+    {
+      "label": "Accept"
+    },
+    {
+      "label": "Commit"
+    },
+    {
+      "label": "Authority"
+    },
+    {
+      "label": "Read and maintain"
+    },
+    {
+      "label": "Derived"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "otlp",
+      "type": "backend",
+      "label": "OTLP request",
+      "sublabel": "authenticated, decoded",
+      "stage": 0,
+      "row": 1,
+      "tag": "spans, logs, metrics",
+      "sources": [
+        {
+          "path": "internal/ingest/server.go",
+          "line": 54,
+          "end_line": 60
+        }
+      ]
+    },
+    {
+      "id": "admission",
+      "type": "backend",
+      "label": "Group admission",
+      "sublabel": "row target, 10 ms window",
+      "stage": 1,
+      "row": 0,
+      "sources": [
+        {
+          "path": "internal/telemetry/store/writer.go",
+          "line": 20,
+          "end_line": 28
+        }
+      ]
+    },
+    {
+      "id": "workers",
+      "type": "backend",
+      "label": "Commit workers",
+      "sublabel": "up to 4 in parallel",
+      "stage": 1,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/telemetry/store/writer.go",
+          "line": 143,
+          "end_line": 150
+        }
+      ]
+    },
+    {
+      "id": "publish",
+      "type": "backend",
+      "label": "Durable publish",
+      "sublabel": "fsync, rename, fsync dir",
+      "stage": 1,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/telemetry/parquet.go",
+          "line": 194,
+          "end_line": 217
+        },
+        {
+          "path": "internal/telemetry/parquet.go",
+          "line": 282,
+          "end_line": 282
+        },
+        {
+          "path": "internal/telemetry/parquet.go",
+          "line": 308,
+          "end_line": 345
+        }
+      ]
+    },
+    {
+      "id": "batches",
+      "type": "database",
+      "label": "Parquet batches",
+      "sublabel": "immutable *.batch dirs",
+      "stage": 2,
+      "row": 1,
+      "tag": "authoritative",
+      "sources": [
+        {
+          "path": "internal/telemetry/parquet.go",
+          "line": 26,
+          "end_line": 26
+        },
+        {
+          "path": "internal/config/config.go",
+          "line": 219,
+          "end_line": 219
+        }
+      ]
+    },
+    {
+      "id": "trace",
+      "type": "backend",
+      "label": "Indexed trace read",
+      "sublabel": "trace.fidx lookup",
+      "stage": 3,
+      "row": 0,
+      "sources": [
+        {
+          "path": "internal/telemetry/trace_index.go",
+          "line": 203,
+          "end_line": 235
+        }
+      ]
+    },
+    {
+      "id": "sql",
+      "type": "backend",
+      "label": "DuckDB SQL",
+      "sublabel": "filters and scans",
+      "stage": 3,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/query/duck.go",
+          "line": 240,
+          "end_line": 244
+        }
+      ]
+    },
+    {
+      "id": "maintain",
+      "type": "backend",
+      "label": "Maintenance",
+      "sublabel": "retention, compaction",
+      "stage": 3,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/query/duck.go",
+          "line": 627,
+          "end_line": 653
+        },
+        {
+          "path": "internal/query/duck.go",
+          "line": 692,
+          "end_line": 693
+        },
+        {
+          "path": "internal/telemetry/store/compaction.go",
+          "line": 132,
+          "end_line": 177
+        }
+      ]
+    },
+    {
+      "id": "rollups",
+      "type": "backend",
+      "label": "Rollups",
+      "sublabel": "service and edge",
+      "stage": 4,
+      "row": 1,
+      "sources": [
+        {
+          "path": "internal/query/duck.go",
+          "line": 505,
+          "end_line": 522
+        },
+        {
+          "path": "internal/query/duck.go",
+          "line": 1437,
+          "end_line": 1437
+        },
+        {
+          "path": "internal/query/duck.go",
+          "line": 1622,
+          "end_line": 1622
+        }
+      ]
+    },
+    {
+      "id": "qstate",
+      "type": "database",
+      "label": "Query state",
+      "sublabel": "DuckDB, rebuildable",
+      "stage": 4,
+      "row": 2,
+      "sources": [
+        {
+          "path": "internal/config/config.go",
+          "line": 227,
+          "end_line": 232
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "admit",
+      "from": "otlp",
+      "to": "admission",
+      "label": "decoded rows",
+      "variant": "emphasis"
+    },
+    {
+      "id": "group",
+      "from": "admission",
+      "to": "workers",
+      "label": "grouped batch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "encode",
+      "from": "workers",
+      "to": "publish",
+      "label": "Parquet + index",
+      "variant": "emphasis"
+    },
+    {
+      "id": "durable",
+      "from": "publish",
+      "to": "batches",
+      "label": "ack after publish",
+      "variant": "emphasis"
+    },
+    {
+      "id": "trace-read",
+      "from": "batches",
+      "to": "trace",
+      "label": "row ranges"
+    },
+    {
+      "id": "sql-read",
+      "from": "batches",
+      "to": "sql",
+      "label": "Parquet scan"
+    },
+    {
+      "id": "select",
+      "from": "batches",
+      "to": "maintain",
+      "label": "bounded groups",
+      "variant": "dashed"
+    },
+    {
+      "id": "swap",
+      "from": "maintain",
+      "to": "batches",
+      "label": "atomic swap",
+      "variant": "dashed"
+    },
+    {
+      "id": "aggregate",
+      "from": "sql",
+      "to": "rollups",
+      "label": "aggregate"
+    },
+    {
+      "id": "cache",
+      "from": "rollups",
+      "to": "qstate",
+      "label": "cache rows"
+    }
+  ]
+}
