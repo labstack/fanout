@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
+	"github.com/labstack/fanout/internal/config"
 )
 
 // lines joins SSE lines with \n.
@@ -39,7 +40,8 @@ func TestProviderBaseURLPreservesGatewayPath(t *testing.T) {
 					_, _ = io.WriteString(w, tc.response)
 				}))
 				defer server.Close()
-				p, err := NewProvider(tc.provider, "test-key", "", server.URL+tc.basePath+slash)
+				cfg := config.Config{AIProvider: tc.provider, AnthropicBaseURL: server.URL + tc.basePath + slash, OpenAIBaseURL: server.URL + tc.basePath + slash}
+				p, err := NewProvider(tc.provider, "test-key", "", cfg.AIBaseURL())
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -2,14 +2,20 @@
 
 ## Configuration conventions
 
-- Follow Canon's consumer-first environment naming: custom product settings use
+- Use consumer-first environment naming: custom product settings use
   `FANOUT_`; AI keys and endpoints use `ANTHROPIC_API_KEY`,
   `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
   Provider and model selection remain `FANOUT_AI_PROVIDER` and `FANOUT_AI_MODEL`.
+  An empty provider disables chat; exactly `anthropic` or `openai` enables it and
+  requires that provider's API key. Ignore AI credentials and endpoints when chat
+  is disabled; validate only the selected provider's endpoint.
 - `internal/config/config.go` is the authoritative schema. Run
   `just docs-generate` after configuration changes and verify
   `just docs-generate-check`; the generator owns `.env`, `.env.production`,
   `.env.example`, and site references. Public defaults exclude all secret fields.
+  `.env` contains only schema-declared `local` overrides; `.env.production` resets
+  those fields to their built-in defaults. `.env.example` keeps all values empty
+  and documents defaults in comments so copying it never overrides YAML.
 - Preserve the explicit YAML/process-environment loader. Fanout does not load
   dotenv files; launchers and deployments own file loading and secret injection.
   Only Fanout's owned namespace rejects unknown environment names; shared vendor

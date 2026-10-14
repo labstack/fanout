@@ -41,17 +41,17 @@ alerts:
   history_days: 7 # FANOUT_ALERTS_HISTORY_DAYS
 
 ai:
-  provider: anthropic # FANOUT_AI_PROVIDER
+  provider: "" # FANOUT_AI_PROVIDER; empty disables chat; select anthropic or openai
   model: "" # FANOUT_AI_MODEL
   anthropic:
     # Defaults to https://api.anthropic.com; Fanout appends /v1/messages.
     base_url: "" # ANTHROPIC_BASE_URL
-    # Optional; enables chat when provider is anthropic: ANTHROPIC_API_KEY
+    # Required when provider is anthropic: ANTHROPIC_API_KEY
     # api_key: ""
   openai:
     # Defaults to https://api.openai.com/v1; Fanout appends /responses.
     base_url: "" # OPENAI_BASE_URL
-    # Optional; enables chat when provider is openai: OPENAI_API_KEY
+    # Required when provider is openai: OPENAI_API_KEY
     # api_key: ""
 
 smtp:

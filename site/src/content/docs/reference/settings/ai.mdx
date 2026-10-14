@@ -1,7 +1,7 @@
 ---
 title: "AI provider settings"
 description: "The provider, key, model and base URL backing the chat investigator."
-summary: "Settings for the model behind the chat investigator. Without a key the agent is disabled."
+summary: "Chat is disabled unless a provider is selected; its API key is then required."
 read_when:
   - "The chat investigator is disabled and you want it on."
   - "You are pointing Fanout at a self-hosted or proxied model endpoint."
@@ -28,13 +28,13 @@ ignored; only the explicitly selected AI provider's key and endpoint are used.
 | `ai.model` | `FANOUT_AI_MODEL` | string | — |
 | `ai.openai.api_key` | `OPENAI_API_KEY` | string · secret | — |
 | `ai.openai.base_url` | `OPENAI_BASE_URL` | string | — |
-| `ai.provider` | `FANOUT_AI_PROVIDER` | string | `anthropic` |
+| `ai.provider` | `FANOUT_AI_PROVIDER` | string | — |
 
 ## Notes
 
 ### `ai.anthropic.api_key`
 
-Enables chat only when ai.provider is anthropic.
+Required when ai.provider is anthropic.
 
 ### `ai.anthropic.base_url`
 
@@ -46,7 +46,7 @@ Overrides the provider's default: claude-sonnet-5-5 for Anthropic and gpt-6.1-so
 
 ### `ai.openai.api_key`
 
-Enables chat only when ai.provider is openai.
+Required when ai.provider is openai.
 
 ### `ai.openai.base_url`
 
@@ -54,7 +54,7 @@ Defaults to https://api.openai.com/v1. Fanout appends /responses, preserving the
 
 ### `ai.provider`
 
-Selects anthropic or openai independently of which keys are present.
+Enables chat by selecting exactly anthropic or openai. Empty disables chat.
 
 :::caution[Secrets]
 Settings marked `secret` are redacted from Fanout's startup configuration

@@ -32,10 +32,11 @@ pick whichever registry your hosts already pull from.
 `FANOUT_AUTH_CODE_SECRET` is required in the default `local` auth mode and must
 be at least 32 characters — the container refuses to start without it. It is the
 only setting the command above adds; the image ships listener and data-directory
-defaults of its own. Add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` with
-`FANOUT_AI_PROVIDER=openai`) to enable the chat investigator,
-which is optional: without a key the process starts normally and logs that the
-agent is disabled.
+defaults of its own. Select `FANOUT_AI_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`,
+or `FANOUT_AI_PROVIDER=openai` with `OPENAI_API_KEY`, to enable the chat
+investigator. Chat is optional and disabled when no provider is selected, even
+with inherited vendor credentials or endpoints. Selecting a provider requires
+its key at startup and validates only its endpoint.
 
 :::caution[Use a named volume, or fix the ownership yourself]
 The image is distroless and runs unprivileged as UID/GID 65532. A **named
@@ -113,11 +114,12 @@ reasoning is in the repository's release contract.
 
 ## AI configuration upgrades
 
-Replace `FANOUT_AI_API_KEY` with `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY` when
-`FANOUT_AI_PROVIDER=openai`. Move YAML `ai.api_key` to the corresponding
-`ai.anthropic.api_key` or `ai.openai.api_key`. The other provider's key does not
-enable chat; provider and model choices remain `FANOUT_AI_PROVIDER` and
-`FANOUT_AI_MODEL`.
+Select exactly `anthropic` or `openai` with `FANOUT_AI_PROVIDER` (YAML
+`ai.provider`) to enable chat; empty disables it. Replace `FANOUT_AI_API_KEY`
+with the selected provider's required `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+Move YAML `ai.api_key` to the corresponding `ai.anthropic.api_key` or
+`ai.openai.api_key`. Inherited keys never select a provider. Model selection
+remains `FANOUT_AI_MODEL`.
 
 Replace `FANOUT_AI_BASE_URL` with the matching `ANTHROPIC_BASE_URL` or
 `OPENAI_BASE_URL` (YAML `ai.anthropic.base_url` or `ai.openai.base_url`). For

@@ -96,7 +96,7 @@ Fanout.
 - A 32-character **authentication code secret**
 
 SMTP and an AI provider are optional. Without SMTP, an operator can mint a
-short-lived login link from the local Fanout binary. Without an AI key, ingest,
+short-lived login link from the local Fanout binary. With no AI provider selected, ingest,
 dashboards, traces, logs, metrics, and MCP continue to work; only investigation
 chat and AI-assisted controls are hidden.
 
@@ -165,8 +165,9 @@ docker exec fanout fanout --config /etc/fanout/fanout.yaml \
   login-link admin@example.com
 ```
 
-Add `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` with `FANOUT_AI_PROVIDER=openai`)
-to enable chat. Configure all four SMTP settings
+Select `FANOUT_AI_PROVIDER=anthropic` and inject `ANTHROPIC_API_KEY`, or select
+`FANOUT_AI_PROVIDER=openai` and inject `OPENAI_API_KEY`, to enable chat. The
+selected provider requires its key at startup. Configure all four SMTP settings
 (`FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`, `FANOUT_SMTP_PASSWORD`, and
 `FANOUT_SMTP_FROM`) to enable email-code login.
 
@@ -206,8 +207,8 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) # must be 32+ characters
 ./bin/fanout
 ```
 
-Optionally set `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY` with
-`FANOUT_AI_PROVIDER=openai`) for chat and the SMTP variables shown above for
+Optionally select `FANOUT_AI_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or
+`FANOUT_AI_PROVIDER=openai` with `OPENAI_API_KEY`, for chat. Set the SMTP variables shown above for
 email-code login. Without SMTP, run `./bin/fanout login-link
 admin@example.com` from the same configuration and data directory.
 
@@ -246,9 +247,10 @@ other settings in those shared vendor namespaces, are ignored. In particular,
 `ANTHROPIC_MODEL` and `OPENAI_MODEL` do not select Fanout's model.
 
 [`.env.example`](.env.example) is generated from the same configuration schema
-as the settings reference, with types, defaults, and empty secret placeholders.
-The shared [`.env`](.env) contains nonsecret local defaults; the generated
-[`.env.production`](.env.production) overrides the local listener for production.
+as the settings reference, with types and defaults in comments and every value
+empty, so copying the template never overrides YAML. The shared [`.env`](.env)
+contains only the nonsecret local listener override; the generated
+[`.env.production`](.env.production) resets it to the schema default for production.
 Personal nonsecret overrides belong in ignored `.env.local`. This public
 repository excludes operator `secrets/` profiles and private recipient policy.
 
@@ -271,7 +273,8 @@ Select only a profile that actually exists for the intended resources. An
 ordinary dotenv loader does not resolve 1Password references or decrypt SOPS.
 The binary retains its YAML/environment precedence: every nonempty dotenv value
 injected by the launcher overrides the corresponding `--config` YAML value.
-For YAML-only ordinary settings, launch the binary directly with injected secrets.
+Generated dotenv files override only the listener, so other YAML settings survive
+both launch modes.
 See [runtime secret delivery](docs/operations.md#runtime-secret-delivery) for
 SOPS injection and migration precautions. Run `just docs-generate` after changing
 the schema; `just docs-generate-check` verifies all three dotenv artifacts and
@@ -290,15 +293,17 @@ operators touch are:
 | `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
 | `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
 | `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
-| `ai.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `ai.anthropic.api_key` | `ANTHROPIC_API_KEY` | — | Enables chat when `ai.provider=anthropic` |
-| `ai.openai.api_key` | `OPENAI_API_KEY` | — | Enables chat when `ai.provider=openai` |
+| `ai.provider` | `FANOUT_AI_PROVIDER` | — | Empty disables chat; exactly `anthropic` or `openai` enables it |
+| `ai.anthropic.api_key` | `ANTHROPIC_API_KEY` | — | Required when `ai.provider=anthropic` |
+| `ai.openai.api_key` | `OPENAI_API_KEY` | — | Required when `ai.provider=openai` |
 | `storage.retention_days` | `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
 | `mcp.enabled` | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 
-Only the selected AI provider's credential and endpoint are used. Without its
-key, chat is disabled even if the other provider's key is present. Unsupported
-provider names fail at startup, including when no key is configured.
+AI chat is disabled by default, even with inherited vendor credentials. Select
+exactly `anthropic` or `openai` to enable it; the selected provider's key is
+required at startup. Only that provider's credential and endpoint are validated
+and used. With no provider selected, AI keys and endpoints are ignored. Unsupported
+provider names, including different casing or surrounding whitespace, fail startup.
 `FANOUT_AI_MODEL` remains the application model selector.
 
 `ANTHROPIC_BASE_URL` defaults to `https://api.anthropic.com`; Fanout appends

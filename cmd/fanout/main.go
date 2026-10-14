@@ -373,7 +373,7 @@ func main() {
 		agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
 		slog.Info("AG-UI agent enabled", "path", "/api/agent/runs", "provider", cfg.AIProvider)
 	} else {
-		slog.Info("AG-UI agent disabled", "reason", "selected AI provider API key is not configured")
+		slog.Info("AG-UI agent disabled", "reason", "ai.provider (FANOUT_AI_PROVIDER) is not selected")
 	}
 
 	// The compiled browser client is an embedded asset, not a second runtime.

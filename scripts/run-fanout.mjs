@@ -35,7 +35,7 @@ function inventory(root) {
   const names = new Set(Object.keys(parseEnv(content)));
   const secrets = new Set();
   for (const block of content.split(/\n\s*\n/)) {
-    if (/^# [^\n]+; secret$/m.test(block)) {
+    if (/^# [a-z0-9_.]+; [a-zA-Z0-9_.]+; secret$/.test(block.split(/\r?\n/, 1)[0])) {
       for (const name of Object.keys(parseEnv(block))) secrets.add(name);
     }
   }
@@ -82,18 +82,15 @@ export async function main(args) {
   const environment = /** @type {"local" | "production"} */ (args[1]);
   const env = prepareEnvironment(root, environment, process.env);
   const child = spawn(args[3], args.slice(4), { cwd: root, env, stdio: "inherit" });
-  const terminate = () => child.kill("SIGTERM");
-  const interrupt = () => child.kill("SIGINT");
-  process.once("SIGTERM", terminate);
-  process.once("SIGINT", interrupt);
+  const handlers = new Map(["SIGINT", "SIGTERM", "SIGHUP"].map(signal => [signal, () => child.kill(signal)]));
+  for (const [signal, handler] of handlers) process.on(signal, handler);
   try {
     return await new Promise((resolveExit, reject) => {
       child.once("error", reject);
-      child.once("exit", (code, signal) => resolveExit(code ?? (signal === "SIGINT" ? 130 : signal === "SIGTERM" ? 143 : 1)));
+      child.once("exit", (code, signal) => resolveExit(code ?? ({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }[signal] ?? 1)));
     });
   } finally {
-    process.off("SIGTERM", terminate);
-    process.off("SIGINT", interrupt);
+    for (const [signal, handler] of handlers) process.off(signal, handler);
   }
 }
 

@@ -149,8 +149,8 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 }
 
 func TestNewProviderNewestDefaults(t *testing.T) {
-	for _, kind := range []string{"", "anthropic", "openai"} {
-		p, err := NewProvider(kind, "test", "", "")
+	for _, kind := range []string{"anthropic", "openai"} {
+		p, err := NewProvider(kind, "test", "", "https://provider.example/gateway")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,6 +163,14 @@ func TestNewProviderNewestDefaults(t *testing.T) {
 			if p.model != "claude-sonnet-5-5" {
 				t.Errorf("anthropic model = %q", p.model)
 			}
+		}
+	}
+}
+
+func TestNewProviderRejectsUnsupportedNames(t *testing.T) {
+	for _, kind := range []string{"", "OpenAI", " OpenAI ", " openai ", "Anthropic", "unsupported"} {
+		if _, err := NewProvider(kind, "test", "", "https://provider.example"); err == nil {
+			t.Errorf("provider %q must be rejected", kind)
 		}
 	}
 }

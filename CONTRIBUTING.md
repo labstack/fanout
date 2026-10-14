@@ -14,8 +14,13 @@ You need Go 1.27.2 and a C/C++ toolchain on native Linux or macOS (amd64 or arm6
 [Bun](https://bun.sh), [just](https://just.systems),
 [golangci-lint](https://golangci-lint.run/), and
 [Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
-also requires a 32-character authentication code secret; SMTP and an AI key are
-optional — see [README](README.md#requirements).
+also requires a 32-character authentication code secret. SMTP and AI chat are
+optional; selecting an AI provider requires its key — see [README](README.md#requirements).
+
+`.env` is now tracked and generated. Before pulling, move nonsecret personal
+values from an older private `.env` to ignored `.env.local` and credentials to
+runtime injection, then preserve the old file outside the checkout. Git refuses
+to overwrite an untracked `.env`. See [runtime secret delivery](docs/operations.md#runtime-secret-delivery).
 
 The DuckDB wrapper downloads the pinned, checksum-verified engine from
 [Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha43763)

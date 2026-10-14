@@ -665,7 +665,7 @@ func TestValidate(t *testing.T) {
 		c := valid
 		c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom = "", "", "", ""
 		c.AnthropicAPIKey = ""
-		c.AIProvider = "anthropic"
+		c.AIProvider = ""
 		if err := c.Validate(); err != nil {
 			t.Fatalf("minimal local config should pass: %v", err)
 		}

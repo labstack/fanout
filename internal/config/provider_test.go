@@ -13,9 +13,10 @@ func TestLoadSelectsProviderCredentials(t *testing.T) {
 		credentials                  []string
 	}{
 		{"anthropic", "anthropic", "anthropic-test", "https://anthropic.example/gateway", []string{"ANTHROPIC_API_KEY=anthropic-test", "ANTHROPIC_BASE_URL=https://anthropic.example/gateway/", "OPENAI_API_KEY=openai-test", "OPENAI_BASE_URL=https://openai.example/v1"}},
-		{"openai", " OpenAI ", "openai-test", "https://openai.example/gateway/v1", []string{"ANTHROPIC_API_KEY=anthropic-test", "OPENAI_API_KEY=openai-test", "OPENAI_BASE_URL=https://openai.example/gateway/v1/"}},
-		{"other key does not enable anthropic", "anthropic", "", DefaultAnthropicBaseURL, []string{"OPENAI_API_KEY=openai-test", "OPENAI_BASE_URL=not-used"}},
-		{"other key does not enable openai", "openai", "", DefaultOpenAIBaseURL, []string{"ANTHROPIC_API_KEY=anthropic-test", "ANTHROPIC_BASE_URL=not-used"}},
+		{"openai", "openai", "openai-test", "https://openai.example/gateway/v1", []string{"ANTHROPIC_API_KEY=anthropic-test", "ANTHROPIC_BASE_URL=not-used", "OPENAI_API_KEY=openai-test", "OPENAI_BASE_URL=https://openai.example/gateway/v1/"}},
+		{"inherited credentials do not enable chat", "", "", "", []string{"ANTHROPIC_API_KEY=anthropic-test", "OPENAI_API_KEY=openai-test", "ANTHROPIC_BASE_URL=not-used", "OPENAI_BASE_URL=not-used"}},
+		{"anthropic default endpoint", "anthropic", "anthropic-test", DefaultAnthropicBaseURL, []string{"ANTHROPIC_API_KEY=anthropic-test", "OPENAI_BASE_URL=not-used"}},
+		{"openai default endpoint", "openai", "openai-test", DefaultOpenAIBaseURL, []string{"OPENAI_API_KEY=openai-test", "ANTHROPIC_BASE_URL=not-used"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + tc.provider}
@@ -23,7 +24,7 @@ func TestLoadSelectsProviderCredentials(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.AIAPIKey() != tc.key || cfg.AIBaseURL() != tc.baseURL || cfg.AgentConfigured() != (tc.key != "") {
+			if cfg.AIProvider != tc.provider || cfg.AIAPIKey() != tc.key || cfg.AIBaseURL() != tc.baseURL || cfg.AgentConfigured() != (tc.provider != "") {
 				t.Fatal("selected provider credential, endpoint, or enabled state is incorrect")
 			}
 		})
@@ -55,7 +56,7 @@ func TestLoadRejectsInvalidProviderURLWithoutLeakingValues(t *testing.T) {
 	for _, provider := range []string{"anthropic", "openai"} {
 		name := strings.ToUpper(provider) + "_BASE_URL"
 		for _, value := range []string{"file:///private", "https://user:private-value@example.com", "https://example.com?key=private-value", "https://example.com#private-value", "https://example.com?", "https://example.com#", "https://", "https://example.com/%zz"} {
-			_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider, name + "=" + value}})
+			_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider, strings.ToUpper(provider) + "_API_KEY=test-key", name + "=" + value}})
 			if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), value) || strings.Contains(err.Error(), "private-value") {
 				t.Fatalf("expected redacted validation error naming %s", name)
 			}
@@ -64,8 +65,29 @@ func TestLoadRejectsInvalidProviderURLWithoutLeakingValues(t *testing.T) {
 }
 
 func TestLoadRejectsUnsupportedProviderWithoutAKey(t *testing.T) {
-	_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=unsupported"}})
-	if err == nil || !strings.Contains(err.Error(), "ai.provider") {
-		t.Fatal("unsupported provider must fail at startup, even without a key")
+	for _, provider := range []string{"unsupported", "OpenAI", " OpenAI ", " openai ", "Anthropic"} {
+		_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider}})
+		if err == nil || !strings.Contains(err.Error(), "ai.provider") {
+			t.Fatal("unsupported provider must fail at startup, even without a key")
+		}
+	}
+}
+
+func TestLoadRequiresSelectedProviderKey(t *testing.T) {
+	for _, provider := range []string{"anthropic", "openai"} {
+		otherKey := "OPENAI_API_KEY"
+		if provider == "openai" {
+			otherKey = "ANTHROPIC_API_KEY"
+		}
+		for _, value := range []string{"", "   "} {
+			name := strings.ToUpper(provider) + "_API_KEY"
+			_, err := Load(LoadOptions{Environ: []string{
+				"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider,
+				name + "=" + value, otherKey + "=other-provider-key",
+			}})
+			if err == nil || !strings.Contains(err.Error(), "ai."+provider+".api_key") || !strings.Contains(err.Error(), name) {
+				t.Fatalf("expected missing key error naming both YAML and environment keys, got %v", err)
+			}
+		}
 	}
 }

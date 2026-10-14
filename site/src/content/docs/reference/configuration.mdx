@@ -25,7 +25,9 @@ A nonempty recognized environment variable wins over the YAML file, and the file
 wins over the built-in default. Empty environment values mean no override.
 All settings are read once at startup and require restart. Fanout does not load
 dotenv files itself. The generated `.env.example` documents types, defaults,
-and empty credential placeholders; `.env` and `.env.production` omit secret fields.
+and leaves every value empty so copying it never overrides YAML. `.env` contains
+only schema-declared local overrides; `.env.production` resets exactly those
+fields to their built-in defaults. Both omit secret fields.
 
 For a source checkout, build the binary and use `just run` for local development
 or `just run-production` for an explicit production launch. Local order is
@@ -38,8 +40,8 @@ unknown names, and secret entries in ordinary dotenv files fail before launch.
 Inject credentials from a private selected SOPS profile or the deployment's
 secret service. This public repository ships no operator secrets or recipients.
 Dotenv values are injected as environment, so nonempty values override the
-corresponding `--config` YAML. Launch the binary directly for YAML-only ordinary
-configuration.
+corresponding `--config` YAML. The generated files override only the listener;
+other YAML settings survive both launch modes.
 
 ## Naming
 
@@ -49,9 +51,12 @@ use `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and
 settings table — `storage.duckdb.memory` maps to `FANOUT_DUCKDB_MEMORY`.
 Provider settings map to native structured keys under `ai.anthropic` or `ai.openai`.
 
-`FANOUT_AI_PROVIDER` selects the provider and `FANOUT_AI_MODEL` selects its model.
-Only the selected provider's key and endpoint are used. Without that key, chat is
-disabled. Other vendor/tool settings, including `ANTHROPIC_MODEL` and
+`FANOUT_AI_PROVIDER` (YAML `ai.provider`) defaults to empty, disabling chat.
+Selecting exactly `anthropic` or `openai` enables chat and requires that provider's
+key at startup; other names, casing, or surrounding whitespace fail. Only the
+selected provider's key and endpoint are validated and used. With no provider
+selected, inherited AI keys and endpoints are ignored. `FANOUT_AI_MODEL` selects
+the model. Other vendor/tool settings, including `ANTHROPIC_MODEL` and
 `OPENAI_MODEL`, are ignored. See [AI settings](/reference/settings/ai) for
 the different base URL meanings and [upgrade instructions](/start/install#ai-configuration-upgrades)
 for migrating the retired generic key and base URL settings.

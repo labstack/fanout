@@ -25,7 +25,7 @@ const (
 // Elapsed-time settings use time.Duration with unit-bearing values.
 type Config struct {
 	// Addr binds the browser, API, MCP, OTLP/gRPC and OTLP/HTTP listener.
-	Addr string `koanf:"server.addr" env:"FANOUT_ADDR" default:":7520"`
+	Addr string `koanf:"server.addr" env:"FANOUT_ADDR" default:":7520" local:"127.0.0.1:7520"`
 	// DataDir stores telemetry, query state, and the control database.
 	DataDir string `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
 	// IngestBatchSize limits telemetry rows per batch; valid values are 1–50000.
@@ -94,21 +94,21 @@ type Config struct {
 	AlertEvaluationInterval time.Duration `koanf:"alerts.evaluation_interval" env:"FANOUT_ALERTS_EVALUATION_INTERVAL" default:"30s"`
 	// AlertHistoryDays sets alert history retention in days.
 	AlertHistoryDays int `koanf:"alerts.history_days" env:"FANOUT_ALERTS_HISTORY_DAYS" default:"7"`
-	// AIProvider selects anthropic or openai independently of which keys are present.
-	AIProvider string `koanf:"ai.provider" env:"FANOUT_AI_PROVIDER" default:"anthropic"`
+	// AIProvider enables chat by selecting exactly anthropic or openai. Empty disables chat.
+	AIProvider string `koanf:"ai.provider" env:"FANOUT_AI_PROVIDER" default:""`
 	// AIModel overrides the provider's default: claude-sonnet-5-5 for Anthropic
 	// and gpt-6.1-sol for OpenAI. The OpenAI provider expects a reasoning model
 	// supporting reasoning.encrypted_content for stateless Responses replay.
 	// A 400 rejecting encrypted content is reported as a server-side configuration
 	// error; choose a compatible reasoning model with ai.model.
 	AIModel string `koanf:"ai.model" env:"FANOUT_AI_MODEL"`
-	// AnthropicAPIKey enables chat only when ai.provider is anthropic.
+	// AnthropicAPIKey is required when ai.provider is anthropic.
 	AnthropicAPIKey string `koanf:"ai.anthropic.api_key" env:"ANTHROPIC_API_KEY" secret:"true"`
 	// AnthropicBaseURL defaults to https://api.anthropic.com. Fanout appends
 	// /v1/messages, preserving any gateway path prefix. Use an HTTP(S) base URL
 	// without embedded credentials, a query, or a fragment.
 	AnthropicBaseURL string `koanf:"ai.anthropic.base_url" env:"ANTHROPIC_BASE_URL"`
-	// OpenAIAPIKey enables chat only when ai.provider is openai.
+	// OpenAIAPIKey is required when ai.provider is openai.
 	OpenAIAPIKey string `koanf:"ai.openai.api_key" env:"OPENAI_API_KEY" secret:"true"`
 	// OpenAIBaseURL defaults to https://api.openai.com/v1. Fanout appends
 	// /responses, preserving the API version and any gateway path prefix.
@@ -329,18 +329,24 @@ func (c Config) Validate() error {
 			return fmt.Errorf("OIDC auto-provisioning requires auth.oidc.allowed_groups or auth.oidc.allowed_domains")
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(c.AIProvider)) {
+	switch c.AIProvider {
 	case "", "anthropic", "openai":
 	default:
 		return fmt.Errorf("ai.provider must be anthropic or openai")
 	}
-	baseURL, key := c.AIBaseURL(), "ai.anthropic.base_url (ANTHROPIC_BASE_URL)"
-	if strings.EqualFold(strings.TrimSpace(c.AIProvider), "openai") {
-		key = "ai.openai.base_url (OPENAI_BASE_URL)"
-	}
-	u, err := url.Parse(baseURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(baseURL, "#") {
-		return fmt.Errorf("%s must be an HTTP(S) base URL without credentials, query, or fragment", key)
+	if c.AgentConfigured() {
+		key, endpoint := "ai.anthropic.api_key (ANTHROPIC_API_KEY)", "ai.anthropic.base_url (ANTHROPIC_BASE_URL)"
+		if c.AIProvider == "openai" {
+			key, endpoint = "ai.openai.api_key (OPENAI_API_KEY)", "ai.openai.base_url (OPENAI_BASE_URL)"
+		}
+		if strings.TrimSpace(c.AIAPIKey()) == "" {
+			return fmt.Errorf("%s is required when ai.provider is %s", key, c.AIProvider)
+		}
+		baseURL := c.AIBaseURL()
+		u, err := url.Parse(baseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(baseURL, "#") {
+			return fmt.Errorf("%s must be an HTTP(S) base URL without credentials, query, or fragment", endpoint)
+		}
 	}
 	for _, raw := range strings.Split(c.TrustedProxyCIDRs, ",") {
 		value := strings.TrimSpace(raw)
@@ -387,13 +393,13 @@ func (c Config) SMTPConfigured() bool {
 
 // AgentConfigured reports whether the in-process AI agent should be started.
 func (c Config) AgentConfigured() bool {
-	return strings.TrimSpace(c.AIAPIKey()) != ""
+	return c.AIProvider != ""
 }
 
 // AIAPIKey returns only the explicitly selected provider's credential.
 func (c Config) AIAPIKey() string {
-	switch strings.ToLower(strings.TrimSpace(c.AIProvider)) {
-	case "", "anthropic":
+	switch c.AIProvider {
+	case "anthropic":
 		return c.AnthropicAPIKey
 	case "openai":
 		return c.OpenAIAPIKey
@@ -404,9 +410,14 @@ func (c Config) AIAPIKey() string {
 
 // AIBaseURL returns the selected provider's API base, including its default.
 func (c Config) AIBaseURL() string {
-	baseURL, fallback := c.AnthropicBaseURL, DefaultAnthropicBaseURL
-	if strings.EqualFold(strings.TrimSpace(c.AIProvider), "openai") {
+	var baseURL, fallback string
+	switch c.AIProvider {
+	case "anthropic":
+		baseURL, fallback = c.AnthropicBaseURL, DefaultAnthropicBaseURL
+	case "openai":
 		baseURL, fallback = c.OpenAIBaseURL, DefaultOpenAIBaseURL
+	default:
+		return ""
 	}
 	if strings.TrimSpace(baseURL) == "" {
 		return fallback

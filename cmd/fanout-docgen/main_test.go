@@ -27,9 +27,6 @@ func TestCollectCrossChecksReflectionAgainstSource(t *testing.T) {
 		if f.Key == "" || f.Env == "" {
 			t.Errorf("%s: koanf and env tags are both required", f.GoName)
 		}
-		if !strings.HasPrefix(f.Env, "FANOUT_") && !strings.HasPrefix(f.Key, "ai.anthropic.") && !strings.HasPrefix(f.Key, "ai.openai.") {
-			t.Errorf("%s: custom environment variable %q lacks FANOUT_ prefix", f.GoName, f.Env)
-		}
 		if f.Type == "" {
 			t.Errorf("%s: no rendered type", f.GoName)
 		}
@@ -70,8 +67,11 @@ func TestEnvironmentTemplateMatchesSchema(t *testing.T) {
 	}
 	for _, f := range fields {
 		value, exists := seen[f.Env]
-		if !exists || value != f.Default || f.Secret && value != "" {
-			t.Errorf("template does not match the safe schema default for %s", f.Env)
+		if !exists || value != "" {
+			t.Errorf("template must leave %s empty so it never overrides YAML", f.Env)
+		}
+		if f.Default != "" && !strings.Contains(string(body), "# Default: "+f.Default+"\n"+f.Env+"=\n") {
+			t.Errorf("template must document the default for %s", f.Env)
 		}
 	}
 	env = append(env, "FANOUT_AUTH_CODE_SECRET="+strings.Repeat("x", 32))
@@ -102,8 +102,8 @@ func TestPublicEnvironmentDefaultsExcludeSecrets(t *testing.T) {
 			t.Errorf("%s is stale; run just docs-generate", tc.path)
 		}
 		for _, f := range fields {
-			if f.Secret && strings.Contains(string(body), f.Env+"=") {
-				t.Errorf("public defaults must exclude secret setting %s", f.Env)
+			if present := strings.Contains(string(body), f.Env+"="); present != (!f.Secret && f.Local != nil) {
+				t.Errorf("public defaults must contain exactly the nonsecret local overrides: %s", f.Env)
 			}
 		}
 		if !strings.Contains(string(body), "FANOUT_ADDR="+tc.addr+"\n") {
@@ -125,6 +125,10 @@ func TestPublicDefaultGenerationPreservesPrivateFiles(t *testing.T) {
 		"AI_API_KEY=synthetic-private-value\n",
 		"# Generated nonsecret configuration by cmd/fanout-docgen.\nANTHROPIC_API_KEY=synthetic-private-value\n",
 		"# Generated nonsecret configuration by cmd/fanout-docgen.\nFANOUT_AI_API_KEY=synthetic-private-value\n",
+		"# Generated nonsecret configuration by cmd/fanout-docgen.\nFANOUT_DATA_DIR=\"safe\n# synthetic-private-value\"\n",
+		"# Generated nonsecret configuration by cmd/fanout-docgen.\nFANOUT_DATA_DIR='synthetic-private-value'\n",
+		"# Generated nonsecret configuration by cmd/fanout-docgen.\nFANOUT_DATA_DIR=`synthetic-private-value`\n",
+		"# Generated nonsecret configuration by cmd/fanout-docgen.\nFANOUT_DATA_DIR=synthetic\\private-value\n",
 	} {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)

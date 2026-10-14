@@ -9,17 +9,22 @@ give ingest credentials only to trusted services and collectors.
 Runtime configuration uses built-in defaults, then an explicit `--config` YAML
 document, then recognized nonempty environment values. Every setting requires
 a restart. Fanout does not load dotenv files itself. The generated root
-`.env.example` documents every setting with empty credential placeholders;
-`.env` and `.env.production` contain only nonsecret settings.
+`.env.example` documents every default in comments and leaves all values empty;
+`.env` and `.env.production` contain only nonsecret environment-specific overrides.
 
 | File | Use | Public Git policy |
 | --- | --- | --- |
-| `.env` | Shared defaults with a loopback local listener | Committed; generated; no secret fields |
+| `.env` | Local loopback listener override | Committed; generated; no secret fields |
 | `.env.production` | Production listener override | Committed; generated; no deployment-specific credentials or origins |
-| `.env.example` | Complete configuration template | Committed; generated; empty secret placeholders |
+| `.env.example` | Complete configuration template | Committed; generated; all values empty |
 | `.env.local` / `.env.production.local` | Personal nonsecret files | Ignored; production never loads them |
 | `secrets/fanout.env` | Private complete SOPS credential profile, when used | Operator-owned; ignored and excluded from Docker |
 | `secrets/fanout.production.env` | Private production profile, when credentials differ | Operator-owned; ignored and excluded from Docker |
+
+`.env` is now tracked and generated. Before pulling, move nonsecret personal
+values from an older private `.env` to ignored `.env.local` and credentials to
+runtime injection, then preserve the old file outside the checkout. Git refuses
+to overwrite an untracked `.env`.
 
 Build the binary, then use `just run` locally or `just run-production` for
 production. The Node launcher uses `node:util.parseEnv`; dotenv is not shell code
@@ -30,9 +35,10 @@ Unknown names, secret entries, and unresolved `op://` references in ordinary
 dotenv files fail before launch. A missing required file never selects another
 profile. Empty values retain Fanout's no-override semantics.
 
-The launcher injects dotenv settings as environment values, so they override
-the native binary's `--config` YAML. Launch the binary directly for YAML-only
-ordinary configuration. Supported binary flags are forwarded unchanged.
+The launcher injects nonempty dotenv settings as environment overrides of
+`--config` YAML. The generated files override only the listener; other YAML
+settings survive both launch modes. `.env.production` resets every local override
+to its schema default. Supported binary flags are forwarded unchanged.
 
 Keep ordinary YAML/dotenv configuration nonsecret where possible. Deliver
 credentials through deployment environment injection, restricted managed mounts,
@@ -79,11 +85,15 @@ names and safe metadata. Update their mappings, verify the real consumers, and
 verify recovery from the destination before removing the old authority. This
 repository ships no credential profiles or decryption keys.
 
-For AI, deliver only the selected provider's `ANTHROPIC_API_KEY` or
-`OPENAI_API_KEY`. Provider endpoint overrides are `ANTHROPIC_BASE_URL` and
+AI chat is disabled by default. Select exactly `anthropic` or `openai` through
+`ai.provider` or `FANOUT_AI_PROVIDER`, then deliver its required `ANTHROPIC_API_KEY`
+or `OPENAI_API_KEY`; a selected provider without its key fails startup. Inherited
+keys do not enable chat. With no provider selected, AI keys and endpoints are
+ignored; only the selected provider's endpoint is validated and used.
+Provider endpoint overrides are `ANTHROPIC_BASE_URL` and
 `OPENAI_BASE_URL`; the OpenAI base includes `/v1`, while Anthropic's excludes it.
 The old generic key/base URL names and YAML keys are rejected; the
-[configuration upgrade instructions](../README.md#configuration) describe
+[configuration upgrade instructions](../site/src/content/docs/start/install.mdx#ai-configuration-upgrades) describe
 their exact replacements. Verify authentication and request paths against the
 configured provider after rollout, without logging credentials.
 
