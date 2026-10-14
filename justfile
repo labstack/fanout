@@ -184,6 +184,8 @@ ui-check:
 # Use a local archify 3.1.0 install via ARCHIFY_HOME (default
 # $HOME/.agents/skills/archify) and Chrome; no npm install is needed for archify.
 # The generator version is pinned so committed SVGs remain reproducible.
+# DIAGRAMS_EVIDENCE_ROOT selects an upstream clone containing the pinned revision
+# when origin is a fork (default: this checkout); inputs and SVGs stay here.
 # Deliberately outside `build` and `check`: SVGs are committed, so only diagram
 # editors need archify and the Chrome export environment.
 

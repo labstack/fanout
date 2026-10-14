@@ -315,6 +315,11 @@
           "end_line": 55
         },
         {
+          "path": "internal/intelligence/detector.go",
+          "line": 240,
+          "end_line": 291
+        },
+        {
           "path": "cmd/fanout/main.go",
           "line": 161,
           "end_line": 162
@@ -564,7 +569,7 @@
       "id": "detector-reads",
       "from": "detector",
       "to": "query",
-      "label": "rollups"
+      "label": "SQL scans"
     },
     {
       "id": "alert-scores",

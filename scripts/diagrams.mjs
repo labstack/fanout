@@ -7,10 +7,45 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ARCHIFY_VERSION = "3.1.0";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const evidenceRoot = resolve(process.env.DIAGRAMS_EVIDENCE_ROOT || repo);
 const diagrams = join(repo, "docs/diagrams");
 const archify = resolve(process.env.ARCHIFY_HOME || join(homedir(), ".agents/skills/archify"));
 
+function credentialFreeURL(value) {
+  return value.replace(/(\w+:\/\/)[^/]*@/, "$1").replace(/^[^/@:]+@(?=[^/:]+:)/, "");
+}
+
 async function main() {
+  const sources = [];
+  const remote = spawnSync("git", ["remote", "get-url", "origin"], {
+    cwd: evidenceRoot,
+    encoding: "utf8",
+  });
+  const origin = remote.error || remote.status !== 0
+    ? "(unavailable)"
+    : credentialFreeURL(remote.stdout.trim());
+  for (const source of (await readdir(diagrams)).filter(name => name.endsWith(".json")).sort()) {
+    const input = join(diagrams, source);
+    const { diagram_type: type, meta } = JSON.parse(await readFile(input, "utf8"));
+    if (typeof type !== "string" || !type) {
+      throw new Error(`${input} must declare diagram_type.`);
+    }
+    const { url, revision } = meta?.repository ?? {};
+    if (typeof url !== "string" || !url || typeof revision !== "string" || !revision) {
+      throw new Error(`${input} must declare meta.repository.url and meta.repository.revision.`);
+    }
+    const expected = credentialFreeURL(url);
+    const commit = spawnSync("git", ["cat-file", "-e", `${revision}^{commit}`], {
+      cwd: evidenceRoot,
+      stdio: "ignore",
+    });
+    if (origin !== expected || commit.error || commit.status !== 0) {
+      const reason = origin !== expected ? "origin does not match" : `pinned revision ${revision} is unavailable`;
+      throw new Error(`Evidence checkout ${evidenceRoot} has origin ${JSON.stringify(origin)}; ${source} expects ${JSON.stringify(expected)}: ${reason}. Set DIAGRAMS_EVIDENCE_ROOT to a clone of labstack/fanout with the expected origin that contains the pinned revision ${revision}.`);
+    }
+    sources.push({ source, input, type });
+  }
+
   const cli = join(archify, "bin/archify.mjs");
   try {
     await access(cli);
@@ -29,21 +64,15 @@ async function main() {
 
   const require = createRequire(join(repo, "ui/host/package.json"));
   const { chromium } = require("@playwright/test");
-  const sources = (await readdir(diagrams)).filter(name => name.endsWith(".json")).sort();
   let browser;
   try {
-    for (const source of sources) {
+    for (const { source, input, type } of sources) {
       const name = source.slice(0, -".json".length);
-      const input = join(diagrams, source);
-      const { diagram_type: type } = JSON.parse(await readFile(input, "utf8"));
-      if (typeof type !== "string" || !type) {
-        throw new Error(`${input} must declare diagram_type.`);
-      }
       const temporary = await mkdtemp(join(tmpdir(), "fanout-diagram-"));
       try {
         const html = join(temporary, `${name}.html`);
         const result = spawnSync(process.execPath, [cli, "finalize", type, input, html,
-          "--repo-root", repo, "--quality", "showcase", "--json"], {
+          "--repo-root", evidenceRoot, "--quality", "showcase", "--json"], {
           cwd: repo,
           encoding: "utf8",
           maxBuffer: 16 * 1024 * 1024,

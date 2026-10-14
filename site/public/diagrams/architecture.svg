@@ -831,7 +831,7 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
         <g data-graph-role="automatic-crossover" style="--step:13">
           <path data-graph-role="automatic-crossover-underlay" d="M 620 492 L 520 492" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="detector" data-edge-to="query" data-edge-label="rollups" data-edge-key="13" data-edge-id="detector-reads" data-composition-points="620,492;520,492" data-composition-crossover="halo" data-composition-independent="true" d="M 620 492 L 520 492" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-edge-from="detector" data-edge-to="query" data-edge-label="SQL scans" data-edge-key="13" data-edge-id="detector-reads" data-composition-points="620,492;520,492" data-composition-crossover="halo" data-composition-independent="true" d="M 620 492 L 520 492" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:14">
           <path data-graph-role="automatic-crossover-underlay" d="M 910 492 L 810 492" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
@@ -1102,9 +1102,9 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="243.8" y="542" width="72.4" height="14" rx="3" class="c-mask"/>
           <text x="280" y="552" class="t-edge-default" font-size="8" text-anchor="middle">read, compact</text>
         </g>
-        <g data-edge-from="detector" data-edge-to="query" data-edge-label="rollups" data-edge-key="13" data-edge-id="detector-reads">
-          <rect x="548.2" y="472" width="43.6" height="14" rx="3" class="c-mask"/>
-          <text x="570" y="482" class="t-edge-default" font-size="8" text-anchor="middle">rollups</text>
+        <g data-edge-from="detector" data-edge-to="query" data-edge-label="SQL scans" data-edge-key="13" data-edge-id="detector-reads">
+          <rect x="543.4" y="472" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
+          <text x="570" y="482" class="t-edge-default" font-size="8" text-anchor="middle">SQL scans</text>
         </g>
         <g data-edge-from="alert" data-edge-to="detector" data-edge-label="scores" data-edge-key="14" data-edge-id="alert-scores">
           <rect x="840.6" y="472" width="38.8" height="14" rx="3" class="c-mask"/>

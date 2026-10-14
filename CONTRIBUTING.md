@@ -90,6 +90,12 @@ a local install (`ARCHIFY_HOME`, default `$HOME/.agents/skills/archify`), the
 Playwright dependencies in `ui/host/node_modules`, and Chrome for the dual-theme
 SVG export. Archify is never installed through npm. Committed SVGs serve the
 README and docs site, so only diagram editors need the rendering environment.
+The evidence checkout defaults to this repository. If your `origin` points to
+a fork, use `DIAGRAMS_EVIDENCE_ROOT=/path/to/upstream-clone just diagrams`, where
+the clone's credential-free `origin` matches `meta.repository.url`
+(`https://github.com/labstack/fanout.git`) and contains the pinned revision.
+The script checks both before rendering. JSON inputs, SVG outputs, and the site
+copy still use your contributor checkout.
 
 **The social preview card is generated.** `site/public/social-card.png` is
 rendered from `docs/media/social-card.typ` by `just social-card`, which needs Inter on a
