@@ -2,36 +2,37 @@
 
 ## Configuration conventions
 
-- Use consumer-first environment naming: custom product settings use
-  `FANOUT_`; AI keys and endpoints use `ANTHROPIC_API_KEY`,
+- Configuration is environment-only. `internal/config/config.go` is the
+  authoritative schema: built-in defaults, then nonempty process environment.
+  Custom names use `FANOUT_` plus a clear name, adding the area only when it
+  clarifies; vendor credentials and endpoints keep `ANTHROPIC_API_KEY`,
   `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
   Provider and model selection remain `FANOUT_AI_PROVIDER` and `FANOUT_AI_MODEL`.
-  An empty provider disables chat; exactly `anthropic` or `openai` enables it and
-  requires that provider's API key. Ignore AI credentials and endpoints when chat
-  is disabled; validate only the selected provider's endpoint.
-- `internal/config/config.go` is the authoritative schema. Run
-  `just docs-generate` after configuration changes and verify
-  `just docs-generate-check`; the generator owns `.env`, `.env.production`,
-  `.env.example`, and site references. Public defaults exclude all secret fields.
-  `.env` contains only schema-declared `local` overrides; `.env.production` resets
-  those fields to their built-in defaults. `.env.example` keeps all values empty
-  and documents defaults in comments so copying it never overrides YAML.
-- Preserve the explicit YAML/process-environment loader. Fanout does not load
-  dotenv files; launchers and deployments own file loading and secret injection.
-  Only Fanout's owned namespace rejects unknown environment names; shared vendor
-  namespaces recognize the documented names and ignore unrelated consumers.
-- The Node launcher used by `just run` loads `.env`, then optional `.env.local`,
-  then explicitly injected values. `just run-production` loads `.env` and required
-  `.env.production`, then injected values, and excludes all personal files.
-  Use Node's native dotenv parser; never source dotenv as shell code. Secret
-  entries and unknown names are rejected in these nonsecret files.
+  An empty provider disables chat; exactly `anthropic` or `openai` requires
+  that provider's key. Ignore AI credentials and endpoints when chat is disabled;
+  validate only the selected provider's endpoint.
+- Every `secret:"true"` field accepts `<ENV>_FILE`. Both forms nonempty fail;
+  secret files lose exactly one trailing LF or CRLF and must remain nonempty.
+  Errors name variables and paths, never secret contents. No file-mode check.
+- `group` tags serve docgen only, using ai, alerts, auth, ingest, mcp, metrics,
+  server, smtp, and storage. Run `just docs-generate` after schema changes and
+  verify `just docs-generate-check`. The generator owns `.env.example` and the
+  site reference; every template value is empty, with defaults and file forms
+  in comments. Secret defaults must never appear in public artifacts.
+- The binary does not load dotenv. `just run` uses Node's native `parseEnv` for
+  optional ignored `./.env`, then inherited environment values win. Personal
+  development credentials may live there. Never shell-source dotenv. Only
+  Fanout's namespace rejects unknown names; tolerate platform service variables
+  and ignore unrelated names in shared vendor namespaces.
+- Native listener default is `127.0.0.1:7520`. The image supplies
+  `FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
 - Repository-managed secret profiles adopt SOPS authority through a verified
   migration, with key recovery in 1Password. Existing vault/platform delivery
   remains authoritative until all consumers and recovery are verified. Follow
   `docs/operations.md` for delivery; never commit credential profiles in plaintext.
 - This public product repository ships no operator secrets or recipients. Keep
-  operator `secrets/`, personal files, and private migration sources ignored and
-  outside Docker inputs; select private SOPS profiles explicitly at launch.
+  operator `secrets/`, personal environment files, and private migration sources
+  ignored and outside Docker inputs; select private SOPS profiles explicitly.
 
 ## Public repository
 

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,134 +12,43 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), "fanout-env-"));
   roots.push(root);
-  writeFileSync(join(root, ".env.example"), `# server.addr; string
-FANOUT_ADDR=
-
-# ai.model; string
-FANOUT_AI_MODEL=
-
-# storage.data_dir; string
-FANOUT_DATA_DIR=
-
-# auth.code_secret; string; secret
-FANOUT_AUTH_CODE_SECRET=
-
-# ai.anthropic.api_key; string; secret
-ANTHROPIC_API_KEY=
-`);
-  writeFileSync(join(root, ".env"), "FANOUT_ADDR=127.0.0.1:7520\n");
   return root;
 }
 
-test("local dotenv defaults, personal overrides, and explicit injection have ordered precedence", () => {
+test("dotenv is optional and inherited values win, including empty values", () => {
   const root = fixture();
-  writeFileSync(join(root, ".env.local"), "FANOUT_ADDR=127.0.0.1:9000\nFANOUT_AI_MODEL=personal\n");
-  const env = prepareEnvironment(root, "local", { FANOUT_ADDR: "", FANOUT_AI_MODEL: "injected", FANOUT_AUTH_CODE_SECRET: "synthetic-only", PATH: "/synthetic/path" });
-  expect(env.FANOUT_ADDR).toBe("127.0.0.1:9000");
+  expect(prepareEnvironment(root, { PATH: "/synthetic/path" })).toEqual({ PATH: "/synthetic/path" });
+  writeFileSync(join(root, ".env"), "FANOUT_ADDR=:9000\nFANOUT_AI_MODEL=personal\nANTHROPIC_API_KEY=synthetic-only\nFANOUT_UNKNOWN=value\n");
+  const env = prepareEnvironment(root, { FANOUT_ADDR: "", FANOUT_AI_MODEL: "injected", PATH: "/synthetic/path" });
+  expect(env.FANOUT_ADDR).toBe("");
   expect(env.FANOUT_AI_MODEL).toBe("injected");
-  expect(env.FANOUT_AUTH_CODE_SECRET).toBe("synthetic-only");
+  expect(env.ANTHROPIC_API_KEY).toBe("synthetic-only");
+  expect(env.FANOUT_UNKNOWN).toBe("value");
   expect(env.PATH).toBe("/synthetic/path");
 });
 
-test("production excludes personal files and requires its declared override file", () => {
+test("dotenv parsing preserves literal shell text, CRLF, and multiline values", () => {
   const root = fixture();
-  writeFileSync(join(root, ".env.local"), "ANTHROPIC_API_KEY=personal-secret\n");
-  writeFileSync(join(root, ".env.production.local"), "FANOUT_AI_MODEL=personal-production\n");
-  expect(() => prepareEnvironment(root, "production", {})).toThrow("Cannot read required");
-  writeFileSync(join(root, ".env.production"), "FANOUT_ADDR=:7520\n");
-  const env = prepareEnvironment(root, "production", {});
-  expect(env.FANOUT_ADDR).toBe(":7520");
-  expect(env.FANOUT_AI_MODEL).toBeUndefined();
-  expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-  expect(prepareEnvironment(root, "production", { FANOUT_AI_MODEL: "deployment" }).FANOUT_AI_MODEL).toBe("deployment");
-});
-
-test("CRLF generated inventory preserves secret classification for local and production preparation", () => {
-  const inventory = readFileSync(join(import.meta.dir, "../.env.example"), "utf8").replace(/\r?\n/g, "\r\n");
-  for (const environment of ["local", "production"] as const) {
-    const root = fixture();
-    writeFileSync(join(root, ".env.example"), inventory);
-    writeFileSync(join(root, ".env.production"), "FANOUT_ADDR=:7520\n");
-    const injected = { FANOUT_AUTH_CODE_SECRET: "synthetic-only", ANTHROPIC_API_KEY: "synthetic-only" };
-    const env = prepareEnvironment(root, environment, injected);
-    expect(env.FANOUT_ADDR).toBe(environment === "local" ? "127.0.0.1:7520" : ":7520");
-    expect(env.FANOUT_AUTH_CODE_SECRET).toBe(injected.FANOUT_AUTH_CODE_SECRET);
-    expect(env.ANTHROPIC_API_KEY).toBe(injected.ANTHROPIC_API_KEY);
-    const file = environment === "local" ? ".env.local" : ".env.production";
-    for (const name of Object.keys(injected)) {
-      writeFileSync(join(root, file), `${name}=synthetic-only\n`);
-      expect(() => prepareEnvironment(root, environment, {})).toThrow(`Secret setting ${name} belongs in runtime injection, not ${file}`);
-    }
-  }
-});
-
-test("dotenv parsing preserves dollars, quotes, whitespace, and multiline values without shell execution", () => {
-  const root = fixture();
-  writeFileSync(join(root, ".env.local"), `FANOUT_DATA_DIR='  $HOME $(printf unsafe) "quoted"  '
+  writeFileSync(join(root, ".env"), `FANOUT_DATA_DIR='  $HOME $(printf unsafe) "quoted"  '
 FANOUT_AI_MODEL="line one
 line two"
-`);
-  const env = prepareEnvironment(root, "local", {});
+`.replace(/\n/g, "\r\n"));
+  const env = prepareEnvironment(root, {});
   expect(env.FANOUT_DATA_DIR).toBe('  $HOME $(printf unsafe) "quoted"  ');
   expect(env.FANOUT_AI_MODEL).toBe("line one\nline two");
-  // Verify the real Node runtime as well as Bun's test-runner implementation.
   const result = Bun.spawnSync(["node", "--input-type=module", "-e",
-    "const {prepareEnvironment}=await import(process.argv[2]); process.stdout.write(JSON.stringify(prepareEnvironment(process.argv[1], 'local', {})));",
+    "const {prepareEnvironment}=await import(process.argv[2]); process.stdout.write(JSON.stringify(prepareEnvironment(process.argv[1], {})));",
     root, pathToFileURL(join(import.meta.dir, "run-fanout.mjs")).href], { cwd: root });
   expect(result.exitCode).toBe(0);
   expect(JSON.parse(result.stdout.toString())).toEqual(env);
 });
 
-test("public and personal dotenv files reject secrets, retired names, and unresolved references without leaking values", () => {
-  for (const assignment of [
-    "ANTHROPIC_API_KEY=synthetic-private-value",
-    "FANOUT_AUTH_CODE_SECRET=",
-    "FANOUT_AI_API_KEY=synthetic-private-value",
-    "FANOUT_AI_BASE_URL=https://example.com/synthetic-private-value",
-    "AI_API_KEY=synthetic-private-value",
-    "FANOUT_AI_MODEL=op://synthetic-private-value",
-  ]) {
-    for (const file of [".env", ".env.local"]) {
-      const root = fixture();
-      writeFileSync(join(root, file), assignment+"\n");
-      let message = "";
-      try { prepareEnvironment(root, "local", {}); } catch (error) { message = (error as Error).message; }
-      expect(message).not.toBe("");
-      expect(message).not.toContain("synthetic-private-value");
-    }
-  }
-});
-
-test("missing defaults and unsupported environments fail rather than fall back", () => {
+test("unreadable dotenv fails and launcher requires a command", async () => {
   const root = fixture();
-  rmSync(join(root, ".env"));
-  expect(() => prepareEnvironment(root, "local", {})).toThrow("Cannot read required");
-  expect(() => prepareEnvironment(root, "staging" as "local", {})).toThrow("Environment must");
-});
-
-test("launcher requires an explicit environment and command", async () => {
+  mkdirSync(join(root, ".env"));
+  expect(() => prepareEnvironment(root, {})).toThrow("Cannot read dotenv");
   await expect(main([])).rejects.toThrow("Usage:");
-  await expect(main(["--environment", "local", "--"])).rejects.toThrow("Usage:");
-});
-
-test("secret classification uses only the strict first-line schema header", () => {
-  const root = fixture();
-  writeFileSync(join(root, ".env.example"), `# ai.model; string
-# documentation; string; secret
-FANOUT_AI_MODEL=
-
-# Invalid-Key; string; secret
-FANOUT_DATA_DIR=
-
-# auth.code_secret; string; secret
-# An ordinary doc line cannot remove the secret marker.
-FANOUT_AUTH_CODE_SECRET=
-`);
-  writeFileSync(join(root, ".env"), "FANOUT_AI_MODEL=public\nFANOUT_DATA_DIR=./public\n");
-  expect(prepareEnvironment(root, "local", {}).FANOUT_AI_MODEL).toBe("public");
-  expect(prepareEnvironment(root, "local", {}).FANOUT_DATA_DIR).toBe("./public");
-  writeFileSync(join(root, ".env"), "FANOUT_AUTH_CODE_SECRET=synthetic-only\n");
-  expect(() => prepareEnvironment(root, "local", {})).toThrow("Secret setting FANOUT_AUTH_CODE_SECRET");
+  await expect(main(["--"])).rejects.toThrow("Usage:");
 });
 
 function launchFixture(childCode: string) {
@@ -150,7 +59,7 @@ function launchFixture(childCode: string) {
 import { main } from './scripts/run-fanout.mjs';
 const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 const before = signals.map(signal => process.listenerCount(signal));
-const code = await main(['--environment', 'local', '--', process.execPath, '-e', process.argv[2]]);
+const code = await main(['--', process.execPath, '-e', process.argv[2]]);
 console.log('cleanup:' + signals.every((signal, index) => process.listenerCount(signal) === before[index]));
 process.exitCode = code;
 `;

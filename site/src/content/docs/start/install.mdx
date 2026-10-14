@@ -45,8 +45,9 @@ is not: `-v "$PWD/data:/var/lib/fanout/data"` fails to open its data directory
 unless that directory is already writable by 65532.
 :::
 
-Both the image and native binary bind the shared listener on all interfaces.
-Set `FANOUT_ADDR=127.0.0.1:7520` for a local-only instance.
+The image sets `FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
+Native installs default to `127.0.0.1:7520`; set `FANOUT_ADDR=:7520` to accept
+connections from other hosts.
 
   </TabItem>
   <TabItem label="Install script">
@@ -72,6 +73,7 @@ run it:
 
 ```sh
 chmod +x fanout
+export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
 ./fanout
 ```
 
@@ -112,41 +114,38 @@ Every tag above also exists under `ghcr.io/labstack/fanout`.
 Standalone signatures and SBOMs are deliberately not published yet — the
 reasoning is in the repository's release contract.
 
-## AI configuration upgrades
+## Configuration upgrades
 
-Select exactly `anthropic` or `openai` with `FANOUT_AI_PROVIDER` (YAML
-`ai.provider`) to enable chat; empty disables it. Replace `FANOUT_AI_API_KEY`
-with the selected provider's required `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
-Move YAML `ai.api_key` to the corresponding `ai.anthropic.api_key` or
-`ai.openai.api_key`. Inherited keys never select a provider. Model selection
-remains `FANOUT_AI_MODEL`.
+Apply these deployment changes before restarting with the new binary or image.
+Every setting requires a restart.
 
-Replace `FANOUT_AI_BASE_URL` with the matching `ANTHROPIC_BASE_URL` or
-`OPENAI_BASE_URL` (YAML `ai.anthropic.base_url` or `ai.openai.base_url`). For
-OpenAI, append `/v1` to the old origin/path: Fanout now appends `/responses`
-instead of `/v1/responses`. Anthropic still appends `/v1/messages`. Both preserve
-gateway prefixes and accept a trailing slash. Retired names are startup errors;
-update deployment/secret inputs with the binary. All settings require restart.
+| Previous setup | Current setup |
+|---|---|
+| YAML configuration and `--config` | Configuration comes from built-in defaults and nonempty environment values. Set deployment environment variables for your settings. |
+| A mount at `/etc/fanout/fanout.yaml` | The new image silently ignores this file. Transfer its settings to environment variables before upgrading. |
+| `FANOUT_AI_API_KEY` and `FANOUT_AI_BASE_URL` | Use the selected provider's `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` or `OPENAI_API_KEY` / `OPENAI_BASE_URL`. |
+| Chat enabled by an inherited key | Set `FANOUT_AI_PROVIDER` to exactly `anthropic` or `openai` and supply its key. Empty disables chat. Model selection remains `FANOUT_AI_MODEL`. |
+| OpenAI base without an API version | Include `/v1` in `OPENAI_BASE_URL`; Fanout appends `/responses`. Anthropic still appends `/v1/messages`. Both preserve gateway prefixes. |
+| Native listener on all interfaces | Native default is `127.0.0.1:7520`. Set `FANOUT_ADDR=:7520` for remote access. The container image supplies `:7520`. |
+| Tracked `.env` defaults | Only generated `.env.example` is tracked, with empty values. Personal `.env` is ignored; `just run` loads it optionally and inherited values win. |
+
+Secrets also accept `<ENV>_FILE` paths for managed mounts. Set either the value
+or the path, never both nonempty. See [runtime secret delivery](https://github.com/labstack/fanout/blob/main/docs/operations.md#runtime-secret-delivery).
 
 ## What an instance opens
 
 | Port or path | Purpose | Native default |
 |---|---|---|
-| `7520` | Browser, API, chat, MCP, OTLP/gRPC and OTLP/HTTP | `:7520`, all interfaces |
+| `7520` | Browser, API, chat, MCP, OTLP/gRPC and OTLP/HTTP | `127.0.0.1:7520`, loopback |
 | `./data` | Telemetry, query state, users, sessions, dashboards, alerts and agent history | `./data` |
 
 Every OTLP export requires the ingest token, including on the shared port.
 Ingest rejects requests before setup completes. Read [authenticate
 exporters](/start/send-telemetry) before pointing a service at the instance.
 
-Upgrading from separate ports? Remove `FANOUT_OTLP_GRPC_ADDR` and
-`FANOUT_OTLP_HTTP_ADDR` (or YAML `ingest.otlp_grpc_addr` and
-`ingest.otlp_http_addr`), update exporters to port `7520` or your public HTTPS
-origin, and remove the old port mappings. Rename `FANOUT_HTTP_ADDR` to
-`FANOUT_ADDR` (YAML `server.http_addr` to `server.addr`). Removed settings are
-startup errors. Also remove `FANOUT_INGEST_ADVERTISED_ENDPOINT` or YAML
-`ingest.advertised_endpoint`; change a private collector hostname directly on
-**Connect telemetry** before copying its generated configuration.
+Exporters use the shared port `7520` or the public HTTPS origin. Every OTLP
+export requires the ingest token. A private collector hostname can be entered
+on **Connect telemetry** before copying its generated configuration.
 
 Separate interface bindings are also removed. If the dashboard is public but
 ingest must remain LAN-only, keep Fanout's backend port private and deny

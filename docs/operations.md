@@ -6,105 +6,140 @@ give ingest credentials only to trusted services and collectors.
 
 ## Runtime secret delivery
 
-Runtime configuration uses built-in defaults, then an explicit `--config` YAML
-document, then recognized nonempty environment values. Every setting requires
-a restart. Fanout does not load dotenv files itself. The generated root
-`.env.example` documents every default in comments and leaves all values empty;
-`.env` and `.env.production` contain only nonsecret environment-specific overrides.
+Runtime configuration uses built-in defaults followed by nonempty process
+environment values. Every setting requires a restart. Fanout reads no
+configuration document or dotenv file. Generated `.env.example` lists the
+settings with empty values and defaults in comments. For development, `just run`
+loads optional ignored `./.env` with Node's native `parseEnv`; inherited values
+win, including empty values. Personal development credentials may live there.
+Personal environment files and operator profiles are excluded from Git and Docker.
 
-| File | Use | Public Git policy |
-| --- | --- | --- |
-| `.env` | Local loopback listener override | Committed; generated; no secret fields |
-| `.env.production` | Production listener override | Committed; generated; no deployment-specific credentials or origins |
-| `.env.example` | Complete configuration template | Committed; generated; all values empty |
-| `.env.local` / `.env.production.local` | Personal nonsecret files | Ignored; production never loads them |
-| `secrets/fanout.env` | Private complete SOPS credential profile, when used | Operator-owned; ignored and excluded from Docker |
-| `secrets/fanout.production.env` | Private production profile, when credentials differ | Operator-owned; ignored and excluded from Docker |
+Custom names use `FANOUT_` plus a clear name, adding the area only when it
+clarifies. Vendor credentials and endpoints keep their documented names.
+Unknown `FANOUT_` names fail startup, except platform service-discovery names;
+unrelated names in shared vendor namespaces are ignored.
 
-`.env` is now tracked and generated. Before pulling, move nonsecret personal
-values from an older private `.env` to ignored `.env.local` and credentials to
-runtime injection, then preserve the old file outside the checkout. Git refuses
-to overwrite an untracked `.env`.
+### Environment and mounted secret files
 
-Build the binary, then use `just run` locally or `just run-production` for
-production. The Node launcher uses `node:util.parseEnv`; dotenv is not shell code
-and values are not interpolated. Local order is `.env`, optional `.env.local`,
-then inherited/injected values. Production order is `.env`, required
-`.env.production`, then inherited/injected values; no personal files are loaded.
-Unknown names, secret entries, and unresolved `op://` references in ordinary
-dotenv files fail before launch. A missing required file never selects another
-profile. Empty values retain Fanout's no-override semantics.
+Deliver credentials through deployment environment injection or managed mounts.
+Every secret accepts either its value or its file path:
 
-The launcher injects nonempty dotenv settings as environment overrides of
-`--config` YAML. The generated files override only the listener; other YAML
-settings survive both launch modes. `.env.production` resets every local override
-to its schema default. Supported binary flags are forwarded unchanged.
+| Value variable | File path variable |
+| --- | --- |
+| `FANOUT_AUTH_CODE_SECRET` | `FANOUT_AUTH_CODE_SECRET_FILE` |
+| `FANOUT_OIDC_CLIENT_SECRET` | `FANOUT_OIDC_CLIENT_SECRET_FILE` |
+| `FANOUT_SMTP_PASSWORD` | `FANOUT_SMTP_PASSWORD_FILE` |
+| `FANOUT_METRICS_TOKEN` | `FANOUT_METRICS_TOKEN_FILE` |
+| `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY_FILE` |
+| `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` |
 
-Keep ordinary YAML/dotenv configuration nonsecret where possible. Deliver
-credentials through deployment environment injection, restricted managed mounts,
-or a platform secret service. Do not bake credentials into images or frontend
-bundles. Local dotenv scratch files stay ignored and outside Docker inputs.
+Both forms nonempty fail startup. Fanout strips exactly one trailing LF or CRLF
+from file contents, then rejects an empty result. Errors identify the variable
+and path, never the contents. Fanout performs no file-mode check; the deployment
+controls mount access. Do not bake credentials into images or frontend bundles.
 
-For repository-managed application secrets adopting Canon, use one authoritative
-SOPS-encrypted profile per workload/credential set, such as
-`secrets/fanout.env`, or `secrets/fanout.production.env` when production actually
-uses different credentials. Select one complete profile explicitly; do not layer
-production credentials over development credentials or fall back on a missing
-profile. Platform-owned credentials remain platform-owned.
-
-Operator profiles and recipient policy are excluded from this public product
-repository. Create them only for actual credential sets; do not ship working
-development credentials or invent environment profiles. Existing private
-credential migration sources remain ignored and are never loaded automatically.
-
-With a provisioned SOPS key and an existing encrypted profile, use
-[SOPS runtime injection](https://getsops.io/docs/usage/advanced/#passing-secrets-to-other-processes)
-to launch without writing decrypted credentials to disk:
+For Docker, mount a provisioned secret and inject its path:
 
 ```sh
-sops exec-env secrets/fanout.env './bin/fanout --config fanout.yaml'
-# Or use the shared nonsecret dotenv defaults:
-sops exec-env secrets/fanout.env 'just run'
-# Select a complete profile for actual production resources:
-sops exec-env secrets/fanout.production.env 'just run-production'
+docker run --name fanout -p 7520:7520 \
+  -v fanout-data:/var/lib/fanout/data \
+  --mount type=bind,src="$AUTH_SECRET_PATH",dst=/run/secrets/auth_code,readonly \
+  -e FANOUT_AUTH_CODE_SECRET_FILE=/run/secrets/auth_code \
+  labstack/fanout:latest
 ```
 
-This example injects only secrets; ordinary settings remain in `fanout.yaml`
-or deployment inputs. SOPS supplies the profile's environment to the child;
-avoid conflicting secret values in inherited shell variables. Verify synthetic
-values containing dollars, quotes, spaces, and newlines through the actual
-deployment parser before migrating a profile. Keep private age identities out
-of Git, restrict their local files to mode `0600`, and document recovery in the
-product's existing 1Password item. 1Password holds key recovery rather than a
-second independently maintained copy of SOPS-owned application secrets.
+The source secret must be readable by the image's UID 65532. In Compose, grant
+only the required secret to the service:
 
-Existing vault-owned delivery remains valid until its migration is verified.
-Before retiring a vault field or old variable name, inventory local, CI,
-deployment, shared-project, supported-version, and recovery consumers using
-names and safe metadata. Update their mappings, verify the real consumers, and
-verify recovery from the destination before removing the old authority. This
-repository ships no credential profiles or decryption keys.
+```yaml
+services:
+  fanout:
+    image: labstack/fanout:latest
+    ports: ["7520:7520"]
+    volumes: ["fanout-data:/var/lib/fanout/data"]
+    environment:
+      FANOUT_AUTH_CODE_SECRET_FILE: /run/secrets/auth_code
+    secrets: [auth_code]
+secrets:
+  auth_code:
+    file: ${AUTH_SECRET_PATH}
+volumes:
+  fanout-data:
+```
 
-AI chat is disabled by default. Select exactly `anthropic` or `openai` through
-`ai.provider` or `FANOUT_AI_PROVIDER`, then deliver its required `ANTHROPIC_API_KEY`
-or `OPENAI_API_KEY`; a selected provider without its key fails startup. Inherited
-keys do not enable chat. With no provider selected, AI keys and endpoints are
-ignored; only the selected provider's endpoint is validated and used.
-Provider endpoint overrides are `ANTHROPIC_BASE_URL` and
-`OPENAI_BASE_URL`; the OpenAI base includes `/v1`, while Anthropic's excludes it.
-The old generic key/base URL names and YAML keys are rejected; the
-[configuration upgrade instructions](../site/src/content/docs/start/install.mdx#ai-configuration-upgrades) describe
-their exact replacements. Verify authentication and request paths against the
-configured provider after rollout, without logging credentials.
+For Kubernetes, put ordinary settings in a ConfigMap and credentials in a
+Secret provisioned through your platform's secret manager. This Pod fragment
+injects both without putting credential values in the manifest:
+
+```yaml
+containers:
+  - name: fanout
+    image: labstack/fanout:latest
+    envFrom:
+      - configMapRef:
+          name: fanout-settings
+    env:
+      - name: FANOUT_AUTH_CODE_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: fanout-credentials
+            key: auth_code_secret
+```
+
+Alternatively mount the Secret as files and set the corresponding `_FILE`
+paths. Use the existing persistent-volume and access policy for telemetry data.
+
+### SOPS runtime injection
+
+Use one authoritative SOPS-encrypted profile per actual workload/credential
+set, such as ignored `secrets/fanout.env`. Select a complete profile explicitly;
+never layer different credential sets or fall back on a missing profile.
+Platform-owned credentials remain platform-owned. This public repository ships
+no operator secrets, recipient policy, or decryption keys.
+
+With a provisioned SOPS key and existing encrypted profile, launch through
+[SOPS runtime injection](https://getsops.io/docs/usage/advanced/#passing-secrets-to-other-processes)
+without writing decrypted credentials to disk:
+
+```sh
+sops exec-env secrets/fanout.env './bin/fanout'
+# For local development with optional personal settings:
+sops exec-env secrets/fanout.env 'just run'
+```
+
+The profile supplies environment values to the child; ordinary settings may
+also come from deployment inputs. A dotenv parser neither decrypts SOPS nor
+resolves 1Password references. Verify synthetic values containing dollars,
+quotes, spaces, and newlines through the actual deployment parser before
+migrating a profile. Keep private age identities out of Git, restrict their
+local files to mode `0600`, and document key recovery in the existing 1Password
+item. 1Password holds recovery rather than a second maintained copy of
+SOPS-owned application secrets.
+
+Existing vault/platform delivery remains authoritative until consumers and
+recovery are verified. Before retiring a vault field or old name, inventory
+local, CI, deployment, shared-project, supported-version, and recovery consumers
+using names and safe metadata. Update mappings, verify real consumers, and
+verify recovery from the destination before removing the old authority. Private
+migration sources stay ignored and are never loaded automatically.
+
+AI chat is disabled by default. Select exactly `anthropic` or `openai` with
+`FANOUT_AI_PROVIDER`, then deliver its required `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY`. A selected provider without its key fails startup. Inherited
+keys never enable chat. Only the selected endpoint is validated and used.
+Overrides are `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL`; the OpenAI base
+includes `/v1`, while Anthropic's excludes it. See the
+[configuration upgrade table](../site/src/content/docs/start/install.mdx#configuration-upgrades).
 
 ## Network surface
 
 | Default | Purpose | Exposure |
 |---|---|---|
-| `:7520` | Browser, API, MCP, health, metrics, OTLP/gRPC and OTLP/HTTP | Users, trusted services or a reverse proxy |
+| `127.0.0.1:7520` (native), `:7520` (image) | Browser, API, MCP, health, metrics, OTLP/gRPC and OTLP/HTTP | Users, trusted services or a reverse proxy |
 
-Both native and container deployments use one listener. Set
-`FANOUT_ADDR=127.0.0.1:7520` for loopback-only access. Every OTLP request
+Both native and container deployments use one listener. Native installs default
+to loopback; set `FANOUT_ADDR=:7520` for remote access. The image supplies
+`FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`. Every OTLP request
 requires the ingest token created during first-admin setup; browser sessions
 and MCP tokens do not authorize ingest. Do not embed the ingest token in a
 browser or shipped mobile application.
@@ -143,6 +178,14 @@ their HTTP `Host` matches that origin, so the reverse proxy must preserve the
 original host.
 
 ## Health and monitoring
+
+`fanout healthcheck` derives `/healthz` from `FANOUT_ADDR` or its built-in
+default. Empty and unspecified bind hosts become loopback, including IPv6.
+`FANOUT_TLS_CERT_FILE` selects HTTPS. The local loopback probe skips certificate
+verification because the certificate may be issued for the public hostname.
+Healthcheck reads only these two settings and does not require valid secrets.
+An explicit `fanout healthcheck <url>` overrides URL derivation.
+
 
 - `/healthz` is the liveness check.
 - `/readyz` includes storage readiness and resolved runtime sizing.
@@ -207,22 +250,15 @@ cascades to sessions, OAuth grants, and owned dashboards. Use `fanout login-link
 
 ## Single-port migration
 
-This is a breaking configuration change:
+All transports use `FANOUT_ADDR`. Exporters use port `7520` or the public
+HTTPS origin and port; the ingest token and signal paths remain the same.
+Enable HTTP/2 backend forwarding for gRPC at proxies and remove obsolete ingest
+port mappings and upstreams. A separate ingest hostname may still route to the
+same Fanout port if required by the edge configuration.
 
-1. Remove `FANOUT_OTLP_GRPC_ADDR` and `FANOUT_OTLP_HTTP_ADDR`, or YAML
-   `ingest.otlp_grpc_addr` and `ingest.otlp_http_addr`. They are rejected at startup.
-2. Rename `FANOUT_HTTP_ADDR` to `FANOUT_ADDR`, or YAML `server.http_addr`
-   to `server.addr` (default `:7520`). Publish only that container port.
-3. Change exporters from ports `4317`/`4318` to `7520`, or to the public HTTPS
-   origin and port. The ingest token and OTLP signal paths do not change.
-4. Enable HTTP/2 backend forwarding for gRPC at any proxy. Remove obsolete
-   ingest port mappings and proxy upstreams. A separate ingest hostname may
-   still route to the same Fanout port if required by the edge configuration.
-5. Set `FANOUT_PUBLIC_URL` to the external origin so setup instructions start
-   with the reachable endpoint. If collectors use a different private hostname,
-   edit the endpoint on **Connect telemetry** before copying the configuration.
-   Remove `FANOUT_INGEST_ADVERTISED_ENDPOINT` or YAML
-   `ingest.advertised_endpoint`; these guidance-only settings are rejected.
+Set `FANOUT_PUBLIC_URL` to the external origin. If collectors use a different
+private hostname, edit the endpoint on **Connect telemetry** before copying the
+configuration.
 
 Local comparison results are in [the single-port benchmark report](benchmarks/single-port-2026-09-08.md).
 
@@ -238,10 +274,7 @@ ingest token is still required on the private path.
 
 Single-port removes the need for a proxy solely to combine listeners. Splitting
 public application access from private ingest still requires network-aware
-routing. The mandatory default is deliberate for this pre-release product:
-there is one existing operator, so keeping two listener topologies would add
-configuration and testing costs without an installed compatibility base. The
-address rename is a separate breaking change, bundled into this migration.
+routing. The shared listener keeps one network topology for this pre-release product.
 
 ## Upgrade and rollback
 
@@ -262,7 +295,7 @@ SMTP is optional. Creating a local user without it succeeds and returns
 operator with access to the same configuration and data directory then runs:
 
 ```sh
-fanout --config /etc/fanout/fanout.yaml login-link user@example.com
+fanout login-link user@example.com
 ```
 
 The resulting link expires after 15 minutes, works once, and is recorded in the

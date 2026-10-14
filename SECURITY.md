@@ -37,9 +37,8 @@ release is supported. There are no backports to earlier tags.
 
 ## Operating Fanout safely
 
-Fanout serves plaintext by default. Configure `server.tls.cert_file` and
-`server.tls.key_file` in YAML (or `FANOUT_TLS_CERT_FILE` and
-`FANOUT_TLS_KEY_FILE`), or place it behind a reverse proxy that terminates TLS.
+Fanout serves plaintext by default. Configure `FANOUT_TLS_CERT_FILE` and
+`FANOUT_TLS_KEY_FILE`, or place it behind a reverse proxy that terminates TLS.
 Browser and API reads require an authenticated account, and every OTLP request
 requires the separately managed ingest token. Demo instances use the same
 credential paths as production instances.

@@ -104,7 +104,7 @@ func (p *openAIProvider) Stream(ctx context.Context, params StreamParams, cb fun
 	if err != nil {
 		var apiErr *APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(apiErr.Body), "encrypted") {
-			return fmt.Errorf("OpenAI configuration error: ai.model must select a reasoning model supporting reasoning.encrypted_content (default gpt-6.1-sol): %w", err)
+			return fmt.Errorf("OpenAI configuration error: FANOUT_AI_MODEL must select a reasoning model supporting reasoning.encrypted_content (default gpt-6.1-sol): %w", err)
 		}
 		return err
 	}

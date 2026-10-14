@@ -1,11 +1,76 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLoadIgnoresInactiveProviderSecretFiles(t *testing.T) {
+	emptyPath := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"", "anthropic", "openai"} {
+		for _, vendor := range []string{"anthropic", "openai"} {
+			if vendor == provider {
+				continue
+			}
+			for _, file := range []struct{ name, path string }{
+				{"missing", "/missing"}, {"empty", emptyPath},
+			} {
+				for _, bothSet := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/%s/%s/both_set=%t", provider, vendor, file.name, bothSet), func(t *testing.T) {
+						env := []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider}
+						if provider != "" {
+							env = append(env, strings.ToUpper(provider)+"_API_KEY=selected-key")
+						}
+						name := strings.ToUpper(vendor)
+						env = append(env, name+"_API_KEY_FILE="+file.path, name+"_BASE_URL=unused-invalid-url")
+						if bothSet {
+							env = append(env, name+"_API_KEY=unused-key")
+						}
+						cfg, err := Load(LoadOptions{Environ: env})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if vendor == "anthropic" && (cfg.AnthropicAPIKey != "" || cfg.AnthropicBaseURL != "") ||
+							vendor == "openai" && (cfg.OpenAIAPIKey != "" || cfg.OpenAIBaseURL != "") {
+							t.Fatal("inactive provider settings must be ignored")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestLoadRejectsSelectedProviderSecretFileErrors(t *testing.T) {
+	for _, provider := range []string{"anthropic", "openai"} {
+		for _, bothSet := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/both_set=%t", provider, bothSet), func(t *testing.T) {
+				name := strings.ToUpper(provider) + "_API_KEY"
+				path := filepath.Join(t.TempDir(), "missing")
+				env := []string{
+					"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider,
+					name + "_FILE=" + path,
+				}
+				if bothSet {
+					env = append(env, name+"=synthetic-private-value")
+				}
+				_, err := Load(LoadOptions{Environ: env})
+				if err == nil || !strings.Contains(err.Error(), name+"_FILE") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "synthetic-private-value") {
+					t.Fatalf("expected redacted file error naming variable and path, got %v", err)
+				}
+				if bothSet && !strings.Contains(err.Error(), "must not both be set") {
+					t.Fatalf("expected selected provider conflict, got %v", err)
+				}
+			})
+		}
+	}
+}
 
 func TestLoadSelectsProviderCredentials(t *testing.T) {
 	for _, tc := range []struct {
@@ -31,24 +96,20 @@ func TestLoadSelectsProviderCredentials(t *testing.T) {
 	}
 }
 
-func TestLoadProviderEnvironmentOverridesYAML(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	document := "ai:\n  provider: openai\n  model: configured-model\n  anthropic:\n    api_key: anthropic-file\n    base_url: https://anthropic.example\n  openai:\n    api_key: openai-file\n    base_url: https://openai.example/v1\n"
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(LoadOptions{Path: path, Environ: []string{
+func TestLoadIgnoresOtherVendorEnvironment(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: []string{
 		"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32),
-		"OPENAI_API_KEY=openai-env", "OPENAI_BASE_URL=https://gateway.example/api/v1/",
-		"ANTHROPIC_API_KEY=", "ANTHROPIC_BASE_URL=", "FANOUT_AI_MODEL=",
+		"FANOUT_AI_PROVIDER=openai", "OPENAI_API_KEY=openai-env",
+		"OPENAI_BASE_URL=https://gateway.example/api/v1/", "FANOUT_AI_MODEL=configured-model",
+		"ANTHROPIC_API_KEY=", "ANTHROPIC_BASE_URL=",
 		"OPENAI_MODEL=unrelated-tool", "ANTHROPIC_MODEL=unrelated-tool",
 		"OPENAI_PROJECT_ID=another-consumer", "ANTHROPIC_AUTH_TOKEN=another-consumer",
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AIAPIKey() != "openai-env" || cfg.AIBaseURL() != "https://gateway.example/api/v1" || cfg.AIModel != "configured-model" || cfg.AnthropicAPIKey != "anthropic-file" || cfg.AnthropicBaseURL != "https://anthropic.example" {
-		t.Fatal("provider environment precedence or shared consumer isolation is incorrect")
+	if cfg.AIAPIKey() != "openai-env" || cfg.AIBaseURL() != "https://gateway.example/api/v1" || cfg.AIModel != "configured-model" || cfg.AnthropicAPIKey != "" || cfg.AnthropicBaseURL != "" {
+		t.Fatal("provider environment or shared consumer isolation is incorrect")
 	}
 }
 
@@ -67,7 +128,7 @@ func TestLoadRejectsInvalidProviderURLWithoutLeakingValues(t *testing.T) {
 func TestLoadRejectsUnsupportedProviderWithoutAKey(t *testing.T) {
 	for _, provider := range []string{"unsupported", "OpenAI", " OpenAI ", " openai ", "Anthropic"} {
 		_, err := Load(LoadOptions{Environ: []string{"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider}})
-		if err == nil || !strings.Contains(err.Error(), "ai.provider") {
+		if err == nil || !strings.Contains(err.Error(), "FANOUT_AI_PROVIDER") {
 			t.Fatal("unsupported provider must fail at startup, even without a key")
 		}
 	}
@@ -85,8 +146,8 @@ func TestLoadRequiresSelectedProviderKey(t *testing.T) {
 				"FANOUT_AUTH_CODE_SECRET=" + strings.Repeat("x", 32), "FANOUT_AI_PROVIDER=" + provider,
 				name + "=" + value, otherKey + "=other-provider-key",
 			}})
-			if err == nil || !strings.Contains(err.Error(), "ai."+provider+".api_key") || !strings.Contains(err.Error(), name) {
-				t.Fatalf("expected missing key error naming both YAML and environment keys, got %v", err)
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("expected missing key error naming the environment variable, got %v", err)
 			}
 		}
 	}

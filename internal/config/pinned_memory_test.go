@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-// Pinning storage.duckdb.memory skips detection entirely, so nothing compares
+// Pinning FANOUT_DUCKDB_MEMORY skips detection entirely, so nothing compares
 // the value to the machine. Both production deployments pinned 4GB on 8 GiB
 // hosts and were OOM-killed repeatedly: DuckDB's budget is not the process's
 // budget, and the Go runtime, the ingest appender and compaction's merges all

@@ -1,87 +1,85 @@
 ---
 title: Configuration
 description: How Fanout is configured, where settings come from, and how the reference stays true to the binary.
-summary: The rules that govern every setting — precedence, naming, secrets, and what happens to a name that changes.
+summary: The rules that govern every setting — precedence, naming, secret files, and validation.
 read_when:
   - You are configuring an instance and want the rules before the list.
   - A setting you set appears to have been ignored.
 status: preview
 ---
 
-Fanout is configured from the environment, or from a YAML file using the same
-keys. Every setting is listed under [Settings](/reference/settings/server),
+Fanout resolves built-in defaults followed by nonempty process environment
+values. Every setting is listed under [Settings](/reference/settings/server),
 grouped by the part of the product it belongs to.
 
-Those pages are generated from `internal/config` by `cmd/fanout-docgen`, and
-the root `.env`, `.env.production`, and `.env.example` are generated from the
-same schema. `just check` fails
-when a committed page or template no longer matches the type the loader
-binds. That is the whole point of generating them: the reference cannot describe
-a setting the binary does not accept, and cannot omit one it does.
+Those pages and `.env.example` are generated from `internal/config` by
+`cmd/fanout-docgen`. `just docs-generate-check` verifies that they match the
+schema the binary uses.
 
 ## Where a value comes from
 
-A nonempty recognized environment variable wins over the YAML file, and the file
-wins over the built-in default. Empty environment values mean no override.
-All settings are read once at startup and require restart. Fanout does not load
-dotenv files itself. The generated `.env.example` documents types, defaults,
-and leaves every value empty so copying it never overrides YAML. `.env` contains
-only schema-declared local overrides; `.env.production` resets exactly those
-fields to their built-in defaults. Both omit secret fields.
+All settings are read once at startup and require a restart. An empty
+environment value means unset and preserves the built-in default. Native
+installs listen on `127.0.0.1:7520`; the image supplies `FANOUT_ADDR=:7520`
+and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
 
-For a source checkout, build the binary and use `just run` for local development
-or `just run-production` for an explicit production launch. Local order is
-`.env`, optional ignored `.env.local`, then injected environment values.
-Production order is `.env`, required `.env.production`, then injected values;
-personal files are excluded. The Node launcher uses the native dotenv parser
-without shell execution or variable interpolation. Missing required files,
-unknown names, and secret entries in ordinary dotenv files fail before launch.
-
-Inject credentials from a private selected SOPS profile or the deployment's
-secret service. This public repository ships no operator secrets or recipients.
-Dotenv values are injected as environment, so nonempty values override the
-corresponding `--config` YAML. The generated files override only the listener;
-other YAML settings survive both launch modes.
+The binary reads only process environment. `.env.example` leaves every value
+empty and documents types, defaults, and secret file forms in comments. For a
+source checkout, copy it to ignored `.env` for personal settings and development
+credentials. Build the binary, then use `just run`: Node's native `parseEnv`
+loads optional `./.env`, and inherited environment values win, including empty
+values. Values are never executed as shell code or interpolated. The binary
+validates unknown names and types. Production deployments supply their own
+environment values or managed secret mounts.
 
 ## Naming
 
-Custom environment settings use the `FANOUT_` prefix. Provider keys and endpoints
-use `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and
-`OPENAI_BASE_URL`. The YAML key is the dotted path in the first column of each
-settings table — `storage.duckdb.memory` maps to `FANOUT_DUCKDB_MEMORY`.
-Provider settings map to native structured keys under `ai.anthropic` or `ai.openai`.
+Custom names use `FANOUT_` plus a clear name, adding the area only when it
+clarifies. Vendor credentials and endpoints keep `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
 
-`FANOUT_AI_PROVIDER` (YAML `ai.provider`) defaults to empty, disabling chat.
-Selecting exactly `anthropic` or `openai` enables chat and requires that provider's
-key at startup; other names, casing, or surrounding whitespace fail. Only the
-selected provider's key and endpoint are validated and used. With no provider
-selected, inherited AI keys and endpoints are ignored. `FANOUT_AI_MODEL` selects
-the model. Other vendor/tool settings, including `ANTHROPIC_MODEL` and
-`OPENAI_MODEL`, are ignored. See [AI settings](/reference/settings/ai) for
-the different base URL meanings and [upgrade instructions](/start/install#ai-configuration-upgrades)
-for migrating the retired generic key and base URL settings.
+`FANOUT_AI_PROVIDER` defaults to empty, disabling chat. Exactly `anthropic`
+or `openai` enables chat and requires that provider's key. Only the selected
+provider's endpoint is validated and used. Inherited credentials never select
+a provider. `FANOUT_AI_MODEL` selects the model; unrelated vendor/tool settings
+such as `ANTHROPIC_MODEL` and `OPENAI_MODEL` are ignored. See
+[AI settings](/reference/settings/ai) for base URL meanings and the
+[configuration upgrade table](/start/install#configuration-upgrades).
 
-## An unknown variable is an error
+## Unknown names
 
-Fanout rejects an unrecognised `FANOUT_`-prefixed variable at startup rather
-than ignoring it. This matters more than it looks: Fanout is pre-release and
-settings get renamed without aliases, so the alternative is a variable you
-believe is in effect, silently replaced by a default nobody chose, discovered
-months later. A refusal to start is the version of that failure you can act on.
-
-The consequence is that upgrading can require a configuration change, and the
-process tells you which one at the first boot after the upgrade.
+Unknown `FANOUT_` names fail startup. Platform-injected service-discovery names
+are tolerated, and unrelated names in shared vendor namespaces are ignored.
+Errors name the relevant environment variable. Boolean, integer, and Go
+duration values must parse as their declared types.
 
 ## Secrets
 
-Settings marked `secret` are redacted from the startup configuration log. They
-are ordinary environment variables otherwise: anything that can read the process
-environment can read them. Fanout does not encrypt them at rest and does not
-integrate with a secret manager — mount them the way you would for any other
-process.
+Every secret accepts either its value or its file path:
+
+| Value variable | File path variable |
+|---|---|
+| `FANOUT_AUTH_CODE_SECRET` | `FANOUT_AUTH_CODE_SECRET_FILE` |
+| `FANOUT_OIDC_CLIENT_SECRET` | `FANOUT_OIDC_CLIENT_SECRET_FILE` |
+| `FANOUT_SMTP_PASSWORD` | `FANOUT_SMTP_PASSWORD_FILE` |
+| `FANOUT_METRICS_TOKEN` | `FANOUT_METRICS_TOKEN_FILE` |
+| `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY_FILE` |
+| `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` |
+
+Setting both forms nonempty fails startup. File contents lose exactly one
+trailing LF or CRLF; an empty result fails. Errors name variables and paths,
+never contents. The deployment controls file access; Fanout performs no
+file-mode check. Secrets are redacted from startup logs.
+
+Use deployment environment injection, Docker/Compose secrets, Kubernetes
+Secrets, or a private selected SOPS profile. This public repository ships no
+operator profiles or recipients. See
+[runtime secret delivery](https://github.com/labstack/fanout/blob/main/docs/operations.md#runtime-secret-delivery)
+for examples.
 
 ## Validation
 
-The whole configuration is validated before any listener opens, so a value the
-binary will not accept stops it at startup. [First boot](/start/first-boot)
-lists what is checked.
+The whole configuration is validated before any listener opens. A value the
+binary cannot accept stops startup. [First boot](/start/first-boot) lists what
+is checked. The healthcheck command derives its probe from the listener and
+TLS environment settings without validating unrelated settings or secrets.

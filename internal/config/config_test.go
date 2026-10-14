@@ -7,10 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"github.com/knadh/koanf/v2"
 )
 
 func validEnvironment() []string {
@@ -27,546 +23,198 @@ func validEnvironment() []string {
 func TestLoadReturnsDefaults(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: validEnvironment()})
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
-
-	if cfg.Addr != ":7520" {
-		t.Errorf("Addr = %q, want %q", cfg.Addr, ":7520")
+	if cfg.Addr != "127.0.0.1:7520" || cfg.DataDir != "./data" || cfg.IngestBatchSize != 50000 || cfg.RollupInterval != time.Minute || cfg.RetentionDays != 30 || cfg.DefaultNamespace != "default" || !cfg.MCPEnabled || !cfg.AlertEnabled || cfg.AIProvider != "" {
+		t.Fatal("built-in defaults were not resolved")
 	}
-
-	if cfg.DataDir != "./data" {
-		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "./data")
-	}
-	if cfg.IngestBatchSize != 50000 {
-		t.Errorf("IngestBatchSize = %d, want %d", cfg.IngestBatchSize, 50000)
-	}
-	if cfg.RollupInterval != time.Minute {
-		t.Errorf("RollupInterval = %s, want %s", cfg.RollupInterval, time.Minute)
-	}
-	if cfg.RetentionDays != 30 {
-		t.Errorf("RetentionDays = %d, want %d", cfg.RetentionDays, 30)
-	}
-	if cfg.DefaultNamespace != "default" {
-		t.Errorf("DefaultNamespace = %q, want %q", cfg.DefaultNamespace, "default")
-	}
-	// DuckDBMemory is no longer asserted to be empty: Load resolves it from
-	// detected memory, and what it resolves to depends on the machine running
-	// the test. On a host where detection declines it stays empty, which is the
-	// documented fallback rather than a failure. The resolution rules
-	// themselves are covered in sizing_test.go.
-	if cfg.DuckDBThreads != 0 {
-		t.Errorf("DuckDBThreads = %d, want 0 (DuckDB self-sizes to core count)", cfg.DuckDBThreads)
-	}
-	// Sized from the machine rather than fixed at 4, so assert the contract:
-	// above the write-gate invariant and within the auto-sizing ceiling.
-	if cfg.DuckDBMaxConns < minDuckDBConns || cfg.DuckDBMaxConns > maxAutoDuckDBConns {
-		t.Errorf("DuckDBMaxConns = %d, want between %d and %d",
-			cfg.DuckDBMaxConns, minDuckDBConns, maxAutoDuckDBConns)
-	}
-}
-
-func TestLoadLayering(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	if err := os.WriteFile(path, []byte(`server:
-  addr: ":1111"
-mcp:
-  enabled: false
-metrics:
-  public: true
-auth:
-  session_idle_ttl: 10h
-  self_signup: true
-`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	cfg, err := Load(LoadOptions{
-		Path:    path,
-		Environ: append(validEnvironment(), "FANOUT_ADDR=:2222"),
-	})
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Addr != ":2222" {
-		t.Fatalf("Addr = %q, want environment override", cfg.Addr)
-	}
-	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
-		t.Fatalf("YAML values were not merged: %+v", cfg)
+	if cfg.DuckDBThreads != 0 || cfg.DuckDBMaxConns < minDuckDBConns || cfg.DuckDBMaxConns > maxAutoDuckDBConns {
+		t.Fatal("machine sizing did not preserve the connection and thread defaults")
 	}
 }
 
 func TestLoadTypedEnvironmentValues(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"FANOUT_MCP_ENABLED=false",
-		"FANOUT_METRICS_PUBLIC=true",
-		"FANOUT_SESSION_IDLE_TTL=10h",
-		"FANOUT_SELF_SIGNUP=true",
+		"FANOUT_ADDR=:9000", "FANOUT_MCP_ENABLED=false", "FANOUT_METRICS_PUBLIC=true",
+		"FANOUT_SESSION_IDLE_TTL=10h", "FANOUT_SELF_SIGNUP=true", "FANOUT_RETENTION_DAYS=0",
+		"FANOUT_ROLLUP_INTERVAL=5m", "FANOUT_MAINTENANCE_INTERVAL=2h", "FANOUT_ALERTS_EVALUATION_INTERVAL=45s",
 	)})
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
-	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
-		t.Fatalf("environment values were not decoded: %+v", cfg)
+	if cfg.Addr != ":9000" || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup || cfg.RetentionDays != 0 || cfg.RollupInterval != 5*time.Minute || cfg.MaintenanceInterval != 2*time.Hour || cfg.AlertEvaluationInterval != 45*time.Second {
+		t.Fatal("environment values were not decoded")
 	}
 }
 
 func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
-	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"FANOUT_ADDR=",
-		"FANOUT_MCP_ENABLED=",
-		"FANOUT_RETENTION_DAYS=",
-	)})
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_ADDR=", "FANOUT_MCP_ENABLED=", "FANOUT_RETENTION_DAYS=", "FANOUT_AUTH_CODE_SECRET_FILE=")})
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
-	if cfg.Addr != ":7520" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
-		t.Fatalf("empty environment values erased defaults: %+v", cfg)
-	}
-}
-
-func TestMCPResourceURL(t *testing.T) {
-	tests := []struct {
-		name      string
-		publicURL string
-		want      string
-	}{
-		{name: "local default", want: "https://localhost:7520/mcp"},
-		{name: "public origin", publicURL: "https://fanout.example.com", want: "https://fanout.example.com/mcp"},
-		{name: "trimmed origin", publicURL: "  https://fanout.example.com/  ", want: "https://fanout.example.com/mcp"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{PublicURL: tc.publicURL}
-			if got := cfg.MCPResourceURL(); got != tc.want {
-				t.Fatalf("MCPResourceURL() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestExampleConfigurationMatchesSchema(t *testing.T) {
-	path := filepath.Join("..", "..", "fanout.example.yaml")
-	cfg, err := Load(LoadOptions{
-		Path:    path,
-		Environ: validEnvironment(),
-	})
-	if err != nil {
-		t.Fatalf("Load example: %v", err)
-	}
-	if cfg.Addr != ":7520" || cfg.DataDir != "./data" {
-		t.Fatalf("example defaults = HTTP %q data %q", cfg.Addr, cfg.DataDir)
-	}
-	defaults, err := Load(LoadOptions{Environ: validEnvironment()})
-	if err != nil {
-		t.Fatalf("Load defaults: %v", err)
-	}
-	if !reflect.DeepEqual(cfg, defaults) {
-		t.Error("example values do not match built-in defaults")
-	}
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read example: %v", err)
-	}
-	example := koanf.New(".")
-	if err := example.Load(file.Provider(path), yaml.Parser()); err != nil {
-		t.Fatalf("parse example: %v", err)
-	}
-	active := make(map[string]bool, len(example.Keys()))
-	for _, key := range example.Keys() {
-		active[key] = true
-	}
-
-	specs, err := configFieldSpecs()
-	if err != nil {
-		t.Fatalf("field specs: %v", err)
-	}
-	wantSecrets := map[string]bool{
-		"ai.anthropic.api_key":    true,
-		"ai.openai.api_key":       true,
-		"smtp.password":           true,
-		"auth.code_secret":        true,
-		"auth.oidc.client_secret": true,
-		"metrics.token":           true,
-	}
-	foundSecrets := make(map[string]bool, len(wantSecrets))
-	rawText := string(raw)
-	for _, spec := range specs {
-		if !strings.Contains(rawText, spec.env) {
-			t.Errorf("example does not document %s", spec.env)
-		}
-		if spec.secret != wantSecrets[spec.key] {
-			t.Errorf("secret classification for %s = %t, want %t", spec.key, spec.secret, wantSecrets[spec.key])
-		}
-		if spec.secret {
-			foundSecrets[spec.key] = true
-		}
-		if spec.secret && active[spec.key] {
-			t.Errorf("secret key %s must be documented but inactive in the example", spec.key)
-		}
-		if spec.secret {
-			leaf := spec.key[strings.LastIndex(spec.key, ".")+1:]
-			if !strings.Contains(rawText, "# "+leaf+":") {
-				t.Errorf("secret key %s is not documented as a commented YAML key", spec.key)
-			}
-		}
-		if !spec.secret && !active[spec.key] {
-			t.Errorf("non-secret key %s must be active in the example", spec.key)
-		}
-	}
-	if !reflect.DeepEqual(foundSecrets, wantSecrets) {
-		t.Errorf("secret settings = %v, want exactly %v", foundSecrets, wantSecrets)
+	if cfg.Addr != "127.0.0.1:7520" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
+		t.Fatal("empty values erased defaults")
 	}
 }
 
 func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
 	specs, err := configFieldSpecs()
 	if err != nil {
-		t.Fatalf("field specs: %v", err)
+		t.Fatal(err)
 	}
-	durationType := reflect.TypeOf(time.Duration(0))
 	for _, spec := range specs {
-		key := strings.ToLower(spec.key)
-		env := strings.ToLower(spec.env)
-		if strings.Contains(key, "_seconds") || strings.Contains(key, "_ms") ||
-			strings.Contains(env, "_seconds") || strings.Contains(env, "_ms") {
-			t.Errorf("elapsed-time setting uses a unit suffix: %s / %s", spec.key, spec.env)
+		if strings.HasSuffix(spec.env, "_SECONDS") || strings.HasSuffix(spec.env, "_MS") {
+			t.Errorf("unit suffix in %s", spec.env)
 		}
-		if spec.typ == durationType && !strings.HasSuffix(key, "_interval") && !strings.HasSuffix(key, "_ttl") && !strings.HasSuffix(key, "_retention") {
-			t.Errorf("duration setting %s must end in _interval or _ttl", spec.key)
+		if spec.typ == reflect.TypeOf(time.Duration(0)) && !strings.HasSuffix(spec.env, "_INTERVAL") && !strings.HasSuffix(spec.env, "_TTL") {
+			t.Errorf("duration name %s must end in _INTERVAL or _TTL", spec.env)
 		}
 	}
 }
 
-func TestLoadDurationIntervals(t *testing.T) {
-	t.Run("YAML", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		document := `storage:
-  rollup_interval: 5m
-  maintenance_interval: 1h
-alerts:
-  evaluation_interval: 45s
-`
-		if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
+func TestLoadRejectsUnknownAndMalformedEnvironment(t *testing.T) {
+	for _, entry := range []string{"FANOUT_HTPP_ADDR=:1111", "FANOUT_SERVICE_PORTAL=7520", "FANOUT_ADDR", "FANOUT_ADDR_FILE=/unused", "FANOUT_AI_API_KEY=synthetic-private-value"} {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), entry)})
+		name, _, _ := strings.Cut(entry, "=")
+		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "synthetic-private-value") {
+			t.Fatalf("expected redacted error naming %s", name)
 		}
-		cfg, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if cfg.RollupInterval != 5*time.Minute ||
-			cfg.MaintenanceInterval != time.Hour ||
-			cfg.AlertEvaluationInterval != 45*time.Second {
-			t.Fatalf("duration values were not decoded: %+v", cfg)
-		}
-	})
-
-	t.Run("environment", func(t *testing.T) {
-		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-			"FANOUT_ROLLUP_INTERVAL=5m",
-			"FANOUT_MAINTENANCE_INTERVAL=1h",
-			"FANOUT_ALERTS_EVALUATION_INTERVAL=45s",
-		)})
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if cfg.RollupInterval != 5*time.Minute ||
-			cfg.MaintenanceInterval != time.Hour ||
-			cfg.AlertEvaluationInterval != 45*time.Second {
-			t.Fatalf("duration values were not decoded: %+v", cfg)
-		}
-	})
-}
-
-func TestDockerConfigurationMatchesSchema(t *testing.T) {
-	path := filepath.Join("..", "..", "fanout.docker.yaml")
-	cfg, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-	if err != nil {
-		t.Fatalf("Load Docker config: %v", err)
-	}
-	if cfg.Addr != ":7520" || cfg.DataDir != "/var/lib/fanout/data" {
-		t.Fatalf("Docker config values = HTTP %q data %q", cfg.Addr, cfg.DataDir)
 	}
 }
 
-func TestLoadRejectsUnknownInputs(t *testing.T) {
-	t.Run("YAML key", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte("server:\n  htpp_addr: ':1111'\n"), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
+func TestLoadRejectsDuplicateEnvironmentNames(t *testing.T) {
+	for _, entry := range []string{"FANOUT_ADDR=", "ANTHROPIC_API_KEY=test", "FANOUT_METRICS_TOKEN_FILE="} {
+		name, _, _ := strings.Cut(entry, "=")
+		_, err := Load(LoadOptions{Environ: []string{entry, entry}})
+		if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), name) {
+			t.Fatalf("expected duplicate error for %s", name)
 		}
-		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-		if err == nil || !strings.Contains(err.Error(), "server.htpp_addr") {
-			t.Fatalf("error = %v, want unknown YAML key", err)
-		}
-	})
-
-	t.Run("environment variable", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_HTPP_ADDR=:1111")})
-		if err == nil || !strings.Contains(err.Error(), "FANOUT_HTPP_ADDR") {
-			t.Fatalf("error = %v, want unknown environment variable", err)
-		}
-	})
-
-	t.Run("removed ingest YAML key", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte("ingest:\n  public_endpoint: https://ingest.example.com\n"), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
-		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-		if err == nil || !strings.Contains(err.Error(), "ingest.public_endpoint") {
-			t.Fatalf("error = %v, want removed YAML key rejected", err)
-		}
-	})
-
-	t.Run("removed ingest environment variable", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_INGEST_ENDPOINT=https://ingest.example.com")})
-		if err == nil || !strings.Contains(err.Error(), "FANOUT_INGEST_ENDPOINT") {
-			t.Fatalf("error = %v, want removed environment variable rejected", err)
-		}
-	})
-
-	t.Run("removed YAML keys", func(t *testing.T) {
-		for _, test := range []struct {
-			key, document string
-		}{
-			{"ai.api_key", "ai:\n  api_key: secret\n"},
-			{"ai.base_url", "ai:\n  base_url: https://ai.example.com\n"},
-			{"agent.provider", "agent:\n  provider: anthropic\n"},
-			{"agent.api_key", "agent:\n  api_key: secret\n"},
-			{"agent.model", "agent:\n  model: test\n"},
-			{"agent.base_url", "agent:\n  base_url: https://ai.example.com\n"},
-			{"ingest.flush_seconds", "ingest:\n  flush_seconds: 15\n"},
-			{"storage.rollup_every_seconds", "storage:\n  rollup_every_seconds: 60\n"},
-			{"storage.merge_every_seconds", "storage:\n  merge_every_seconds: 60\n"},
-			{"storage.maintenance_every_seconds", "storage:\n  maintenance_every_seconds: 3600\n"},
-			{"alerts.evaluation_interval_seconds", "alerts:\n  evaluation_interval_seconds: 30\n"},
-			{"mcp.public_url", "mcp:\n  public_url: https://fanout.example.com/mcp\n"},
-		} {
-			t.Run(test.key, func(t *testing.T) {
-				path := filepath.Join(t.TempDir(), "fanout.yaml")
-				if err := os.WriteFile(path, []byte(test.document), 0o600); err != nil {
-					t.Fatalf("write config: %v", err)
-				}
-				_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-				if err == nil || !strings.Contains(err.Error(), test.key) {
-					t.Fatalf("error = %v, want removed key %s rejected", err, test.key)
-				}
-			})
-		}
-	})
-
-	t.Run("removed environment variables", func(t *testing.T) {
-		for _, name := range []string{
-			"FANOUT_AI_API_KEY",
-			"FANOUT_AI_BASE_URL",
-			"FANOUT_ROLLUP_EVERY_SECONDS",
-			"FANOUT_MERGE_EVERY_SECONDS",
-			"FANOUT_MERGE_INTERVAL",
-			"FANOUT_MAINTENANCE_EVERY_SECONDS",
-			"FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS",
-			"FANOUT_MCP_PUBLIC_URL",
-		} {
-			t.Run(name, func(t *testing.T) {
-				_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"=1")})
-				if err == nil || !strings.Contains(err.Error(), name) {
-					t.Fatalf("error = %v, want removed environment variable %s rejected", err, name)
-				}
-			})
-		}
-	})
-
-	t.Run("near platform variable", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_SERVICE_PORTAL=7520")})
-		if err == nil || !strings.Contains(err.Error(), "FANOUT_SERVICE_PORTAL") {
-			t.Fatalf("error = %v, want unknown environment variable", err)
-		}
-	})
-
-	t.Run("malformed environment entry", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_ADDR")})
-		if err == nil || !strings.Contains(err.Error(), "NAME=value") {
-			t.Fatalf("error = %v, want malformed environment error", err)
-		}
-	})
-}
-
-func TestLoadIgnoresKubernetesServiceEnvironment(t *testing.T) {
-	environ := append(validEnvironment(),
-		"FANOUT_SERVICE_HOST=10.0.0.1",
-		"FANOUT_SERVICE_PORT=7520",
-		"FANOUT_SERVICE_PORT_HTTP=7520",
-		"FANOUT_PORT=tcp://10.0.0.1:7520",
-		"FANOUT_PORT_7520_TCP_ADDR=10.0.0.1",
-	)
-	if _, err := Load(LoadOptions{Environ: environ}); err != nil {
-		t.Fatalf("Load with Kubernetes service variables: %v", err)
 	}
 }
 
-func TestLoadIgnoresEnvironmentOutsideNamespace(t *testing.T) {
-	if _, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"OTHER_APP_SETTING=value",
-	)}); err != nil {
-		t.Fatalf("Load with unrelated environment variable: %v", err)
+func TestLoadIgnoresPlatformAndUnrelatedEnvironment(t *testing.T) {
+	env := append(validEnvironment(), "FANOUT_SERVICE_HOST=10.0.0.1", "FANOUT_SERVICE_PORT=7520", "FANOUT_SERVICE_PORT_HTTP=7520", "FANOUT_PORT=tcp://10.0.0.1:7520", "FANOUT_PORT_7520_TCP_ADDR=10.0.0.1", "OTHER_APP_SETTING=value", "OPENAI_MODEL=other-model")
+	if _, err := Load(LoadOptions{Environ: env}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestLoadAllowsEmptyYAMLSections(t *testing.T) {
-	for _, document := range []string{
-		"metrics:\n",
-		"auth:\n  oidc:\n    # client_id: fanout\n",
-		"server: {}\n",
+func TestLoadRejectsInvalidTypedValuesWithoutLeakingValues(t *testing.T) {
+	for _, entry := range []string{
+		"FANOUT_ROLLUP_INTERVAL=private-value", "FANOUT_SMTP_PORT=25.9", "FANOUT_MCP_ENABLED=off", "FANOUT_RETENTION_DAYS=999999999999999999999999999",
+		"FANOUT_INGEST_BATCH_SIZE=0", "FANOUT_DUCKDB_MAX_CONNECTIONS=-3", "FANOUT_DUCKDB_THREADS=-4",
+		"FANOUT_ROLLUP_INTERVAL=999ms", "FANOUT_MAINTENANCE_INTERVAL=-5s", "FANOUT_ALERTS_EVALUATION_INTERVAL=0s",
 	} {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load(LoadOptions{Path: path, Environ: validEnvironment()}); err != nil {
-			t.Fatalf("Load %q: %v", document, err)
-		}
-	}
-}
-
-func TestLoadRejectsYAMLNullValues(t *testing.T) {
-	for _, key := range []struct {
-		name, document string
-	}{
-		{"HTTP address", "server:\n  addr:\n"},
-		{"MCP enabled", "mcp:\n  enabled:\n"},
-		{"retention", "storage:\n  retention_days:\n"},
-	} {
-		t.Run(key.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "fanout.yaml")
-			if err := os.WriteFile(path, []byte(key.document), 0o600); err != nil {
-				t.Fatal(err)
+		env := validEnvironment()
+		name, _, _ := strings.Cut(entry, "=")
+		for i, existing := range env {
+			if strings.HasPrefix(existing, name+"=") {
+				env = append(env[:i], env[i+1:]...)
+				break
 			}
-			_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-			if err == nil || !strings.Contains(err.Error(), "must not be null") {
-				t.Fatalf("error = %v, want null rejection", err)
-			}
-		})
-	}
-}
-
-func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
-	t.Run("missing file", func(t *testing.T) {
-		_, err := Load(LoadOptions{Path: filepath.Join(t.TempDir(), "missing.yaml"), Environ: validEnvironment()})
-		if err == nil {
-			t.Fatal("expected missing file error")
 		}
-	})
-
-	for _, test := range []struct {
-		name, document string
-	}{
-		{"invalid duration", "storage:\n  rollup_interval: never\n"},
-		{"fractional integer", "smtp:\n  port: 25.9\n"},
-		{"integer as boolean", "mcp:\n  enabled: 2\n"},
-		{"YAML keyword as boolean", "alerts:\n  enabled: off\n"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "fanout.yaml")
-			if err := os.WriteFile(path, []byte(test.document), 0o600); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
-			_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-			if err == nil {
-				t.Fatal("expected type error")
-			}
-		})
-	}
-
-	t.Run("invalid merged config", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_INGEST_BATCH_SIZE=0")})
-		if err == nil || !strings.Contains(err.Error(), "batch_size") {
-			t.Fatalf("error = %v, want validation error", err)
+		_, err := Load(LoadOptions{Environ: append(env, entry)})
+		if err == nil || !strings.Contains(err.Error(), name) || strings.Contains(err.Error(), "private-value") {
+			t.Fatalf("expected redacted validation error for %s", name)
 		}
-	})
-
-	t.Run("explicit empty auth mode", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte("auth:\n  mode: \"\"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-		if err == nil || !strings.Contains(err.Error(), "auth.mode must not be empty") {
-			t.Fatalf("error = %v, want explicit empty auth-mode rejection", err)
-		}
-	})
-
-	for _, test := range []struct {
-		name, assignment, key string
-	}{
-		{"negative max connections is not auto", "FANOUT_DUCKDB_MAX_CONNECTIONS=-3", "max_connections"},
-		{"zero alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=0s", "evaluation_interval"},
-		{"negative maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=-5s", "maintenance_interval"},
-		{"negative DuckDB threads", "FANOUT_DUCKDB_THREADS=-4", "duckdb.threads"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := Load(LoadOptions{Environ: append(validEnvironment(), test.assignment)})
-			if err == nil || !strings.Contains(err.Error(), test.key) {
-				t.Fatalf("error = %v, want validation error for %s", err, test.key)
-			}
-		})
-	}
-
-	for _, test := range []struct {
-		name, assignment, key string
-	}{
-		{"subsecond rollup interval", "FANOUT_ROLLUP_INTERVAL=999ms", "rollup_interval"},
-		{"subsecond maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=500ms", "maintenance_interval"},
-		{"subsecond alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=999ms", "evaluation_interval"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := Load(LoadOptions{Environ: append(validEnvironment(), test.assignment)})
-			if err == nil || !strings.Contains(err.Error(), test.key) {
-				t.Fatalf("error = %v, want lower-bound validation for %s", err, test.key)
-			}
-		})
 	}
 }
 
 func TestLoadIgnoresDotenvInputs(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FANOUT_ADDR=:9999\n"), 0o600); err != nil {
-		t.Fatalf("write .env: %v", err)
+		t.Fatal(err)
 	}
 	t.Chdir(dir)
-
 	cfg, err := Load(LoadOptions{Environ: validEnvironment()})
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
-	if cfg.Addr != ":7520" {
-		t.Fatalf("Addr = %q, want default", cfg.Addr)
+	if cfg.Addr != "127.0.0.1:7520" {
+		t.Fatal("binary loaded dotenv")
 	}
 }
 
-func TestLoadErrorsDoNotContainSecrets(t *testing.T) {
-	const secret = "do-not-print-this-password"
-	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	document := "smtp:\n  password: " + secret + "\n  port: 25.9\n"
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+func TestLoadSecretFiles(t *testing.T) {
+	names := []string{"FANOUT_AUTH_CODE_SECRET", "FANOUT_OIDC_CLIENT_SECRET", "FANOUT_SMTP_PASSWORD", "FANOUT_METRICS_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"}
+	specs, err := configFieldSpecs()
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-	if err == nil {
-		t.Fatal("expected decode error")
-	}
-	if strings.Contains(err.Error(), secret) {
-		t.Fatalf("error leaked secret: %v", err)
+	for _, name := range names {
+		for _, tc := range []struct{ name, suffix, retained string }{
+			{"no newline", "", ""},
+			{"LF", "\n", ""},
+			{"CRLF", "\r\n", ""},
+			{"two LF", "\n\n", "\n"},
+			{"two CRLF", "\r\n\r\n", "\r\n"},
+			{"bare CR", "\r", "\r"},
+			{"spaces", "  \n", "  "},
+		} {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				secret := strings.Repeat("x", 32)
+				path := filepath.Join(t.TempDir(), "secret")
+				if err := os.WriteFile(path, []byte(secret+tc.suffix), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				env := []string{}
+				for _, entry := range validEnvironment() {
+					if !strings.HasPrefix(entry, name+"=") {
+						env = append(env, entry)
+					}
+				}
+				env = append(env, name+"=", name+"_FILE="+path)
+				if isProviderEnvironment(name) {
+					provider, _, _ := strings.Cut(strings.ToLower(name), "_")
+					env = append(env, "FANOUT_AI_PROVIDER="+provider)
+				}
+				cfg, err := Load(LoadOptions{Environ: env})
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := secret + tc.retained
+				for _, spec := range specs {
+					if spec.env == name && reflect.ValueOf(cfg).Field(spec.index).String() != want {
+						t.Fatalf("%s did not preserve exact file contents", name)
+					}
+				}
+			})
+		}
 	}
 }
 
-func TestLoadRequiresPrivatePermissionsForConfigSecrets(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	if err := os.WriteFile(path, []byte("ai:\n  anthropic:\n    api_key: secret-from-file\n"), 0o644); err != nil {
-		t.Fatal(err)
+func TestLoadRejectsConflictingOrInvalidSecretFiles(t *testing.T) {
+	const name = "FANOUT_METRICS_TOKEN"
+	const secret = "synthetic-private-value"
+	path := filepath.Join(t.TempDir(), "secret")
+	for _, content := range []string{"", "\n", "\r\n", secret} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		env := append(validEnvironment(), name+"_FILE="+path)
+		if content == secret {
+			env = append(env, name+"="+secret)
+		}
+		_, err := Load(LoadOptions{Environ: env})
+		if err == nil || !strings.Contains(err.Error(), name+"_FILE") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), secret) {
+			t.Fatal("expected redacted file error naming variable and path")
+		}
 	}
-	_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-	if err == nil || !strings.Contains(err.Error(), "must not be accessible by group or others") {
-		t.Fatalf("error = %v, want file permission rejection", err)
+	for _, invalidPath := range []string{path + "-missing", filepath.Dir(path)} {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"_FILE="+invalidPath)})
+		if err == nil || !strings.Contains(err.Error(), name+"_FILE") || !strings.Contains(err.Error(), invalidPath) {
+			t.Fatal("expected file read error naming variable and path")
+		}
+	}
+}
+
+func TestMCPResourceURL(t *testing.T) {
+	for _, tc := range []struct{ publicURL, want string }{
+		{"", "https://localhost:7520/mcp"}, {"https://fanout.example.com", "https://fanout.example.com/mcp"}, {"  https://fanout.example.com/  ", "https://fanout.example.com/mcp"},
+	} {
+		if got := (Config{PublicURL: tc.publicURL}).MCPResourceURL(); got != tc.want {
+			t.Fatalf("MCPResourceURL = %s, want %s", got, tc.want)
+		}
 	}
 }
 
@@ -733,7 +381,7 @@ func TestValidate(t *testing.T) {
 		} {
 			c.PublicURL = invalid
 			if err := c.Validate(); err == nil {
-				t.Errorf("server.public_url %q should be rejected with MCP enabled", invalid)
+				t.Errorf("FANOUT_PUBLIC_URL %q should be rejected with MCP enabled", invalid)
 			}
 		}
 	})
@@ -758,32 +406,32 @@ func TestFieldSpecsRejectInvalidSchemas(t *testing.T) {
 		want string
 	}{
 		{
-			name: "duplicate key",
+			name: "secret file name collision",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"same" env:"FANOUT_A"`
-				B string `koanf:"same" env:"FANOUT_B"`
+				A string `env:"FANOUT_SECRET" secret:"true"`
+				B string `env:"FANOUT_SECRET_FILE"`
 			}{}),
-			want: "share key",
+			want: "share environment variable",
 		},
 		{
 			name: "duplicate environment",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"a" env:"FANOUT_SAME"`
-				B string `koanf:"b" env:"FANOUT_SAME"`
+				A string `env:"FANOUT_SAME"`
+				B string `env:"FANOUT_SAME"`
 			}{}),
 			want: "share environment variable",
 		},
 		{
 			name: "missing tag",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"a"`
+				A string
 			}{}),
 			want: "must declare",
 		},
 		{
 			name: "missing prefix",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"a" env:"A"`
+				A string `env:"A"`
 			}{}),
 			want: "outside the supported configuration contract",
 		},
@@ -815,33 +463,5 @@ func TestSecureCookies(t *testing.T) {
 				t.Fatalf("SecureCookies = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestRemovedListenerAndEndpointSettingsRejected(t *testing.T) {
-	t.Run("old server address", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte("server:\n  http_addr: ':7520'\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := Load(LoadOptions{Path: path, Environ: validEnvironment()}); err == nil || !strings.Contains(err.Error(), "server.http_addr") {
-			t.Fatalf("removed key: %v", err)
-		}
-	})
-	for _, key := range []string{"otlp_grpc_addr", "otlp_http_addr", "advertised_endpoint"} {
-		t.Run(key, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "fanout.yaml")
-			if err := os.WriteFile(path, []byte("ingest:\n  "+key+": ':4317'\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := Load(LoadOptions{Path: path, Environ: validEnvironment()}); err == nil || !strings.Contains(err.Error(), key) {
-				t.Fatalf("removed key: %v", err)
-			}
-		})
-	}
-	for _, name := range []string{"FANOUT_HTTP_ADDR", "FANOUT_OTLP_GRPC_ADDR", "FANOUT_OTLP_HTTP_ADDR", "FANOUT_INGEST_ADVERTISED_ENDPOINT"} {
-		if _, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"=:4317")}); err == nil || !strings.Contains(err.Error(), name) {
-			t.Fatalf("removed variable: %v", err)
-		}
 	}
 }

@@ -262,7 +262,7 @@ h1#_top {
 /* Code inside a heading is set smaller than the heading's own size.
    The generated settings reference titles every note with a setting key, and a
    key is one long unbreakable token: at Starlight's h3 size,
-   `storage.duckdb.max_connections` is wider than the content column and breaks
+   `FANOUT_DUCKDB_MAX_CONNECTIONS` is wider than the content column and breaks
    mid-identifier, rendering as "max_connection" above a lone "s". */
 .sl-markdown-content :is(h1, h2, h3, h4, h5, h6) code {
   font-size: 0.78em;

@@ -52,21 +52,19 @@ func main() {
 		// list going stale is loud rather than a quietly shorter table.
 		routeDirs = flag.String("route-dirs", "internal/api,internal/agent,cmd/fanout",
 			"comma-separated directories whose files register HTTP routes")
-		outDir        = flag.String("out", "site/src/content/docs/reference", "reference root to write generated pages into")
-		envExample    = flag.String("env-example", ".env.example", "path to the generated environment template")
-		envDefaults   = flag.String("env-defaults", ".env", "path to the generated nonsecret local defaults")
-		envProduction = flag.String("env-production", ".env.production", "path to the generated nonsecret production overrides")
-		check         = flag.Bool("check", false, "exit non-zero when a written page differs from the one on disk")
+		outDir     = flag.String("out", "site/src/content/docs/reference", "reference root to write generated pages into")
+		envExample = flag.String("env-example", ".env.example", "path to the generated environment template")
+		check      = flag.Bool("check", false, "exit non-zero when a written page differs from the one on disk")
 	)
 	flag.Parse()
 
-	if err := run(*source, *alerts, *routeDirs, *outDir, *envExample, *envDefaults, *envProduction, *check); err != nil {
+	if err := run(*source, *alerts, *routeDirs, *outDir, *envExample, *check); err != nil {
 		fmt.Fprintf(os.Stderr, "fanout-docgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(source, alertSource, routeDirs, outDir, envExample, envDefaults, envProduction string, check bool) error {
+func run(source, alertSource, routeDirs, outDir, envExample string, check bool) error {
 	fields, err := collect(source)
 	if err != nil {
 		return err
@@ -120,20 +118,7 @@ func run(source, alertSource, routeDirs, outDir, envExample, envDefaults, envPro
 	}
 	pages["mcp-tools.mdx"] = toolsPage
 
-	outputs := map[string][]byte{
-		envExample:    renderEnvironment(fields),
-		envDefaults:   renderDefaults(fields, false),
-		envProduction: renderDefaults(fields, true),
-	}
-	// Never replace an operator's dotenv file or a managed secret mount with
-	// generated public defaults. Check before writing any artifacts.
-	if !check {
-		for _, path := range []string{envDefaults, envProduction} {
-			if err := validateGeneratedDefaults(path, fields); err != nil {
-				return err
-			}
-		}
-	}
+	outputs := map[string][]byte{envExample: renderEnvironment(fields)}
 	for name, body := range pages {
 		outputs[filepath.Join(outDir, name)] = body
 	}
@@ -187,44 +172,6 @@ func run(source, alertSource, routeDirs, outDir, envExample, envDefaults, envPro
 		"fanout-docgen: wrote %d page(s) covering %d setting(s), %d alert variable(s), %d route(s) and %d MCP tool(s)\n",
 		len(pages), len(fields), len(alertEnvCount), len(routeCount), len(toolCount),
 	)
-	return nil
-}
-
-func validateGeneratedDefaults(path string, fields []field) error {
-	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	refuse := func() error {
-		return fmt.Errorf("refuse to overwrite private or unmanaged environment file %s; preserve it outside the public defaults before adopting the layout", path)
-	}
-	if !info.Mode().IsRegular() {
-		return refuse()
-	}
-	existing, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	if !bytes.HasPrefix(existing, []byte("# Generated nonsecret configuration by cmd/fanout-docgen.\n")) {
-		return refuse()
-	}
-	public := make(map[string]bool, len(fields))
-	for _, f := range fields {
-		public[f.Env] = !f.Secret
-	}
-	for _, line := range strings.Split(string(existing), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		name, value, assignment := strings.Cut(line, "=")
-		if !assignment || !public[strings.TrimSpace(name)] || strings.ContainsAny(value, "\"'`\\") {
-			return refuse()
-		}
-	}
 	return nil
 }
 
@@ -329,18 +276,17 @@ func renderAlertEnv(vars []field) []byte {
 // field is one setting, assembled from both views of the same declaration.
 type field struct {
 	GoName  string
-	Key     string // koanf key, e.g. "storage.duckdb.memory"
+	Key     string // alert expression variable
+	Group   string // documentation area, e.g. "storage"
 	Env     string // e.g. "FANOUT_DUCKDB_MEMORY"
 	Type    string
 	Default string
-	Local   *string // nil unless the schema declares a local override
 	Secret  bool
 	Doc     string
 }
 
 func (f field) group() string {
-	key, _, _ := strings.Cut(f.Key, ".")
-	return key
+	return f.Group
 }
 
 // collect reflects over config.Config for the contract, parses source for the
@@ -360,27 +306,22 @@ func collect(source string) ([]field, error) {
 		if !sf.IsExported() {
 			continue
 		}
-		key := sf.Tag.Get("koanf")
+		group := sf.Tag.Get("group")
 		env := sf.Tag.Get("env")
-		if key == "" || env == "" {
+		if group == "" || env == "" {
 			return nil, fmt.Errorf(
-				"config.Config field %s is exported but carries no koanf/env tag; "+
+				"config.Config field %s is exported but carries no group/env tag; "+
 					"either tag it so it reaches the reference, or unexport it",
 				sf.Name,
 			)
 		}
 		seen[sf.Name] = true
-		var local *string
-		if value, ok := sf.Tag.Lookup("local"); ok {
-			local = &value
-		}
 		fields = append(fields, field{
 			GoName:  sf.Name,
-			Key:     key,
+			Group:   group,
 			Env:     env,
 			Type:    typeName(sf.Type),
 			Default: sf.Tag.Get("default"),
-			Local:   local,
 			Secret:  sf.Tag.Get("secret") == "true",
 			Doc:     docs[sf.Name],
 		})
@@ -399,7 +340,7 @@ func collect(source string) ([]field, error) {
 		}
 	}
 
-	sort.Slice(fields, func(i, j int) bool { return fields[i].Key < fields[j].Key })
+	sort.Slice(fields, func(i, j int) bool { return fields[i].Env < fields[j].Env })
 	return fields, nil
 }
 
@@ -496,7 +437,7 @@ type groupPage struct {
 	ReadWhen    []string
 }
 
-// Registering a group is deliberate. A new koanf prefix appearing in the type
+// Registering a group is deliberate. A new group appearing in the type
 // is a new section of the product, and it should be named by a person rather
 // than published under a bare key — so an unregistered group fails the run
 // instead of shipping a page called "metrics" with no explanation on it.
@@ -614,26 +555,30 @@ func renderPage(name string, page groupPage, fields []field) []byte {
 	b.WriteString("{/* Generated by cmd/fanout-docgen from internal/config. Edit the generator, not this page. */}\n\n")
 
 	b.WriteString("Every setting below is read once at startup and requires a restart to change.\n")
-	b.WriteString("It is read from the environment variable in the second\n")
-	b.WriteString("column, or from the same key in a YAML configuration file. An unrecognised\n")
-	b.WriteString("`FANOUT_`-prefixed variable is a startup error, so a renamed setting surfaces\n")
-	b.WriteString("as a refusal to start rather than as a default nobody chose.\n\n")
+	b.WriteString("Built-in defaults are overridden by nonempty environment values.\n")
+	b.WriteString("Unknown `FANOUT_` names fail startup; platform-injected service names are tolerated.\n")
+	b.WriteString("Custom names use `FANOUT_` plus a clear name, adding the area only when it clarifies.\n")
+	b.WriteString("Vendor credentials and endpoints keep the vendor's documented names.\n\n")
 	b.WriteString("Fanout also recognizes `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`,\n")
 	b.WriteString("`OPENAI_API_KEY`, and `OPENAI_BASE_URL`. Other vendor/tool variables are\n")
 	b.WriteString("ignored; only the explicitly selected AI provider's key and endpoint are used.\n\n")
 
-	b.WriteString("| Setting | Environment variable | Type | Default |\n")
-	b.WriteString("|---|---|---|---|\n")
+	b.WriteString("| Environment variable | Type | Default |\n")
+	b.WriteString("|---|---|---|\n")
 	for _, f := range fields {
 		typ := f.Type
 		if f.Secret {
 			typ += " · secret"
 		}
 		def := "—"
-		if f.Default != "" {
+		if f.Default != "" && !f.Secret {
 			def = "`" + f.Default + "`"
 		}
-		fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n", f.Key, f.Env, typ, def)
+		names := "`" + f.Env + "`"
+		if f.Secret {
+			names += " or `" + f.Env + "_FILE`"
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", names, typ, def)
 	}
 
 	var noted []field
@@ -645,15 +590,15 @@ func renderPage(name string, page groupPage, fields []field) []byte {
 	if len(noted) > 0 {
 		b.WriteString("\n## Notes\n")
 		for _, f := range noted {
-			fmt.Fprintf(&b, "\n### `%s`\n\n%s\n", f.Key, f.Doc)
+			fmt.Fprintf(&b, "\n### `%s`\n\n%s\n", f.Env, f.Doc)
 		}
 	}
 
 	if hasSecret(fields) {
 		b.WriteString("\n:::caution[Secrets]\n")
 		b.WriteString("Settings marked `secret` are redacted from Fanout's startup configuration\n")
-		b.WriteString("log. They are still plain environment variables: anything that can read the\n")
-		b.WriteString("process environment can read them.\n")
+		b.WriteString("log. Supply either the value or its `_FILE` path, never both. File contents\n")
+		b.WriteString("lose exactly one trailing newline (LF or CRLF); empty secrets fail startup.\n")
 		b.WriteString(":::\n")
 	}
 
@@ -661,19 +606,19 @@ func renderPage(name string, page groupPage, fields []field) []byte {
 }
 
 // renderEnvironment shares the exact reflected schema used by the site pages.
-// Empty values never override YAML; defaults are documented in comments.
+// Values stay empty; defaults and secret file forms are documented in comments.
 func renderEnvironment(fields []field) []byte {
 	var b strings.Builder
 	b.WriteString("# Generated by cmd/fanout-docgen from internal/config/config.go.\n")
 	b.WriteString("# Regenerate with just docs-generate; verify with just docs-generate-check.\n")
 	b.WriteString("# Fanout does not load dotenv files. Inject through your launcher or deployment.\n")
-	b.WriteString("# Precedence: built-in defaults < --config YAML < nonempty environment values.\n")
+	b.WriteString("# Precedence: built-in defaults < nonempty environment values.\n")
 	b.WriteString("# All settings require restart. Empty environment values mean no override.\n")
 	b.WriteString("# Secret entries below are empty placeholders; use runtime secret injection.\n")
 	b.WriteString("# Local authentication requires FANOUT_AUTH_CODE_SECRET (32+ characters).\n")
 	b.WriteString("# Chat is disabled unless FANOUT_AI_PROVIDER selects anthropic or openai; its key is required.\n")
 	for _, f := range fields {
-		fmt.Fprintf(&b, "\n# %s; %s", f.Key, f.Type)
+		fmt.Fprintf(&b, "\n# %s; %s", f.Env, f.Type)
 		if f.Secret {
 			b.WriteString("; secret")
 		}
@@ -687,36 +632,9 @@ func renderEnvironment(fields []field) []byte {
 		}
 		fmt.Fprintf(&b, "# Default: %s\n", defaultValue)
 		fmt.Fprintf(&b, "%s=\n", f.Env)
-	}
-	return []byte(b.String())
-}
-
-// renderDefaults emits only schema-declared local overrides, without secrets.
-// Production resets exactly those fields to their built-in defaults.
-func renderDefaults(fields []field, production bool) []byte {
-	var b strings.Builder
-	b.WriteString("# Generated nonsecret configuration by cmd/fanout-docgen.\n")
-	b.WriteString("# Regenerate with just docs-generate. Credentials never belong in this file.\n")
-	if production {
-		b.WriteString("# Production overrides for .env. Deployment supplies its public URL and secrets.\n")
-	} else {
-		b.WriteString("# Shared local overrides; .env.production resets them for production.\n")
-		b.WriteString("# Use just run, or inject these values explicitly; Fanout does not load dotenv.\n")
-		b.WriteString("# Personal nonsecret overrides belong in ignored .env.local.\n")
-	}
-	for _, f := range fields {
-		if f.Secret || f.Local == nil {
-			continue
+		if f.Secret {
+			fmt.Fprintf(&b, "# Alternatively set %s_FILE to a secret file path; do not set both.\n", f.Env)
 		}
-		fmt.Fprintf(&b, "\n# %s; %s\n", f.Key, f.Type)
-		if f.Doc != "" {
-			fmt.Fprintf(&b, "# %s\n", f.Doc)
-		}
-		value := *f.Local
-		if production {
-			value = f.Default
-		}
-		fmt.Fprintf(&b, "%s=%s\n", f.Env, value)
 	}
 	return []byte(b.String())
 }

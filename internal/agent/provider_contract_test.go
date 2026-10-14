@@ -140,7 +140,7 @@ func TestOpenAIEncryptedContentConfigurationError(t *testing.T) {
 	}
 	err = p.Stream(context.Background(), StreamParams{}, func(StreamEvent) error { return nil })
 	var apiErr *APIError
-	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "ai.model") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
+	if err == nil || !strings.Contains(err.Error(), "reasoning model") || !strings.Contains(err.Error(), "FANOUT_AI_MODEL") || !errors.As(err, &apiErr) || apiErr.StatusCode != 400 {
 		t.Errorf("configuration error = %v", err)
 	}
 	if got := clientErrorMessage(err); got != "Fanout could not reach the model provider. Please try again." {

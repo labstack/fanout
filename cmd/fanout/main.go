@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"reflect"
 	"regexp"
 	"runtime"
 	"strings"
@@ -58,7 +60,7 @@ type repairCommand struct {
 }
 
 func main() {
-	configPath, showVersion, loginEmail, healthURL, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
+	showVersion, loginEmail, healthURL, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -70,7 +72,8 @@ func main() {
 		return
 	}
 	if healthURL != "" {
-		if err := checkHealth(healthURL); err != nil {
+		derivedProbe := len(os.Args) == 2 && os.Args[1] == "healthcheck"
+		if err := checkHealth(healthURL, derivedProbe); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -79,7 +82,7 @@ func main() {
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
-	cfg, err := config.Load(config.LoadOptions{Path: configPath})
+	cfg, err := config.Load(config.LoadOptions{})
 	if err != nil {
 		slog.Error("invalid configuration", "err", err)
 		os.Exit(1)
@@ -373,7 +376,7 @@ func main() {
 		agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
 		slog.Info("AG-UI agent enabled", "path", "/api/agent/runs", "provider", cfg.AIProvider)
 	} else {
-		slog.Info("AG-UI agent disabled", "reason", "ai.provider (FANOUT_AI_PROVIDER) is not selected")
+		slog.Info("AG-UI agent disabled", "reason", "FANOUT_AI_PROVIDER is not selected")
 	}
 
 	// The compiled browser client is an embedded asset, not a second runtime.
@@ -423,15 +426,19 @@ func main() {
 	}
 }
 
-func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, repair *repairCommand, err error) {
+func parseCommandLine(args []string, output io.Writer) (showVersion bool, loginEmail, healthURL string, repair *repairCommand, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return "", true, "", "", nil, nil
+		return true, "", "", nil, nil
 	}
 	if len(args) >= 1 && len(args) <= 2 && args[0] == "healthcheck" {
 		if len(args) == 2 {
-			return "", false, "", args[1], nil, nil
+			return false, "", args[1], nil, nil
 		}
-		return "", false, "", "http://127.0.0.1:7520/healthz", nil, nil
+		healthURL, err := healthcheckURL(os.Getenv("FANOUT_ADDR"), os.Getenv("FANOUT_TLS_CERT_FILE"))
+		if err != nil {
+			fmt.Fprintln(output, err)
+		}
+		return false, "", healthURL, nil, err
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
@@ -439,34 +446,33 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage of fanout:")
 		fmt.Fprintln(output, "  fanout [flags]")
-		fmt.Fprintln(output, "  fanout [--config path] login-link <email>")
-		fmt.Fprintln(output, "  fanout [--config path] repair verify")
-		fmt.Fprintln(output, "  fanout [--config path] repair quarantine --batch <id>")
+		fmt.Fprintln(output, "  fanout login-link <email>")
+		fmt.Fprintln(output, "  fanout repair verify")
+		fmt.Fprintln(output, "  fanout repair quarantine --batch <id>")
 		fmt.Fprintln(output, "  fanout healthcheck [url]")
 		fmt.Fprintln(output, "  fanout version")
 		fmt.Fprintln(output, "Flags:")
 		flags.PrintDefaults()
 	}
-	flags.StringVar(&configPath, "config", "", "path to a Fanout YAML configuration file")
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return "", false, "", "", nil, err
+		return false, "", "", nil, err
 	}
 	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
-		return configPath, false, flags.Arg(1), "", nil, nil
+		return false, flags.Arg(1), "", nil, nil
 	}
 	if flags.NArg() > 0 && flags.Arg(0) == "repair" {
 		repair, err := parseRepairCommand(flags.Args()[1:], output)
-		return configPath, false, "", "", repair, err
+		return false, "", "", repair, err
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return "", false, "", "", nil, err
+		return false, "", "", nil, err
 	}
-	return configPath, showVersion, "", "", nil, nil
+	return showVersion, "", "", nil, nil
 }
 
 func parseRepairCommand(args []string, output io.Writer) (*repairCommand, error) {
@@ -518,8 +524,43 @@ func runRepair(root string, command repairCommand, output io.Writer) error {
 	}
 }
 
-func checkHealth(healthURL string) error {
+func healthcheckURL(addr, certFile string) (string, error) {
+	if addr == "" {
+		field, _ := reflect.TypeOf(config.Config{}).FieldByName("Addr")
+		addr = field.Tag.Get("default")
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("FANOUT_ADDR must be a host:port address: %w", err)
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+		if ip.To4() == nil {
+			host = "::1"
+		}
+	}
+	scheme := "http"
+	if certFile != "" {
+		scheme = "https"
+	}
+	return (&url.URL{Scheme: scheme, Host: net.JoinHostPort(host, port), Path: "/healthz"}).String(), nil
+}
+
+func checkHealth(healthURL string, derivedProbe bool) error {
 	client := &http.Client{Timeout: 3 * time.Second}
+	if derivedProbe {
+		// A derived probe targets this process's own listener directly, whose
+		// certificate may name its public hostname rather than any bind IP.
+		// Explicit URLs retain environment proxies and certificate verification.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		defer transport.CloseIdleConnections()
+		client.Transport = transport
+	}
 	response, err := client.Get(healthURL)
 	if err != nil {
 		return fmt.Errorf("healthcheck: %w", err)

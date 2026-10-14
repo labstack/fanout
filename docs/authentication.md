@@ -72,13 +72,13 @@ If you are locked out in local mode, run the command with the same configuration
 and data directory as the server:
 
 ```sh
-fanout --config /etc/fanout/fanout.yaml login-link admin@example.com
+fanout login-link admin@example.com
 ```
 
 For a container using the bundled configuration:
 
 ```sh
-docker exec <container> fanout --config /etc/fanout/fanout.yaml \
+docker exec <container> fanout \
   login-link admin@example.com
 ```
 

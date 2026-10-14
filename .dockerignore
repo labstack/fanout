@@ -19,10 +19,8 @@ ui/host/node_modules/
 ui/host/dist/
 
 # Dev files
-.env
-.env.*
-**/.env
-**/.env.*
+.env*
+**/.env*
 secrets/
 .sops.yaml
 .tmp/

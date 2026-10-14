@@ -39,12 +39,8 @@ coverage.out
 coverage.html
 cover.out
 
-# Only generated public defaults/templates are tracked. Personal overrides,
-# credential migration sources, and operator secret profiles remain private.
-.env
-.env.*
-!/.env
-!/.env.production
+# Personal environment files and operator secret profiles remain private.
+.env*
 !/.env.example
 /secrets/
 /.sops.yaml

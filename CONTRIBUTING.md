@@ -17,10 +17,11 @@ You need Go 1.27.2 and a C/C++ toolchain on native Linux or macOS (amd64 or arm6
 also requires a 32-character authentication code secret. SMTP and AI chat are
 optional; selecting an AI provider requires its key — see [README](README.md#requirements).
 
-`.env` is now tracked and generated. Before pulling, move nonsecret personal
-values from an older private `.env` to ignored `.env.local` and credentials to
-runtime injection, then preserve the old file outside the checkout. Git refuses
-to overwrite an untracked `.env`. See [runtime secret delivery](docs/operations.md#runtime-secret-delivery).
+Copy `.env.example` to ignored `.env` for personal development settings and
+credentials. After building, `just run` loads it with Node's native dotenv
+parser; inherited environment values win. The binary validates the settings.
+Keep this file out of Git and Docker inputs. See
+[runtime secret delivery](docs/operations.md#runtime-secret-delivery).
 
 The DuckDB wrapper downloads the pinned, checksum-verified engine from
 [Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha43763)
@@ -89,18 +90,17 @@ font is missing rather than shipping a card in a substitute face, which typst
 would otherwise do without complaint.
 
 **Runtime configuration is strict.** `internal/config/config.go` owns the
-schema, documented in [`fanout.example.yaml`](fanout.example.yaml). New settings
-need a YAML key, a consumer-defined environment name (or `FANOUT_` for custom
-settings), a purpose comment, a test, and matching documentation. Unknown YAML
-keys and owned `FANOUT_` names deliberately fail startup. Recognized provider
-names are explicit; unrelated shared-vendor/tool variables are ignored.
-Run `just docs-generate` to regenerate the settings reference, `.env`,
-`.env.production`, and `.env.example`; `just docs-generate-check` verifies them.
-Public defaults exclude secret fields, and templates use empty placeholders.
-Private overrides and operator secret profiles stay ignored and outside Docker.
-After building, `just run` loads shared/local nonsecret settings with the Node
-launcher; `just run-production` excludes personal files. Inject credentials
-explicitly. Never introduce aliases for retired names or shell-source dotenv.
+schema. New settings need an environment name, a documentation `group` tag,
+a purpose comment, a test, and matching documentation. Custom settings use
+`FANOUT_` plus a clear name, adding the area only when it clarifies; vendor
+credentials and endpoints keep the vendor's documented names. Unknown owned
+names fail startup, while unrelated shared-vendor/tool variables are ignored.
+Secrets use `secret:"true"` and automatically accept an `_FILE` form; do not
+set both forms nonempty. Run `just docs-generate` to regenerate the settings
+reference and `.env.example`; `just docs-generate-check` verifies them. The
+template leaves all values empty and documents defaults in comments.
+Personal environment files and operator profiles stay ignored and outside
+Docker. Never shell-source dotenv.
 
 **SQLite migrations own the control schema.** Write forward SQL changes in
 `internal/db/migrations` using Goose annotations. `just db-migrate-create NAME`
