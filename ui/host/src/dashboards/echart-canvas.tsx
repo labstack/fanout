@@ -112,7 +112,10 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     let compiled = layoutInput.current;
     // ECharts containment can shrink the nominal plot. Recompute numeric tick
     // density once from the native rect, including any annotation/legend band.
-    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}}}}};
+    const native = chart.current as unknown as {getModel?():{
+      getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}}};
+      getSeriesByIndex?(index:number):{getData():{getLayout(name:string):ArrayLike<number> | undefined}};
+    }};
     let rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
     const plotHeight=rect?.height;
     if(plotHeight && compiled.yAxis) {
@@ -127,6 +130,15 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     layoutInput.current = compiled;
     if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
       compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
+        // Match the native end label's last valid point after zoom filtering,
+        // retaining the authored series index for legend and axis selection.
+        const points = native?.getModel?.().getSeriesByIndex?.(seriesIndex)?.getData().getLayout("points");
+        if (points) {
+          for (let i = points.length - 2; i >= 0; i -= 2) {
+            if (Number.isFinite(points[i]) && Number.isFinite(points[i + 1])) return points[i + 1];
+          }
+          return NaN;
+        }
         const pixel = chart.current?.convertToPixel({seriesIndex}, value);
         return Array.isArray(pixel) ? pixel[1] : NaN;
       });

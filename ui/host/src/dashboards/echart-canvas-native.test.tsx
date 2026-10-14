@@ -39,16 +39,16 @@ function option(dark = false, values = [[0, 1000], [1000, 2000], [1, 10000]]): E
     id: "p", status: "ok", elapsed_ms: 0, from_ms: 0, to_ms: 1000,
     frame: {
       columns: [{ name: "time", type: "time", role: "time" }, ...["A", "B"].map(name => ({ name, type: "number" as const, role: "measure" as const, unit: "ms" }))],
-      values, rows: 2,
+      values, rows: values[0].length,
     },
   }, chartThemeFor(dark), { width: 320, height: 210 }), animation: false };
 }
 
-function assertLabels(chart: EChartsType, compiled: EChartsCoreOption) {
+function assertLabels(chart: EChartsType, compiled: EChartsCoreOption, thresholdCount = 3) {
   const rect = (chart as unknown as { getModel(): { getComponent(name: string): { coordinateSystem: { getRect(): { x: number; y: number; width: number; height: number } } } } }).getModel().getComponent("grid").coordinateSystem.getRect();
   const texts = nativeAudit(chart, compiled, { width: chart.getWidth(), height: chart.getHeight() }, rect).texts;
   const thresholds = texts.filter(text => text.text.startsWith("Budget "));
-  expect(thresholds).toHaveLength(3);
+  expect(thresholds).toHaveLength(thresholdCount);
   for (const [index, text] of thresholds.entries()) {
     expect(text.left).toBeGreaterThanOrEqual(rect.x);
     expect(text.right).toBeLessThanOrEqual(rect.x + rect.width);
@@ -61,10 +61,14 @@ function assertLabels(chart: EChartsType, compiled: EChartsCoreOption) {
   // Direct end labels occupy the separate lane to the right of the plot.
   const ends = texts.filter(text => ["A", "B"].includes(text.text) && text.left >= rect.x + rect.width);
   expect(ends.length).toBeGreaterThan(0);
-  for (const text of ends) {
+  for (const [index, text] of ends.entries()) {
     expect(text.top).toBeGreaterThanOrEqual(rect.y);
     expect(text.bottom).toBeLessThanOrEqual(rect.y + rect.height);
+    for (const other of ends.slice(index + 1)) {
+      expect(text.top < other.bottom && text.bottom > other.top, JSON.stringify([text, other])).toBe(false);
+    }
   }
+  return ends;
 }
 
 it("keeps compact native log-chart labels contained and separate with default animations", async () => {
@@ -136,6 +140,21 @@ it("keeps native labels inside the plot after dataZoom and its reset", async () 
     expect(chart.convertToPixel({ seriesIndex: 0 }, [0, 100])).not.toEqual(before);
     expect((chart.getOption().dataZoom as { start: number }[])[0].start).toBe(90);
     assertLabels(chart, compiled);
+    await act(async () => chart.dispatchAction({ type: "dataZoom", start: 0, end: 100 }));
+    assertLabels(chart, compiled);
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("keeps native end labels contained and separate when zoom excludes the original endpoints", async () => {
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  const compiled = { ...option(false, [[0, 500, 1000], [1, 100, 10000], [1, 10, 1000]]), dataZoom: [{ type: "inside", xAxisIndex: 0, filterMode: "filter" }] };
+  try {
+    await act(async () => root.render(<EChartCanvas option={compiled} height={210} label="Latency" />));
+    const chart = native.chart!;
+    assertLabels(chart, compiled);
+    await act(async () => chart.dispatchAction({ type: "dataZoom", start: 0, end: 50 }));
+    expect((chart.getOption().dataZoom as { end: number }[])[0].end).toBe(50);
+    expect(assertLabels(chart, compiled, 1).map(text => text.text).sort()).toEqual(["A", "B"]);
     await act(async () => chart.dispatchAction({ type: "dataZoom", start: 0, end: 100 }));
     assertLabels(chart, compiled);
   } finally { await act(async () => root.unmount()); }
