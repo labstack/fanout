@@ -4,8 +4,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
 #
 # Environment:
-#   FANOUT_VERSION  install this tag instead of the latest release (e.g. v2026.8.0)
+#   FANOUT_VERSION  install this tag instead of the latest release (e.g. v2026.10.1-alpha)
 #   FANOUT_PREFIX   install into this directory instead of the default
+# Tags use vYYYY.M.N with an alpha, beta, or rc suffix for maturity; GA has none.
+# N counts every release within the month, regardless of suffix.
 set -eu
 
 REPO="labstack/fanout"

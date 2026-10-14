@@ -30,20 +30,37 @@ jobs:
       - name: Validate CalVer tag and lineage
         run: |
           set -euo pipefail
-          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]{4}\.([1-9]|1[0-2])\.([0-9]|[1-9][0-9]*)$ ]] || {
-            echo "release tag must match v{YYYY}.{M}.{N}" >&2
+          tag_pattern='^v([0-9]{4})\.([1-9]|1[0-2])\.(0|[1-9][0-9]*)(-(alpha|beta|rc))?$'
+          [[ "${GITHUB_REF_NAME}" =~ ${tag_pattern} ]] || {
+            echo "release tag must match v{YYYY}.{M}.{N}[-alpha|-beta|-rc]" >&2
             exit 1
           }
+          release_year=$((10#${BASH_REMATCH[1]}))
+          release_month=${BASH_REMATCH[2]}
+          release_number=${BASH_REMATCH[3]}
           git fetch origin main --tags
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main || {
             echo "release tag is not on main" >&2
             exit 1
           }
-          newest="$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)"
-          [ "${newest}" = "${GITHUB_REF_NAME}" ] || {
-            echo "${GITHUB_REF_NAME} is not the newest release tag (${newest})" >&2
-            exit 1
-          }
+          tags="$(git tag --list 'v*.*.*')"
+          while IFS= read -r tag; do
+            [[ "${tag}" =~ ${tag_pattern} ]] || continue
+            year=$((10#${BASH_REMATCH[1]}))
+            month=${BASH_REMATCH[2]}
+            number=${BASH_REMATCH[3]}
+            if ((year == release_year && month == release_month && number == release_number)) &&
+              [ "${tag}" != "${GITHUB_REF_NAME}" ]; then
+              echo "${tag} shares the release number of ${GITHUB_REF_NAME}" >&2
+              exit 1
+            fi
+            if ((year > release_year ||
+              (year == release_year && month > release_month) ||
+              (year == release_year && month == release_month && number > release_number))); then
+              echo "${GITHUB_REF_NAME} is not the newest release tag (${tag})" >&2
+              exit 1
+            fi
+          done <<< "${tags}"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -285,6 +302,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Maturity lives in the tag; keep this a full release so /releases/latest resolves.
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \

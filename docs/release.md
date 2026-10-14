@@ -13,9 +13,14 @@ Fanout publishes one release from a verified commit on `main`. A release contain
 
 ## Version contract
 
-Tags use unpadded CalVer: `vYYYY.M.N`. The first release in a month is `.0`.
-Container tags omit the leading `v`, so `v2026.8.0` publishes
-`ghcr.io/labstack/fanout:2026.8.0` and `labstack/fanout:2026.8.0`.
+Tags use unpadded CalVer: `vYYYY.M.N[-alpha|-beta|-rc]`. The suffix states product
+maturity; GA has no suffix. The first release in a month is `.0`, and every
+release increments `N` regardless of suffix. Fanout is currently alpha; after
+`v2026.10.0`, the next release is `v2026.10.1-alpha`.
+Container tags omit the leading `v`, so `v2026.10.1-alpha` publishes
+`ghcr.io/labstack/fanout:2026.10.1-alpha` and `labstack/fanout:2026.10.1-alpha`.
+Every release moves `latest`. GitHub Releases are not marked as prereleases:
+the tag carries maturity, and the installer's `/releases/latest` must resolve.
 Only release and `latest` tags are mirrored to Docker Hub; `main` and commit
 tags remain GHCR-only.
 
@@ -60,15 +65,15 @@ also be verified directly:
 
 ```sh
 sha256sum -c SHA256SUMS
-gh attestation verify fanout_v2026.8.0_linux_amd64.tar.gz \
+gh attestation verify fanout_v2026.10.1-alpha_linux_amd64.tar.gz \
   --repo labstack/fanout
 ```
 
 For containers, pin or record the digest returned by the registry:
 
 ```sh
-docker buildx imagetools inspect ghcr.io/labstack/fanout:2026.8.0
-docker buildx imagetools inspect docker.io/labstack/fanout:2026.8.0
+docker buildx imagetools inspect ghcr.io/labstack/fanout:2026.10.1-alpha
+docker buildx imagetools inspect docker.io/labstack/fanout:2026.10.1-alpha
 ```
 
 ## Supply-chain scope

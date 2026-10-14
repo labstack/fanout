@@ -16,7 +16,12 @@ describe("timeseries end labels", () => {
       expect(series.labelLayout).toEqual({ dy: expect.any(Number), hideOverlap: true });
       expect(series.endLabel).toMatchObject({ lineHeight: 14, padding: [1, 0] });
     }
-    expect((option.series as Series[])[0].markLine.data[0].label).toMatchObject({ formatter: "p99 budget 1.5 s", position: "insideStartTop", fontSize: 12 });
+    expect((option.series as Series[])[0].markLine.data[0].label).toMatchObject({ formatter: "p99 budget 1.5 s", position: "insideEndBottom", fontSize: 12 });
+  });
+  it("places threshold markLine labels below the right end of the line", () => {
+    const option = timeseriesOption({ ...panel, thresholds: [{ value: 1000, status: "warn" }, { value: 2000, status: "bad" }] }, result, chartThemeFor(false));
+    const labels = (option.series as Series[])[0].markLine.data.map(mark => mark.label.position);
+    expect(labels).toEqual(["insideEndBottom", "insideEndBottom"]);
   });
   it("omits end labels for more than six source series", () => {
     const columns = Array.from({ length: 7 }, (_, i) => ({ name: `s${i}`, type: "number" as const, role: "measure" as const }));
