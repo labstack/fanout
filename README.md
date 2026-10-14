@@ -20,7 +20,8 @@ client, chat investigator, MCP tools, dashboards, and alerts are preview capabil
 - OTLP ingest over gRPC and HTTP, with local Parquet storage and DuckDB analytics.
 - An investigation agent that answers questions about your telemetry in plain language.
 - An MCP server for external agents using the same typed query tools.
-- Dashboards and alerts across traces, logs, and metrics.
+- Dashboards across traces, logs, and metrics, and alerts on service error rate, latency,
+  throughput, and log volume.
 
 ## Quick start
 
