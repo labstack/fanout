@@ -180,23 +180,16 @@ ui-check:
 
 # ── Diagrams ─────────────────────────────────────────────────────────────────
 
-# Renders docs/diagrams/*.d2 beside each source. Deliberately outside `build`
-# and `check`: the SVG is committed, so only someone editing a diagram needs d2
-# installed at all.
-#
-# D2 output changes between minor versions, so the recipe pins the generator
-# used for committed SVGs instead of depending on a contributor's installed
-# binary.
+# Archify renders docs/diagrams/*.json and exports one dual-theme SVG per source.
+# Use a local archify 3.1.0 install via ARCHIFY_HOME (default
+# $HOME/.agents/skills/archify) and Chrome; no npm install is needed for archify.
+# The generator version is pinned so committed SVGs remain reproducible.
+# Deliberately outside `build` and `check`: SVGs are committed, so only diagram
+# editors need archify and the Chrome export environment.
 
-# Render every d2 diagram to SVG and publish the same assets on the docs site.
+# Export every archify diagram and publish the same SVGs on the docs site.
 diagrams:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for src in docs/diagrams/*.d2; do
-      go run oss.terrastruct.com/d2@v0.7.1 "$src" "${src%.d2}.svg"
-    done
-    mkdir -p site/public/diagrams
-    cp docs/diagrams/*.svg site/public/diagrams/
+    node scripts/diagrams.mjs
 
 # Fail when the site serves a diagram other than the committed documentation
 # copy. Regeneration stays a deliberate writing step.
@@ -261,7 +254,7 @@ site-build: docs-generate-check diagrams-check site-deps
 # missing face does not fail the render; it quietly produces a card set in
 # whatever typst found instead. This reads the warning back and fails on it.
 #
-# The version is pinned for the same reason d2 is: typst re-lays out text
+# The version is pinned for reproducible output: typst re-lays out text
 # between releases, so a different one rewrites every glyph position and
 # produces a diff that is not a real change.
 #

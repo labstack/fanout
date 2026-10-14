@@ -1,0 +1,623 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Fanout runtime architecture",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/labstack/fanout.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "681d46ba8cf0a92ea85764bfa4736a8e2739a8c9"
+    }
+  },
+  "components": [
+    {
+      "id": "collector",
+      "type": "external",
+      "label": "OTLP SDK or Collector",
+      "sublabel": "any OpenTelemetry exporter",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/ingest/server.go",
+          "line": 54,
+          "end_line": 60
+        }
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Browser",
+      "sublabel": "embedded React UI",
+      "pos": [
+        330,
+        40
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/ui/ui.go",
+          "line": 18,
+          "end_line": 30
+        },
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 390,
+          "end_line": 393
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "external",
+      "label": "Anthropic or OpenAI",
+      "sublabel": "selected provider only",
+      "pos": [
+        620,
+        40
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/agent/provider_http.go",
+          "line": 17,
+          "end_line": 44
+        }
+      ]
+    },
+    {
+      "id": "mcpclient",
+      "type": "external",
+      "label": "External MCP client",
+      "sublabel": "remote agent or IDE",
+      "pos": [
+        910,
+        40
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 357,
+          "end_line": 369
+        }
+      ]
+    },
+    {
+      "id": "ingest",
+      "type": "backend",
+      "label": "OTLP ingest",
+      "sublabel": "gRPC + HTTP, token checked",
+      "pos": [
+        40,
+        180
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/server/http.go",
+          "line": 13,
+          "end_line": 32
+        },
+        {
+          "path": "internal/ingest/auth.go",
+          "line": 51,
+          "end_line": 89
+        },
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 207,
+          "end_line": 209
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "security",
+      "label": "HTTP API + auth",
+      "sublabel": "sessions, OIDC, email codes",
+      "pos": [
+        330,
+        180
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 186,
+          "end_line": 190
+        },
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 299,
+          "end_line": 299
+        },
+        {
+          "path": "internal/api/oidc.go",
+          "line": 42,
+          "end_line": 49
+        }
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Agent runtime",
+      "sublabel": "AG-UI stream, chat threads",
+      "pos": [
+        620,
+        180
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 372,
+          "end_line": 385
+        },
+        {
+          "path": "internal/agent/runtime.go",
+          "line": 60,
+          "end_line": 64
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "backend",
+      "label": "MCP server",
+      "sublabel": "20 typed tools",
+      "pos": [
+        910,
+        180
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 356,
+          "end_line": 371
+        },
+        {
+          "path": "internal/mcp/server.go",
+          "line": 105,
+          "end_line": 105
+        }
+      ]
+    },
+    {
+      "id": "writer",
+      "type": "backend",
+      "label": "Commit workers",
+      "sublabel": "up to 4, 10 ms group window",
+      "pos": [
+        40,
+        320
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/telemetry/store/writer.go",
+          "line": 20,
+          "end_line": 28
+        },
+        {
+          "path": "internal/telemetry/store/writer.go",
+          "line": 143,
+          "end_line": 150
+        }
+      ]
+    },
+    {
+      "id": "obs",
+      "type": "backend",
+      "label": "Queries + dashboards",
+      "sublabel": "one contract for API and MCP",
+      "pos": [
+        330,
+        320
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 277,
+          "end_line": 284
+        }
+      ]
+    },
+    {
+      "id": "query",
+      "type": "backend",
+      "label": "Query kernel",
+      "sublabel": "DuckDB, rollups, compaction",
+      "pos": [
+        330,
+        460
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/query/duck.go",
+          "line": 240,
+          "end_line": 244
+        },
+        {
+          "path": "internal/query/duck.go",
+          "line": 505,
+          "end_line": 522
+        },
+        {
+          "path": "internal/query/duck.go",
+          "line": 627,
+          "end_line": 653
+        }
+      ]
+    },
+    {
+      "id": "detector",
+      "type": "backend",
+      "label": "Anomaly detector",
+      "sublabel": "health and z-scores",
+      "pos": [
+        620,
+        460
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/intelligence/detector.go",
+          "line": 46,
+          "end_line": 55
+        },
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 161,
+          "end_line": 162
+        }
+      ]
+    },
+    {
+      "id": "alert",
+      "type": "backend",
+      "label": "Alert engine",
+      "sublabel": "CEL rules, every 30s",
+      "pos": [
+        910,
+        460
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 173,
+          "end_line": 183
+        },
+        {
+          "path": "internal/alert/engine.go",
+          "line": 60,
+          "end_line": 60
+        }
+      ]
+    },
+    {
+      "id": "webhooks",
+      "type": "external",
+      "label": "Webhook targets",
+      "sublabel": "per-rule HTTP endpoint",
+      "pos": [
+        1200,
+        460
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/alert/webhook.go",
+          "line": 50,
+          "end_line": 50
+        },
+        {
+          "path": "internal/alert/engine.go",
+          "line": 360,
+          "end_line": 360
+        }
+      ]
+    },
+    {
+      "id": "parquet",
+      "type": "database",
+      "label": "Parquet batches",
+      "sublabel": "authoritative, trace.fidx",
+      "pos": [
+        40,
+        600
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/telemetry/parquet.go",
+          "line": 282,
+          "end_line": 282
+        },
+        {
+          "path": "internal/config/config.go",
+          "line": 219,
+          "end_line": 219
+        }
+      ]
+    },
+    {
+      "id": "qstate",
+      "type": "database",
+      "label": "DuckDB query state",
+      "sublabel": "rebuildable cache",
+      "pos": [
+        330,
+        600
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/config/config.go",
+          "line": 227,
+          "end_line": 232
+        }
+      ]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "Control SQLite",
+      "sublabel": "users, dashboards, rules, threads",
+      "pos": [
+        910,
+        600
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "internal/store/store.go",
+          "line": 30,
+          "end_line": 30
+        },
+        {
+          "path": "cmd/fanout/main.go",
+          "line": 165,
+          "end_line": 170
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "fanout: one Go process, one listener :7520",
+      "wraps": [
+        "ingest",
+        "api",
+        "agent",
+        "mcp",
+        "writer",
+        "obs",
+        "query",
+        "detector",
+        "alert"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "FANOUT_DATA_DIR",
+      "wraps": [
+        "parquet",
+        "qstate",
+        "sqlite"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "otlp-in",
+      "from": "collector",
+      "to": "ingest",
+      "label": "OTLP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "browser-in",
+      "from": "browser",
+      "to": "api",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "mcp-in",
+      "from": "mcpclient",
+      "to": "mcp",
+      "label": "/mcp OAuth",
+      "variant": "security"
+    },
+    {
+      "id": "chat-stream",
+      "from": "api",
+      "to": "agent",
+      "label": "AG-UI SSE"
+    },
+    {
+      "id": "model-call",
+      "from": "agent",
+      "to": "provider",
+      "label": "HTTPS stream"
+    },
+    {
+      "id": "tool-calls",
+      "from": "agent",
+      "to": "mcp",
+      "label": "tool calls"
+    },
+    {
+      "id": "ingest-commit",
+      "from": "ingest",
+      "to": "writer",
+      "label": "batch"
+    },
+    {
+      "id": "publish",
+      "from": "writer",
+      "to": "parquet",
+      "label": "atomic publish",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-queries",
+      "from": "api",
+      "to": "obs",
+      "label": "typed API"
+    },
+    {
+      "id": "mcp-queries",
+      "from": "mcp",
+      "to": "obs",
+      "label": "typed tools",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "obs-query",
+      "from": "obs",
+      "to": "query",
+      "label": "SQL"
+    },
+    {
+      "id": "query-cache",
+      "from": "query",
+      "to": "qstate",
+      "label": "rollups"
+    },
+    {
+      "id": "query-parquet",
+      "from": "query",
+      "to": "parquet",
+      "label": "read, compact",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "detector-reads",
+      "from": "detector",
+      "to": "query",
+      "label": "rollups"
+    },
+    {
+      "id": "alert-scores",
+      "from": "alert",
+      "to": "detector",
+      "label": "scores"
+    },
+    {
+      "id": "alert-webhook",
+      "from": "alert",
+      "to": "webhooks",
+      "label": "POST"
+    },
+    {
+      "id": "alert-rules",
+      "from": "alert",
+      "to": "sqlite",
+      "label": "rules, history"
+    },
+    {
+      "id": "alert-rollups",
+      "from": "alert",
+      "to": "query",
+      "label": "rollups",
+      "fromSide": "top",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One listener",
+      "items": [
+        "OTLP /v1/* and gRPC go to ingest",
+        "Everything else is the Echo app: API, UI, /mcp, /api/agent"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Control SQLite",
+      "items": [
+        "Users, sessions, settings, dashboards, OAuth clients, chat threads, alert rules",
+        "Ingest reads the token hash from it on every export"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Optional",
+      "items": [
+        "Chat only when FANOUT_AI_PROVIDER is set",
+        "OIDC sign-in and SMTP email codes when configured",
+        "/metrics for Prometheus"
+      ]
+    }
+  ]
+}

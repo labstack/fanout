@@ -123,13 +123,13 @@ outgrows one machine's disk and CPU has outgrown Fanout.
 One process contains ingest, storage, query, alerts, the agent, MCP, and the React client. Browser
 and agent clients share a typed observability contract.
 
-![Fanout architecture](docs/diagrams/architecture.svg)
+![Fanout runtime architecture: OTLP ingest and commit workers publish Parquet; the browser API, agent runtime, and MCP server share queries and dashboards, with DuckDB query state, SQLite control state, anomaly detection, and webhook alerts.](docs/diagrams/architecture.svg)
 
 Parquet holds telemetry, DuckDB query state is rebuildable, and SQLite holds transactional product
 state. See [how storage works](https://fanout.run/explanation/storage-model) for durable ingest,
 indexed reads, and compaction while reads continue.
 
-![Fanout persistence](docs/diagrams/persistence.svg)
+![Telemetry durability and query flow: authenticated OTLP rows pass through group admission, parallel commit workers, and durable publication into immutable Parquet batches; indexed trace reads, DuckDB SQL, retention, and compaction use those batches, while service and edge rollups populate rebuildable query state.](docs/diagrams/persistence.svg)
 
 ## Configuration
 
