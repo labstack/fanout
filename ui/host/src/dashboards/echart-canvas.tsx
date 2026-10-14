@@ -102,9 +102,47 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     rangeBarHeight.current = height; apply.current();
   }, []);
   const auditInput = useRef<{ compiled: EChartsCoreOption; size: ChartSize } | null>(null);
+  const layoutInput = useRef(option);
+  const relayout = useRef<() => void>(() => undefined);
   const context = useRef<CanvasRenderingContext2D | null | undefined>(undefined);
   const responsive = useRef(false);
   responsive.current = Boolean(optionForSize);
+  relayout.current = () => {
+    // Keep the pre-layout series so labels omitted in a smaller plot can return.
+    let compiled = layoutInput.current;
+    // ECharts containment can shrink the nominal plot. Recompute numeric tick
+    // density once from the native rect, including any annotation/legend band.
+    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}}}}};
+    let rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
+    const plotHeight=rect?.height;
+    if(plotHeight && compiled.yAxis) {
+      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
+      const updated=axes.map(axis=>adaptValueAxis(axis,plotHeight));
+      if(updated.some((axis,i)=>axis.splitNumber!==axes[i].splitNumber || axis.interval!==axes[i].interval)) {
+        compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
+        chart.current?.setOption({yAxis:compiled.yAxis});
+        rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
+      }
+    }
+    layoutInput.current = compiled;
+    if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
+      compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
+        const pixel = chart.current?.convertToPixel({seriesIndex}, value);
+        return Array.isArray(pixel) ? pixel[1] : NaN;
+      });
+      chart.current?.setOption({series: compiled.series});
+    }
+    if (rect && (compiled.series as {markLine?: {data?: {yAxis?: number}[]}}[] | undefined)?.some(line => line.markLine?.data?.some(mark => typeof mark.yAxis === "number"))) {
+      compiled = layoutThresholdLabels(compiled, rect, (seriesIndex, value) => {
+        const pixel = chart.current?.convertToPixel({seriesIndex}, [0, value]);
+        return Array.isArray(pixel) ? pixel[1] : NaN;
+      });
+      chart.current?.setOption({series: compiled.series});
+    }
+    displayedRef.current = compiled;
+    if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
+    if (import.meta.env.DEV && auditInput.current) auditInput.current = { ...auditInput.current, compiled };
+  };
   apply.current = () => {
     if (context.current === undefined) context.current = document.createElement("canvas").getContext("2d");
     const ctx = context.current;
@@ -123,40 +161,12 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     // ECharts 6 brush preprocessing always creates a toolbox, even without
     // buttons. Register it and hide it; activation uses takeGlobalCursor.
     chart.current?.setOption({ ...compiled, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), ...(zoom.current ? { toolbox: { show: false }, brush: { xAxisIndex: 0, brushMode: "single", removeOnClick: true } } : {}), aria: { ...(compiled as { aria?: object }).aria, enabled: true, description } }, { notMerge: true });
-    // ECharts containment can shrink the nominal plot. Recompute numeric tick
-    // density once from the native rect, including any annotation/legend band.
-    const native = chart.current as unknown as {getModel?():{getComponent(name:string):{coordinateSystem?:{getRect():{y:number;height:number;width:number}}}}};
-    let rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
-    const plotHeight=rect?.height;
-    if(plotHeight && compiled.yAxis) {
-      const axes=(Array.isArray(compiled.yAxis)?compiled.yAxis:[compiled.yAxis]) as Record<string,unknown>[];
-      const updated=axes.map(axis=>adaptValueAxis(axis,plotHeight));
-      if(updated.some((axis,i)=>axis.splitNumber!==axes[i].splitNumber || axis.interval!==axes[i].interval)) {
-        compiled={...compiled,yAxis:Array.isArray(compiled.yAxis)?updated:updated[0]};
-        chart.current?.setOption({yAxis:compiled.yAxis});
-        rect=native?.getModel?.().getComponent("grid")?.coordinateSystem?.getRect();
-      }
-    }
-    if (rect && (compiled.series as {endLabel?: {show?: boolean}}[] | undefined)?.some(line => line.endLabel?.show)) {
-      compiled = layoutEndLabels(compiled, rect, (seriesIndex, value) => {
-        const pixel = chart.current?.convertToPixel({seriesIndex}, value);
-        return Array.isArray(pixel) ? pixel[1] : NaN;
-      });
-      chart.current?.setOption({series: compiled.series});
-    }
-    if (rect && (compiled.series as {markLine?: {data?: {yAxis?: number}[]}}[] | undefined)?.some(line => line.markLine?.data?.some(mark => typeof mark.yAxis === "number"))) {
-      compiled = layoutThresholdLabels(compiled, rect, (seriesIndex, value) => {
-        const pixel = chart.current?.convertToPixel({seriesIndex}, [0, value]);
-        return Array.isArray(pixel) ? pixel[1] : NaN;
-      });
-      chart.current?.setOption({series: compiled.series});
-    }
+    layoutInput.current = compiled;
+    if (import.meta.env.DEV) auditInput.current = { compiled, size };
+    relayout.current();
     if (highlighted.current) highlight(highlighted.current);
     if (zoom.current) chart.current?.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
     if (zoom.current && brushRange.current) paintRange();
-    displayedRef.current = compiled;
-    if (keyboardRef.current && activeRef.current) setDisplayed(compiled);
-    if (import.meta.env.DEV) auditInput.current = { compiled, size };
   };
 
   useEffect(() => {
@@ -183,8 +193,10 @@ export function EChartCanvas({ option, optionForSize, height, label, onClick, on
     });
     instance.on("legendselectchanged", (params) => {
       selected.current = { ...(params as { selected: Record<string, boolean> }).selected };
+      relayout.current();
     });
-    const observer = new ResizeObserver(() => { instance.resize(); if (responsive.current) apply.current(); });
+    instance.on("datazoom", () => relayout.current());
+    const observer = new ResizeObserver(() => { instance.resize(); if (responsive.current) apply.current(); else relayout.current(); });
     observer.observe(ref.current);
     return () => { observer.disconnect(); removeAudit?.(); if (highlighted.current) highlight(undefined); instance.dispose(); chart.current = null; };
   }, []);

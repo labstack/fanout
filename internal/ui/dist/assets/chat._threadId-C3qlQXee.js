@@ -1,1 +1,0 @@
-import{t as e}from"./chat-BYIXPaYj.js";var t=e;export{t as component};
