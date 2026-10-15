@@ -3,8 +3,6 @@ package query
 import (
 	"context"
 	"fmt"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -93,8 +91,8 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&versions); err != nil || versions != 120 {
 		t.Fatalf("versions=%d err=%v", versions, err)
 	}
-	// Requeue the same real backlog and park the production version loop after
-	// it owns writeGate, so the anomaly writer demonstrably contends with it.
+	// Requeue the real backlog while publication blocks admission. Anomalies
+	// must persist before publication releases, and the loop must retry later.
 	if _, err := d.writer().Exec(`DELETE FROM version_rollup_batches`); err != nil {
 		t.Fatal(err)
 	}
@@ -111,15 +109,14 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); d.runVersionRollupLoop(ctx) }()
 	defer func() { cancel(); <-done }()
-	waitForVersionBudgetStack(t, "query.(*Duck).runVersionRollupLoop", "query.(*parquetReadGate).RLockContext")
+	if n, err := d.RefreshVersionRollup(ctx); err != nil || n != 0 {
+		t.Fatalf("publication skip=%d %v", n, err)
+	}
 	now := time.Now().UTC()
 	finding := annotations.Anomaly{Namespace: "namespace-0", Service: "service-0", Kind: "volume", From: now.Add(-time.Minute), To: now, Title: "Low volume", Severity: "warn"}
 	persisted := make(chan error, 1)
 	go func() { persisted <- d.RecordAnomalies(ctx, []annotations.Anomaly{finding}, now) }()
-	waitForVersionBudgetStack(t, "query.(*Duck).RecordAnomalies", "writegate.(*WriteGate).LockContext")
 	start := time.Now()
-	d.parquetMu.Unlock()
-	locked = false
 	select {
 	case err := <-persisted:
 		if err != nil {
@@ -128,34 +125,25 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("anomaly persistence starved behind busy version loop")
 	}
-	t.Logf("anomaly persisted behind productive version pass in %v", time.Since(start))
+	d.parquetMu.Unlock()
+	locked = false
+	t.Logf("anomaly persisted during blocked Parquet admission in %v", time.Since(start))
 	var count int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log WHERE title='Low volume'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("persisted=%d err=%v", count, err)
 	}
-	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches`).Scan(&marked); err != nil || marked == 0 {
-		t.Fatalf("version loop made no progress: %d %v", marked, err)
-	}
-}
-
-func waitForVersionBudgetStack(t *testing.T, caller, frame string) {
-	t.Helper()
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-	ticker := time.NewTicker(time.Millisecond)
-	defer ticker.Stop()
-	buffer := make([]byte, 1<<20)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
-		for stack := range strings.SplitSeq(string(buffer[:runtime.Stack(buffer, true)]), "\n\n") {
-			if strings.Contains(stack, "[select]") && strings.Contains(stack, caller) && strings.Contains(stack, frame) {
-				return
-			}
+		if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches`).Scan(&marked); err != nil {
+			t.Fatal(err)
 		}
-		select {
-		case <-deadline.C:
-			t.Fatalf("never observed %s waiting in %s", caller, frame)
-		case <-ticker.C:
+		if marked > 0 {
+			break
 		}
+		if time.Now().After(deadline) {
+			t.Fatal("version loop did not retry after publication")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

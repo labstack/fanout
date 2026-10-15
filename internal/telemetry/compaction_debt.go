@@ -6,9 +6,13 @@ import (
 )
 
 const (
-	CompactionMaxRows    = 25_000_000
-	CompactionBatchLimit = 128
-	CompactionDebtLimit  = 1024
+	CompactionMaxRows = 25_000_000
+	// The slowest measured merge with six busy cores sustained over 400k
+	// rows/s. Four million rows retire pressured debt in about ten seconds;
+	// unpressured and higher-generation merges retain the normal ceiling.
+	CompactionPressureMaxRows = 4_000_000
+	CompactionBatchLimit      = 128
+	CompactionDebtLimit       = 1024
 )
 
 // Generation0BatchCount is the exact live ingest-batch inventory, including
@@ -30,15 +34,17 @@ func (p *ParquetStore) CompactionDebt() int {
 // changeGeneration0Locked also maintains conservative, reclaimable debt. A raw
 // generation-0 limit can deadlock on arbitrary oversized requests or on many
 // finished days with fewer than eight inputs. Exempt batches above half the
-// merge row ceiling, and reserve one underfilled group per day. Positive debt
-// then guarantees a selectable group without changing compaction policy.
+// pressured merge row ceiling, and reserve one underfilled group per day.
+// Positive debt then guarantees a selectable group within the pressured ceiling. Larger
+// indivisible inputs can still compact below pressure, but cannot block ingest
+// behind debt that the pressured policy is unable to retire.
 func (p *ParquetStore) changeGeneration0Locked(b BatchMetadata, delta int) {
 	if b.Generation != 0 {
 		return
 	}
 	p.generation0Batches += delta
 	rows := int64(b.Spans) + int64(b.Logs) + int64(b.Metrics)
-	if b.MaxIngestedNanos <= 0 || rows <= 0 || rows > CompactionMaxRows/2 {
+	if b.MaxIngestedNanos <= 0 || rows <= 0 || rows > CompactionPressureMaxRows/2 {
 		return
 	}
 	if p.generation0ByDay == nil {

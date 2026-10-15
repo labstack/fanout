@@ -25,7 +25,7 @@ func TestCompactionStreamingIndexMatchesReread(t *testing.T) {
 	}
 	var inputs []string
 	for part := 0; part < 4; part++ {
-		spans := make([]Span, 5000)
+		spans := make([]Span, 15001)
 		for i := range spans {
 			// Shared traces cross inputs and read buffers. Tied and signed times
 			// exercise the complete sort tuple and the existing metadata bounds.
@@ -47,7 +47,7 @@ func TestCompactionStreamingIndexMatchesReread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Rows != 20000 || stats.MinSpanStartNanos != 1 || stats.MaxSpanStartNanos != 5 {
+	if stats.Rows != 60004 || stats.MinSpanStartNanos != 1 || stats.MaxSpanStartNanos != 5 {
 		t.Fatalf("merge stats=%+v", stats)
 	}
 	// This is the old narrow reread, retained only as an independent oracle.
