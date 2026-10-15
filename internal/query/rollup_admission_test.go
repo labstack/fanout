@@ -47,13 +47,15 @@ func TestAnalyticalRollupsReleaseGateWhenPublicationBlocksAdmission(t *testing.T
 			if err := d.writer().QueryRow(`SELECT count(*) FROM version_rollup_batches`).Scan(&marked); err != nil || marked != 0 {
 				t.Fatalf("skipped version markers=%d error=%v", marked, err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			// Allow slow race runs to finish the INSERT while still detecting a
+			// gate parked for the former 15-second admission lease.
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			start := time.Now()
 			if err := d.RecordAnomalies(ctx, []annotations.Anomaly{}, time.Now()); err != nil {
-				t.Fatalf("anomaly parked behind %s admission: %v", component, err)
+				t.Fatalf("anomaly persistence failed with %s admission blocked: %v", component, err)
 			}
-			t.Logf("anomaly persisted with publication held: %s", time.Since(start))
+			t.Logf("anomaly persisted with publication blocking %s admission: %s", component, time.Since(start))
 			d.parquetMu.Unlock()
 			locked = false
 			if n, err := refresh(); err != nil || component != "edge" && n == 0 {
