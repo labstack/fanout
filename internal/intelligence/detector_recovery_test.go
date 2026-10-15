@@ -79,6 +79,7 @@ func TestDetectorRetriesFailedQueriesAtUnchangedWatermark(t *testing.T) {
 				if err := query.CreateCacheTables(db); err != nil {
 					t.Fatal(err)
 				}
+				createDetectorLogs(t, db)
 				end := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
 				seedDetectorRecoveryRollup(t, db, end)
 				d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
@@ -112,8 +113,8 @@ func TestDetectorRetriesFailedQueriesAtUnchangedWatermark(t *testing.T) {
 					}
 				}
 				d.runCheck(t.Context())
-				if d.LatestSnapshot() != got || len(d.annotationBatches) != 0 {
-					t.Fatal("successful minute was evaluated again")
+				if latest := d.LatestSnapshot(); latest == got || latest.Anomalies[0] != got.Anomalies[0] {
+					t.Fatal("live refresh changed the successful anomaly evaluation")
 				}
 			})
 		}
@@ -180,9 +181,10 @@ func TestDetectorRetriesPersistenceAtUnchangedWatermark(t *testing.T) {
 		}
 	}
 	d.runCheck(t.Context())
-	if d.LatestSnapshot() != previous || len(d.annotationBatches) != 0 {
-		t.Fatal("stalled watermark queued another batch")
+	if latest := d.LatestSnapshot(); latest == previous || latest.Anomalies[0] != previous.Anomalies[0] {
+		t.Fatal("live refresh changed the stalled anomaly evaluation")
 	}
+	refreshed := d.LatestSnapshot()
 	unlock()
 	unlock = nil
 	if err := waitAttempt(); err != nil {
@@ -197,7 +199,144 @@ func TestDetectorRetriesPersistenceAtUnchangedWatermark(t *testing.T) {
 			t.Fatalf("retry changed evaluated interval: %+v", a)
 		}
 	}
-	if d.LatestSnapshot() != previous {
+	if d.LatestSnapshot() != refreshed {
 		t.Fatal("persistence retry changed snapshot")
+	}
+}
+
+func TestDetectorRetriesPatternFailureWithoutPublishingHealthySnapshot(t *testing.T) {
+	for _, withPrevious := range []bool{false, true} {
+		name := "startup"
+		if withPrevious {
+			name = "previous"
+		}
+		t.Run(name, func(t *testing.T) {
+			native, err := duckdb.NewConnector("", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer native.Close()
+			connector := &detectorFailureConnector{Connector: native}
+			db := sql.OpenDB(connector)
+			defer db.Close()
+			if err := query.CreateCacheTables(db); err != nil {
+				t.Fatal(err)
+			}
+			createDetectorLogs(t, db)
+			end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+			seedDetectorRecoveryRollup(t, db, end)
+			d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+			if withPrevious {
+				d.runCheck(t.Context())
+				<-d.annotationBatches
+			}
+			previous := d.LatestSnapshot()
+			at := time.Now().UTC().Add(-time.Minute)
+			if _, err := db.Exec(`INSERT INTO logs SELECT ?::TIMESTAMP_NS::TIMESTAMPTZ_NS, ?, 'failure', 'failure', 'ERROR', 'api', 'default' FROM range(10)`, at, at.UnixNano()); err != nil {
+				t.Fatal(err)
+			}
+			connector.fail = "AS occurrence_count"
+			if _, err := d.GenerateSnapshot(t.Context()); err == nil {
+				t.Fatal("pattern query failure was treated as an empty successful result")
+			}
+			d.runCheck(t.Context())
+			if d.LatestSnapshot() != previous || len(d.annotationBatches) != 0 {
+				t.Fatal("pattern failure published a snapshot or annotations")
+			}
+			// The anomaly evaluation completed even if patterns failed. Recover
+			// patterns while refusing to re-run that completed anomaly query.
+			connector.fail = "AS current_rate"
+			d.runCheck(t.Context())
+			got := d.LatestSnapshot()
+			if got == nil || got == previous || len(got.Patterns) != 1 || len(got.Anomalies) != 3 || got.HealthScore >= 100 {
+				t.Fatalf("pattern query was not retried at the same watermark: %+v", got)
+			}
+		})
+	}
+}
+
+func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
+	native, err := duckdb.NewConnector("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer native.Close()
+	connector := &detectorFailureConnector{Connector: native, fail: "AS occurrence_count"}
+	db := sql.OpenDB(connector)
+	defer db.Close()
+	if err := query.CreateCacheTables(db); err != nil {
+		t.Fatal(err)
+	}
+	createDetectorLogs(t, db)
+	end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+	seedDetectorRecoveryRollup(t, db, end)
+	d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+	for range 2 {
+		d.runCheck(t.Context())
+	}
+	if d.LatestSnapshot() != nil || len(d.annotationBatches) != 0 {
+		t.Fatal("pattern failure published a snapshot or annotations")
+	}
+	if d.evaluation == nil || len(d.evaluation.findings) != 3 {
+		t.Fatalf("missing successful anomaly evaluation: %+v", d.evaluation)
+	}
+	want := detectorAnnotations(IntelligenceSnapshot{Anomalies: d.evaluation.findings}, d.duck.DefaultNamespace())
+
+	// Replace the failed-publication evaluation with a healthy, later window
+	// while patterns still fail, then recover at that new watermark.
+	advanced := end.Add(time.Minute)
+	if _, err := db.Exec(`UPDATE service_rollup SET error_rate=0,p95_ms=10,spans=100,served_spans=100`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE rollup_state SET last_ingested_unix_nano=? WHERE cache_key='service_rollup_v3'`, advanced.Add(30*time.Second).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	d.runCheck(t.Context())
+	if d.evaluation == nil || !d.evaluation.through.Equal(advanced) || len(d.evaluation.findings) != 0 || d.LatestSnapshot() != nil || len(d.annotationBatches) != 0 {
+		t.Fatalf("healthy evaluation did not replace the unpublished evaluation: %+v", d.evaluation)
+	}
+	connector.fail = ""
+	d.runCheck(t.Context())
+	got := d.LatestSnapshot()
+	if got == nil || !got.evaluatedThrough.Equal(advanced) || len(got.Anomalies) != 0 || got.HealthScore != 100 {
+		t.Fatalf("recovered snapshot should reflect the healthy window: %+v", got)
+	}
+	batch := <-d.annotationBatches
+	if len(batch.findings) != len(want) {
+		t.Fatalf("unpublished incident lost or duplicated: %+v", batch.findings)
+	}
+	for i, finding := range batch.findings {
+		if finding != want[i] {
+			t.Fatalf("unpublished finding changed: got %+v, want %+v", finding, want[i])
+		}
+	}
+
+	// Persist the recovered batch through the real annotation storage path.
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
+	repo, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer duck.Close()
+	if err := duck.RecordAnomalies(t.Context(), batch.findings, batch.at); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := annotations.New(duck).Read(t.Context(), annotations.Request{From: end.Add(-time.Hour), To: advanced.Add(time.Hour)})
+	if err != nil || len(persisted.Anomalies) != len(want) {
+		t.Fatalf("persisted findings: %+v, %v", persisted, err)
+	}
+	for _, finding := range persisted.Anomalies {
+		if !finding.From.Equal(end.Add(-15*time.Minute)) || !finding.To.Equal(end) {
+			t.Fatalf("unpublished incident interval changed: %+v", finding)
+		}
+	}
+	d.runCheck(t.Context())
+	if batch := <-d.annotationBatches; len(batch.findings) != 0 {
+		t.Fatalf("published findings were carried again: %+v", batch.findings)
 	}
 }

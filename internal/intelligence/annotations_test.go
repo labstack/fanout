@@ -171,3 +171,61 @@ func TestDetectorWritesFailedFindingsWithTheNextBatch(t *testing.T) {
 		t.Fatal("second write did not happen")
 	}
 }
+
+func TestDetectorKeepsDisplacedPendingIncidentAndItsInterval(t *testing.T) {
+	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	ctx, cancel := context.WithCancel(t.Context())
+	entered := make(chan annotationBatch, 3)
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.persistAnnotations(ctx, func(ctx context.Context, findings []annotations.Anomaly, at time.Time) error {
+			entered <- annotationBatch{append([]annotations.Anomaly(nil), findings...), at}
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	defer func() { cancel(); <-done }()
+	now := time.Now().UTC()
+	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now})
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("persistence did not start")
+	}
+	incident := Anomaly{ServiceName: "api", Type: AnomalyLatencyDegradation, ZScore: 4, WindowStart: now.Add(-time.Minute), WindowEnd: now}
+	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now.Add(time.Minute), Anomalies: []Anomaly{incident}})
+	// A repeated live pattern refresh must not duplicate this finding.
+	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now.Add(2 * time.Minute), Anomalies: []Anomaly{incident}})
+	d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now.Add(3 * time.Minute)})
+	close(release)
+	select {
+	case batch := <-entered:
+		if len(batch.findings) != 1 || !batch.findings[0].From.Equal(incident.WindowStart) || !batch.findings[0].To.Equal(incident.WindowEnd) || !batch.at.Equal(now.Add(3*time.Minute)) {
+			t.Fatalf("displaced incident was lost, duplicated or extended: %+v", batch)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending incident was not persisted")
+	}
+}
+
+func TestDetectorBoundsPendingFindings(t *testing.T) {
+	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	now := time.Now().UTC()
+	for _, count := range []int{maxCarriedAnomalies + 1, 1} {
+		findings := make([]Anomaly, count)
+		for i := range findings {
+			findings[i] = Anomaly{Type: AnomalyLatencyDegradation, WindowStart: now.Add(time.Duration(i) * time.Minute), WindowEnd: now.Add(time.Duration(i+1) * time.Minute)}
+		}
+		d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: now, Anomalies: findings})
+	}
+	batch := <-d.annotationBatches
+	if len(batch.findings) != maxCarriedAnomalies || !batch.findings[len(batch.findings)-1].To.Equal(now.Add(time.Minute)) {
+		t.Fatalf("pending findings not bounded with newest retained: %d", len(batch.findings))
+	}
+}
