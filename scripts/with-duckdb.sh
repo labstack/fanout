@@ -3,26 +3,26 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version=v2.0.0-alpha43763
+version=v2.0.0-alpha46057
 case "$(uname -s)/$(uname -m)" in
 Darwin/arm64)
 	platform=osx-arm64
-	checksum=42320cd312d1a55f2fbe2e527b4f95aed6e0b9ee77e64092fa2a5b0879024206
+	checksum=e78e6a3ab5c35c1451650cdd234e9f42c8c9485412aaf063dfaae995f0dcda6a
 	system_libs='-lc++ -Wl,-no_warn_duplicate_libraries'
 	;;
 Darwin/x86_64)
 	platform=osx-amd64
-	checksum=c13adabde6b7aac99281d745da2bdfad0c482b306e1b3d3d7391ef806e967368
+	checksum=a1dd2b83754484dcd0980ed1c46d5726ec2a2fd26090d43341dc74f1060abff3
 	system_libs='-lc++ -Wl,-no_warn_duplicate_libraries'
 	;;
 Linux/x86_64)
 	platform=linux-amd64
-	checksum=5d62c5bca5474722e172d19c51ba4c7b3711444b70f6478b3b38b94bfb5681b2
+	checksum=4cb2df2e767f2a08fb38a0c39b8dadd1ad0eb07fd5cd6431092e709be41a323e
 	system_libs='-lstdc++ -lm -ldl -pthread'
 	;;
 Linux/aarch64)
 	platform=linux-arm64
-	checksum=af0ed15848a76a013764419b4f47020ae0aa7e71396f2365aa61a95ecba456ee
+	checksum=81cf834f18a7004d412862d25bbbd334c1e335432c94a2cbcb6c0f560ebbc3eb
 	system_libs='-lstdc++ -lm -ldl -pthread'
 	;;
 *)

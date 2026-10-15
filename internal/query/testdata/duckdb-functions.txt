@@ -1,4 +1,4 @@
-# engine v2.0.0-alpha43763
+# engine v2.0.0-alpha46057
 != scalar
 !__postfix scalar
 !~~ scalar
@@ -961,6 +961,7 @@ read_ndjson_objects table
 read_parquet table
 read_single_csv_file table
 read_single_json_file table
+read_single_parquet_file table
 read_text table
 reduce scalar
 regexp_escape scalar

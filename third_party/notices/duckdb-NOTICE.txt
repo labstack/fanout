@@ -1,5 +1,5 @@
-DuckDB 96063b9e39749cc0f087bb11501d7edbee527957 — upstream license and bundled third-party notices.
-Source: https://github.com/duckdb/duckdb/tree/96063b9e39749cc0f087bb11501d7edbee527957
+DuckDB b15358c371 — upstream license and bundled third-party notices.
+Source: https://github.com/duckdb/duckdb/tree/b15358c371
 
 --- LICENSE ---
 

@@ -24,6 +24,8 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"SELECT * FROM (WITH rollup_state AS (SELECT 1) SELECT * FROM rollup_state) x, rollup_state",
 		"SELECT * FROM query('SELECT * FROM rollup_state')",
 		"SELECT * FROM read_parquet('/etc/passwd')",
+		"SELECT * FROM read_single_parquet_file('/etc/passwd')",
+		"SELECT read_single_parquet_file('/etc/passwd')",
 		"SELECT * FROM (SHOW ALL TABLES)",
 		"SELECT * FROM read_batches",
 		"SELECT * FROM read_span_events",

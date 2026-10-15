@@ -29,7 +29,7 @@ Keep this file out of Git and Docker inputs. See
 [runtime secret delivery](docs/operations.md#runtime-secret-delivery).
 
 The DuckDB wrapper downloads the pinned, checksum-verified engine from
-[Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha43763)
+[Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha46057)
 on the first build. Linux needs the C++ runtime (`libstdc++`); macOS needs
 Xcode Command Line Tools and `libc++`. Cross-compilation is unsupported.
 Use `just` recipes or prefix Go commands with the wrapper:
@@ -46,8 +46,8 @@ Alternatively configure your editor to launch `gopls` through
 `bash scripts/with-duckdb.sh gopls serve`. An already-running editor process
 must be restarted to inherit these variables.
 
-The dependency mirror preserves the original DuckDB `v2.0.0-alpha43763`
-archives at upstream commit `96063b9e39` byte for byte. Its `duckdb-` tag
+The dependency mirror preserves the original DuckDB `v2.0.0-alpha46057`
+archives at upstream commit `b15358c371` byte for byte. Its `duckdb-` tag
 namespace is separate from Fanout's product CalVer releases; new engine bytes
 require a new artifact tag and checksum pins. It never supplies a second engine
 or downloads extensions at runtime.
