@@ -1,0 +1,548 @@
+{
+  "ID": "",
+  "Spans": [
+    {
+      "Namespace": "shop",
+      "TraceID": "010200",
+      "SpanID": "030000",
+      "ParentSpanID": "04",
+      "ServiceName": "api",
+      "Name": "operation",
+      "Kind": "SPAN_KIND_CLIENT",
+      "StartUnixNanos": 1790856000000000017,
+      "EndUnixNanos": 1790856000001000019,
+      "DurationMS": 1.000002,
+      "StatusCode": "STATUS_CODE_ERROR",
+      "StatusMsg": "failed",
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
+      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "TraceState": "vendor=state",
+      "Flags": 257,
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0,
+      "HTTPMethod": "POST",
+      "HTTPStatusCode": "503",
+      "HTTPRoute": "/orders",
+      "DBSystem": "",
+      "RPCMethod": "",
+      "RPCService": "",
+      "PeerService": "",
+      "ServiceVersion": "v1",
+      "DeploymentEnv": "prod",
+      "ExceptionType": "Timeout",
+      "ExceptionMessage": "late"
+    },
+    {
+      "Namespace": "shop",
+      "TraceID": "010200",
+      "SpanID": "030100",
+      "ParentSpanID": "04",
+      "ServiceName": "api",
+      "Name": "operation",
+      "Kind": "SPAN_KIND_CLIENT",
+      "StartUnixNanos": 1790856000000000017,
+      "EndUnixNanos": 1790856000001000019,
+      "DurationMS": 1.000002,
+      "StatusCode": "STATUS_CODE_ERROR",
+      "StatusMsg": "failed",
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
+      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "TraceState": "vendor=state",
+      "Flags": 257,
+      "ScopeName": "jobs",
+      "ScopeVersion": "2.0",
+      "IngestedAt": 0,
+      "HTTPMethod": "POST",
+      "HTTPStatusCode": "503",
+      "HTTPRoute": "/orders",
+      "DBSystem": "",
+      "RPCMethod": "",
+      "RPCService": "",
+      "PeerService": "",
+      "ServiceVersion": "v1",
+      "DeploymentEnv": "prod",
+      "ExceptionType": "Timeout",
+      "ExceptionMessage": "late"
+    },
+    {
+      "Namespace": "fallback",
+      "TraceID": "010201",
+      "SpanID": "030000",
+      "ParentSpanID": "04",
+      "ServiceName": "worker",
+      "Name": "operation",
+      "Kind": "SPAN_KIND_CLIENT",
+      "StartUnixNanos": 1790856000000000017,
+      "EndUnixNanos": 1790856000001000019,
+      "DurationMS": 1.000002,
+      "StatusCode": "STATUS_CODE_ERROR",
+      "StatusMsg": "failed",
+      "Resource": {
+        "deployment.environment": "test",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "worker",
+        "service.version": "v2"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
+      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "TraceState": "vendor=state",
+      "Flags": 257,
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0,
+      "HTTPMethod": "POST",
+      "HTTPStatusCode": "503",
+      "HTTPRoute": "/orders",
+      "DBSystem": "",
+      "RPCMethod": "",
+      "RPCService": "",
+      "PeerService": "",
+      "ServiceVersion": "v2",
+      "DeploymentEnv": "test",
+      "ExceptionType": "Timeout",
+      "ExceptionMessage": "late"
+    },
+    {
+      "Namespace": "fallback",
+      "TraceID": "010201",
+      "SpanID": "030100",
+      "ParentSpanID": "04",
+      "ServiceName": "worker",
+      "Name": "operation",
+      "Kind": "SPAN_KIND_CLIENT",
+      "StartUnixNanos": 1790856000000000017,
+      "EndUnixNanos": 1790856000001000019,
+      "DurationMS": 1.000002,
+      "StatusCode": "STATUS_CODE_ERROR",
+      "StatusMsg": "failed",
+      "Resource": {
+        "deployment.environment": "test",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "worker",
+        "service.version": "v2"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "EventsJSON": "[{\"time_unix_nano\":1790856000000000020,\"name\":\"exception\",\"attributes\":{\"exception.message\":\"late\",\"exception.type\":\"Timeout\"}}]",
+      "LinksJSON": "[{\"trace_id\":\"05\",\"span_id\":\"06\",\"trace_state\":\"a=b\",\"attributes\":{\"link\":\"value\"}}]",
+      "TraceState": "vendor=state",
+      "Flags": 257,
+      "ScopeName": "jobs",
+      "ScopeVersion": "2.0",
+      "IngestedAt": 0,
+      "HTTPMethod": "POST",
+      "HTTPStatusCode": "503",
+      "HTTPRoute": "/orders",
+      "DBSystem": "",
+      "RPCMethod": "",
+      "RPCService": "",
+      "PeerService": "",
+      "ServiceVersion": "v2",
+      "DeploymentEnv": "test",
+      "ExceptionType": "Timeout",
+      "ExceptionMessage": "late"
+    }
+  ],
+  "Logs": [
+    {
+      "Namespace": "shop",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "ObservedTimeNanos": 1790856000000000019,
+      "Severity": "ERROR",
+      "SeverityNumber": 17,
+      "Body": "order 123 failed",
+      "ServiceName": "api",
+      "TraceID": "0102",
+      "SpanID": "0304",
+      "Flags": 1,
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0,
+      "BodyTemplate": "order \u003cnum\u003e failed"
+    },
+    {
+      "Namespace": "shop",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "ObservedTimeNanos": 1790856000000000019,
+      "Severity": "ERROR",
+      "SeverityNumber": 17,
+      "Body": "order 123 failed",
+      "ServiceName": "api",
+      "TraceID": "0102",
+      "SpanID": "0304",
+      "Flags": 1,
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "ScopeName": "jobs",
+      "ScopeVersion": "2.0",
+      "IngestedAt": 0,
+      "BodyTemplate": "order \u003cnum\u003e failed"
+    },
+    {
+      "Namespace": "fallback",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "ObservedTimeNanos": 1790856000000000019,
+      "Severity": "ERROR",
+      "SeverityNumber": 17,
+      "Body": "order 123 failed",
+      "ServiceName": "worker",
+      "TraceID": "0102",
+      "SpanID": "0304",
+      "Flags": 1,
+      "Resource": {
+        "deployment.environment": "test",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "worker",
+        "service.version": "v2"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0,
+      "BodyTemplate": "order \u003cnum\u003e failed"
+    },
+    {
+      "Namespace": "fallback",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "ObservedTimeNanos": 1790856000000000019,
+      "Severity": "ERROR",
+      "SeverityNumber": 17,
+      "Body": "order 123 failed",
+      "ServiceName": "worker",
+      "TraceID": "0102",
+      "SpanID": "0304",
+      "Flags": 1,
+      "Resource": {
+        "deployment.environment": "test",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "worker",
+        "service.version": "v2"
+      },
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "ScopeName": "jobs",
+      "ScopeVersion": "2.0",
+      "IngestedAt": 0,
+      "BodyTemplate": "order \u003cnum\u003e failed"
+    }
+  ],
+  "Metrics": [
+    {
+      "SeriesID": 2351255154244030761,
+      "Namespace": "shop",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "Name": "gauge",
+      "Description": "description",
+      "Unit": "ms",
+      "Type": "gauge",
+      "Temporality": "",
+      "Monotonic": false,
+      "StartTimeUnixNanos": 1790855940000000009,
+      "ServiceName": "api",
+      "Value": 12,
+      "HistBoundsJSON": "",
+      "HistCountsJSON": "",
+      "HistCount": 0,
+      "HistSum": 0,
+      "ExemplarsJSON": "",
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0
+    },
+    {
+      "SeriesID": 8590532344666084636,
+      "Namespace": "shop",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "Name": "sum",
+      "Description": "",
+      "Unit": "",
+      "Type": "sum",
+      "Temporality": "delta",
+      "Monotonic": true,
+      "StartTimeUnixNanos": 1790855940000000009,
+      "ServiceName": "api",
+      "Value": 12,
+      "HistBoundsJSON": "",
+      "HistCountsJSON": "",
+      "HistCount": 0,
+      "HistSum": 0,
+      "ExemplarsJSON": "",
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0
+    },
+    {
+      "SeriesID": 8703808910938826939,
+      "Namespace": "shop",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "Name": "histogram",
+      "Description": "",
+      "Unit": "",
+      "Type": "histogram",
+      "Temporality": "cumulative",
+      "Monotonic": false,
+      "StartTimeUnixNanos": 0,
+      "ServiceName": "api",
+      "Value": 0,
+      "HistBoundsJSON": "[1]",
+      "HistCountsJSON": "[1,1]",
+      "HistCount": 2,
+      "HistSum": 0,
+      "ExemplarsJSON": "",
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "Resource": {
+        "deployment.environment": "prod",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "api",
+        "service.namespace": "shop",
+        "service.version": "v1"
+      },
+      "ScopeName": "jobs",
+      "ScopeVersion": "2.0",
+      "IngestedAt": 0
+    },
+    {
+      "SeriesID": 8583487415274828271,
+      "Namespace": "fallback",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "Name": "exponential",
+      "Description": "",
+      "Unit": "",
+      "Type": "exponential_histogram",
+      "Temporality": "delta",
+      "Monotonic": false,
+      "StartTimeUnixNanos": 0,
+      "ServiceName": "worker",
+      "Value": 0,
+      "HistBoundsJSON": "[-5e-324,0,1,2]",
+      "HistCountsJSON": "[0,0,0,1,0]",
+      "HistCount": 1,
+      "HistSum": 0,
+      "ExemplarsJSON": "",
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "Resource": {
+        "deployment.environment": "test",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "worker",
+        "service.version": "v2"
+      },
+      "ScopeName": "http",
+      "ScopeVersion": "1.0",
+      "IngestedAt": 0
+    },
+    {
+      "SeriesID": 4088968036412745285,
+      "Namespace": "fallback",
+      "EventUnixNanos": 0,
+      "TimeUnixNanos": 1790856000000000017,
+      "Name": "summary",
+      "Description": "",
+      "Unit": "",
+      "Type": "summary",
+      "Temporality": "",
+      "Monotonic": false,
+      "StartTimeUnixNanos": 0,
+      "ServiceName": "worker",
+      "Value": 0,
+      "HistBoundsJSON": "[0.5]",
+      "HistCountsJSON": "[3]",
+      "HistCount": 1,
+      "HistSum": 3,
+      "ExemplarsJSON": "",
+      "Attributes": {
+        "bytes": "AP8=",
+        "flag": true,
+        "http.method": "POST",
+        "http.request.method": "GET",
+        "http.route": "/orders",
+        "http.status_code": 503
+      },
+      "Resource": {
+        "deployment.environment": "test",
+        "nested": [
+          7,
+          false
+        ],
+        "service.name": "worker",
+        "service.version": "v2"
+      },
+      "ScopeName": "jobs",
+      "ScopeVersion": "2.0",
+      "IngestedAt": 0
+    }
+  ]
+}

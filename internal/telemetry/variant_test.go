@@ -41,7 +41,7 @@ func TestVariantRoundTripAcrossRowGroupsAndCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	merged := filepath.Join(dir, "merged.parquet")
-	if err := mergeTypedParquet[logParquetRow](context.Background(), []string{first, second}, merged, false); err != nil {
+	if err := mergeTypedParquet[logParquetRow](context.Background(), []string{first, second}, merged, false, &ParquetMergeStats{}); err != nil {
 		t.Fatal(err)
 	}
 	checkVariantRows(t, merged, append(rows, rows[:3]...))

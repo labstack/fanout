@@ -626,8 +626,13 @@ func TestRepositoryRecoversInterruptedCompactionSwap(t *testing.T) {
 		for i := range paths {
 			paths[i] = filepath.Join(repository.Parquet.BatchPath(fmt.Sprintf("recover-%d", i)), signal+".parquet")
 		}
-		if err := repository.Parquet.MergeParquet(context.Background(), signal, paths, filepath.Join(stage, signal+".parquet")); err != nil {
+		stats, err := repository.Parquet.MergeParquet(context.Background(), signal, paths, filepath.Join(stage, signal+".parquet"))
+		if err != nil {
 			t.Fatal(err)
+		}
+		if signal == "spans" {
+			output.MinSpanStartNanos = stats.MinSpanStartNanos
+			output.MaxSpanStartNanos = stats.MaxSpanStartNanos
 		}
 	}
 	if err := repository.Parquet.PrepareReplacement(stage, output); err != nil {

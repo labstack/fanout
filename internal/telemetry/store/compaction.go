@@ -213,8 +213,16 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	group, mergeCtx := errgroup.WithContext(ctx)
 	for _, plan := range plans {
 		group.Go(func() error {
-			if err := r.Parquet.MergeParquet(mergeCtx, plan.signal, plan.inputs, plan.output); err != nil {
+			stats, err := r.Parquet.MergeParquet(mergeCtx, plan.signal, plan.inputs, plan.output)
+			if err != nil {
 				return fmt.Errorf("compact %s Parquet: %w", plan.signal, err)
+			}
+			if plan.signal == "spans" {
+				if stats.Rows != int64(marker.Output.Spans) {
+					return fmt.Errorf("compacted span count: got %d want %d", stats.Rows, marker.Output.Spans)
+				}
+				marker.Output.MinSpanStartNanos = stats.MinSpanStartNanos
+				marker.Output.MaxSpanStartNanos = stats.MaxSpanStartNanos
 			}
 			if err := mergeCtx.Err(); err != nil {
 				return err

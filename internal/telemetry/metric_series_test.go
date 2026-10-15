@@ -43,7 +43,7 @@ func TestMetricSeriesIDSurvivesParquetCompaction(t *testing.T) {
 		want = append(want, m.SeriesID)
 	}
 	output := filepath.Join(t.TempDir(), "metrics.parquet")
-	if err := store.MergeParquet(t.Context(), "metrics", inputs, output); err != nil {
+	if _, err := store.MergeParquet(t.Context(), "metrics", inputs, output); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := parquet.ReadFile[struct {

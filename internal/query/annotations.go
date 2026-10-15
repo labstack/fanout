@@ -228,8 +228,8 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, id := range retired {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM version_rollup_batches WHERE batch_id=?`, id); err != nil {
+	if len(retired) > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM version_rollup_batches WHERE batch_id IN (`+idsSQL(retired)+`)`); err != nil {
 			return 0, err
 		}
 	}
@@ -513,14 +513,14 @@ func (d *Duck) transferVersionMarker(ctx context.Context, output telemetry.Batch
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	for _, id := range inputs {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM version_rollup_batches WHERE batch_id=?`, id).Scan(&count); err != nil {
-			return err
-		}
-		if count == 0 {
-			return nil
-		} // The full output must be read when any input is cold.
+	// The full output must be read when any input is cold. Check the complete
+	// input set in one statement while retaining the publication transaction.
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM version_rollup_batches WHERE batch_id IN (`+idsSQL(inputs)+`)`).Scan(&count); err != nil {
+		return err
+	}
+	if count != len(inputs) {
+		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO version_rollup_batches VALUES (?,?) ON CONFLICT(batch_id) DO UPDATE SET max_ingested=greatest(version_rollup_batches.max_ingested,excluded.max_ingested)`, output.ID, output.MaxIngestedNanos); err != nil {
 		return err

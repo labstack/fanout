@@ -635,38 +635,53 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 		}
 		d.updateParquetStats(ctx)
 	}
+	runMaintenanceSchedule(ctx, every, run, func() int {
+		compacted, err := d.runParquetCompactionCycle(ctx)
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("telemetry compaction cycle failed", "err", err)
+		}
+		return compacted
+	})
+}
+
+// Keep compaction busy while a cycle makes progress, then poll at the normal
+// idle cadence. The independent maintenance ticker retains the hourly pass.
+func runMaintenanceSchedule(ctx context.Context, every time.Duration, run func(), compact func() int) {
 	run()
 	maintenanceTicker := time.NewTicker(every)
 	defer maintenanceTicker.Stop()
-	var compactionTicker *time.Ticker
+	var compactionTimer *time.Timer
 	var compactionTick <-chan time.Time
 	if every > parquetCompactionCycle {
-		compactionTicker = time.NewTicker(parquetCompactionCycle)
-		compactionTick = compactionTicker.C
-		defer compactionTicker.Stop()
+		compactionTimer = time.NewTimer(parquetCompactionCycle)
+		compactionTick = compactionTimer.C
+		defer compactionTimer.Stop()
 	}
 	for {
 		select {
 		case <-maintenanceTicker.C:
 			run()
 		case <-compactionTick:
-			if err := d.runParquetCompactionCycle(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("telemetry compaction cycle failed", "err", err)
+			compacted := compact()
+			delay := parquetCompactionCycle
+			if compacted > 0 {
+				delay = 100 * time.Millisecond
 			}
+			compactionTimer.Reset(delay)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (d *Duck) runParquetCompactionCycle(ctx context.Context) error {
+func (d *Duck) runParquetCompactionCycle(ctx context.Context) (int, error) {
 	if d.repository == nil {
-		return nil
+		return 0, nil
 	}
 	started := time.Now()
 	if err := d.repository.RecoverParquet(ctx, d); err != nil {
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, metrics.TelemetryError, time.Since(started).Seconds())
-		return err
+		return 0, err
 	}
 	compacted, err := d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetCompactionCycleBudget)
 	result := metrics.TelemetryNoop
@@ -676,7 +691,7 @@ func (d *Duck) runParquetCompactionCycle(ctx context.Context) error {
 		result = metrics.TelemetrySuccess
 	}
 	metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, result, time.Since(started).Seconds())
-	return err
+	return compacted, err
 }
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
@@ -1496,25 +1511,31 @@ WITH affected AS (
 bounds AS (
   SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
 ),
--- The parent side is range-filtered HERE rather than in the join's ON
--- clause, which keeps the hash build off every span ever ingested. The
--- affected window is one minute of newly ingested spans; the table behind
--- this view is the whole retention period, so the two differ by orders of
--- magnitude and the ON-clause form pays for the difference on every pass.
---
--- Measured (TestEdgeRollupPlanUsesHashJoins, spans as a Parquet-backed view,
--- 600k spans over 25 days, one affected minute): 14ms here against 33ms with
--- the range predicate in the ON clause. Both plan a HASH_JOIN -- the cost is
--- the size of the build side, not the join algorithm.
---
--- Parents more than 1h outside the affected bucket range are dropped, which
--- is acceptable for minute-bucket dependency edges. Caveat retained from the
--- original: buckets come from span start_time while the window bounds
--- ingested_unix_nano, so one late-arriving span with an old start_time
--- widens this range for the pass that ingests it.
+-- Only traces with children in affected buckets can contribute call edges.
+-- Bound this distinct relation to the same child window as call_edges, before
+-- building the parent side; unrelated traces in the two-hour range must not
+-- occupy the parent hash table. Namespace is part of the trace identity.
+child_traces AS (
+  SELECT DISTINCT child.namespace, child.trace_id
+  FROM spans child
+  JOIN affected a
+    ON a.namespace = child.namespace
+   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
+  CROSS JOIN bounds
+  WHERE child.service IS NOT NULL
+    AND child.service != ''
+    AND child.start_time >= (bounds.lo)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND child.start_time < (bounds.hi + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+),
+-- Retain the existing +/-1h parent range, including parents outside the child
+-- minute. Late arrivals can still widen the affected bucket range.
 parent_scope AS (
   SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
-  FROM spans parent, bounds
+  FROM spans parent
+  SEMI JOIN child_traces child
+    ON parent.namespace = child.namespace
+   AND parent.trace_id = child.trace_id
+  CROSS JOIN bounds
   WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND parent.service IS NOT NULL
@@ -1538,14 +1559,9 @@ call_edges AS (
   JOIN affected a
     ON a.namespace = child.namespace
    AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
-  -- bounds joins last, and as an explicit CROSS JOIN. Written as
-  -- "FROM spans child, bounds JOIN parent_scope ON child...", the comma binds
-  -- looser than JOIN: that parses as "spans child" comma "(bounds JOIN
-  -- parent_scope ON ...)", so DuckDB materialises a CROSS_PRODUCT of the child
-  -- scan with bounds instead of folding the single bounds row into the filters.
-  -- Same rows either way, so nothing fails and no row assertion notices; on the
-  -- fixture above it is 21ms against 14ms. TestEdgeRollupPlanUsesHashJoins
-  -- asserts the CROSS_PRODUCT is absent here and present in the comma form.
+  -- Keep bounds as an explicit CROSS JOIN after the keyed joins, so the
+  -- planner can fold its single row into the child filters. The plan test
+  -- guards against Cartesian or correlated span-to-span joins.
   CROSS JOIN bounds
   WHERE child.service IS NOT NULL
     AND child.service != ''

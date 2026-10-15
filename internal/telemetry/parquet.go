@@ -145,20 +145,32 @@ func (p *ParquetStore) StagingPath(id string) string {
 	return filepath.Join(p.stagingDir, id)
 }
 
+// ParquetMergeStats records row counts and the existing span metadata bounds
+// without decoding the completed output a second time.
+type ParquetMergeStats struct {
+	Rows              int64
+	MinSpanStartNanos int64
+	MaxSpanStartNanos int64
+}
+
 // MergeParquet rewrites immutable files into one native Parquet output. Span
-// rows retain the index order required by trace.fidx; the other signals keep
-// their input order. Re-encoding also consolidates tiny ingest row groups.
-func (p *ParquetStore) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
+// rows retain the index order required by trace.fidx and build that sidecar as
+// they are copied; the other signals keep their input order. Re-encoding also
+// consolidates tiny ingest row groups.
+func (p *ParquetStore) MergeParquet(ctx context.Context, signal string, inputs []string, output string) (ParquetMergeStats, error) {
+	var stats ParquetMergeStats
+	var err error
 	switch signal {
 	case "spans":
-		return mergeTypedParquet[spanParquetRow](ctx, inputs, output, true)
+		err = mergeTypedParquet[spanParquetRow](ctx, inputs, output, true, &stats)
 	case "logs":
-		return mergeTypedParquet[logParquetRow](ctx, inputs, output, false)
+		err = mergeTypedParquet[logParquetRow](ctx, inputs, output, false, &stats)
 	case "metrics":
-		return mergeTypedParquet[metricParquetRow](ctx, inputs, output, false)
+		err = mergeTypedParquet[metricParquetRow](ctx, inputs, output, false, &stats)
 	default:
-		return fmt.Errorf("unsupported Parquet signal %q", signal)
+		err = fmt.Errorf("unsupported Parquet signal %q", signal)
 	}
+	return stats, err
 }
 
 func (p *ParquetStore) BatchMetadata() []BatchMetadata {
@@ -736,69 +748,10 @@ func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
 	return stats, nil
 }
 
-// PrepareReplacement completes metadata and the trace sidecar for Parquet
-// files produced by the compactor.
+// PrepareReplacement durably records metadata after all signal merges and the
+// streaming trace index have completed. Span bounds come from the merge.
 func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) error {
 	metadata.Version = batchMetadataVersion
-	metadata.MinSpanStartNanos = 0
-	metadata.MaxSpanStartNanos = 0
-	if metadata.Spans > 0 {
-		f, err := os.Open(filepath.Join(dir, "spans.parquet"))
-		if err != nil {
-			return err
-		}
-		reader := parquet.NewGenericReader[traceParquetRow](f)
-		index, err := newTraceIndexWriter(filepath.Join(dir, "trace.fidx"))
-		if err != nil {
-			_ = reader.Close()
-			_ = f.Close()
-			return err
-		}
-		rows := 0
-		buffer := make([]traceParquetRow, min(8192, metadata.Spans))
-		for {
-			n, readErr := reader.Read(buffer)
-			for i := range n {
-				if start := buffer[i].StartUnixNano; start > 0 && (metadata.MinSpanStartNanos == 0 || start < metadata.MinSpanStartNanos) {
-					metadata.MinSpanStartNanos = start
-				}
-				metadata.MaxSpanStartNanos = max(metadata.MaxSpanStartNanos, buffer[i].StartUnixNano)
-				if err := index.Append(buffer[i].TraceHash); err != nil {
-					index.Abort()
-					_ = reader.Close()
-					_ = f.Close()
-					return err
-				}
-			}
-			rows += n
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			if readErr != nil {
-				index.Abort()
-				_ = reader.Close()
-				_ = f.Close()
-				return readErr
-			}
-			if n == 0 {
-				index.Abort()
-				_ = reader.Close()
-				_ = f.Close()
-				return io.ErrNoProgress
-			}
-		}
-		if err := errors.Join(reader.Close(), f.Close()); err != nil {
-			index.Abort()
-			return err
-		}
-		if rows != metadata.Spans {
-			index.Abort()
-			return fmt.Errorf("compacted span count: got %d want %d", rows, metadata.Spans)
-		}
-		if err := index.Close(); err != nil {
-			return err
-		}
-	}
 	if err := writeJSONFile(filepath.Join(dir, "metadata.json"), metadata); err != nil {
 		return err
 	}
@@ -1288,16 +1241,51 @@ func parquetWriterOptions(pageSize int, extra ...parquet.WriterOption) []parquet
 type contextParquetRows struct {
 	context.Context
 	parquet.Rows
+	index       *traceIndexWriter
+	stats       *ParquetMergeStats
+	hashColumn  int
+	startColumn int
 }
 
 func (r contextParquetRows) ReadRows(rows []parquet.Row) (int, error) {
 	if err := r.Context.Err(); err != nil {
 		return 0, err
 	}
-	return r.Rows.ReadRows(rows)
+	n, err := r.Rows.ReadRows(rows)
+	if r.index != nil {
+		for _, row := range rows[:n] {
+			var hash uint64
+			var start int64
+			found := 0
+			for _, value := range row {
+				switch value.Column() {
+				case r.hashColumn:
+					hash = value.Uint64()
+					found++
+				case r.startColumn:
+					start = value.Int64()
+					found++
+				}
+				if found == 2 {
+					break
+				}
+			}
+			if found != 2 {
+				return 0, errors.New("compacted span is missing index columns")
+			}
+			if start > 0 && (r.stats.MinSpanStartNanos == 0 || start < r.stats.MinSpanStartNanos) {
+				r.stats.MinSpanStartNanos = start
+			}
+			r.stats.MaxSpanStartNanos = max(r.stats.MaxSpanStartNanos, start)
+			if indexErr := r.index.Append(hash); indexErr != nil {
+				return 0, indexErr
+			}
+		}
+	}
+	return n, err
 }
 
-func mergeTypedParquet[T any](ctx context.Context, inputs []string, output string, sorted bool) (err error) {
+func mergeTypedParquet[T any](ctx context.Context, inputs []string, output string, sorted bool, stats *ParquetMergeStats) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -1352,13 +1340,40 @@ func mergeTypedParquet[T any](ctx context.Context, inputs []string, output strin
 		}
 	}()
 	options = append(options, telemetrySchema[T]())
+	reader := contextParquetRows{Context: ctx, Rows: rows, stats: stats}
+	if sorted {
+		hash, found := source.Schema().Lookup("_trace_hash")
+		if !found {
+			return errors.New("compacted spans have no trace hash")
+		}
+		start, found := source.Schema().Lookup("start_unix_nano")
+		if !found {
+			return errors.New("compacted spans have no start time")
+		}
+		index, indexErr := newTraceIndexWriter(filepath.Join(filepath.Dir(output), "trace.fidx"))
+		if indexErr != nil {
+			return indexErr
+		}
+		defer func() {
+			if !ok {
+				index.Abort()
+			}
+		}()
+		reader.index, reader.hashColumn, reader.startColumn = index, hash.ColumnIndex, start.ColumnIndex
+	}
 	writer := parquet.NewGenericWriter[T](out, parquetWriterOptions(parquetPageSize, options...)...)
-	_, copyErr := parquet.CopyRows(writer, contextParquetRows{Context: ctx, Rows: rows})
+	count, copyErr := parquet.CopyRows(writer, reader)
+	stats.Rows = count
 	if closeErr := writer.Close(); copyErr != nil || closeErr != nil {
 		return errors.Join(copyErr, closeErr)
 	}
 	if err := out.Close(); err != nil {
 		return err
+	}
+	if reader.index != nil {
+		if err := reader.index.Close(); err != nil {
+			return err
+		}
 	}
 	ok = true
 	return nil
@@ -1467,9 +1482,4 @@ func ValidateBatchID(id string) error {
 		}
 	}
 	return nil
-}
-
-type traceParquetRow struct {
-	TraceHash     uint64 `parquet:"_trace_hash"`
-	StartUnixNano int64  `parquet:"start_unix_nano"`
 }
