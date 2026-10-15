@@ -15,7 +15,7 @@ func TestParquetMessagingViewProjectsShreddedKeysIntoScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if err := store.CommitBatch(context.Background(), telemetry.BatchMetadata{ID: "attrs"}, []telemetry.Span{
+	if err := store.CommitBatch(context.Background(), &telemetry.BatchMetadata{ID: "attrs"}, []telemetry.Span{
 		{TraceID: "one", SpanID: "a", Resource: map[string]any{"service.name": "api"}, Attributes: map[string]any{"messaging.system": "kafka", "messaging.destination.name": "jobs"}},
 		{TraceID: "two", SpanID: "b", Resource: map[string]any{"service.name": "worker"}, Attributes: map[string]any{"messaging.system": "nats", "messaging.destination.name": "events"}},
 	}, nil, nil); err != nil {

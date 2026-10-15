@@ -150,7 +150,7 @@ func TestCommitBatchAllocationStaysNearPayloadSize(t *testing.T) {
 			// A distinct ID each time: CommitBatch is idempotent, and a repeat
 			// would return early and measure nothing.
 			id := fmt.Sprintf("peak-heap-%d", attempt)
-			if err := store.CommitBatch(context.Background(), BatchMetadata{ID: id}, spans, nil, nil); err != nil {
+			if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: id}, spans, nil, nil); err != nil {
 				t.Errorf("commit batch: %v", err)
 			}
 		})
@@ -189,7 +189,7 @@ func BenchmarkCommitBatch(b *testing.B) {
 			b.Fatalf("open parquet store: %v", err)
 		}
 		observed, _ := samplePeakHeapInuse(func() {
-			if err := store.CommitBatch(context.Background(), BatchMetadata{ID: fmt.Sprintf("bench-%d", i)}, spans, nil, nil); err != nil {
+			if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: fmt.Sprintf("bench-%d", i)}, spans, nil, nil); err != nil {
 				b.Fatalf("commit batch: %v", err)
 			}
 		})

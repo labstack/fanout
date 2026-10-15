@@ -47,6 +47,7 @@ func versionEngine(t *testing.T) (*Duck, *telemetrystore.Repository) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	d.publicationBounds = restoredPublicationBounds(repo)
 	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
 	return d, repo
 }
@@ -160,14 +161,14 @@ func (e *annotationCountingEngine) QueryContext(ctx context.Context, text string
 func TestVersionPassAndHistoryCaps(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
-	for i := 0; i < 65; i++ {
+	for i := 0; i < versionRollupBatchBudget+1; i++ {
 		id := fmt.Sprintf("version-%03d", i)
 		n := at.Add(time.Duration(i) * time.Millisecond).UnixNano()
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: "v1", TraceID: id, SpanID: id, Name: "root", StartUnixNanos: n, EndUnixNanos: n + 1000, DurationMS: .001, IngestedAt: n}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 64 {
+	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != versionRollupBatchBudget {
 		t.Fatalf("first pass %d %v", n, err)
 	}
 	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
@@ -197,7 +198,7 @@ func TestVersionPassAndHistoryCaps(t *testing.T) {
 func TestVersionDrainAndLimitedReset(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
-	for i := range 70 {
+	for i := range versionRollupBatchBudget + 6 {
 		n := at.UnixNano()
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("drain-%03d", i), Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": "v2"}, EventUnixNanos: n, IngestedAt: n}}}); err != nil {
 			t.Fatal(err)
@@ -217,7 +218,7 @@ func TestVersionDrainAndLimitedReset(t *testing.T) {
 		t.Fatalf("stuck backlog=%d %v", limited, err)
 	}
 	var marked int
-	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches`).Scan(&marked); err != nil || marked != 70 {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches`).Scan(&marked); err != nil || marked != versionRollupBatchBudget+6 {
 		t.Fatalf("markers=%d %v", marked, err)
 	}
 }
@@ -234,12 +235,12 @@ func commitVersionLogs(t *testing.T, repo *telemetrystore.Repository, id string,
 		}
 		logs[i] = telemetry.Log{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": version}, EventUnixNanos: n, IngestedAt: at.UnixNano()}
 	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Logs: logs}); err != nil {
+	if err := commitRestoredFixture(repo, t.Context(), telemetrystore.Batch{ID: id, Logs: logs}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestVersionOversizedBatchDrains(t *testing.T) {
+func TestVersionLargeBatchDrains(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	commitVersionLogs(t, repo, "oversized", at, 64001)
@@ -259,32 +260,6 @@ func TestVersionOversizedBatchDrains(t *testing.T) {
 	}
 }
 
-func TestVersionMixedBatchPasses(t *testing.T) {
-	d, repo := versionEngine(t)
-	at := time.Now().UTC().Add(-time.Hour)
-	for i, size := range []int{1, 64001, 2, 64002, 3} {
-		commitVersionLogs(t, repo, fmt.Sprintf("mixed-%d", i), at.Add(time.Duration(i)*time.Minute), size)
-	}
-	for pass := range 5 {
-		if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
-			t.Fatalf("pass %d processed=%d %v", pass, n, err)
-		}
-		var marked, limited int
-		if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id=?`, fmt.Sprintf("mixed-%d", pass)).Scan(&marked); err != nil || marked != 1 {
-			t.Fatalf("oldest batch on pass %d marked=%d %v", pass, marked, err)
-		}
-		want := 1
-		if pass == 4 {
-			want = 0
-		}
-		if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != want {
-			t.Fatalf("pass %d limited=%d want=%d %v", pass, limited, want, err)
-		}
-	}
-	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
-		t.Fatalf("drained pass=%d %v", n, err)
-	}
-}
 func TestVersionResourceLogsAndMetrics(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)

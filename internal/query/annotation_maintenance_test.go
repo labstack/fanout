@@ -44,7 +44,7 @@ func TestVersionHistoryDeletesOnlyWhenNeeded(t *testing.T) {
 func TestVersionFailureDoesNotStarveNewBatches(t *testing.T) {
 	_, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
-	commitVersionLogs(t, repo, "a-old", at, 64001)
+	commitVersionLogs(t, repo, "a-old", at, 1)
 	commitVersionLogs(t, repo, "b-new", at.Add(time.Minute), 1)
 	commitVersionLogs(t, repo, "c-new", at.Add(2*time.Minute), 1)
 	db, mock, err := sqlmock.New()
@@ -53,6 +53,7 @@ func TestVersionFailureDoesNotStarveNewBatches(t *testing.T) {
 	}
 	defer db.Close()
 	d := &Duck{DB: db, writeDB: db, repository: repo, versionRollupPasses: 1}
+	d.versionRollupFailures = map[string]versionRollupFailure{"a-old": {retrySingly: true}}
 	mock.ExpectQuery(`SELECT batch_id FROM version_rollup_batches`).WillReturnRows(sqlmock.NewRows([]string{"batch_id"}))
 
 	mock.ExpectBegin()
@@ -216,7 +217,7 @@ func TestSingleDrainRegistration(t *testing.T) {
 	}
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || (fn.Name.Name != "rollupOnce" && fn.Name.Name != "runReadCacheLoop") {
+		if !ok || (fn.Name.Name != "rollupOnce" && fn.Name.Name != "runReadCacheLoop" && fn.Name.Name != "runVersionRollupLoop") {
 			continue
 		}
 		count := 0
@@ -229,7 +230,7 @@ func TestSingleDrainRegistration(t *testing.T) {
 			return true
 		})
 		want := 0
-		if fn.Name.Name == "runReadCacheLoop" {
+		if fn.Name.Name == "runVersionRollupLoop" {
 			want = 1
 		}
 		if count != want {
@@ -305,41 +306,6 @@ func TestAnomalyMergePerformance(t *testing.T) {
 	var count int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log WHERE title='new' AND severity='bad' AND start_time=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND end_time=?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, now.Add(-5*time.Minute), now.Add(time.Minute)).Scan(&count); err != nil || count != 10000 {
 		t.Fatalf("merged=%d %v", count, err)
-	}
-}
-
-func TestOversizedVersionBatch(t *testing.T) {
-	d, repo := versionEngine(t)
-	now := time.Now().UTC().UnixNano()
-	logs := make([]telemetry.Log, 64001)
-	for i := range logs {
-		logs[i] = telemetry.Log{ServiceName: "oversized", Resource: map[string]any{"service.version": "v1"}, EventUnixNanos: now, IngestedAt: now}
-	}
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "oversized", Logs: logs}); err != nil {
-		t.Fatal(err)
-	}
-	var log bytes.Buffer
-	logger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
-	defer slog.SetDefault(logger)
-	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
-		t.Fatalf("oversized pass: %d %v", n, err)
-	}
-	if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 0 {
-		t.Fatalf("oversized retry: %d %v", n, err)
-	}
-	if output := log.String(); strings.Contains(output, "version rollup batch exceeds row budget") {
-		t.Fatalf("oversized warning spam: %s", output)
-	}
-	var count, limited int
-	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("oversized scanned=%d %v", count, err)
-	}
-	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 0 {
-		t.Fatalf("limited=%d %v", limited, err)
-	}
-	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup_batches WHERE batch_id='oversized'`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("oversized batch acknowledged=%d %v", count, err)
 	}
 }
 

@@ -1,201 +1,280 @@
 package query
 
 import (
-	"context"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-func TestRollupPublicationLagExceedsReaderAndPublisherWindow(t *testing.T) {
-	minimum := defaultWriterGrace + time.Duration(maxQueryTimeoutMs)*time.Millisecond
-	if rollupPublicationSafetyLag <= minimum {
-		t.Fatalf("rollup publication lag = %s, must exceed reader+publisher window %s", rollupPublicationSafetyLag, minimum)
-	}
-}
-
-// TestRollupWatermarkPicksUpLateLowIngestedRow reproduces the silent-data-loss
-// bug: a row that commits with an ingested timestamp below a watermark already
-// advanced by another signal would be excluded from the rollup forever. The
-// safety lag must keep it in the reprocessed window.
-func TestRollupWatermarkPicksUpLateLowIngestedRow(t *testing.T) {
+func TestRollupHorizonDoesNotSkipInFlightRows(t *testing.T) {
 	db := openTestDuck(t)
 	if err := CreateTables(db); err != nil {
-		t.Fatalf("CreateTables: %v", err)
+		t.Fatal(err)
 	}
 	if err := CreateViews(db); err != nil {
-		t.Fatalf("CreateViews: %v", err)
+		t.Fatal(err)
 	}
-
-	const lag = 2 * time.Second
-	d := &Duck{
-		DB: db, writeDB: db,
-		cfg:            config.Config{RetentionDays: 30},
-		rollupLagNanos: lag.Nanoseconds(),
+	horizon := int64(99)
+	minimum := int64(200)
+	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return horizon, 200, minimum }}
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	insert := func(id string, stamp int64) {
+		insertRollupTestSpan(t, db, rollupTestSpan{namespace: "ns", traceID: "trace", spanID: id, parentSpanID: "parent", service: id, start: bucket, ingested: stamp})
 	}
-	ctx := context.Background()
-
-	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
-	tNow := time.Now().UnixNano()
-
-	// First signal commits at the high-water mark and the rollup advances.
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns", traceID: "t1", spanID: "s1", service: "alpha",
-		operation: "op", start: bucket.Add(time.Second), duration: 10 * time.Millisecond,
-		ingested: tNow,
-	})
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("first rollupOnce: %v", err)
+	insertRollupTestSpan(t, db, rollupTestSpan{namespace: "ns", traceID: "trace", spanID: "parent", service: "gateway", start: bucket, ingested: 200})
+	insert("later", 200)
+	if _, err := d.rollupOnce(t.Context()); err != nil {
+		t.Fatal(err)
 	}
-
-	// A second signal commits LATER but with a lower ingested timestamp (within
-	// the lag window). Pre-fix, this was below the stored watermark and dropped.
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns", traceID: "t2", spanID: "s2", service: "beta",
-		operation: "op", start: bucket.Add(time.Second), duration: 10 * time.Millisecond,
-		ingested: tNow - time.Second.Nanoseconds(),
-	})
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("second rollupOnce: %v", err)
+	requireRowCount(t, db, "SELECT count(*) FROM service_rollup WHERE ?", true, 0)
+	for _, component := range []string{"service", "edge"} {
+		if got := testutil.ToFloat64(metrics.RollupWatermark.WithLabelValues(component)); got > float64(horizon)/1e9 {
+			t.Fatalf("%s progress %g exceeds horizon %g", component, got, float64(horizon)/1e9)
+		}
 	}
+	// Stamp 100 remained in flight while stamp 200 published. Once it
+	// publishes, both the service and edge passes must include it.
+	insert("earlier", 100)
+	minimum = 100
+	horizon = 200
+	if _, err := d.rollupOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requireServiceRollupSpans(t, db, "ns", bucket, "earlier", 1)
+	requireServiceRollupSpans(t, db, "ns", bucket, "later", 1)
+	requireRowCount(t, db, "SELECT count(*) FROM edge_rollup WHERE caller='gateway' AND callee=?", "earlier", 1)
+}
 
-	requireServiceRollupSpans(t, db, "ns", bucket, "beta", 1)
-
-	// After the max plateaus (no new ingest), the rollup must go idle rather than
-	// re-aggregating the trailing window every cycle forever.
-	affected, err := d.rollupOnce(ctx)
+func TestRollupIdleHorizonExecutesNoSQL(t *testing.T) {
+	db, mock, err := sqlmock.New()
 	if err != nil {
-		t.Fatalf("third rollupOnce: %v", err)
+		t.Fatal(err)
 	}
-	if affected != 0 {
-		t.Errorf("third rollupOnce affected %d rows; want 0 (should short-circuit once ingest plateaus)", affected)
+	defer db.Close()
+	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 100, 200, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 100, edgeRollupStateKey: 100}}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.refreshEdgeRollupPass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// TestRollupWatermarkLagSurvivesChunkedCatchUp pins the interaction between
-// chunked catch-up and the safety lag (the chunked backlog test runs with lag
-// disabled, so it cannot catch either regression):
-//   - the lag clamp must apply on chunked passes too — a chunk end landing
-//     inside the tip's lag window must not advance the watermark past rows
-//     that commit late below it;
-//   - the rawmax key must advance only as far as a pass actually scanned —
-//     storing the full tip on a chunked pass lets the plateau shortcut close
-//     the watermark at the tip before its lag window was ever reprocessed.
-//
-// Reverting either half of the fix drops one of the two late rows forever.
-func TestRollupWatermarkLagSurvivesChunkedCatchUp(t *testing.T) {
-	db := openTestDuck(t)
-	if err := CreateTables(db); err != nil {
-		t.Fatalf("CreateTables: %v", err)
+func TestRollupWindowsPartitionSteadyIngest(t *testing.T) {
+	watermark := int64(0)
+	seen := make(map[int64]int)
+	for horizon := int64(100); horizon <= 1000; horizon += 100 {
+		start, end, _ := rollupWindow(watermark, 1, horizon)
+		for row := int64(1); row <= horizon; row++ {
+			if row > start && row <= end {
+				seen[row]++
+			}
+		}
+		watermark = end
 	}
-	if err := CreateViews(db); err != nil {
-		t.Fatalf("CreateViews: %v", err)
+	for row := int64(1); row <= 1000; row++ {
+		if seen[row] != 1 {
+			t.Fatalf("stamp %d processed %d times", row, seen[row])
+		}
 	}
-
-	const lag = 2 * time.Second
-	d := &Duck{
-		DB: db, writeDB: db,
-		cfg:            config.Config{RetentionDays: 30},
-		rollupLagNanos: lag.Nanoseconds(),
-	}
-	ctx := context.Background()
-
-	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
-	const base = int64(1_000_000) // synthetic ingest clock, nanos
-	chunkEnd := base - 1 + rollupChunkNanos
-	tip := base + rollupChunkNanos + time.Second.Nanoseconds() // 1s past the chunk end: pass 1 is chunked AND its end is inside the tip's lag window
-
-	insert := func(spanID, service string, ingested int64) {
-		insertRollupTestSpan(t, db, rollupTestSpan{
-			namespace: "ns", traceID: "tr-" + spanID, spanID: spanID, service: service,
-			operation: "op", start: bucket.Add(time.Second), duration: 10 * time.Millisecond,
-			ingested: ingested,
-		})
-	}
-
-	insert("s-base", "alpha", base)
-	insert("s-tip", "delta", tip)
-
-	// Pass 1: chunked. The watermark must stop at tip-lag, not the chunk end.
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("first rollupOnce: %v", err)
-	}
-	requireServiceRollupSpans(t, db, "ns", bucket, "alpha", 1)
-
-	// Late row below the chunk end but inside the tip's lag window. Without
-	// the chunked-pass clamp the watermark already passed it.
-	insert("s-late-clamp", "beta", chunkEnd-500*time.Millisecond.Nanoseconds())
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("second rollupOnce: %v", err)
-	}
-
-	// Late row just below the tip. With rawmax stored at the full tip on the
-	// chunked pass, the plateau shortcut has already closed the watermark at
-	// the tip and the next pass short-circuits past this row.
-	insert("s-late-plateau", "gamma", tip-time.Second.Nanoseconds())
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("third rollupOnce: %v", err)
-	}
-
-	requireServiceRollupSpans(t, db, "ns", bucket, "beta", 1)
-	requireServiceRollupSpans(t, db, "ns", bucket, "gamma", 1)
 }
 
-// TestEdgeRollupWatermarkPicksUpLateChild exercises the edge rollup's safety-lag
-// path (the existing edge test runs with lag disabled): a child span that commits
-// after the watermark advanced, with a lower ingested timestamp, must still
-// produce its dependency edge.
-func TestEdgeRollupWatermarkPicksUpLateChild(t *testing.T) {
-	db := openTestDuck(t)
-	if err := CreateTables(db); err != nil {
-		t.Fatalf("CreateTables: %v", err)
+func TestRollupPicksUpRetriedCommit(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	batch := telemetrystore.Batch{ID: "retry", Spans: []telemetry.Span{{Namespace: "ns", ServiceName: "retried", TraceID: "trace", SpanID: "span", StartUnixNanos: bucket.UnixNano(), IngestedAt: 1}}}
+	path := repo.Parquet.BatchPath(batch.ID)
+	if err := os.WriteFile(path, []byte("block publication"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	if err := CreateViews(db); err != nil {
-		t.Fatalf("CreateViews: %v", err)
+	if err := repo.Commit(t.Context(), batch); err == nil {
+		t.Fatal("blocked publication succeeded")
 	}
+	failedStamp := batch.Spans[0].IngestedAt
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "other", Logs: []telemetry.Log{{Namespace: "ns", ServiceName: "other", TimeUnixNanos: bucket.UnixNano()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if d.rollupWatermarks[serviceRollupStateKey] <= failedStamp {
+		t.Fatal("fixture did not advance past failed stamp")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Commit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requireServiceRollupSpans(t, d.DB, "ns", bucket, "retried", 1)
+}
 
-	const lag = 2 * time.Second
-	d := &Duck{
-		DB: db, writeDB: db,
-		cfg:            config.Config{RetentionDays: 30},
-		rollupLagNanos: lag.Nanoseconds(),
+func TestRollupFailedFirstAttemptDoesNotOpenEpochWindow(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	batch := telemetrystore.Batch{ID: "first-attempt", Spans: []telemetry.Span{{Namespace: "ns", ServiceName: "first", TraceID: "trace", SpanID: "span", StartUnixNanos: bucket.UnixNano()}}}
+	path := repo.Parquet.BatchPath(batch.ID)
+	if err := os.WriteFile(path, []byte("block publication"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	ctx := context.Background()
-	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
-	tNow := time.Now().UnixNano()
-	start := bucket.Add(time.Second)
+	if err := repo.Commit(t.Context(), batch); err == nil {
+		t.Fatal("blocked publication succeeded")
+	}
+	if _, err := d.rollupOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if d.rollupWatermarks[serviceRollupStateKey] != 0 || d.rollupWatermarks[edgeRollupStateKey] != 0 {
+		t.Fatal("failed attempt opened an epoch catch-up window")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Commit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.rollupOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requireServiceRollupSpans(t, d.DB, "ns", bucket, "first", 1)
+}
 
-	// Parent + first child commit at the high-water mark; edge advances.
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns", traceID: "tr", spanID: "p1", service: "gateway",
-		operation: "op", kind: "SPAN_KIND_SERVER", start: start, duration: 10 * time.Millisecond, ingested: tNow,
-	})
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns", traceID: "tr", spanID: "c1", parentSpanID: "p1", service: "orders",
-		operation: "op", kind: "SPAN_KIND_CLIENT", start: start, duration: 5 * time.Millisecond, ingested: tNow,
-	})
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("first rollupOnce: %v", err)
+func TestRollupRestartRewindsFailedAttemptTail(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
+	repo, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
 	}
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	future := time.Now().Add(time.Hour).UnixNano()
+	batch := telemetrystore.Batch{ID: "durable", Spans: []telemetry.Span{{Namespace: "ns", ServiceName: "original", TraceID: "trace", SpanID: "span", StartUnixNanos: bucket.UnixNano(), IngestedAt: future}}}
+	if err := commitRestoredFixture(repo, t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	repo.Close()
+	repo, err = telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	batch.ID = "retry"
+	batch.Spans[0].ServiceName = "after-restart"
+	path := repo.Parquet.BatchPath(batch.ID)
+	if err := os.WriteFile(path, []byte("block publication"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Commit(t.Context(), batch); err == nil {
+		t.Fatal("blocked publication succeeded")
+	}
+	failed := batch.Spans[0].IngestedAt
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if d.rollupWatermarks[serviceRollupStateKey] != failed {
+		t.Fatal("fixture did not process the failed attempt's empty tail")
+	}
+	for _, v := range []struct {
+		key   string
+		value int64
+	}{{edgeRollupSubWindowKey, failed}, {edgeRollupSubCursorKey, bucket.UnixNano()}} {
+		if _, err := d.DB.Exec(`INSERT INTO rollup_state VALUES (?,?,now()) ON CONFLICT(cache_key) DO UPDATE SET last_ingested_unix_nano=excluded.last_ingested_unix_nano`, v.key, v.value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.Close()
+	repo.Close()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	repo, err = telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+	d, err = NewDuck(t.Context(), cfg, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if d.rollupWatermarks[serviceRollupStateKey] != future {
+		t.Fatal("empty tail survived restart")
+	}
+	_, cursor := readEdgeRollupState(t, d)
+	if cursor != 0 {
+		t.Fatal("partial empty-tail cursor survived restart")
+	}
+	if err := repo.Commit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if batch.Spans[0].IngestedAt != failed {
+		t.Fatal("fixture did not reuse the failed attempt's nondurable stamp")
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requireServiceRollupSpans(t, d.DB, "ns", bucket, "after-restart", 1)
+}
 
-	// A late child of the same parent commits with a lower ingested timestamp.
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns", traceID: "tr", spanID: "c2", parentSpanID: "p1", service: "payments",
-		operation: "op", kind: "SPAN_KIND_CLIENT", start: start, duration: 5 * time.Millisecond,
-		ingested: tNow - time.Second.Nanoseconds(),
-	})
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("second rollupOnce: %v", err)
+func TestRollupIncludesRenamedFirstAttemptBeforeAdoption(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("directory permission failure injection requires an unprivileged user")
 	}
-
-	var calls int64
-	if err := db.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(calls), 0) FROM edge_rollup WHERE namespace = 'ns' AND caller = 'gateway' AND callee = 'payments'`).
-		Scan(&calls); err != nil {
-		t.Fatalf("query edge_rollup: %v", err)
+	d, repo := newBatchCacheTest(t)
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	batch := telemetrystore.Batch{ID: "first-sync-fails", Spans: []telemetry.Span{{Namespace: "ns", ServiceName: "first", TraceID: "trace", SpanID: "span", StartUnixNanos: bucket.UnixNano()}}}
+	// Allow rename but deny opening the parent directory for its final fsync.
+	// The stage has its own readable directory; no production fault hook is needed.
+	dir := repo.Parquet.BatchesDir()
+	if err := os.Chmod(dir, 0300); err != nil {
+		t.Fatal(err)
 	}
-	if calls < 1 {
-		t.Errorf("late child edge gateway->payments missing (calls=%d); safety lag should have caught it", calls)
+	t.Cleanup(func() { _ = os.Chmod(dir, 0755) })
+	err := repo.Commit(t.Context(), batch)
+	if restoreErr := os.Chmod(dir, 0755); restoreErr != nil {
+		t.Fatal(restoreErr)
 	}
+	if err == nil {
+		t.Fatal("commit succeeded despite denied directory fsync")
+	}
+	if info, err := os.Stat(repo.Parquet.BatchPath(batch.ID)); err != nil || !info.IsDir() {
+		t.Fatalf("rename did not complete: %v", err)
+	}
+	if len(repo.Parquet.BatchMetadata()) != 0 {
+		t.Fatal("failed commit was registered")
+	}
+	stamp := batch.Spans[0].IngestedAt
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "second", Logs: []telemetry.Log{{Namespace: "ns", ServiceName: "other", TimeUnixNanos: bucket.UnixNano()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if d.rollupWatermarks[serviceRollupStateKey] <= stamp {
+		t.Fatal("rollup did not pass the failed stamp")
+	}
+	if err := repo.Commit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requireServiceRollupSpans(t, d.DB, "ns", bucket, "first", 1)
 }

@@ -1,6 +1,7 @@
 package intelligence
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -12,11 +13,11 @@ import (
 )
 
 // Exercise the production Parquet timestamp type, not a mutable TIMESTAMP table.
-// Detector methods return nil on SQL errors, so require an actual anomaly from
-// each query rather than merely accepting an empty snapshot.
+// Require an actual anomaly from each query and propagate SQL errors. INTERNAL spans
+// are served work too: latency detection must use the rollup definition.
 func TestDetectorsReadNativeParquetTimestamps(t *testing.T) {
 	ctx := t.Context()
-	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 1}
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 1, RollupInterval: time.Minute}
 	repository, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +43,7 @@ func TestDetectorsReadNativeParquetTimestamps(t *testing.T) {
 			nanos := at.Add(time.Duration(i) * time.Second).UnixNano()
 			batch.Spans = append(batch.Spans, telemetry.Span{
 				Namespace: "prod", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d-%d", bucket, i), SpanID: "span",
-				Kind: "SPAN_KIND_SERVER", StatusCode: status, DurationMS: latency,
+				Kind: "SPAN_KIND_INTERNAL", StatusCode: status, DurationMS: latency,
 				StartUnixNanos: nanos, EndUnixNanos: nanos + int64(latency*1e6), IngestedAt: nanos,
 			})
 		}
@@ -54,16 +55,47 @@ func TestDetectorsReadNativeParquetTimestamps(t *testing.T) {
 	if err := repository.Commit(ctx, batch); err != nil {
 		t.Fatal(err)
 	}
+	rollupCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); duck.RunRollups(rollupCtx) }()
+	until := time.Now().Add(5 * time.Second)
+	for {
+		minute, err := duck.CompletedServiceRollupMinute(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !minute.IsZero() {
+			break
+		}
+		if time.Now().After(until) {
+			t.Fatal("service rollup did not complete")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-done
 	detector := NewDetector(duck, DefaultDetectorConfig())
-	for name, detect := range map[string]func() []Anomaly{
-		"error rate": func() []Anomaly { return detector.detectErrorRateAnomalies(ctx, start, end) },
-		"latency":    func() []Anomaly { return detector.detectLatencyAnomalies(ctx, start, end) },
-		"volume":     func() []Anomaly { return detector.detectVolumeAnomalies(ctx, start, end) },
+	for name, detect := range map[string]func() ([]Anomaly, error){
+		"error rate": func() ([]Anomaly, error) {
+			return detector.detectErrorRateAnomalies(ctx, start.Truncate(time.Minute), end.Truncate(time.Minute))
+		},
+		"latency": func() ([]Anomaly, error) {
+			return detector.detectLatencyAnomalies(ctx, start.Truncate(time.Minute), end.Truncate(time.Minute))
+		},
+		"volume": func() ([]Anomaly, error) {
+			return detector.detectVolumeAnomalies(ctx, start.Truncate(time.Minute), end.Truncate(time.Minute))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			anomalies := detect()
+			anomalies, err := detect()
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(anomalies) != 1 || anomalies[0].ServiceName != "checkout" || anomalies[0].Current <= anomalies[0].Baseline {
 				t.Fatalf("expected checkout anomaly, got %#v", anomalies)
+			}
+			if !anomalies[0].WindowStart.Equal(start.Truncate(time.Minute)) || !anomalies[0].WindowEnd.Equal(end.Truncate(time.Minute)) {
+				t.Fatalf("evaluated bounds: %+v", anomalies[0])
 			}
 		})
 	}

@@ -327,11 +327,10 @@ func TestBacklogServiceFailuresIdentifyStatementAndPreserveCause(t *testing.T) {
 			}
 			defer db.Close()
 			cause := &duckdb.Error{Type: duckdb.ErrorTypeOutOfMemory, Msg: "Out of Memory Error: attribution fixture"}
-			mock.ExpectBegin()
-			for _, key := range []string{serviceRollupStateKey, serviceRollupRawMaxKey} {
+			for _, key := range []string{serviceRollupStateKey} {
 				mock.ExpectQuery("FROM rollup_state").WithArgs(key).WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(1))
 			}
-			mock.ExpectQuery("FROM \\(").WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(2))
+			mock.ExpectBegin()
 			if label == "service_rollup/delete" {
 				mock.ExpectExec("DELETE FROM service_rollup").WillReturnError(cause)
 			} else {
@@ -339,7 +338,7 @@ func TestBacklogServiceFailuresIdentifyStatementAndPreserveCause(t *testing.T) {
 				mock.ExpectExec("WITH affected").WillReturnError(cause)
 			}
 			mock.ExpectRollback()
-			d := &Duck{DB: db, writeDB: db}
+			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 2, 2, 1 }}
 			_, err = d.refreshServiceRollup(t.Context())
 			var native *duckdb.Error
 			if err == nil || !strings.Contains(err.Error(), label) || !errors.Is(err, cause) || !errors.As(err, &native) || native != cause {

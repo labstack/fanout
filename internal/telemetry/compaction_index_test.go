@@ -33,7 +33,7 @@ func TestCompactionStreamingIndexMatchesReread(t *testing.T) {
 			spans[i] = Span{Namespace: fmt.Sprint("ns-", n%3), TraceID: fmt.Sprint("trace-", n%97), SpanID: fmt.Sprint("span-", n), StartUnixNanos: int64(n%11) - 5, EndUnixNanos: int64(n%11) + 5, IngestedAt: 100, Resource: map[string]any{"bytes": []byte{0, 255}, "typed": []any{int64(n), false}}, Attributes: map[string]any{"n": int64(n)}}
 		}
 		id := fmt.Sprint("input-", part)
-		if err := store.CommitBatch(t.Context(), BatchMetadata{ID: id}, spans, nil, nil); err != nil {
+		if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: id}, spans, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 		inputs = append(inputs, filepath.Join(store.BatchPath(id), "spans.parquet"))
@@ -133,7 +133,7 @@ func TestCancelledSpanMergeRemovesOutputAndIndex(t *testing.T) {
 	for i := range spans {
 		spans[i] = Span{TraceID: fmt.Sprint("trace-", i), SpanID: fmt.Sprint(i), StartUnixNanos: int64(i), IngestedAt: 100}
 	}
-	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "input"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "input"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	base, cancel := context.WithCancel(t.Context())

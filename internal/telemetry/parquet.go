@@ -84,12 +84,16 @@ type storedBatch struct {
 }
 
 type ParquetStore struct {
-	dir         string
-	batchesDir  string
-	stagingDir  string
-	mu          sync.RWMutex
-	publishGate chan struct{}
-	batches     map[string]*storedBatch
+	dir                string
+	batchesDir         string
+	stagingDir         string
+	mu                 sync.RWMutex
+	publishGate        chan struct{}
+	batches            map[string]*storedBatch
+	generation0Batches int
+	generation0ByDay   map[int64]int
+	compactionDebt     int
+	debtChanged        chan struct{}
 }
 
 type ParquetStats struct {
@@ -192,6 +196,17 @@ func (p *ParquetStore) BatchMetadata() []BatchMetadata {
 	return out
 }
 
+// batchMetadataByID returns one installed batch without scanning the catalog.
+func (p *ParquetStore) batchMetadataByID(id string) (BatchMetadata, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	batch, ok := p.batches[id]
+	if !ok {
+		return BatchMetadata{}, false
+	}
+	return batch.metadata, true
+}
+
 func (p *ParquetStore) RowCount() uint64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -205,15 +220,17 @@ func (p *ParquetStore) RowCount() uint64 {
 // CommitBatch publishes one atomic batch directory. Preparation is allowed to
 // finish; only the final publish-gate wait is capped. A stalled publication
 // therefore cannot hang ingest, while a large valid encode does not consume
-// the gate budget before it starts waiting.
-func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
+// the gate budget before it starts waiting. On success metadata is replaced
+// with the actual published metadata, including an adopted earlier attempt.
+func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
 	if err := ValidateBatchID(metadata.ID); err != nil {
 		return err
 	}
 	metadata.Version = batchMetadataVersion
 	metadata.Spans, metadata.Logs, metadata.Metrics = len(spans), len(logs), len(metrics)
 	final := p.BatchPath(metadata.ID)
-	if p.hasBatch(metadata.ID) {
+	if existing, ok := p.batchMetadataByID(metadata.ID); ok {
+		*metadata = existing
 		return nil
 	}
 	if info, err := os.Stat(final); err == nil && info.IsDir() {
@@ -233,6 +250,7 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 			return err
 		}
 		p.installBatch(adopted)
+		*metadata = adopted.metadata
 		return nil
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -339,7 +357,8 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 		return err
 	}
 	defer p.unlockPublish()
-	if p.hasBatch(metadata.ID) {
+	if existing, ok := p.batchMetadataByID(metadata.ID); ok {
+		*metadata = existing
 		complete = true
 		return os.RemoveAll(stage)
 	}
@@ -352,7 +371,11 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 			if err := syncDirectory(p.batchesDir); err != nil {
 				return errors.Join(err, removeErr)
 			}
-			return errors.Join(p.registerBatch(final), removeErr)
+			if err := p.registerBatch(final); err != nil {
+				return errors.Join(err, removeErr)
+			}
+			*metadata, _ = p.batchMetadataByID(metadata.ID)
+			return removeErr
 		}
 		return fmt.Errorf("publish Parquet batch: %w", err)
 	}
@@ -361,8 +384,9 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 		return err
 	}
 	p.mu.Lock()
-	p.batches[metadata.ID] = prepared
+	p.setBatchLocked(metadata.ID, prepared)
 	p.mu.Unlock()
+	*metadata = prepared.metadata
 	return nil
 }
 
@@ -435,9 +459,9 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 			defer p.mu.Unlock()
 			for _, input := range prepared {
 				if _, err := os.Stat(input.active); err == nil {
-					p.batches[input.id] = input.batch
+					p.setBatchLocked(input.id, input.batch)
 				} else {
-					delete(p.batches, input.id)
+					p.setBatchLocked(input.id, nil)
 				}
 			}
 		}
@@ -707,7 +731,7 @@ func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(fu
 		}
 		p.mu.Lock()
 		for _, id := range retiredIDs {
-			delete(p.batches, id)
+			p.setBatchLocked(id, nil)
 		}
 		p.mu.Unlock()
 		return nil
@@ -828,9 +852,9 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 			p.mu.Lock()
 			defer p.mu.Unlock()
 			for _, id := range inputs {
-				delete(p.batches, id)
+				p.setBatchLocked(id, nil)
 			}
-			p.batches[metadata.ID] = replacement
+			p.setBatchLocked(metadata.ID, replacement)
 		}
 		rollback := func() error {
 			var rollbackErr error
@@ -844,12 +868,12 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 				}
 			}
 			p.mu.Lock()
-			delete(p.batches, metadata.ID)
+			p.setBatchLocked(metadata.ID, nil)
 			for id := range inputBatches {
-				delete(p.batches, id)
+				p.setBatchLocked(id, nil)
 			}
 			for id, batch := range restore {
-				p.batches[id] = batch
+				p.setBatchLocked(id, batch)
 			}
 			p.mu.Unlock()
 			return errors.Join(rollbackErr, syncDirectory(p.batchesDir))
@@ -866,7 +890,7 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 			}
 			source = stage
 			p.mu.Lock()
-			delete(p.batches, metadata.ID)
+			p.setBatchLocked(metadata.ID, nil)
 			p.mu.Unlock()
 		}
 		for _, id := range inputs {
@@ -1097,7 +1121,7 @@ func verifyTypedParquet[T any](path string, expected int, visit func(T, uint64) 
 // installBatch publishes a validated batch into the queryable set.
 func (p *ParquetStore) installBatch(batch *storedBatch) {
 	p.mu.Lock()
-	p.batches[batch.metadata.ID] = batch
+	p.setBatchLocked(batch.metadata.ID, batch)
 	p.mu.Unlock()
 }
 
@@ -1211,13 +1235,6 @@ func parquetTimeRange(file *parquet.File, column string) TimeRange {
 		}
 	}
 	return result
-}
-
-func (p *ParquetStore) hasBatch(id string) bool {
-	p.mu.RLock()
-	_, ok := p.batches[id]
-	p.mu.RUnlock()
-	return ok
 }
 
 func spanSortingColumns() parquet.SortingOption {

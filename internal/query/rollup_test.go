@@ -20,7 +20,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -83,7 +83,7 @@ func TestServiceRollupLatencyExcludesDependencyWaits(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews failed: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, cfg: config.Config{RetentionDays: 30}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30}}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 
@@ -138,7 +138,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -227,7 +227,7 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -301,7 +301,7 @@ func TestRollupOnceMessagingEdgeCountsConsumedMessages(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -372,7 +372,7 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -505,7 +505,7 @@ func TestRollupOnceChunksWideBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -723,7 +723,7 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews failed: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, cfg: config.Config{RetentionDays: 30}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30}}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 
@@ -746,9 +746,25 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 		t.Fatalf("CreateTables after the schema change: %v", err)
 	}
 	requireRowCount(t, db, `SELECT count(*) FROM service_rollup`, nil, 0)
+	d.rollupWatermarks = nil
 
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("rollupOnce after recreate failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
+}
+
+// Mutable-table fixtures have no Repository. Their source is explicit and is
+// never used by the production Parquet path.
+func tablePublicationBounds(db *sql.DB) func() (int64, int64, int64) {
+	return func() (int64, int64, int64) {
+		var hi, lo int64
+		if err := db.QueryRow(`SELECT coalesce(max(v),0), coalesce(min(v),0) FROM (
+   SELECT ingested_unix_nano v FROM telemetry.spans UNION ALL
+   SELECT ingested_unix_nano FROM telemetry.logs UNION ALL
+   SELECT ingested_unix_nano FROM telemetry.metrics)`).Scan(&hi, &lo); err != nil {
+			panic(err)
+		}
+		return hi, hi, lo
+	}
 }

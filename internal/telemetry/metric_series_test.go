@@ -33,7 +33,7 @@ func TestMetricSeriesIDSurvivesParquetCompaction(t *testing.T) {
 		m := Metric{Namespace: "test", Name: "net", Type: "gauge", TimeUnixNanos: int64(i + 1), Attributes: map[string]any{"nested": []any{map[string]any{"id": int64(i)}}}}
 		m.SeriesID = MetricSeriesID(m)
 		id := fmt.Sprintf("series%d", i)
-		if err := store.CommitBatch(t.Context(), BatchMetadata{ID: id}, nil, nil, []Metric{m}); err != nil {
+		if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: id}, nil, nil, []Metric{m}); err != nil {
 			t.Fatal(err)
 		}
 		if err := ValidatePublishedBatch(store.BatchPath(id)); err != nil {

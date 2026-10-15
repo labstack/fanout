@@ -115,8 +115,8 @@ func TestDetectorAnnotationMapping(t *testing.T) {
 	}
 	defer duck.Close()
 	at := time.Now().UTC().Truncate(time.Minute)
-	snapshot := IntelligenceSnapshot{GeneratedAt: at, Anomalies: []Anomaly{{ServiceName: "checkout", Type: AnomalyLatencyDegradation, ZScore: -4, DetectedAt: at, Description: "Slow"}, {ServiceName: "payment", Type: AnomalyVolumeChange, ZScore: 3, DetectedAt: at, Description: "Low volume"}}}
-	findings := detectorAnnotations(snapshot, "shop", 5*time.Minute)
+	snapshot := IntelligenceSnapshot{GeneratedAt: at, Anomalies: []Anomaly{{ServiceName: "checkout", Type: AnomalyLatencyDegradation, ZScore: -4, DetectedAt: at, WindowStart: at.Add(-5 * time.Minute), WindowEnd: at, Description: "Slow"}, {ServiceName: "payment", Type: AnomalyVolumeChange, ZScore: 3, DetectedAt: at, WindowStart: at.Add(-5 * time.Minute), WindowEnd: at, Description: "Low volume"}}}
+	findings := detectorAnnotations(snapshot, "shop")
 	if err := duck.RecordAnomalies(t.Context(), findings, at); err != nil {
 		t.Fatal(err)
 	}

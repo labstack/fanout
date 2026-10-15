@@ -33,13 +33,12 @@ func TestEdgeRollupTickDrainsMultiHourBacklog(t *testing.T) {
 			}
 			watermark, cursor := readEdgeRollupState(t, d)
 			source := now.Add(-4*time.Hour + 11*step).UnixNano()
-			want := source - d.rollupSafetyLagNanos()
+			want := source - int64(0)
 			if cursor != 0 || watermark != want {
 				t.Fatalf("one tick did not drain the backlog: watermark=%d cursor=%d want=%d", watermark, cursor, want)
 			}
 			assertBacklogEdges(t, d)
-			// The unchanged plateau rule completes the safety-lag tail on the
-			// next tick, rather than bypassing the lag inside this tick.
+			// An unchanged publication horizon makes the next tick idle.
 			if _, err := d.rollupOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -107,7 +106,7 @@ func TestEdgeRollupTickReleasesGateBetweenSubWindows(t *testing.T) {
 		t.Fatalf("tick did not advance many passes: rows=%d passes=%d err=%v", n, passes, err)
 	}
 	watermark, cursor := readEdgeRollupState(t, d)
-	if watermark != now.UnixNano()-d.rollupSafetyLagNanos() || cursor != 0 {
+	if watermark != now.UnixNano()-int64(0) || cursor != 0 {
 		t.Fatalf("tick left a backlog: watermark=%d cursor=%d", watermark, cursor)
 	}
 	assertBacklogEdges(t, d)
@@ -159,7 +158,7 @@ func TestEdgeRollupTickContinuesPastEmptyPendingPass(t *testing.T) {
 	}
 }
 
-func TestEdgeRollupTickPreservesPublicationLag(t *testing.T) {
+func TestEdgeRollupTickPicksUpRestampedLateChild(t *testing.T) {
 	d, repo := versionEngine(t)
 	d.cfg.RollupInterval = time.Minute
 	now := time.Now().UTC().Truncate(time.Minute)
@@ -168,8 +167,8 @@ func TestEdgeRollupTickPreservesPublicationLag(t *testing.T) {
 		t.Fatal(err)
 	}
 	watermark, cursor := readEdgeRollupState(t, d)
-	if want := now.UnixNano() - d.rollupSafetyLagNanos(); watermark != want || cursor != 0 {
-		t.Fatalf("tick consumed the publication lag: watermark=%d cursor=%d want=%d", watermark, cursor, want)
+	if want := now.UnixNano() - int64(0); watermark != want || cursor != 0 {
+		t.Fatalf("tick did not reach the horizon: watermark=%d cursor=%d want=%d", watermark, cursor, want)
 	}
 	base := now.Add(-3 * time.Hour).UnixNano()
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "late-edge", Spans: []telemetry.Span{{Namespace: "ns-a", ServiceName: "late-child", TraceID: "0", SpanID: "late", ParentSpanID: "s0", Kind: "SPAN_KIND_CLIENT", StartUnixNanos: base, EndUnixNanos: base + int64(time.Millisecond), DurationMS: 1, IngestedAt: now.Add(-time.Second).UnixNano()}}}); err != nil {

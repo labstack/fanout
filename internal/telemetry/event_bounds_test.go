@@ -18,7 +18,7 @@ func TestEventBoundsUsePhysicalNanosecondsAfterReopen(t *testing.T) {
 	spans := []Span{{TraceID: "trace", SpanID: "negative", StartUnixNanos: -7, EndUnixNanos: -3, IngestedAt: 999}, {TraceID: "trace", SpanID: "positive", StartUnixNanos: 23, EndUnixNanos: 24, IngestedAt: 999}}
 	logs := []Log{{EventUnixNanos: 5, TimeUnixNanos: 1, IngestedAt: 999}, {ObservedTimeNanos: 17, IngestedAt: 999}}
 	metrics := []Metric{{EventUnixNanos: 11, TimeUnixNanos: 1, IngestedAt: 999}, {IngestedAt: 999}}
-	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "bounds"}, spans, logs, metrics); err != nil {
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "bounds"}, spans, logs, metrics); err != nil {
 		t.Fatal(err)
 	}
 	store, err = OpenParquetStore(dir)

@@ -250,3 +250,37 @@ func histogramSampleCount(t *testing.T, metricName, labelName, labelValue string
 	}
 	return 0
 }
+
+func TestCompactionBacklogSourceTracksCountAndOwner(t *testing.T) {
+	count := 12
+	releaseOld := SetCompactionBacklogSource(func() int { return count })
+	releaseNew := SetCompactionBacklogSource(func() int { return count + 1 })
+	defer releaseNew()
+	releaseOld()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, family := range families {
+		if family.GetName() == "fanout_compaction_backlog_batches" {
+			found = true
+			if got := family.Metric[0].GetGauge().GetValue(); got != 13 {
+				t.Fatalf("count=%g", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("backlog gauge not exported")
+	}
+	releaseNew()
+	families, err = prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() == "fanout_compaction_backlog_batches" && family.Metric[0].GetGauge().GetValue() != 0 {
+			t.Fatal("closed source retained")
+		}
+	}
+}

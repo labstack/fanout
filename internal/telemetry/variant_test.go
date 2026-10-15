@@ -123,7 +123,7 @@ func testUnsupportedFormatLeavesStoreUntouched(t *testing.T, suffix string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "old"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "old"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	metadata := filepath.Join(store.BatchPath("old"), "metadata.json")

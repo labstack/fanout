@@ -22,8 +22,8 @@ func TestVolumeAnomalyComparesEqualWindows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE spans (
-		service TEXT, namespace TEXT, start_time TIMESTAMP, start_unix_nano BIGINT
+	if _, err := db.Exec(`CREATE TABLE service_rollup (
+		service TEXT, namespace TEXT, bucket TIMESTAMP_NS, spans BIGINT
 	)`); err != nil {
 		t.Fatal(err)
 	}
@@ -38,12 +38,8 @@ func TestVolumeAnomalyComparesEqualWindows(t *testing.T) {
 	for bucket, count := range perBucket {
 		at := baselineStart.Add(time.Duration(bucket) * 5 * time.Minute)
 		for _, service := range []string{"cart", "checkout", "frontend"} {
-			for i := range count {
-				ts := at.Add(time.Duration(i) * time.Millisecond)
-				if _, err := db.Exec(`INSERT INTO spans VALUES (?, 'default', ?, ?)`,
-					service, ts, ts.UnixNano()); err != nil {
-					t.Fatal(err)
-				}
+			if _, err := db.Exec(`INSERT INTO service_rollup VALUES (?, 'default', ?, ?)`, service, at, count); err != nil {
+				t.Fatal(err)
 			}
 		}
 	}
@@ -94,8 +90,8 @@ func TestVolumeAnomalyStillFiresOnARealDrop(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE spans (
-		service TEXT, namespace TEXT, start_time TIMESTAMP, start_unix_nano BIGINT
+	if _, err := db.Exec(`CREATE TABLE service_rollup (
+		service TEXT, namespace TEXT, bucket TIMESTAMP_NS, spans BIGINT
 	)`); err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +108,8 @@ func TestVolumeAnomalyStillFiresOnARealDrop(t *testing.T) {
 			if service == "collapsing" && inCurrentWindow {
 				count = count / 20
 			}
-			for i := range count {
-				ts := at.Add(time.Duration(i) * time.Millisecond)
-				if _, err := db.Exec(`INSERT INTO spans VALUES (?, 'default', ?, ?)`,
-					service, ts, ts.UnixNano()); err != nil {
-					t.Fatal(err)
-				}
+			if _, err := db.Exec(`INSERT INTO service_rollup VALUES (?, 'default', ?, ?)`, service, at, count); err != nil {
+				t.Fatal(err)
 			}
 			count = perBucket[bucket]
 		}

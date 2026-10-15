@@ -1,6 +1,6 @@
 // Package intelligence derives anomalies and log patterns from telemetry.
 //
-// Every SQL string in this file goes through internal/query's validator, which
+// Public log-pattern SQL goes through internal/query's validator, which
 // rejects "--" outright. A SQL comment in one of these statements therefore
 // fails the query at runtime, on a background goroutine, as a logged error
 // nobody is watching -- that is how latency detection stopped reporting for
@@ -93,7 +93,14 @@ func (d *Detector) safeRunCheck(ctx context.Context) {
 
 // runCheck performs a single detection cycle
 func (d *Detector) runCheck(ctx context.Context) {
-	snapshot := d.GenerateSnapshot(ctx)
+	snapshot, err := d.GenerateSnapshot(ctx)
+	if err != nil {
+		slog.Error("generate detector snapshot failed", "error", err)
+		return
+	}
+	if previous := d.LatestSnapshot(); previous != nil && snapshot.GeneratedAt.Equal(previous.GeneratedAt) {
+		return
+	}
 	d.publishSnapshot(snapshot)
 
 	anomalyCount := len(snapshot.Anomalies)
@@ -107,7 +114,7 @@ func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
 	d.mu.Lock()
 	d.snapshot = &snapshot
 	d.mu.Unlock()
-	batch := annotationBatch{detectorAnnotations(snapshot, d.duck.DefaultNamespace(), d.config.LookbackWindow), snapshot.GeneratedAt}
+	batch := annotationBatch{detectorAnnotations(snapshot, d.duck.DefaultNamespace()), snapshot.GeneratedAt}
 	// Only the producer modifies the pending slot. Persistence can be blocked
 	// while a newer cycle replaces the single pending batch.
 	d.annotationMu.Lock()
@@ -129,27 +136,50 @@ func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
 const maxCarriedAnomalies = 10000
 
 func (d *Detector) persistAnnotations(ctx context.Context, record func(context.Context, []annotations.Anomaly, time.Time) error) {
-	// A write can miss the write gate while ingest catches up on a backlog. Its
-	// findings are kept and written with the next batch, so a short spike seen
-	// during the backlog is not lost; the store merges overlapping episodes.
-	var carried []annotations.Anomaly
+	// Keep failed findings with their evaluated intervals, even when the
+	// watermark stalls and no new batch arrives to trigger another write.
+	var carried annotationBatch
+	var retry *time.Timer
+	var retryC <-chan time.Time
+	delay := time.Second
+	defer func() {
+		if retry != nil {
+			retry.Stop()
+		}
+	}()
 	for {
 		if ctx.Err() != nil {
 			return
 		}
+		var batch annotationBatch
 		select {
 		case <-ctx.Done():
 			return
-		case batch := <-d.annotationBatches:
-			findings := append(carried, batch.findings...)
-			carried = nil
-			if err := record(ctx, findings, batch.at); err != nil && ctx.Err() == nil {
-				slog.Error("persist detector annotations", "error", err, "carried", len(findings))
-				if len(findings) > maxCarriedAnomalies {
-					findings = findings[len(findings)-maxCarriedAnomalies:]
-				}
-				carried = findings
+		case batch = <-d.annotationBatches:
+			batch.findings = append(carried.findings, batch.findings...)
+		case <-retryC:
+			batch = carried
+		}
+		if retry != nil {
+			retry.Stop()
+		}
+		retryC = nil
+		if err := record(ctx, batch.findings, batch.at); err != nil && ctx.Err() == nil {
+			slog.Error("persist detector annotations", "error", err, "carried", len(batch.findings))
+			if len(batch.findings) > maxCarriedAnomalies {
+				batch.findings = batch.findings[len(batch.findings)-maxCarriedAnomalies:]
 			}
+			carried = batch
+			if retry == nil {
+				retry = time.NewTimer(delay)
+			} else {
+				retry.Reset(delay)
+			}
+			retryC = retry.C
+			delay = min(2*delay, 30*time.Second)
+		} else {
+			carried = annotationBatch{}
+			delay = time.Second
 		}
 	}
 }
@@ -162,12 +192,22 @@ func (d *Detector) LatestSnapshot() *IntelligenceSnapshot {
 }
 
 // GenerateSnapshot generates a complete intelligence snapshot
-func (d *Detector) GenerateSnapshot(ctx context.Context) IntelligenceSnapshot {
+func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, error) {
+	completed, err := d.duck.CompletedServiceRollupMinute(ctx)
+	if err != nil {
+		return IntelligenceSnapshot{}, fmt.Errorf("read detector service watermark: %w", err)
+	}
+	if previous := d.LatestSnapshot(); previous != nil && !completed.After(previous.evaluatedThrough) {
+		return *previous, nil
+	}
 	now := time.Now()
 	lookback := now.Add(-d.config.LookbackWindow)
 
 	// Detect anomalies
-	anomalies := d.detectAnomalies(ctx, lookback, now)
+	anomalies, err := d.detectAnomalies(ctx, completed.Add(-d.config.LookbackWindow), completed)
+	if err != nil {
+		return IntelligenceSnapshot{}, err
+	}
 
 	// Detect log patterns
 	patterns := d.detectLogPatterns(ctx, lookback, now)
@@ -179,33 +219,46 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) IntelligenceSnapshot {
 	insights := d.generateInsights(anomalies, patterns)
 
 	return IntelligenceSnapshot{
-		GeneratedAt: now,
-		Timeframe:   fmt.Sprintf("last_%dm", int(d.config.LookbackWindow.Minutes())),
-		Insights:    insights,
-		Patterns:    patterns,
-		Anomalies:   anomalies,
-		Summary:     d.generateSummary(healthScore, anomalies, patterns),
-		HealthScore: healthScore,
-	}
+		evaluatedThrough: completed,
+		GeneratedAt:      now,
+		Timeframe:        fmt.Sprintf("last_%dm", int(d.config.LookbackWindow.Minutes())),
+		Insights:         insights,
+		Patterns:         patterns,
+		Anomalies:        anomalies,
+		Summary:          d.generateSummary(healthScore, anomalies, patterns),
+		HealthScore:      healthScore,
+	}, nil
 }
 
-// detectAnomalies detects statistical anomalies in metrics
-func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
+// detectAnomalies evaluates exactly [start, end) from completed rollup minutes.
+func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) ([]Anomaly, error) {
+	if end.IsZero() {
+		return nil, nil
+	}
 	var anomalies []Anomaly
 
 	// 1. Error rate anomalies by service
-	errorAnomalies := d.detectErrorRateAnomalies(ctx, start, end)
+	errorAnomalies, err := d.detectErrorRateAnomalies(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
 	anomalies = append(anomalies, errorAnomalies...)
 
 	// 2. Latency anomalies by service
-	latencyAnomalies := d.detectLatencyAnomalies(ctx, start, end)
+	latencyAnomalies, err := d.detectLatencyAnomalies(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
 	anomalies = append(anomalies, latencyAnomalies...)
 
 	// 3. Volume anomalies
-	volumeAnomalies := d.detectVolumeAnomalies(ctx, start, end)
+	volumeAnomalies, err := d.detectVolumeAnomalies(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
 	anomalies = append(anomalies, volumeAnomalies...)
 
-	return anomalies
+	return anomalies, nil
 }
 
 // minErrorRateStddev floors the error-rate z-score denominator at one
@@ -240,11 +293,11 @@ func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
 			FROM (
 				SELECT
 					service as service_name,
-					(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS bucket_rate
-				FROM spans
-				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+					(SUM(error_rate * spans) / SUM(spans)) AS bucket_rate
+				FROM service_rollup
+				WHERE bucket >= make_timestamp_ns(%d) AND bucket < make_timestamp_ns(%d) AND spans > 0
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', bucket)
 			) buckets
 			GROUP BY service_name
 		),
@@ -256,11 +309,11 @@ func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
 			FROM (
 				SELECT
 					service as service_name,
-					(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS bucket_rate
-				FROM spans
-				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+					(SUM(error_rate * spans) / SUM(spans)) AS bucket_rate
+				FROM service_rollup
+				WHERE bucket >= make_timestamp_ns(%d) AND bucket < make_timestamp_ns(%d) AND spans > 0
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', bucket)
 			) buckets
 			GROUP BY service_name
 		)
@@ -279,7 +332,7 @@ func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
 }
 
 // detectErrorRateAnomalies detects error rate spikes
-func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
+func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time.Time) ([]Anomaly, error) {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
@@ -288,20 +341,17 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	// Compare current error rate to baseline (previous period)
 	sql := errorRateAnomalySQL(startNano, endNano, scope)
 
-	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
-	if resp.Error != "" {
-		if !isNoDataError(resp.Error) {
-			slog.Error("error rate detection failed", "error", resp.Error)
-		}
-		return nil
+	rows, err := d.readServiceAnomalies(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("error rate detection: %w", err)
 	}
 
 	var anomalies []Anomaly
-	for _, row := range resp.Results {
-		serviceName, _ := row["service_name"].(string)
-		currentRate, _ := row["current_rate"].(float64)
-		baselineRate, _ := row["baseline_rate"].(float64)
-		zScore, _ := row["z_score"].(float64)
+	for _, row := range rows {
+		serviceName := row.service
+		currentRate := row.current
+		baselineRate := row.baseline
+		zScore := row.zScore
 
 		if math.Abs(zScore) >= d.config.ErrorRateThreshold {
 			anomalies = append(anomalies, Anomaly{
@@ -312,82 +362,39 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 				Baseline:    baselineRate * 100,
 				ZScore:      zScore,
 				DetectedAt:  time.Now(),
+				WindowStart: start,
+				WindowEnd:   end,
 				Description: fmt.Sprintf("%s error rate: %.1f%% (baseline: %.1f%%, z-score: %.2f)",
 					serviceName, currentRate*100, baselineRate*100, zScore),
 			})
 		}
 	}
 
-	return anomalies
+	return anomalies, nil
 }
 
 // detectLatencyAnomalies detects latency degradation
-func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
-	// The percentile below is approx_quantile, not PERCENTILE_CONT: the exact
-	// form is holistic and retains every value of every group on the raw
-	// allocator, outside anything memory_limit bounds. This runs every 60s over
-	// a 15-minute window. See serviceRollupP95SQL.
+func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.Time) ([]Anomaly, error) {
+	// service_rollup grades served spans (with its outbound-only fallback).
+	// Weight minute p95 values by spans; do not recompute raw-span quantiles.
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
 	scope := detectorScopeClause(namespace)
 
-	sql := fmt.Sprintf(`
-		WITH current_period AS (
-			SELECT
-				service as service_name,
-				approx_quantile(duration_ms, 0.95) AS p95_latency
-			FROM spans
-			WHERE start_unix_nano >= %d AND start_unix_nano < %d
-			  AND kind = 'SPAN_KIND_SERVER'
-			  %s
-			GROUP BY service
-		),
-		baseline_buckets AS (
-			SELECT
-				service as service_name,
-				time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS) AS bucket,
-				approx_quantile(duration_ms, 0.95) AS p95_latency
-			FROM spans
-			WHERE start_unix_nano >= %d AND start_unix_nano < %d
-			  AND kind = 'SPAN_KIND_SERVER'
-			  %s
-			GROUP BY service, bucket
-		),
-		baseline_period AS (
-			SELECT
-				service_name,
-				AVG(p95_latency) AS avg_p95,
-				STDDEV(p95_latency) AS p95_stddev
-			FROM baseline_buckets
-			GROUP BY service_name
-		)
-		SELECT
-			c.service_name,
-			c.p95_latency AS current_p95,
-			COALESCE(b.avg_p95, 0.0) AS baseline_p95,
-			CASE
-				WHEN b.p95_stddev > 0 THEN (c.p95_latency - b.avg_p95) / b.p95_stddev
-				ELSE 0.0
-			END AS z_score
-		FROM current_period c
-		LEFT JOIN baseline_period b ON c.service_name = b.service_name
-	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
+	sql := latencyAnomalySQL(startNano, endNano, scope)
 
-	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
-	if resp.Error != "" {
-		if !isNoDataError(resp.Error) {
-			slog.Error("latency detection failed", "error", resp.Error)
-		}
-		return nil
+	rows, err := d.readServiceAnomalies(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("latency detection: %w", err)
 	}
 
 	var anomalies []Anomaly
-	for _, row := range resp.Results {
-		serviceName, _ := row["service_name"].(string)
-		currentP95, _ := row["current_p95"].(float64)
-		baselineP95, _ := row["baseline_p95"].(float64)
-		zScore, _ := row["z_score"].(float64)
+	for _, row := range rows {
+		serviceName := row.service
+		currentP95 := row.current
+		baselineP95 := row.baseline
+		zScore := row.zScore
 
 		if zScore >= d.config.LatencyThreshold {
 			anomalies = append(anomalies, Anomaly{
@@ -398,13 +405,15 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 				Baseline:    baselineP95,
 				ZScore:      zScore,
 				DetectedAt:  time.Now(),
+				WindowStart: start,
+				WindowEnd:   end,
 				Description: fmt.Sprintf("%s P95 latency: %.1fms (baseline P95: %.1fms, z-score: %.2f)",
 					serviceName, currentP95, baselineP95, zScore),
 			})
 		}
 	}
 
-	return anomalies
+	return anomalies, nil
 }
 
 // volumeAnomalySQL compares span volume in [startNano, endNano) against the
@@ -426,11 +435,11 @@ func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 			FROM (
 				SELECT
 					service as service_name,
-					COUNT(*) AS cnt
-				FROM spans
-				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+					SUM(spans) AS cnt
+				FROM service_rollup
+				WHERE bucket >= make_timestamp_ns(%d) AND bucket < make_timestamp_ns(%d) AND spans > 0
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', bucket)
 			) subq
 			GROUP BY service_name
 		),
@@ -442,11 +451,11 @@ func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 			FROM (
 				SELECT
 					service as service_name,
-					COUNT(*) AS cnt
-				FROM spans
-				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+					SUM(spans) AS cnt
+				FROM service_rollup
+				WHERE bucket >= make_timestamp_ns(%d) AND bucket < make_timestamp_ns(%d) AND spans > 0
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', bucket)
 			) subq
 			GROUP BY service_name
 		)
@@ -464,7 +473,7 @@ func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 }
 
 // detectVolumeAnomalies detects unusual traffic volume changes
-func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
+func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Time) ([]Anomaly, error) {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
@@ -472,20 +481,17 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 
 	sql := volumeAnomalySQL(startNano, endNano, scope)
 
-	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
-	if resp.Error != "" {
-		if !isNoDataError(resp.Error) {
-			slog.Error("volume detection failed", "error", resp.Error)
-		}
-		return nil
+	rows, err := d.readServiceAnomalies(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("volume detection: %w", err)
 	}
 
 	var anomalies []Anomaly
-	for _, row := range resp.Results {
-		serviceName, _ := row["service_name"].(string)
-		currentCount, _ := row["current_count"].(float64)
-		baselineCount, _ := row["baseline_count"].(float64)
-		zScore, _ := row["z_score"].(float64)
+	for _, row := range rows {
+		serviceName := row.service
+		currentCount := row.current
+		baselineCount := row.baseline
+		zScore := row.zScore
 
 		if math.Abs(zScore) >= d.config.VolumeThreshold {
 			anomalies = append(anomalies, Anomaly{
@@ -496,13 +502,86 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 				Baseline:    baselineCount,
 				ZScore:      zScore,
 				DetectedAt:  time.Now(),
+				WindowStart: start,
+				WindowEnd:   end,
 				Description: fmt.Sprintf("%s volume: %.0f spans (baseline: %.0f, z-score: %.2f)",
 					serviceName, currentCount, baselineCount, zScore),
 			})
 		}
 	}
 
-	return anomalies
+	return anomalies, nil
+}
+
+// latencyAnomalySQL compares span-weighted minute p95 values. Baseline
+// scatter remains the standard deviation of five-minute bucket values.
+func latencyAnomalySQL(startNano, endNano int64, scope string) string {
+	return fmt.Sprintf(`
+		WITH current_period AS (
+			SELECT
+				service as service_name,
+				SUM(p95_ms * spans) / SUM(spans) AS p95_latency
+			FROM service_rollup
+			WHERE bucket >= make_timestamp_ns(%d) AND bucket < make_timestamp_ns(%d) AND spans > 0
+			  %s
+			GROUP BY service
+		),
+		baseline_buckets AS (
+			SELECT
+				service as service_name,
+				time_bucket(INTERVAL '5 minutes', bucket) AS baseline_bucket,
+				SUM(p95_ms * spans) / SUM(spans) AS p95_latency
+			FROM service_rollup
+			WHERE bucket >= make_timestamp_ns(%d) AND bucket < make_timestamp_ns(%d) AND spans > 0
+			  %s
+			GROUP BY service, baseline_bucket
+		),
+		baseline_period AS (
+			SELECT
+				service_name,
+				AVG(p95_latency) AS avg_p95,
+				STDDEV(p95_latency) AS p95_stddev
+			FROM baseline_buckets
+			GROUP BY service_name
+		)
+		SELECT
+			c.service_name,
+			c.p95_latency AS current_p95,
+			COALESCE(b.avg_p95, 0.0) AS baseline_p95,
+			CASE
+				WHEN b.p95_stddev > 0 THEN (c.p95_latency - b.avg_p95) / b.p95_stddev
+				ELSE 0.0
+			END AS z_score
+		FROM current_period c
+		LEFT JOIN baseline_period b ON c.service_name = b.service_name
+	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
+
+}
+
+type serviceAnomalyRow struct {
+	service                   string
+	current, baseline, zScore float64
+}
+
+// Use the same internal read path as the product's service-rollup panels.
+// These fixed statements never pass through the public SQL allowlist.
+func (d *Detector) readServiceAnomalies(ctx context.Context, statement string) ([]serviceAnomalyRow, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rows, err := d.duck.QueryContext(ctx, statement)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []serviceAnomalyRow
+	for rows.Next() {
+		var row serviceAnomalyRow
+		if err := rows.Scan(&row.service, &row.current, &row.baseline, &row.zScore); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
 }
 
 // detectLogPatterns groups repetitive log messages
@@ -680,15 +759,14 @@ func toInt(v interface{}) int {
 	return int(toInt64(v))
 }
 
-func detectorAnnotations(snapshot IntelligenceSnapshot, namespace string, lookback time.Duration) []annotations.Anomaly {
+func detectorAnnotations(snapshot IntelligenceSnapshot, namespace string) []annotations.Anomaly {
 	findings := make([]annotations.Anomaly, 0, len(snapshot.Anomalies))
 	for _, a := range snapshot.Anomalies {
 		severity := "warn"
 		if math.Abs(a.ZScore) >= 4 {
 			severity = "bad"
 		}
-		end := a.DetectedAt.UTC().Truncate(time.Minute)
-		findings = append(findings, annotations.Anomaly{Namespace: namespace, Service: a.ServiceName, Kind: string(a.Type), From: end.Add(-lookback), To: end, Title: a.Description, Severity: severity})
+		findings = append(findings, annotations.Anomaly{Namespace: namespace, Service: a.ServiceName, Kind: string(a.Type), From: a.WindowStart, To: a.WindowEnd, Title: a.Description, Severity: severity})
 	}
 	return findings
 }

@@ -57,7 +57,7 @@ func TestMetricIngestKeepsKindTemporalityAndStart(t *testing.T) {
 			t.Fatalf("point %d: %+v", i, got)
 		}
 	}
-	if err := store.CommitBatch(t.Context(), telemetry.BatchMetadata{ID: "ingest_series"}, nil, nil, captured); err != nil {
+	if err := store.CommitBatch(t.Context(), &telemetry.BatchMetadata{ID: "ingest_series"}, nil, nil, captured); err != nil {
 		t.Fatal(err)
 	}
 	physical, err := parquet.ReadFile[struct {

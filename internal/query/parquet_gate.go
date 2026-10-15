@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// defaultWriterGrace bounds how long readers may keep entering ahead of a
+// defaultWriterGrace bounds how long query readers may keep entering ahead of a
 // waiting publisher. Long enough that ordinary dashboard traffic never queues
 // behind maintenance, short enough that retention and compaction always run.
 const defaultWriterGrace = 30 * time.Second
@@ -21,12 +21,20 @@ var rollupReaderLease = defaultWriterGrace / 2
 // ErrParquetReadWait distinguishes publication contention from a query error.
 var ErrParquetReadWait = errors.New("wait for Parquet publication")
 
+type parquetReadMode uint8
+
+const (
+	parquetReadQuery parquetReadMode = iota
+	parquetReadBackground
+)
+
 // parquetReadGate protects Parquet file publication without sync.RWMutex's
 // unconditional writer preference. Queuing maintenance must not stall
 // unrelated API reads or readiness probes, so readers continue to be admitted
 // while a publisher waits — but only until that publisher's grace period
 // expires, after which new readers queue so retention and compaction cannot be
-// starved by overlapping query traffic.
+// starved by overlapping query traffic. Background readers always yield to
+// queued publishers so repeated passes cannot extend publication's wait.
 type parquetReadGate struct {
 	once        sync.Once
 	mu          sync.Mutex
@@ -67,62 +75,44 @@ func (g *parquetReadGate) grace() time.Duration {
 	return defaultWriterGrace
 }
 
-// admitsReaderLocked reports whether a new reader may enter. A reader is
-// refused once a publisher is active, or once the longest-waiting publisher
-// has been queued for longer than the grace period.
-func (g *parquetReadGate) admitsReaderLocked() bool {
+// admitsReaderLocked gives only query readers the waiting publisher's grace.
+func (g *parquetReadGate) admitsReaderLocked(mode parquetReadMode) bool {
 	if g.writer {
 		return false
 	}
 	if len(g.waiting) == 0 {
 		return true
 	}
+	if mode == parquetReadBackground {
+		return false
+	}
 	return g.clock().Sub(g.waiting[0].queuedAt) < g.grace()
 }
 
-// publisherGraceLeft reports how long the oldest queued publication may still
-// be kept waiting before the gate starts refusing new readers.
-//
-// A long-running internal reader asks between units of work, so it can stop at
-// a resumable point rather than make every query behind it wait out the rest
-// of its pass. It is the remaining grace and not the mere presence of a
-// publisher that matters: while the grace holds, readers are still being
-// admitted and nothing is blocked, so yielding then would give up throughput
-// to relieve congestion that does not exist yet.
-//
-// Zero means a publication is holding the gate, or has waited out its grace
-// and new readers are already queuing. With nothing queued, the full grace.
-func (g *parquetReadGate) publisherGraceLeft() time.Duration {
+// publisherWaiting lets resumable internal readers release their snapshot
+// promptly, even while ordinary readers are still admitted during the grace.
+func (g *parquetReadGate) publisherWaiting() bool {
 	g.init()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.writer {
-		return 0
-	}
-	if len(g.waiting) == 0 {
-		return g.grace()
-	}
-	if left := g.grace() - g.clock().Sub(g.waiting[0].queuedAt); left > 0 {
-		return left
-	}
-	return 0
+	return len(g.waiting) > 0
 }
 
-func (g *parquetReadGate) TryRLock() bool {
+func (g *parquetReadGate) TryRLock(mode parquetReadMode) bool {
 	g.init()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if !g.admitsReaderLocked() {
+	if !g.admitsReaderLocked(mode) {
 		return false
 	}
 	g.readers++
 	return true
 }
 
-func (g *parquetReadGate) RLockContext(ctx context.Context) error {
+func (g *parquetReadGate) RLockContext(ctx context.Context, mode parquetReadMode) error {
 	g.init()
 	g.mu.Lock()
-	for !g.admitsReaderLocked() {
+	for !g.admitsReaderLocked(mode) {
 		changed := g.changed
 		g.mu.Unlock()
 		select {

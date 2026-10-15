@@ -19,7 +19,7 @@ func TestMetricPhysicalRowKeepsFidelityColumns(t *testing.T) {
 	metric := Metric{Name: "net", Type: "sum", Temporality: "delta", Monotonic: true,
 		StartTimeUnixNanos: 1790855940000000017, TimeUnixNanos: 1790856000000000009, IngestedAt: 1790856000000000010}
 	metric.SeriesID = MetricSeriesID(metric)
-	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "fidelity"}, nil, nil, []Metric{metric}); err != nil {
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "fidelity"}, nil, nil, []Metric{metric}); err != nil {
 		t.Fatal(err)
 	}
 	got := readOneParquetRow[metricParquetRow](t, filepath.Join(store.BatchPath("fidelity"), "metrics.parquet"))
@@ -42,7 +42,7 @@ func TestFormatThreeIsRefusedBeforeCleanup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			err = store.CommitBatch(t.Context(), BatchMetadata{ID: "old"}, []Span{completeTestSpan()}, []Log{{Body: "ready", TimeUnixNanos: 1}},
+			err = store.CommitBatch(t.Context(), &BatchMetadata{ID: "old"}, []Span{completeTestSpan()}, []Log{{Body: "ready", TimeUnixNanos: 1}},
 				[]Metric{{Name: "n", Type: "gauge", TimeUnixNanos: 1, IngestedAt: 1}})
 			if err != nil {
 				t.Fatal(err)
@@ -128,7 +128,7 @@ func TestFormatFourRequiresNewMetricPhysicalSchema(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "schema"}, nil, nil,
+			if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "schema"}, nil, nil,
 				[]Metric{{Name: "n", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: 1, IngestedAt: 1}}); err != nil {
 				t.Fatal(err)
 			}
@@ -165,7 +165,7 @@ func TestPartiallyRemovedRetiredBatchDoesNotStopOpen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "partial"},
+				if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "partial"},
 					[]Span{completeTestSpan()}, []Log{{Body: "ready", TimeUnixNanos: 1}},
 					[]Metric{{Name: "n", Type: "gauge", TimeUnixNanos: 1}}); err != nil {
 					t.Fatal(err)
@@ -211,7 +211,7 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 		m.SeriesID = MetricSeriesID(m)
 		metrics[i] = m
 	}
-	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "readback"}, nil, nil, metrics); err != nil {
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "readback"}, nil, nil, metrics); err != nil {
 		t.Fatal(err)
 	}
 	verifier, err := NewBatchVerifier(t.Context(), store.BatchPath("readback"))
