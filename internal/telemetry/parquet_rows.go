@@ -3,14 +3,19 @@ package telemetry
 // Dictionary encoding is applied per column chunk and holds every distinct
 // value for the whole row group, which ingest flushes only at
 // parquetRowGroupRows. That pays for itself on a column whose values repeat —
-// service names, HTTP methods, scope identifiers, the resource block shared by
-// every span in a ResourceSpans — and costs a full second copy of the payload
-// on a column whose values do not. Per-row events, links and exemplars are
-// near-unique by construction and are written plain. Attributes and resources
-// use shredded VARIANT columns with a bounded shared metadata dictionary.
-// Dictionary-encoding whole attribute payloads made one 50k-span commit
-// hold several times the batch it was handed, which is what
-// TestCommitBatchPeakHeapStaysNearPayloadSize pins.
+// span kinds and statuses, HTTP methods, scope identifiers, the resource
+// block shared by every span in a ResourceSpans — and costs a full second copy
+// of the payload on a column whose values do not. Per-row IDs, events, links
+// and exemplars are near-unique by construction and are written plain. Span
+// namespaces, services and operation names stay plain too: clients bound
+// neither their length nor their count, and parquetDictionaryMaxBytes is only
+// checked when a page flushes. Attributes and resources use shredded VARIANT
+// columns with a bounded shared metadata dictionary.
+// Dictionary-encoding whole attribute payloads made one 50k-span commit hold
+// several times the batch it was handed; commit_memory_test.go bounds the
+// allocation ratio. Dashboard scans filter and group on the low-cardinality
+// span columns, and the engine evaluates those predicates against a
+// dictionary instead of decoding one string per row.
 
 type spanParquetRow struct {
 	Namespace        string  `parquet:"namespace"`
@@ -20,13 +25,13 @@ type spanParquetRow struct {
 	ParentSpanID     string  `parquet:"parent_span_id"`
 	Service          string  `parquet:"service"`
 	Operation        string  `parquet:"operation"`
-	Kind             string  `parquet:"kind"`
+	Kind             string  `parquet:"kind,dict"`
 	StartTime        int64   `parquet:"start_time,timestamp(nanosecond)"`
 	EndTime          int64   `parquet:"end_time,timestamp(nanosecond)"`
 	StartUnixNano    int64   `parquet:"start_unix_nano"`
 	EndUnixNano      int64   `parquet:"end_unix_nano"`
 	DurationMS       float64 `parquet:"duration_ms"`
-	Status           string  `parquet:"status"`
+	Status           string  `parquet:"status,dict"`
 	StatusMessage    string  `parquet:"status_message"`
 	Resource         any     `parquet:"resource,variant"`
 	Attributes       any     `parquet:"attributes,variant"`

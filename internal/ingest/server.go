@@ -3,11 +3,13 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,8 +92,8 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 				}
 				row := telemetry.Span{
 					Namespace:      namespace,
-					TraceID:        fmt.Sprintf("%x", sp.TraceId),
-					SpanID:         fmt.Sprintf("%x", sp.SpanId),
+					TraceID:        hex.EncodeToString(sp.TraceId),
+					SpanID:         hex.EncodeToString(sp.SpanId),
 					ParentSpanID:   hexOrEmpty(sp.ParentSpanId),
 					ServiceName:    svc,
 					Name:           sp.Name,
@@ -575,7 +577,7 @@ func spanAttrInt(attrs []*common.KeyValue, keys ...string) string {
 				// Handle integer values (common for status codes)
 				if kv.Value != nil {
 					if iv, ok := kv.Value.Value.(*common.AnyValue_IntValue); ok {
-						return fmt.Sprintf("%d", iv.IntValue)
+						return strconv.FormatInt(iv.IntValue, 10)
 					}
 				}
 			}
@@ -731,7 +733,7 @@ func hexOrEmpty(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%x", b)
+	return hex.EncodeToString(b)
 }
 
 func eventsToJSON(events []*tracepb.Span_Event) string {
@@ -778,8 +780,8 @@ func linksToJSON(links []*tracepb.Span_Link) string {
 	out := make([]link, 0, len(links))
 	for _, l := range links {
 		ln := link{
-			TraceID:    fmt.Sprintf("%x", l.TraceId),
-			SpanID:     fmt.Sprintf("%x", l.SpanId),
+			TraceID:    hex.EncodeToString(l.TraceId),
+			SpanID:     hex.EncodeToString(l.SpanId),
 			TraceState: l.TraceState,
 		}
 		if len(l.Attributes) > 0 {

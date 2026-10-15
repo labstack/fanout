@@ -55,7 +55,13 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 			return "The selected metric points have no defined values for these measures in this time range."
 		}
 	}
-	total, err := e.count(ctx, sig, nil, scope)
+	total, without, err := e.filterCounts(ctx, sig, active, scope)
+	if err != nil {
+		// One statement fails when any predicate fails on rows another filter
+		// normally excludes, such as a cast; counted separately, a failing
+		// rerun hides only its own count.
+		total, without, err = e.rerunCounts(ctx, sig, active, scope)
+	}
 	if err != nil {
 		return ""
 	}
@@ -63,13 +69,10 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 		return fmt.Sprintf("No %s were recorded in this time range.", sig.name)
 	}
 	best, recovered := -1, int64(0)
-	for i := range min(len(active), maxDiagnosedFilters) {
-		others := append(append([]Filter{}, active[:i]...), active[i+1:]...)
-		n, err := e.count(ctx, sig, others, scope)
-		if err != nil || n <= recovered {
-			continue
+	for i, n := range without {
+		if n > recovered {
+			best, recovered = i, n
 		}
-		best, recovered = i, n
 	}
 	if best >= 0 {
 		f := active[best]
@@ -102,6 +105,73 @@ func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, sco
 		}
 	}
 	return n, rows.Err()
+}
+
+// filterCounts scans the signal once for everything the diagnosis compares:
+// the rows in the window, and for each of the first maxDiagnosedFilters
+// active filters the rows that satisfy every other active filter. Each FILTER
+// clause is the predicate the rerun count would have carried, so one
+// statement replaces one scan per filter without changing a single count.
+func (e *Executor) filterCounts(ctx context.Context, sig *signal, active []Filter, scope Scope) (total int64, without []int64, err error) {
+	window, windowArgs, err := buildWhere(sig, nil, scope)
+	if err != nil {
+		return 0, nil, err
+	}
+	clauses := make([]string, len(active))
+	clauseArgs := make([][]any, len(active))
+	for i, f := range active {
+		if clauses[i], clauseArgs[i], err = filterClause(f, scope); err != nil {
+			return 0, nil, err
+		}
+	}
+	// Positional parameters bind in textual order: the FILTER clauses precede
+	// the window predicate in the statement, so their arguments come first.
+	without = make([]int64, min(len(active), maxDiagnosedFilters))
+	selects := []string{"count(*)"}
+	dest := []any{&total}
+	var args []any
+	for i := range without {
+		var others []string
+		for j := range active {
+			if j != i {
+				others = append(others, clauses[j])
+				args = append(args, clauseArgs[j]...)
+			}
+		}
+		if len(others) == 0 {
+			selects = append(selects, "count(*)")
+		} else {
+			selects = append(selects, "count(*) FILTER (WHERE "+strings.Join(others, " AND ")+")")
+		}
+		dest = append(dest, &without[i])
+	}
+	args = append(args, windowArgs...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+structuredSource(sig.name)+" WHERE "+window, args...)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		if err := rows.Scan(dest...); err != nil {
+			return 0, nil, err
+		}
+	}
+	return total, without, rows.Err()
+}
+
+// rerunCounts is filterCounts one statement at a time. A rerun that fails
+// counts no rows.
+func (e *Executor) rerunCounts(ctx context.Context, sig *signal, active []Filter, scope Scope) (int64, []int64, error) {
+	total, err := e.count(ctx, sig, nil, scope)
+	if err != nil {
+		return 0, nil, err
+	}
+	without := make([]int64, min(len(active), maxDiagnosedFilters))
+	for i := range without {
+		others := append(append([]Filter{}, active[:i]...), active[i+1:]...)
+		without[i], _ = e.count(ctx, sig, others, scope)
+	}
+	return total, without, nil
 }
 
 func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string, filters []Filter, scope Scope) string {

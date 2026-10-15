@@ -31,13 +31,17 @@ type traceIndex struct {
 }
 
 type traceIndexWriter struct {
-	file    *os.File
-	path    string
-	last    traceRange
-	rows    uint64
-	entries uint64
-	have    bool
-	closed  bool
+	file *os.File
+	// Entries are 24 bytes and there is one per trace; buffering them keeps
+	// a 50,000-span batch from costing tens of thousands of write calls.
+	buffered *bufio.Writer
+	encoded  [traceIndexEntrySize]byte
+	path     string
+	last     traceRange
+	rows     uint64
+	entries  uint64
+	have     bool
+	closed   bool
 }
 
 func newTraceIndexWriter(path string) (*traceIndexWriter, error) {
@@ -50,7 +54,7 @@ func newTraceIndexWriter(path string) (*traceIndexWriter, error) {
 		_ = os.Remove(path)
 		return nil, err
 	}
-	return &traceIndexWriter{file: file, path: path}, nil
+	return &traceIndexWriter{file: file, buffered: bufio.NewWriterSize(file, 64<<10), path: path}, nil
 }
 
 // Append adds one Parquet row hash. Input must be ordered by hash, which lets
@@ -91,6 +95,9 @@ func (w *traceIndexWriter) Close() error {
 			return w.fail(err)
 		}
 	}
+	if err := w.buffered.Flush(); err != nil {
+		return w.fail(err)
+	}
 	var header [traceIndexHeaderSize]byte
 	copy(header[:], traceIndexMagic)
 	binary.LittleEndian.PutUint64(header[8:], w.entries)
@@ -117,11 +124,11 @@ func (w *traceIndexWriter) Abort() {
 }
 
 func (w *traceIndexWriter) flush() error {
-	var encoded [traceIndexEntrySize]byte
+	encoded := w.encoded[:]
 	binary.LittleEndian.PutUint64(encoded[0:8], w.last.hash)
 	binary.LittleEndian.PutUint64(encoded[8:16], w.last.row)
 	binary.LittleEndian.PutUint64(encoded[16:24], w.last.count)
-	if _, err := w.file.Write(encoded[:]); err != nil {
+	if _, err := w.buffered.Write(encoded[:]); err != nil {
 		return err
 	}
 	w.entries++

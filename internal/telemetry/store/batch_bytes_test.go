@@ -43,21 +43,21 @@ func TestRichSharedResourcesReachRowTargetAndUseActualAdmissionBytes(t *testing.
 		return batch
 	}
 	first, second := newExport(), newExport()
-	if !groupBatchFits(batchBytes(first), second, 1) {
+	if !groupBatchFits(batchBytes(first), batchBytes(second), 1) {
 		t.Fatal("24-key shared resources prematurely cut a 50k-row group")
 	}
 	w := NewWriter(nil, maxGroupBatchRows)
 	w.SetInFlightBudget(maxGroupBatchBytes)
 	for _, batch := range []Batch{first, second} {
-		if err := w.reserve(batch); err != nil {
+		if err := w.reserve(batchBytes(batch)); err != nil {
 			t.Fatalf("actual retained exports fit the budget: %v", err)
 		}
 	}
-	if err := w.reserve(newExport()); err == nil {
+	if err := w.reserve(batchBytes(newExport())); err == nil {
 		t.Fatal("distinct requests must each charge their own resource and row payloads")
 	}
-	w.release(first)
-	w.release(second)
+	w.release(batchBytes(first))
+	w.release(batchBytes(second))
 	if got := w.inFlightBytes.Load(); got != 0 {
 		t.Fatalf("reservation leak: %d", got)
 	}
@@ -98,10 +98,10 @@ func TestGroupBatchBytesAdmitsALoneOversizedRequest(t *testing.T) {
 	if got := batchBytes(huge); got <= maxGroupBatchBytes {
 		t.Fatalf("fixture is wrong: batchBytes = %d, want more than the %d ceiling", got, maxGroupBatchBytes)
 	}
-	if !groupBatchFits(0, huge, 0) {
+	if !groupBatchFits(0, batchBytes(huge), 0) {
 		t.Error("an empty group must admit any single request, however large")
 	}
-	if groupBatchFits(maxGroupBatchBytes, huge, 1) {
+	if groupBatchFits(maxGroupBatchBytes, batchBytes(huge), 1) {
 		t.Error("a non-empty group must not accept a request that takes it past the ceiling")
 	}
 }

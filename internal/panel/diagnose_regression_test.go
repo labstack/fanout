@@ -88,6 +88,30 @@ func TestDiagnosisChoosesMostSelectiveQualifyingFilter(t *testing.T) {
 	}
 }
 
+func TestDiagnosisSkipsFailingFilterRerun(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, []telemetry.Span{
+		{ServiceName: "checkout", HTTPStatusCode: "200", HTTPRoute: "/ok", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
+		{ServiceName: "frontend", HTTPStatusCode: "", HTTPRoute: "/ok", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
+	}, nil)
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := Dashboard{Name: "Diagnosis", Time: Time{Range: "1h"}, Panels: []Panel{{
+		ID: "empty", Title: "Empty", Viz: "table", Query: &Query{
+			From: "spans", Measures: []string{"count()"}, By: []string{"service"},
+			Where: []string{"service = 'checkout'", "CAST(http_status_code AS BIGINT) > 100", "http_route = '/missing'"},
+		},
+	}}}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "match http_route = '/missing'. Without that filter, 1 do.") {
+		t.Fatalf("result = %+v", r)
+	}
+}
+
 // countingEngine counts the statements a diagnosis issues.
 type countingEngine struct {
 	Engine
@@ -119,8 +143,9 @@ func TestDiagnosisBoundsReruns(t *testing.T) {
 	}
 	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour), Vars: map[string]Value{"service": {Values: []string{"checkout"}}}}
 	_ = e.diagnose(t.Context(), &d.Panels[0], checked.Filters["empty"], scope)
-	// One total count, at most maxDiagnosedFilters reruns, and one value lookup.
-	if counting.queries > 2+maxDiagnosedFilters {
-		t.Fatalf("diagnosis ran %d queries, want at most %d", counting.queries, 2+maxDiagnosedFilters)
+	// One scan counts the window and the first maxDiagnosedFilters reruns
+	// together; a value lookup for the blamed equality is the only other read.
+	if counting.queries > 2 {
+		t.Fatalf("diagnosis ran %d queries, want at most 2", counting.queries)
 	}
 }

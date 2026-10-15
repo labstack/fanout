@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/parquet-go/parquet-go"
-	"github.com/parquet-go/parquet-go/compress/zstd"
 	"github.com/zeebo/xxh3"
 	"golang.org/x/sync/errgroup"
 )
@@ -27,8 +26,12 @@ const (
 	SchemaBatch          = "_schema" + BatchSuffix
 	batchMetadataVersion = 4
 	parquetPageSize      = 64 << 10
-	parquetRowGroupRows  = 50_000
-	maxTraceQueryResults = 500
+	// A column whose distinct values outgrow this switches to plain pages for
+	// the rest of its row group, so client-supplied text cannot grow a
+	// dictionary without bound.
+	parquetDictionaryMaxBytes = 1 << 20
+	parquetRowGroupRows       = 50_000
+	maxTraceQueryResults      = 500
 )
 
 // commitPublishWait caps how long one ingest commit waits for the publish
@@ -1274,9 +1277,10 @@ func spanSortingColumns() parquet.SortingOption {
 
 func parquetWriterOptions(pageSize int, extra ...parquet.WriterOption) []parquet.WriterOption {
 	options := []parquet.WriterOption{
-		parquet.Compression(&zstd.Codec{Level: zstd.SpeedFastest, Concurrency: 1}),
+		parquet.Compression(parquetCodec),
 		parquet.MaxRowsPerRowGroup(parquetRowGroupRows),
 		parquet.PageBufferSize(pageSize),
+		parquet.DictionaryMaxBytes(parquetDictionaryMaxBytes),
 	}
 	return append(options, extra...)
 }
