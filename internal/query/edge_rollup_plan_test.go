@@ -48,6 +48,9 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 			t.Errorf("edge rollup plans a %s; the FROM clause has regressed to the comma form:\n%s", bad, shippedPlan)
 		}
 	}
+	if !strings.Contains(shippedPlan, "SEMI") {
+		t.Errorf("edge rollup lost the child-trace semi-join:\n%s", shippedPlan)
+	}
 	if !strings.Contains(shippedPlan, "Hash Join") {
 		t.Errorf("edge rollup plans no HASH_JOIN at all:\n%s", shippedPlan)
 	}
@@ -96,7 +99,8 @@ func edgeRollupCommaForm(t *testing.T) string {
 	if !strings.Contains(form, "\n  CROSS JOIN bounds\n") {
 		t.Fatal("no CROSS JOIN bounds to remove")
 	}
-	return strings.Replace(form, "\n  CROSS JOIN bounds\n", "\n", 1)
+	i := strings.LastIndex(form, "\n  CROSS JOIN bounds\n")
+	return form[:i] + "\n" + form[i+len("\n  CROSS JOIN bounds\n"):]
 }
 
 func explain(t *testing.T, db *sql.DB, query string, args ...any) string {
@@ -223,6 +227,56 @@ func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`CREATE VIEW spans AS SELECT * FROM read_parquet('` + dir + `/spans.parquet')`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEdgeRollupParentTraceScope(t *testing.T) {
+	db := openTestDuck(t)
+	if _, err := db.Exec(createEdgeRollupTable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE spans AS
+ SELECT namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,
+ start_time::TIMESTAMPTZ_NS start_time,ingested_unix_nano,NULL::VARCHAR messaging_system,NULL::VARCHAR messaging_destination
+ FROM (VALUES
+ ('shop','trace','parent','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
+ ('other','trace','parent','','wrong-namespace','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
+ ('shop','trace','child','parent','downstream','SPAN_KIND_CLIENT','ERROR',30.0,TIMESTAMP '2026-09-20 12:00:00',100),
+ ('shop','trace','late-child','parent','downstream','SPAN_KIND_CLIENT','OK',10.0,TIMESTAMP '2026-09-20 12:00:01',1),
+ ('shop','outside','parent','','too-old','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 10:59:59',1),
+ ('shop','outside','child','parent','downstream','SPAN_KIND_CLIENT','OK',1.0,TIMESTAMP '2026-09-20 12:00:00',100),
+ ('shop','unused','parent','','unrelated','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
+ ('shop','trace','empty-child','parent','','SPAN_KIND_CLIENT','OK',1.0,TIMESTAMP '2026-09-20 12:00:00',100)
+ ) t(namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,start_time,ingested_unix_nano)`); err != nil {
+		t.Fatal(err)
+	}
+	lo := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(edgeRollupInsertSQL, 50, 200, lo, lo.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var namespace, caller, callee, edgeType string
+	var bucket time.Time
+	var calls int
+	var avg, errorRate float64
+	rows, err := db.Query(`SELECT namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type FROM edge_rollup`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		t.Fatal("no call edge")
+	}
+	if err := rows.Scan(&namespace, &bucket, &caller, &callee, &calls, &avg, &errorRate, &edgeType); err != nil {
+		t.Fatal(err)
+	}
+	if namespace != "shop" || !bucket.Equal(lo) || caller != "upstream" || callee != "downstream" || calls != 2 || avg != 20 || errorRate != 0.5 || edgeType != "call" {
+		t.Fatalf("edge=%s %s %s %s %d %g %g %s", namespace, bucket, caller, callee, calls, avg, errorRate, edgeType)
+	}
+	if rows.Next() {
+		t.Fatal("unexpected edge from unrelated, cross-namespace, or out-of-range parent")
+	}
+	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
 }

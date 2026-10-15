@@ -433,3 +433,38 @@ func TestIdleVersionPassDoesNotWrite(t *testing.T) {
 		t.Fatalf("unused watermark: %d %v", unused, err)
 	}
 }
+
+func TestVersionMarkerTransferUsesOneInputSet(t *testing.T) {
+	for _, warm := range []bool{false, true} {
+		t.Run(fmt.Sprint(warm), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			d := &Duck{DB: db, writeDB: db}
+			inputs := make([]string, 128)
+			for i := range inputs {
+				inputs[i] = fmt.Sprintf("input-%d", i)
+			}
+			count := len(inputs)
+			if !warm {
+				count--
+			}
+			mock.ExpectBegin()
+			mock.ExpectQuery(`SELECT count\(\*\) FROM version_rollup_batches WHERE batch_id IN`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(count))
+			if warm {
+				mock.ExpectExec(`INSERT INTO version_rollup_batches`).WithArgs("output", int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectCommit()
+			} else {
+				mock.ExpectRollback()
+			}
+			if err := d.transferVersionMarker(t.Context(), telemetry.BatchMetadata{ID: "output", MaxIngestedNanos: 2}, inputs); err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

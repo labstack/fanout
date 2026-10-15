@@ -72,7 +72,16 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	count := 0
+	for _, rs := range req.ResourceSpans {
+		for _, ss := range rs.ScopeSpans {
+			count += len(ss.Spans)
+		}
+	}
 	batch := telemetrystore.Batch{}
+	if count > 0 {
+		batch.Spans = make([]telemetry.Span, 0, count)
+	}
 	for _, rs := range req.ResourceSpans {
 		resources, err := resourceAttributes(rs.Resource)
 		if err != nil {
@@ -83,6 +92,8 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 		if namespace == "" {
 			namespace = cfg.DefaultNamespace
 		}
+		serviceVersion := getResourceAttr(rs.Resource, "service.version")
+		deploymentEnv := getResourceAttr(rs.Resource, "deployment.environment")
 		for _, ss := range rs.ScopeSpans {
 			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
@@ -124,8 +135,8 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					RPCMethod:      spanAttr(sp.Attributes, "rpc.method"),
 					RPCService:     spanAttr(sp.Attributes, "rpc.service"),
 					PeerService:    spanAttr(sp.Attributes, "peer.service", "server.address"),
-					ServiceVersion: getResourceAttr(rs.Resource, "service.version"),
-					DeploymentEnv:  getResourceAttr(rs.Resource, "deployment.environment"),
+					ServiceVersion: serviceVersion,
+					DeploymentEnv:  deploymentEnv,
 				}
 				// Pre-extracted exception info from span events.
 				excType, excMsg := extractException(sp.Events)
@@ -161,7 +172,16 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	count := 0
+	for _, rl := range req.ResourceLogs {
+		for _, sl := range rl.ScopeLogs {
+			count += len(sl.LogRecords)
+		}
+	}
 	batch := telemetrystore.Batch{}
+	if count > 0 {
+		batch.Logs = make([]telemetry.Log, 0, count)
+	}
 	for _, rl := range req.ResourceLogs {
 		resources, err := resourceAttributes(rl.Resource)
 		if err != nil {
@@ -218,7 +238,29 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	count := 0
+	for _, rm := range req.ResourceMetrics {
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				switch d := m.Data.(type) {
+				case *metricspb.Metric_Gauge:
+					count += len(d.Gauge.DataPoints)
+				case *metricspb.Metric_Sum:
+					count += len(d.Sum.DataPoints)
+				case *metricspb.Metric_Histogram:
+					count += len(d.Histogram.DataPoints)
+				case *metricspb.Metric_ExponentialHistogram:
+					count += len(d.ExponentialHistogram.DataPoints)
+				case *metricspb.Metric_Summary:
+					count += len(d.Summary.DataPoints)
+				}
+			}
+		}
+	}
 	batch := telemetrystore.Batch{}
+	if count > 0 {
+		batch.Metrics = make([]telemetry.Metric, 0, count)
+	}
 	for _, rm := range req.ResourceMetrics {
 		resources, err := resourceAttributes(rm.Resource)
 		if err != nil {
