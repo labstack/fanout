@@ -39,6 +39,17 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 	if _, err := db.Exec(createEdgePassBucketsSQL, windowLo, windowHi); err != nil {
 		t.Fatal(err)
 	}
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepareEdgeParents(t.Context(), tx, spanLo, spanHi); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	parentPlan := explain(t, db, strings.TrimPrefix(createEdgeParentsSQL, "CREATE TEMP TABLE edge_pass_parents AS "), spanLo, spanHi)
 	shippedPlan := explain(t, db, edgeRollupInsertSQL, spanLo, spanHi)
 
 	// DuckDB 2 optimizes the historical comma form too. Guard the shipped plan
@@ -51,8 +62,8 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 			t.Errorf("edge rollup plans a %s; the FROM clause has regressed to the comma form:\n%s", bad, shippedPlan)
 		}
 	}
-	if !strings.Contains(shippedPlan, "SEMI") {
-		t.Errorf("edge rollup lost the child-trace semi-join:\n%s", shippedPlan)
+	if !strings.Contains(strings.ToUpper(parentPlan), "SEMI") {
+		t.Errorf("edge rollup lost the child-trace semi-join:\n%s", parentPlan)
 	}
 	if !strings.Contains(shippedPlan, "Hash Join") {
 		t.Errorf("edge rollup plans no HASH_JOIN at all:\n%s", shippedPlan)
@@ -261,7 +272,22 @@ func TestEdgeRollupParentTraceScope(t *testing.T) {
 	if _, err := db.Exec(createEdgePassBucketsSQL, 50, 200); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(edgeRollupInsertSQL, lo, lo.Add(time.Minute)); err != nil {
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	wide, err := prepareEdgeParents(t.Context(), tx, lo, lo.Add(time.Minute))
+	if err != nil || !wide {
+		t.Fatalf("30-minute parent did not run tier 2: wide=%v err=%v", wide, err)
+	}
+	if _, err := tx.ExecContext(t.Context(), edgeRollupInsertSQL, lo, lo.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec("DROP TABLE edge_pass_parents"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	var namespace, caller, callee, edgeType string
@@ -287,5 +313,65 @@ func TestEdgeRollupParentTraceScope(t *testing.T) {
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEdgeRollupSkipsDistantParentsWhenChildrenMatch(t *testing.T) {
+	db := openTestDuck(t)
+	seedEdgeRollupFixture(t, db)
+	if _, err := db.Exec(createEdgePassBucketsSQL, 50, 200); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	lo := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	wide, err := prepareEdgeParents(t.Context(), tx, lo, lo.Add(time.Minute))
+	if err != nil || wide {
+		t.Fatalf("matched children ran tier 2: wide=%v err=%v", wide, err)
+	}
+	if _, err := tx.ExecContext(t.Context(), edgeRollupInsertSQL, lo, lo.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	if err := tx.QueryRow("SELECT sum(calls)::BIGINT FROM edge_rollup").Scan(&calls); err != nil || calls != 1003 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+}
+
+func TestEdgeRollupDistantParentPreservesNearParentMultiplicity(t *testing.T) {
+	db := openTestDuck(t)
+	if _, err := db.Exec(createEdgeRollupTable); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE spans AS
+ SELECT namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,
+ start_time::TIMESTAMPTZ_NS start_time,ingested_unix_nano,NULL::VARCHAR messaging_system,NULL::VARCHAR messaging_destination
+ FROM (VALUES
+ ('ns','trace','far','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
+ ('ns','trace','near','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:55:00',1),
+ ('ns','trace','child-far','far','downstream','SPAN_KIND_CLIENT','ERROR',30.0,TIMESTAMP '2026-09-20 12:00:00',100),
+ ('ns','trace','child-near','near','downstream','SPAN_KIND_CLIENT','OK',10.0,TIMESTAMP '2026-09-20 12:00:01',100)
+ ) t(namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,start_time,ingested_unix_nano)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(createEdgePassBucketsSQL, 50, 200); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	lo := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	if _, err := insertEdgeRollup(t.Context(), tx, lo, lo.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	var avg, errorRate float64
+	if err := tx.QueryRow("SELECT calls,avg_ms,error_rate FROM edge_rollup WHERE namespace='ns' AND caller='upstream' AND callee='downstream'").Scan(&calls, &avg, &errorRate); err != nil || calls != 2 || avg != 20 || errorRate != 0.5 {
+		t.Fatalf("calls=%d avg=%g error_rate=%g err=%v", calls, avg, errorRate, err)
 	}
 }

@@ -24,6 +24,7 @@ const (
 	// durable acknowledgement when the row target is not reached.
 	groupAdmissionWindow    = 10 * time.Millisecond
 	pressureAdmissionWindow = 250 * time.Millisecond
+	pressureAdmissionIdle   = 20 * time.Millisecond
 	maxAdmissionRequests    = 512
 	maxGroupBatchRows       = 50_000
 	maxCommitWorkers        = 4
@@ -227,8 +228,16 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 		// Coalesce more exports before the hard debt stop is needed. Read
 		// reclaimable debt once per group; low-load acknowledgements keep
 		// their short window as soon as compaction relieves the pressure.
+		var idle <-chan time.Time
+		var idleTimer *time.Timer
 		if w.compaction != nil && w.compaction.CompactionDebt() >= telemetry.CompactionDebtLimit/2 {
 			window = pressureAdmissionWindow
+			// Closed-loop exporters cannot send again until this group commits.
+			// Close an idle group promptly, while a paced stream can continue
+			// coalescing up to the pressure window and the existing bounds.
+			idleTimer = time.NewTimer(pressureAdmissionIdle)
+			defer idleTimer.Stop()
+			idle = idleTimer.C
 		}
 		timer := time.NewTimer(window)
 		defer timer.Stop()
@@ -239,6 +248,11 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 				requests = append(requests, next)
 				rows += batchRows(next.batch)
 				bytes += next.bytes
+				if idleTimer != nil {
+					idleTimer.Reset(pressureAdmissionIdle)
+				}
+			case <-idle:
+				break admit
 			case <-timer.C:
 				break admit
 			case <-ctx.Done():

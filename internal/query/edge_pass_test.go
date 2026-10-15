@@ -110,23 +110,23 @@ func TestEdgePassDropsRelationOnEveryExit(t *testing.T) {
 			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return stamp, stamp, stamp }}
 			checkAbsent := func() {
 				var count int
-				if err := db.QueryRow("SELECT count(*) FROM duckdb_tables() WHERE table_name='edge_pass_buckets'").Scan(&count); err != nil || count != 0 {
+				if err := db.QueryRow("SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('edge_pass_buckets','edge_pass_parents','edge_pass_unmatched')").Scan(&count); err != nil || count != 0 {
 					t.Fatalf("pass relation survived: count=%d err=%v", count, err)
 				}
 			}
 			if !empty {
 				// Fail after materialization, then retry on the same SQL connection.
-				if _, err := db.Exec("ALTER TABLE edge_rollup RENAME TO saved_edge_rollup"); err != nil {
+				if _, err := db.Exec("ALTER TABLE edge_rollup RENAME COLUMN avg_ms TO saved_avg_ms"); err != nil {
 					t.Fatal(err)
 				}
 				if _, _, err := d.refreshEdgeRollupPass(t.Context()); err == nil {
-					t.Fatal("missing rollup table did not fail the pass")
+					t.Fatal("incompatible rollup schema did not fail the pass")
 				}
 				checkAbsent()
 				if watermark, cursor := readEdgeRollupState(t, d); watermark != 0 || cursor != 0 {
 					t.Fatalf("failed pass advanced state: watermark=%d cursor=%d", watermark, cursor)
 				}
-				if _, err := db.Exec("ALTER TABLE saved_edge_rollup RENAME TO edge_rollup"); err != nil {
+				if _, err := db.Exec("ALTER TABLE edge_rollup RENAME COLUMN saved_avg_ms TO avg_ms"); err != nil {
 					t.Fatal(err)
 				}
 			}

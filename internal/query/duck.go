@@ -989,7 +989,7 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 			if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, subLo, subHi); err != nil {
 				return 0, false, err
 			}
-			res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, subLo, subHi)
+			res, err := insertEdgeRollup(ctx, tx, subLo, subHi)
 			if err != nil {
 				return 0, false, err
 			}
@@ -1480,17 +1480,14 @@ WHERE EXISTS (
     AND affected.bucket = edge_rollup.bucket
 );`
 
-const edgeRollupInsertSQL = edgeAffectedBucketsSQL + `,
--- The affected bucket range, computed once. As four scalar subqueries
--- repeated across the predicates below, these read as correlated to the
--- planner and cost a re-derivation each.
+const edgeChildTracesSQL = edgeAffectedBucketsSQL + `,
+-- Compute the affected bucket range once for the child and parent filters.
 bounds AS (
   SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
 ),
 -- Only traces with children in affected buckets can contribute call edges.
 -- Bound this distinct relation to the same child window as call_edges, before
--- building the parent side; unrelated traces in the two-hour range must not
--- occupy the parent hash table. Namespace is part of the trace identity.
+-- building the parent side. Namespace is part of the trace identity.
 child_traces AS (
   SELECT DISTINCT child.namespace, child.trace_id
   FROM spans child
@@ -1502,20 +1499,113 @@ child_traces AS (
     AND child.service != ''
     AND child.start_time >= (bounds.lo)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND child.start_time < (bounds.hi + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+)`
+
+// Parent lookup is connection-local and transactional, like edge_pass_buckets.
+// The wide scan is issued only after an explicit unmatched-trace check.
+// The result reports whether that scan ran.
+func prepareEdgeParents(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (bool, error) {
+	if _, err := tx.ExecContext(ctx, createEdgeParentsSQL, lo, hi); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, createEdgeUnmatchedSQL, lo, hi); err != nil {
+		return false, err
+	}
+	var unmatched bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM edge_pass_unmatched)").Scan(&unmatched); err != nil {
+		return false, err
+	}
+	if unmatched {
+		// Replace these traces rather than unioning overlapping parent windows.
+		// This retains duplicates without a disjoint time filter on the wide scan.
+		if _, err := tx.ExecContext(ctx, deleteEdgeUnmatchedParentsSQL); err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, insertEdgeDistantParentsSQL, lo, hi); err != nil {
+			return false, err
+		}
+	}
+	_, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_unmatched")
+	return unmatched, err
+}
+
+func insertEdgeRollup(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (sql.Result, error) {
+	if _, err := prepareEdgeParents(ctx, tx, lo, hi); err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, lo, hi)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_parents"); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+const createEdgeParentsSQL = `CREATE TEMP TABLE edge_pass_parents AS ` + edgeChildTracesSQL + `
+SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
+FROM spans parent
+SEMI JOIN child_traces child
+  ON parent.namespace = child.namespace
+ AND parent.trace_id = child.trace_id
+CROSS JOIN bounds
+WHERE parent.start_time >= (bounds.lo - INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND parent.start_time <= (bounds.hi + INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND parent.service IS NOT NULL
+  AND parent.service != ''`
+
+const createEdgeUnmatchedSQL = `CREATE TEMP TABLE edge_pass_unmatched AS ` + edgeAffectedBucketsSQL + `,
+bounds AS (
+  SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
+)
+SELECT DISTINCT child.namespace, child.trace_id
+FROM spans child
+JOIN affected a
+  ON a.namespace = child.namespace
+ AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
+ANTI JOIN edge_pass_parents parent
+  ON parent.namespace = child.namespace
+ AND parent.trace_id = child.trace_id
+ AND parent.span_id = child.parent_span_id
+CROSS JOIN bounds
+WHERE child.service IS NOT NULL
+  AND child.service != ''
+  AND child.parent_span_id IS NOT NULL
+  AND child.parent_span_id != ''
+  AND child.start_time >= bounds.lo::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND child.start_time < (bounds.hi + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS`
+
+const deleteEdgeUnmatchedParentsSQL = `
+DELETE FROM edge_pass_parents
+WHERE EXISTS (
+  SELECT 1 FROM edge_pass_unmatched child
+  WHERE child.namespace = edge_pass_parents.namespace
+    AND child.trace_id = edge_pass_parents.trace_id
+)`
+
+const insertEdgeDistantParentsSQL = edgeAffectedBucketsSQL + `,
+bounds AS (
+  SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
+)
+INSERT INTO edge_pass_parents
+SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
+FROM spans parent
+SEMI JOIN edge_pass_unmatched child
+  ON parent.namespace = child.namespace
+ AND parent.trace_id = child.trace_id
+CROSS JOIN bounds
+WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND parent.service IS NOT NULL
+  AND parent.service != ''`
+
+const edgeRollupInsertSQL = edgeAffectedBucketsSQL + `,
+bounds AS (
+  SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
 ),
--- Retain the existing +/-1h parent range, including parents outside the child
--- minute. Late arrivals can still widen the affected bucket range.
 parent_scope AS (
-  SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
-  FROM spans parent
-  SEMI JOIN child_traces child
-    ON parent.namespace = child.namespace
-   AND parent.trace_id = child.trace_id
-  CROSS JOIN bounds
-  WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND parent.service IS NOT NULL
-    AND parent.service != ''
+  SELECT namespace, span_id, trace_id, service FROM edge_pass_parents
 ),
 call_edges AS (
   SELECT
