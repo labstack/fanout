@@ -120,7 +120,7 @@ func TestCompactionPressureDrainsGenerationZeroBeforeHigherGenerations(t *testin
 			}
 			debt := telemetry.CompactionDebtLimit
 			for pass := 0; debt >= telemetry.CompactionDebtLimit/2; pass++ {
-				selected := selectCompactionBatches(batches, 128, debt)
+				selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, debt)
 				if len(selected) < 2 {
 					t.Fatal("positive debt has no selection")
 				}
@@ -146,7 +146,7 @@ func TestCompactionPressureDrainsGenerationZeroBeforeHigherGenerations(t *testin
 				batches = next
 			}
 			if strings.HasPrefix(mode, "higher-") {
-				selected := selectCompactionBatches(batches, 128, debt)
+				selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, debt)
 				if len(selected) < 2 || selected[0].Generation == 0 {
 					t.Fatalf("higher generations did not resume at debt=%d: %v", debt, selected)
 				}
@@ -160,14 +160,14 @@ func TestCompactionPressureDrainsGenerationZeroBeforeHigherGenerations(t *testin
 		small = append(small, telemetry.BatchMetadata{ID: fmt.Sprint(i), Spans: 1, MaxIngestedNanos: 1})
 	}
 	small = append(small, telemetry.BatchMetadata{ID: "today", Spans: 1, MaxIngestedNanos: int64(24*time.Hour) + 1})
-	if len(selectCompactionBatches(small, 128, 0)) != 8 {
+	if len(selectCompactionBatchesWithHigherCap(small, 128, 128, 0)) != 8 {
 		t.Fatal("finished eight-input group stranded")
 	}
 	var terminal []telemetry.BatchMetadata
 	for i := 0; i < 1024; i++ {
 		terminal = append(terminal, telemetry.BatchMetadata{ID: fmt.Sprint(i), Spans: maxCompactionRows, MaxIngestedNanos: 1})
 	}
-	if len(selectCompactionBatches(terminal, 128, 0)) != 0 {
+	if len(selectCompactionBatchesWithHigherCap(terminal, 128, 128, 0)) != 0 {
 		t.Fatal("terminal counterexample changed")
 	}
 }

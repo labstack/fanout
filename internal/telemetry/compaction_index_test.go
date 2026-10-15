@@ -118,7 +118,9 @@ type cancelMergeContext struct {
 
 func (c *cancelMergeContext) Err() error {
 	c.checks++
-	if c.checks == 3 {
+	// Initial admission, input open and key priming now check cancellation too.
+	// Cancel at the next row-group boundary, after the first group was written.
+	if c.checks == 5 {
 		c.cancel()
 	}
 	return c.Context.Err()

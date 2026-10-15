@@ -135,6 +135,25 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	}
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
+	for {
+		count, err := r.compactParquet(ctx, publisher, maxBatches)
+		if !errors.Is(err, errCompactionPreempted) {
+			return count, err
+		}
+		// The interrupted output was never prepared or marked. Its workers and
+		// staging cleanup have finished. The higher-generation retry size is
+		// retained separately while generation 0 retires debt and clears its
+		// own attempt record. Reselect immediately, prioritizing generation 0.
+		if err := clearCompactionAttempt(r.root); err != nil {
+			return 0, err
+		}
+	}
+}
+
+func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublisher, maxBatches int) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	markerPath := filepath.Join(r.root, "COMPACTION.json")
 	if exists, err := pathExists(markerPath); err != nil {
 		return 0, err
@@ -145,7 +164,9 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	}
 	// A pass that was killed mid-merge left a record of how much it tried to
 	// take. Take less.
-	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), compactionBatchCap(maxBatches, readCompactionAttempt(r.root)), r.Parquet.CompactionDebt())
+	batchCap := compactionBatchCap(maxBatches, readCompactionAttempt(r.root))
+	selected := selectCompactionBatchesWithHigherCap(r.Parquet.BatchMetadata(), batchCap,
+		compactionBatchCap(batchCap, r.preemptedCompactionInputs), r.Parquet.CompactionDebt())
 	if len(selected) < minCompactionMergeInputs {
 		return 0, nil
 	}
@@ -210,30 +231,33 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	if err := writeCompactionAttempt(r.root, len(selected)); err != nil {
 		return 0, err
 	}
-	group, mergeCtx := errgroup.WithContext(ctx)
-	for _, plan := range plans {
-		group.Go(func() error {
-			stats, err := r.Parquet.MergeParquet(mergeCtx, plan.signal, plan.inputs, plan.output)
-			if err != nil {
-				return fmt.Errorf("compact %s Parquet: %w", plan.signal, err)
-			}
-			if plan.signal == "spans" {
-				if stats.Rows != int64(marker.Output.Spans) {
-					return fmt.Errorf("compacted span count: got %d want %d", stats.Rows, marker.Output.Spans)
+	err := r.mergeCompaction(ctx, selected[0].Generation, len(selected), func(ctx context.Context) error {
+		group, mergeCtx := errgroup.WithContext(ctx)
+		for _, plan := range plans {
+			group.Go(func() error {
+				stats, err := r.Parquet.MergeParquet(mergeCtx, plan.signal, plan.inputs, plan.output)
+				if err != nil {
+					return fmt.Errorf("compact %s Parquet: %w", plan.signal, err)
 				}
-				marker.Output.MinSpanStartNanos = stats.MinSpanStartNanos
-				marker.Output.MaxSpanStartNanos = stats.MaxSpanStartNanos
-			}
-			if err := mergeCtx.Err(); err != nil {
-				return err
-			}
-			if err := syncFile(plan.output); err != nil {
-				return fmt.Errorf("sync compacted %s Parquet: %w", plan.signal, err)
-			}
-			return nil
-		})
-	}
-	if err := group.Wait(); err != nil {
+				if plan.signal == "spans" {
+					if stats.Rows != int64(marker.Output.Spans) {
+						return fmt.Errorf("compacted span count: got %d want %d", stats.Rows, marker.Output.Spans)
+					}
+					marker.Output.MinSpanStartNanos = stats.MinSpanStartNanos
+					marker.Output.MaxSpanStartNanos = stats.MaxSpanStartNanos
+				}
+				if err := mergeCtx.Err(); err != nil {
+					return err
+				}
+				if err := syncFile(plan.output); err != nil {
+					return fmt.Errorf("sync compacted %s Parquet: %w", plan.signal, err)
+				}
+				return nil
+			})
+		}
+		return group.Wait()
+	})
+	if err != nil {
 		return 0, err
 	}
 	if err := r.Parquet.PrepareReplacement(stage, marker.Output); err != nil {
@@ -259,7 +283,37 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	return len(selected), nil
 }
 
-func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches, debt int) []telemetry.BatchMetadata {
+var errCompactionPreempted = errors.New("higher-generation compaction yielded to ingest debt")
+
+// Only unprepared higher-generation work is cancellable by debt. Join the
+// watcher and all merge workers before touching preparation or durable markers.
+// Generation 0 and minimum pairs retain the caller context: debt can delay a
+// higher generation only until its attempts halve to a pair. The retry size is
+// process-local; after a restart the durable interrupted-attempt rule still
+// shrinks unfinished work. Called with compactionMu held.
+func (r *Repository) mergeCompaction(ctx context.Context, generation uint32, inputs int, merge func(context.Context) error) error {
+	if generation == 0 || inputs <= minCompactionMergeInputs {
+		return merge(ctx)
+	}
+	mergeCtx, cancel := context.WithCancelCause(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if r.Parquet.WaitForCompactionLimit(mergeCtx) == nil {
+			cancel(errCompactionPreempted)
+		}
+	}()
+	err := merge(mergeCtx)
+	cancel(nil)
+	<-done
+	if (err == nil || errors.Is(err, context.Canceled)) && errors.Is(context.Cause(mergeCtx), errCompactionPreempted) && ctx.Err() == nil {
+		r.preemptedCompactionInputs = inputs
+		return errCompactionPreempted
+	}
+	return err
+}
+
+func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, maxBatches, higherMaxBatches, debt int) []telemetry.BatchMetadata {
 	// minCompactionInputs is a "worth the effort" policy and belongs to the
 	// caller, which applies it to the ceiling it was asked for. Here the floor
 	// is only what a merge needs: after an interrupted pass the ceiling is
@@ -292,11 +346,15 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches, debt
 	var selected []telemetry.BatchMetadata
 	found := false
 	for key, group := range groups {
+		batchCap := maxBatches
+		if key.generation > 0 {
+			batchCap = min(batchCap, higherMaxBatches)
+		}
 		rowLimit := int64(maxCompactionRows)
 		if pressure && key.generation == 0 {
 			rowLimit = telemetry.CompactionPressureMaxRows
 		}
-		candidate := selectBoundedCompactionGroup(group, maxBatches, rowLimit, key.day < newestDay)
+		candidate := selectBoundedCompactionGroup(group, batchCap, rowLimit, key.day < newestDay)
 		if len(candidate) < 2 {
 			continue
 		}
@@ -424,8 +482,8 @@ func compactionBatchRows(batch telemetry.BatchMetadata) int64 {
 }
 
 // CompactParquetPass starts complete compactions until the phase budget
-// expires. An in-flight merge keeps the caller context so slow, valid work
-// commits instead of restarting the same input group on every pass.
+// expires. The phase budget never cancels an in-flight merge; only blocking
+// ingest debt preempts unprepared higher-generation work.
 func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPublisher, maxBatches int, budget time.Duration) (int, error) {
 	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
@@ -493,6 +551,11 @@ func (r *Repository) completeCompaction(ctx context.Context, marker compactionMa
 		return publish(ctx, marker.Output, marker.Inputs, swap)
 	}); err != nil {
 		return err
+	}
+	// Recovery can finish publication too; only higher-generation outputs
+	// reset the debt-preemption size.
+	if marker.Output.Generation > 1 {
+		r.preemptedCompactionInputs = 0
 	}
 	markerPath := filepath.Join(r.root, "COMPACTION.json")
 	if err := os.Remove(markerPath); err != nil && !errors.Is(err, os.ErrNotExist) {

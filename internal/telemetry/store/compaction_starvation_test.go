@@ -34,7 +34,7 @@ func TestSelectCompactionBatchesDoesNotStarveHigherGenerations(t *testing.T) {
 	// so both are valid candidates and the tie-break decides.
 	batches := append(genBatches(1, 0, 508, 1_000), genBatches(1, 2, 290, 200_000)...)
 
-	selected := selectCompactionBatches(batches, 128, 0)
+	selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, 0)
 	if len(selected) == 0 {
 		t.Fatal("selected nothing with two compactable groups available")
 	}
@@ -50,7 +50,7 @@ func TestSelectCompactionBatchesDoesNotStarveHigherGenerations(t *testing.T) {
 func TestSelectCompactionBatchesStillPrefersTheOlderDay(t *testing.T) {
 	batches := append(genBatches(1, 0, 200, 1_000), genBatches(5, 2, 290, 200_000)...)
 
-	selected := selectCompactionBatches(batches, 128, 0)
+	selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, 0)
 	if len(selected) == 0 {
 		t.Fatal("selected nothing")
 	}
@@ -69,7 +69,7 @@ func TestSelectCompactionBatchesPressureThreshold(t *testing.T) {
 			if debt >= telemetry.CompactionDebtLimit/2 {
 				want = 0
 			}
-			selected := selectCompactionBatches(batches, 128, debt)
+			selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, debt)
 			if len(selected) < 2 || selected[0].Generation != want {
 				t.Fatalf("debt=%d selected=%v want generation %d", debt, selected, want)
 			}
@@ -85,12 +85,12 @@ func TestSelectCompactionBatchesPressureKeepsOldestEligibleGenerationZero(t *tes
 			batches = append(batches, genBatches(1, 0, 1, 1000)...)
 			batches = append(batches, genBatches(2, 0, 8, 1000)...)
 			batches = append(batches, genBatches(3, 0, 1200, 1000)...)
-			selected := selectCompactionBatches(batches, cap, telemetry.CompactionDebtLimit)
+			selected := selectCompactionBatchesWithHigherCap(batches, cap, cap, telemetry.CompactionDebtLimit)
 			if len(selected) != min(cap, 8) || selected[0].Generation != 0 || selected[0].MaxIngestedNanos/int64(24*time.Hour) != 2 {
 				t.Fatalf("selected=%v, want oldest eligible generation-0 group within cap %d", selected, cap)
 			}
 			// Clearing pressure restores the older higher-generation group.
-			selected = selectCompactionBatches(batches, cap, 0)
+			selected = selectCompactionBatchesWithHigherCap(batches, cap, cap, 0)
 			if len(selected) < 2 || selected[0].Generation != 2 || selected[0].MaxIngestedNanos/int64(24*time.Hour) != 1 {
 				t.Fatalf("normal order did not resume: %v", selected)
 			}
@@ -104,7 +104,7 @@ func TestSelectCompactionBatchesServesGenerationZeroWhenNothingIsPiledAbove(t *t
 	// Only generation 0 has enough to form a group.
 	batches := append(genBatches(1, 0, 200, 1_000), genBatches(1, 2, 3, 1_000)...)
 
-	selected := selectCompactionBatches(batches, 128, 0)
+	selected := selectCompactionBatchesWithHigherCap(batches, 128, 128, 0)
 	if len(selected) == 0 {
 		t.Fatal("selected nothing with a full generation-0 group available")
 	}

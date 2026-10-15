@@ -35,6 +35,9 @@ type Repository struct {
 	lastPublished       int64
 	minimumStamp        int64
 	inFlight            map[int64]struct{}
+
+	// Guarded by compactionMu; generation-0 completions must not reset this.
+	preemptedCompactionInputs int
 }
 
 func Open(root string) (*Repository, error) {

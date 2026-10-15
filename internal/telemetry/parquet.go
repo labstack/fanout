@@ -94,6 +94,7 @@ type ParquetStore struct {
 	generation0ByDay   map[int64]int
 	compactionDebt     int
 	debtChanged        chan struct{}
+	debtLimitReached   chan struct{}
 }
 
 type ParquetStats struct {

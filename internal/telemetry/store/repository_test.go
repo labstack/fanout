@@ -494,10 +494,10 @@ func TestSelectCompactionBatchesRequiresFullSmallFileGroup(t *testing.T) {
 	for i := range batches {
 		batches[i] = telemetry.BatchMetadata{ID: fmt.Sprintf("batch-%d", i), MaxIngestedNanos: 1, Spans: 1}
 	}
-	if selected := selectCompactionBatches(batches[:groupSize-1], groupSize, 0); len(selected) != 0 {
+	if selected := selectCompactionBatchesWithHigherCap(batches[:groupSize-1], groupSize, groupSize, 0); len(selected) != 0 {
 		t.Fatalf("selected partial group of %d batches", len(selected))
 	}
-	if selected := selectCompactionBatches(batches, groupSize, 0); len(selected) != groupSize {
+	if selected := selectCompactionBatchesWithHigherCap(batches, groupSize, groupSize, 0); len(selected) != groupSize {
 		t.Fatalf("selected full group = %d, want %d", len(selected), groupSize)
 	}
 }
@@ -514,7 +514,7 @@ func TestSelectCompactionBatchesBuildsRowBoundedGroup(t *testing.T) {
 			Bytes: 1 << 20,
 		}
 	}
-	selected := selectCompactionBatches(batches, maxBatches, 0)
+	selected := selectCompactionBatchesWithHigherCap(batches, maxBatches, maxBatches, 0)
 	if len(selected) != 12 {
 		t.Fatalf("selected %d batches, want 12 below row limit", len(selected))
 	}
@@ -539,7 +539,7 @@ func TestSelectCompactionBatchesCombinesSaturatedLargeFiles(t *testing.T) {
 			Bytes: 1 << 20,
 		}
 	}
-	selected := selectCompactionBatches(batches, maxBatches, 0)
+	selected := selectCompactionBatchesWithHigherCap(batches, maxBatches, maxBatches, 0)
 	if len(selected) != len(batches) {
 		t.Fatalf("selected %d saturated large batches, want %d", len(selected), len(batches))
 	}
@@ -559,7 +559,7 @@ func TestSelectCompactionBatchesSkipsUncompactableOlderGroup(t *testing.T) {
 			Spans: 1,
 		}
 	}
-	selected := selectCompactionBatches(batches, minCompactionInputs, 0)
+	selected := selectCompactionBatchesWithHigherCap(batches, minCompactionInputs, minCompactionInputs, 0)
 	if len(selected) != minCompactionInputs || !strings.HasPrefix(selected[0].ID, "newer-") {
 		t.Fatalf("selection did not skip uncompactable older group: %#v", selected)
 	}
