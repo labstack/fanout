@@ -110,7 +110,7 @@ func TestEdgePassDropsRelationOnEveryExit(t *testing.T) {
 			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return stamp, stamp, stamp }}
 			checkAbsent := func() {
 				var count int
-				if err := db.QueryRow("SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('edge_pass_buckets','edge_pass_parents','edge_pass_unmatched')").Scan(&count); err != nil || count != 0 {
+				if err := db.QueryRow("SELECT count(*) FROM (SELECT table_name AS name FROM duckdb_tables() UNION ALL SELECT view_name AS name FROM duckdb_views()) WHERE name IN ('edge_pass_buckets','edge_pass_parents','edge_pass_unmatched')").Scan(&count); err != nil || count != 0 {
 					t.Fatalf("pass relation survived: count=%d err=%v", count, err)
 				}
 			}
@@ -126,6 +126,10 @@ func TestEdgePassDropsRelationOnEveryExit(t *testing.T) {
 				if watermark, cursor := readEdgeRollupState(t, d); watermark != 0 || cursor != 0 {
 					t.Fatalf("failed pass advanced state: watermark=%d cursor=%d", watermark, cursor)
 				}
+				var buckets int
+				if err := db.QueryRow("SELECT count(*) FROM read_edge_buckets").Scan(&buckets); err != nil || buckets != 0 {
+					t.Fatalf("failed discovery retained buckets=%d err=%v", buckets, err)
+				}
 				if _, err := db.Exec("ALTER TABLE edge_rollup RENAME COLUMN saved_avg_ms TO avg_ms"); err != nil {
 					t.Fatal(err)
 				}
@@ -135,6 +139,25 @@ func TestEdgePassDropsRelationOnEveryExit(t *testing.T) {
 			}
 			checkAbsent()
 			if !empty {
+				watermark, cursor := readEdgeRollupState(t, d)
+				// A failed resume must retain the previous cursor AND summaries.
+				if _, err := db.Exec("ALTER TABLE edge_rollup RENAME COLUMN avg_ms TO saved_avg_ms"); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := d.refreshEdgeRollupPass(t.Context()); err == nil {
+					t.Fatal("incompatible rollup schema did not fail the resume")
+				}
+				checkAbsent()
+				if w, c := readEdgeRollupState(t, d); w != watermark || c != cursor {
+					t.Fatalf("failed resume moved state: watermark=%d cursor=%d", w, c)
+				}
+				var buckets int
+				if err := db.QueryRow("SELECT count(*) FROM read_edge_buckets").Scan(&buckets); err != nil || buckets != 1 {
+					t.Fatalf("failed resume lost summaries: buckets=%d err=%v", buckets, err)
+				}
+				if _, err := db.Exec("ALTER TABLE edge_rollup RENAME COLUMN saved_avg_ms TO avg_ms"); err != nil {
+					t.Fatal(err)
+				}
 				if _, pending, err := d.refreshEdgeRollupPass(t.Context()); err != nil || pending {
 					t.Fatalf("resumed pass pending=%v err=%v", pending, err)
 				}

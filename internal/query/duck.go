@@ -342,15 +342,13 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	}{
 		{serviceRollupStateKey, horizon},
 		{edgeRollupStateKey, horizon},
-		// Skipping discards any half-aggregated window, so its resume point
-		// must go too or the next pass would reopen a window behind the
-		// watermark it just advanced.
-		{edgeRollupSubCursorKey, 0},
-		{edgeRollupSubWindowKey, 0},
 	} {
 		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
 			return err
 		}
+	}
+	if err := clearEdgeRollupCursor(ctx, tx); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
@@ -960,12 +958,19 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 	}
 	newWatermark := windowEnd
 
-	// Build the incoming/recent-arrival repair relation once in this snapshot.
-	// Count every affected span per minute so adaptive counting preserves repair
-	// duplicates without retaining all of their individual rows.
-	// TEMP is connection-local; creation rolls back on failure, and the table
-	// is explicitly dropped before commit so no later pass can observe it.
-	if _, err := tx.ExecContext(ctx, createEdgePassBucketsSQL, windowStart, windowEnd); err != nil {
+	// Discover affected buckets once per frozen ingestion window, including
+	// recent-arrival repairs. Persist only their counts, atomically with the
+	// cursor. Resumes read these small summaries rather than the original spans.
+	if !resuming {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM read_edge_buckets"); err != nil {
+			return 0, false, err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO read_edge_buckets "+edgePassBucketsSelectSQL, windowStart, windowEnd); err != nil {
+			return 0, false, err
+		}
+	}
+	// Keep the per-pass name connection-local. It never holds individual spans.
+	if _, err := tx.ExecContext(ctx, "CREATE TEMP VIEW edge_pass_buckets AS SELECT * FROM read_edge_buckets"); err != nil {
 		return 0, false, err
 	}
 
@@ -1037,6 +1042,9 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 		}
 	} else {
 		storedWatermark = lastWatermark
+		if _, err := tx.ExecContext(ctx, `DELETE FROM read_edge_buckets WHERE bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, time.Unix(0, nextCursor)); err != nil {
+			return 0, false, err
+		}
 		if err := storeRollupWatermark(ctx, tx, edgeRollupSubCursorKey, nextCursor); err != nil {
 			return 0, false, err
 		}
@@ -1044,7 +1052,7 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 			return 0, false, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_buckets"); err != nil {
+	if _, err := tx.ExecContext(ctx, "DROP VIEW edge_pass_buckets"); err != nil {
 		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1058,9 +1066,12 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 	return totalAffected, !completed || chunked, nil
 }
 
-// clearEdgeRollupCursor drops the resume point once its window is fully
-// aggregated, so the next pass opens a fresh ingested window.
+// clearEdgeRollupCursor discards the resume point and its bucket summaries
+// together, so the next pass opens a fresh ingested window.
 func clearEdgeRollupCursor(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM read_edge_buckets"); err != nil {
+		return err
+	}
 	if err := storeRollupWatermark(ctx, tx, edgeRollupSubCursorKey, 0); err != nil {
 		return err
 	}
@@ -1413,8 +1424,9 @@ const edgeArrivalGap = 5 * time.Minute
 // Only relationship keys are read from the recent ingestion range. Its stamp
 // predicates allow Parquet footer pruning independently of event-time history.
 // Messaging uses the aggregate's exact keys, including the shared minute.
-var createEdgePassBucketsSQL = fmt.Sprintf(`
-CREATE TEMP TABLE edge_pass_buckets AS
+var createEdgePassBucketsSQL = "CREATE TEMP TABLE edge_pass_buckets AS " + edgePassBucketsSelectSQL
+
+var edgePassBucketsSelectSQL = fmt.Sprintf(`
 WITH incoming AS MATERIALIZED (
   SELECT namespace, trace_id, span_id, start_time, kind,
          messaging_destination, messaging_system
