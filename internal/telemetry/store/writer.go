@@ -51,6 +51,8 @@ type Writer struct {
 	groupWindow    time.Duration
 	shutdownGrace  time.Duration
 	done           chan struct{}
+	stopping       chan struct{}
+	submissionMu   sync.RWMutex
 	submissions    chan submission
 }
 
@@ -66,6 +68,7 @@ type submission struct {
 type commitJob struct {
 	batches []Batch
 	acks    []chan error
+	bytes   int
 }
 
 // ErrIngestOverBudget is returned when accepting a request would take the
@@ -109,7 +112,7 @@ func (w *Writer) release(bytes int) {
 func NewWriter(repository *Repository, batchSize int) *Writer {
 	return &Writer{
 		repository: repository, batchSize: batchSize, groupWindow: groupAdmissionWindow,
-		done: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth),
+		done: make(chan struct{}), stopping: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth),
 	}
 }
 
@@ -127,22 +130,16 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	if batchRows(batch) == 0 {
 		return nil
 	}
-	// Charged here rather than at the transport because both transports funnel
-	// through this call, and it already blocks until durable acknowledgement --
-	// so the ledger measures exactly the bytes the process is holding.
+	// The caller owns the reservation until enqueue succeeds. The queue and
+	// then the commit job retain it even if the caller stops waiting for its ack.
 	bytes := batchBytes(batch)
 	if err := w.reserve(bytes); err != nil {
 		return err
 	}
-	defer w.release(bytes)
 	request := submission{batch: batch, bytes: bytes, ack: make(chan error, 1)}
-	select {
-	case w.submissions <- request:
-		metrics.UpdateQueueDepth("batch", len(w.submissions))
-	case <-w.done:
-		return errors.New("telemetry writer is stopped")
-	case <-ctx.Done():
-		return ctx.Err()
+	if err := w.enqueueSubmission(ctx, request); err != nil {
+		w.release(bytes)
+		return err
 	}
 	select {
 	case err := <-request.ack:
@@ -154,9 +151,45 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	}
 }
 
+func (w *Writer) enqueueSubmission(ctx context.Context, request submission) error {
+	w.submissionMu.RLock()
+	defer w.submissionMu.RUnlock()
+	// Once shutdown starts, never enqueue into an already drained queue.
+	select {
+	case <-w.stopping:
+		return errors.New("telemetry writer is stopped")
+	default:
+	}
+	select {
+	case w.submissions <- request:
+		metrics.UpdateQueueDepth("batch", len(w.submissions))
+		return nil
+	case <-w.stopping:
+		return errors.New("telemetry writer is stopped")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (w *Writer) Run(ctx context.Context) error {
-	defer close(w.done)
-	defer metrics.UpdateQueueDepth("batch", 0)
+	defer func() {
+		close(w.stopping)
+		// Wake blocked enqueues before excluding producers and draining. A send
+		// racing the stop can succeed, but must finish before this final drain.
+		w.submissionMu.Lock()
+		defer w.submissionMu.Unlock()
+		for {
+			select {
+			case request := <-w.submissions:
+				w.release(request.bytes)
+				request.ack <- errors.New("telemetry writer stopped before durable acknowledgement")
+			default:
+				metrics.UpdateQueueDepth("batch", 0)
+				close(w.done)
+				return
+			}
+		}
+	}()
 	w.compaction, _ = w.repository.(compactionPressure)
 	jobs := make(chan commitJob, commitQueueDepth)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -214,9 +247,17 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 }
 
-func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out chan<- commitJob) error {
+func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out chan<- commitJob) (err error) {
 	requests := make([]submission, 1, maxAdmissionRequests)
 	requests[0] = request
+	defer func() {
+		if err != nil {
+			for _, pending := range requests {
+				w.release(pending.bytes)
+				pending.ack <- err
+			}
+		}
+	}()
 	rows := batchRows(request.batch)
 	bytes := request.bytes
 	limit := w.batchLimit()
@@ -281,7 +322,7 @@ drained:
 			direct := requests[0]
 			requests = requests[1:]
 			direct.batch.ID = uuid.NewString()
-			if err := enqueueJob(ctx, out, commitJob{batches: []Batch{direct.batch}, acks: []chan error{direct.ack}}); err != nil {
+			if err := w.enqueueJob(ctx, out, commitJob{batches: []Batch{direct.batch}, acks: []chan error{direct.ack}, bytes: direct.bytes}); err != nil {
 				return err
 			}
 			continue
@@ -314,47 +355,47 @@ drained:
 		for i := range group {
 			acks[i] = group[i].ack
 		}
-		if err := enqueueJob(ctx, out, commitJob{batches: []Batch{batch}, acks: acks}); err != nil {
+		if err := w.enqueueJob(ctx, out, commitJob{batches: []Batch{batch}, acks: acks, bytes: groupBytes}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func enqueueJob(ctx context.Context, out chan<- commitJob, job commitJob) error {
+func (w *Writer) enqueueJob(ctx context.Context, out chan<- commitJob, job commitJob) error {
 	select {
 	case out <- job:
 		return nil
 	case <-ctx.Done():
+		w.finishJob(job, ctx.Err())
 		return ctx.Err()
 	}
 }
 
 func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case job, ok := <-jobs:
-			if !ok {
-				return
-			}
-			if err := w.commitJob(ctx, job); err != nil {
-				for _, ack := range job.acks {
-					ack <- err
-				}
-				slog.Error("telemetry batch commit exhausted retries", "error", err)
-				continue
-			}
-			for _, batch := range job.batches {
-				metrics.RecordIngest("spans", len(batch.Spans))
-				metrics.RecordIngest("logs", len(batch.Logs))
-				metrics.RecordIngest("metrics", len(batch.Metrics))
-			}
-			for _, ack := range job.acks {
-				ack <- nil
-			}
+	for job := range jobs {
+		if err := ctx.Err(); err != nil {
+			w.finishJob(job, err)
+			continue
 		}
+		if err := w.commitJob(ctx, job); err != nil {
+			w.finishJob(job, err)
+			slog.Error("telemetry batch commit exhausted retries", "error", err)
+			continue
+		}
+		for _, batch := range job.batches {
+			metrics.RecordIngest("spans", len(batch.Spans))
+			metrics.RecordIngest("logs", len(batch.Logs))
+			metrics.RecordIngest("metrics", len(batch.Metrics))
+		}
+		w.finishJob(job, nil)
+	}
+}
+
+func (w *Writer) finishJob(job commitJob, err error) {
+	w.release(job.bytes)
+	for _, ack := range job.acks {
+		ack <- err
 	}
 }
 

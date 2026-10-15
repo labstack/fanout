@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"math"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,19 +23,22 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-// isNoDataError returns true if the error indicates telemetry tables are empty/unavailable.
-func isNoDataError(errMsg string) bool {
-	return strings.Contains(errMsg, "Table with name")
-}
-
 // Detector runs intelligence detection on observability data
 type Detector struct {
-	duck              *query.Duck
-	config            DetectorConfig
-	mu                sync.RWMutex
-	snapshot          *IntelligenceSnapshot
-	annotationMu      sync.Mutex
-	annotationBatches chan annotationBatch
+	duck                *query.Duck
+	config              DetectorConfig
+	mu                  sync.RWMutex
+	snapshot            *IntelligenceSnapshot
+	evaluationMu        sync.Mutex
+	evaluation          *anomalyEvaluation
+	annotationMu        sync.Mutex
+	unpublishedFindings []annotations.Anomaly
+	annotationBatches   chan annotationBatch
+}
+
+type anomalyEvaluation struct {
+	through  time.Time
+	findings []Anomaly
 }
 
 type annotationBatch struct {
@@ -98,9 +102,6 @@ func (d *Detector) runCheck(ctx context.Context) {
 		slog.Error("generate detector snapshot failed", "error", err)
 		return
 	}
-	if previous := d.LatestSnapshot(); previous != nil && snapshot.GeneratedAt.Equal(previous.GeneratedAt) {
-		return
-	}
 	d.publishSnapshot(snapshot)
 
 	anomalyCount := len(snapshot.Anomalies)
@@ -119,21 +120,43 @@ func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
 	// while a newer cycle replaces the single pending batch.
 	d.annotationMu.Lock()
 	defer d.annotationMu.Unlock()
+	batch.findings = mergeAnnotationFindings(d.unpublishedFindings, batch.findings)
+	d.unpublishedFindings = nil
 	select {
 	case d.annotationBatches <- batch:
 		return
 	default:
 	}
 	select {
-	case <-d.annotationBatches:
+	case displaced := <-d.annotationBatches:
+		batch.findings = mergeAnnotationFindings(displaced.findings, batch.findings)
 	default:
 	}
 	d.annotationBatches <- batch
 }
 
-// maxCarriedAnomalies bounds findings kept across failed writes; it matches the
-// anomaly history the store retains.
+// maxCarriedAnomalies bounds unpublished findings, pending batches, and failed
+// writes; it matches the anomaly history the store retains.
 const maxCarriedAnomalies = 10000
+
+// Preserve each evaluated interval, deduplicate repeated evaluations, and keep
+// the newest findings when unpublished, pending, or failed writes reach the history limit.
+func mergeAnnotationFindings(older, newer []annotations.Anomaly) []annotations.Anomaly {
+	capacity := min(maxCarriedAnomalies, len(older)+len(newer))
+	merged := make([]annotations.Anomaly, 0, capacity)
+	seen := make(map[annotations.Anomaly]bool, capacity)
+	for _, findings := range [][]annotations.Anomaly{newer, older} {
+		for i := len(findings) - 1; i >= 0 && len(merged) < maxCarriedAnomalies; i-- {
+			finding := findings[i]
+			if !seen[finding] {
+				seen[finding] = true
+				merged = append(merged, finding)
+			}
+		}
+	}
+	slices.Reverse(merged)
+	return merged
+}
 
 func (d *Detector) persistAnnotations(ctx context.Context, record func(context.Context, []annotations.Anomaly, time.Time) error) {
 	// Keep failed findings with their evaluated intervals, even when the
@@ -156,7 +179,7 @@ func (d *Detector) persistAnnotations(ctx context.Context, record func(context.C
 		case <-ctx.Done():
 			return
 		case batch = <-d.annotationBatches:
-			batch.findings = append(carried.findings, batch.findings...)
+			batch.findings = mergeAnnotationFindings(carried.findings, batch.findings)
 		case <-retryC:
 			batch = carried
 		}
@@ -166,9 +189,6 @@ func (d *Detector) persistAnnotations(ctx context.Context, record func(context.C
 		retryC = nil
 		if err := record(ctx, batch.findings, batch.at); err != nil && ctx.Err() == nil {
 			slog.Error("persist detector annotations", "error", err, "carried", len(batch.findings))
-			if len(batch.findings) > maxCarriedAnomalies {
-				batch.findings = batch.findings[len(batch.findings)-maxCarriedAnomalies:]
-			}
 			carried = batch
 			if retry == nil {
 				retry = time.NewTimer(delay)
@@ -193,24 +213,36 @@ func (d *Detector) LatestSnapshot() *IntelligenceSnapshot {
 
 // GenerateSnapshot generates a complete intelligence snapshot
 func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, error) {
+	d.evaluationMu.Lock()
+	defer d.evaluationMu.Unlock()
 	completed, err := d.duck.CompletedServiceRollupMinute(ctx)
 	if err != nil {
 		return IntelligenceSnapshot{}, fmt.Errorf("read detector service watermark: %w", err)
 	}
-	if previous := d.LatestSnapshot(); previous != nil && !completed.After(previous.evaluatedThrough) {
-		return *previous, nil
-	}
 	now := time.Now()
 	lookback := now.Add(-d.config.LookbackWindow)
 
-	// Detect anomalies
-	anomalies, err := d.detectAnomalies(ctx, completed.Add(-d.config.LookbackWindow), completed)
-	if err != nil {
-		return IntelligenceSnapshot{}, err
+	// Only completed anomaly evaluations are memoized. Live patterns run on
+	// every wall-time check, even before the first rollup or while it stalls.
+	if d.evaluation == nil || !completed.Equal(d.evaluation.through) {
+		anomalies, err := d.detectAnomalies(ctx, completed.Add(-d.config.LookbackWindow), completed)
+		if err != nil {
+			return IntelligenceSnapshot{}, err
+		}
+		d.evaluation = &anomalyEvaluation{through: completed, findings: anomalies}
 	}
+	anomalies := d.evaluation.findings
 
 	// Detect log patterns
-	patterns := d.detectLogPatterns(ctx, lookback, now)
+	patterns, err := d.detectLogPatterns(ctx, lookback, now)
+	if err != nil {
+		// A later watermark may replace this evaluation before patterns recover.
+		// Keep its original intervals until a successful annotation publication.
+		d.annotationMu.Lock()
+		d.unpublishedFindings = mergeAnnotationFindings(d.unpublishedFindings, detectorAnnotations(IntelligenceSnapshot{Anomalies: anomalies}, d.duck.DefaultNamespace()))
+		d.annotationMu.Unlock()
+		return IntelligenceSnapshot{}, err
+	}
 
 	// Calculate health score
 	healthScore := d.calculateHealthScore(anomalies, patterns)
@@ -585,7 +617,7 @@ func (d *Detector) readServiceAnomalies(ctx context.Context, statement string) (
 }
 
 // detectLogPatterns groups repetitive log messages
-func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) []Pattern {
+func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) ([]Pattern, error) {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
@@ -598,10 +630,10 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 			severity,
 			service as service_name,
 			COUNT(*) AS occurrence_count,
-			MIN(time_unix_nano) AS first_seen_nano,
-			MAX(time_unix_nano) AS last_seen_nano
+			epoch_ns(MIN(time)::TIMESTAMP_NS) AS first_seen_nano,
+			epoch_ns(MAX(time)::TIMESTAMP_NS) AS last_seen_nano
 		FROM logs
-		WHERE time_unix_nano >= %d AND time_unix_nano < %d
+		WHERE time >= make_timestamp_ns(%d)::TIMESTAMPTZ_NS AND time < make_timestamp_ns(%d)::TIMESTAMPTZ_NS
 		AND severity IN ('WARN', 'ERROR', 'FATAL')
 		%s
 		GROUP BY COALESCE(body_template, SUBSTRING(body, 1, 100)), severity, service
@@ -612,10 +644,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
-		if !isNoDataError(resp.Error) {
-			slog.Error("pattern detection failed", "error", resp.Error)
-		}
-		return nil
+		return nil, fmt.Errorf("pattern detection: %s", resp.Error)
 	}
 
 	var patterns []Pattern
@@ -637,7 +666,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		})
 	}
 
-	return patterns
+	return patterns, nil
 }
 
 // calculateHealthScore calculates overall system health (0-100, lower is worse)

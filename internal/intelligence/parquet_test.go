@@ -99,7 +99,10 @@ func TestDetectorsReadNativeParquetTimestamps(t *testing.T) {
 			}
 		})
 	}
-	patterns := detector.detectLogPatterns(ctx, start, end)
+	patterns, err := detector.detectLogPatterns(ctx, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(patterns) != 1 || patterns[0].Count != 3 || patterns[0].FirstSeen.UnixNano() != start.UnixNano() {
 		t.Fatalf("log patterns: %#v", patterns)
 	}

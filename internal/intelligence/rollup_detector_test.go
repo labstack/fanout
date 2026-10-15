@@ -82,6 +82,7 @@ func TestDetectorsStopBeforeTheServiceWatermarkMinute(t *testing.T) {
 	if err := query.CreateCacheTables(db); err != nil {
 		t.Fatal(err)
 	}
+	createDetectorLogs(t, db)
 	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for i, rate := range []float64{0, .5, 1} {
 		if _, err := db.Exec(`INSERT INTO service_rollup(namespace,bucket,service,spans,served_spans,p95_ms,error_rate) VALUES ('prod',?,'api',100,100,10,?)`, base.Add(time.Duration(i)*5*time.Minute), rate); err != nil {
@@ -111,7 +112,7 @@ func TestDetectorsStopBeforeTheServiceWatermarkMinute(t *testing.T) {
 	}
 }
 
-func TestDetectorPersistsEvaluatedWindowAndSkipsStalledMinute(t *testing.T) {
+func TestDetectorPersistsEvaluatedWindowWhilePatternsRefresh(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
@@ -165,26 +166,30 @@ func TestDetectorPersistsEvaluatedWindowAndSkipsStalledMinute(t *testing.T) {
 		t.Fatalf("historical interval: %+v", persisted)
 	}
 	// A recheck would see different values; an unchanged completed minute must
-	// retain the exact prior snapshot and enqueue no annotation write.
+	// retain the anomaly evaluation while rebuilding the live snapshot.
 	if _, err := duck.DB.Exec(`UPDATE service_rollup SET error_rate=.9 WHERE bucket >= ?`, start); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
 		detector.runCheck(t.Context())
 	}
-	if detector.LatestSnapshot() != previous || len(detector.annotationBatches) != 0 {
-		t.Fatal("stalled watermark re-evaluated or queued annotations")
+	if latest := detector.LatestSnapshot(); latest == previous || latest.Anomalies[0] != a {
+		t.Fatal("stalled watermark changed the anomaly evaluation")
+	}
+	refreshed := <-detector.annotationBatches
+	if len(refreshed.findings) != 1 || !refreshed.findings[0].From.Equal(start) || !refreshed.findings[0].To.Equal(end) {
+		t.Fatalf("live refresh changed persisted interval: %+v", refreshed)
 	}
 	after := read()
 	if len(after) != 1 || !after[0].From.Equal(persisted[0].From) || !after[0].To.Equal(persisted[0].To) {
 		t.Fatalf("stalled interval changed: %+v", after)
 	}
-	// Crossing only seconds in the same minute still skips evaluation.
+	// Crossing only seconds in the same minute still skips anomaly evaluation.
 	if _, err := duck.DB.Exec(`UPDATE rollup_state SET last_ingested_unix_nano=? WHERE cache_key='service_rollup_v3'`, end.Add(59*time.Second).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	detector.runCheck(t.Context())
-	if detector.LatestSnapshot() != previous || len(detector.annotationBatches) != 0 {
+	if detector.LatestSnapshot().Anomalies[0] != a {
 		t.Fatal("incomplete minute triggered evaluation")
 	}
 	if _, err := duck.DB.Exec(`UPDATE rollup_state SET last_ingested_unix_nano=? WHERE cache_key='service_rollup_v3'`, end.Add(time.Minute).UnixNano()); err != nil {

@@ -34,7 +34,7 @@ func (c *recordingCommitter) Commit(_ context.Context, batch Batch) error {
 
 func testWriter(committer batchCommitter, batchSize int) *Writer {
 	return &Writer{
-		repository: committer, batchSize: batchSize, groupWindow: groupAdmissionWindow, done: make(chan struct{}),
+		repository: committer, batchSize: batchSize, groupWindow: groupAdmissionWindow, done: make(chan struct{}), stopping: make(chan struct{}),
 		submissions: make(chan submission, submissionQueueDepth),
 	}
 }
@@ -84,6 +84,7 @@ func TestWriterAcknowledgesOnlyAfterAtomicCommit(t *testing.T) {
 func TestWriterGroupsQueuedSubmissions(t *testing.T) {
 	committer := &recordingCommitter{}
 	w := testWriter(committer, maxGroupBatchRows)
+	w.SetInFlightBudget(8192)
 	results := make(chan error, 4)
 	for i := range 4 {
 		go func() {
@@ -98,6 +99,9 @@ func TestWriterGroupsQueuedSubmissions(t *testing.T) {
 		if err := <-results; err != nil {
 			t.Fatal(err)
 		}
+	}
+	if got := w.inFlightBytes.Load(); got != 0 {
+		t.Fatalf("grouped commit retained %d bytes", got)
 	}
 	cancel()
 	if err := <-runDone; err != nil {

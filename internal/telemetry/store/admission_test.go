@@ -17,8 +17,8 @@ import (
 // still an out-of-memory kill however cheap each batch became.
 //
 // Submit is where that is countable -- both transports funnel through it, and
-// it already blocks until durable acknowledgement, so charging it on entry and
-// releasing it on return measures exactly the bytes the process is holding.
+// it transfers its reservation to the queue until the writer finishes with the
+// payload, even when the caller stops waiting for durable acknowledgement.
 func TestSubmitRefusesWorkBeyondTheInFlightBudget(t *testing.T) {
 	w := NewWriter(nil, 1000)
 	w.inFlightBudget = 4096
