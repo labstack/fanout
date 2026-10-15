@@ -24,8 +24,8 @@ var blockedSQLFunctions = map[string]bool{
 	"query": true, "query_table": true, "json_execute_serialized_sql": true,
 	"current_setting": true, "getvariable": true, "getenv": true,
 	"read_csv": true, "read_csv_auto": true, "read_json": true, "read_json_auto": true,
-	"read_text": true, "read_blob": true, "read_parquet": true, "glob": true,
-	"http_get": true, "write_file": true, "write_log": true,
+	"read_text": true, "read_blob": true, "read_parquet": true, "read_single_parquet_file": true,
+	"glob": true, "http_get": true, "write_file": true, "write_log": true,
 	"current_query": true, "current_query_id": true,
 	"pg_get_viewdef": true, "pg_get_constraintdef": true, "format_type": true, "get_block_size": true,
 }

@@ -18,8 +18,8 @@ static int register_extensions(void) {
 */
 import "C"
 
-const Version = "v2.0.0-alpha43763"
-const SourceCommit = "96063b9e39749cc0f087bb11501d7edbee527957"
+const Version = "v2.0.0-alpha46057"
+const SourceCommit = "b15358c371"
 
 func init() {
 	if C.GoString(C.duckdb_library_version()) != Version {
