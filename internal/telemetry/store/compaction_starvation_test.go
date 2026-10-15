@@ -127,7 +127,7 @@ func TestSelectBoundedCompactionGroupCompactsAnUnderfilledDay(t *testing.T) {
 	// A finished day: well under the count ceiling, nowhere near saturating.
 	group := genBatches(3, 1, 56, 5_000)
 
-	candidate := selectBoundedCompactionGroup(group, 128, true)
+	candidate := selectBoundedCompactionGroup(group, 128, maxCompactionRows, true)
 
 	if len(candidate) == 0 {
 		t.Fatal("no candidate for a 56-batch day: a day that will never grow to 128 files can never consolidate")
@@ -139,7 +139,7 @@ func TestSelectBoundedCompactionGroupCompactsAnUnderfilledDay(t *testing.T) {
 
 // Still not worth waking the merge for a couple of files.
 func TestSelectBoundedCompactionGroupIgnoresATrivialDay(t *testing.T) {
-	if got := selectBoundedCompactionGroup(genBatches(3, 1, 3, 5_000), 128, true); len(got) != 0 {
+	if got := selectBoundedCompactionGroup(genBatches(3, 1, 3, 5_000), 128, maxCompactionRows, true); len(got) != 0 {
 		t.Errorf("candidate = %d for a 3-batch day, want none: below the effort floor", len(got))
 	}
 }

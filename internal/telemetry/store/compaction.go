@@ -292,7 +292,11 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches, debt
 	var selected []telemetry.BatchMetadata
 	found := false
 	for key, group := range groups {
-		candidate := selectBoundedCompactionGroup(group, maxBatches, key.day < newestDay)
+		rowLimit := int64(maxCompactionRows)
+		if pressure && key.generation == 0 {
+			rowLimit = telemetry.CompactionPressureMaxRows
+		}
+		candidate := selectBoundedCompactionGroup(group, maxBatches, rowLimit, key.day < newestDay)
 		if len(candidate) < 2 {
 			continue
 		}
@@ -315,7 +319,7 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches, debt
 // small files, but admits a smaller group when the row ceiling fills first.
 // Without the latter, one successful generation can make every later group too
 // large for the ceiling and permanently strand those files.
-func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches int, finished bool) []telemetry.BatchMetadata {
+func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches int, rowLimit int64, finished bool) []telemetry.BatchMetadata {
 	ordered := append([]telemetry.BatchMetadata(nil), group...)
 	sort.Slice(ordered, func(i, j int) bool {
 		left, right := compactionBatchRows(ordered[i]), compactionBatchRows(ordered[j])
@@ -333,7 +337,7 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 	var smallest int64
 	for _, batch := range ordered {
 		batchRows := compactionBatchRows(batch)
-		if batchRows <= 0 || batchRows > maxCompactionRows {
+		if batchRows <= 0 || batchRows > rowLimit {
 			continue
 		}
 		batchBytes := compactionBatchBytes(batch)
@@ -344,7 +348,7 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 			saturated = true
 			break
 		}
-		if rows > maxCompactionRows-batchRows {
+		if rows > rowLimit-batchRows {
 			saturated = true
 			break
 		}
@@ -364,7 +368,7 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 		rows += batchRows
 		bytes += batchBytes
 	}
-	if rows == maxCompactionRows || smallest > 0 && smallest > maxCompactionRows-rows {
+	if rows == rowLimit || smallest > 0 && smallest > rowLimit-rows {
 		saturated = true
 	}
 	if bytes == maxCompactionBytes {

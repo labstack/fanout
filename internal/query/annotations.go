@@ -144,8 +144,11 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		return 0, fmt.Errorf("version_rollup/write_gate: %w", err)
 	}
 	defer unlock()
-	if err := d.lockRollupParquetRead(waitCtx); err != nil {
+	if err := waitCtx.Err(); err != nil {
 		return 0, err
+	}
+	if !d.tryRollupParquetRead() {
+		return 0, nil
 	}
 	defer d.parquetMu.RUnlock()
 	cancelWait()

@@ -331,11 +331,13 @@ func TestBacklogServiceFailuresIdentifyStatementAndPreserveCause(t *testing.T) {
 				mock.ExpectQuery("FROM rollup_state").WithArgs(key).WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(1))
 			}
 			mock.ExpectBegin()
+			mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery("SELECT epoch_ns").WillReturnRows(sqlmock.NewRows([]string{"lo", "hi"}).AddRow(0, 60_000_000_000))
 			if label == "service_rollup/delete" {
 				mock.ExpectExec("DELETE FROM service_rollup").WillReturnError(cause)
 			} else {
 				mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
-				mock.ExpectExec("WITH affected").WillReturnError(cause)
+				mock.ExpectExec("WITH span_agg").WillReturnError(cause)
 			}
 			mock.ExpectRollback()
 			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 2, 2, 1 }}

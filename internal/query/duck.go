@@ -790,6 +790,14 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	// consistent and deadlock-free.
 	unlock := d.writeGate.Lock(writegate.WriteRollupService)
 	defer unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if !d.tryRollupParquetRead() {
+		result = metrics.RollupNoop
+		return 0, nil
+	}
+	defer d.parquetMu.RUnlock()
 	horizon, published, minimum := d.publicationBounds()
 	sourceMax = published
 	// Failed attempts advance the horizon without publishing rows. Until the
@@ -810,10 +818,6 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		updateRollupProgress(metrics.RollupService, true, lastWatermark, published)
 		return 0, nil
 	}
-	if err := d.lockRollupParquetRead(ctx); err != nil {
-		return 0, err
-	}
-	defer d.parquetMu.RUnlock()
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -823,12 +827,32 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	newWatermark := windowEnd
 
 	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
-	if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, args...); err != nil {
-		return 0, fmt.Errorf("service_rollup/delete: %w", err)
+	if _, err := tx.ExecContext(ctx, createServicePassAffectedSQL, args...); err != nil {
+		return 0, fmt.Errorf("service_rollup/affected: %w", err)
 	}
-	res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, args...)
-	if err != nil {
-		return 0, fmt.Errorf("service_rollup/insert: %w", err)
+	var lower, upper sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT epoch_ns(min(bucket)), epoch_ns(max(bucket) + INTERVAL 1 MINUTE) FROM service_pass_affected`).Scan(&lower, &upper); err != nil {
+		return 0, fmt.Errorf("service_rollup/bounds: %w", err)
+	}
+	var rows int64
+	// An empty ingestion window still advances its watermark, but cannot
+	// delete or insert any buckets. Keep exact signed nanoseconds in Go.
+	if lower.Valid && upper.Valid {
+		lo, hi := time.Unix(0, lower.Int64).UTC(), time.Unix(0, upper.Int64).UTC()
+		if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, lo, hi); err != nil {
+			return 0, fmt.Errorf("service_rollup/delete: %w", err)
+		}
+		res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, lo, hi, lo, hi, lo, hi)
+		if err != nil {
+			return 0, fmt.Errorf("service_rollup/insert: %w", err)
+		}
+		rows, err = res.RowsAffected()
+		if err != nil {
+			slog.Warn("service rollup rows affected unavailable", "err", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE service_pass_affected`); err != nil {
+		return 0, fmt.Errorf("service_rollup/drop_affected: %w", err)
 	}
 
 	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
@@ -841,14 +865,6 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	d.rollupWatermarks[serviceRollupStateKey] = newWatermark
 	updateRollupProgress(metrics.RollupService, true, newWatermark, published)
 
-	rows, err := res.RowsAffected()
-	if err != nil {
-		// Warn, not Debug: recordedRows feeds fanout_rollup_component_rows_total,
-		// so a silent zero here reads in benchmark evidence as "the rollup ran and
-		// matched nothing" when it actually means "we do not know".
-		slog.Warn("service rollup rows affected unavailable", "err", err)
-		return 0, nil
-	}
 	recordedRows = rows
 	return rows, nil
 }
@@ -887,6 +903,14 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
 	defer unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+	if !d.tryRollupParquetRead() {
+		result = metrics.RollupNoop
+		return 0, false, nil
+	}
+	defer d.parquetMu.RUnlock()
 	horizon, published, minimum := d.publicationBounds()
 	sourceMax = published
 	// Failed attempts advance the horizon without publishing rows. Until the
@@ -907,10 +931,6 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 		updateRollupProgress(metrics.RollupEdge, true, lastWatermark, published)
 		return 0, false, nil
 	}
-	if err := d.lockRollupParquetRead(ctx); err != nil {
-		return 0, false, err
-	}
-	defer d.parquetMu.RUnlock()
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, err
@@ -1253,8 +1273,8 @@ func serviceRollupQuantileSQL(alias string, index int, column string) string {
 	return fmt.Sprintf("COALESCE(%s[%d], %s[%d]) AS %s", served, index, all, index, column)
 }
 
-const serviceRollupDeleteSQL = `
-WITH affected AS (
+const createServicePassAffectedSQL = `
+CREATE OR REPLACE TEMP TABLE service_pass_affected AS
   SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
@@ -1277,44 +1297,21 @@ WITH affected AS (
     AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
-    AND service != ''
-)
+    AND service != '';`
+
+const serviceRollupDeleteSQL = `
 DELETE FROM service_rollup
-WHERE EXISTS (
-  SELECT 1
-  FROM affected
-  WHERE affected.namespace = service_rollup.namespace
-    AND affected.bucket = service_rollup.bucket
-    AND affected.service = service_rollup.service
+WHERE bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND EXISTS (
+    SELECT 1 FROM service_pass_affected a
+    WHERE a.namespace = service_rollup.namespace
+      AND a.bucket = service_rollup.bucket
+      AND a.service = service_rollup.service
 );`
 
 var serviceRollupInsertSQL = `
-WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket, service
-  FROM spans
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND start_time IS NOT NULL
-    AND service IS NOT NULL
-    AND service != ''
-  UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
-  FROM logs
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND time IS NOT NULL
-    AND service IS NOT NULL
-    AND service != ''
-  UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
-  FROM metrics
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND time IS NOT NULL
-    AND service IS NOT NULL
-    AND service != ''
-),
-span_agg AS (
+WITH span_agg AS (
   SELECT
     s.namespace,
     date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
@@ -1336,7 +1333,7 @@ span_agg AS (
     ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
-  JOIN affected a
+  JOIN service_pass_affected a
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
    AND a.service = s.service
@@ -1347,8 +1344,8 @@ span_agg AS (
   -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
   -- old start_time widens the range (and this scan) only for the pass that
   -- ingests it, same trade-off as the edge rollup's parent bound.
-  WHERE s.start_time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.start_time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  WHERE s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service
 ),
 log_agg AS (
@@ -1358,12 +1355,12 @@ log_agg AS (
     l.service,
     COUNT(*) AS log_count
   FROM logs l
-  JOIN affected a
+  JOIN service_pass_affected a
     ON a.namespace = l.namespace
    AND a.bucket = date_trunc('minute', l.time::TIMESTAMP_NS)
    AND a.service = l.service
-  WHERE l.time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND l.time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  WHERE l.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND l.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY l.namespace, date_trunc('minute', l.time::TIMESTAMP_NS), l.service
 ),
 metric_agg AS (
@@ -1373,12 +1370,12 @@ metric_agg AS (
     m.service,
     COUNT(DISTINCT m.name) AS metric_count
   FROM metrics m
-  JOIN affected a
+  JOIN service_pass_affected a
     ON a.namespace = m.namespace
    AND a.bucket = date_trunc('minute', m.time::TIMESTAMP_NS)
    AND a.service = m.service
-  WHERE m.time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND m.time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  WHERE m.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND m.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY m.namespace, date_trunc('minute', m.time::TIMESTAMP_NS), m.service
 )
 INSERT INTO service_rollup (
@@ -1404,7 +1401,7 @@ SELECT
   COALESCE(s.error_rate, 0),
   COALESCE(l.log_count, 0),
   COALESCE(m.metric_count, 0)
-FROM affected a
+FROM service_pass_affected a
 LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
 LEFT JOIN metric_agg m USING (namespace, bucket, service);`
@@ -1925,10 +1922,13 @@ func (d *Duck) lockParquetRead(ctx context.Context, reader string) error {
 	return nil
 }
 
-func (d *Duck) lockRollupParquetRead(ctx context.Context) error {
-	waitCtx, cancel := context.WithTimeout(ctx, rollupReaderLease)
-	defer cancel()
-	return d.lockParquetRead(waitCtx, readerRollup)
+// Keep gate-first lock ordering, but never park the analytical writer gate
+// behind a publication. The owning loop retries skipped work on its cadence.
+func (d *Duck) tryRollupParquetRead() bool {
+	start := time.Now()
+	admitted := d.parquetMu.TryRLock(parquetReadBackground)
+	metrics.RecordParquetRead(readerRollup, time.Since(start).Seconds(), admitted)
+	return admitted
 }
 
 // ---- Queries for API ----

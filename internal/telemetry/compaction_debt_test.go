@@ -108,7 +108,7 @@ func TestCompactionDebtExcludesUnreclaimableInventory(t *testing.T) {
 			t.Fatalf("after install %d debt=%d want=%d", i, got, want)
 		}
 	}
-	p.installBatch(&storedBatch{metadata: BatchMetadata{ID: "oversized", Spans: CompactionMaxRows, MaxIngestedNanos: 1}})
+	p.installBatch(&storedBatch{metadata: BatchMetadata{ID: "oversized", Spans: CompactionPressureMaxRows/2 + 1, MaxIngestedNanos: 1}})
 	p.installBatch(&storedBatch{metadata: BatchMetadata{ID: "another-day", Spans: 1, MaxIngestedNanos: int64(24 * time.Hour)}})
 	if got := p.CompactionDebt(); got != CompactionDebtLimit/2 {
 		t.Fatalf("unreclaimable inputs raised debt: %d", got)

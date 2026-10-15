@@ -56,8 +56,13 @@ func TestBackgroundPassesYieldToQueuedPublication(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			waitCtx, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
 			defer stop()
-			if err := pass(waitCtx); !errors.Is(err, ErrParquetReadWait) || !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("background pass did not wait behind publisher: %v", err)
+			err := pass(waitCtx)
+			if name == "stats" {
+				if !errors.Is(err, ErrParquetReadWait) || !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("stats did not wait behind publisher: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("analytical pass did not skip queued publication: %v", err)
 			}
 		})
 	}

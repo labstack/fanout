@@ -423,38 +423,40 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 	}
 }
 
-func TestRollupReadLockHonorsContext(t *testing.T) {
+func TestRollupReadAdmissionSkipsPublication(t *testing.T) {
 	d := &Duck{publicationBounds: func() (int64, int64, int64) { return 2, 2, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 1}}
 	mustLock(&d.parquetMu)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	_, err := d.refreshServiceRollup(ctx)
-	d.parquetMu.Unlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("refreshServiceRollup error = %v, want deadline exceeded", err)
+	defer d.parquetMu.Unlock()
+	if rows, err := d.refreshServiceRollup(t.Context()); err != nil || rows != 0 {
+		t.Fatalf("service skip rows=%d error=%v", rows, err)
+	}
+	if rows, pending, err := d.refreshEdgeRollupPass(t.Context()); err != nil || rows != 0 || pending {
+		t.Fatalf("edge skip rows=%d pending=%v error=%v", rows, pending, err)
+	}
+	if d.rollupWatermarks[serviceRollupStateKey] != 1 {
+		t.Fatal("skipped pass moved watermark")
 	}
 }
 
-func TestRollupAdmissionLeaseDoesNotCancelAdmittedWork(t *testing.T) {
+func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	originalLease := rollupReaderLease
-	rollupReaderLease = 5 * time.Millisecond
-	t.Cleanup(func() { rollupReaderLease = originalLease })
-
 	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupStateKey).
 		WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(100))
 	mock.ExpectBegin()
+	mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT epoch_ns").WillReturnRows(sqlmock.NewRows([]string{"lo", "hi"}).AddRow(0, 60_000_000_000))
 	mock.ExpectExec("DELETE FROM service_rollup").WillDelayFor(20 * time.Millisecond).WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("WITH affected").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("WITH span_agg").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DROP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO rollup_state").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 200, 200, 100 }}
 	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
-		t.Fatalf("admitted rollup was canceled by its admission lease: %v", err)
+		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
