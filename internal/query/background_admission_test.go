@@ -54,7 +54,13 @@ func TestBackgroundPassesYieldToQueuedPublication(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			waitCtx, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			// Successful analytical passes need headroom under the race detector;
+			// only stats is expected to wait for its deadline.
+			waitBudget := 5 * time.Second
+			if name == "stats" {
+				waitBudget = 20 * time.Millisecond
+			}
+			waitCtx, stop := context.WithTimeout(t.Context(), waitBudget)
 			defer stop()
 			err := pass(waitCtx)
 			if name == "stats" {
