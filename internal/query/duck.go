@@ -1661,16 +1661,13 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	var tx *sql.Tx
 	var db snapshotSQL = conn
 	if window, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
-		tx, err = conn.BeginTx(ctx, nil)
+		tx, err = beginRead(ctx, conn)
 		if err == nil {
 			db = tx
 			query, err = d.bindSnapshot(ctx, tx, query, window)
 		}
 		if err != nil {
-			if tx != nil {
-				_ = tx.Rollback()
-			}
-			_ = conn.Close()
+			endRead(conn, tx)
 			d.parquetMu.RUnlock()
 			return nil, err
 		}
@@ -1679,17 +1676,11 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	rows, err := db.QueryContext(ctx, query, args...)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-		_ = conn.Close()
+		endRead(conn, tx)
 		d.parquetMu.RUnlock()
 		return nil, err
 	}
 	release := func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
 		// The connection goes back to the pool only once its rows are done
 		// with it, which is what closing the rows first guarantees.
 		//
@@ -1698,10 +1689,39 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		// return the connection when the context died, and an explicitly held
 		// one is the caller's until it says otherwise. Every call site closes
 		// on every path; this is what it costs if one stops.
-		_ = conn.Close()
+		endRead(conn, tx)
 		d.parquetMu.RUnlock()
 	}
 	return &lockedRows{Rows: rows, unlock: release}, nil
+}
+
+// beginRead opens a read transaction that only its owner ends. A transaction
+// begun with the request context is rolled back by database/sql from another
+// goroutine when that context is cancelled, while DuckDB may still deliver the
+// cancelled statement's interrupt to the ROLLBACK. The rollback then fails,
+// the transaction stays open, and the pooled connection fails every later read.
+// Statements inside still run under ctx, so cancellation still stops them.
+func beginRead(ctx context.Context, conn *sql.Conn) (*sql.Tx, error) {
+	tx, err := conn.BeginTx(context.WithoutCancel(ctx), nil)
+	if err != nil {
+		discardConn(conn)
+	}
+	return tx, err
+}
+
+// endRead rolls back tx, if any, and returns conn to the pool. A connection
+// whose rollback failed may still hold the transaction, so it is discarded
+// instead of being handed to the next reader.
+func endRead(conn *sql.Conn, tx *sql.Tx) {
+	if tx != nil && tx.Rollback() != nil {
+		discardConn(conn)
+	}
+	_ = conn.Close()
+}
+
+// discardConn closes conn's driver connection rather than pooling it.
+func discardConn(conn *sql.Conn) {
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 }
 
 type lockedRows struct {
@@ -2047,5 +2067,14 @@ LIMIT %d;
 // WithReadTransaction keeps derived annotation rows and completeness flags in
 // one read snapshot. Its callback only receives the query surface.
 func (d *Duck) WithReadTransaction(ctx context.Context, read func(queryrows.Queryer) error) error {
-	return (queryrows.SQLAdapter{DB: d.DB}).WithReadTransaction(ctx, read)
+	conn, err := d.acquireRead(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := beginRead(ctx, conn)
+	defer endRead(conn, tx)
+	if err != nil {
+		return err
+	}
+	return read(queryrows.SQLAdapter{DB: tx})
 }

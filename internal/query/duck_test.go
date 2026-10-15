@@ -222,6 +222,52 @@ WHERE bucket >= ? AND bucket < ?`, eventTime.Add(-time.Minute), eventTime.Add(ti
 	}
 }
 
+// A cancelled statement's interrupt can reach the ROLLBACK that ends its read
+// transaction, leaving the transaction open. The read must roll back itself
+// after cancellation, and a connection whose rollback failed must leave the
+// pool instead of failing every later read.
+func TestReadTransactionRollbackFailureDiscardsTheConnection(t *testing.T) {
+	for _, rollbackErr := range []error{nil, errors.New("INTERRUPT Error: Interrupted!")} {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn, err := db.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		mock.ExpectBegin()
+		tx, err := beginRead(ctx, conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rollback := mock.ExpectRollback()
+		if rollbackErr != nil {
+			rollback.WillReturnError(rollbackErr)
+		}
+		cancel()
+		// database/sql rolls back a transaction begun with a cancelled context
+		// on its own goroutine, where a failed rollback cannot be seen.
+		time.Sleep(20 * time.Millisecond)
+		if mock.ExpectationsWereMet() == nil {
+			t.Fatal("cancellation rolled the read transaction back before its owner ended it")
+		}
+		endRead(conn, tx)
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+		want := 1
+		if rollbackErr != nil {
+			want = 0
+		}
+		if open := db.Stats().OpenConnections; open != want {
+			t.Errorf("rollback error %v: %d pooled connections, want %d", rollbackErr, open, want)
+		}
+		_ = db.Close()
+	}
+}
+
 func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
