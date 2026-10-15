@@ -208,7 +208,7 @@ func TestWriterAdaptsAdmissionToReclaimableDebt(t *testing.T) {
 			}
 			go submit(0)
 			synctest.Wait()
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(15 * time.Millisecond)
 			go submit(1)
 			synctest.Wait()
 			time.Sleep(300 * time.Millisecond)
@@ -222,7 +222,7 @@ func TestWriterAdaptsAdmissionToReclaimableDebt(t *testing.T) {
 			wantLatency := [2]time.Duration{10 * time.Millisecond, 10 * time.Millisecond}
 			if debt >= telemetry.CompactionDebtLimit/2 {
 				want = 1
-				wantLatency = [2]time.Duration{250 * time.Millisecond, 230 * time.Millisecond}
+				wantLatency = [2]time.Duration{35 * time.Millisecond, 20 * time.Millisecond}
 			}
 			if latencies != wantLatency {
 				t.Fatalf("debt=%d acknowledgement latencies=%v want=%v", debt, latencies, wantLatency)
@@ -276,6 +276,52 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 				job := <-out
 				if len(job.acks) > maxAdmissionRequests || batchRows(job.batches[0]) > maxGroupBatchRows {
 					t.Fatal("group bound exceeded")
+				}
+			})
+		})
+	}
+}
+
+func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
+	for _, interval := range []time.Duration{15 * time.Millisecond, 25 * time.Millisecond} {
+		t.Run(interval.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c := &pressureRecordingCommitter{recordingCommitter: &recordingCommitter{}}
+				c.debt.Store(telemetry.CompactionDebtLimit / 2)
+				w := testWriter(c, maxGroupBatchRows)
+				w.compaction = c
+				request := submission{batch: testBatch(), ack: make(chan error, 1)}
+				out := make(chan commitJob, 1)
+				done := make(chan error, 1)
+				at := time.Now()
+				var elapsed time.Duration
+				go func() {
+					err := w.enqueueSubmissions(t.Context(), request, out)
+					elapsed = time.Since(at)
+					done <- err
+				}()
+				synctest.Wait()
+				// Keep arrivals below the idle cutoff, or let the first group idle.
+				for i := 1; i <= 16; i++ {
+					time.Sleep(interval)
+					w.submissions <- request
+					synctest.Wait()
+				}
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+				job := <-out
+				wantRequests := 17
+				wantElapsed := pressureAdmissionWindow
+				if interval > pressureAdmissionIdle {
+					wantRequests = 1
+					wantElapsed = pressureAdmissionIdle
+				}
+				if elapsed != wantElapsed {
+					t.Fatalf("dispatch after %v want=%v", elapsed, wantElapsed)
+				}
+				if len(job.acks) != wantRequests {
+					t.Fatalf("requests=%d want=%d", len(job.acks), wantRequests)
 				}
 			})
 		})
