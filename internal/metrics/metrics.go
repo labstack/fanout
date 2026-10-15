@@ -47,6 +47,10 @@ const (
 var (
 	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Active immutable batches not covered at the start of the last read-cache pass"})
 
+	IngestBackpressureSeconds = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds the ingest writer waited for compaction debt to retire",
+	})
+
 	// Ingest metrics
 	IngestTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_ingest_rows_total",
@@ -562,3 +566,24 @@ func validateTelemetryResult(result TelemetryResult) {
 		panic("metrics: invalid Telemetry result: " + string(result))
 	}
 }
+
+type compactionBacklogSource struct{ count func() int }
+
+var compactionBacklog atomic.Pointer[compactionBacklogSource]
+
+// SetCompactionBacklogSource reads the exact inventory rather than a periodic
+// file-stat snapshot. Closing an older repository cannot clear a newer source.
+func SetCompactionBacklogSource(count func() int) func() {
+	source := &compactionBacklogSource{count: count}
+	compactionBacklog.Store(source)
+	return func() { compactionBacklog.CompareAndSwap(source, nil) }
+}
+
+var _ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+	Name: "fanout_compaction_backlog_batches", Help: "Live generation-0 batches, including underfilled groups and oversized terminal batches",
+}, func() float64 {
+	if source := compactionBacklog.Load(); source != nil {
+		return float64(source.count())
+	}
+	return 0
+})

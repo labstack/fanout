@@ -133,7 +133,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	defer unlock()
 	// Cache retries are frequent. A queued publication must not park the cache
 	// gate for the analytical rollup's much longer admission lease.
-	admitted := d.parquetMu.TryRLock()
+	admitted := d.parquetMu.TryRLock(parquetReadBackground)
 	metrics.RecordParquetRead(readerRollup, 0, admitted)
 	if !admitted {
 		return 0, nil

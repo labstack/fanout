@@ -182,10 +182,10 @@ func TestRepositoryPrunesOnlyExpiredBatches(t *testing.T) {
 	newer.Spans[0].StartUnixNanos, newer.Spans[0].IngestedAt = 1_000, 1_000
 	newer.Logs[0].TimeUnixNanos, newer.Logs[0].IngestedAt = 1_000, 1_000
 	newer.Metrics[0].TimeUnixNanos, newer.Metrics[0].IngestedAt = 1_000, 1_000
-	if err := repository.Commit(context.Background(), old); err != nil {
+	if err := commitRestoredFixture(repository, context.Background(), old); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.Commit(context.Background(), newer); err != nil {
+	if err := commitRestoredFixture(repository, context.Background(), newer); err != nil {
 		t.Fatal(err)
 	}
 	publisher := &testParquetCompactor{afterSwap: func() error {
@@ -326,7 +326,7 @@ func TestRepositoryPrunePassDrainsWithinBudgetAndOldestFirst(t *testing.T) {
 		batch.Spans[0].IngestedAt = int64(i + 1)
 		batch.Logs[0].IngestedAt = int64(i + 1)
 		batch.Metrics[0].IngestedAt = int64(i + 1)
-		if err := repository.Commit(context.Background(), batch); err != nil {
+		if err := commitRestoredFixture(repository, context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -360,7 +360,7 @@ func TestRepositoryPrunePassFinishesPublicationAfterBudget(t *testing.T) {
 		batch.Spans[0].IngestedAt = int64(i + 1)
 		batch.Logs[0].IngestedAt = int64(i + 1)
 		batch.Metrics[0].IngestedAt = int64(i + 1)
-		if err := repository.Commit(context.Background(), batch); err != nil {
+		if err := commitRestoredFixture(repository, context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -417,7 +417,7 @@ func TestRepositoryRetentionUsesIngestTimeNotEventTime(t *testing.T) {
 	batch.Spans[0].IngestedAt = 100
 	batch.Logs[0].IngestedAt = 100
 	batch.Metrics[0].IngestedAt = 100
-	if err := repository.Commit(context.Background(), batch); err != nil {
+	if err := commitRestoredFixture(repository, context.Background(), batch); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := repository.PruneParquet(context.Background(), &testParquetCompactor{}, 500, 64)
@@ -494,10 +494,10 @@ func TestSelectCompactionBatchesRequiresFullSmallFileGroup(t *testing.T) {
 	for i := range batches {
 		batches[i] = telemetry.BatchMetadata{ID: fmt.Sprintf("batch-%d", i), MaxIngestedNanos: 1, Spans: 1}
 	}
-	if selected := selectCompactionBatches(batches[:groupSize-1], groupSize); len(selected) != 0 {
+	if selected := selectCompactionBatches(batches[:groupSize-1], groupSize, 0); len(selected) != 0 {
 		t.Fatalf("selected partial group of %d batches", len(selected))
 	}
-	if selected := selectCompactionBatches(batches, groupSize); len(selected) != groupSize {
+	if selected := selectCompactionBatches(batches, groupSize, 0); len(selected) != groupSize {
 		t.Fatalf("selected full group = %d, want %d", len(selected), groupSize)
 	}
 }
@@ -514,7 +514,7 @@ func TestSelectCompactionBatchesBuildsRowBoundedGroup(t *testing.T) {
 			Bytes: 1 << 20,
 		}
 	}
-	selected := selectCompactionBatches(batches, maxBatches)
+	selected := selectCompactionBatches(batches, maxBatches, 0)
 	if len(selected) != 12 {
 		t.Fatalf("selected %d batches, want 12 below row limit", len(selected))
 	}
@@ -539,7 +539,7 @@ func TestSelectCompactionBatchesCombinesSaturatedLargeFiles(t *testing.T) {
 			Bytes: 1 << 20,
 		}
 	}
-	selected := selectCompactionBatches(batches, maxBatches)
+	selected := selectCompactionBatches(batches, maxBatches, 0)
 	if len(selected) != len(batches) {
 		t.Fatalf("selected %d saturated large batches, want %d", len(selected), len(batches))
 	}
@@ -559,7 +559,7 @@ func TestSelectCompactionBatchesSkipsUncompactableOlderGroup(t *testing.T) {
 			Spans: 1,
 		}
 	}
-	selected := selectCompactionBatches(batches, minCompactionInputs)
+	selected := selectCompactionBatches(batches, minCompactionInputs, 0)
 	if len(selected) != minCompactionInputs || !strings.HasPrefix(selected[0].ID, "newer-") {
 		t.Fatalf("selection did not skip uncompactable older group: %#v", selected)
 	}
@@ -911,4 +911,41 @@ func (f testParquetPublisherFunc) PublishParquetReplacement(ctx context.Context,
 }
 func (c *testParquetCompactor) PublishParquetReplacement(ctx context.Context, _ telemetry.BatchMetadata, _ []string, publish func(context.Context) error) error {
 	return c.PublishParquet(ctx, publish)
+}
+
+// commitRestoredFixture seeds already-stamped historical inputs, as recovery
+// does. Normal ingest tests use Repository.Commit and its fresh attempt stamp.
+func commitRestoredFixture(repo *Repository, ctx context.Context, batch Batch) error {
+	var lo, hi int64
+	include := func(n int64) {
+		if n > 0 && (lo == 0 || n < lo) {
+			lo = n
+		}
+		hi = max(hi, n)
+	}
+	for i := range batch.Spans {
+		row := &batch.Spans[i]
+		row.Namespace = telemetry.NormalizeNamespace(row.Namespace)
+		include(row.IngestedAt)
+		if row.StartUnixNanos == 0 {
+			row.StartUnixNanos = row.IngestedAt
+		}
+	}
+	for i := range batch.Logs {
+		row := &batch.Logs[i]
+		row.Namespace = telemetry.NormalizeNamespace(row.Namespace)
+		include(row.IngestedAt)
+		if row.EventUnixNanos == 0 {
+			row.EventUnixNanos = telemetry.FirstPositiveNanos(row.TimeUnixNanos, row.ObservedTimeNanos, row.IngestedAt)
+		}
+	}
+	for i := range batch.Metrics {
+		row := &batch.Metrics[i]
+		row.Namespace = telemetry.NormalizeNamespace(row.Namespace)
+		include(row.IngestedAt)
+		if row.EventUnixNanos == 0 {
+			row.EventUnixNanos = telemetry.FirstPositiveNanos(row.TimeUnixNanos, row.IngestedAt)
+		}
+	}
+	return repo.Parquet.CommitBatch(ctx, &telemetry.BatchMetadata{ID: batch.ID, MinIngestedNanos: lo, MaxIngestedNanos: hi}, batch.Spans, batch.Logs, batch.Metrics)
 }

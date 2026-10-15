@@ -81,7 +81,7 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 					points = append(points, m)
 				}
 			}
-			if err := store.CommitBatch(t.Context(), telemetry.BatchMetadata{ID: fmt.Sprintf("minute%d", minute+10)}, nil, nil, points); err != nil {
+			if err := store.CommitBatch(t.Context(), &telemetry.BatchMetadata{ID: fmt.Sprintf("minute%d", minute+10)}, nil, nil, points); err != nil {
 				t.Fatal(err)
 			}
 		}

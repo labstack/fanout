@@ -26,7 +26,7 @@ func verificationFixture(t *testing.T) (string, []spanParquetRow) {
 		{TraceID: "trace", SpanID: "c", StartUnixNanos: 30},
 		{TraceID: "trace", SpanID: "d", StartUnixNanos: 40, Attributes: map[string]any{"other": []byte{0, 255}}, Resource: map[string]any{"service.name": "last", "extra": []any{int64(2), false}}},
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "verify"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "verify"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	dir := store.BatchPath("verify")

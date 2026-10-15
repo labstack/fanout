@@ -30,7 +30,7 @@ func TestSpanParquetDictionaryEncodesLowCardinalityColumns(t *testing.T) {
 		spans[i] = Span{Namespace: "prod", TraceID: strings.Repeat("a", 30) + string(rune('a'+i%26)) + string(rune('a'+i/26)), SpanID: strings.Repeat("b", 14) + string(rune('a'+i%26)) + string(rune('a'+i/26)),
 			ServiceName: "checkout", Name: "POST /orders", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_UNSET", StartUnixNanos: int64(i + 1), EndUnixNanos: int64(i + 2), IngestedAt: 999}
 	}
-	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "encodings"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "encodings"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	f, err := os.Open(filepath.Join(store.BatchPath("encodings"), "spans.parquet"))
@@ -84,7 +84,7 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 			ServiceName: "checkout", HTTPRoute: fmt.Sprintf("/%0100d", i), Name: "op", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK",
 			StartUnixNanos: int64(i + 1), EndUnixNanos: int64(i + 2), IngestedAt: 999}
 	}
-	if err := store.CommitBatch(t.Context(), BatchMetadata{ID: "bounded"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "bounded"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	f, err := os.Open(filepath.Join(store.BatchPath("bounded"), "spans.parquet"))

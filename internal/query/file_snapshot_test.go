@@ -154,7 +154,7 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 	at := time.Now().UTC().Truncate(time.Hour)
 	for i := range 8 {
 		n := at.Add(time.Duration(i) * time.Second).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("part", i), Spans: []telemetry.Span{{Namespace: "prod", ServiceName: "api", TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: at.UnixNano()}}, Logs: []telemetry.Log{{Namespace: "prod", TimeUnixNanos: n, IngestedAt: at.UnixNano()}}}); err != nil {
+		if err := commitRestoredFixture(repo, t.Context(), telemetrystore.Batch{ID: fmt.Sprint("part", i), Spans: []telemetry.Span{{Namespace: "prod", ServiceName: "api", TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: at.UnixNano()}}, Logs: []telemetry.Log{{Namespace: "prod", TimeUnixNanos: n, IngestedAt: at.UnixNano()}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -264,10 +264,14 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 
 func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
+	release := d.writeGate.Lock(writegate.WriteRollupService)
+	defer release()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
+	versionDone := make(chan struct{})
+	go func() { defer close(versionDone); d.runVersionRollupLoop(ctx) }()
 	go func() { defer close(done); d.runReadCacheLoop(ctx) }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() { cancel(); <-done; <-versionDone })
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new", Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +289,23 @@ func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 				t.Fatal(err)
 			}
 			if count == 1 {
+				// Let the version worker reach its blocked pass, then publish
+				// another file that requires a later read-cache pass.
+				time.Sleep(1100 * time.Millisecond)
+				if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "second", Logs: []telemetry.Log{{TimeUnixNanos: 2}}}); err != nil {
+					t.Fatal(err)
+				}
+				until := time.Now().Add(3 * time.Second)
+				for time.Now().Before(until) {
+					if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&count); err != nil {
+						t.Fatal(err)
+					}
+					if count == 2 {
+						return
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				t.Fatal("blocked version pass delayed the next read-cache pass")
 				return
 			}
 		}
@@ -407,9 +428,9 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	// Pin a reader so publication has to drain. The worker must still be able to
-	// acknowledge new ingest and must not collect the prepared output marker.
-	if err := d.parquetMu.RLockContext(t.Context()); err != nil {
+	// Pin a reader so publication has to drain. Preparation must release the
+	// cache write gate; new cache passes skip until the publisher is gone.
+	if err := d.parquetMu.RLockContext(t.Context(), parquetReadQuery); err != nil {
 		t.Fatal(err)
 	}
 	defer d.parquetMu.RUnlock()
@@ -436,14 +457,20 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new-input", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
 		t.Fatal(err)
 	}
+	waitForQueuedWriter(t, &d.parquetMu)
 	passCtx, stop := context.WithTimeout(t.Context(), time.Second)
 	defer stop()
+	unlock, err := d.cacheGate.LockContext(passCtx, writegate.WriteReadCache)
+	if err != nil {
+		t.Fatalf("preparation held cache gate behind publication: %v", err)
+	}
+	unlock()
 	if _, err := d.RefreshReadCaches(passCtx); err != nil {
 		t.Fatalf("worker blocked behind publication: %v", err)
 	}
 	markers, err := batchMarkers(t.Context(), d.DB)
-	if err != nil || !markers["output"] || !markers["new-input"] {
-		t.Fatalf("prepared output/new ingest lost: %v %v", markers, err)
+	if err != nil || !markers["output"] || markers["new-input"] {
+		t.Fatalf("prepared output lost or cache entered ahead of publisher: %v %v", markers, err)
 	}
 	cancel()
 	if err := <-done; err == nil {
@@ -453,8 +480,8 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	markers, err = batchMarkers(t.Context(), d.DB)
-	if err != nil || markers["output"] {
-		t.Fatalf("failed output was not collected: %v %v", markers, err)
+	if err != nil || markers["output"] || !markers["new-input"] {
+		t.Fatalf("cache did not collect failed output and acknowledge new ingest: %v %v", markers, err)
 	}
 }
 
@@ -462,11 +489,11 @@ func TestRetiredTraceRepairsOnlyItsActiveScopeAndBounds(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	at := time.Now().UTC().Truncate(time.Hour)
 	old := at.Add(-2 * time.Hour).UnixNano()
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "retire-scope", Spans: []telemetry.Span{{Namespace: "gone", ServiceName: "retired", TraceID: "shared", StartUnixNanos: old, EndUnixNanos: old + 1, StatusCode: "ERROR", IngestedAt: old}}}); err != nil {
+	if err := commitRestoredFixture(repo, t.Context(), telemetrystore.Batch{ID: "retire-scope", Spans: []telemetry.Span{{Namespace: "gone", ServiceName: "retired", TraceID: "shared", StartUnixNanos: old, EndUnixNanos: old + 1, StatusCode: "ERROR", IngestedAt: old}}}); err != nil {
 		t.Fatal(err)
 	}
 	now := at.UnixNano()
-	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "keep-scope", Spans: []telemetry.Span{
+	if err := commitRestoredFixture(repo, t.Context(), telemetrystore.Batch{ID: "keep-scope", Spans: []telemetry.Span{
 		{Namespace: "prod", ServiceName: "api", TraceID: "shared", StartUnixNanos: now, EndUnixNanos: now + 1, IngestedAt: now},
 		{Namespace: "prod", ServiceName: "api", TraceID: "winner", StartUnixNanos: now, EndUnixNanos: now + 1000, IngestedAt: now},
 	}}); err != nil {

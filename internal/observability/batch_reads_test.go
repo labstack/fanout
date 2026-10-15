@@ -156,7 +156,7 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 	rng := rand.New(rand.NewPCG(11, 104729))
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	statuses := []string{"OK", "ERROR", "error", "UNSET", ""}
-	commit := func(k int, ingest time.Time) {
+	commit := func(k int) {
 		t.Helper()
 		lo := t0.Add(-40*time.Minute + time.Duration(k)*37*time.Second)
 		batch := telemetrystore.Batch{ID: fmt.Sprintf("local%03d", k)}
@@ -165,7 +165,7 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 			dur := time.Duration(rng.Int64N(int64(2 * time.Second)))
 			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: []string{"prod", "dev"}[rng.IntN(2)], ServiceName: []string{"api", "worker"}[rng.IntN(2)],
 				TraceID: fmt.Sprintf("t%03d", k/2+rng.IntN(3)), SpanID: fmt.Sprintf("%s-%d", batch.ID, i), StartUnixNanos: at.UnixNano(), EndUnixNanos: at.Add(dur).UnixNano(),
-				DurationMS: float64(dur) / 1e6, StatusCode: statuses[rng.IntN(len(statuses))], HTTPMethod: "GET", HTTPRoute: "/a", IngestedAt: ingest.UnixNano()})
+				DurationMS: float64(dur) / 1e6, StatusCode: statuses[rng.IntN(len(statuses))], HTTPMethod: "GET", HTTPRoute: "/a"})
 		}
 		if err := repo.Commit(t.Context(), batch); err != nil {
 			t.Fatal(err)
@@ -209,7 +209,7 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 		}
 	}
 	for k := 0; k < 24; k++ {
-		commit(k, t0.Add(-2*time.Hour+time.Duration(k)*time.Second))
+		commit(k)
 	}
 	refresh()
 	check("cached")
@@ -221,11 +221,12 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 	check("compacted before refresh")
 	refresh()
 	check("compacted")
+	retireThrough, _, _ := repo.PublicationBounds()
 	for k := 24; k < 28; k++ {
-		commit(k, t0.Add(time.Duration(k)*time.Second))
+		commit(k)
 	}
 	refresh()
-	if n, err := repo.PruneParquet(t.Context(), d, t0.Add(-time.Hour).UnixNano(), 100); err != nil || n == 0 {
+	if n, err := repo.PruneParquet(t.Context(), d, retireThrough+1, 100); err != nil || n == 0 {
 		t.Fatalf("prune: %d %v", n, err)
 	}
 	check("pruned before refresh")

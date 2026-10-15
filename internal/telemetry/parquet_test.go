@@ -25,7 +25,7 @@ func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
 	}
 	span := completeTestSpan()
 	metadata := BatchMetadata{ID: "batch-1", MinIngestedNanos: span.IngestedAt, MaxIngestedNanos: span.IngestedAt}
-	if err := store.CommitBatch(context.Background(), metadata, []Span{span}, []Log{{Namespace: "tenant", Body: "ready", TimeUnixNanos: 12}}, []Metric{{Namespace: "tenant", Name: "requests", TimeUnixNanos: 13}}); err != nil {
+	if err := store.CommitBatch(context.Background(), &metadata, []Span{span}, []Log{{Namespace: "tenant", Body: "ready", TimeUnixNanos: 12}}, []Metric{{Namespace: "tenant", Name: "requests", TimeUnixNanos: 13}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,7 +38,7 @@ func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
 	if got := store.RowCount(); got != 3 {
 		t.Fatalf("row count = %d, want 3", got)
 	}
-	if err := store.CommitBatch(context.Background(), metadata, []Span{span}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &metadata, []Span{span}, nil, nil); err != nil {
 		t.Fatalf("idempotent commit: %v", err)
 	}
 	if got := store.RowCount(); got != 3 {
@@ -94,7 +94,7 @@ func TestParquetStoreTraceUsesExactIDAndEventOrder(t *testing.T) {
 		{TraceID: "other", SpanID: "other", StartUnixNanos: 20},
 		{TraceID: "wanted", SpanID: "earlier", StartUnixNanos: 10},
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "batch"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "batch"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := traceAll(store, "wanted")
@@ -115,7 +115,7 @@ func TestValidatePublishedBatchDetectsTraceIndexDataDivergence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "diverged"}, []Span{{
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "diverged"}, []Span{{
 		TraceID: "trace", SpanID: "span", StartUnixNanos: 1,
 	}}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestParquetStoreTraceFiltersAndBoundsResultsDuringRead(t *testing.T) {
 		Span{Namespace: "staging", TraceID: "large-trace", SpanID: "wrong-namespace", StartUnixNanos: 11},
 		Span{Namespace: "prod", TraceID: "large-trace", SpanID: "outside-window", StartUnixNanos: 200},
 	)
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "large"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "large"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -193,7 +193,7 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 		ExemplarsJSON: `[{"trace_id":"trace"}]`, Attributes: map[string]any{"route": "/pay"},
 		Resource: map[string]any{"host": "one"}, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
 		t.Fatal(err)
 	}
 	batchDir := store.BatchPath("complete-signals")
@@ -218,7 +218,7 @@ func TestParquetStoreSkipsTraceIndexesOutsideTimeWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "old-traces"}, []Span{{
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "old-traces"}, []Span{{
 		TraceID: "wanted", SpanID: "old", StartUnixNanos: 100,
 	}}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
@@ -282,7 +282,7 @@ func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	}
 	commitDone := make(chan error, 1)
 	go func() {
-		commitDone <- store.CommitBatch(context.Background(), BatchMetadata{ID: "concurrent", MaxIngestedNanos: 3}, []Span{{TraceID: "trace-2"}}, nil, nil)
+		commitDone <- store.CommitBatch(context.Background(), &BatchMetadata{ID: "concurrent", MaxIngestedNanos: 3}, []Span{{TraceID: "trace-2"}}, nil, nil)
 	}()
 	select {
 	case err := <-commitDone:
@@ -303,7 +303,7 @@ func TestPrunePublicationContextBoundsStorageLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.lockPublish(context.Background()); err != nil {
@@ -330,11 +330,11 @@ func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(context.Background(), output, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &output, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
@@ -355,7 +355,7 @@ func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
 	}
 	commitDone := make(chan error, 1)
 	go func() {
-		commitDone <- store.CommitBatch(context.Background(), BatchMetadata{ID: "concurrent"}, []Span{{TraceID: "trace-2"}}, nil, nil)
+		commitDone <- store.CommitBatch(context.Background(), &BatchMetadata{ID: "concurrent"}, []Span{{TraceID: "trace-2"}}, nil, nil)
 	}()
 	select {
 	case err := <-commitDone:
@@ -377,11 +377,11 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(context.Background(), output, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &output, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	originalSync := syncPublishedDirectory
@@ -412,11 +412,11 @@ func TestPublishReplacementUnpublishesRecoveredOutputBeforeRetiringInputs(t *tes
 		t.Fatal(err)
 	}
 	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(context.Background(), output, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &output, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	blockedRetired := filepath.Join(store.BatchesDir(), "input.retired-output")
@@ -454,7 +454,7 @@ func TestParquetStoreRejectsUnsafeBatchID(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"", ".hidden", "../escape", "has space"} {
-		if err := store.CommitBatch(context.Background(), BatchMetadata{ID: id}, []Span{{TraceID: "t"}}, nil, nil); err == nil {
+		if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: id}, []Span{{TraceID: "t"}}, nil, nil); err == nil {
 			t.Fatalf("CommitBatch accepted unsafe ID %q", id)
 		}
 	}
@@ -466,7 +466,7 @@ func TestParquetStoreRejectsMetadataRowCountMismatchOnOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "mismatch"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "mismatch"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	metadataPath := filepath.Join(store.BatchPath("mismatch"), "metadata.json")
@@ -546,7 +546,7 @@ func TestCommitBatchDoesNotBlockIndefinitelyOnStalledPublication(t *testing.T) {
 	metadata := BatchMetadata{ID: "batch-stalled", MinIngestedNanos: span.IngestedAt, MaxIngestedNanos: span.IngestedAt}
 
 	done := make(chan error, 1)
-	go func() { done <- store.CommitBatch(ctx, metadata, []Span{span}, nil, nil) }()
+	go func() { done <- store.CommitBatch(ctx, &metadata, []Span{span}, nil, nil) }()
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.DeadlineExceeded) {

@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxCompactionRows = 25_000_000
+	maxCompactionRows = telemetry.CompactionMaxRows
 
 	// maxCompactionBytes bounds a pass by the bytes it admits, because that is
 	// what a merge costs: parquet-go opens a cursor per row group across every
@@ -145,7 +145,7 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	}
 	// A pass that was killed mid-merge left a record of how much it tried to
 	// take. Take less.
-	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), compactionBatchCap(maxBatches, readCompactionAttempt(r.root)))
+	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), compactionBatchCap(maxBatches, readCompactionAttempt(r.root)), r.Parquet.CompactionDebt())
 	if len(selected) < minCompactionMergeInputs {
 		return 0, nil
 	}
@@ -259,7 +259,7 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	return len(selected), nil
 }
 
-func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) []telemetry.BatchMetadata {
+func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches, debt int) []telemetry.BatchMetadata {
 	// minCompactionInputs is a "worth the effort" policy and belongs to the
 	// caller, which applies it to the ceiling it was asked for. Here the floor
 	// is only what a merge needs: after an interrupted pass the ceiling is
@@ -276,28 +276,12 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 		key := compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}
 		groups[key] = append(groups[key], batch)
 	}
-	// Within a day, take the HIGHEST generation that has a compactable group,
-	// not the lowest.
-	//
-	// Lowest-first starves everything above it. Ingest refills generation 0
-	// continuously, so if it always wins no later generation is ever selected,
-	// while each pass it does run adds one more batch to the generation above.
-	// Observed on the live box as 508 / 371 / 290 batches at generations
-	// 0 / 1 / 2, generation 2 untouched for hours, and the live file count
-	// settling at an equilibrium instead of falling. That count is what every
-	// query pays per-file overhead on, so an equilibrium there is a permanent
-	// tax rather than a backlog that clears.
-	//
-	// Highest-first cannot starve anything. A generation above 0 only grows by
-	// one batch per pass of the generation below it, so its group fills slowly
-	// and empties in a few passes; once it no longer has a full group it stops
-	// being a candidate and generation 0 -- which is almost always ready --
-	// takes every remaining pass. Reducing the count by a group is worth the
-	// same wherever it happens, because the cost being reduced is per file.
-	//
-	// The older day still wins outright. Reclaiming space retention is about to
-	// drop matters more than consolidating today, and a day no longer being
-	// written finishes and stays finished.
+	// Under writer pressure, reclaim generation-0 debt before starting a
+	// potentially long higher-generation merge, even on an older day. Within
+	// that priority keep the normal order: oldest day, then highest generation.
+	// Below pressure, higher generations run first within each day so continuous
+	// ingest cannot starve them.
+	pressure := debt >= telemetry.CompactionDebtLimit/2
 	newestDay := int64(math.MinInt64)
 	for key := range groups {
 		if key.day > newestDay {
@@ -312,9 +296,11 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 		if len(candidate) < 2 {
 			continue
 		}
-		better := !found ||
-			key.day < chosen.day ||
-			key.day == chosen.day && key.generation > chosen.generation
+		priority := pressure && key.generation == 0
+		chosenPriority := pressure && chosen.generation == 0
+		better := !found || priority && !chosenPriority ||
+			priority == chosenPriority && (key.day < chosen.day ||
+				key.day == chosen.day && key.generation > chosen.generation)
 		if better {
 			chosen, selected, found = key, candidate, true
 		}

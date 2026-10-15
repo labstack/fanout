@@ -11,7 +11,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -71,7 +70,6 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 
 func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
 	cfg := s.cfg
-	now := time.Now().UnixNano()
 	count := 0
 	for _, rs := range req.ResourceSpans {
 		for _, ss := range rs.ScopeSpans {
@@ -126,7 +124,6 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					Flags:        sp.Flags,
 					ScopeName:    scopeName,
 					ScopeVersion: scopeVer,
-					IngestedAt:   now,
 					// Pre-extracted OTel semantic convention attributes.
 					HTTPMethod:     spanAttr(sp.Attributes, "http.method", "http.request.method"),
 					HTTPStatusCode: spanAttrInt(sp.Attributes, "http.status_code", "http.response.status_code"),
@@ -171,7 +168,6 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 
 func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
 	cfg := s.cfg
-	now := time.Now().UnixNano()
 	count := 0
 	for _, rl := range req.ResourceLogs {
 		for _, sl := range rl.ScopeLogs {
@@ -217,7 +213,6 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 					Attributes:        attrs,
 					ScopeName:         scopeName,
 					ScopeVersion:      scopeVer,
-					IngestedAt:        now,
 				}
 				batch.Logs = append(batch.Logs, row)
 			}
@@ -237,7 +232,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 
 func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
 	cfg := s.cfg
-	now := time.Now().UnixNano()
 	count := 0
 	for _, rm := range req.ResourceMetrics {
 		for _, sm := range rm.ScopeMetrics {
@@ -296,7 +290,6 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							Resource:           resources,
 							ScopeName:          scopeName,
 							ScopeVersion:       scopeVer,
-							IngestedAt:         now,
 						}
 						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
@@ -328,7 +321,6 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							Resource:           resources,
 							ScopeName:          scopeName,
 							ScopeVersion:       scopeVer,
-							IngestedAt:         now,
 						}
 						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
@@ -366,7 +358,6 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							Resource:           resources,
 							ScopeName:          scopeName,
 							ScopeVersion:       scopeVer,
-							IngestedAt:         now,
 						}
 						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
@@ -408,7 +399,6 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							Resource:           resources,
 							ScopeName:          scopeName,
 							ScopeVersion:       scopeVer,
-							IngestedAt:         now,
 						}
 						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)
@@ -436,7 +426,6 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							Resource:           resources,
 							ScopeName:          scopeName,
 							ScopeVersion:       scopeVer,
-							IngestedAt:         now,
 						}
 						row.SeriesID = telemetry.MetricSeriesID(row)
 						batch.Metrics = append(batch.Metrics, row)

@@ -28,7 +28,7 @@ func TestEdgeRollupBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db,
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
 	}
 	ctx := context.Background()
@@ -263,7 +263,7 @@ func TestEdgeRollupBoundsSubWindowsPerPass(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
 	ctx := context.Background()
 
 	// One ingested instant, but start_time spread over 600 minutes: 20
@@ -394,7 +394,10 @@ WHERE ingested_unix_nano > ? AND ingested_unix_nano <= ?`, ingested-1, ingested)
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	subHi, err := edgeSubWindowEnd(ctx, tx, ingested-1, ingested, base, base.Add(29*time.Minute), 10)
+	if _, err := tx.ExecContext(ctx, createEdgePassBucketsSQL, ingested-1, ingested); err != nil {
+		t.Fatal(err)
+	}
+	subHi, err := edgeSubWindowEnd(ctx, tx, base, base.Add(29*time.Minute), 10)
 	if err != nil {
 		t.Fatal(err)
 	}

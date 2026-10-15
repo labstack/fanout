@@ -79,7 +79,40 @@ func createAnnotationTables(db *sql.DB) error {
 		"namespace", "service", "kind", "start_time", "end_time", "title", "severity")
 }
 
-const versionRollupWaitBudget = 20 * time.Second
+const (
+	versionRollupWaitBudget = 20 * time.Second
+	// Mixed 5k/50k-per-signal Parquet batches process about 3.8m rows in
+	// one second on eight threads. Bound both rows and file/marker overhead
+	// while amortizing each pass and the worker's 100ms progress delay.
+	versionRollupRowBudget   = 1_000_000
+	versionRollupBatchBudget = 64
+)
+
+// Batches are ordered by ingestion time by the caller. Indivisible oversized
+// batches and failed groups still get a single-batch attempt under the deadline.
+func pendingVersionBatches(batches []telemetry.BatchMetadata, marked map[string]bool, failures map[string]versionRollupFailure, now time.Time) []telemetry.BatchMetadata {
+	pending := []telemetry.BatchMetadata{}
+	count := 0
+	for _, b := range batches {
+		if marked[b.ID] || now.Before(failures[b.ID].nextAttempt) {
+			continue
+		}
+		size := b.Spans + b.Logs + b.Metrics
+		if failures[b.ID].retrySingly && len(pending) > 0 {
+			break
+		}
+		if len(pending) == 0 && (size > versionRollupRowBudget || failures[b.ID].retrySingly) {
+			pending = append(pending, b)
+			break
+		}
+		if len(pending) >= versionRollupBatchBudget || count+size > versionRollupRowBudget {
+			break
+		}
+		pending = append(pending, b)
+		count += size
+	}
+	return pending
+}
 
 func (d *Duck) RefreshVersionRollup(ctx context.Context) (int64, error) {
 	return d.refreshVersionRollup(ctx, versionRollupWaitBudget)
@@ -153,27 +186,7 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 			delete(d.versionRollupFailures, id)
 		}
 	}
-	pending := []telemetry.BatchMetadata{}
-	count := 0
-	for _, b := range batches {
-		if marked[b.ID] || time.Now().Before(d.versionRollupFailures[b.ID].nextAttempt) {
-			continue
-		}
-		size := b.Spans + b.Logs + b.Metrics
-		if d.versionRollupFailures[b.ID].retrySingly && len(pending) > 0 {
-			break
-		}
-		if len(pending) == 0 && (size > 64000 || d.versionRollupFailures[b.ID].retrySingly) {
-			// Oversized batches and failed groups retry alone under the 10s deadline.
-			pending = append(pending, b)
-			break
-		}
-		if len(pending) >= 64 || count+size > 64000 {
-			break
-		}
-		pending = append(pending, b)
-		count += size
-	}
+	pending := pendingVersionBatches(batches, marked, d.versionRollupFailures, time.Now())
 	attempted := false
 	// writeGate protects this disposable, per-process retry state. Failed batches
 	// remain unmarked, so a later committed pass still discloses limited history.

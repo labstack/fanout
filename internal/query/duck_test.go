@@ -183,7 +183,6 @@ func TestNewDuckUsesUTCForEveryConnection(t *testing.T) {
 	}}}); err != nil {
 		t.Fatalf("commit timezone fixture: %v", err)
 	}
-	d.rollupLagNanos = 0
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("roll up timezone fixture: %v", err)
 	}
@@ -425,7 +424,7 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 }
 
 func TestRollupReadLockHonorsContext(t *testing.T) {
-	d := &Duck{}
+	d := &Duck{publicationBounds: func() (int64, int64, int64) { return 2, 2, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 1}}
 	mustLock(&d.parquetMu)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -446,16 +445,14 @@ func TestRollupAdmissionLeaseDoesNotCancelAdmittedWork(t *testing.T) {
 	rollupReaderLease = 5 * time.Millisecond
 	t.Cleanup(func() { rollupReaderLease = originalLease })
 
-	mock.ExpectBegin()
 	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupStateKey).
-		WillReturnRows(sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(100))
-	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupRawMaxKey).
-		WillReturnRows(sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(100))
-	mock.ExpectQuery("FROM \\(").WillDelayFor(20 * time.Millisecond).
 		WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(100))
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM service_rollup").WillDelayFor(20 * time.Millisecond).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("WITH affected").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO rollup_state").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-
-	d := &Duck{DB: db, writeDB: db}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 200, 200, 100 }}
 	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
 		t.Fatalf("admitted rollup was canceled by its admission lease: %v", err)
 	}
@@ -519,7 +516,7 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
+	if err := commitRestoredFixture(repository, context.Background(), telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
 		t.Fatal(err)
 	}
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -640,7 +637,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 			Logs:    []telemetry.Log{{Body: "old", IngestedAt: 1}},
 			Metrics: []telemetry.Metric{{Name: "old", IngestedAt: 1}},
 		}
-		if err := repository.Commit(context.Background(), batch); err != nil {
+		if err := commitRestoredFixture(repository, context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -758,7 +755,6 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			component: "service",
 			stateReads: []stateRead{
 				{serviceRollupStateKey, watermarkNanos},
-				{serviceRollupRawMaxKey, watermarkNanos},
 			},
 			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshServiceRollup(ctx) },
 		},
@@ -766,7 +762,6 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			component: "edge",
 			stateReads: []stateRead{
 				{edgeRollupStateKey, watermarkNanos},
-				{edgeRollupRawMaxKey, watermarkNanos},
 			},
 			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshEdgeRollup(ctx) },
 		},
@@ -781,22 +776,24 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			}
 			defer db.Close()
 
-			d := &Duck{DB: db, writeDB: db, cfg: config.Config{}}
+			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return sourceNanos, sourceNanos, 1 }, cfg: config.Config{}}
 			watermarkRows := func(value int64) *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
 			}
 
-			mock.ExpectBegin()
 			for _, read := range tc.stateReads {
 				mock.ExpectQuery("FROM rollup_state").WithArgs(read.key).
 					WillReturnRows(watermarkRows(read.value))
 			}
-			mock.ExpectQuery("FROM spans").
-				WillReturnRows(sqlmock.NewRows([]string{"v"}).AddRow(sourceNanos))
+			mock.ExpectBegin()
 			// Everything past this point fails, so the rollup returns an error
 			// without advancing its watermark.
-			mock.ExpectQuery(".").
-				WillReturnError(errors.New("rollup query failed"))
+			if tc.component == "service" {
+				mock.ExpectExec(".").WillReturnError(errors.New("rollup query failed"))
+			} else {
+				mock.ExpectQuery(".").WillReturnError(errors.New("rollup query failed"))
+			}
+			mock.ExpectRollback()
 
 			if _, err := tc.refresh(d, context.Background()); err == nil {
 				t.Fatalf("refresh %s rollup: error = nil, want the injected failure surfaced", tc.component)

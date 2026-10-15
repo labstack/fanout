@@ -26,7 +26,7 @@ func TestNativeTimestampPredicatesPruneParquetAndPreserveNanoseconds(t *testing.
 		n := base.Add(time.Duration(i/50000)*time.Minute + time.Duration(i%50000)).UnixNano()
 		spans[i] = telemetry.Span{TraceID: "trace", SpanID: fmt.Sprintf("%06d", i), StartUnixNanos: n, EndUnixNanos: n + 1, ServiceName: "api", DurationMS: 1}
 	}
-	if err := store.CommitBatch(context.Background(), telemetry.BatchMetadata{ID: "time"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), &telemetry.BatchMetadata{ID: "time"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	db := openTestDuck(t)

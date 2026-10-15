@@ -167,7 +167,7 @@ func TestServiceRollupBacklogDrainsWithoutDroppingLateBuckets(t *testing.T) {
 				t.Fatal(err)
 			}
 			tip := base.Add(11 * ingestStep).UnixNano()
-			// Below the live tip, but inside its publication safety lag. This
+			// A new commit stamp revisits an old event bucket. This
 			// revisits an old event bucket containing service-only outbound work.
 			late := telemetrystore.Batch{ID: "late", Spans: []telemetry.Span{{Namespace: "ns-a", ServiceName: "outbound", TraceID: "late", SpanID: "late", Kind: "SPAN_KIND_CLIENT", StartUnixNanos: base.UnixNano(), EndUnixNanos: base.Add(time.Millisecond).UnixNano(), DurationMS: 1, IngestedAt: tip - int64(time.Second)}}, Logs: []telemetry.Log{{Namespace: "ns-b", ServiceName: "gateway", EventUnixNanos: base.UnixNano(), TimeUnixNanos: base.UnixNano(), IngestedAt: tip - int64(time.Second), Body: "late"}}}
 			if err := repo.Commit(ctx, late); err != nil {
@@ -182,7 +182,8 @@ func TestServiceRollupBacklogDrainsWithoutDroppingLateBuckets(t *testing.T) {
 				if err := d.DB.QueryRowContext(ctx, `SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key=?`, serviceRollupStateKey).Scan(&watermark); err != nil {
 					t.Fatal(err)
 				}
-				if watermark == tip {
+				horizon, _, _ := d.publicationBounds()
+				if watermark == horizon {
 					break
 				}
 			}
@@ -223,7 +224,7 @@ func seedAnalyticalBacklog(t *testing.T, repo *telemetrystore.Repository, base t
 			}
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: ns, ServiceName: "gateway", EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: ingest + int64(time.Duration(batch)*step), Body: "backlog"})
 		}
-		if err := repo.Commit(t.Context(), b); err != nil {
+		if err := commitRestoredFixture(repo, t.Context(), b); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -271,5 +272,54 @@ func assertBacklogMarkers(t *testing.T, d *Duck, repo *telemetrystore.Repository
 		if !cached[b.ID] || !marked[b.ID] {
 			t.Fatalf("active batch %s missing cache/version acknowledgement", b.ID)
 		}
+	}
+}
+
+// commitRestoredFixture seeds already-stamped historical inputs, as recovery
+// does. Normal ingest tests use Repository.Commit and its fresh attempt stamp.
+func commitRestoredFixture(repo *telemetrystore.Repository, ctx context.Context, batch telemetrystore.Batch) error {
+	var lo, hi int64
+	include := func(n int64) {
+		if n > 0 && (lo == 0 || n < lo) {
+			lo = n
+		}
+		hi = max(hi, n)
+	}
+	for i := range batch.Spans {
+		row := &batch.Spans[i]
+		row.Namespace = telemetry.NormalizeNamespace(row.Namespace)
+		include(row.IngestedAt)
+		if row.StartUnixNanos == 0 {
+			row.StartUnixNanos = row.IngestedAt
+		}
+	}
+	for i := range batch.Logs {
+		row := &batch.Logs[i]
+		row.Namespace = telemetry.NormalizeNamespace(row.Namespace)
+		include(row.IngestedAt)
+		if row.EventUnixNanos == 0 {
+			row.EventUnixNanos = telemetry.FirstPositiveNanos(row.TimeUnixNanos, row.ObservedTimeNanos, row.IngestedAt)
+		}
+	}
+	for i := range batch.Metrics {
+		row := &batch.Metrics[i]
+		row.Namespace = telemetry.NormalizeNamespace(row.Namespace)
+		include(row.IngestedAt)
+		if row.EventUnixNanos == 0 {
+			row.EventUnixNanos = telemetry.FirstPositiveNanos(row.TimeUnixNanos, row.IngestedAt)
+		}
+	}
+	return repo.Parquet.CommitBatch(ctx, &telemetry.BatchMetadata{ID: batch.ID, MinIngestedNanos: lo, MaxIngestedNanos: hi}, batch.Spans, batch.Logs, batch.Metrics)
+}
+func restoredPublicationBounds(repo *telemetrystore.Repository) func() (int64, int64, int64) {
+	return func() (int64, int64, int64) {
+		var lo, hi int64
+		for _, b := range repo.Parquet.BatchMetadata() {
+			hi = max(hi, b.MaxIngestedNanos)
+			if b.MinIngestedNanos > 0 && (lo == 0 || b.MinIngestedNanos < lo) {
+				lo = b.MinIngestedNanos
+			}
+		}
+		return hi, hi, lo
 	}
 }

@@ -36,7 +36,10 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 	spanLo := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	spanHi := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
-	shippedPlan := explain(t, db, edgeRollupInsertSQL, windowLo, windowHi, spanLo, spanHi)
+	if _, err := db.Exec(createEdgePassBucketsSQL, windowLo, windowHi); err != nil {
+		t.Fatal(err)
+	}
+	shippedPlan := explain(t, db, edgeRollupInsertSQL, spanLo, spanHi)
 
 	// DuckDB 2 optimizes the historical comma form too. Guard the shipped plan
 	// directly rather than requiring the optimizer to retain an old defect.
@@ -59,13 +62,16 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 	// asserted: the ratios are consistent but the absolute numbers are not
 	// stable enough across machines to fail a build on.
 	var want []string
-	for _, form := range []struct{ name, sql string }{
-		{"shipped", edgeRollupInsertSQL},
-		{"comma", commaForm},
-		{"pre-fix (range predicate in the ON clause)", string(preFix)},
+	for _, form := range []struct {
+		name, sql string
+		args      []any
+	}{
+		{"shipped", edgeRollupInsertSQL, []any{spanLo, spanHi}},
+		{"comma", commaForm, []any{spanLo, spanHi}},
+		{"pre-fix (range predicate in the ON clause)", string(preFix), []any{windowLo, windowHi, spanLo, spanHi}},
 	} {
 		start := time.Now()
-		edges := runEdgeRollup(t, db, form.sql, windowLo, windowHi, spanLo, spanHi)
+		edges := runEdgeRollup(t, db, form.sql, form.args...)
 		t.Logf("%-44s %6.0fms  %d edges", form.name, float64(time.Since(start).Microseconds())/1000, len(edges))
 		if want == nil {
 			if len(edges) == 0 {
@@ -252,7 +258,10 @@ func TestEdgeRollupParentTraceScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	lo := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	if _, err := db.Exec(edgeRollupInsertSQL, 50, 200, lo, lo.Add(time.Minute)); err != nil {
+	if _, err := db.Exec(createEdgePassBucketsSQL, 50, 200); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(edgeRollupInsertSQL, lo, lo.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	var namespace, caller, callee, edgeType string

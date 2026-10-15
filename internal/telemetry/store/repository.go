@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -26,9 +26,15 @@ type Batch struct {
 // Repository publishes self-contained Parquet batch directories. The
 // directory rename is the transaction and the filesystem is the catalog.
 type Repository struct {
-	root         string
-	Parquet      *telemetry.ParquetStore
-	compactionMu sync.Mutex
+	releaseBacklogGauge func()
+	root                string
+	Parquet             *telemetry.ParquetStore
+	compactionMu        sync.Mutex
+	publicationMu       sync.Mutex
+	lastStamp           int64
+	lastPublished       int64
+	minimumStamp        int64
+	inFlight            map[int64]struct{}
 }
 
 func Open(root string) (*Repository, error) {
@@ -56,6 +62,14 @@ func Open(root string) (*Repository, error) {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean retired Parquet batches: %w", err)
 	}
+	for _, batch := range parquetStore.BatchMetadata() {
+		r.lastStamp = max(r.lastStamp, batch.MaxIngestedNanos)
+		r.lastPublished = max(r.lastPublished, batch.MaxIngestedNanos)
+		if batch.MinIngestedNanos > 0 && (r.minimumStamp == 0 || batch.MinIngestedNanos < r.minimumStamp) {
+			r.minimumStamp = batch.MinIngestedNanos
+		}
+	}
+	r.releaseBacklogGauge = metrics.SetCompactionBacklogSource(parquetStore.Generation0BatchCount)
 	return r, nil
 }
 
@@ -107,7 +121,18 @@ func (r *Repository) cleanupCompactionArtifacts() error {
 	return syncDirectory(r.root)
 }
 
-func (r *Repository) Close() error { return r.Parquet.Close() }
+func (r *Repository) Close() error {
+	if r.releaseBacklogGauge != nil {
+		r.releaseBacklogGauge()
+	}
+	return r.Parquet.Close()
+}
+
+func (r *Repository) WaitForCompaction(ctx context.Context) (time.Duration, error) {
+	return r.Parquet.WaitForCompaction(ctx)
+}
+
+func (r *Repository) CompactionDebt() int { return r.Parquet.CompactionDebt() }
 
 // CleanupParquet removes retired inputs only while no retention or compaction
 // transaction can still need them for rollback.
@@ -174,15 +199,67 @@ func (r *Repository) protectedRetiredSuffix() (string, error) {
 	return ".retired-" + marker.Output.ID, nil
 }
 
+// beginPublication reserves a strictly increasing attempt stamp before any row
+// can become visible. The same mutex protects reservations and the horizon.
+func (r *Repository) beginPublication(now int64) int64 {
+	r.publicationMu.Lock()
+	defer r.publicationMu.Unlock()
+	r.lastStamp = max(now, r.lastStamp+1)
+	// A renamed directory can remain visible after its final fsync fails.
+	// Keep its stamp in the initial scan even before a retry adopts it.
+	if r.minimumStamp == 0 {
+		r.minimumStamp = r.lastStamp
+	}
+	if r.inFlight == nil {
+		r.inFlight = make(map[int64]struct{})
+	}
+	r.inFlight[r.lastStamp] = struct{}{}
+	return r.lastStamp
+}
+
+func (r *Repository) finishPublication(stamp int64, published telemetry.BatchMetadata) {
+	r.publicationMu.Lock()
+	defer r.publicationMu.Unlock()
+	if published.MaxIngestedNanos > 0 {
+		r.lastPublished = max(r.lastPublished, published.MaxIngestedNanos)
+		if r.minimumStamp == 0 || published.MinIngestedNanos < r.minimumStamp {
+			r.minimumStamp = published.MinIngestedNanos
+		}
+	}
+	delete(r.inFlight, stamp)
+}
+
+// PublicationBounds returns the exact completed-attempt horizon, the largest
+// published stamp (for lag), and the minimum opened or reserved stamp (for initial catch-up).
+// Compaction/recovery only republish existing stamps and do not reserve attempts.
+func (r *Repository) PublicationBounds() (horizon, published, minimum int64) {
+	r.publicationMu.Lock()
+	defer r.publicationMu.Unlock()
+	horizon = r.lastStamp
+	for stamp := range r.inFlight {
+		horizon = min(horizon, stamp-1)
+	}
+	return horizon, r.lastPublished, r.minimumStamp
+}
+
 func (r *Repository) Commit(ctx context.Context, batch Batch) error {
-	normalizeBatch(&batch)
 	if err := validateBatch(batch); err != nil {
 		return err
 	}
+	stamp := r.beginPublication(time.Now().UnixNano())
+	var published telemetry.BatchMetadata
+	defer func() { r.finishPublication(stamp, published) }()
+	normalizeBatch(&batch, stamp)
 	metadata := telemetry.BatchMetadata{
-		ID: batch.ID, MinIngestedNanos: batchMinIngestedNanos(batch), MaxIngestedNanos: batchMaxIngestedNanos(batch),
+		ID: batch.ID, MinIngestedNanos: stamp, MaxIngestedNanos: stamp,
 	}
-	return r.Parquet.CommitBatch(ctx, metadata, batch.Spans, batch.Logs, batch.Metrics)
+	err := r.Parquet.CommitBatch(ctx, &metadata, batch.Spans, batch.Logs, batch.Metrics)
+	if err == nil {
+		// An idempotent retry can adopt a directory from a previous attempt
+		// whose final fsync failed. Its durable rows retain that older stamp.
+		published = metadata
+	}
+	return err
 }
 
 func (r *Repository) RowCount() uint64 { return r.Parquet.RowCount() }
@@ -223,69 +300,26 @@ func validateBatch(batch Batch) error {
 	return nil
 }
 
-func normalizeBatch(batch *Batch) {
-	ingestedAt := time.Now().UnixNano()
+func normalizeBatch(batch *Batch, ingestedAt int64) {
 	for i := range batch.Spans {
 		batch.Spans[i].Namespace = telemetry.NormalizeNamespace(batch.Spans[i].Namespace)
-		if batch.Spans[i].IngestedAt == 0 {
-			batch.Spans[i].IngestedAt = ingestedAt
-		}
+		batch.Spans[i].IngestedAt = ingestedAt
 		if batch.Spans[i].StartUnixNanos == 0 {
 			batch.Spans[i].StartUnixNanos = batch.Spans[i].IngestedAt
 		}
 	}
 	for i := range batch.Logs {
 		batch.Logs[i].Namespace = telemetry.NormalizeNamespace(batch.Logs[i].Namespace)
-		if batch.Logs[i].IngestedAt == 0 {
-			batch.Logs[i].IngestedAt = ingestedAt
-		}
+		batch.Logs[i].IngestedAt = ingestedAt
 		if batch.Logs[i].EventUnixNanos == 0 {
 			batch.Logs[i].EventUnixNanos = telemetry.FirstPositiveNanos(batch.Logs[i].TimeUnixNanos, batch.Logs[i].ObservedTimeNanos, batch.Logs[i].IngestedAt)
 		}
 	}
 	for i := range batch.Metrics {
 		batch.Metrics[i].Namespace = telemetry.NormalizeNamespace(batch.Metrics[i].Namespace)
-		if batch.Metrics[i].IngestedAt == 0 {
-			batch.Metrics[i].IngestedAt = ingestedAt
-		}
+		batch.Metrics[i].IngestedAt = ingestedAt
 		if batch.Metrics[i].EventUnixNanos == 0 {
 			batch.Metrics[i].EventUnixNanos = telemetry.FirstPositiveNanos(batch.Metrics[i].TimeUnixNanos, batch.Metrics[i].IngestedAt)
 		}
 	}
-}
-
-func batchMaxIngestedNanos(batch Batch) int64 {
-	var value int64
-	for _, row := range batch.Spans {
-		value = max(value, row.IngestedAt)
-	}
-	for _, row := range batch.Logs {
-		value = max(value, row.IngestedAt)
-	}
-	for _, row := range batch.Metrics {
-		value = max(value, row.IngestedAt)
-	}
-	return value
-}
-
-func batchMinIngestedNanos(batch Batch) int64 {
-	value := int64(math.MaxInt64)
-	include := func(candidate int64) {
-		if candidate > 0 {
-			value = min(value, candidate)
-		}
-	}
-	for _, row := range batch.Spans {
-		include(row.IngestedAt)
-	}
-	for _, row := range batch.Logs {
-		include(row.IngestedAt)
-	}
-	for _, row := range batch.Metrics {
-		include(row.IngestedAt)
-	}
-	if value == math.MaxInt64 {
-		return 0
-	}
-	return value
 }

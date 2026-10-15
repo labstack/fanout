@@ -22,22 +22,29 @@ const (
 	// Bound group admission independently of encode time. Ten milliseconds
 	// coalesces concurrent exports without imposing a 20ms floor on every
 	// durable acknowledgement when the row target is not reached.
-	groupAdmissionWindow = 10 * time.Millisecond
-	maxAdmissionRequests = 512
-	maxGroupBatchRows    = 50_000
-	maxCommitWorkers     = 4
-	submissionQueueDepth = 256
-	writerShutdownGrace  = 30 * time.Second
+	groupAdmissionWindow    = 10 * time.Millisecond
+	pressureAdmissionWindow = 250 * time.Millisecond
+	maxAdmissionRequests    = 512
+	maxGroupBatchRows       = 50_000
+	maxCommitWorkers        = 4
+	submissionQueueDepth    = 256
+	writerShutdownGrace     = 30 * time.Second
 )
 
 type batchCommitter interface {
 	Commit(context.Context, Batch) error
 }
 
+type compactionPressure interface {
+	WaitForCompaction(context.Context) (time.Duration, error)
+	CompactionDebt() int
+}
+
 type Writer struct {
 	inFlightBudget int
 	inFlightBytes  atomic.Int64
 	repository     batchCommitter
+	compaction     compactionPressure
 	batchSize      int
 	retryDelay     func(int) time.Duration
 	groupWindow    time.Duration
@@ -149,6 +156,7 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 func (w *Writer) Run(ctx context.Context) error {
 	defer close(w.done)
 	defer metrics.UpdateQueueDepth("batch", 0)
+	w.compaction, _ = w.repository.(compactionPressure)
 	jobs := make(chan commitJob, commitQueueDepth)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
@@ -184,6 +192,15 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 
 	for {
+		if w.compaction != nil {
+			waited, err := w.compaction.WaitForCompaction(ctx)
+			if waited > 0 {
+				metrics.IngestBackpressureSeconds.Add(waited.Seconds())
+			}
+			if err != nil {
+				return finish(true)
+			}
+		}
 		select {
 		case request := <-w.submissions:
 			metrics.UpdateQueueDepth("batch", len(w.submissions))
@@ -200,20 +217,28 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 	requests := make([]submission, 1, maxAdmissionRequests)
 	requests[0] = request
 	rows := batchRows(request.batch)
+	bytes := request.bytes
 	limit := w.batchLimit()
-	if rows < limit {
+	if rows < limit && bytes < maxGroupBatchBytes {
 		window := w.groupWindow
 		if window <= 0 {
 			window = groupAdmissionWindow
 		}
+		// Coalesce more exports before the hard debt stop is needed. Read
+		// reclaimable debt once per group; low-load acknowledgements keep
+		// their short window as soon as compaction relieves the pressure.
+		if w.compaction != nil && w.compaction.CompactionDebt() >= telemetry.CompactionDebtLimit/2 {
+			window = pressureAdmissionWindow
+		}
 		timer := time.NewTimer(window)
 		defer timer.Stop()
 	admit:
-		for len(requests) < maxAdmissionRequests && rows < limit {
+		for len(requests) < maxAdmissionRequests && rows < limit && bytes < maxGroupBatchBytes {
 			select {
 			case next := <-w.submissions:
 				requests = append(requests, next)
 				rows += batchRows(next.batch)
+				bytes += next.bytes
 			case <-timer.C:
 				break admit
 			case <-ctx.Done():

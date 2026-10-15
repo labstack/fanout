@@ -31,6 +31,8 @@ type Anomaly struct {
 	ZScore      float64     `json:"z_score"`      // Statistical significance
 	DetectedAt  time.Time   `json:"detected_at"`  // When anomaly was detected
 	Description string      `json:"description"`  // Human-readable description
+	WindowStart time.Time   `json:"-"`            // Evaluated interval, inclusive
+	WindowEnd   time.Time   `json:"-"`            // Evaluated interval, exclusive
 }
 
 // AnomalyType represents the type of anomaly detected
@@ -52,13 +54,14 @@ type Insight struct {
 
 // IntelligenceSnapshot represents the current system intelligence state
 type IntelligenceSnapshot struct {
-	GeneratedAt time.Time `json:"generated_at"`
-	Timeframe   string    `json:"timeframe"` // e.g., "last_15m"
-	Insights    []Insight `json:"insights"`
-	Patterns    []Pattern `json:"patterns"`
-	Anomalies   []Anomaly `json:"anomalies"`
-	Summary     string    `json:"summary"`      // Overall system health summary
-	HealthScore float64   `json:"health_score"` // 0-100, lower is worse
+	evaluatedThrough time.Time
+	GeneratedAt      time.Time `json:"generated_at"`
+	Timeframe        string    `json:"timeframe"` // e.g., "last_15m"
+	Insights         []Insight `json:"insights"`
+	Patterns         []Pattern `json:"patterns"`
+	Anomalies        []Anomaly `json:"anomalies"`
+	Summary          string    `json:"summary"`      // Overall system health summary
+	HealthScore      float64   `json:"health_score"` // 0-100, lower is worse
 }
 
 // DetectorConfig holds configuration for the anomaly detector

@@ -167,7 +167,9 @@ A semantic version covers the cache schema and aggregation rules; a version
 change atomically discards all private
 read tables and rebuilds from authoritative format-4 Parquet. The background
 worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
-trace backlog independently of the service and edge rollups' safety window.
+trace backlog independently of the service and edge rollups' publication horizon.
+Version history drains on its own worker, so an analytical-gate wait cannot
+delay the completed-batch worker.
 Completed-batch and analytical writers use separate gates and two connections
 outside the read pool. They modify disjoint tables; maintenance holds both gates
 for checkpointing. Trace reads avoid materializing every retained candidate into
@@ -182,12 +184,33 @@ snapshot capture. Only signals referenced by a query are bound.
 Completed-batch trace caches still rebuild retained history
 in bounded passes; uncached files remain immediately queryable.
 
-## Rollups lag deliberately
+## Rollups follow durable publication
 
-Overview and alert queries read rebuildable DuckDB rollups. Their watermark
-trails committed telemetry by a fixed safety window so out-of-order events from
-bounded commit retries are not skipped. Raw committed telemetry is queryable
-before it appears in a rollup.
+Overview and alert queries read rebuildable DuckDB rollups. Each commit attempt
+receives a strictly increasing ingestion stamp; a retry receives a new stamp.
+The repository tracks unfinished attempts and advances the publication horizon
+only past attempts that have published durably or failed. Service and edge
+rollups process disjoint ingestion windows up to that horizon, recomputing each
+affected event-time bucket in full. Raw committed telemetry remains queryable
+before its next rollup pass.
+
+Error-rate, latency, and volume detectors read service-rollup minutes through
+the last completed minute before the service watermark. The baseline has the
+same length as the current period. Latency uses the span-weighted mean of the
+rollup's served-span minute p95 values; log-pattern detection still reads logs.
+
+The ingest writer waits when reclaimable generation-0 compaction debt reaches
+1,024 batches. Already admitted commits finish and requests wait in the bounded
+submission queue, honoring their own deadlines. Debt excludes batches above half
+the merge row ceiling and reserves 127 smaller inputs per ingestion day: those
+inputs can otherwise be stranded by the compaction eligibility rules.
+At 512 batches of reclaimable debt, compaction prioritizes eligible generation-0
+groups across all days. Below that threshold, it selects the oldest eligible day
+and then the highest eligible generation within that day.
+The exact count of all live generation-0 batches, including those exclusions,
+is exported as `fanout_compaction_backlog_batches`. Time spent waiting is
+`fanout_ingest_backpressure_seconds_total`. This bounds reclaimable debt rather
+than imposing an absolute limit on retained batch count.
 
 Service dependency traversal reads the complete edge rollup within the selected
 window, including edges outside the topology view's displayed page. It follows

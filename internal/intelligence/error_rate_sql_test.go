@@ -12,29 +12,20 @@ import (
 // error percentage, so a service's whole history is one readable slice.
 func errorRateFixture(t *testing.T, db *sql.DB, start time.Time, services map[string][]float64) {
 	t.Helper()
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS spans (
-		service TEXT, namespace TEXT, status TEXT, start_time TIMESTAMP, start_unix_nano BIGINT
-	)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS service_rollup (
+ service VARCHAR, namespace VARCHAR, bucket TIMESTAMP_NS, spans BIGINT, error_rate DOUBLE
+ )`); err != nil {
 		t.Fatal(err)
 	}
-	const perBucket = 1000
 	for service, rates := range services {
 		for bucket, rate := range rates {
 			at := start.Add(time.Duration(bucket) * 5 * time.Minute)
-			errors := int(math.Round(rate * perBucket))
-			for i := range perBucket {
-				status := "STATUS_CODE_OK"
-				if i < errors {
-					status = "STATUS_CODE_ERROR"
-				}
-				ts := at.Add(time.Duration(i) * time.Millisecond)
-				if _, err := db.Exec(`INSERT INTO spans VALUES (?, 'default', ?, ?, ?)`,
-					service, status, ts, ts.UnixNano()); err != nil {
-					t.Fatal(err)
-				}
+			if _, err := db.Exec(`INSERT INTO service_rollup VALUES (?,'default',?,1000,?)`, service, at, rate); err != nil {
+				t.Fatal(err)
 			}
 		}
 	}
+
 }
 
 func errorRateScores(t *testing.T, db *sql.DB, start, end time.Time) map[string]float64 {

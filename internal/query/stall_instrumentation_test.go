@@ -114,42 +114,39 @@ func TestSnapshotWaitIsMeasuredForReaders(t *testing.T) {
 	}
 }
 
-func TestPublisherGraceLeftTracksAWaitingSwap(t *testing.T) {
-	gate := parquetReadGate{writerGrace: time.Second}
-	if left := gate.publisherGraceLeft(); left != time.Second {
-		t.Fatalf("an idle gate reports %v of grace left, want the whole %v", left, time.Second)
+func TestPublisherWaitingTracksFreshAndCanceledPublication(t *testing.T) {
+	gate := parquetReadGate{}
+	base := time.Now()
+	gate.now = func() time.Time { return base }
+	if gate.publisherWaiting() {
+		t.Fatal("idle gate reports a waiting publisher")
 	}
-	if err := gate.RLockContext(context.Background()); err != nil {
-		t.Fatalf("RLockContext: %v", err)
+	if err := gate.RLockContext(t.Context(), parquetReadQuery); err != nil {
+		t.Fatal(err)
 	}
-	queued := make(chan struct{})
-	go func() {
-		close(queued)
-		if err := gate.LockContext(context.Background()); err == nil {
-			gate.Unlock()
-		}
-	}()
-	<-queued
+	defer gate.RUnlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- gate.LockContext(ctx) }()
 	deadline := time.Now().Add(time.Second)
-	for gate.publisherGraceLeft() == time.Second {
+	for !gate.publisherWaiting() {
 		if time.Now().After(deadline) {
-			t.Fatal("a publisher waiting for readers did not start consuming its grace")
+			t.Fatal("fresh publisher was not observed")
 		}
 		time.Sleep(time.Millisecond)
 	}
-	// The grace runs down rather than vanishing: a reader admitted now is not
-	// blocking anything yet, which is what stops the rollup yielding on sight.
-	if left := gate.publisherGraceLeft(); left <= 0 || left > time.Second {
-		t.Fatalf("grace left = %v, want a positive remainder under %v", left, time.Second)
-	}
-	deadline = time.Now().Add(3 * time.Second)
-	for gate.publisherGraceLeft() > 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("grace never ran out")
-		}
-		time.Sleep(5 * time.Millisecond)
+	if !gate.TryRLock(parquetReadQuery) {
+		t.Fatal("fresh publisher exhausted reader grace")
 	}
 	gate.RUnlock()
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("publication: %v", err)
+	}
+	if gate.publisherWaiting() {
+		t.Fatal("canceled publisher remained waiting")
+	}
 }
 
 // database/sql closes a connector that implements io.Closer when its DB is

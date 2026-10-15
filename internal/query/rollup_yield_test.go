@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,17 +56,13 @@ func newSpreadDuck(t *testing.T, rows, spreadMins int) *Duck {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
 	seedEdgeSpread(t, d, rows, spreadMins)
 	return d
 }
 
-// A rollup pass holds the Parquet snapshot until it commits, so a publication
-// whose grace has run out makes every arriving query wait out the rest of that
-// pass. The one-sub-window budget also bounds that wait without a publisher.
-// The pass now stops at the first sub-window boundary once that happens, which
-// costs nothing to arrange: the resume cursor already exists for the per-pass
-// budget, and the ingested watermark already stays behind an unfinished window.
+// A fresh publisher must get the snapshot at the first resumable boundary,
+// while the pass still completes at least one sub-window and can resume later.
 func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	const (
 		rows       = 6_000
@@ -85,19 +80,7 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	}
 
 	yielding := newSpreadDuck(t, rows, spreadMins)
-	// A publisher can only queue while something is reading, so the test holds
-	// a reader of its own. The gate's clock is the test's: the pass is admitted
-	// with the grace intact, and the clock jumps past it once the pass is
-	// under way — which is the state the rollup yields for, and the only one
-	// in which a query is actually blocked behind it.
-	spend := spendGraceOnCue(&yielding.parquetMu)
-	if err := yielding.parquetMu.RLockContext(ctx); err != nil {
-		t.Fatalf("hold a reader: %v", err)
-	}
-	queued := queuePublisher(t, yielding)
-	spendOnceAdmitted(&yielding.parquetMu, spend)
-
-	if _, err := yielding.refreshEdgeRollup(ctx); err != nil {
+	if _, err := edgePassBeforeQueuedPublisher(t, yielding, false); err != nil {
 		t.Fatalf("yielding pass: %v", err)
 	}
 	watermark, yieldCursor := readEdgeRollupState(t, yielding)
@@ -113,8 +96,6 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 
 	// Yielding must not stall the rollup: with the publisher gone the same
 	// instance finishes the window.
-	yielding.parquetMu.RUnlock()
-	queued.done()
 	for passes := 0; ; passes++ {
 		if passes > spreadMins/30+4 {
 			t.Fatal("edge rollup did not converge after yielding")
@@ -131,99 +112,63 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	}
 }
 
-// A publisher that is always queued must not stop the rollup dead: every pass
-// has to complete at least one sub-window, or a busy compaction cycle starves
-// the cache the whole product reads from.
+// An admitted pass completes one sub-window even if a publisher's grace
+// expires while the pass is in flight.
 func TestEdgeRollupAlwaysCompletesOneSubWindow(t *testing.T) {
-	ctx := context.Background()
 	d := newSpreadDuck(t, 4_000, 180)
-	spend := spendGraceOnCue(&d.parquetMu)
-	if err := d.parquetMu.RLockContext(ctx); err != nil {
-		t.Fatalf("hold a reader: %v", err)
-	}
-	queued := queuePublisher(t, d)
-	// Overdue from the pass's very first boundary: it must still complete one
-	// sub-window, or a busy compaction cycle starves the cache.
-	spendOnceAdmitted(&d.parquetMu, spend)
-
-	rows, err := d.refreshEdgeRollup(ctx)
+	rows, err := edgePassBeforeQueuedPublisher(t, d, true)
 	if err != nil {
 		t.Fatalf("pass with a publisher queued: %v", err)
 	}
 	if rows == 0 {
-		t.Fatal("a pass yielded before doing any work; a busy compaction cycle would starve the cache")
+		t.Fatal("an admitted pass yielded before doing any work")
 	}
-	d.parquetMu.RUnlock()
-	queued.done()
 }
 
-// queuePublisher parks a publication in the gate's wait list and returns a
-// handle that releases it. It requires a reader to already hold the snapshot,
-// which is the only state in which a publisher waits rather than enters.
-func queuePublisher(t *testing.T, d *Duck) (handle struct{ done func() }) {
+// Hold the only SQL connection after loading admission's prerequisites. The
+// pass can take its snapshot but cannot begin SQL until publication queues.
+func edgePassBeforeQueuedPublisher(t *testing.T, d *Duck, overdue bool) (int64, error) {
 	t.Helper()
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	go func() {
-		if err := d.parquetMu.LockContext(context.Background()); err != nil {
-			close(entered)
-			return
-		}
-		close(entered)
-		<-release
-		d.parquetMu.Unlock()
-	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for queuedPublishers(&d.parquetMu) == 0 {
+	ctx := t.Context()
+	horizon, published, minimum := d.publicationBounds()
+	d.publicationBounds = func() (int64, int64, int64) { return horizon, published, minimum }
+	if _, err := d.cachedRollupWatermark(ctx, edgeRollupStateKey, horizon); err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: time.Now()}
+	d.parquetMu.now = clock.Now
+	conn, err := d.writer().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	type result struct {
+		rows int64
+		err  error
+	}
+	finished := make(chan result, 1)
+	go func() { rows, err := d.refreshEdgeRollup(ctx); finished <- result{rows, err} }()
+	deadline := time.Now().Add(time.Second)
+	for readers(&d.parquetMu) == 0 {
 		if time.Now().After(deadline) {
-			t.Fatal("publisher never queued")
+			t.Fatal("edge pass never entered its snapshot")
 		}
 		time.Sleep(time.Millisecond)
 	}
-	handle.done = func() {
-		<-entered
-		close(release)
+	publishedResult := make(chan error, 1)
+	go func() { publishedResult <- d.PublishParquet(ctx, func(context.Context) error { return nil }) }()
+	waitForQueuedWriter(t, &d.parquetMu)
+	if overdue {
+		clock.Advance(defaultWriterGrace + time.Second)
 	}
-	return handle
-}
-
-// spendGraceOnCue replaces the gate's clock with one the test moves. Until the
-// returned function is called the clock stands still, so a queued publication
-// keeps its whole grace and readers are admitted; afterwards the clock is an
-// hour later, so the grace is spent and every new reader would queue.
-func spendGraceOnCue(gate *parquetReadGate) (spend func()) {
-	base := time.Now()
-	var spent atomic.Bool
-	gate.now = func() time.Time {
-		if spent.Load() {
-			return base.Add(time.Hour)
-		}
-		return base
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
 	}
-	return func() { spent.Store(true) }
-}
-
-// queuedPublishers reads the gate's wait list. The grace-based predicate the
-// rollup uses cannot serve here: a publication that has only just queued still
-// has its whole grace, which is exactly the state this waits to observe.
-func queuedPublishers(gate *parquetReadGate) int {
-	gate.init()
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	return len(gate.waiting)
-}
-
-// spendOnceAdmitted spends the queued publication's grace the moment the rollup
-// has entered the snapshot, so the pass is admitted with the grace intact and
-// finds it gone at its first sub-window boundary. Waiting on the reader count
-// rather than on a duration keeps that ordering exact.
-func spendOnceAdmitted(gate *parquetReadGate, spend func()) {
-	go func() {
-		for readers(gate) < 2 {
-			time.Sleep(time.Millisecond)
-		}
-		spend()
-	}()
+	pass := <-finished
+	if err := <-publishedResult; err != nil {
+		t.Fatal(err)
+	}
+	return pass.rows, pass.err
 }
 
 func readers(gate *parquetReadGate) int {
