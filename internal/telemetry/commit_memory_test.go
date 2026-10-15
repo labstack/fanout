@@ -29,21 +29,21 @@ import (
 // The assertion is on total bytes allocated rather than peak live heap.
 // Peak heap carries whatever slack the collector happened to be holding when
 // the sampler looked, which varies with GOMAXPROCS and machine speed: the same
-// code measured 2.79x locally and 3.83x on a CI runner, and the two encodings'
-// peak-heap distributions overlap. Total allocation does not overlap and barely
-// varies -- it answers "how many copies does this make", which is the question.
-// Peak heap is still reported, because it is what the kernel kills on.
+// code measured 2.79x locally and 3.83x on a CI runner. Total allocation
+// answers "how many copies does this make", which is the question. Peak heap
+// is still reported, because it is what the kernel kills on.
 //
-// This is a ratchet, not a target, and it is placed between two measured
-// distributions rather than guessed. Dictionary-encoded near-unique JSON
-// columns allocate 10.68x-10.90x; writing them plain allocates 4.40x-5.69x.
-// The limit sits in that gap.
+// This is a ratchet, not a target, and it is placed above a measured
+// distribution rather than guessed. With parquetCodec's 1 MiB zstd window a
+// commit allocates 1.1x-2.0x its payload. The library's default 4 MiB window
+// measured 3x-9x: encoders rebuilt after each garbage collection allocated
+// 8 MiB of match history apiece, and that history outweighed every copy.
 //
 // What remains above 1x is a conversion copy of every JSON column
 // (makeSpanParquetRow) plus row-struct headers and the writer's own buffers.
 // Lower this constant as each is addressed; see the ordered plan in the
 // ingest-memory issue.
-const commitAllocRatioLimit = 7.0
+const commitAllocRatioLimit = 3.0
 
 // syntheticSpan builds a span whose JSON columns look like production: a
 // resource block shared across the batch, and attributes/events/links that are

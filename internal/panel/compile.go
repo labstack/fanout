@@ -114,24 +114,29 @@ func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, erro
 		if scope.dropped(f) {
 			continue
 		}
-		empty := false
-		for _, name := range f.Params {
-			if v, ok := scope.Vars[name]; ok && !v.All && len(v.Values) == 0 {
-				empty = true
-			}
-		}
-		if empty {
-			clauses = append(clauses, "FALSE")
-			continue
-		}
-		text, _, values, err := bindParams(f.Expr, scope.lookup(f))
+		clause, values, err := filterClause(f, scope)
 		if err != nil {
 			return "", nil, err
 		}
-		clauses = append(clauses, "("+text+")")
+		clauses = append(clauses, clause)
 		args = append(args, values...)
 	}
 	return strings.Join(clauses, " AND "), args, nil
+}
+
+// filterClause renders one filter that the scope keeps. A variable bound to
+// no values matches nothing.
+func filterClause(f Filter, scope Scope) (string, []any, error) {
+	for _, name := range f.Params {
+		if v, ok := scope.Vars[name]; ok && !v.All && len(v.Values) == 0 {
+			return "FALSE", nil, nil
+		}
+	}
+	text, _, values, err := bindParams(f.Expr, scope.lookup(f))
+	if err != nil {
+		return "", nil, err
+	}
+	return "(" + text + ")", values, nil
 }
 
 // compileQuery turns a structured query into one statement. The bucket is

@@ -48,6 +48,10 @@ type Writer struct {
 
 type submission struct {
 	batch Batch
+	// bytes is batchBytes(batch), measured once at submission: the estimate
+	// walks every attribute map, and admission, grouping and release all
+	// need the same figure.
+	bytes int
 	ack   chan error
 }
 
@@ -62,18 +66,19 @@ type commitJob struct {
 // point, and a dropped request would defeat it.
 var ErrIngestOverBudget = errors.New("telemetry ingest is over its in-flight byte budget")
 
-// reserve charges a batch against the in-flight budget, or refuses it.
+// reserve charges a batch's measured bytes against the in-flight budget,
+// or refuses it.
 //
 // An empty ledger admits anything, however large. One request is one atomic
 // batch and refusing the only thing in flight would shed load the process is
 // not actually short of -- the budget exists to stop requests accumulating,
 // not to reject a single large one. A budget of zero is unbounded, so an
 // unconfigured deployment behaves exactly as it did before.
-func (w *Writer) reserve(batch Batch) error {
+func (w *Writer) reserve(bytes int) error {
 	if w.inFlightBudget <= 0 {
 		return nil
 	}
-	cost := int64(batchBytes(batch))
+	cost := int64(bytes)
 	for {
 		current := w.inFlightBytes.Load()
 		if current > 0 && current > int64(w.inFlightBudget)-cost {
@@ -86,11 +91,11 @@ func (w *Writer) reserve(batch Batch) error {
 	}
 }
 
-func (w *Writer) release(batch Batch) {
+func (w *Writer) release(bytes int) {
 	if w.inFlightBudget <= 0 {
 		return
 	}
-	w.inFlightBytes.Add(-int64(batchBytes(batch)))
+	w.inFlightBytes.Add(-int64(bytes))
 }
 
 func NewWriter(repository *Repository, batchSize int) *Writer {
@@ -117,11 +122,12 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	// Charged here rather than at the transport because both transports funnel
 	// through this call, and it already blocks until durable acknowledgement --
 	// so the ledger measures exactly the bytes the process is holding.
-	if err := w.reserve(batch); err != nil {
+	bytes := batchBytes(batch)
+	if err := w.reserve(bytes); err != nil {
 		return err
 	}
-	defer w.release(batch)
-	request := submission{batch: batch, ack: make(chan error, 1)}
+	defer w.release(bytes)
+	request := submission{batch: batch, bytes: bytes, ack: make(chan error, 1)}
 	select {
 	case w.submissions <- request:
 		metrics.UpdateQueueDepth("batch", len(w.submissions))
@@ -251,13 +257,13 @@ drained:
 			if len(group) > 0 && rows+nextRows > limit {
 				break
 			}
-			if !groupBatchFits(groupBytes, next.batch, len(group)) {
+			if !groupBatchFits(groupBytes, next.bytes, len(group)) {
 				break
 			}
 			requests = requests[1:]
 			group = append(group, next)
 			rows += nextRows
-			groupBytes += batchBytes(next.batch)
+			groupBytes += next.bytes
 			batch.Spans = append(batch.Spans, next.batch.Spans...)
 			batch.Logs = append(batch.Logs, next.batch.Logs...)
 			batch.Metrics = append(batch.Metrics, next.batch.Metrics...)
@@ -400,11 +406,11 @@ func batchBytes(batch Batch) int {
 // atomic directory, and refusing it would drop data rather than batch it more
 // carefully -- the same reason the row ceiling lets a lone oversized request
 // through.
-func groupBatchFits(groupBytes int, next Batch, groupLen int) bool {
+func groupBatchFits(groupBytes, nextBytes, groupLen int) bool {
 	if groupLen == 0 {
 		return true
 	}
-	return groupBytes <= maxGroupBatchBytes-batchBytes(next)
+	return groupBytes <= maxGroupBatchBytes-nextBytes
 }
 
 func batchRows(batch Batch) int {
