@@ -78,6 +78,33 @@ func (p *ParquetStore) setBatchLocked(id string, batch *storedBatch) {
 		close(p.debtChanged)
 		p.debtChanged = nil
 	}
+	if p.compactionDebt >= CompactionDebtLimit && p.debtLimitReached != nil {
+		close(p.debtLimitReached)
+		p.debtLimitReached = nil
+	}
+}
+
+// WaitForCompactionLimit wakes higher-generation work when ingest needs the
+// compactor. Registration and the threshold check share the catalog lock, so
+// debt cannot cross the limit between the check and subscribing. No lock is
+// held while waiting, and caller cancellation releases the waiter.
+func (p *ParquetStore) WaitForCompactionLimit(ctx context.Context) error {
+	p.mu.Lock()
+	if p.compactionDebt >= CompactionDebtLimit {
+		p.mu.Unlock()
+		return nil
+	}
+	if p.debtLimitReached == nil {
+		p.debtLimitReached = make(chan struct{})
+	}
+	reached := p.debtLimitReached
+	p.mu.Unlock()
+	select {
+	case <-reached:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // WaitForCompaction releases the catalog lock before sleeping and wakes on a

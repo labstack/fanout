@@ -2,10 +2,64 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 )
+
+func TestCompactionLimitNotificationDoesNotMissCrossings(t *testing.T) {
+	p := &ParquetStore{batches: make(map[string]*storedBatch)}
+	for i := range CompactionDebtLimit + CompactionBatchLimit - 2 {
+		p.installBatch(&storedBatch{metadata: BatchMetadata{ID: fmt.Sprint(i), Spans: 1, MaxIngestedNanos: 1}})
+	}
+	for cycle := range 2 {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		done := make(chan error, 2)
+		for range 2 {
+			go func() { done <- p.WaitForCompactionLimit(ctx) }()
+		}
+		until := time.Now().Add(time.Second)
+		for {
+			p.mu.RLock()
+			registered := p.debtLimitReached != nil
+			p.mu.RUnlock()
+			if registered {
+				break
+			}
+			if time.Now().After(until) {
+				cancel()
+				t.Fatal("limit waiter not registered")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		p.installBatch(&storedBatch{metadata: BatchMetadata{ID: "crossing", Spans: 1, MaxIngestedNanos: 1}})
+		for range 2 {
+			if err := <-done; err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+		}
+		// Arriving after the crossing also observes it, without waiting for
+		// another publication. Retiring it rearms the next crossing.
+		if err := p.WaitForCompactionLimit(ctx); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		cancel()
+		p.mu.Lock()
+		p.setBatchLocked("crossing", nil)
+		p.mu.Unlock()
+		if p.CompactionDebt() != CompactionDebtLimit-1 {
+			t.Fatalf("cycle %d debt=%d", cycle, p.CompactionDebt())
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := p.WaitForCompactionLimit(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
 
 func TestGenerationZeroInventoryTracksCatalogChanges(t *testing.T) {
 	p := &ParquetStore{batches: make(map[string]*storedBatch)}

@@ -14,7 +14,7 @@ func TestPressuredCompactionBoundsRowsAndPreservesNormalCeilings(t *testing.T) {
 		if rows > telemetry.CompactionPressureMaxRows/2 {
 			small = append(small, genBatches(3, 0, 1151, 50_000)...)
 		}
-		selected := selectCompactionBatches(small, 128, telemetry.CompactionDebtLimit)
+		selected := selectCompactionBatchesWithHigherCap(small, 128, 128, telemetry.CompactionDebtLimit)
 		var total int64
 		for _, b := range selected {
 			total += compactionBatchRows(b)
@@ -28,13 +28,13 @@ func TestPressuredCompactionBoundsRowsAndPreservesNormalCeilings(t *testing.T) {
 		}
 	}
 	group := genBatches(2, 0, 128, 50_000)
-	if selected := selectCompactionBatches(group, 128, telemetry.CompactionDebtLimit/2-1); len(selected) != 128 {
+	if selected := selectCompactionBatchesWithHigherCap(group, 128, 128, telemetry.CompactionDebtLimit/2-1); len(selected) != 128 {
 		t.Fatalf("normal ceiling changed: %d", len(selected))
 	}
 	for i := range group {
 		group[i].Generation = 1
 	}
-	if selected := selectCompactionBatches(group, 128, telemetry.CompactionDebtLimit); len(selected) != 128 {
+	if selected := selectCompactionBatchesWithHigherCap(group, 128, 128, telemetry.CompactionDebtLimit); len(selected) != 128 {
 		t.Fatalf("higher generation ceiling changed: %d", len(selected))
 	}
 }
