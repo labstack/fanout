@@ -17,7 +17,7 @@ import (
 
 // readCacheVersion covers both schema and aggregation semantics. These tables
 // are disposable; a mismatch rebuilds them together from immutable Parquet.
-const readCacheVersion = 4
+const readCacheVersion = 5
 
 const (
 	readCacheBatchLimit = 64
@@ -62,6 +62,12 @@ func createBatchCaches(db *sql.DB) error {
 				return err
 			}
 		}
+		// Bucket counts and the unfinished edge window are one disposable
+		// unit. Restart that window from its unchanged ingestion watermark
+		// when upgrading from a cache without these counts (or new semantics).
+		if _, err := tx.Exec(`DELETE FROM rollup_state WHERE cache_key IN (?, ?)`, edgeRollupSubCursorKey, edgeRollupSubWindowKey); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(`DELETE FROM read_cache_version`); err != nil {
 			return err
 		}
@@ -70,6 +76,7 @@ func createBatchCaches(db *sql.DB) error {
 		}
 	}
 	for _, stmt := range []string{
+		`CREATE TABLE IF NOT EXISTS read_edge_buckets (namespace VARCHAR, bucket TIMESTAMPTZ_NS, spans BIGINT)`,
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR PRIMARY KEY,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,

@@ -321,7 +321,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_cache_version SET version=3`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
+	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_cache_version SET version=4`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
 		if _, err := d.DB.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -329,11 +329,18 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"read_batches", "read_trace_parts", "read_trace_candidates"} {
+	for _, table := range []string{"read_batches", "read_trace_parts", "read_trace_candidates", "read_edge_buckets"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
 		}
+	}
+	if watermark, cursor := readEdgeRollupState(t, d); watermark != 0 || cursor != 0 {
+		t.Fatalf("obsolete edge cursor survived: watermark=%d cursor=%d", watermark, cursor)
+	}
+	var resumeEnd int64
+	if err := d.DB.QueryRow(`SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key=?`, edgeRollupSubWindowKey).Scan(&resumeEnd); err != nil || resumeEnd != 0 {
+		t.Fatalf("obsolete edge window survived: end=%d err=%v", resumeEnd, err)
 	}
 	var obsolete int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('read_obsolete','endpoint_rollup','read_endpoints','read_logs')`).Scan(&obsolete); err != nil || obsolete != 0 {
@@ -350,7 +357,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 		t.Fatalf("rebuilt bound=%d: %v", minStart, err)
 	}
 	var version int
-	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 4 {
+	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 5 {
 		t.Fatalf("version=%d: %v", version, err)
 	}
 

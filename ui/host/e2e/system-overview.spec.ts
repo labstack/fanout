@@ -1,7 +1,7 @@
-import { expect } from "@playwright/test";
+import { expect, type Response } from "@playwright/test";
 import { cardSelector, chooseView, readyCard, test } from "./accessibility-support";
 import { chartLabel } from "./setup-support";
-import type { Panel, PanelResult } from "../../panels/types";
+import type { DashboardTime, Panel, PanelResult } from "../../panels/types";
 import { frameRows } from "../../panels/rows";
 import { statusFor } from "../../panels/thresholds";
 
@@ -20,12 +20,6 @@ test("default system overview shows all six self-observation scenarios within tw
   if (!window) throw new Error("Global setup did not provide the seed window");
   await page.clock.setFixedTime(new Date(window.to));
   await page.addInitScript(theme => localStorage.setItem("mantine-color-scheme-value", theme), test.info().project.use.colorScheme!);
-  const results = new Map<string, PanelResult>();
-  page.on("response", async response => {
-    if (new URL(response.url()).pathname !== "/api/panels/query" || !response.ok()) return;
-    const body = await response.json() as { results: PanelResult[] };
-    for (const result of body.results) results.set(result.id, result);
-  });
   await page.goto("/");
   await expect(page).toHaveURL(/\/dashboards\/[^/?]+/);
   // The server resolves a relative range with its own clock, which keeps
@@ -33,6 +27,16 @@ test("default system overview shows all six self-observation scenarios within tw
   const pinned = new URL(page.url());
   pinned.searchParams.set("from", new Date(new Date(window.to).getTime() - 3_600_000).toISOString());
   pinned.searchParams.set("to", new Date(window.to).toISOString());
+  // Only collect requests for the pinned document. The first document's
+  // relative-range responses can lose their bodies during navigation. Attach
+  // before navigating so the pinned document's initial results are included.
+  const responses: Response[] = [];
+  const collectResponse = (response: Response) => {
+    if (new URL(response.url()).pathname !== "/api/panels/query" || !response.ok()) return;
+    const time = (response.request().postDataJSON() as { time?: DashboardTime }).time;
+    if (time?.from === pinned.searchParams.get("from") && time?.to === pinned.searchParams.get("to")) responses.push(response);
+  };
+  page.on("response", collectResponse);
   await page.goto(pinned.pathname + pinned.search);
   await expect(page.getByText("System overview", { exact: true }).first()).toBeVisible();
   // The harness scrolls each ordinary saved panel into view to trigger its
@@ -43,6 +47,12 @@ test("default system overview shows all six self-observation scenarios within tw
     await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     await response;
     for (const panel of panels) await readyCard(page, panel);
+  }
+  page.off("response", collectResponse);
+  const results = new Map<string, PanelResult>();
+  for (const response of responses) {
+    const body = await response.json() as { results: PanelResult[] };
+    for (const result of body.results) results.set(result.id, result);
   }
 
   const hosts = page.locator(cardSelector("hosts"));
