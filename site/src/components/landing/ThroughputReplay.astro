@@ -1,0 +1,152 @@
+---
+import { benchmark, sustainedSeries, formatRate } from "../../data/benchmark";
+
+const { sustained, host } = benchmark;
+const id = "throughput-replay";
+const left = 130, right = 970, top = 36, bottom = 270;
+const seconds = benchmark.series_seconds;
+const totals = sustainedSeries.map(point => point.spans + point.logs + point.metrics);
+const maximum = Math.max(...totals);
+const magnitude = 10 ** Math.floor(Math.log10(maximum / 3));
+const step = [1, 2, 2.5, 5, 10].map(value => value * magnitude).find(value => value * 3 >= maximum)!;
+const ceiling = step * 3;
+const x = (time: number) => left + time / seconds * (right - left);
+const y = (rate: number) => bottom - rate / ceiling * (bottom - top);
+const layers = ["spans", "logs", "metrics"] as const;
+const paths = layers.map((_, layer) => {
+  const bound = (point: typeof sustainedSeries[number], count: number) =>
+    layers.slice(0, count).reduce((sum, key) => sum + point[key], 0);
+  const upper = sustainedSeries.map(point => `${x(point.at_seconds).toFixed(2)},${y(bound(point, layer + 1)).toFixed(2)}`);
+  const lower = [...sustainedSeries].reverse().map(point => `${x(point.at_seconds).toFixed(2)},${y(bound(point, layer)).toFixed(2)}`);
+  return `M${upper.join(" L")} L${lower.join(" L")} Z`;
+});
+const averageDuration = sustained.seconds >= 60 ? `${Math.round(sustained.seconds / 60)}-minute` : `${sustained.seconds}-second`;
+const clock = (time: number) => `${String(Math.floor(time / 60)).padStart(2, "0")}:${String(Math.floor(time % 60)).padStart(2, "0")}`;
+const rateWidth = `· ${formatRate(maximum)} items/s, 5 s rate`.length;
+const machine = host.description.split(",")[0].replace("Cloud ", "");
+const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_second)} accepted items per second on average over ${sustained.seconds} seconds: ${formatRate(sustained.spans_per_second)} spans, ${formatRate(sustained.log_records_per_second)} log records and ${formatRate(sustained.metric_points_per_second)} metric points per second. Stacked areas show trailing five-second rates from Fanout's accepted-row counters, starting with the first full window. ${benchmark.development_preview ? `Development preview of ${benchmark.series_phase}; the suite is incomplete and all gates did not pass.` : "Measured mixed-sustained trial."}`;
+---
+
+<figure class="fo-replay not-content" data-throughput-replay data-series={JSON.stringify(sustainedSeries)} data-seconds={seconds} data-ceiling={ceiling} data-step={step} aria-labelledby={`${id}-name`} aria-describedby={`${id}-description`}>
+  <p id={`${id}-description`} class="fo-replay-sr">{description}</p>
+  <figcaption>
+    <div class="fo-replay-heading">
+      <span id={`${id}-name`} class="fo-replay-eyebrow">{benchmark.development_preview ? "Development preview · mixed ingest" : "Sustained mixed ingest"}</span>
+      <span class="fo-replay-headline">
+        <strong data-counter>{formatRate(sustained.accepted_per_second)}</strong><span>items/s</span>
+      </span>
+      <span class="fo-replay-average">{averageDuration} {sustained.phase === "mixed-sustained" ? "average" : "preview average"}</span>
+    </div>
+    <button type="button" class="fo-replay-control" data-replay hidden aria-label="Pause measured throughput">Pause</button>
+  </figcaption>
+  <div class="fo-replay-legend" aria-label="Chart legend">
+    <span><i class="fo-replay-spans" aria-hidden="true"></i>Spans <b data-value="spans">{formatRate(sustained.spans_per_second)}</b></span>
+    <span><i class="fo-replay-logs" aria-hidden="true"></i>Logs <b data-value="logs">{formatRate(sustained.log_records_per_second)}</b></span>
+    <span><i class="fo-replay-metrics" aria-hidden="true"></i>Metrics <b data-value="metrics">{formatRate(sustained.metric_points_per_second)}</b></span>
+  </div>
+  <div class="fo-replay-chart">
+  <svg viewBox="0 0 1000 400" role="img" aria-labelledby={`${id}-title ${id}-desc`}>
+    <title id={`${id}-title`}>{formatRate(sustained.accepted_per_second)} items/s · {sustained.seconds} seconds of measured mixed ingest</title>
+    <desc id={`${id}-desc`}>{description}</desc>
+    <defs><clipPath id={`${id}-clip`}><rect data-reveal x={left} y={top} width={right - left} height={bottom - top} /></clipPath></defs>
+    <g aria-hidden="true">
+      {[0, step, step * 2, ceiling].map(tick => <>
+        <line class="fo-replay-grid" x1={left} x2={right} y1={y(tick)} y2={y(tick)} />
+        <text class="fo-replay-y" x={left - 12} y={y(tick)} dy="0.35em">{tick === 0 ? "0" : tick >= 1e6 ? `${tick / 1e6}m` : `${tick / 1000}k`}</text>
+      </>)}
+      <g clip-path={`url(#${id}-clip)`}>
+        {paths.map((path, i) => <path class={`fo-replay-area fo-replay-${layers[i]}`} d={path} />)}
+      </g>
+      <line data-playhead class="fo-replay-playhead" x1={right} x2={right} y1={top} y2={bottom} visibility="hidden" />
+      {[0, 1, 2, 3, 4].map(tick => <text class="fo-replay-x" style={tick === 4 ? "text-anchor: end" : undefined} x={x(seconds * tick / 4)} y="325">{Math.round(seconds * tick / 4)}s</text>)}
+      <text class="fo-replay-axis" x={(left + right) / 2} y="380">elapsed seconds</text>
+    </g>
+  </svg>
+  <div class="fo-replay-plot" data-plot aria-hidden="true"></div>
+  <div class="fo-replay-tooltip" data-tooltip hidden aria-hidden="true">
+    <span data-tooltip-time></span>
+    <span>Spans <b data-hover="spans"></b></span>
+    <span>Logs <b data-hover="logs"></b></span>
+    <span>Metrics <b data-hover="metrics"></b></span>
+  </div>
+  </div>
+  <div class="fo-replay-status"><span data-state>Full measured run</span><span class="fo-replay-readout"><span data-elapsed>{clock(seconds)} / {clock(seconds)}</span><span class="fo-replay-rate" data-rate hidden style={`min-width: ${rateWidth}ch`}></span></span></div>
+  <p class="fo-replay-setup">Replay of the measured run · {machine} · {host.logical_cpus} vCPU</p>
+  {benchmark.development_preview && <p class="fo-replay-note">{benchmark.series_phase} · Partial run · Completion gate failed</p>}
+</figure>
+
+<style>
+  .fo-replay {
+    --fo-series-spans: var(--sl-color-gray-2);
+    --fo-series-logs: var(--sl-color-accent);
+    --fo-series-metrics: var(--sl-color-gray-3);
+    container-type: inline-size;
+    min-width: 0;
+    margin: 0;
+    padding: clamp(1rem, 3vw, 2rem);
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 8px;
+    background: var(--sl-color-black);
+    font-family: var(--fo-font-display);
+    color: var(--sl-color-white);
+  }
+  figcaption { position: relative; }
+  .fo-replay-heading { display: grid; gap: 0.55rem; min-width: 0; }
+  .fo-replay-eyebrow, .fo-replay-setup, .fo-replay-average { color: var(--sl-color-gray-2); font-size: clamp(0.68rem, 1.3vw, 0.8rem); }
+  .fo-replay-setup { margin: 0.75rem 0 0; line-height: 1.7; text-wrap: pretty; }
+  .fo-replay-eyebrow { padding-inline-end: 5rem; }
+  .fo-replay-headline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; }
+  .fo-replay-headline strong { font-size: clamp(1.9rem, 5.5vw, 4rem); font-weight: 500; line-height: 1.1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+  .fo-replay-headline > span { font-size: clamp(0.8rem, 2vw, 1.1rem); color: var(--sl-color-gray-2); }
+  .fo-replay-control { position: absolute; top: -0.5rem; right: 0; min-height: 44px; min-width: 5rem; padding: 0.4rem 0.2rem; border: 0; border-radius: 3px; background: none; color: var(--sl-color-gray-2); font: inherit; font-size: 0.72rem; cursor: pointer; }
+  .fo-replay-control[hidden] { display: block; visibility: hidden; }
+  .fo-replay-control:disabled { cursor: default; }
+  .fo-replay-control:hover:not(:disabled) { color: var(--sl-color-white); }
+  .fo-replay-control:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 4px; }
+  .fo-replay-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; margin-top: 1.5rem; font-size: 0.72rem; color: var(--sl-color-gray-2); }
+  .fo-replay-legend span { white-space: nowrap; }
+  .fo-replay-legend b { display: block; margin: 0.25rem 0 0 1rem; font-weight: 400; color: var(--sl-color-white); }
+  .fo-replay-legend i { display: inline-block; width: 0.5rem; height: 0.5rem; margin-right: 0.25rem; border-radius: 1px; }
+  .fo-replay-legend b, .fo-replay-status, .fo-replay-tooltip { font-variant-numeric: tabular-nums; }
+  .fo-replay-spans { fill: var(--fo-series-spans); background: var(--fo-series-spans); }
+  .fo-replay-logs { fill: var(--fo-series-logs); background: var(--fo-series-logs); }
+  .fo-replay-metrics { fill: var(--fo-series-metrics); background: var(--fo-series-metrics); }
+  .fo-replay-chart { position: relative; width: 100%; aspect-ratio: 5 / 2; min-height: 13rem; margin-top: 1.5rem; }
+  svg { display: block; position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .fo-replay-plot { position: absolute; inset: 0; visibility: hidden; }
+  .fo-replay[data-mounted] svg { visibility: hidden; }
+  .fo-replay[data-mounted] .fo-replay-plot { visibility: visible; }
+  .fo-replay-status { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem 1rem; min-height: 1.4em; font-size: 0.65rem; color: var(--sl-color-gray-2); }
+  .fo-replay-readout { display: flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 0.5ch; margin-left: auto; }
+  .fo-replay-readout > span { white-space: nowrap; }
+  .fo-replay-rate:not([hidden]) { display: inline-block; text-align: right; }
+  .fo-replay-tooltip { position: absolute; top: 0; right: 0; z-index: 1; padding: 0.6rem 0.75rem; border: 1px solid var(--sl-color-gray-5); border-radius: 4px; background: var(--sl-color-black); color: var(--sl-color-gray-2); font-size: 0.65rem; pointer-events: none; }
+  .fo-replay-tooltip span { display: block; }
+  .fo-replay-tooltip span:not(:first-child) { display: flex; justify-content: space-between; gap: 0.8rem; }
+  .fo-replay-tooltip b { display: inline-block; min-width: 7ch; text-align: right; font-weight: 400; color: var(--sl-color-white); }
+  .fo-replay-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .fo-replay-plot :global(.uplot), .fo-replay-plot :global(.uplot *) { box-sizing: border-box; }
+  .fo-replay-plot :global(.uplot) { width: min-content; font-family: var(--fo-font-display); }
+  .fo-replay-plot :global(.u-wrap) { position: relative; user-select: none; }
+  .fo-replay-plot :global(.u-over), .fo-replay-plot :global(.u-under), .fo-replay-plot :global(.u-axis) { position: absolute; }
+  .fo-replay-plot :global(.u-under) { overflow: hidden; }
+  .fo-replay-plot :global(canvas) { position: relative; display: block; width: 100%; height: 100%; }
+  .fo-replay-plot :global(.u-cursor-x), .fo-replay-plot :global(.u-cursor-y) { position: absolute; left: 0; top: 0; pointer-events: none; will-change: transform; }
+  .fo-replay-plot :global(.u-cursor-x) { height: 100%; border-right: 1px dashed var(--sl-color-gray-3); }
+  .fo-replay-plot :global(.u-cursor-y) { width: 100%; border-bottom: 1px dashed var(--sl-color-gray-3); }
+  .fo-replay-plot :global(.u-off) { display: none; }
+  svg text { fill: var(--sl-color-gray-2); font-family: var(--fo-font-display); font-size: calc(0.7rem * tan(atan2(1000px, 100cqw))); }
+  .fo-replay-y { text-anchor: end; }
+  .fo-replay-x, .fo-replay-axis { text-anchor: middle; }
+  .fo-replay-grid { stroke: var(--sl-color-gray-5); stroke-width: 0.5; }
+  .fo-replay-area { fill-opacity: 0.12; stroke: currentColor; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  path.fo-replay-spans { stroke: var(--fo-series-spans); }
+  path.fo-replay-logs { stroke: var(--fo-series-logs); }
+  path.fo-replay-metrics { stroke: var(--fo-series-metrics); }
+  .fo-replay-playhead { stroke: var(--sl-color-white); stroke-width: 1.5; }
+  line { vector-effect: non-scaling-stroke; }
+  .fo-replay-note { margin: 1rem 0 0; font-size: 0.7rem; color: var(--sl-color-gray-2); }
+  @media (max-width: 30rem) {
+    .fo-replay-headline strong { font-size: clamp(1.75rem, 8vw, 2.4rem); }
+  }
+</style>

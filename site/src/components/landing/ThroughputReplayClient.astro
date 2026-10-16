@@ -1,0 +1,8 @@
+{/* Imported by the landing content only: scripts in Starlight's global Hero
+    override are otherwise hoisted onto every documentation page. */}
+<script>
+  import { mountReplay } from "./throughput-replay";
+  document.querySelectorAll<HTMLElement>("[data-throughput-replay]").forEach(root => {
+    mountReplay(root, async () => (await import("uplot")).default);
+  });
+</script>

@@ -34,10 +34,10 @@ const { sustained } = benchmark;
         <svg viewBox={`0 0 480 ${multiple ? 328 : 292}`} role="img" aria-labelledby={`${chartId}-title ${chartId}-desc`}>
           <title id={`${chartId}-title`}>{signalNames[signal]} accepted throughput by processes per signal</title>
           <desc id={`${chartId}-desc`}>
-            Median line and minimum-to-maximum band across {benchmark.repeat} repetitions at 1, 2, 4, 8, 16, 32 and 64 processes per signal.
+            Median line and minimum-to-maximum band across the recorded repetitions at each process count; the suite requests {benchmark.repeat} repetitions.
             The horizontal axis is evenly spaced on a log2 scale; the vertical axis runs from zero to 600,000 accepted items per second.
-            {points.map((point) => ` At ${point.processes_per_signal} processes: ${formatRate(point.median)} items/s, range ${formatRate(point.min)} to ${formatRate(point.max)}.`).join("")}
-            {signal === "mixed" && ` The diamond marks the single sustained phase: ${formatRate(sustained.accepted_per_second)} items/s at ${sustained.processes_per_signal} processes per signal over ${sustained.seconds} seconds. Shading at 32–64 processes marks generator CPU of at least 7 cores.`}
+            {points.map((point) => ` At ${point.processes_per_signal} processes: ${formatRate(point.median)} items/s, range ${formatRate(point.min)} to ${formatRate(point.max)}, ${point.repetitions} repetitions.`).join("")}
+            {signal === "mixed" && ` The diamond marks the ${benchmark.development_preview ? "development preview" : "sustained"} phase: ${formatRate(sustained.accepted_per_second)} items/s at ${sustained.processes_per_signal} processes per signal over ${sustained.seconds} seconds. Shading marks generator CPU of at least 7 cores.`}
           </desc>
           <g aria-hidden="true">
             {limited.length > 0 && <>
@@ -68,7 +68,7 @@ const { sustained } = benchmark;
         <div class="fo-sweep-key" aria-label="Chart legend">
           <span><i class="fo-key-median" aria-hidden="true"></i>median</span>
           <span><i class="fo-key-band" aria-hidden="true"></i>min–max</span>
-          {signal === "mixed" && <span><i class="fo-key-sustained" aria-hidden="true"></i>{formatRate(sustained.accepted_per_second)}/s sustained at {sustained.processes_per_signal}</span>}
+          {signal === "mixed" && <span><i class="fo-key-sustained" aria-hidden="true"></i>{formatRate(sustained.accepted_per_second)}/s {benchmark.development_preview ? "preview" : "sustained"} at {sustained.processes_per_signal}</span>}
         </div>
       </figure>
     );

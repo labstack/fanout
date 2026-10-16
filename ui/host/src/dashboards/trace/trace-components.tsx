@@ -20,7 +20,7 @@ export function Waterfall({
   );
   const total = Math.max(end - start, 1);
   const services = [...new Set(spans.map(span => span.service))];
-  const visibleSpans = usePagedItems(spans, 8);
+  const visibleSpans = usePagedItems(spans);
   return (
     <>
       <Table.ScrollContainer minWidth={680}>

@@ -1,0 +1,43 @@
+---
+interface Props { reverse?: boolean; }
+const { reverse = false } = Astro.props;
+---
+
+<section class:list={["fo-capture-row", "not-content", { "fo-capture-row-reverse": reverse }]}>
+  <div class="fo-capture-copy"><slot /></div>
+  <div class="fo-capture-media"><slot name="capture" /></div>
+</section>
+
+<style>
+  .fo-capture-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    gap: 1.5rem;
+    margin-top: clamp(3rem, 6vw, 5rem);
+  }
+  .fo-capture-copy, .fo-capture-media { min-width: 0; width: 100%; margin: 0; }
+  .fo-capture-copy :global(h2) {
+    margin: 0;
+    font-size: clamp(1.5rem, 2.5vw, 2rem);
+    line-height: 1.25;
+    color: var(--sl-color-white);
+    text-wrap: balance;
+    overflow-wrap: normal;
+  }
+  .fo-capture-copy :global(p) {
+    margin: 1rem 0 0;
+    font-family: var(--fo-font-body);
+    color: var(--sl-color-gray-2);
+    font-size: 1rem;
+    line-height: 1.7;
+    max-width: 54ch;
+    text-wrap: pretty;
+  }
+  @media (min-width: 52rem) {
+    .fo-capture-row { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: clamp(2rem, 4vw, 3.5rem); }
+    .fo-capture-row-reverse { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+    .fo-capture-row-reverse .fo-capture-media { grid-column: 1; grid-row: 1; }
+    .fo-capture-row-reverse .fo-capture-copy { grid-column: 2; grid-row: 1; }
+  }
+</style>

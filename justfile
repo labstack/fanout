@@ -70,6 +70,10 @@ e2e *ARGS:
     just build
     cd ui/host && bun run e2e {{ARGS}}
 
+# Refresh the six real product captures used by the landing page.
+landing-captures:
+    FANOUT_LANDING_BASE_URL="${FANOUT_LANDING_BASE_URL:-}" FANOUT_LANDING_SESSION_COOKIE="${FANOUT_LANDING_SESSION_COOKIE:-}" FANOUT_LANDING_CAPTURES=1 just e2e e2e/landing-captures.spec.ts
+
 # CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
 # without pushing anything.
 

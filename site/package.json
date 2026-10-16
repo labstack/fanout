@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro check && astro build && node scripts/check-tables.mjs && node scripts/check-social-card.mjs && node scripts/check-canonical.mjs",
+    "build": "astro check && astro build && node scripts/check-tables.mjs && node scripts/check-social-card.mjs && node scripts/check-canonical.mjs && node scripts/check-benchmark-numbers.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
@@ -20,7 +20,8 @@
     "@fontsource/ibm-plex-sans": "5.3.0",
     "@phosphor-icons/core": "2.1.1",
     "astro": "7.3.6",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "uplot": "1.6.32"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",

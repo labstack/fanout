@@ -1,7 +1,7 @@
 ---
 title: Fanout
 description: One binary that ingests OpenTelemetry, stores it, and answers questions about it.
-summary: The landing page — what Fanout is, what it replaces, and what it refuses to do.
+summary: OpenTelemetry observability in one binary, with a system overview, service map and trace waterfall.
 template: splash
 # The landing page's content title is also the site title, so Starlight's
 # default would be "Fanout · Fanout". A frontmatter title replaces that default
@@ -25,7 +25,7 @@ head:
       content: "https://fanout.run/"
 hero:
   title: See what broke without operating an observability stack.
-  tagline: Send traces, logs and metrics to one process over OpenTelemetry. Investigate incidents in the browser or through an agent, and run alerts — without operating the stack behind them.
+  tagline: Send OpenTelemetry traces, logs and metrics to one binary to investigate incidents and run alerts.
   actions:
     - text: Install Fanout
       link: /start/install
@@ -34,109 +34,57 @@ hero:
 status: shipped
 ---
 
-import Section from "../../components/landing/Section.astro";
 import ProofStrip from "../../components/landing/ProofStrip.astro";
-import Benchmark from "../../components/landing/Benchmark.astro";
-import Preview from "../../components/landing/Preview.astro";
-import Pipeline from "../../components/landing/Pipeline.astro";
-import Contrast from "../../components/landing/Contrast.astro";
-import Refusals from "../../components/landing/Refusals.astro";
+import CaptureRow from "../../components/landing/CaptureRow.astro";
+import ProductCapture from "../../components/landing/ProductCapture.astro";
 import CtaBar from "../../components/landing/CtaBar.astro";
+import ThroughputReplayClient from "../../components/landing/ThroughputReplayClient.astro";
 
-{/* Prose below is Markdown inside each component, never a prop: `<path>.md` and llms.txt are generated from this source with component tags stripped, so a prop would render for a person and vanish for an agent. Keep MDX comments on one line — toPlainMarkdown only strips single-line ones, and a wrapped comment leaks into the alternate. */}
+<ThroughputReplayClient />
+
+{/* Keep prose as Markdown children: the Markdown and llms.txt routes strip component tags and retain their content. Keep MDX comments on one line. */}
 
 <ProofStrip>
 
-- **Self-hosted** on your hardware
-
-- **OTLP native** traces, logs and metrics
-
-- **Open local storage** authoritative Parquet, embedded queries
-
-- **One small VM** reference deployment target
-
-- **Apache-2.0** open source
+- [**415,859 items/s** sustained](/explanation/performance)
+- **One binary**
+- **OTLP** traces, logs and metrics
+- **Parquet** you own
+- **Apache-2.0**
 
 </ProofStrip>
 
-<Section eyebrow="What you look at">
+<CaptureRow>
 
-## Every service, one screen, no query language.
+## Every service on one screen.
 
-Health, latency, error rate and throughput for everything reporting — with the
-slow one already at the top. The chat investigator works from the same typed
-queries this view does, so what it tells you and what you are looking at cannot
-disagree.
+See request rate, errors and latency across your system. Open a dashboard
+or ask a question to investigate the services that need attention.
 
-<Preview />
+<ProductCapture slot="capture" view="overview" alt="Fanout System overview dashboard with request rate, error rate, latency and service panels." />
 
-</Section>
+</CaptureRow>
 
-<Section eyebrow="What it replaces">
+<CaptureRow reverse>
 
-## Five services, or one process.
+## See how your services connect.
 
-This is the whole argument. Every other claim on this page follows from it — the
-short backup procedure, the single configuration, and the absence of an
-integration layer to debug at three in the morning.
+Follow calls across services and external dependencies, with health, traffic and
+latency on the map. Open a service to inspect its traces.
 
-<Contrast />
+<ProductCapture slot="capture" view="service-map" alt="Fanout service map showing calls between services and external dependencies, with health and latency." />
 
-</Section>
+</CaptureRow>
 
-<Section eyebrow="Inside the binary">
+<CaptureRow>
 
-## Three signals in, one process, answers back out.
+## Find where the time went.
 
-Fanout is where your telemetry lands, not something you put in front of the
-thing it lands in. Traces, logs and metrics arrive over standard OTLP from SDKs
-or a Collector you already run, and everything after that happens inside one
-binary.
+Open a trace to see each operation in a waterfall, with duration, service and
+error status alongside correlated logs.
 
-<Pipeline>
+<ProductCapture slot="capture" view="trace" alt="Fanout trace waterfall showing operation durations across services and correlated logs." />
 
-Nothing in the middle crosses a network, and nothing else has to be running for
-it to answer. The data directory it writes is the whole of its state.
-
-</Pipeline>
-
-</Section>
-
-<Section eyebrow="Measured on one machine">
-
-## 422,408 OpenTelemetry items a second. One binary.
-
-On a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with telemetrygen
-on a separate ccx33 in the same location over a private network, Fanout
-v2026.10.7-alpha accepted **422,408 mixed OpenTelemetry items/s for five
-minutes**: 51,358 spans, 184,883 log records and 186,178 metric points per
-second. Every generator exited successfully, there were zero dropped rows and
-no restarts, and the Parquet store passed verification. The run measured ingest only.
-
-<Benchmark />
-
-[Read the methodology](/explanation/performance), inspect the
-[raw evidence](https://github.com/labstack/fanout-bench/tree/main/published/2026-10-16-ccx33x2-v2026.10.7-alpha),
-or [run the harness](https://github.com/labstack/fanout-bench) on your own hardware.
-
-</Section>
-
-<Section eyebrow="Limits">
-
-## What Fanout will not do.
-
-These decide whether Fanout fits, so they are here rather than three pages in.
-None of them is a roadmap item phrased as a virtue.
-
-<Refusals>
-
-- **Not multi-tenant:** namespaces scope queries, not access. Anyone who can query the instance can query every namespace in it; an instance is one trust domain.
-- **No horizontal scale:** ingest, query and maintenance share a process and a machine. There is no scaling one without the others, because they are the same thing.
-- **No universal capacity number:** the benchmark above describes one release, host and workload. Your payload cardinality, query mix and disk decide the capacity of your instance. [Measure your own hardware](/explanation/performance).
-- **No migration paths:** Fanout is pre-release. Storage-format changes may require a fresh data directory; preserve backups before upgrading.
-
-</Refusals>
-
-</Section>
+</CaptureRow>
 
 <CtaBar />
