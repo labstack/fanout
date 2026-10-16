@@ -43,8 +43,8 @@ export function RowPanel(props: AnalysisProps) {
       }}>{String(value).slice(0,16)}</Anchor>;
     }
     if (name === "service" && value) return props.onSelect
-      ? <Anchor component="button" type="button" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
-      : <Text fz={12} style={serviceStyle} title={String(value)}>{String(value)}</Text>;
+      ? <Anchor component="button" type="button" className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)} onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>
+      : <Text fz={12} className="dashboard-dimension-nowrap" style={serviceStyle} title={String(value)}>{String(value)}</Text>;
     if (name === "health" || name === "severity" || name === "status") {
       const severity = name === "severity" ? severityLabel(value) : undefined;
       const bad = severity ? severity === "ERROR" || severity === "FATAL" : String(value).includes("ERROR") || value === "FATAL" || value === "CRITICAL" || value === "unhealthy";

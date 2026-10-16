@@ -207,7 +207,7 @@ it("hides fix without manage permission while keeping Explain answer-only", asyn
 
 it("copies a view link without edit mode and reports success", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
-  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  vi.spyOn(navigator.clipboard, "writeText").mockImplementation(writeText);
   window.history.replaceState({}, "", "/dashboards/d1?edit=1&range=6h");
   const { host } = await render();
   await menu(host, "Requests", "Copy link");
@@ -219,7 +219,7 @@ it("copies a view link without edit mode and reports success", async () => {
 });
 
 it("shows a copyable URL when clipboard permission is denied", async () => {
-  vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("Denied")) } });
+  vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("Denied"));
   window.history.replaceState({}, "", "/dashboards/d1?edit=1");
   const { host } = await render();
   await menu(host, "Requests", "Copy link");

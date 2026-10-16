@@ -4,8 +4,24 @@
 }
 
 .dashboard-table {
-  table-layout: fixed;
+  table-layout: auto;
   width: 100%;
+}
+
+/* Whole values determine their intrinsic column width. Only text may shrink. */
+.dashboard-table td {
+  white-space: nowrap;
+}
+
+/* Text shrinks into leftover space, but keeps enough to recognize a name;
+   past that the table scrolls. */
+.dashboard-table td:has(> .dashboard-dimension-nowrap) {
+  max-width: 0;
+  min-width: 14ch;
+}
+
+.dashboard-table .mantine-Badge-root {
+  width: max-content;
 }
 
 .dashboard-dimension-nowrap {

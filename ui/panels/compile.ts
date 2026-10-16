@@ -98,11 +98,13 @@ function baseOption(theme: ChartTheme, unit?: string): Option {
   };
 }
 
-function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
+function thresholdLines(panel: Panel, theme: ChartTheme, bounds: { min: number; max: number }, unit?: string) {
   return (panel.thresholds ?? []).map((t) => ({
     yAxis: t.value,
-    // The middle of the plot keeps the label away from ticks on either axis.
-    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideMiddleBottom", distance: 8, color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontSize: 12 },
+    // ECharts insideEnd* positions right-align at the horizontal line's end.
+    // distance insets along x and offsets along y. Face into the plot at both
+    // range boundaries so neither the label nor its halo can reach axis ticks.
+    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: t.value <= (bounds.min + bounds.max) / 2 ? "insideEndTop" : "insideEndBottom", distance: 8, color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontSize: 12 },
     lineStyle: { color: theme.status[t.status], type: [4, 3], width: 1 },
   }));
 }
@@ -137,6 +139,21 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
   // Preserve authored series priority when the plot cannot fit every padded label.
   const labelCapacity = Math.max(0, Math.floor(plotHeight / 16));
   const period = result.shift_ms;
+  const bounds = units.map((axisUnit) => {
+    const selected = [...current, ...previousSeries].filter(s => (s.unit ?? panel.unit) === axisUnit);
+    const values = selected.flatMap(s => s.points.flatMap(([, v]) => v === null ? [] : [v]));
+    if (style === "stacked") {
+      const sums = new Map<number, { positive: number; negative: number }>();
+      for (const s of current.filter(s => (s.unit ?? panel.unit) === axisUnit)) for (const [t, v] of s.points) {
+        const sum = sums.get(t) ?? { positive: 0, negative: 0 }; if (v !== null) { if (v > 0) sum.positive += v; else sum.negative += v; } sums.set(t, sum);
+      }
+      values.push(...[...sums.values()].flatMap(s => [s.positive, s.negative]));
+    }
+    // Extents belong to data (including stacks and the previous period).
+    // ECharts' markLineFilter draws thresholds only inside the resulting
+    // native axis range, including log axes and later tick-density changes.
+    return valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, plotHeight);
+  });
   const lines = current.map((s, i) => {
     const color = colorFor(s.name, i, theme);
     return {
@@ -157,7 +174,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
       itemStyle: { ...markStyle(color,theme), borderRadius: style === "bars" || style === "stacked" ? [2, 2, 0, 0] : undefined },
       barMaxWidth: 12,
       emphasis: { focus: "series" },
-      markLine: i === 0 && (panel.thresholds?.length ?? 0) > 0 ? { symbol: ["none", "none"], silent: true, data: thresholdLines(panel, theme, unit) } : undefined,
+      markLine: i === 0 && (panel.thresholds?.length ?? 0) > 0 ? { symbol: ["none", "none"], silent: true, data: thresholdLines(panel, theme, bounds[0], unit) } : undefined,
     };
   });
   const previous = period !== undefined ? previousSeries.map((s) => ({
@@ -173,19 +190,6 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     lineStyle: { width: 1, type: "dashed", color: theme.muted },
     itemStyle: { color: theme.muted },
   })) : [];
-  const bounds = units.map((axisUnit, i) => {
-    const selected = [...current, ...previousSeries].filter(s => (s.unit ?? panel.unit) === axisUnit);
-    const values = selected.flatMap(s => s.points.flatMap(([, v]) => v === null ? [] : [v]));
-    if (style === "stacked") {
-      const sums = new Map<number, { positive: number; negative: number }>();
-      for (const s of current.filter(s => (s.unit ?? panel.unit) === axisUnit)) for (const [t, v] of s.points) {
-        const sum = sums.get(t) ?? { positive: 0, negative: 0 }; if (v !== null) { if (v > 0) sum.positive += v; else sum.negative += v; } sums.set(t, sum);
-      }
-      values.push(...[...sums.values()].flatMap(s => [s.positive, s.negative]));
-    }
-    if (i === 0) values.push(...(panel.thresholds ?? []).map(t => t.value));
-    return valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, plotHeight);
-  });
   const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
   return layoutEndLabels({
     ...baseOption(theme, unit),
