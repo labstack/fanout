@@ -1,12 +1,11 @@
 package metrics
 
 import (
-	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 )
 
 // gatherDuckDBMemory returns the exported per-tag memory series, by tag.
@@ -32,42 +31,57 @@ func gatherDuckDBMemory(t *testing.T) map[string]float64 {
 	return out
 }
 
-// The whole purpose of this series is to measure what DuckDB holds right now,
-// so that the untracked gap against process RSS can be derived from it. A
-// failed read must therefore export nothing. Reporting the last successful
-// figures as if they were current is the one outcome that actively misleads:
-// the gap is computed against a stale sum, and the number that was supposed to
-// reveal an impending out-of-memory kill reads normal.
-func TestDuckDBMemoryDropsSeriesWhenTheReadFails(t *testing.T) {
-	release := SetDuckDBMemorySource(func() map[string]int64 {
-		return map[string]int64{"BASE_TABLE": 4096}
-	})
-	if got := gatherDuckDBMemory(t); got["BASE_TABLE"] != 4096 {
-		release()
-		t.Fatalf("healthy read exported %v, want BASE_TABLE=4096", got)
-	}
-	release()
-
-	// The source is installed but cannot read: the closure in internal/query
-	// returns nil for a query error, a scan error, or a partial read.
-	release = SetDuckDBMemorySource(func() map[string]int64 { return nil })
+func TestDuckDBMemoryPublishesCompleteSamplesAndTimestamp(t *testing.T) {
+	record, release := SetDuckDBMemorySource()
 	defer release()
 	if got := gatherDuckDBMemory(t); len(got) != 0 {
-		t.Errorf("after a failed read the gauge still exports %v; stale values are reported as current", got)
+		t.Fatalf("before the first sample exported %v", got)
+	}
+	if got := gatherMemoryTimestamp(t); got != 0 {
+		t.Fatalf("before the first sample timestamp=%g", got)
+	}
+	tags := map[string]int64{"BASE_TABLE": 4096}
+	record(tags, time.Unix(1234, 500_000_000))
+	tags["BASE_TABLE"] = 0 // Publication owns an immutable copy.
+	if got := gatherDuckDBMemory(t); got["BASE_TABLE"] != 4096 {
+		t.Fatalf("healthy read exported %v, want BASE_TABLE=4096", got)
+	}
+	if got := gatherMemoryTimestamp(t); got != 1234.5 {
+		t.Fatalf("timestamp=%g, want 1234.5", got)
+	}
+	record(map[string]int64{"HASH_TABLE": 2048}, time.Unix(1235, 0))
+	if got := gatherDuckDBMemory(t); len(got) != 1 || got["HASH_TABLE"] != 2048 {
+		t.Fatalf("replacement sample exported %v", got)
 	}
 }
 
-// Prometheus scrapes concurrently, and a GaugeVec that is Reset and refilled on
-// every scrape is shared mutable state: two scrapes interleave, and one of them
-// observes the other's half-finished refill -- missing tags, and a sum that
-// understates what DuckDB holds.
-func TestDuckDBMemoryIsSafeUnderConcurrentScrapes(t *testing.T) {
-	release := SetDuckDBMemorySource(func() map[string]int64 {
-		return map[string]int64{"BASE_TABLE": 1, "HASH_TABLE": 2, "ORDER_BY": 3}
-	})
+func TestDuckDBMemoryReleaseOnlyClearsItsOwner(t *testing.T) {
+	recordOld, releaseOld := SetDuckDBMemorySource()
+	record, release := SetDuckDBMemorySource()
 	defer release()
+	record(map[string]int64{"BASE_TABLE": 2}, time.Now())
+	releaseOld()
+	recordOld(map[string]int64{"BASE_TABLE": 1}, time.Now())
+	if got := gatherDuckDBMemory(t); got["BASE_TABLE"] != 2 {
+		t.Fatalf("old owner changed the current sample: %v", got)
+	}
+	release()
+	if got := gatherDuckDBMemory(t); len(got) != 0 {
+		t.Fatalf("released source still exports %v", got)
+	}
+}
+
+func TestDuckDBMemoryIsSafeUnderConcurrentScrapes(t *testing.T) {
+	record, release := SetDuckDBMemorySource()
+	defer release()
+	record(map[string]int64{"BASE_TABLE": 1, "HASH_TABLE": 2, "ORDER_BY": 3}, time.Now())
 
 	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 200 {
+			record(map[string]int64{"BASE_TABLE": 1, "HASH_TABLE": 2, "ORDER_BY": 3}, time.Now())
+		}
+	})
 	for range 8 {
 		wg.Add(1)
 		go func() {
@@ -86,7 +100,6 @@ func TestDuckDBMemoryIsSafeUnderConcurrentScrapes(t *testing.T) {
 						t.Errorf("scrape saw %d tags, want 3: a concurrent refill was observed half-done", n)
 						return
 					}
-					_ = dto.MetricType_GAUGE
 				}
 			}
 		}()
@@ -100,11 +113,21 @@ func TestDuckDBMemoryExportsNothingWithoutASource(t *testing.T) {
 	if got := gatherDuckDBMemory(t); len(got) != 0 {
 		t.Errorf("with no source installed the gauge exports %v", got)
 	}
-	if families, err := prometheus.DefaultGatherer.Gather(); err == nil {
-		for _, family := range families {
-			if strings.Contains(family.GetName(), "duckdb_memory_scrape") {
-				t.Errorf("%s exists only to pump a push gauge; a collector does not need it", family.GetName())
-			}
+	if got := gatherMemoryTimestamp(t); got != -1 {
+		t.Errorf("without a source timestamp=%g, want absent", got)
+	}
+}
+
+func gatherMemoryTimestamp(t *testing.T) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() == "fanout_duckdb_memory_last_success_timestamp_seconds" {
+			return family.Metric[0].GetGauge().GetValue()
 		}
 	}
+	return -1
 }

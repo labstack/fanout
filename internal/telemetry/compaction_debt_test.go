@@ -4,9 +4,40 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+func TestMetricsScrapeDoesNotWaitForCatalogLock(t *testing.T) {
+	p := &ParquetStore{batches: make(map[string]*storedBatch)}
+	p.installBatch(&storedBatch{metadata: BatchMetadata{ID: "a", Generation: 0, Spans: 1}})
+	release := metrics.SetCompactionBacklogSource(p.Generation0BatchCount)
+	defer release()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	handler := promhttp.Handler()
+	go func() {
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("/metrics waited for the catalog lock")
+	}
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "fanout_compaction_backlog_batches 1\n") {
+		t.Fatalf("scrape did not return the cached backlog: %d %s", recorder.Code, recorder.Body.String())
+	}
+}
 
 func TestCompactionLimitNotificationDoesNotMissCrossings(t *testing.T) {
 	p := &ParquetStore{batches: make(map[string]*storedBatch)}

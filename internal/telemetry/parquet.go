@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/parquet-go/parquet-go"
@@ -91,10 +92,12 @@ type ParquetStore struct {
 	publishGate        chan struct{}
 	batches            map[string]*storedBatch
 	generation0Batches int
-	generation0ByDay   map[int64]int
-	compactionDebt     int
-	debtChanged        chan struct{}
-	debtLimitReached   chan struct{}
+	// Published after each catalog mutation; scrapes never take mu.
+	generation0Snapshot atomic.Int64
+	generation0ByDay    map[int64]int
+	compactionDebt      int
+	debtChanged         chan struct{}
+	debtLimitReached    chan struct{}
 }
 
 type ParquetStats struct {

@@ -2,8 +2,11 @@ package metrics
 
 import (
 	"database/sql"
+	"maps"
 	"math"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -312,15 +315,26 @@ func RecordFlush(signal string, durationSec float64) {
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
 }
 
-// duckDBPoolStats is the live source for the connection-pool gauges below.
+type duckDBPoolSource struct{ sample atomic.Pointer[sql.DBStats] }
+
+// duckDBPoolStats is the cached source for the connection-pool gauges below.
 //
 // A holder rather than a promauto.NewGaugeFunc closure over the pool: the
 // gauges are declared once for the process, while a *Duck is constructed many
 // times in a test binary, and registering a collector per construction panics
 // on the second one. Unset, every gauge reads zero.
-var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
+var duckDBPoolStats atomic.Pointer[duckDBPoolSource]
 
-// duckDBMemoryStats is the live source for the per-tag DuckDB memory gauge.
+type duckDBMemorySample struct {
+	tags map[string]int64
+	at   time.Time
+}
+
+type duckDBMemorySource struct {
+	sample atomic.Pointer[duckDBMemorySample]
+}
+
+// duckDBMemoryStats holds the latest background sample for the memory gauge.
 //
 // memory_limit bounds DuckDB's buffer pool and nothing else, so the figure that
 // actually predicts an out-of-memory kill is the gap between what the process
@@ -329,72 +343,109 @@ var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
 // - sum(fanout_duckdb_memory_bytes) - go_memstats_heap_sys_bytes. Without it
 // every diagnosis of this process is an inference, which is how a whole day
 // got spent optimising a Go heap that was never the problem.
-var duckDBMemoryStats atomic.Pointer[func() map[string]int64]
+var duckDBMemoryStats atomic.Pointer[duckDBMemorySource]
 
-// SetDuckDBMemorySource installs the reader for the per-tag memory gauge.
-func SetDuckDBMemorySource(tags func() map[string]int64) (release func()) {
-	if tags == nil {
-		return func() {}
-	}
-	installed := &tags
+// SetDuckDBMemorySource installs a cache, never a scrape-time query. Record
+// publishes a complete successful sample; failures leave the last one intact.
+// Releasing an older Duck cannot clear a newer Duck's source.
+func SetDuckDBMemorySource() (record func(map[string]int64, time.Time), release func()) {
+	installed := &duckDBMemorySource{}
 	duckDBMemoryStats.Store(installed)
-	return func() { duckDBMemoryStats.CompareAndSwap(installed, nil) }
+	return func(tags map[string]int64, at time.Time) {
+		installed.sample.Store(&duckDBMemorySample{tags: maps.Clone(tags), at: at})
+	}, func() { duckDBMemoryStats.CompareAndSwap(installed, nil) }
 }
 
-// duckDBMemoryDesc is emitted by a Collector, not held in a GaugeVec.
-//
-// The obvious implementation -- a GaugeVec that a scrape hook Resets and
-// refills -- is shared mutable state across concurrent scrapes, and a scrape
-// that lands mid-refill exports a subset of the tags. That understates what
-// DuckDB holds and correspondingly overstates the untracked gap, which is the
-// single number this series exists to compute. It also leaves the last good
-// values in place when a read fails, reporting them as current: the reading
-// that was meant to reveal an impending out-of-memory kill then looks normal.
-//
-// A Collector has neither problem. Each scrape builds its own metrics from its
-// own read, and a read that returns nothing exports nothing -- the series goes
-// absent, which is visibly different from "DuckDB is holding nothing".
+// Both series come from one immutable sample, so concurrent scrapes never see
+// a partial tag set or a timestamp belonging to a different sample.
 var duckDBMemoryDesc = prometheus.NewDesc(
 	"fanout_duckdb_memory_bytes",
-	"DuckDB memory usage by tag, as DuckDB itself accounts for it",
+	"Last sampled DuckDB memory usage by tag, as DuckDB itself accounts for it",
 	[]string{"tag"}, nil,
+)
+
+var duckDBMemorySampleDesc = prometheus.NewDesc(
+	"fanout_duckdb_memory_last_success_timestamp_seconds",
+	"Unix timestamp of the last successful DuckDB memory sample, or zero before the first success",
+	nil, nil,
 )
 
 type duckDBMemoryCollector struct{}
 
-func (duckDBMemoryCollector) Describe(ch chan<- *prometheus.Desc) { ch <- duckDBMemoryDesc }
+func (duckDBMemoryCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- duckDBMemoryDesc
+	ch <- duckDBMemorySampleDesc
+}
 
 func (duckDBMemoryCollector) Collect(ch chan<- prometheus.Metric) {
-	fn := duckDBMemoryStats.Load()
-	if fn == nil {
+	source := duckDBMemoryStats.Load()
+	if source == nil {
 		return
 	}
-	for tag, bytes := range (*fn)() {
-		ch <- prometheus.MustNewConstMetric(duckDBMemoryDesc, prometheus.GaugeValue, float64(bytes), tag)
+	at := 0.0
+	if sample := source.sample.Load(); sample != nil {
+		at = float64(sample.at.UnixNano()) / 1e9
+		for tag, bytes := range sample.tags {
+			ch <- prometheus.MustNewConstMetric(duckDBMemoryDesc, prometheus.GaugeValue, float64(bytes), tag)
+		}
 	}
+	ch <- prometheus.MustNewConstMetric(duckDBMemorySampleDesc, prometheus.GaugeValue, at)
 }
 
 func init() {
 	prometheus.DefaultRegisterer.MustRegister(duckDBMemoryCollector{})
 }
 
-// SetDuckDBPoolSource points the connection-pool gauges at a pool and returns
-// the function that stops reading it. The last caller wins; the returned
-// release only clears the source if it is still the one it installed, so a
-// second Duck closing in a test binary cannot blank the gauges of one that is
-// still serving.
+// SetDuckDBPoolSource samples pool bookkeeping independently of memory queries,
+// so a stuck engine cannot hide pool starvation. Stats takes database/sql's
+// mutex, which some connection cleanup paths hold during driver calls; scrapes
+// therefore read only the cached result. Release stops and joins this sampler
+// before the owning Duck closes its handles, without clearing a newer owner.
 func SetDuckDBPoolSource(stats func() sql.DBStats) (release func()) {
+	return setDuckDBPoolSource(stats, 5*time.Second)
+}
+
+func setDuckDBPoolSource(stats func() sql.DBStats, interval time.Duration) func() {
 	if stats == nil {
 		return func() {}
 	}
-	installed := &stats
+	installed := &duckDBPoolSource{}
 	duckDBPoolStats.Store(installed)
-	return func() { duckDBPoolStats.CompareAndSwap(installed, nil) }
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			sample := stats()
+			installed.sample.Store(&sample)
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			duckDBPoolStats.CompareAndSwap(installed, nil)
+			close(stop)
+			<-done
+		})
+	}
 }
 
 func poolStats() sql.DBStats {
-	if fn := duckDBPoolStats.Load(); fn != nil {
-		return (*fn)()
+	if source := duckDBPoolStats.Load(); source != nil {
+		if sample := source.sample.Load(); sample != nil {
+			return *sample
+		}
 	}
 	return sql.DBStats{}
 }
@@ -571,8 +622,8 @@ type compactionBacklogSource struct{ count func() int }
 
 var compactionBacklog atomic.Pointer[compactionBacklogSource]
 
-// SetCompactionBacklogSource reads the exact inventory rather than a periodic
-// file-stat snapshot. Closing an older repository cannot clear a newer source.
+// SetCompactionBacklogSource reads the cached exact inventory. The source must
+// not take the catalog lock. Closing an older repository cannot clear a newer source.
 func SetCompactionBacklogSource(count func() int) func() {
 	source := &compactionBacklogSource{count: count}
 	compactionBacklog.Store(source)
