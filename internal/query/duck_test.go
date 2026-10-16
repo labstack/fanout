@@ -221,6 +221,39 @@ WHERE bucket >= ? AND bucket < ?`, eventTime.Add(-time.Minute), eventTime.Add(ti
 	}
 }
 
+func TestNewDuckReconnectsInUTCAfterStartupContextCancelled(t *testing.T) {
+	t.Setenv("TZ", "America/Los_Angeles")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "128MB"}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	d.stopMemorySampler()
+	<-d.memorySamplerDone
+	cancel()
+	for name, db := range map[string]*sql.DB{"read": d.DB, "write": d.writeDB, "memory": d.memoryDB} {
+		t.Run(name, func(t *testing.T) {
+			// Retire every existing connection so this query must reconnect.
+			db.SetMaxIdleConns(0)
+			var timezone string
+			if err := db.QueryRowContext(t.Context(), "SELECT current_setting('TimeZone')").Scan(&timezone); err != nil {
+				t.Fatal(err)
+			}
+			if timezone != "UTC" {
+				t.Fatalf("new connection timezone=%q, want UTC", timezone)
+			}
+		})
+	}
+}
+
 // A cancelled statement's interrupt can reach the ROLLBACK that ends its read
 // transaction, leaving the transaction open. The read must roll back itself
 // after cancellation, and a connection whose rollback failed must leave the

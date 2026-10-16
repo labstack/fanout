@@ -17,22 +17,19 @@ func (d *Duck) startMemorySampler(interval time.Duration, sample func(context.Co
 	ctx, cancel := context.WithCancel(context.Background())
 	d.stopMemorySampler = cancel
 	d.memorySamplerDone = make(chan struct{})
-	record, release := metrics.SetDuckDBMemorySource()
+	record, release := metrics.SetDuckDBMemorySource(interval)
 	d.releaseMemoryGauges = release
 	go func() {
 		defer close(d.memorySamplerDone)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
 		failures := 0
 		for {
 			if ctx.Err() != nil {
 				return
 			}
-			readCtx, readCancel := context.WithTimeout(ctx, duckDBMemorySampleInterval)
+			readCtx, readCancel := context.WithTimeout(ctx, interval)
 			tags, err := sample(readCtx)
-			if err == nil {
-				err = readCtx.Err()
-			}
 			readCancel()
 			if ctx.Err() != nil {
 				return
@@ -46,10 +43,12 @@ func (d *Duck) startMemorySampler(interval time.Duration, sample func(context.Co
 				record(tags, time.Now())
 				failures = 0
 			}
+			// Pace from completion, including slow calls that ignore the deadline.
+			timer.Reset(interval)
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-timer.C:
 			}
 		}
 	}()

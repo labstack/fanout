@@ -32,7 +32,7 @@ func gatherDuckDBMemory(t *testing.T) map[string]float64 {
 }
 
 func TestDuckDBMemoryPublishesCompleteSamplesAndTimestamp(t *testing.T) {
-	record, release := SetDuckDBMemorySource()
+	record, release := SetDuckDBMemorySource(time.Minute)
 	defer release()
 	if got := gatherDuckDBMemory(t); len(got) != 0 {
 		t.Fatalf("before the first sample exported %v", got)
@@ -41,23 +41,24 @@ func TestDuckDBMemoryPublishesCompleteSamplesAndTimestamp(t *testing.T) {
 		t.Fatalf("before the first sample timestamp=%g", got)
 	}
 	tags := map[string]int64{"BASE_TABLE": 4096}
-	record(tags, time.Unix(1234, 500_000_000))
+	at := time.Now()
+	record(tags, at)
 	tags["BASE_TABLE"] = 0 // Publication owns an immutable copy.
 	if got := gatherDuckDBMemory(t); got["BASE_TABLE"] != 4096 {
 		t.Fatalf("healthy read exported %v, want BASE_TABLE=4096", got)
 	}
-	if got := gatherMemoryTimestamp(t); got != 1234.5 {
-		t.Fatalf("timestamp=%g, want 1234.5", got)
+	if got := gatherMemoryTimestamp(t); got != float64(at.UnixNano())/1e9 {
+		t.Fatalf("timestamp=%g, want %v", got, at)
 	}
-	record(map[string]int64{"HASH_TABLE": 2048}, time.Unix(1235, 0))
+	record(map[string]int64{"HASH_TABLE": 2048}, time.Now())
 	if got := gatherDuckDBMemory(t); len(got) != 1 || got["HASH_TABLE"] != 2048 {
 		t.Fatalf("replacement sample exported %v", got)
 	}
 }
 
 func TestDuckDBMemoryReleaseOnlyClearsItsOwner(t *testing.T) {
-	recordOld, releaseOld := SetDuckDBMemorySource()
-	record, release := SetDuckDBMemorySource()
+	recordOld, releaseOld := SetDuckDBMemorySource(time.Minute)
+	record, release := SetDuckDBMemorySource(time.Minute)
 	defer release()
 	record(map[string]int64{"BASE_TABLE": 2}, time.Now())
 	releaseOld()
@@ -72,7 +73,7 @@ func TestDuckDBMemoryReleaseOnlyClearsItsOwner(t *testing.T) {
 }
 
 func TestDuckDBMemoryIsSafeUnderConcurrentScrapes(t *testing.T) {
-	record, release := SetDuckDBMemorySource()
+	record, release := SetDuckDBMemorySource(time.Minute)
 	defer release()
 	record(map[string]int64{"BASE_TABLE": 1, "HASH_TABLE": 2, "ORDER_BY": 3}, time.Now())
 
@@ -130,4 +131,17 @@ func gatherMemoryTimestamp(t *testing.T) float64 {
 		}
 	}
 	return -1
+}
+
+func TestDuckDBMemoryDropsStaleSeriesAndKeepsTimestamp(t *testing.T) {
+	record, release := SetDuckDBMemorySource(time.Second)
+	defer release()
+	at := time.Now().Add(-3 * time.Second)
+	record(map[string]int64{"BASE_TABLE": 4096}, at)
+	if got := gatherDuckDBMemory(t); len(got) != 0 {
+		t.Fatalf("stale sample exported %v", got)
+	}
+	if got := gatherMemoryTimestamp(t); got != float64(at.UnixNano())/1e9 {
+		t.Fatalf("stale sample timestamp=%g, want %v", got, at)
+	}
 }
