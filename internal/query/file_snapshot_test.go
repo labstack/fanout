@@ -172,6 +172,7 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 		t.Helper()
 		w := queryrows.Window{Start: at.Add(-time.Minute), End: at.Add(time.Minute)}
 		var count int
+		assertInventoryOracle(t, d, w, 2)
 		w.Kind = queryrows.TraceCandidateRead
 		w.Namespace = "prod"
 		w.Service = "api"
@@ -221,7 +222,7 @@ func TestReadCacheCancellationLeavesNoMarkerOrPartialContributions(t *testing.T)
 	if _, err := d.RefreshReadCaches(ctx); err == nil {
 		t.Fatal("cancelled backfill succeeded")
 	}
-	for _, table := range []string{"read_batches", "read_trace_parts", "read_trace_candidates"} {
+	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
@@ -244,7 +245,7 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err == nil {
 		t.Fatal("broken cache schema accepted")
 	}
-	for _, table := range []string{"read_batches", "read_trace_parts"} {
+	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
@@ -321,7 +322,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_cache_version SET version=4`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
+	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
 		if _, err := d.DB.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -329,7 +330,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"read_batches", "read_trace_parts", "read_trace_candidates", "read_edge_buckets"} {
+	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates", "read_edge_buckets"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
@@ -357,7 +358,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 		t.Fatalf("rebuilt bound=%d: %v", minStart, err)
 	}
 	var version int
-	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 5 {
+	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 6 {
 		t.Fatalf("version=%d: %v", version, err)
 	}
 
@@ -557,6 +558,7 @@ func TestTraceCacheFollowsMultipleCompactionLevels(t *testing.T) {
 		t.Fatalf("replacement=%v", batches)
 	}
 	w := queryrows.Window{Start: at.Add(-time.Minute), End: at.Add(2 * time.Minute), Kind: queryrows.TraceCandidateRead}
+	assertInventoryOracle(t, d, w, 1)
 	var count int
 	if err := d.QueryRowScan(queryrows.WithWindow(t.Context(), w), []any{&count}, `SELECT count(*) FROM trace_candidates`); err != nil || count != 1 {
 		t.Fatalf("candidate=%d: %v", count, err)
@@ -633,7 +635,7 @@ func TestReadCacheRowBudgetAndOversizedFileProgress(t *testing.T) {
 	}
 }
 
-func TestTraceBackfillBudgetsSpanRowsAndReportsOnlyTraceWork(t *testing.T) {
+func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	logs := make([]telemetry.Log, readCacheRowBudget)
 	for i := range logs {
@@ -648,18 +650,30 @@ func TestTraceBackfillBudgetsSpanRowsAndReportsOnlyTraceWork(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+	written, err := d.RefreshReadCaches(t.Context())
+	if err != nil {
 		t.Fatal(err)
 	}
 	markers, err := batchMarkers(t.Context(), d.DB)
-	if err != nil || !markers["older-trace"] || !markers["log-heavy-trace"] {
-		t.Fatalf("logs consumed trace row budget: %v %v", markers, err)
+	if err != nil || len(markers) != 1 || !markers["log-only"] || written != 1 {
+		t.Fatalf("all-signal budget/work: %v written=%d err=%v", markers, written, err)
 	}
-	var count int
-	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_parts`).Scan(&count); err != nil || count != 2 {
-		t.Fatalf("trace parts=%d %v", count, err)
+	if got := metricFamily(t, "fanout_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 3 {
+		t.Fatalf("pending all-signal gauge=%v want 3", got)
 	}
-	if got := metricFamily(t, "fanout_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 2 {
-		t.Fatalf("pending trace gauge=%v want 2", got)
+	written, err = d.RefreshReadCaches(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	markers, err = batchMarkers(t.Context(), d.DB)
+	if err != nil || !markers["log-heavy-trace"] || markers["older-trace"] || written != 4 {
+		t.Fatalf("oversized mixed batch: %v written=%d err=%v", markers, written, err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	markers, err = batchMarkers(t.Context(), d.DB)
+	if err != nil || len(markers) != 3 {
+		t.Fatalf("remaining batch: %v %v", markers, err)
 	}
 }

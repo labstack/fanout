@@ -11,7 +11,7 @@ const reachabilitySQL = `WITH raw AS (
  AND time < $__to::TIMESTAMP_NS::TIMESTAMPTZ_NS AND name='httpcheck.status' QUALIFY row_number() OVER (PARTITION BY series_id,time ORDER BY ingested_unix_nano DESC,value DESC)=1),
  keyed AS (SELECT *,to_json([namespace,url,method,host])::VARCHAR AS entity,
  coalesce(namespace,'')||' / '||coalesce(method,'method unknown')||' '||coalesce(url,'endpoint unknown')||' from '||coalesce(host,'vantage unknown') AS endpoint_from FROM raw),
- service_hosts AS (SELECT DISTINCT namespace,resource['host.name']::VARCHAR AS host FROM spans WHERE $__window(start_time) AND service IS NOT NULL AND service<>''),
+ service_hosts AS (SELECT DISTINCT namespace,resource['host.name']::VARCHAR AS host FROM resource_inventory WHERE signal='spans' AND $__window(first_seen) AND service IS NOT NULL AND service<>''),
  check_hosts AS (SELECT DISTINCT namespace,host FROM keyed WHERE $__window(time)),
  vantage AS (SELECT count(*)>0 AND bool_and(coalesce(host<>'',false) AND EXISTS (SELECT 1 FROM service_hosts s WHERE s.namespace=check_hosts.namespace AND s.host=check_hosts.host)) AS all_local FROM check_hosts),
  inventory AS (SELECT DISTINCT entity,endpoint_from||CASE WHEN all_local THEN ' (all checks run on service hosts; outside reachability unverified)' ELSE '' END AS endpoint_from FROM keyed CROSS JOIN vantage WHERE $__window(time)),
@@ -111,8 +111,4 @@ func containerCapacitySQL() string {
  FROM results ORDER BY (reporting<>'reporting') DESC,status DESC NULLS LAST,namespace,host,container`
 }
 
-const versionObservationsSQL = `WITH resources AS MATERIALIZED (
- SELECT namespace,service,resource,min(start_time) AS seen FROM spans WHERE $__window(start_time) GROUP BY namespace,service,resource
- UNION ALL SELECT namespace,service,resource,min(time) AS seen FROM logs WHERE $__window(time) GROUP BY namespace,service,resource
- UNION ALL SELECT namespace,service,resource,min(time) AS seen FROM metrics WHERE $__window(time) GROUP BY namespace,service,resource)
- SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,seen FROM resources`
+const versionObservationsSQL = `SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,first_seen AS seen FROM resource_inventory WHERE $__window(first_seen)`

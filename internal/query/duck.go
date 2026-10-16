@@ -1788,6 +1788,20 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 			d.parquetMu.RUnlock()
 			return nil, err
 		}
+	} else if strings.Contains(strings.ToLower(query), "resource_inventory") {
+		// The empty validation descriptor must never become a reader. Inspect
+		// actual references (a literal or unrelated CTE is harmless).
+		compiled, compileErr := d.compileSnapshot(ctx, conn, query)
+		if compileErr == nil {
+			if _, inventory := compiled.names["resource_inventory"]; inventory {
+				compileErr = fmt.Errorf("resource_inventory requires a repository and logical panel window")
+			}
+		}
+		if compileErr != nil {
+			endRead(conn, nil)
+			d.parquetMu.RUnlock()
+			return nil, compileErr
+		}
 	}
 	started := time.Now()
 	rows, err := db.QueryContext(ctx, query, args...)

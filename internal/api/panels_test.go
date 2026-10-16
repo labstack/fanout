@@ -34,7 +34,7 @@ func (f *fakePanels) ResolveVariables(context.Context, panel.ResolveRequest) (ma
 }
 
 func (f *fakePanels) Schema(_ context.Context, req panel.SchemaRequest) (*panel.Schema, error) {
-	return &panel.Schema{Window: req.Window}, nil
+	return &panel.Schema{Window: req.Window, SQLRelations: panel.SQLRelations()}, nil
 }
 
 func servePanels(t *testing.T, engine PanelEngine, method, path, body string) *httptest.ResponseRecorder {
@@ -107,7 +107,7 @@ func TestVariableAndSchemaRoutes(t *testing.T) {
 		t.Fatalf("resolve %d %s", rec.Code, rec.Body)
 	}
 	rec = servePanels(t, &fakePanels{}, http.MethodGet, "/api/telemetry/schema?window=6h", "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"window":"6h"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"window":"6h"`) || !strings.Contains(rec.Body.String(), `"sql_relations":{"resource_inventory":`) || !strings.Contains(rec.Body.String(), `"sql_type":"TIMESTAMPTZ_NS"`) {
 		t.Fatalf("schema %d %s", rec.Code, rec.Body)
 	}
 }

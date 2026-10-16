@@ -149,6 +149,9 @@ const macroAttr = `
 CREATE OR REPLACE MACRO attr(attributes, key) AS
   variant_extract(attributes, key);`
 
+// A binding descriptor for panel validation, never the execution source.
+const emptyResourceInventory = `SELECT NULL::VARCHAR AS signal,NULL::VARCHAR AS namespace,NULL::VARCHAR AS service,NULL::VARIANT AS resource,NULL::TIMESTAMPTZ_NS AS first_seen,NULL::TIMESTAMPTZ_NS AS last_seen WHERE false`
+
 // CreateCacheTables creates only DuckDB's rebuildable query accelerators. The
 // production telemetry rows themselves live in immutable Parquet batches.
 func CreateCacheTables(db *sql.DB) error {
@@ -200,7 +203,7 @@ func CreateParquetViews(db *sql.DB, parquetDir string) error {
 
 // CreateViews creates stable clean-name views plus the attr() macro.
 func CreateViews(db *sql.DB) error {
-	for _, stmt := range []string{macroAttr, viewSpans, viewLogs, viewMetrics} {
+	for _, stmt := range []string{macroAttr, viewSpans, viewLogs, viewMetrics, `CREATE OR REPLACE VIEW resource_inventory AS ` + emptyResourceInventory} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create view/macro: %w", err)
 		}

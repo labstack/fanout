@@ -17,7 +17,7 @@ import (
 
 // readCacheVersion covers both schema and aggregation semantics. These tables
 // are disposable; a mismatch rebuilds them together from immutable Parquet.
-const readCacheVersion = 5
+const readCacheVersion = 6
 
 const (
 	readCacheBatchLimit = 64
@@ -78,6 +78,7 @@ func createBatchCaches(db *sql.DB) error {
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS read_edge_buckets (namespace VARCHAR, bucket TIMESTAMPTZ_NS, spans BIGINT)`,
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
+		`CREATE TABLE IF NOT EXISTS read_resource_inventory (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR PRIMARY KEY,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,
 	} {
@@ -169,7 +170,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	sort.SliceStable(batches, func(i, j int) bool { return newestBatchEvent(batches[i]) < newestBatchEvent(batches[j]) })
 	pendingCount := 0
 	for _, b := range batches {
-		if !markers[b.ID] && b.Spans > 0 {
+		if !markers[b.ID] && b.Spans+b.Logs+b.Metrics > 0 {
 			pendingCount++
 		}
 	}
@@ -178,7 +179,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	pendingRows := 0
 	for i := len(batches) - 1; i >= 0; i-- {
 		if !markers[batches[i].ID] {
-			rows := batches[i].Spans
+			rows := batches[i].Spans + batches[i].Logs + batches[i].Metrics
 			// A complete file is indivisible. Admit one oversized file to make
 			// progress, otherwise bound new work by rows as well as file count.
 			if len(pending) > 0 && pendingRows+rows > readCacheRowBudget {
@@ -226,7 +227,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		}
 	}
 	if len(stale) > 0 {
-		for _, table := range []string{"read_trace_parts", "read_batches"} {
+		for _, table := range []string{"read_resource_inventory", "read_trace_parts", "read_batches"} {
 			if err := exec("DELETE FROM " + table + " WHERE batch_id IN (" + idsSQL(stale) + ")"); err != nil {
 				return 0, err
 			}
@@ -245,9 +246,8 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			return 0, err
 		}
 	}
-	// Bind spans once for the whole pass. Materialize new
-	// batch parts and one indexed candidate per trace. The temporary parts table
-	// feeds both inserts without rereading Parquet or scanning retained parts.
+	// Each aggregation scans only the pass's new files. Materialize trace
+	// parts once for both trace inserts without scanning retained parts.
 	source := func(signal string) string {
 		var selected []telemetry.BatchMetadata
 		for _, b := range batches {
@@ -264,6 +264,17 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		// identifies each contribution without a separate UNION branch per file.
 		physical := strings.Replace(d.physicalSource(signal, selected), "SELECT ", "SELECT filename AS __fanout_filename,", 1)
 		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__fanout_filename")+" AS batch_id,\n", 1)
+	}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		if rows := source(signal); rows != "" {
+			clock := "time"
+			if signal == "spans" {
+				clock = "start_time"
+			}
+			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,` + sqlLiteral(signal) + `,namespace,service,resource,min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY batch_id,namespace,service,resource`); err != nil {
+				return 0, err
+			}
+		}
 	}
 	if spans := source("spans"); spans != "" {
 		if err := exec(`CREATE OR REPLACE TEMP TABLE cache_new_trace_parts AS SELECT batch_id,coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,trace_id,
@@ -308,10 +319,20 @@ func timeLiteral(t time.Time) string {
 func windowPredicate(column string, w queryrows.Window) string {
 	return column + ">=" + timeLiteral(w.Start) + " AND " + column + "<" + timeLiteral(w.End)
 }
-func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []telemetry.BatchMetadata, w queryrows.Window, sources map[string]string) error {
+func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []telemetry.BatchMetadata, w queryrows.Window, inventory bool, sources map[string]string) error {
 	markers, err := batchMarkers(ctx, db)
 	if err != nil {
 		return err
+	}
+	if inventory {
+		window, ok := queryrows.ReadInventoryWindow(ctx)
+		if !ok {
+			return fmt.Errorf("resource_inventory requires a logical panel window")
+		}
+		sources["resource_inventory"] = d.resourceInventorySource(batches, markers, window)
+	}
+	if w.Kind == queryrows.RawRead {
+		return nil
 	}
 	var cachedIDs []string
 	var cached, uncached []telemetry.BatchMetadata
@@ -436,6 +457,7 @@ func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []s
 	}
 	where := " WHERE batch_id IN (" + idsSQL(inputs) + ")"
 	for _, stmt := range []string{
+		`INSERT INTO read_resource_inventory SELECT ` + sqlLiteral(output) + `,signal,namespace,service,resource,min(first_seen),max(last_seen) FROM read_resource_inventory` + where + ` GROUP BY signal,namespace,service,resource`,
 		`INSERT INTO read_trace_parts SELECT ` + sqlLiteral(output) + `,namespace,service,trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts` + where + ` GROUP BY 2,3,4`,
 		`INSERT INTO read_batches(batch_id) VALUES (` + sqlLiteral(output) + `)`,
 		`UPDATE read_batches SET replacement_id=` + sqlLiteral(output) + where,

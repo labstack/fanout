@@ -82,7 +82,7 @@ func redactSQLLogTables(ctx context.Context, parser Parser, value any, ctes map[
 				entry, _ := entry.(map[string]any)
 				name, _ := entry["key"].(string)
 				switch strings.ToLower(name) {
-				case "logs", "spans", "metrics", "service_rollup", "edge_rollup":
+				case "logs", "spans", "metrics", "service_rollup", "edge_rollup", "resource_inventory":
 					return errors.New("CTE names must not shadow telemetry relations")
 				}
 				definition, _ := entry["value"].(map[string]any)

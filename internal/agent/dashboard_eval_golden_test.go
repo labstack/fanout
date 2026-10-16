@@ -57,6 +57,15 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tools.Close()
+	foundInventoryGuide := false
+	for _, definition := range tools.Definitions() {
+		if definition.Name == "create_dashboard" {
+			foundInventoryGuide = strings.Contains(definition.Description, "resource_inventory") && strings.Contains(definition.Description, "actual in-window event times") && strings.Contains(definition.Description, "not events or instances")
+		}
+	}
+	if !foundInventoryGuide {
+		t.Fatal("embedded AI tools lost the shared MCP inventory guidance")
+	}
 	ctx := dashboard.WithOwner(t.Context(), "owner")
 	authored := panel.Dashboard{Name: "Eval fixture", Time: panel.Time{From: &from, To: &to}, Panels: []panel.Panel{
 		{ID: "actual_latency", Title: "Latency", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"p95(duration_ms)"}, Where: []string{"service = 'checkout'", "namespace = 'shop'"}}, Unit: "ms", Thresholds: []panel.Threshold{{Value: 100, Status: "warn"}}},

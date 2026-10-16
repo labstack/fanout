@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/panel"
 )
 
 // toolCount is set by renderMCPTools so the summary line can report it.
@@ -150,6 +152,22 @@ func renderMCPTools() ([]byte, error) {
 		b.WriteString("\n")
 	}
 
+	b.WriteString("## Panel SQL relations\n\n")
+	relations := panel.SQLRelations()
+	names := make([]string, 0, len(relations))
+	for name := range relations {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		relation := relations[name]
+		fmt.Fprintf(&b, "### %s\n\n%s\n\n", name, mdx(relation.Description))
+		b.WriteString("| Column | SQL type | Means |\n|---|---|---|\n")
+		for _, column := range relation.Columns {
+			fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", column.Name, column.SQLType, cell(column.Description))
+		}
+		b.WriteString("\n")
+	}
 	b.WriteString("## Authentication\n\n")
 	b.WriteString("MCP uses OAuth, not a static key, and **not the ingest token** — an agent\n")
 	b.WriteString("presenting the ingest token is rejected. A client discovers the endpoints,\n")

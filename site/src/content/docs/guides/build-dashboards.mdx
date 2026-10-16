@@ -90,9 +90,61 @@ the cause of a change.
 
 For queries that need it, a panel can use guarded SQL: one read-only `SELECT`
 over approved telemetry relations, with a required time-window filter. Logs,
-log patterns, traces, scatter and state timelines use structured queries.
+log patterns, traces and scatter use structured queries. SQL state timelines
+return timestamp `time`, a string item, one numeric measure and optional string
+`state`, with thresholds.
 SQL is an authoring escape hatch. **Spec** is a read-only inspection view;
 there is no SQL or chart-style editor there.
+
+### Discover resources observed in the window
+
+`get_telemetry_schema` and `/api/telemetry/schema` list SQL-only relations in
+`sql_relations`, separately from the three telemetry signals. In panel SQL,
+`resource_inventory` returns one row per distinct full resource, signal,
+namespace and service observed inside the selected half-open window
+`[start,end)`. It exposes `signal`, `namespace`, `service`, typed `resource`,
+`first_seen` and `last_seen`. The timestamps are actual event observations
+inside that window, including when the resource also existed earlier.
+
+```sql
+SELECT namespace, service, resource['service.version']::VARCHAR AS version,
+       first_seen, last_seen
+FROM resource_inventory
+WHERE signal = 'spans' AND $__window(first_seen)
+ORDER BY namespace, service, version, first_seen, last_seen
+```
+
+Select the required signal (`spans`, `logs` or `metrics`). Dotted resource keys
+are literal keys. Full resources with different runtime or SDK attributes
+remain distinct even if their displayed version matches. `count(*)` counts
+resource identities per signal, not events or instances. This relation is
+scoped to the logical panel window, independently of metric lookbacks; it is
+not a historical registry. Structured `query.from`, variables and unscoped
+arbitrary SQL cannot read it. The [SQL relation reference](/reference/mcp-tools#panel-sql-relations)
+lists column types and semantics.
+
+### Update existing System overview panels deliberately
+
+New defaults use `resource_inventory` for **What changed?** (`versions`) and
+the service-host input to **Is it reachable?** (`check_states`). Existing
+saved dashboards keep their SQL. Deploy the supporting binary before editing
+those saved definitions.
+
+1. Use `list_dashboards` and `get_dashboard` to select the owner's dashboard by
+   ID and capture its current `version` and spec. Do not identify a board by
+   title alone. Compare both panel SQL fields with the known shipped definitions
+   being upgraded; skip and report customized or missing definitions.
+2. Build replacements from the new default SQL, changing only those SQL fields.
+   Run `preview_panels` with the saved time and variables and inspect the complete
+   frames, including first-seen times and reachability warnings.
+3. Call `edit_dashboard` with the captured `base_version` and two
+   `update_panel` operations, each with its panel `id` and `set: {sql: ...}`.
+   Preserve every other field, layout and variable. If the base version is
+   stale, reread and review the diff before retrying.
+4. Retain the prior SQL and version history. Before rolling back to a binary
+   without this relation, restore both prior SQL fields through reviewed edits
+   at the then-current base version. The disposable cache rebuilds independently;
+   the telemetry format remains unchanged.
 
 ## Choose metric measures by kind
 

@@ -130,7 +130,7 @@ func TestCheckReturnsEngineInterruptAsOperationalError(t *testing.T) {
 
 func TestSQLCTEsCannotShadowTelemetry(t *testing.T) {
 	engine, _ := newTestEngine(t)
-	for _, name := range []string{"logs", "spans", "metrics", "service_rollup", "edge_rollup", "LOGS", "safe"} {
+	for _, name := range []string{"logs", "spans", "metrics", "service_rollup", "edge_rollup", "resource_inventory", "RESOURCE_INVENTORY", "LOGS", "safe", "resources"} {
 		t.Run(name, func(t *testing.T) {
 			d := Dashboard{Name: "CTE", Panels: []Panel{{ID: "p", Title: "P", Viz: "table", SQL: "WITH " + name + " AS (SELECT * FROM logs WHERE $__window(time)) SELECT count(*) FROM " + name}}}
 			Normalize(&d)
@@ -138,7 +138,7 @@ func TestSQLCTEsCannotShadowTelemetry(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if name == "safe" {
+			if name == "safe" || name == "resources" {
 				if len(problems) > 0 {
 					t.Fatalf("normal CTE rejected: %v", problems)
 				}

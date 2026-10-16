@@ -39,7 +39,7 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"SELECT getvariable('operator_secret')",
 		"WITH x AS MATERIALIZED (COPY (SELECT 1) TO '" + output + "') SELECT * FROM x",
 	} {
-		if err := validateSQLAST(ctx, conn, query); err == nil {
+		if err := validateSQLAST(ctx, conn, query, false); err == nil {
 			t.Errorf("accepted %s", query)
 		}
 	}
@@ -50,7 +50,7 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"WITH x AS (SELECT 1 AS n) SELECT * FROM x",
 		"WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x WHERE n<3) SELECT * FROM x",
 	} {
-		if err := validateSQLAST(ctx, conn, query); err != nil {
+		if err := validateSQLAST(ctx, conn, query, false); err != nil {
 			t.Errorf("rejected %s: %v", query, err)
 		}
 	}

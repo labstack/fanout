@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -53,6 +54,12 @@ func TestDescribeToolsMatchesWhatAClientIsServed(t *testing.T) {
 	served := map[string]string{}
 	for _, tool := range listed.Tools {
 		served[tool.Name] = tool.Description
+		if tool.Name == "get_telemetry_schema" {
+			encoded, err := json.Marshal(tool.OutputSchema)
+			if err != nil || !strings.Contains(string(encoded), `"sql_relations"`) || !strings.Contains(string(encoded), `"sql_type"`) {
+				t.Fatalf("MCP SQL relation output schema: %s %v", encoded, err)
+			}
+		}
 	}
 	for _, doc := range docs {
 		description, ok := served[doc.Name]
