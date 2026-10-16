@@ -1,0 +1,128 @@
+---
+/* Shared published sweeps: a log2 process axis, median, and repetition range.
+ * All four plots share a zero-based 600k scale for direct visual comparison.
+ */
+import { benchmark, formatRate, signalNames, type Signal } from "../../data/benchmark";
+
+interface Props {
+  id: string;
+  signals?: Signal[];
+}
+
+const { id, signals = ["traces", "logs", "metrics", "mixed"] } = Astro.props;
+const multiple = signals.length > 1;
+// Small multiples need room for the same screen-sized labels as the landing plot.
+const left = multiple ? 64 : 52, right = 452, top = 60, bottom = 240;
+const x = (processes: number) => left + Math.log2(processes) / 6 * (right - left);
+const y = (rate: number) => bottom - rate / 600000 * (bottom - top);
+const ticks = [0, 200000, 400000, 600000];
+const { sustained } = benchmark;
+---
+
+<div class:list={["fo-sweeps", "not-content", { "fo-sweeps-multiple": signals.length > 1 }]}>
+  {signals.map((signal) => {
+    const points = benchmark.sweeps[signal];
+    const chartId = `${id}-${signal}`;
+    const line = points.map((point) => `${x(point.processes_per_signal)},${y(point.median)}`).join(" ");
+    const band = [...points.map((point) => `${x(point.processes_per_signal)},${y(point.max)}`),
+      ...[...points].reverse().map((point) => `${x(point.processes_per_signal)},${y(point.min)}`)].join(" ");
+    const limited = points.filter((point) => point.generator_cpu_median >= 7);
+    const limitedStart = limited.length ? x(limited[0].processes_per_signal) : right;
+    return (
+      <figure class="fo-sweep">
+        <figcaption><strong>{signalNames[signal]} sweep</strong><span>accepted items/s</span></figcaption>
+        <svg viewBox={`0 0 480 ${multiple ? 328 : 292}`} role="img" aria-labelledby={`${chartId}-title ${chartId}-desc`}>
+          <title id={`${chartId}-title`}>{signalNames[signal]} accepted throughput by processes per signal</title>
+          <desc id={`${chartId}-desc`}>
+            Median line and minimum-to-maximum band across {benchmark.repeat} repetitions at 1, 2, 4, 8, 16, 32 and 64 processes per signal.
+            The horizontal axis is evenly spaced on a log2 scale; the vertical axis runs from zero to 600,000 accepted items per second.
+            {points.map((point) => ` At ${point.processes_per_signal} processes: ${formatRate(point.median)} items/s, range ${formatRate(point.min)} to ${formatRate(point.max)}.`).join("")}
+            {signal === "mixed" && ` The diamond marks the single sustained phase: ${formatRate(sustained.accepted_per_second)} items/s at ${sustained.processes_per_signal} processes per signal over ${sustained.seconds} seconds. Shading at 32–64 processes marks generator CPU of at least 7 cores.`}
+          </desc>
+          <g aria-hidden="true">
+            {limited.length > 0 && <>
+              <rect class="fo-generator-region" x={limitedStart} y={top} width={right - limitedStart} height={bottom - top} />
+              <line class="fo-generator-boundary" x1={limitedStart} x2={limitedStart} y1={top} y2={bottom} />
+              <text class="fo-generator-label" x={right} y="20">generator near its limit</text>
+              <text class="fo-generator-detail" x={right} y={multiple ? 20 : 38} dy={multiple ? "1.3em" : undefined}>≥7 cores · shaded region</text>
+              <text class="fo-generator-inline" x={right} y="20">generator near its limit · ≥7 cores · shaded region</text>
+            </>}
+            {ticks.map((tick) => <>
+              <line class="fo-grid" x1={left} x2={right} y1={y(tick)} y2={y(tick)} />
+              <text class="fo-y-label" x={left - 10} y={y(tick) + 4}>{tick === 0 ? "0" : `${tick / 1000}k`}</text>
+            </>)}
+            {points.map((point) => <>
+              <line class="fo-grid" x1={x(point.processes_per_signal)} x2={x(point.processes_per_signal)} y1={top} y2={bottom} />
+              <text class="fo-x-label" x={x(point.processes_per_signal)} y={multiple ? bottom : 261} dy={multiple ? "1.6em" : undefined}>{point.processes_per_signal}</text>
+            </>)}
+            <polygon class="fo-band" points={band} />
+            <polyline class="fo-median" points={line} />
+            {points.map((point) => <circle class="fo-point" cx={x(point.processes_per_signal)} cy={y(point.median)} r="3.5" />)}
+            {signal === "mixed" && <>
+              <line class="fo-sustained-guide" x1={x(sustained.processes_per_signal)} x2={x(sustained.processes_per_signal)} y1={y(sustained.accepted_per_second)} y2={bottom} />
+              <path class="fo-sustained" d={`M${x(sustained.processes_per_signal)} ${y(sustained.accepted_per_second) - 6} l6 6 -6 6 -6 -6 Z`} />
+            </>}
+            <text class="fo-axis-title" x={(left + right) / 2} y={multiple ? bottom : 284} dy={multiple ? "3.6em" : undefined}>processes per signal · log2</text>
+          </g>
+        </svg>
+        <div class="fo-sweep-key" aria-label="Chart legend">
+          <span><i class="fo-key-median" aria-hidden="true"></i>median</span>
+          <span><i class="fo-key-band" aria-hidden="true"></i>min–max</span>
+          {signal === "mixed" && <span><i class="fo-key-sustained" aria-hidden="true"></i>{formatRate(sustained.accepted_per_second)}/s sustained at {sustained.processes_per_signal}</span>}
+        </div>
+      </figure>
+    );
+  })}
+</div>
+
+<style>
+  .fo-sweeps {
+    --fo-sweep-muted: var(--sl-color-gray-2);
+    min-width: 0;
+    font-family: var(--fo-font-display);
+  }
+  .fo-sweeps-multiple {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-block: 1.5rem;
+  }
+  .fo-sweep {
+    container-type: inline-size;
+    min-width: 0;
+    margin: 0;
+    padding: clamp(0.6rem, 2vw, 1.2rem);
+    background: var(--sl-color-black);
+  }
+  .fo-sweeps-multiple .fo-sweep { border: 1px solid var(--sl-color-gray-5); border-radius: 2px; }
+  figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.4rem; font-size: 0.72rem; color: var(--fo-sweep-muted); }
+  figcaption strong { font-weight: 500; color: var(--sl-color-white); }
+  svg { display: block; width: 100%; height: auto; margin-top: 0.6rem; }
+  /* Cancel the 480-unit viewBox scale so labels match the caption at every width.
+   * tan(atan2()) gives a unitless ratio without CSS typed division. */
+  svg text { fill: var(--fo-sweep-muted); font-family: var(--fo-font-display); font-size: calc(0.72rem * tan(atan2(480px, 100cqw))); }
+  .fo-y-label { text-anchor: end; }
+  .fo-x-label, .fo-axis-title { text-anchor: middle; }
+  .fo-generator-label, .fo-generator-detail, .fo-generator-inline { text-anchor: end; }
+  .fo-generator-inline { display: none; }
+  .fo-grid { stroke: var(--sl-color-gray-5); }
+  .fo-generator-region { fill: var(--sl-color-gray-2); opacity: 0.1; }
+  .fo-generator-boundary { stroke: var(--sl-color-gray-3); stroke-dasharray: 3 4; }
+  .fo-band { fill: var(--sl-color-accent); fill-opacity: 0.22; }
+  .fo-median { fill: none; stroke: var(--sl-color-accent-high); stroke-width: 2; }
+  .fo-point { fill: var(--sl-color-black); stroke: var(--sl-color-accent-high); stroke-width: 2; }
+  .fo-sustained-guide { stroke: var(--sl-color-white); stroke-dasharray: 3 4; }
+  .fo-sustained { fill: var(--sl-color-white); stroke: var(--sl-color-black); stroke-width: 1.5; }
+  line, polyline, path, circle { vector-effect: non-scaling-stroke; }
+  .fo-sweep-key { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; font-size: 0.68rem; color: var(--fo-sweep-muted); }
+  .fo-sweep-key span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .fo-sweep-key i { display: inline-block; width: 0.9rem; flex-shrink: 0; }
+  .fo-key-median { border-top: 2px solid var(--sl-color-accent-high); }
+  .fo-key-band { height: 0.55rem; background: var(--sl-color-accent); opacity: 0.35; }
+  .fo-sweep-key .fo-key-sustained { width: 0.45rem; height: 0.45rem; background: var(--sl-color-white); transform: rotate(45deg); }
+  @media (max-width: 64rem) { .fo-sweeps-multiple { grid-template-columns: minmax(0, 1fr); } }
+  @container (min-width: 28rem) {
+    .fo-generator-label, .fo-generator-detail { display: none; }
+    .fo-generator-inline { display: block; }
+  }
+</style>
