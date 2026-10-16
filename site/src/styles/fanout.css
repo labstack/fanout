@@ -17,7 +17,7 @@
  * The accent is violet, and that is a decision worth stating because the
  * obvious alternative is wrong. Three hues on this site are load-bearing:
  * green, amber and red mean healthy, degraded and unhealthy inside Fanout
- * itself, and they appear in the landing page's own service table. Tinting a
+ * itself and in its product captures. Tinting a
  * link green would put "green means healthy" in conflict with "green means
  * interactive" on the same scroll. Violet is the one accent in the product
  * palette that carries no status, so it is the one free to mean "you can click
@@ -67,8 +67,7 @@
   --sl-color-black: #0b0e14;
 
   /* Healthy, degraded, unhealthy. These three are load-bearing: they mean the
-     same thing on this site as they do inside the product, and three landing
-     components were each carrying their own copy of the hex. Tokens because
+     same thing on this site as they do inside the product. Tokens because
      the dark values wash out on a light background — the pale green and coral
      that read clearly on Ayu surfaces fall under 4.5:1 on white. */
   --fo-status-ok: #7fd962;

@@ -1,5 +1,6 @@
 import { Button, Center, Group, Text, ThemeIcon, Box } from "@mantine/core";
 import { useEffect, useState, type ReactNode } from "react";
+import { pageItems, TRACE_PAGE_SIZE } from "./pagination";
 export function EmptyState({
   icon,
   title,
@@ -29,7 +30,7 @@ export function EmptyState({
     </Center>
   );
 }
-export function usePagedItems<T>(items: T[], pageSize = 8) {
+export function usePagedItems<T>(items: T[], pageSize = TRACE_PAGE_SIZE) {
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   useEffect(() => {
@@ -40,7 +41,7 @@ export function usePagedItems<T>(items: T[], pageSize = 8) {
     page,
     setPage,
     totalPages,
-    pageItems: items.slice(start, start + pageSize),
+    pageItems: pageItems(items, page, pageSize),
     from: items.length ? start + 1 : 0,
     to: Math.min(start + pageSize, items.length),
     total: items.length,

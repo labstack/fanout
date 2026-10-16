@@ -166,3 +166,5 @@ to check the sidebar and compile pages, then run the table, social-card and
 canonical guards included in that script. `just site-build` also installs site
 dependencies; use the installed build directly when dependency installation is
 outside the verification environment's scope. Neither command publishes the site.
+
+Refresh the landing page’s light and dark product captures with `rtk just landing-captures` (real seeded server and local Chrome); to capture a real workload on an existing instance such as Fanout v2026.10.7-alpha through a local tunnel, set `FANOUT_LANDING_BASE_URL=http://127.0.0.1:17520` and `FANOUT_LANDING_SESSION_COOKIE` to the `name=value` session cookie from first-admin setup before running the same command (no server startup or seed, default live dashboard range, and a complete trace with at least 10 spans across 3 services, preferring success).

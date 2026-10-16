@@ -49,6 +49,9 @@ function seed(binary: string | undefined, base: string, tokenFile: string, log: 
 }
 
 export default async function globalSetup() {
+  // External landing captures use an existing instance and an in-memory session.
+  if (process.env.FANOUT_LANDING_BASE_URL) return;
+
   const dir = await mkdtemp(join(tmpdir(), "fanout-e2e-"));
   let child: ChildProcess | undefined;
   let seedChild: ChildProcess | undefined;
