@@ -42,6 +42,13 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 	if d.writer() != d.writeDB {
 		t.Fatal("writes are not going through the write handle")
 	}
+	// Occupy the sampler's dedicated slot throughout the assertions. Even a
+	// blocked memory query must leave request and write capacity untouched.
+	memory, err := d.memoryDB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("hold memory connection: %v", err)
+	}
+	defer memory.Close()
 
 	// Use the read pool first, so its idle count is non-zero and the assertion
 	// below is about where the write went rather than about a pool nobody has
@@ -153,8 +160,9 @@ func TestPublisherWaitingTracksFreshAndCanceledPublication(t *testing.T) {
 // closed, and duckdb's connector closes the instance behind an unsynchronized
 // bool. Two handles over one connector therefore meant two duckdb_close calls
 // on one instance — a double free that kills the process rather than returning
-// an error. The write handle borrows the instance; the read pool owns it.
-func TestClosingTheWriteHandleLeavesTheInstanceAlive(t *testing.T) {
+// an error. The write and memory handles borrow the instance; the read pool
+// owns it.
+func TestClosingBorrowedHandlesLeavesTheInstanceAlive(t *testing.T) {
 	ctx := context.Background()
 	cfg := config.Config{DataDir: t.TempDir(), RollupInterval: time.Minute, DuckDBMemory: "128MB"}
 	repository, err := telemetrystore.Open(cfg.TelemetryDir())
@@ -166,13 +174,19 @@ func TestClosingTheWriteHandleLeavesTheInstanceAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuck: %v", err)
 	}
+	defer d.Close()
+	d.stopMemorySampler()
+	<-d.memorySamplerDone
 
 	if err := d.writeDB.Close(); err != nil {
 		t.Fatalf("close write handle: %v", err)
 	}
+	if err := d.memoryDB.Close(); err != nil {
+		t.Fatalf("close memory handle: %v", err)
+	}
 	var one int
 	if err := d.DB.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
-		t.Fatalf("read pool died with the write handle: %v", err)
+		t.Fatalf("read pool died with the borrowed handles: %v", err)
 	}
 
 	// Close is idempotent, including under a second shutdown path arriving at

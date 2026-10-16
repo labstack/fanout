@@ -56,7 +56,7 @@ func (d *Duck) startMemorySampler(interval time.Duration, sample func(context.Co
 }
 
 func (d *Duck) sampleMemory(ctx context.Context) (map[string]int64, error) {
-	rows, err := d.DB.QueryContext(ctx, "SELECT tag, sum(memory_usage_bytes) FROM duckdb_memory() GROUP BY tag")
+	rows, err := d.memoryDB.QueryContext(ctx, "SELECT tag, sum(memory_usage_bytes) FROM duckdb_memory() GROUP BY tag")
 	if err != nil {
 		return nil, err
 	}
