@@ -57,7 +57,8 @@ func capacityCTE(containers bool) string {
 		entity = "to_json([host,container_id])::VARCHAR"
 		priority = "CASE name WHEN 'container.cpu.utilization' THEN 1 WHEN 'container.memory.usage.total' THEN 2 ELSE 3 END"
 	}
-	return `WITH raw AS (SELECT *,resource['host.name']::VARCHAR AS host,resource['container.id']::VARCHAR AS container_id,
+	return `WITH raw AS MATERIALIZED (SELECT series_id,ingested_unix_nano,namespace,time,value,type,name,start_time,temporality,unit,
+ resource['host.name']::VARCHAR AS host,resource['container.id']::VARCHAR AS container_id,
  resource['container.name']::VARCHAR AS container_name,attributes['state']::VARCHAR AS state,
  attributes['mountpoint']::VARCHAR AS mountpoint,attributes['device']::VARCHAR AS device
  FROM metrics WHERE time >= make_timestamp_ns(epoch_ns($__from::TIMESTAMP_NS)-600000000000)::TIMESTAMPTZ_NS AND time < $__to::TIMESTAMP_NS::TIMESTAMPTZ_NS AND name IN (` + names + `)),
@@ -106,6 +107,8 @@ func containerCapacitySQL() string {
  FROM results ORDER BY (reporting<>'reporting') DESC,status DESC NULLS LAST,namespace,host,container`
 }
 
-const versionObservationsSQL = `SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,start_time AS seen FROM spans WHERE $__window(start_time)
- UNION ALL SELECT namespace,service,resource['service.version']::VARCHAR,resource['process.runtime.name']::VARCHAR,resource['process.runtime.version']::VARCHAR,resource['telemetry.sdk.language']::VARCHAR,resource['telemetry.sdk.version']::VARCHAR,time FROM logs WHERE $__window(time)
- UNION ALL SELECT namespace,service,resource['service.version']::VARCHAR,resource['process.runtime.name']::VARCHAR,resource['process.runtime.version']::VARCHAR,resource['telemetry.sdk.language']::VARCHAR,resource['telemetry.sdk.version']::VARCHAR,time FROM metrics WHERE $__window(time)`
+const versionObservationsSQL = `WITH resources AS MATERIALIZED (
+ SELECT namespace,service,resource,min(start_time) AS seen FROM spans WHERE $__window(start_time) GROUP BY namespace,service,resource
+ UNION ALL SELECT namespace,service,resource,min(time) AS seen FROM logs WHERE $__window(time) GROUP BY namespace,service,resource
+ UNION ALL SELECT namespace,service,resource,min(time) AS seen FROM metrics WHERE $__window(time) GROUP BY namespace,service,resource)
+ SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,seen FROM resources`
