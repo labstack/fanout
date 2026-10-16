@@ -2,6 +2,7 @@ import { init, use, setPlatformAPI } from "echarts/core";
 import { BarChart, CustomChart, ScatterChart, LineChart } from "echarts/charts";
 import { GraphicComponent, GridComponent, LegendComponent, MarkAreaComponent, MarkLineComponent, TooltipComponent, VisualMapComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
+import { LabelLayout } from "echarts/features";
 import { expect,it } from "vitest";
 import { analysisOption } from "../../../panels/analysis";
 import { gaugeOption,barOption,chartThemeFor,timeseriesOption } from "../../../panels/compile";
@@ -10,7 +11,39 @@ import { nativeAudit } from "./chart-measurements";
 // SVG in happy-dom has no canvas/font engine. Give the native renderer a
 // deterministic monospace metric rather than zrender's one-em-per-character fallback.
 setPlatformAPI({measureText: (text, font) => ({width: Array.from(text ?? "").length * Number(font?.match(/([\d.]+)px/)?.[1] ?? 12) * .62})});
-use([BarChart,CustomChart,ScatterChart,LineChart,GraphicComponent,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
+use([LabelLayout,BarChart,CustomChart,ScatterChart,LineChart,GraphicComponent,GridComponent,LegendComponent,MarkAreaComponent,MarkLineComponent,TooltipComponent,VisualMapComponent,SVGRenderer]);
+it.each([false, true])("keeps rendered threshold labels inside the plot, clear of axis ticks (%s)", dark => {
+ const el = document.createElement("div"); document.body.append(el);
+ const chart = init(el, undefined, { renderer: "svg", width: 500, height: 248 });
+ try {
+  for (const width of [350, 500, 800]) for (const style of ["line", "bars"] as const) {
+   const size = { width, height: 248 }, theme = chartThemeFor(dark);
+   chart.resize(size);
+   const panel = { id: "t", title: "Latency", viz: "timeseries" as const, unit: "ms" as const, options: { style }, thresholds: [{ value: 2000, status: "bad" as const }] };
+   const result = { id: "t", status: "ok" as const, elapsed_ms: 1, from_ms: 0, to_ms: 3600000, frame: {
+    columns: [{ name: "time", type: "time" as const, role: "time" as const }, { name: "p95", type: "number" as const, role: "measure" as const, unit: "ms" }],
+    values: [[0, 3600000], [10, 20]], rows: 2,
+   } };
+   const option = withAnnotations(timeseriesOption(panel, result, theme, size), panel, result, { deploys: [], anomalies: [
+    { namespace: "shop", service: "cart", kind: "latency", title: "Slow", severity: "bad", from: new Date(0).toISOString(), to: new Date(3600000).toISOString() },
+   ] }, {}, theme, size);
+   chart.setOption({ ...option, animation: false }, { notMerge: true });
+   const rect = (chart as any).getModel().getComponent("grid").coordinateSystem.getRect();
+   const audit = nativeAudit(chart, option, size, rect);
+   const labels = audit.texts.filter(text => text.text === "bad 2 s");
+   expect(labels).toHaveLength(1);
+   const label = labels[0];
+   expect((label.left + label.right) / 2).toBeCloseTo(rect.x + rect.width / 2, 0);
+   expect(label.left).toBeGreaterThanOrEqual(rect.x + 4);
+   expect(label.right).toBeLessThanOrEqual(rect.x + rect.width);
+   expect(label.top).toBeGreaterThanOrEqual(rect.y);
+   expect(label.bottom).toBeLessThanOrEqual(rect.y + rect.height);
+   for (const tick of audit.plot!.y_ticks) {
+    expect(label.left < tick.right && label.right > tick.left && label.top < tick.bottom && label.bottom > tick.top).toBe(false);
+   }
+  }
+ } finally { chart.dispose(); el.remove(); }
+});
 it.each([false,true])("native gauge text never overlaps in meter layouts at 1100/1440 layouts (%s)",dark=>{
  for(const size of [{width:159,height:56},{width:238,height:56},{width:159,height:180},{width:220,height:140},{width:238,height:180},{width:320,height:180}]) {
   const el=document.createElement("div");document.body.append(el);const chart=init(el,undefined,{renderer:"svg",...size});

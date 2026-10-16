@@ -68,7 +68,7 @@ describe("annotation scope and windows", () => {
     const band = got.series[0].markArea.data[0];
     expect(band[0].xAxis).toBe(0); expect(band[1].xAxis).toBe(10000);
     expect(band[0].itemStyle).toEqual({ color: theme.status.warn, opacity: .09 });
-    expect(band[0].tooltip.formatter()).toBe(`checkout · Slow · bad · latency · ${at(-1000)} – ${at(11000)}`);
+    expect(band[0].tooltip.formatter()).toBe(`shop/checkout · Slow · bad · latency · ${at(-1000)} – ${at(11000)}`);
     expect(got.tooltip.renderMode).toBe("html");
     expect(got.series[0].markLine.silent).toBe(false); expect(got.series[0].markArea.silent).toBe(false);
   });
@@ -125,7 +125,7 @@ it.each([false, true])("merges three overlapping kinds into one band with every 
   }
   expect(mixedKinds.anomalies.map(episode => episode.from)).toEqual([at(4000), at(2000), at(1000)]);
 });
-it("merges adjacent kinds but preserves gaps, services, namespaces and clipped bounds", () => {
+it("unions adjacent kinds and services without stacking fills, preserving gaps and source identities", () => {
   const base = mixedKinds.anomalies[0];
   const anomalies = [...mixedKinds.anomalies,
     { ...base, kind: "adjacent", from: at(9000), to: at(11000) },
@@ -134,8 +134,26 @@ it("merges adjacent kinds but preserves gaps, services, namespaces and clipped b
   ];
   const data = { ...result, from_ms: 3000, to_ms: 15000, annotation_scope: undefined };
   const areas = markers(data, "timeseries", { deploys: [], anomalies }).series[0].markArea.data;
-  expect(areas.map(area => area.map(bound => bound.xAxis)).sort((a, b) => a[0] - b[0])).toEqual([[3000, 11000], [4000, 9000], [4000, 9000], [12000, 14000]]);
+  expect(areas.map(area => area.map(bound => bound.xAxis))).toEqual([[3000, 11000], [12000, 14000]]);
   const merged = areas.find(area => area[0].xAxis === 3000)!;
   expect(merged[0].tooltip.formatter()).toContain("adjacent");
   expect(merged[0].tooltip.formatter()).toContain(at(1000));
+  for (const identity of ["shop/cart", "ops/cart", "shop/checkout"]) expect(merged[0].tooltip.formatter()).toContain(identity);
+});
+
+it.each([false, true])("renders repeated 15-minute checks as one faint band with honest source bounds (%s)", dark => {
+  const start = Date.parse("2026-10-16T08:00:00Z");
+  const anomalies = Array.from({ length: 60 }, (_, i) => ({
+    ...history.anomalies[0], from: at(start + i * 60000), to: at(start + (i + 15) * 60000),
+  })).reverse();
+  const data = { ...result, from_ms: start + 5 * 60000, to_ms: start + 60 * 60000 };
+  const got = withAnnotations({ series: [{ type: "line" }] }, panel, data, { deploys: [], anomalies }, {}, chartThemeFor(dark));
+  const areas = (got.series as { markArea: { data: Area[] } }[])[0].markArea.data;
+  expect(areas).toHaveLength(1);
+  expect(areas[0].map(bound => bound.xAxis)).toEqual([data.from_ms, data.to_ms]);
+  expect(areas[0][0].itemStyle.opacity).toBe(dark ? .12 : .09);
+  for (const source of anomalies) {
+    expect(areas[0][0].tooltip.formatter()).toContain(`${source.from} – ${source.to}`);
+  }
+  expect(anomalies[0].from).toBe(at(start + 59 * 60000));
 });

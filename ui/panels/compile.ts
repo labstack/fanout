@@ -101,7 +101,8 @@ function baseOption(theme: ChartTheme, unit?: string): Option {
 function thresholdLines(panel: Panel, theme: ChartTheme, unit?: string) {
   return (panel.thresholds ?? []).map((t) => ({
     yAxis: t.value,
-    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideEndBottom", color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontSize: 12 },
+    // The middle of the plot keeps the label away from ticks on either axis.
+    label: { formatter: `${t.label ?? t.status} ${formatAxis(unit ?? panel.unit)(t.value).replace(/(?<=\d)(ms|s|m|h)$/, " $1")}`, position: "insideMiddleBottom", distance: 8, color: theme.muted, textBorderColor: theme.surface, textBorderWidth: 3, fontSize: 12 },
     lineStyle: { color: theme.status[t.status], type: [4, 3], width: 1 },
   }));
 }
