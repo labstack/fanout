@@ -42,6 +42,8 @@ type Duck struct {
 	// only if they are still reading it.
 	releasePoolGauges   func()
 	releaseMemoryGauges func()
+	stopMemorySampler   context.CancelFunc
+	memorySamplerDone   chan struct{}
 	// writeDB has two connections: analytical rollups share writeGate, while
 	// completed-batch aggregates use cacheGate and disjoint tables. Both stay
 	// outside the read pool. Maintenance acquires both gates for checkpointing.
@@ -251,32 +253,6 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	d := &Duck{DB: db, writeDB: writeDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
-	// And what DuckDB admits to holding, so the gap against process RSS is
-	// observable rather than inferred.
-	d.releaseMemoryGauges = metrics.SetDuckDBMemorySource(func() map[string]int64 {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		rows, err := db.QueryContext(ctx, "SELECT tag, sum(memory_usage_bytes) FROM duckdb_memory() GROUP BY tag")
-		if err != nil {
-			return nil
-		}
-		defer rows.Close()
-		tags := make(map[string]int64, 16)
-		for rows.Next() {
-			var tag string
-			var bytes int64
-			if err := rows.Scan(&tag, &bytes); err != nil {
-				return nil
-			}
-			tags[tag] = bytes
-		}
-		// A partial read is worse than no read: it publishes a low sum, and
-		// the untracked figure derived from it reads correspondingly high.
-		if err := rows.Err(); err != nil {
-			return nil
-		}
-		return tags
-	})
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned FANOUT_DUCKDB_MEMORY: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -316,6 +292,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 			slog.Info("rollup skip-to-latest: existing data marked already-rolled-up")
 		}
 	}
+	d.startMemorySampler(duckDBMemorySampleInterval, d.sampleMemory)
 	return d, nil
 }
 
@@ -431,15 +408,19 @@ func sqlLiteral(v string) string {
 
 func (d *Duck) Close() error {
 	d.closeOnce.Do(func() {
+		if d.stopMemorySampler != nil {
+			d.stopMemorySampler()
+		}
 		if d.releasePoolGauges != nil {
 			d.releasePoolGauges()
 		}
-		// Same reason as the pool source: the closure captures this Duck's
-		// read pool, so leaving it installed past Close means the next scrape
-		// queries a closed pool and the gauges freeze at stale values that
-		// still look live.
 		if d.releaseMemoryGauges != nil {
 			d.releaseMemoryGauges()
+		}
+		if d.stopMemorySampler != nil {
+			// Join before closing either handle: the read pool owns the shared
+			// connector, which must outlive every sampling query.
+			<-d.memorySamplerDone
 		}
 		var errs []error
 		if d.writeDB != nil {

@@ -16,11 +16,10 @@ const (
 )
 
 // Generation0BatchCount is the exact live ingest-batch inventory, including
-// terminal oversized batches and underfilled day groups. No metadata scan.
+// terminal oversized batches and underfilled day groups. The cached count
+// lets metrics read it without waiting for the catalog lock or a metadata scan.
 func (p *ParquetStore) Generation0BatchCount() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.generation0Batches
+	return int(p.generation0Snapshot.Load())
 }
 
 // CompactionDebt returns the reclaimable generation-0 backlog, excluding
@@ -74,6 +73,7 @@ func (p *ParquetStore) setBatchLocked(id string, batch *storedBatch) {
 		p.batches[id] = batch
 		p.changeGeneration0Locked(batch.metadata, 1)
 	}
+	p.generation0Snapshot.Store(int64(p.generation0Batches))
 	if p.compactionDebt < debtBefore && p.debtChanged != nil {
 		close(p.debtChanged)
 		p.debtChanged = nil
