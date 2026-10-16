@@ -95,7 +95,18 @@ test("capture the overview, service map and trace waterfall for the landing page
     ...dashboard.spec.panels.filter(panel => panel.viz === "timeseries").slice(0, 2),
   ];
   for (const panel of firstFold) await expect(page.locator(cardSelector(panel.id))).toBeInViewport({ ratio: 1 });
-  await capture("overview");
+  const overview = page.getByRole("main", { name: "Dashboard", exact: true });
+  await capture("overview", overview, async () => {
+    const clip = await overview.evaluate(main => {
+      const bounds = main.getBoundingClientRect();
+      const x = Math.ceil(Math.max(0, bounds.left)), y = Math.ceil(Math.max(0, bounds.top));
+      return { x, y, width: Math.floor(Math.min(window.innerWidth, bounds.right)) - x,
+        height: Math.floor(Math.min(window.innerHeight, bounds.bottom)) - y };
+    });
+    expect(clip.width).toBeGreaterThanOrEqual(clip.height);
+    expect(clip.height).toBeGreaterThan(0);
+    return clip;
+  });
 
   const mapPanel = dashboard.spec.panels.find(panel => panel.viz === "service_map");
   if (!mapPanel) throw new Error("System overview has no service map");
@@ -118,19 +129,19 @@ test("capture the overview, service map and trace waterfall for the landing page
     // its contents, which can reintroduce the whitespace being removed.
     const clip = await fullMap.getByRole("region", { name: /service dependency graph/ }).evaluate(region => {
       const boxes = [...region.querySelectorAll("button, svg > g > path, span")]
-        .map(node => node.getBoundingClientRect()).filter(box => box.width > 0 && box.height > 0);
+        .map(node => node.getBoundingClientRect()).filter(box => box.width > 0 || box.height > 0);
       if (!boxes.length) throw new Error("The service graph has no rendered bounds");
       const left = Math.min(...boxes.map(box => box.left)), right = Math.max(...boxes.map(box => box.right));
       const top = Math.min(...boxes.map(box => box.top)), bottom = Math.max(...boxes.map(box => box.bottom));
-      // At least 24px on every side, centred with symmetric padding; expand
-      // the shorter dimension only as needed for a 16:9 landscape frame.
-      const width = Math.ceil(Math.max(right - left + 48, (bottom - top + 48) * 16 / 9));
-      const height = Math.ceil(width * 9 / 16);
-      return { x: (left + right - width) / 2, y: (top + bottom - height) / 2, width, height };
+      // Keep 24 CSS pixels (48 source pixels at 2x) beyond every rendered
+      // node, connector and label. Let the graph determine the aspect ratio.
+      const x = Math.floor(left - 24), y = Math.floor(top - 24);
+      return { x, y, width: Math.ceil(right + 24) - x, height: Math.ceil(bottom + 24) - y };
     });
     const viewport = page.viewportSize()!;
     expect(clip.x).toBeGreaterThanOrEqual(0); expect(clip.x + clip.width).toBeLessThanOrEqual(viewport.width);
     expect(clip.y).toBeGreaterThanOrEqual(0); expect(clip.y + clip.height).toBeLessThanOrEqual(viewport.height);
+    expect(clip.width).toBeGreaterThanOrEqual(clip.height);
     return clip;
   });
 

@@ -65,7 +65,7 @@ export function mountReplay(root: HTMLElement, load: () => Promise<typeof uPlot>
     colors = signals.map(key => style.getPropertyValue(`--fo-series-${key}`).trim());
     ink = style.getPropertyValue("--sl-color-gray-2").trim();
     grid = style.getPropertyValue("--sl-color-gray-5").trim();
-    font = `11px ${style.getPropertyValue("--fo-font-display").trim()}`;
+    font = `12px ${style.getPropertyValue("--fo-font-display").trim()}`;
   };
   const readouts = () => {
     elapsedLabel.textContent = `${clock(elapsed % duration)} / ${clock(duration)}`;

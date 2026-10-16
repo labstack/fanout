@@ -16,9 +16,9 @@ if (!content.includes(`<strong>${sustained}</strong>`)) {
   .fo-proof :global(ul) {
     list-style: none;
     margin: 0;
-    padding: 1rem 0;
-    display: flex;
-    flex-wrap: wrap;
+    padding: 1.25rem 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: center;
     justify-content: space-between;
     gap: 1rem 1.5rem;
@@ -27,7 +27,7 @@ if (!content.includes(`<strong>${sustained}</strong>`)) {
   div.fo-proof :global(li) {
     margin: 0;
     font-family: var(--fo-font-display);
-    font-size: 0.8rem;
+    font-size: 0.8125rem;
     line-height: 1.5;
     color: var(--sl-color-gray-2);
   }
@@ -36,4 +36,11 @@ if (!content.includes(`<strong>${sustained}</strong>`)) {
   .fo-proof :global(a) { color: var(--sl-color-accent-high); text-underline-offset: 0.25em; }
   .fo-proof :global(a strong) { color: inherit; }
   .fo-proof :global(a:focus-visible) { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+  @media (min-width: 72rem) {
+    .fo-proof :global(ul) { display: flex; }
+  }
+  @media (max-width: 39.999rem) {
+    .fo-proof :global(ul) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fo-proof :global(li:first-child) { grid-column: 1 / -1; }
+  }
 </style>
