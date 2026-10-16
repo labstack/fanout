@@ -30,7 +30,7 @@ func DefaultSpec() panel.Dashboard {
 			{ID: "service_health", Title: "Is anything failing or slow?", Description: receiverDescription("otlp", "Service health and error trend with deploy markers."), Viz: "health", Width: 12, Query: &panel.Query{From: "spans", Where: []string{service}}},
 			{ID: "service_map", Title: "Services and external dependencies", Description: receiverDescription("otlp", "Failing or slow services and external dependencies observed in client spans."), Viz: "service_map", Width: 12, Height: "l", Query: &panel.Query{From: "spans", Where: []string{service}}},
 			capacityPanel("hosts", "Is anything running out? Hosts", "hostmetrics", "CPU busy, memory used and the fullest filesystem; worst first. Not reporting after two intervals is bad.", hostCapacitySQL()),
-			capacityPanel("containers", "Containers", "docker_stats", "CPU and memory usage against the container limit; worst first. Not reporting after two intervals is bad.", containerCapacitySQL()),
+			capacityPanel("containers", "Containers", "docker_stats", "CPU: 100% is one core. Status uses limits; memory only if no CPU limit. Silence after two intervals is bad.", containerCapacitySQL()),
 			{ID: "versions", Title: "What changed?", Description: receiverDescription("otlp", "Service versions, first seen in the selected range, runtime and SDK."), Viz: "table", Width: 12, SQL: `WITH observations AS (` + versionObservationsSQL + `) SELECT namespace,service,version,min(seen) AS first_seen,runtime_name,runtime_version,sdk_language,sdk_version FROM observations WHERE version IS NOT NULL AND version<>'' GROUP BY namespace,service,version,runtime_name,runtime_version,sdk_language,sdk_version ORDER BY first_seen DESC,namespace,service,version`},
 		},
 	}

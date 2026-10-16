@@ -53,11 +53,11 @@ func capacityCTE(containers bool) string {
 	priority := "CASE name WHEN 'system.cpu.time' THEN 1 WHEN 'system.memory.usage' THEN 2 ELSE 3 END"
 	if containers {
 		identity += " AND container_id IS NOT NULL AND container_id<>''"
-		names = "'container.cpu.utilization','container.memory.usage.total','container.memory.usage.limit'"
+		names = "'container.cpu.utilization','container.cpu.limit','container.memory.usage.total','container.memory.usage.limit'"
 		entity = "to_json([host,container_id])::VARCHAR"
-		priority = "CASE name WHEN 'container.cpu.utilization' THEN 1 WHEN 'container.memory.usage.total' THEN 2 ELSE 3 END"
+		priority = "CASE name WHEN 'container.cpu.utilization' THEN 1 WHEN 'container.memory.usage.total' THEN 2 WHEN 'container.cpu.limit' THEN 4 ELSE 3 END"
 	}
-	return `WITH raw AS MATERIALIZED (SELECT series_id,ingested_unix_nano,namespace,time,value,type,name,start_time,temporality,unit,
+	return `WITH raw AS MATERIALIZED (SELECT series_id,ingested_unix_nano,namespace,time,value,type,name,start_time,temporality,unit,scope_name,
  resource['host.name']::VARCHAR AS host,resource['container.id']::VARCHAR AS container_id,
  resource['container.name']::VARCHAR AS container_name,attributes['state']::VARCHAR AS state,
  attributes['mountpoint']::VARCHAR AS mountpoint,attributes['device']::VARCHAR AS device
@@ -98,12 +98,16 @@ func hostCapacitySQL() string {
  FROM results ORDER BY (reporting<>'reporting') DESC,status DESC NULLS LAST,namespace,host`
 }
 func containerCapacitySQL() string {
+	// docker_stats reports percent of one core despite declaring unit "1".
+	// Only a reported CPU limit makes that usage a capacity signal.
 	return capacityCTE(true) + `, values_by_container AS (SELECT namespace,entity,
- sum(value*CASE unit WHEN '%' THEN 1 WHEN '1' THEN 100 END) FILTER (WHERE name='container.cpu.utilization') AS cpu_percent,
+ sum(value*CASE WHEN scope_name='github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver' THEN 1 ELSE CASE unit WHEN '%' THEN 1 WHEN '1' THEN 100 END END) FILTER (WHERE name='container.cpu.utilization') AS cpu_percent,
+ sum(value) FILTER (WHERE name='container.cpu.limit' AND scope_name='github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver' AND value>0) AS cpu_limit,
  sum(value) FILTER (WHERE name='container.memory.usage.total') AS total_bytes,sum(value) FILTER (WHERE name='container.memory.usage.limit') AS limit_bytes FROM latest GROUP BY namespace,entity),
- results AS (SELECT i.namespace,i.host,coalesce(i.container,i.container_id) AS container,` + strings.ReplaceAll(reportingSQL, "/* identity */", "OR i.container_id IS NULL OR i.container_id=''") + ` AS reporting,v.cpu_percent,100.0*v.total_bytes/nullif(v.limit_bytes,0) AS memory_percent,v.total_bytes,v.limit_bytes,c.last_seen FROM inventory i LEFT JOIN cadence c USING(namespace,entity) LEFT JOIN values_by_container v USING(namespace,entity))
- SELECT namespace,host,container,CASE WHEN reporting<>'reporting' THEN 100 ELSE greatest(cpu_percent,memory_percent) END::DOUBLE AS status,reporting,cpu_percent,memory_percent,total_bytes,limit_bytes,last_seen,
- CASE WHEN limit_bytes IS NULL OR limit_bytes=0 THEN 'memory limit not reported' WHEN cpu_percent IS NULL OR memory_percent IS NULL THEN 'measurement missing, unsupported or stale' END AS measurement
+ results AS (SELECT i.namespace,i.host,coalesce(i.container,i.container_id) AS container,` + strings.ReplaceAll(reportingSQL, "/* identity */", "OR i.container_id IS NULL OR i.container_id=''") + ` AS reporting,v.cpu_percent,v.cpu_limit,100.0*v.total_bytes/nullif(v.limit_bytes,0) AS memory_percent,v.total_bytes,v.limit_bytes,c.last_seen FROM inventory i LEFT JOIN cadence c USING(namespace,entity) LEFT JOIN values_by_container v USING(namespace,entity))
+ SELECT namespace,host,container,CASE WHEN reporting<>'reporting' THEN 100 ELSE greatest(cpu_percent/nullif(cpu_limit,0),memory_percent) END::DOUBLE AS status,reporting,cpu_percent,memory_percent,total_bytes,limit_bytes,last_seen,
+ nullif(concat_ws('; ',CASE WHEN cpu_limit IS NULL THEN 'cpu limit not reported' END,
+ CASE WHEN limit_bytes IS NULL OR limit_bytes=0 THEN 'memory limit not reported' WHEN cpu_percent IS NULL OR memory_percent IS NULL THEN 'measurement missing, unsupported or stale' END),'') AS measurement
  FROM results ORDER BY (reporting<>'reporting') DESC,status DESC NULLS LAST,namespace,host,container`
 }
 

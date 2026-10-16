@@ -414,3 +414,106 @@ func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testin
 		}
 	}
 }
+
+func TestDefaultContainersUseScopeCPUUnitsAndReportedLimitsForStatus(t *testing.T) {
+	e, repo := defaultFixture(t)
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Minute)
+	const dockerScope = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver"
+	limit := func(value float64) *float64 { return &value }
+	tests := []struct {
+		name        string
+		scope       string
+		unit        string
+		cpu         float64
+		cpuLimit    *float64
+		staleLimit  bool
+		memoryLimit *float64
+		wantCPU     any
+		wantStatus  any
+		measurement any
+	}{
+		{name: "docker-small", scope: dockerScope, unit: "1", cpu: 2, memoryLimit: limit(100), wantCPU: 2.0, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "docker-multicore-unlimited", scope: dockerScope, unit: "1", cpu: 193.46, memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "other-ratio", scope: "another.receiver", unit: "1", cpu: 0.5, memoryLimit: limit(100), wantCPU: 50.0, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "other-percent", scope: "another.receiver", unit: "%", cpu: 50, memoryLimit: limit(100), wantCPU: 50.0, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "docker-percent", scope: dockerScope, unit: "%", cpu: 193.46, memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "eight-core-limit", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(8), memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 193.46 / 8},
+		{name: "two-core-limit", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(2), memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 193.46 / 2},
+		{name: "one-core-warning", scope: dockerScope, unit: "1", cpu: 85, cpuLimit: limit(1), memoryLimit: limit(100), wantCPU: 85.0, wantStatus: 85.0},
+		{name: "memory-worse", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(8), memoryLimit: limit(25), wantCPU: 193.46, wantStatus: 80.0},
+		{name: "memory-bad-unlimited", scope: dockerScope, unit: "1", cpu: 2, memoryLimit: limit(20), wantCPU: 2.0, wantStatus: 100.0, measurement: "cpu limit not reported"},
+		{name: "zero-cpu-limit", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(0), memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "negative-cpu-limit", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(-1), memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "stale-cpu-limit", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(1), staleLimit: true, memoryLimit: limit(100), wantCPU: 193.46, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "other-scope-limit", scope: "another.receiver", unit: "1", cpu: 0.5, cpuLimit: limit(0.1), memoryLimit: limit(100), wantCPU: 50.0, wantStatus: 20.0, measurement: "cpu limit not reported"},
+		{name: "cpu-only-limit", scope: dockerScope, unit: "1", cpu: 193.46, cpuLimit: limit(2), wantCPU: 193.46, wantStatus: 193.46 / 2, measurement: "memory limit not reported"},
+		{name: "neither-limit", scope: dockerScope, unit: "1", cpu: 193.46, wantCPU: 193.46, measurement: "cpu limit not reported; memory limit not reported"},
+		{name: "unsupported-other-unit", scope: "another.receiver", unit: "unknown", cpu: 0.5, memoryLimit: limit(100), wantStatus: 20.0, measurement: "cpu limit not reported; measurement missing, unsupported or stale"},
+	}
+	var metrics []telemetry.Metric
+	for _, tt := range tests {
+		for _, at := range []time.Time{start, start.Add(time.Minute)} {
+			metric := func(name, unit string, value float64, at time.Time) telemetry.Metric {
+				m := telemetry.Metric{Namespace: "test", Name: name, Type: "gauge", Unit: unit, Value: value, ScopeName: tt.scope, Resource: map[string]any{"host.name": "host", "container.id": tt.name}, TimeUnixNanos: at.UnixNano(), EventUnixNanos: at.UnixNano()}
+				m.SeriesID = telemetry.MetricSeriesID(m)
+				return m
+			}
+			metrics = append(metrics, metric("container.cpu.utilization", tt.unit, tt.cpu, at), metric("container.memory.usage.total", "By", 20, at))
+			if tt.memoryLimit != nil {
+				metrics = append(metrics, metric("container.memory.usage.limit", "By", *tt.memoryLimit, at))
+			}
+			if tt.cpuLimit != nil {
+				limitTime := at
+				if tt.staleLimit {
+					limitTime = at.Add(-6 * time.Minute)
+				}
+				metrics = append(metrics, metric("container.cpu.limit", "{cpu}", *tt.cpuLimit, limitTime))
+			}
+		}
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "container-cpu-limits", Metrics: metrics}); err != nil {
+		t.Fatal(err)
+	}
+	spec := DefaultSpec()
+	for _, p := range spec.Panels {
+		if p.ID == "containers" && !strings.Contains(p.Description, "100% is one core") {
+			t.Fatal("container CPU percentage must explain its denominator")
+		}
+	}
+	spec.Time = panel.Time{From: &start, To: &end}
+	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: spec, Panels: []string{"containers"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := results[0]
+	containers := defaultValues(t, result, "container")
+	if len(containers) != len(tests) {
+		t.Fatalf("containers: got %d, want %d", len(containers), len(tests))
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			row := -1
+			for i, name := range containers {
+				if name == tt.name {
+					row = i
+					break
+				}
+			}
+			if row < 0 {
+				t.Fatal("container missing")
+			}
+			for column, want := range map[string]any{"cpu_percent": tt.wantCPU, "status": tt.wantStatus, "measurement": tt.measurement, "reporting": "reporting"} {
+				got := defaultValues(t, result, column)[row]
+				if number, ok := want.(float64); ok {
+					if value, ok := got.(float64); ok && math.Abs(value-number) <= 1e-12 {
+						continue
+					}
+				} else if got == want {
+					continue
+				}
+				t.Errorf("%s: got %v, want %v", column, got, want)
+			}
+		})
+	}
+}
