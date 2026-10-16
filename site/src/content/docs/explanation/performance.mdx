@@ -1,143 +1,125 @@
 ---
 title: Performance
-description: Fanout's benchmark candidate, its limits, and how to reproduce the measurement on your hardware.
-summary: A qualified preview of Fanout's measured three-signal ingest, plus the evidence required before it becomes a published result.
+description: Published v2026.10.7-alpha ingest results, hardware, methodology and raw evidence.
+summary: Sustained mixed ingest at 422,408 items/s on a Hetzner ccx33, with three sweep repetitions, ranges, generator CPU and reproduction commands.
 read_when:
   - You want to understand the performance figure on the landing page.
-  - You need to size an instance for your own load.
-status: preview
+  - You need to measure an instance for your own load.
+status: shipped
 ---
 
-Fanout has a publication candidate, not an official throughput claim yet. The
-distinction is visible beside the number because provenance is part of a
-benchmark result, not a footnote added after it.
+import BenchmarkSweep from "../../../components/landing/BenchmarkSweep.astro";
 
-## Candidate result
+On a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with telemetrygen
+on a separate ccx33 (8 dedicated vCPUs, 32 GB RAM) in the same location over
+a private network, Fanout v2026.10.7-alpha accepted **422,408 mixed
+OpenTelemetry items/s for five minutes**. The composition was 51,358 spans,
+184,883 log records and 186,178 metric points per second. Every generator
+exited successfully, there were zero dropped rows and no restarts, and
+`fanout repair verify` validated the Parquet store. The run measured ingest only.
 
-On a machine with eight logical CPUs and 15.6 GiB of memory, Fanout v2026.8.11
-accepted **296,196 OpenTelemetry items per second** for five minutes. The load
-contained traces, logs and metrics at the same time, and Fanout and the load
-generators shared the host.
+## Setup and measurement
 
-| Workload | Fanout accepted/s | Offered/s | Average Fanout CPU | Peak RSS |
-|---|---:|---:|---:|---:|
-| Traces, spans | 220,324 | 320,000 | 2.45 cores | 1.2 GiB |
-| Logs, records | 187,303 | 320,000 | 3.04 cores | 1.3 GiB |
-| Metrics, data points | 209,638 | 320,000 | 1.69 cores | 1.1 GiB |
-| Three-signal short peak | 355,938 | 960,000 | 4.57 cores | 3.0 GiB |
-| Three-signal sustained | 296,196 | 960,000 | 4.90 cores | 9.4 GiB |
+Fanout ran alone on its ccx33 with dedicated AMD EPYC-Milan vCPUs. Both VMs
+ran Ubuntu 24.04 in Hetzner's fsn1 location. telemetrygen v0.157.0 sent
+plaintext OTLP/gRPC over the private network, using 1,000-item batches and
+8 workers per process.
 
-Accepted throughput is the change in Fanout's own
-`fanout_ingest_rows_total` counter over the measured phase. It is not the rate
-requested or reported by the generator. Across the complete saturation suite,
-Fanout accepted 153.8 million items.
+The `publish` preset swept 1, 2, 4, 8, 16, 32 and 64 processes per signal
+for traces, logs, metrics and mixed ingest, with three repetitions at each
+process count. It then ran one five-minute mixed phase at 32 processes per
+signal. Accepted throughput is the change in Fanout's
+`fanout_ingest_rows_total` counter over each measured phase.
 
-The run passed its functional quality gates: every generator exited
-successfully, Fanout reported zero dropped rows and no restart, and `fanout
-repair verify` validated the authoritative Parquet store.
+The suite accepted **584.1 million items** in total: 131,484,819 spans,
+217,735,381 log records and 234,835,485 metric points.
 
-### Generator load, not a Fanout scaling curve
+## Sustained mixed ingest
 
-The chart on the landing page plots the same run's generator sweep: one, two,
-four, eight and sixteen `telemetrygen` processes per signal, doubling at every
-step. Accepted throughput rose from 38,853 items per second at one process per
-signal to the 355,938 short peak at sixteen. That is a 9.2x gain for a 16x
-increase in generators, and the shape is the point—below sixteen processes the
-load generators, not Fanout, set the rate. Read it as evidence that the
-saturating configuration was reached, not as a scaling law for Fanout itself.
-The intermediate process counts are plotted from the same run and their exact
-values ship with the raw artifacts.
+The sustained phase ran once for **302.9 seconds**. Fanout averaged
+**7.33 CPU cores** and reached **13.5 GiB peak RSS**. The generator host
+averaged **7.01 of 8 CPU cores**.
 
-:::caution[Why this is not published evidence yet]
-This was one repetition, and the benchmark harness it ran from carried
-uncommitted local changes, so no commit identifies the code that produced it.
-The result is a useful design and capacity preview, but it will not become the
-official headline until the clean harness produces at least three passing
-repetitions and the raw artifacts are published together.
-:::
+| Signal | Accepted items/s |
+|---|---:|
+| Spans | 51,358 |
+| Log records | 184,883 |
+| Metric points | 186,178 |
+| Mixed total | 422,408 |
 
-## What this number does—and does not—measure
+telemetrygen keeps one trace export in flight per process, while log and
+metric processes keep eight, producing the measured composition.
 
-This is a **three-signal ingest** result: spans, log records and metric data
-points were written concurrently. It is not a read/write result. Calling it a
-mixed workload would imply that dashboard queries ran beside ingest, which
-they did not.
+The run measured ingest only, using synthetic, highly compressible
+telemetrygen payloads. Results describe this hardware.
 
-The official read-under-write result will separately report requested,
-completed, failed and shed query rates plus p50, p95 and p99 latency. Until that
-result passes, Fanout makes no claim about interactive query capacity at the
-headline write rate.
+## Median peaks
 
-The generators shared the Fanout host, so generator CPU and memory contention
-can make the observed result lower than an isolated-server ceiling. Synthetic
-`telemetrygen` payloads are also highly compressible, so this run is not a
-storage-sizing formula for production data.
+Each peak is the highest median accepted rate in that workload's sweep.
+Ranges cover all three repetitions at the listed process count. CPU columns
+are median average cores at that count; each host has 8 cores.
 
-## What the official result must carry
+| Workload | Median peak items/s | Processes per signal | Range items/s | Fanout CPU cores | Generator CPU cores |
+|---|---:|---:|---:|---:|---:|
+| Mixed | 429,749 | 32 | 429,504–471,506 | 6.95 | 7.02 |
+| Traces | 243,696 | 64 | 225,110–267,916 | 6.03 | 6.83 |
+| Logs | 342,494 | 64 | 299,902–347,721 | 6.82 | 3.46 |
+| Metrics | 540,102 | 64 | 293,700–543,941 | 5.83 | 4.64 |
 
-Before the candidate becomes Fanout's official headline, it has to ship with:
+## Mixed sweep
 
-- the Fanout release artifact and checksum plus the benchmark-driver commit;
-- complete machine, network, container and Fanout configuration;
-- the raw `report.json`, `report.md` and `samples.jsonl` from that same run;
-- an authenticated OTLP path matching the current release;
-- at least three publish-preset repetitions and their variability;
-- separate ingest-only and read-under-write results;
-- the query completion rate and latency distribution beside any read claim;
-- limitations stated next to the result rather than hidden at the bottom.
+All rates below are accepted items/s across the three repetitions. CPU
+columns are median average cores per host.
 
-## Reproduce it on your hardware
+| Processes per signal | Median items/s | Min items/s | Max items/s | Fanout CPU cores | Generator CPU cores |
+|---|---:|---:|---:|---:|---:|
+| 1 | 41,300 | 40,269 | 41,362 | 4.92 | 0.31 |
+| 2 | 81,075 | 80,661 | 81,651 | 4.44 | 0.65 |
+| 4 | 148,972 | 130,086 | 154,626 | 5.09 | 1.33 |
+| 8 | 244,888 | 219,064 | 273,901 | 6.06 | 2.56 |
+| 16 | 330,232 | 325,618 | 364,301 | 6.39 | 4.29 |
+| 32 | 429,749 | 429,504 | 471,506 | 6.95 | 7.02 |
+| 64 | 422,667 | 384,338 | 441,460 | 6.79 | 7.49 |
 
-The independent
-[Fanout Bench](https://github.com/labstack/fanout-bench) project drives the
-official OpenTelemetry `telemetrygen` client, counts rows accepted by Fanout,
-and emits raw JSON plus a publication-ready report. It can add authenticated
-dashboard reads on top, which is the part that matters.
-Parquet ingest, indexed trace reads, and DuckDB analytics have separate
-coordination paths, but they still compete for the same CPU, memory bandwidth,
-filesystem cache, and disk. Maintenance adds native Parquet merge work and
-short reader-exclusive namespace changes. An ingest-only number therefore
-still overstates what an instance does while anyone is looking at it.
+## Signal sweeps
 
-Obtain the ingest token through first-admin setup, configure Fanout
-with a dedicated `FANOUT_METRICS_TOKEN`, then expose that same metrics token to
-the harness as `FANOUT_BENCH_METRICS_TOKEN`. Metrics are private by default. A
-local run starts with:
+The charts use a shared vertical scale and an evenly spaced log2 process
+axis. Lines and points show the median; bands show the minimum and maximum
+across three repetitions. The diamond marks the sustained phase at 32
+processes per signal. The shaded region marks generator CPU of at least
+7 cores.
 
-```sh
-export FANOUT_BENCH_INGEST_TOKEN='…'
-export FANOUT_BENCH_METRICS_TOKEN='…'
-fanout-bench run \
-  --endpoint localhost:7520 \
-  --metrics-url http://localhost:7520/metrics \
-  --insecure \
-  --same-host
+<BenchmarkSweep id="performance" />
+
+## Evidence
+
+The [published evidence directory](https://github.com/labstack/fanout-bench/tree/main/published/2026-10-16-ccx33x2-v2026.10.7-alpha)
+contains the raw artifacts, and its
+[README](https://github.com/labstack/fanout-bench/blob/main/published/2026-10-16-ccx33x2-v2026.10.7-alpha/README.md)
+summarises the run. It records all gates passing: successful generator exits,
+zero dropped rows, no restarts and a verified Parquet store.
+
+The harness was clean at commit
+[`8a2a28aafa828fc7967ba82a481c7cdb5c7e921e`](https://github.com/labstack/fanout-bench/commit/8a2a28aafa828fc7967ba82a481c7cdb5c7e921e).
+The [Fanout release artifact](https://github.com/labstack/fanout/releases/download/v2026.10.7-alpha/fanout_v2026.10.7-alpha_linux_amd64.tar.gz)
+has SHA-256:
+
+```text
+d1b602130463b38a03f7575c52c1c2178213839dbf276294abd57ce662c8756b
 ```
 
-The harness repository documents signal-specific saturation, sustained
-three-signal load, read-under-write latency, machine identity, and publication
-rules. For a publication-quality run, use the `publish` preset and retain all
-three repetitions:
+## Reproduce
+
+From the [fanout-bench](https://github.com/labstack/fanout-bench) repository,
+run the Hetzner provisioner with the same release, preset and repetition count:
 
 ```sh
-fanout-bench run \
-  --host your-benchmark-host \
-  --fanout-version v2026.8.11 \
+scripts/hetzner.sh \
+  --fanout-version v2026.10.7-alpha \
   --preset publish \
-  --repeat 3 \
-  --output results/fanout-v2026.8.11
+  --repeat 3
 ```
 
-:::caution[A result describes the machine it ran on]
-Benchmark output describes the hardware and dataset you tested, not an
-equivalent vCPU count at another provider. Two machines advertised with the same
-core count differ in memory bandwidth, disk latency and noisy neighbours, and
-Fanout is sensitive to all three — [storage](/explanation/storage-model)
-explains why.
-:::
-
-## What to watch in production
-
-For capacity, the useful signals are the ones an instance emits about itself:
-telemetry drops, sustained query latency, readiness failures, and free disk.
-[Troubleshooting](/guides/troubleshoot) lists where they are.
+Both VMs default to ccx33. The
+[publishing guide](https://github.com/labstack/fanout-bench/blob/main/docs/publishing.md)
+documents credentials, provisioning, the private network and artifact collection.

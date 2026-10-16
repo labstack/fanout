@@ -163,10 +163,12 @@ runbook](docs/operations.md).
 
 ## Performance
 
-[Fanout Bench](https://github.com/labstack/fanout-bench) measures authenticated ingest and optional
-dashboard read load on your hardware; the [performance
-methodology](https://fanout.run/explanation/performance) covers reproducible evidence and
-publication requirements.
+Fanout v2026.10.7-alpha accepted **422,408 mixed OpenTelemetry items/s for five minutes**
+on a Hetzner Cloud ccx33 (8 dedicated vCPUs, 32 GB RAM), with telemetrygen on a separate
+ccx33 over a private network. The run measured ingest only. See the [performance
+methodology](https://fanout.run/explanation/performance) and [raw
+evidence](https://github.com/labstack/fanout-bench/tree/main/published/2026-10-16-ccx33x2-v2026.10.7-alpha).
+[Fanout Bench](https://github.com/labstack/fanout-bench) reproduces the measurement on your hardware.
 
 ## Build from source
 
