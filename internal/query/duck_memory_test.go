@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/config"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -132,6 +134,59 @@ func TestDuckCloseCancelsAndJoinsMemorySampler(t *testing.T) {
 	}
 }
 
+func TestMemorySamplingDoesNotNeedReadOrWritePoolCapacity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "128MB", DuckDBMaxConns: 1}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+		if open := d.memoryDB.Stats().OpenConnections; open != 0 {
+			t.Errorf("Close left %d memory connections open", open)
+		}
+	}()
+	// Sample synchronously below so no timer determines which query runs.
+	d.stopMemorySampler()
+	<-d.memorySamplerDone
+	if got := d.memoryDB.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("memory handle MaxOpenConnections = %d, want 1", got)
+	}
+
+	// Exhaust both application pools. Sampling must still reach the engine.
+	read, err := d.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer read.Close()
+	for range 2 {
+		write, err := d.writeDB.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer write.Close()
+	}
+	tags, err := d.sampleMemory(ctx)
+	if err != nil {
+		t.Fatalf("sample with read and write pools exhausted: %v", err)
+	}
+	if len(tags) == 0 {
+		t.Fatal("memory sample contains no tags")
+	}
+	if inUse := d.memoryDB.Stats().InUse; inUse != 0 {
+		t.Fatalf("memory query retained %d connections after reading rows", inUse)
+	}
+}
+
 func TestMemorySamplerRejectsPartialQueryResults(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -144,7 +199,7 @@ func TestMemorySamplerRejectsPartialQueryResults(t *testing.T) {
 			AddRow("HASH_TABLE", 2048).
 			RowError(1, errors.New("read failed")),
 	)
-	d := &Duck{DB: db}
+	d := &Duck{memoryDB: db}
 	if tags, err := d.sampleMemory(t.Context()); err == nil || tags != nil {
 		t.Fatalf("partial query returned tags=%v, err=%v", tags, err)
 	}

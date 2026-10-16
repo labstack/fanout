@@ -32,7 +32,7 @@ type Duck struct {
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
-	// closeOnce makes Close idempotent. Both handles come from one connector,
+	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
 	// second Close would call duckdb_close twice on the same instance, which
 	// is a double free the runtime cannot recover from.
@@ -44,6 +44,9 @@ type Duck struct {
 	releaseMemoryGauges func()
 	stopMemorySampler   context.CancelFunc
 	memorySamplerDone   chan struct{}
+	// memoryDB has one borrowed connection so a blocked memory query cannot
+	// occupy a request or write slot. The read pool owns the shared instance.
+	memoryDB *sql.DB
 	// writeDB has two connections: analytical rollups share writeGate, while
 	// completed-batch aggregates use cacheGate and disjoint tables. Both stay
 	// outside the read pool. Maintenance acquires both gates for checkpointing.
@@ -246,11 +249,11 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, err
 	}
 
-	db, writeDB, err := openDuckDB(ctx, dsn, tempDir, duckDBPoolSize(cfg))
+	db, writeDB, memoryDB, err := openDuckDB(ctx, dsn, tempDir, duckDBPoolSize(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
-	d := &Duck{DB: db, writeDB: writeDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
+	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
@@ -334,14 +337,15 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	return nil
 }
 
-// openDuckDB returns the read pool and the single-connection write handle.
+// openDuckDB returns the read pool, the two-connection write handle, and the
+// single-connection memory sampling handle.
 //
-// Both come from one connector so they share one DuckDB instance and therefore
+// All come from one connector so they share one DuckDB instance and therefore
 // one catalog: a write committed on one handle is visible to the other, and
 // DDL run at boot applies to both. (A second connector to the same file would
 // also work — DuckDB keeps an instance cache — but two owners of one instance
 // is exactly the hazard the wrapper below exists to avoid.)
-func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, error) {
+func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, error) {
 	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
 	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
 	// TIMESTAMP values, while API windows arrive in UTC.
@@ -370,7 +374,7 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	db := sql.OpenDB(connector)
@@ -395,7 +399,12 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	writeDB := sql.OpenDB(borrowedConnector{connector})
 	writeDB.SetMaxOpenConns(2)
 	writeDB.SetMaxIdleConns(2)
-	return db, writeDB, nil
+	// Memory sampling can block inside the engine despite its deadline. Keep
+	// its one connection separate from both request and write capacity.
+	memoryDB := sql.OpenDB(borrowedConnector{connector})
+	memoryDB.SetMaxOpenConns(1)
+	memoryDB.SetMaxIdleConns(1)
+	return db, writeDB, memoryDB, nil
 }
 
 // borrowedConnector hands out connections from a connector it does not own.
@@ -418,18 +427,21 @@ func (d *Duck) Close() error {
 			d.releaseMemoryGauges()
 		}
 		if d.stopMemorySampler != nil {
-			// Join before closing either handle: the read pool owns the shared
+			// Join before closing any handle: the read pool owns the shared
 			// connector, which must outlive every sampling query.
 			<-d.memorySamplerDone
 		}
 		var errs []error
+		if d.memoryDB != nil {
+			errs = append(errs, d.memoryDB.Close())
+		}
 		if d.writeDB != nil {
 			// The write handle holds a connector that does not close the
 			// instance, so this releases its connection and nothing else.
 			errs = append(errs, d.writeDB.Close())
 		}
-		// A Duck assembled field by field, as tests do, may hold neither
-		// handle; closing one is then nothing to do rather than a panic.
+		// A Duck assembled field by field, as tests do, may hold no handles;
+		// closing one is then nothing to do rather than a panic.
 		if d.DB != nil {
 			errs = append(errs, d.DB.Close())
 		}
