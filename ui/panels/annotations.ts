@@ -21,21 +21,23 @@ export function withAnnotations(option: Record<string, unknown>, panel: Panel, r
     lineStyle: { type: "dashed", color: theme.muted, width: 1 },
     tooltip: { formatter: () => escapeHTML(`${a.service} · ${a.version} · ${a.at}`) },
   }));
-  // Merge in service/namespace/time order regardless of kind, so connected
-  // windows get one translucent fill while retaining every source window.
-  const episodes: { service: string; namespace: string; from: number; to: number; labels: string[]; details: string[]; count: number }[] = [];
+  // All annotations share the plot's full height. Union connected windows in
+  // time order, including across services, so their alpha never stacks. Keep
+  // each scoped source's identity and evaluated bounds in the tooltip.
+  const episodes: { from: number; to: number; labels: string[]; details: string[]; count: number }[] = [];
   for (const a of annotations.anomalies.filter(matches).filter(a => Date.parse(a.to) > from && Date.parse(a.from) < to)
-    .sort((a, b) => a.namespace.localeCompare(b.namespace) || a.service.localeCompare(b.service) || Date.parse(a.from) - Date.parse(b.from))) {
+    .sort((a, b) => Date.parse(a.from) - Date.parse(b.from))) {
     const start = Math.max(from, Date.parse(a.from)), end = Math.min(to, Date.parse(a.to));
-    const label = `${a.title} (${a.kind}) · ${a.from} – ${a.to}`;
-    const detail = escapeHTML(`${a.service} · ${a.title} · ${a.severity} · ${a.kind} · ${a.from} – ${a.to}`);
+    const identity = a.namespace ? `${a.namespace}/${a.service}` : a.service;
+    const label = `${identity} · ${a.title} (${a.kind}) · ${a.from} – ${a.to}`;
+    const detail = escapeHTML(`${identity} · ${a.title} · ${a.severity} · ${a.kind} · ${a.from} – ${a.to}`);
     const last = episodes.at(-1);
-    if (last && last.service === a.service && last.namespace === a.namespace && start <= last.to) {
+    if (last && start <= last.to) {
       last.to = Math.max(last.to, end);
       last.count++;
       if (!last.labels.includes(label)) last.labels.push(label);
       if (!last.details.includes(detail)) last.details.push(detail);
-    } else episodes.push({ service: a.service, namespace: a.namespace, from: start, to: end, labels: [label], details: [detail], count: 1 });
+    } else episodes.push({ from: start, to: end, labels: [label], details: [detail], count: 1 });
   }
   const anomalies = episodes.map(a => [{
     xAxis: a.from, name: a.labels.join(" · "),
