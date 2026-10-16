@@ -19,10 +19,10 @@ it.each([false, true])("keeps rendered threshold labels inside the plot, clear o
   for (const width of [350, 500, 800]) for (const style of ["line", "bars"] as const) {
    const size = { width, height: 248 }, theme = chartThemeFor(dark);
    chart.resize(size);
-   const panel = { id: "t", title: "Latency", viz: "timeseries" as const, unit: "ms" as const, options: { style }, thresholds: [{ value: 2000, status: "bad" as const }] };
+   const panel = { id: "t", title: "Latency", viz: "timeseries" as const, unit: "ms" as const, options: { style }, thresholds: [{ value: 0, status: "ok" as const }, { value: 1000, status: "warn" as const }, { value: 2000, status: "bad" as const }] };
    const result = { id: "t", status: "ok" as const, elapsed_ms: 1, from_ms: 0, to_ms: 3600000, frame: {
     columns: [{ name: "time", type: "time" as const, role: "time" as const }, { name: "p95", type: "number" as const, role: "measure" as const, unit: "ms" }],
-    values: [[0, 3600000], [10, 20]], rows: 2,
+    values: [[0, 3600000], [1000, 2000]], rows: 2,
    } };
    const option = withAnnotations(timeseriesOption(panel, result, theme, size), panel, result, { deploys: [], anomalies: [
     { namespace: "shop", service: "cart", kind: "latency", title: "Slow", severity: "bad", from: new Date(0).toISOString(), to: new Date(3600000).toISOString() },
@@ -30,16 +30,44 @@ it.each([false, true])("keeps rendered threshold labels inside the plot, clear o
    chart.setOption({ ...option, animation: false }, { notMerge: true });
    const rect = (chart as any).getModel().getComponent("grid").coordinateSystem.getRect();
    const audit = nativeAudit(chart, option, size, rect);
-   const labels = audit.texts.filter(text => text.text === "bad 2 s");
-   expect(labels).toHaveLength(1);
-   const label = labels[0];
-   expect((label.left + label.right) / 2).toBeCloseTo(rect.x + rect.width / 2, 0);
-   expect(label.left).toBeGreaterThanOrEqual(rect.x + 4);
-   expect(label.right).toBeLessThanOrEqual(rect.x + rect.width);
-   expect(label.top).toBeGreaterThanOrEqual(rect.y);
-   expect(label.bottom).toBeLessThanOrEqual(rect.y + rect.height);
-   for (const tick of audit.plot!.y_ticks) {
-    expect(label.left < tick.right && label.right > tick.left && label.top < tick.bottom && label.bottom > tick.top).toBe(false);
+   const labels = audit.texts.filter(text => ["ok 0 ms", "warn 1 s", "bad 2 s"].includes(text.text));
+   expect(labels).toHaveLength(3);
+   for (const label of labels) {
+    // Native bounds include half of the 3px text halo.
+    expect(label.right).toBeCloseTo(rect.x + rect.width - 8 + 1.5, 0);
+    expect(label.left).toBeGreaterThanOrEqual(rect.x + 4);
+    expect(label.right).toBeLessThanOrEqual(rect.x + rect.width);
+    expect(label.top).toBeGreaterThanOrEqual(rect.y);
+    expect(label.bottom).toBeLessThanOrEqual(rect.y + rect.height);
+    for (const tick of [...audit.plot!.y_ticks, ...audit.texts.filter(text => text.top >= rect.y + rect.height)]) {
+     expect(label.left < tick.right && label.right > tick.left && label.top < tick.bottom && label.bottom > tick.top).toBe(false);
+    }
+   }
+  }
+ } finally { chart.dispose(); el.remove(); }
+});
+
+it.each([false, true])("renders thresholds only in data-driven native axis ranges (%s)", dark => {
+ const el = document.createElement("div"); document.body.append(el);
+ const chart = init(el, undefined, { renderer: "svg", width: 500, height: 248 });
+ const theme = chartThemeFor(dark);
+ try {
+  for (const style of ["line", "area", "bars", "stacked"] as const) for (const scale of ["linear", "log"] as const) {
+   const panel = { id: "t", title: "Latency", viz: "timeseries" as const, unit: "ms" as const, options: { style, scale }, thresholds: [{ value: 2000, status: "bad" as const }] };
+   for (const values of [[10, 20], [1000, 2000]]) {
+    const result = { id: "t", status: "ok" as const, elapsed_ms: 1, from_ms: 0, to_ms: 3600000, frame: {
+     columns: [{ name: "time", type: "time" as const, role: "time" as const }, { name: "p95", type: "number" as const, role: "measure" as const, unit: "ms" }],
+     values: [[0, 3600000], values], rows: 2,
+    } };
+    const option = timeseriesOption(panel, result, theme);
+    chart.setOption({ ...timeseriesOption({ ...panel, thresholds: [] }, result, theme), animation: false }, { notMerge: true });
+    const extent = () => [...(chart as any).getModel().getComponent("yAxis").axis.scale.getExtent()];
+    const without = extent();
+    chart.setOption({ ...option, animation: false }, { notMerge: true });
+    expect(extent()).toEqual(without);
+    const audit = nativeAudit(chart, option, { width: 500, height: 248 });
+    expect(audit.texts.filter(text => text.text === "bad 2 s")).toHaveLength(values[1] < 2000 ? 0 : 1);
+    if (values[1] < 2000) expect(extent()[1]).toBeLessThan(2000);
    }
   }
  } finally { chart.dispose(); el.remove(); }

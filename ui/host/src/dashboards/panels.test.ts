@@ -105,7 +105,7 @@ describe("compile", () => {
   });
 
   it("draws series, thresholds and the previous period", () => {
-    const option = timeseriesOption(panel, result, theme) as { series: { name: string; lineStyle?: { type?: string }; markLine?: { data: unknown[] } }[]; legend: { show: boolean } };
+    const option = timeseriesOption({ ...panel, thresholds: [{ value: 750, status: "warn" }] }, result, theme) as { series: { name: string; lineStyle?: { type?: string }; markLine?: { data: unknown[] } }[]; legend: { show: boolean } };
     expect(option.series.map((s) => s.name)).toEqual(["checkout", "cart", "checkout · previous", "cart · previous"]);
     expect(option.series[2].lineStyle?.type).toBe("dashed");
     expect(option.series[0].markLine?.data).toHaveLength(1);
@@ -199,10 +199,12 @@ describe("compile, more", () => {
     expect(none.series.some((s) => s.name.endsWith("previous"))).toBe(false);
   });
 
-  it("keeps a threshold above the data in view, and does not sample bars", () => {
+  it("keeps axis bounds independent of thresholds, and does not sample bars", () => {
     const p = { ...panel, thresholds: [{ value: 1500, status: "bad" as const }] };
     const option = timeseriesOption(p, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { yAxis: { max: number } };
-    expect(option.yAxis.max).toBeGreaterThanOrEqual(1500);
+    const without = timeseriesOption(panel, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { yAxis: { min: number; max: number; interval: number } };
+    for (const key of ["min", "max", "interval"] as const) expect((option.yAxis as typeof without.yAxis)[key]).toBe(without.yAxis[key]);
+    expect(option.yAxis.max).toBeLessThan(1500);
     const bars = timeseriesOption({ ...p, options: { style: "bars" } }, { id: "x", status: "ok", frame: grouped, elapsed_ms: 1 }, theme) as { series: S[] };
     expect(bars.series[0].sampling).toBeUndefined();
   });

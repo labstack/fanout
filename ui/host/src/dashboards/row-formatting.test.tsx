@@ -62,6 +62,8 @@ it.each([false,true])("log body owns remaining width, clamps then expands; trace
  const text=row.querySelector<HTMLElement>("[data-row-text]")!;
  expect(text.style.maxHeight).toBe("36px"); expect(text.style.whiteSpace).toBe("normal");
  expect(host.querySelector<HTMLTableColElement>('col[data-field="body"]')?.style.width).toBe("");
+ expect(host.querySelector<HTMLTableColElement>('col[data-field="time"]')?.style.width).toBe("146px");
+ expect(host.querySelector<HTMLTableColElement>('col[data-field="severity"]')?.style.width).toBe("90px");
  expect(Number.parseFloat(host.querySelector<HTMLTableElement>("table")!.style.minWidth)).toBeGreaterThanOrEqual(656);
  const trace=row.querySelector<HTMLElement>("[data-trace-id]")!; expect(trace.textContent).toBe(id.slice(0,16));expect(trace.title).toBe(id);
  await act(async()=>row.click()); expect(row.dataset.rowExpanded).toBe("true"); expect(text.style.maxHeight).toBe("");
