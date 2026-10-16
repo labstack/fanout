@@ -297,6 +297,26 @@ func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) ([
 // percentage point. See errorRateAnomalySQL.
 const minErrorRateStddev = 0.01
 
+// minLatencyIncreaseRatio requires a 20% slowdown, keeping small proportional
+// shifts in slow services quiet while allowing substantial regressions through.
+const minLatencyIncreaseRatio = 0.20
+
+// minLatencyIncreaseMS requires at least 5ms of extra p95 latency: even a large
+// ratio on a sub-millisecond service is noise, but 20ms to 60ms still qualifies.
+const minLatencyIncreaseMS = 5.0
+
+// minLatencyStddev assumes at least 1ms of timing scatter, so a flat baseline
+// can still detect regressions without amplifying fractional-millisecond jitter.
+const minLatencyStddev = 1.0
+
+// minVolumeChangeRatio requires a 25% traffic change in either direction,
+// suppressing small count fluctuations while retaining 30% drops and doubling.
+const minVolumeChangeRatio = 0.25
+
+// minVolumeStddev assumes at least one span of counting uncertainty, allowing
+// flat baselines to detect traffic stopping or surging without dividing by zero.
+const minVolumeStddev = 1.0
+
 // errorRateAnomalySQL compares the error rate in [startNano, endNano) against
 // the window of equal length immediately before it.
 //
@@ -428,7 +448,9 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 		baselineP95 := row.baseline
 		zScore := row.zScore
 
-		if zScore >= d.config.LatencyThreshold {
+		increase := currentP95 - baselineP95
+		if zScore >= d.config.LatencyThreshold &&
+			increase >= minLatencyIncreaseMS && increase >= baselineP95*minLatencyIncreaseRatio {
 			anomalies = append(anomalies, Anomaly{
 				Type:        AnomalyLatencyDegradation,
 				ServiceName: serviceName,
@@ -458,6 +480,8 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 // the traffic did. Every service was permanently a critical volume anomaly:
 // steady traffic scored z=75 in TestVolumeAnomalyComparesEqualWindows, and the
 // live demo sat at health score 0 with 17 meaningless critical insights.
+// Retain baseline-only services with a zero current count so traffic stopping
+// is evaluated even though the rollup has no positive-span rows for that window.
 func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 	return fmt.Sprintf(`
 		WITH current_period AS (
@@ -492,16 +516,16 @@ func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 			GROUP BY service_name
 		)
 		SELECT
-			c.service_name,
-			c.span_count::DOUBLE AS current_count,
+			COALESCE(c.service_name, b.service_name) AS service_name,
+			COALESCE(c.span_count, 0.0)::DOUBLE AS current_count,
 			COALESCE(b.avg_count, 0.0) AS baseline_count,
 			CASE
-				WHEN b.count_stddev > 0 THEN (c.span_count - b.avg_count) / b.count_stddev
+				WHEN b.avg_count > 0 THEN (COALESCE(c.span_count, 0.0) - b.avg_count) / GREATEST(COALESCE(b.count_stddev, 0.0), %f)
 				ELSE 0.0
 			END AS z_score
 		FROM current_period c
-		LEFT JOIN baseline_period b ON c.service_name = b.service_name
-	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
+		FULL OUTER JOIN baseline_period b ON c.service_name = b.service_name
+	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope, minVolumeStddev)
 }
 
 // detectVolumeAnomalies detects unusual traffic volume changes
@@ -525,7 +549,8 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 		baselineCount := row.baseline
 		zScore := row.zScore
 
-		if math.Abs(zScore) >= d.config.VolumeThreshold {
+		if math.Abs(zScore) >= d.config.VolumeThreshold && baselineCount > 0 &&
+			math.Abs(currentCount-baselineCount) >= baselineCount*minVolumeChangeRatio {
 			anomalies = append(anomalies, Anomaly{
 				Type:        AnomalyVolumeChange,
 				ServiceName: serviceName,
@@ -581,12 +606,12 @@ func latencyAnomalySQL(startNano, endNano int64, scope string) string {
 			c.p95_latency AS current_p95,
 			COALESCE(b.avg_p95, 0.0) AS baseline_p95,
 			CASE
-				WHEN b.p95_stddev > 0 THEN (c.p95_latency - b.avg_p95) / b.p95_stddev
+				WHEN b.avg_p95 IS NOT NULL THEN (c.p95_latency - b.avg_p95) / GREATEST(COALESCE(b.p95_stddev, 0.0), %f)
 				ELSE 0.0
 			END AS z_score
 		FROM current_period c
 		LEFT JOIN baseline_period b ON c.service_name = b.service_name
-	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
+	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope, minLatencyStddev)
 
 }
 
