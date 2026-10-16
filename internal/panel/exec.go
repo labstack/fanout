@@ -428,6 +428,7 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 }
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
+	ctx = queryrows.WithInventoryWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
 	read := metricReadScope(p, scope)
 	if p.SQL != "" {
 		// SQL panels may look back up to the metric lookback before their

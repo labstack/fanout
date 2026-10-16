@@ -14,6 +14,18 @@ type Window struct {
 }
 
 type windowKey struct{}
+type inventoryWindowKey struct{}
+
+// WithInventoryWindow records the logical panel interval before file lookback
+// expansion. It is independent of the raw-file read window and read kind.
+func WithInventoryWindow(ctx context.Context, window Window) context.Context {
+	return context.WithValue(ctx, inventoryWindowKey{}, window)
+}
+
+func ReadInventoryWindow(ctx context.Context) (Window, bool) {
+	window, ok := ctx.Value(inventoryWindowKey{}).(Window)
+	return window, ok && window.Start.Before(window.End)
+}
 
 func WithWindow(ctx context.Context, window Window) context.Context {
 	return context.WithValue(ctx, windowKey{}, window)

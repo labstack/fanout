@@ -16,6 +16,16 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	spans := schema.Signals["spans"]
+	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 1 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
+		t.Fatalf("SQL relation discovery: %+v", schema)
+	}
+	if got := schema.SQLRelations["resource_inventory"]; got.Columns[3].SQLType != "VARIANT" || got.Columns[4].SQLType != "TIMESTAMPTZ_NS" {
+		t.Fatalf("inventory types: %+v", got)
+	}
+	d := Dashboard{Name: "Invalid structured inventory", Panels: []Panel{{ID: "resources", Title: "Resources", Viz: "stat", Query: &Query{From: "resource_inventory", Measures: []string{"count()"}}}}}
+	if err := e.Validate(t.Context(), &d); err == nil {
+		t.Fatal("SQL-only relation accepted as structured signal")
+	}
 	if spans.TimeColumn != "start_time" {
 		t.Fatalf("time column = %q", spans.TimeColumn)
 	}

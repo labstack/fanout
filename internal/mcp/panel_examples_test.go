@@ -302,3 +302,31 @@ func TestMetricExamplesExecuteWithObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestResourceInventoryExampleExecutesThroughPanelTools(t *testing.T) {
+	now := time.Now().UTC()
+	s := panelServerFixtureAt(t, true, now)
+	var d panel.Dashboard
+	if err := json.Unmarshal([]byte(resourceInventoryExample), &d); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.panels.Validate(t.Context(), &d); err != nil {
+		t.Fatal(err)
+	}
+	_, preview, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: d.Panels, Time: &d.Time})
+	if err != nil || len(preview.Panels) != 1 || preview.Panels[0].Status != "ok" || preview.Panels[0].Rows != 1 {
+		t.Fatalf("inventory preview=%+v %v", preview, err)
+	}
+	_, fragment, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: d.Panels[0]})
+	if err != nil || len(fragment.Results) != 1 || fragment.Results[0].Status != "ok" {
+		t.Fatalf("inventory query=%+v %v", fragment, err)
+	}
+	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: d})
+	if err != nil || created.Dashboard.Version != 1 {
+		t.Fatalf("inventory create=%+v %v", created, err)
+	}
+	_, schema, err := s.telemetrySchema(t.Context(), nil, SchemaInput{})
+	if err != nil || len(schema.Signals) != 3 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
+		t.Fatalf("inventory schema=%+v %v", schema, err)
+	}
+}

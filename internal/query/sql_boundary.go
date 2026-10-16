@@ -46,7 +46,7 @@ func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain 
 			release()
 		}
 	}()
-	if err := validateSQLAST(ctx, conn, query); err != nil {
+	if err := validateSQLAST(ctx, conn, query, false); err != nil {
 		return nil, nil, err
 	}
 	query = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(query), ";"))
@@ -101,12 +101,12 @@ func parseStatement(ctx context.Context, db rowQueryer, query string) (map[strin
 	return parsed.Statements[0].Node, nil
 }
 
-func validateSQLAST(ctx context.Context, conn *sql.Conn, query string) error {
+func validateSQLAST(ctx context.Context, conn *sql.Conn, query string, panel bool) error {
 	node, err := parseStatement(ctx, conn, query)
 	if err != nil {
 		return err
 	}
-	return validateSQLNode(node, nil)
+	return validateSQLNode(node, nil, panel)
 }
 
 // describeProjection describes a query and returns, per result column, the
@@ -182,7 +182,7 @@ func containsLogicalType(expression, name string) bool {
 	return strings.EqualFold(token.String(), name)
 }
 
-func validateSQLNode(value any, ctes map[string]bool) error {
+func validateSQLNode(value any, ctes map[string]bool, panel bool) error {
 	switch node := value.(type) {
 	case map[string]any:
 		// Definitions see prior and outer CTEs. A nonrecursive definition cannot
@@ -203,7 +203,7 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 				if !ok || !defined || definition["query_node"] == nil {
 					return fmt.Errorf("invalid CTE definition")
 				}
-				if err := validateSQLNode(definition, scope); err != nil {
+				if err := validateSQLNode(definition, scope, panel); err != nil {
 					return err
 				}
 				scope[strings.ToLower(name)] = true
@@ -230,6 +230,12 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 			schema, _ := node["schema_name"].(string)
 			catalog, _ := node["catalog_name"].(string)
 			allowed := map[string]bool{"spans": true, "logs": true, "metrics": true, "service_rollup": true, "edge_rollup": true}
+			if strings.EqualFold(name, "resource_inventory") {
+				if !panel || (schema != "" && schema != "main") {
+					return fmt.Errorf("resource_inventory is available only to panel SQL in its logical window")
+				}
+				allowed["resource_inventory"] = true
+			}
 			cte := catalog == "" && ((schema == "" && ctes[strings.ToLower(name)]) ||
 				(schema == "recurring" && ctes["recurring:"+strings.ToLower(name)]))
 			if !cte && (catalog != "" || (schema != "" && schema != "main" && schema != "telemetry") || !allowed[strings.ToLower(name)]) {
@@ -261,13 +267,13 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 				scope[strings.ToLower(name)] = true
 				scope["recurring:"+strings.ToLower(name)] = true
 			}
-			if err := validateSQLNode(child, scope); err != nil {
+			if err := validateSQLNode(child, scope, panel); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for _, child := range node {
-			if err := validateSQLNode(child, ctes); err != nil {
+			if err := validateSQLNode(child, ctes, panel); err != nil {
 				return err
 			}
 		}

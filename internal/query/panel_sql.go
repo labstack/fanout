@@ -29,10 +29,10 @@ func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, 
 		return "", nil, err
 	}
 	defer conn.Close()
-	if err := validateSQLAST(ctx, conn, query); err != nil {
+	if err := validateSQLAST(ctx, conn, query, true); err != nil {
 		return "", nil, err
 	}
-	if err := validateSQLAST(ctx, conn, describe); err != nil {
+	if err := validateSQLAST(ctx, conn, describe, true); err != nil {
 		return "", nil, err
 	}
 	trim := func(s string) string { return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), ";")) }
@@ -40,7 +40,17 @@ func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, 
 	if err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("SELECT %s FROM (%s) AS _result(%s) LIMIT %d", strings.Join(projection, ","), trim(query), strings.Join(aliases, ","), maxRows), serialized, nil
+	execution := trim(query)
+	if maxRows == 0 {
+		// Timeline validation inspects driver column types with a zero-row
+		// execution. Bind its descriptor explicitly; real readers still require
+		// a repository and a logical inventory window.
+		execution, err = compileRelations(ctx, conn, execution, map[string]string{"resource_inventory": emptyResourceInventory}, map[string]string{})
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	return fmt.Sprintf("SELECT %s FROM (%s) AS _result(%s) LIMIT %d", strings.Join(projection, ","), execution, strings.Join(aliases, ","), maxRows), serialized, nil
 }
 
 // RenderSQL renders a statement node (as returned by ParseSQL) back to SQL

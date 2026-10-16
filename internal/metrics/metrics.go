@@ -47,7 +47,7 @@ const (
 )
 
 var (
-	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Active immutable batches not covered at the start of the last read-cache pass"})
+	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Nonempty active immutable batches across spans, logs and metrics not covered at the start of the last read-cache pass"})
 
 	IngestBackpressureSeconds = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds the ingest writer waited for compaction debt to retire",
