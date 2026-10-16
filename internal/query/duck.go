@@ -249,7 +249,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, err
 	}
 
-	db, writeDB, memoryDB, err := openDuckDB(ctx, dsn, tempDir, duckDBPoolSize(cfg))
+	db, writeDB, memoryDB, err := openDuckDB(dsn, tempDir, duckDBPoolSize(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
@@ -345,7 +345,7 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 // DDL run at boot applies to both. (A second connector to the same file would
 // also work — DuckDB keeps an instance cache — but two owners of one instance
 // is exactly the hazard the wrapper below exists to avoid.)
-func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, error) {
+func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, error) {
 	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
 	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
 	// TIMESTAMP values, while API windows arrive in UTC.
@@ -354,11 +354,15 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	// dir has already been used fails with "Cannot switch temporary directory
 	// after the current one has been used". The boot hook runs once per pooled
 	// connection, so only the first connection sets it; the rest inherit the
-	// instance-wide value. LOAD/ATTACH stay per-connection — they're idempotent.
+	// instance-wide value.
 	var tempDirOnce sync.Once
 	var tempDirErr error
 
-	connector, err := duckdb.NewConnector(dsn, func(execer driver.ExecerContext) error {
+	native, err := duckdb.NewConnector(dsn, nil)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	connector := &initializedConnector{Connector: native, init: func(ctx context.Context, execer driver.ExecerContext) error {
 		if _, err := execer.ExecContext(ctx, "SET TimeZone='UTC'", nil); err != nil {
 			return fmt.Errorf("set timezone: %w", err)
 		}
@@ -372,10 +376,7 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 			return fmt.Errorf("set temp_directory: %w", tempDirErr)
 		}
 		return nil
-	})
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	}}
 
 	db := sql.OpenDB(connector)
 	// The on-disk DuckDB file contains only rebuildable rollups and views; Parquet
@@ -411,6 +412,24 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 // It deliberately does not implement io.Closer: that is the whole point.
 type borrowedConnector struct{ driver.Connector }
 
+// Initialize with each Connect call's context, never the startup context:
+// database/sql may open replacement connections long after startup finishes.
+type initializedConnector struct {
+	*duckdb.Connector
+	init func(context.Context, driver.ExecerContext) error
+}
+
+func (c *initializedConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.Connector.Connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.init(ctx, conn.(driver.ExecerContext)); err != nil {
+		return nil, errors.Join(err, conn.Close())
+	}
+	return conn, nil
+}
+
 func sqlLiteral(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
@@ -427,27 +446,41 @@ func (d *Duck) Close() error {
 			d.releaseMemoryGauges()
 		}
 		if d.stopMemorySampler != nil {
-			// Join before closing any handle: the read pool owns the shared
-			// connector, which must outlive every sampling query.
-			<-d.memorySamplerDone
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-d.memorySamplerDone:
+			case <-timer.C:
+				// The engine may ignore cancellation. Keep all handles and the
+				// owning connector alive until the abandoned query returns;
+				// closing the instance underneath it can crash native code.
+				go func() {
+					<-d.memorySamplerDone
+					if err := d.closeHandles(); err != nil {
+						slog.Warn("close DuckDB after memory sampler stopped", "err", err)
+					}
+				}()
+				return
+			}
 		}
-		var errs []error
-		if d.memoryDB != nil {
-			errs = append(errs, d.memoryDB.Close())
-		}
-		if d.writeDB != nil {
-			// The write handle holds a connector that does not close the
-			// instance, so this releases its connection and nothing else.
-			errs = append(errs, d.writeDB.Close())
-		}
-		// A Duck assembled field by field, as tests do, may hold no handles;
-		// closing one is then nothing to do rather than a panic.
-		if d.DB != nil {
-			errs = append(errs, d.DB.Close())
-		}
-		d.closeErr = errors.Join(errs...)
+		d.closeErr = d.closeHandles()
 	})
 	return d.closeErr
+}
+
+func (d *Duck) closeHandles() error {
+	var errs []error
+	if d.memoryDB != nil {
+		errs = append(errs, d.memoryDB.Close())
+	}
+	if d.writeDB != nil {
+		errs = append(errs, d.writeDB.Close())
+	}
+	// The read pool owns the instance and must close after its borrowers.
+	if d.DB != nil {
+		errs = append(errs, d.DB.Close())
+	}
+	return errors.Join(errs...)
 }
 
 // writer returns the dedicated write handle initialized by NewDuck.

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"maps"
 	"math"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -315,9 +314,9 @@ func RecordFlush(signal string, durationSec float64) {
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
 }
 
-type duckDBPoolSource struct{ sample atomic.Pointer[sql.DBStats] }
+type duckDBPoolSource struct{ stats func() sql.DBStats }
 
-// duckDBPoolStats is the cached source for the connection-pool gauges below.
+// duckDBPoolStats is the live source for the connection-pool gauges below.
 //
 // A holder rather than a promauto.NewGaugeFunc closure over the pool: the
 // gauges are declared once for the process, while a *Duck is constructed many
@@ -332,6 +331,7 @@ type duckDBMemorySample struct {
 
 type duckDBMemorySource struct {
 	sample atomic.Pointer[duckDBMemorySample]
+	maxAge time.Duration
 }
 
 // duckDBMemoryStats holds the latest background sample for the memory gauge.
@@ -348,8 +348,8 @@ var duckDBMemoryStats atomic.Pointer[duckDBMemorySource]
 // SetDuckDBMemorySource installs a cache, never a scrape-time query. Record
 // publishes a complete successful sample; failures leave the last one intact.
 // Releasing an older Duck cannot clear a newer Duck's source.
-func SetDuckDBMemorySource() (record func(map[string]int64, time.Time), release func()) {
-	installed := &duckDBMemorySource{}
+func SetDuckDBMemorySource(interval time.Duration) (record func(map[string]int64, time.Time), release func()) {
+	installed := &duckDBMemorySource{maxAge: 2 * interval}
 	duckDBMemoryStats.Store(installed)
 	return func(tags map[string]int64, at time.Time) {
 		installed.sample.Store(&duckDBMemorySample{tags: maps.Clone(tags), at: at})
@@ -385,8 +385,10 @@ func (duckDBMemoryCollector) Collect(ch chan<- prometheus.Metric) {
 	at := 0.0
 	if sample := source.sample.Load(); sample != nil {
 		at = float64(sample.at.UnixNano()) / 1e9
-		for tag, bytes := range sample.tags {
-			ch <- prometheus.MustNewConstMetric(duckDBMemoryDesc, prometheus.GaugeValue, float64(bytes), tag)
+		if time.Since(sample.at) <= source.maxAge {
+			for tag, bytes := range sample.tags {
+				ch <- prometheus.MustNewConstMetric(duckDBMemoryDesc, prometheus.GaugeValue, float64(bytes), tag)
+			}
 		}
 	}
 	ch <- prometheus.MustNewConstMetric(duckDBMemorySampleDesc, prometheus.GaugeValue, at)
@@ -396,56 +398,20 @@ func init() {
 	prometheus.DefaultRegisterer.MustRegister(duckDBMemoryCollector{})
 }
 
-// SetDuckDBPoolSource samples pool bookkeeping independently of memory queries,
-// so a stuck engine cannot hide pool starvation. Stats takes database/sql's
-// mutex, which some connection cleanup paths hold during driver calls; scrapes
-// therefore read only the cached result. Release stops and joins this sampler
-// before the owning Duck closes its handles, without clearing a newer owner.
+// SetDuckDBPoolSource reads database/sql bookkeeping on each scrape without
+// querying the engine. Releasing an older Duck cannot clear a newer source.
 func SetDuckDBPoolSource(stats func() sql.DBStats) (release func()) {
-	return setDuckDBPoolSource(stats, 5*time.Second)
-}
-
-func setDuckDBPoolSource(stats func() sql.DBStats, interval time.Duration) func() {
 	if stats == nil {
 		return func() {}
 	}
-	installed := &duckDBPoolSource{}
+	installed := &duckDBPoolSource{stats: stats}
 	duckDBPoolStats.Store(installed)
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			sample := stats()
-			installed.sample.Store(&sample)
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			duckDBPoolStats.CompareAndSwap(installed, nil)
-			close(stop)
-			<-done
-		})
-	}
+	return func() { duckDBPoolStats.CompareAndSwap(installed, nil) }
 }
 
 func poolStats() sql.DBStats {
 	if source := duckDBPoolStats.Load(); source != nil {
-		if sample := source.sample.Load(); sample != nil {
-			return *sample
-		}
+		return source.stats()
 	}
 	return sql.DBStats{}
 }

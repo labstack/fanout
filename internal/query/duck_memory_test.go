@@ -9,16 +9,178 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/config"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func TestMetricsScrapeKeepsLastMemorySampleWhileSamplerBlocks(t *testing.T) {
+func TestDuckDBMemoryDropsSeriesWhenTheReadFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		d := &Duck{}
+		defer d.Close()
+		calls := 0
+		d.startMemorySampler(time.Second, func(context.Context) (map[string]int64, error) {
+			calls++
+			if calls == 1 {
+				return map[string]int64{"BASE_TABLE": 4096}, nil
+			}
+			return nil, errors.New("memory query failed")
+		})
+		synctest.Wait()
+		if memory, timestamp := memoryMetrics(t); memory != 4096 || timestamp <= 0 {
+			t.Fatalf("first sample: memory=%g, timestamp=%g", memory, timestamp)
+		}
+		time.Sleep(2500 * time.Millisecond)
+		synctest.Wait()
+		if memory, timestamp := memoryMetrics(t); memory != -1 || timestamp <= 0 {
+			t.Fatalf("failed reads: memory=%g, timestamp=%g", memory, timestamp)
+		}
+	})
+}
+
+func TestMemorySamplerBlockedSampleAgesOut(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		d := &Duck{}
+		unblock := make(chan struct{})
+		defer func() {
+			close(unblock)
+			d.Close()
+		}()
+		calls := 0
+		d.startMemorySampler(time.Second, func(ctx context.Context) (map[string]int64, error) {
+			calls++
+			if calls == 1 {
+				return map[string]int64{"BASE_TABLE": 4096}, nil
+			}
+			<-unblock
+			return nil, ctx.Err()
+		})
+		time.Sleep(time.Second)
+		synctest.Wait()
+		memory, timestamp := memoryMetrics(t)
+		if memory != 4096 || timestamp <= 0 {
+			t.Fatalf("fresh sample: memory=%g, timestamp=%g", memory, timestamp)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if memory, _ := memoryMetrics(t); memory != 4096 {
+			t.Fatalf("sample exactly two intervals old: memory=%g", memory)
+		}
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		if memory, lastSuccess := memoryMetrics(t); memory != -1 || lastSuccess != timestamp {
+			t.Fatalf("hung sampler: memory=%g, timestamp=%g, want absent memory and timestamp=%g", memory, lastSuccess, timestamp)
+		}
+		if calls != 2 {
+			t.Fatalf("blocked sampler made %d calls, want 2", calls)
+		}
+	})
+}
+
+func TestMemorySamplerUsesIntervalDeadlineAndPacesFromCompletion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		d := &Duck{}
+		defer d.Close()
+		const interval = time.Second
+		var calls atomic.Int32
+		var finished time.Time
+		d.startMemorySampler(interval, func(ctx context.Context) (map[string]int64, error) {
+			if calls.Add(1) > 1 {
+				if gap := time.Since(finished); gap != interval {
+					t.Errorf("next sample started after %s, want %s", gap, interval)
+				}
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) != interval {
+				t.Errorf("read deadline=%v, want one interval from now", deadline)
+			}
+			// A successful query may return after its deadline; keep its result.
+			<-ctx.Done()
+			time.Sleep(interval / 2)
+			finished = time.Now()
+			return map[string]int64{"BASE_TABLE": 4096}, nil
+		})
+		time.Sleep(2 * interval)
+		synctest.Wait()
+		if memory, _ := memoryMetrics(t); memory != 4096 {
+			t.Fatalf("successful overdue sample discarded: memory=%g", memory)
+		}
+		if calls.Load() != 1 {
+			t.Fatalf("sampler made %d calls before the next interval", calls.Load())
+		}
+		time.Sleep(interval / 2)
+		synctest.Wait()
+		if calls.Load() != 2 {
+			t.Fatalf("sampler made %d calls, want 2", calls.Load())
+		}
+	})
+}
+
+func TestDuckCloseBoundsWaitAndDefersHandleCleanup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := &Duck{DB: db}
+		unblock := make(chan struct{})
+		d.startMemorySampler(time.Hour, func(ctx context.Context) (map[string]int64, error) {
+			<-unblock // Ignore cancellation, then use the handle before returning.
+			if err := db.PingContext(context.Background()); err != nil {
+				t.Errorf("sampler's handle closed while still in use: %v", err)
+			}
+			return nil, ctx.Err()
+		})
+		synctest.Wait()
+		start := time.Now()
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(start); elapsed != time.Second {
+			t.Fatalf("Close waited %s, want 1s", elapsed)
+		}
+		if err := d.Close(); err != nil {
+			t.Fatal(err)
+		}
+		mock.ExpectPing()
+		mock.ExpectClose()
+		close(unblock)
+		synctest.Wait()
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// A missing memory series is distinct from a real zero-byte sample.
+func memoryMetrics(t *testing.T) (memory, timestamp float64) {
+	t.Helper()
+	memory, timestamp = -1, -1
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		switch family.GetName() {
+		case "fanout_duckdb_memory_bytes":
+			memory = family.Metric[0].GetGauge().GetValue()
+		case "fanout_duckdb_memory_last_success_timestamp_seconds":
+			timestamp = family.Metric[0].GetGauge().GetValue()
+		}
+	}
+	return
+}
+
+func TestMetricsScrapeDropsStaleMemoryWhileSamplerBlocks(t *testing.T) {
 	var log bytes.Buffer
 	logger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
@@ -35,7 +197,7 @@ func TestMetricsScrapeKeepsLastMemorySampleWhileSamplerBlocks(t *testing.T) {
 		}
 	})
 	calls := 0
-	d.startMemorySampler(time.Millisecond, func(ctx context.Context) (map[string]int64, error) {
+	d.startMemorySampler(10*time.Millisecond, func(ctx context.Context) (map[string]int64, error) {
 		if _, ok := ctx.Deadline(); !ok {
 			return nil, errors.New("missing sampling deadline")
 		}
@@ -82,13 +244,8 @@ func TestMetricsScrapeKeepsLastMemorySampleWhileSamplerBlocks(t *testing.T) {
 			t.Fatalf("/metrics status=%d: %s", recorder.Code, recorder.Body.String())
 		}
 		body := recorder.Body.String()
-		for _, series := range []string{
-			`fanout_duckdb_memory_bytes{tag="BASE_TABLE"} 4096`,
-			`fanout_duckdb_memory_bytes{tag="HASH_TABLE"} 2048`,
-		} {
-			if !strings.Contains(body, series) {
-				t.Fatalf("missing cached series %s", series)
-			}
+		if strings.Contains(body, "fanout_duckdb_memory_bytes") {
+			t.Fatal("blocked sampler still exports stale memory series")
 		}
 		const prefix = "fanout_duckdb_memory_last_success_timestamp_seconds "
 		for _, line := range strings.Split(body, "\n") {
