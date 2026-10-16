@@ -66,7 +66,7 @@ function setup(t, { reduced = false, deferred = false, series = samples, duratio
   const element = key => {
     if (!elements.has(key)) elements.set(key, events({ textContent: averages[key] ?? (key === "[data-rate]" ? "" : "average"),
       hidden: true, attrs: {}, setAttribute(key, value) { this.attrs[key] = value; },
-      getBoundingClientRect: () => ({ width: 600, height: 240 }) }));
+      getBoundingClientRect: () => ({ width: 1030, height: 200 }) }));
     return elements.get(key);
   };
   const root = { dataset: { series: JSON.stringify(series), seconds: String(duration), ceiling: "300", step: "100" }, querySelector: element };
@@ -245,13 +245,17 @@ test("manual pause survives reduced-motion changes and leaves a working Play con
 
 test("theme and size follow tokens and the container; teardown releases observers and timers", async t => {
   const s = setup(t); await s.visible(true); const plot = s.plots[0];
+  assert.equal(plot.width, 1030); assert.equal(plot.height, 200);
+  for (const axis of plot.opts.axes) assert.match(axis.font, /^12px /);
   assert.match(plot.opts.series[1].stroke(), /^dark:/);
   s.element("[data-replay]").dispatch("click");
   assert.equal(s.timers.size, 0, "manual pause still permits responsive/theme redraws");
   s.theme("light"); assert.match(plot.opts.series[1].stroke(), /^light:/);
   assert.match(plot.opts.axes[1].grid.stroke(), /^light:/);
-  s.element("[data-plot]").getBoundingClientRect = () => ({ width: 320, height: 208 });
-  s.observers.size.callback(); assert.equal(plot.width, 320); assert.equal(plot.height, 208);
+  for (const width of [910, 324]) {
+    s.element("[data-plot]").getBoundingClientRect = () => ({ width, height: 200 });
+    s.observers.size.callback(); assert.equal(plot.width, width); assert.equal(plot.height, 200);
+  }
   s.doc.hidden = true; s.doc.dispatch("visibilitychange");
   const redraws = plot.redraws;
   s.theme("dark"); s.observers.size.callback();
@@ -270,7 +274,7 @@ test("server markup retains accessible chart and reserves canvas/control/readout
   assert.match(source, /aria-describedby=\{`\$\{id\}-description`\}/);
   assert.match(source, /<title[^>]+>.*formatRate\(sustained.accepted_per_second\)/);
   assert.match(source, /data-plot aria-hidden="true"/);
-  assert.match(source, /aspect-ratio: 5 \/ 2/);
+  assert.match(source, /height: 200px/);
   assert.match(source, /font-variant-numeric: tabular-nums/);
   assert.match(source, /data-rate hidden style=\{`min-width: \$\{rateWidth\}ch`\}><\/span>/);
   assert.match(source, /const rateWidth = `· \$\{formatRate\(maximum\)\} items\/s, 5 s rate`\.length/);

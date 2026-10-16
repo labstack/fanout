@@ -34,21 +34,22 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
 <style>
   .fo-hero {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     min-width: 0;
-    gap: clamp(2rem, 4vw, 3rem);
-    padding: clamp(1.5rem, 4vw, 3rem) 0 2rem;
+    gap: var(--fo-capture-gap);
+    padding: 2rem 0 0;
     font-family: var(--fo-font-display);
   }
 
-  .fo-hero-copy { max-width: 58rem; }
+  .fo-hero-copy { min-width: 0; max-width: 60rem; }
 
   .fo-hero-copy h1#_top {
     font-family: var(--fo-font-display);
-    font-size: clamp(2.1rem, 4vw, 3.5rem);
+    font-size: clamp(2.1rem, 3.5vw, 3rem);
     line-height: 1.12;
     letter-spacing: -0.02em;
     font-weight: 600;
-    margin: 0 0 1.25rem;
+    margin: 0 0 1rem;
     color: var(--sl-color-white);
     text-wrap: balance;
     overflow-wrap: normal;
@@ -59,8 +60,7 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
     color: var(--sl-color-gray-2);
     font-size: 1.1rem;
     line-height: 1.7;
-    margin: 0 0 1.5rem;
-    max-width: 54ch;
+    margin: 0 0 1.25rem;
     text-wrap: pretty;
   }
 
@@ -104,17 +104,6 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
   .fo-action-primary:hover {
     background: var(--sl-color-gray-1);
     border-color: var(--sl-color-gray-1);
-  }
-
-  @media (min-width: 72rem) {
-    .fo-hero {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
-      align-items: center;
-    }
-
-    .fo-hero-copy h1#_top {
-      font-size: clamp(2rem, 2.75vw, 2.5rem);
-    }
   }
 
   @media (prefers-reduced-motion: no-preference) {

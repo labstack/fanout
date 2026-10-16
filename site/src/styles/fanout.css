@@ -119,6 +119,50 @@ body:has(.fo-hero) header.header .sl-flex {
   justify-content: space-between;
 }
 
+/* One rhythm for the landing page, including the gap across Starlight's hero
+   and Markdown wrappers. Keep the content edges shared by copy and captures. */
+body:has(.fo-hero) {
+  --fo-section-gap: 4rem;
+  --fo-figure-gap: 2rem;
+  --fo-capture-gap: 1.5rem;
+  --sl-content-pad-x: 2rem;
+}
+
+body:has(.fo-hero) .sl-container {
+  min-width: 0;
+  margin-inline: auto;
+}
+
+body:has(.fo-hero) :is(.main-frame, .main-pane) {
+  min-width: 0;
+}
+
+body:has(.fo-hero) .sl-container > .sl-markdown-content {
+  display: grid;
+  /* Auto-minimum tracks can grow to the captures' intrinsic image width. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: var(--fo-section-gap);
+  margin-top: var(--fo-figure-gap);
+}
+
+body:has(.fo-hero) .sl-markdown-content > * {
+  min-width: 0;
+  margin: 0;
+}
+
+@media (max-width: 71.999rem) {
+  body:has(.fo-hero) { --fo-section-gap: 3.5rem; }
+}
+
+@media (max-width: 39.999rem) {
+  body:has(.fo-hero) {
+    --fo-section-gap: 3rem;
+    --fo-capture-gap: 1.25rem;
+    --sl-content-pad-x: 1rem;
+  }
+}
+
 /* Prose uses the productive member of the same Plex family. The mono identity
    remains in every heading and piece of chrome, while paragraphs and lists get
    the denser word shapes and calmer rhythm of a proportional text face. */
