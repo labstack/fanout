@@ -13,10 +13,9 @@ import (
 // spread their start_time over spreadMins, which is what forces the edge rollup
 // to sub-window: a seed load or a backfill compresses a wide start_time range
 // into a narrow ingested window.
-func seedEdgeSpread(t *testing.T, d *Duck, rows, spreadMins int) {
+func seedEdgeSpread(t *testing.T, d *Duck, baseTime time.Time, rows, spreadMins int) {
 	t.Helper()
 	ctx := context.Background()
-	baseTime := time.Now().UTC().Truncate(time.Minute)
 	for _, spec := range []struct{ kind, span, parent, service string }{
 		{"SPAN_KIND_SERVER", "parent-%d", "", "svc-a"},
 		{"SPAN_KIND_CLIENT", "child-%d", "parent-%d", "svc-b"},
@@ -47,7 +46,7 @@ FROM range(?, ?) t(i), input`,
 	}
 }
 
-func newSpreadDuck(t *testing.T, rows, spreadMins int) *Duck {
+func newSpreadDuck(t *testing.T, baseTime time.Time, rows, spreadMins int) *Duck {
 	t.Helper()
 	db := openTestDuck(t)
 	if err := CreateTables(db); err != nil {
@@ -57,7 +56,7 @@ func newSpreadDuck(t *testing.T, rows, spreadMins int) *Duck {
 		t.Fatalf("CreateViews: %v", err)
 	}
 	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
-	seedEdgeSpread(t, d, rows, spreadMins)
+	seedEdgeSpread(t, d, baseTime, rows, spreadMins)
 	return d
 }
 
@@ -69,8 +68,10 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 		spreadMins = 300
 	)
 	ctx := context.Background()
+	// Both databases need the same buckets even if setup crosses a minute.
+	baseTime := time.Now().UTC().Truncate(time.Minute)
 
-	undisturbed := newSpreadDuck(t, rows, spreadMins)
+	undisturbed := newSpreadDuck(t, baseTime, rows, spreadMins)
 	if _, err := undisturbed.refreshEdgeRollup(ctx); err != nil {
 		t.Fatalf("undisturbed pass: %v", err)
 	}
@@ -78,8 +79,12 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 	if freeCursor == 0 {
 		t.Fatal("the undisturbed pass consumed the whole window; this seed no longer exercises sub-windowing")
 	}
+	wantCursor := baseTime.Add(-time.Duration(spreadMins-1)*time.Minute + 30*time.Minute).UnixNano()
+	if freeCursor != wantCursor {
+		t.Fatalf("undisturbed pass cursor=%d, want one sub-window ending at %d", freeCursor, wantCursor)
+	}
 
-	yielding := newSpreadDuck(t, rows, spreadMins)
+	yielding := newSpreadDuck(t, baseTime, rows, spreadMins)
 	if _, err := edgePassBeforeQueuedPublisher(t, yielding, false); err != nil {
 		t.Fatalf("yielding pass: %v", err)
 	}
@@ -115,7 +120,8 @@ func TestEdgeRollupYieldsToAQueuedPublisher(t *testing.T) {
 // An admitted pass completes one sub-window even if a publisher's grace
 // expires while the pass is in flight.
 func TestEdgeRollupAlwaysCompletesOneSubWindow(t *testing.T) {
-	d := newSpreadDuck(t, 4_000, 180)
+	baseTime := time.Now().UTC().Truncate(time.Minute)
+	d := newSpreadDuck(t, baseTime, 4_000, 180)
 	rows, err := edgePassBeforeQueuedPublisher(t, d, true)
 	if err != nil {
 		t.Fatalf("pass with a publisher queued: %v", err)
