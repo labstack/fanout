@@ -1,7 +1,7 @@
 ---
 title: Privacy
 description: What fanout.run measures, what it never collects, and how to turn analytics off.
-summary: The website's own privacy terms and the control that turns its analytics on or off. Not about a Fanout instance you run, which sends nothing anywhere.
+summary: Website analytics, consent controls, browser storage and hosting; separate from a self-hosted Fanout instance.
 read_when:
   - You want to know what this website records about your visit.
   - You allowed or declined analytics and want to change that answer.
@@ -10,11 +10,10 @@ status: shipped
 
 import AnalyticsPreference from "../../components/AnalyticsPreference.astro";
 
-This page is about **this website**, `fanout.run`. It is not about the Fanout
-you run: a Fanout instance keeps its telemetry in its own storage on its own
-machine and reports nothing to us. There is no phone-home, no licence check and
-no usage beacon in the binary. Nothing on this page changes that, because
-nothing on this page is in it.
+This page describes `fanout.run`. A self-hosted Fanout instance stores telemetry
+on its own machine and sends no usage reports to LabStack. When you enable the
+built-in agent, it sends conversation content and tool results to your configured
+AI provider. External MCP clients receive the results of the tools they call.
 
 ## Website analytics
 
@@ -22,18 +21,14 @@ nothing on this page is in it.
 
 ### When it runs
 
-- **In the EEA, the UK, Guernsey, the Isle of Man and Jersey**, nothing is
-  loaded and no identifier is stored until you say yes. The prompt is the only
-  thing that appears before you answer.
+- **In the EEA, the UK, Guernsey, the Isle of Man and Jersey**, the analytics tag is
+  loaded and its identifier stored only after you allow analytics.
 - **Everywhere else**, analytics run and the control above turns them off.
 - **If your browser sends Global Privacy Control**, analytics do not run and
   you are not asked, because you have already answered. Choosing Allow above
-  overrides it for this browser: it is the more specific answer, and this site
-  does not treat a browser default as outranking your own decision.
+  overrides that signal for this browser.
 
-Do Not Track is not consulted. The specification was withdrawn in 2019, Safari
-removed the header, and the browsers that still send one leave it off by
-default, so it says nothing reliable about what a reader wants.
+Do Not Track is not consulted.
 
 Which of these applies is decided from the country Cloudflare reports for your
 connection. If that lookup fails, the site asks rather than assumes.
@@ -51,20 +46,18 @@ Two things are cut down before they leave the browser:
 - **The referrer is reduced to its site.** We record that you came from a search
   engine, not what you searched for.
 
-Some clicks and copies are counted as events: following an outbound link from
-the footer or the landing page, and copying the install command. These record
-which control was used, not what you typed.
+Outbound clicks in the header, footer and landing page record the control,
+link text and destination URL. Copying the install command records the control
+used.
 
-Google's advertising features are switched off — no Google Signals, no ad
-personalisation, and ad data redaction is on — so the data is not used to build
-an advertising profile of you.
+The site disables Google Signals and ad personalisation and enables ad data
+redaction.
 
 ### What is never sent
 
-Nothing you enter anywhere is collected, because this site has no forms, no
-accounts, no search box that reports what you typed, and no session recording or
-heatmaps. It does not attempt to identify you. And, to say it once more: no data
-from any Fanout instance passes through this site.
+The site does not send search terms or collect form input. It has no accounts,
+session recording or heatmaps. Self-hosted telemetry does not pass through this
+website.
 
 ### Storage
 
@@ -92,5 +85,4 @@ you allow analytics.
 Questions about this page belong in
 [an issue](https://github.com/labstack/fanout/issues). The site's source,
 including the analytics code described here, is in
-[the repository](https://github.com/labstack/fanout/tree/main/site) — this page
-describes what that code does, and the code is the thing you can check.
+[the repository](https://github.com/labstack/fanout/tree/main/site).
