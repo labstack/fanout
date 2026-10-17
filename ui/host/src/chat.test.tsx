@@ -315,6 +315,16 @@ it.each(["mixed", "presets", "custom"])("expands requested presets over discover
     } finally { await act(async () => root.unmount()); }
   }
 });
+it("keeps all-empty views collapsed and opens the turn's last view with data", async () => {
+  const empty = appMessage("two", "query_telemetry", "No matches") as Message & { content: { tool_result: ReturnType<typeof fixture> } };
+  for (const result of empty.content.tool_result.results) result.status = "empty";
+  const root = await mount(value({ messages: [appMessage("one", "query_telemetry", "Data"), empty] }));
+  try {
+    const toggles = [...document.querySelectorAll('button[aria-expanded]')];
+    expect(toggles.map(toggle => toggle.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+    expect(toggles[1].textContent).toContain("empty");
+  } finally { await act(async () => root.unmount()); }
+});
 it("renders the latest server view snapshot without a host preset-winner rule", async () => {
   const preset = appMessage("one", "get_service_topology", "Requested");
   const custom = structuredClone(preset) as Message & { content: Record<string, unknown> }; custom.id = "two"; custom.content.tool_name = "query_telemetry"; (custom.content.tool_result as ReturnType<typeof fixture>).view.kind="query";
@@ -327,7 +337,7 @@ it("renders the latest server view snapshot without a host preset-winner rule", 
 
 it("collapses earlier views, dedupes within a turn, expands accessibly and restores on reload", async () => {
   const app = (id: string, title: string, changed = false): Message => {
-    const f = fixture(); f.dashboard.name = title; f.dashboard.panels[0].title = title;
+    const f = fixture(); f.results[0].status = "ok"; f.dashboard.name = title; f.dashboard.panels[0].title = title;
     f.view.key=(changed?"1":"0").repeat(64);
     if (changed) f.dashboard.time = { from: "2026-10-07T18:45:00Z", to: "2026-10-07T19:45:00Z", refresh: "off" };
     return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: f, is_error: false } } as Message;
@@ -336,7 +346,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
   let root = await mount(value({ messages }));
   await vi.waitFor(() => expect(document.querySelectorAll("[data-app-frame]")).toHaveLength(1));
   const summary = document.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')!;
-  expect(summary.textContent).toContain("Discovery · logs · empty");
+  expect(summary.textContent).toContain("Discovery · logs · 0 rows");
   expect(document.querySelectorAll("[data-chat-app]")).toHaveLength(2);
   await act(async () => summary.click());
   expect(summary.getAttribute("aria-expanded")).toBe("true");
@@ -359,7 +369,7 @@ it("shows app tool errors and old string activities without throwing", async () 
 
 it("keeps distinct captured windows and variables, and resets dedupe at the next user turn", async () => {
   const app = (id: string, from: number, vars?: Record<string, string>): Message => {
-    const fragment = fixture(); fragment.results[0].from_ms = from; fragment.vars = vars; fragment.view.key=(vars?"3":String(from)).repeat(64);
+    const fragment = fixture(); fragment.results[0].status = "ok"; fragment.results[0].from_ms = from; fragment.vars = vars; fragment.view.key=(vars?"3":String(from)).repeat(64);
     return { id, role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message;
   };
   const root = await mount(value({ messages: [{ id: "u1", role: "user", content: "Show" } as Message, app("one", 0), app("two", 1), app("three", 0, { service: "checkout" }), { id: "u2", role: "user", content: "Again" } as Message, app("four", 0)] }));
@@ -371,7 +381,7 @@ it("keeps distinct captured windows and variables, and resets dedupe at the next
 
 it("dedupes a complete custom map and topology preset with different row limits", async () => {
   const map = fixture("service_map"); map.dashboard.panels[0].query = { from: "spans", limit: 20 };
-  map.results[0].frame = { columns: [{ name: "service", type: "string", role: "dimension" }], values: [["checkout"]], rows: 1 };
+  map.results[0].status = "ok"; map.results[0].frame = { columns: [{ name: "service", type: "string", role: "dimension" }], values: [["checkout"]], rows: 1 };
   const preset = structuredClone(map); preset.dashboard.name = "Telemetry"; preset.dashboard.panels[0].id = "services"; preset.dashboard.panels[0].title = "Service dependencies"; preset.dashboard.panels[0].query!.limit = 400; preset.results[0].id = "services"; preset.view.kind="preset";
   const messages = [map, preset].map((fragment, i) => ({ id: String(i), role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: i ? "get_service_topology" : "query_telemetry", tool_input: {}, tool_result: fragment, is_error: false } } as Message));
   const root = await mount(value({ messages }));
