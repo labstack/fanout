@@ -23,7 +23,9 @@ LIMIT ?`
 
 // Uninstrumented peers are visible through client spans; they do not require
 // another rollup or an integration with the remote service.
-const topologyExternalQuery = `WITH clients AS (
+// Materialize the explicit client projection once for the peer and edge
+// aggregates, so their anti-joins do not repeat the underlying span scans.
+const topologyExternalQuery = `WITH clients AS MATERIALIZED (
  SELECT s.service AS caller,s.peer_service AS callee,s.duration_ms,
  CASE WHEN s.status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END AS error
  FROM spans s WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
