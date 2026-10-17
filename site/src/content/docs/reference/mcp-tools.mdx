@@ -133,7 +133,7 @@ Read-only. Calling it changes nothing.
 
 ## get_service_performance
 
-**Service performance explorer** — Display separate latency, error rate and request rate panels plus slow endpoints for one service or the system.
+**Service performance explorer** — Display separate latency, error rate and request rate panels plus slow operations (HTTP, gRPC and consumers) for one service or the system.
 
 Read-only. Calling it changes nothing.
 
@@ -142,7 +142,7 @@ Read-only. Calling it changes nothing.
 | Input | Type | Required | Means |
 |---|---|---|---|
 | `from` | `string` | no | Absolute start, RFC3339Nano; requires to and excludes window |
-| `limit` | `integer` | no | Maximum endpoints to return, from 1 to 500 |
+| `limit` | `integer` | no | Maximum operations to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional exact OpenTelemetry service name; omit for the whole system |
 | `to` | `string` | no | Absolute end, RFC3339Nano; requires from and excludes window |

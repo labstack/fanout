@@ -28,7 +28,7 @@ const ProtocolVersion = "2026-07-28"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every panel is ok or deliberately empty, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
+const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every panel is ok or deliberately empty, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
 
 type Observability interface {
 	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
@@ -62,7 +62,7 @@ type PerformanceInput struct {
 	Window    string     `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h"`
 	Namespace string     `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	Service   string     `json:"service,omitempty" jsonschema:"Optional exact OpenTelemetry service name; omit for the whole system"`
-	Limit     int        `json:"limit,omitempty" jsonschema:"Maximum endpoints to return, from 1 to 500"`
+	Limit     int        `json:"limit,omitempty" jsonschema:"Maximum operations to return, from 1 to 500"`
 }
 
 type TraceInput struct {
@@ -349,7 +349,7 @@ func (s *Server) registerTools() {
 	fragmentTool(s, &mcp.Tool{
 		Name:        "get_service_performance",
 		Title:       "Service performance explorer",
-		Description: "Display separate latency, error rate and request rate panels plus slow endpoints for one service or the system.",
+		Description: "Display separate latency, error rate and request rate panels plus slow operations (HTTP, gRPC and consumers) for one service or the system.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(panelsAppURI),
 	}, s.performance)
