@@ -10,12 +10,14 @@ data/
 # package fixtures, which are source.
 /testdata/
 
+# Dependencies and their tool caches, in every workspace.
+**/node_modules/
+
 # Build
 /.cache/
 telemetry.test
 bin/
 fanout
-ui/host/node_modules/
 ui/host/dist/
 
 # Dev files
@@ -35,7 +37,6 @@ tmp/
 .firecrawl/
 
 # Local documentation-site outputs.
-site/node_modules/
 site/dist/
 site/.astro/
 
