@@ -1,16 +1,13 @@
 ---
-title: Fanout
-description: One binary that ingests OpenTelemetry, stores it, and answers questions about it.
-summary: OpenTelemetry observability in one binary, with a system overview, service map and trace waterfall.
+title: Observability your agents can operate.
+description: Send OpenTelemetry to one binary. Investigate with Fanout's built-in agent, or connect yours over MCP.
+summary: Investigate with Fanout's built-in agent, or use the same typed tools from your own agent over MCP.
 template: splash
-# The landing page's content title is also the site title, so Starlight's
-# default would be "Fanout · Fanout". A frontmatter title replaces that default
-# instead of adding a second <title>; the same override gives social cards a
-# useful proposition. The canonical stays at the public root even though the
-# static file produced by Astro is named index.html.
+# Override Starlight's title order consistently for search and social cards.
+# The canonical stays at the public root even though Astro writes index.html.
 head:
   - tag: title
-    content: "Fanout · OpenTelemetry observability in one binary."
+    content: "Fanout · Observability your agents can operate."
   - tag: link
     attrs:
       rel: canonical
@@ -18,14 +15,14 @@ head:
   - tag: meta
     attrs:
       property: og:title
-      content: "Fanout · OpenTelemetry observability in one binary."
+      content: "Fanout · Observability your agents can operate."
   - tag: meta
     attrs:
       property: og:url
       content: "https://fanout.run/"
 hero:
-  title: See what broke without operating an observability stack.
-  tagline: Send OpenTelemetry traces, logs and metrics to one binary to investigate incidents and run alerts.
+  title: Observability your agents can operate.
+  tagline: Send OpenTelemetry to one binary. Investigate with Fanout's built-in agent, or connect yours over MCP.
   actions:
     - text: Install Fanout
       link: /start/install
@@ -36,54 +33,65 @@ status: shipped
 
 import ProofStrip from "../../components/landing/ProofStrip.astro";
 import CaptureRow from "../../components/landing/CaptureRow.astro";
-import ProductCapture from "../../components/landing/ProductCapture.astro";
+import ProductVideo from "../../components/landing/ProductVideo.astro";
 import CtaBar from "../../components/landing/CtaBar.astro";
+import McpCommand from "../../components/landing/McpCommand.astro";
+import ThroughputReplay from "../../components/landing/ThroughputReplay.astro";
 import ThroughputReplayClient from "../../components/landing/ThroughputReplayClient.astro";
 
 <ThroughputReplayClient />
 
 {/* Keep prose as Markdown children: the Markdown and llms.txt routes strip component tags and retain their content. Keep MDX comments on one line. */}
 
+<ThroughputReplay />
+
 <ProofStrip>
 
-- [**415,859 items/s** sustained](/explanation/performance)
-- **One binary**
+- **MCP** for your agents
 - **OTLP** traces, logs and metrics
 - **Parquet** you own
 - **Apache-2.0**
 
 </ProofStrip>
 
-<CaptureRow>
+<CaptureRow eyebrow="Dashboards">
 
-## Every service on one screen.
+## Dashboards from a sentence.
 
-See request rate, errors and latency across your system. Open a dashboard
-or ask a question to investigate the services that need attention.
+Ask for checkout request rate, errors, p95 latency and slowest dependencies. The agent builds and saves the dashboard.
 
-<ProductCapture slot="capture" view="overview" alt="Fanout System overview dashboard with request rate, error rate, latency and service panels." />
-
-</CaptureRow>
-
-<CaptureRow>
-
-## See how your services connect.
-
-Follow calls across services and external dependencies, with health, traffic and
-latency on the map. Open a service to inspect its traces.
-
-<ProductCapture slot="capture" view="service-map" alt="Fanout service map showing calls between services and external dependencies, with health and latency." />
+<ProductVideo slot="capture" view="dashboard" eager spedUp alt="Fanout agent building and saving a checkout dashboard, then opening its panels." description="A request for checkout request rate, error rate, p95 latency and slowest dependencies becomes a saved dashboard with rendered panels." />
 
 </CaptureRow>
 
-<CaptureRow>
+<CaptureRow eyebrow="Investigation">
 
-## Find where the time went.
+## Ask what broke.
 
-Open a trace to see each operation in a waterfall, with duration, service and
-error status alongside correlated logs.
+The agent queries traces, logs and metrics, then explains what the evidence shows. Try it on the [live demo](https://demo.fanout.run/chat): sign in with your email, no password needed.
 
-<ProductCapture slot="capture" view="trace" alt="Fanout trace waterfall showing operation durations across services and correlated logs." />
+<ProductVideo slot="capture" view="chat" spedUp alt="Fanout agent investigating why checkout is slower, with telemetry evidence inline." description="A checkout latency question leads to queries across traces, logs and metrics, evidence inline and an explanation of what it shows." />
+
+</CaptureRow>
+
+<CaptureRow eyebrow="MCP" columns>
+
+## Use the same tools from your agent.
+
+Query telemetry, inspect traces and save dashboards through typed MCP tools.
+
+<ul className="fo-mcp-tools">
+  <li><code>get_telemetry_schema</code></li>
+  <li><code>query_telemetry</code></li>
+  <li><code>search_logs</code></li>
+  <li><code>inspect_trace</code></li>
+  <li><code>preview_panels</code></li>
+  <li><code>create_dashboard</code></li>
+</ul>
+
+<p><a className="fo-link" href="/guides/connect-over-mcp">Connect an agent over MCP →</a></p>
+
+<McpCommand slot="capture" />
 
 </CaptureRow>
 

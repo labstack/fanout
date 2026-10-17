@@ -10,7 +10,7 @@ export default defineConfig({
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
   timeout: 120_000,
-  globalTimeout: 12 * 60_000,
+  globalTimeout: (process.env.FANOUT_LANDING_RECORDINGS === "1" ? 40 : 12) * 60_000,
   expect: { timeout: 30_000 },
   reporter: [["list"], ["./e2e/failure-report.ts", { outputFolder: "playwright-report" }]],
   outputDir: "test-results",

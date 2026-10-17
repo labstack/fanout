@@ -1,6 +1,4 @@
 ---
-import ThroughputReplay from "./ThroughputReplay.astro";
-
 const { data } = Astro.locals.starlightRoute.entry;
 const { title = data.title, tagline, actions = [] } = data.hero ?? {};
 ---
@@ -28,7 +26,6 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
       )
     }
   </div>
-  <ThroughputReplay />
 </div>
 
 <style>

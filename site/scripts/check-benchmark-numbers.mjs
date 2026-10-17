@@ -20,8 +20,9 @@ for (const relative of files) {
     equal(relative, "sustained/preview items/s", amount(match[1]), benchmark.sustained.accepted_per_second);
     rates++;
   }
-  // A throughput heading cannot silently disappear from the prose contract.
-  if (!rates) failures.push(`${relative}: missing authored headline items/s`);
+  // The landing replay renders its headline directly from the benchmark data.
+  const dataHeadline = relative === "../src/content/docs/index.mdx" && /^<ThroughputReplay \/>$/m.test(source);
+  if (!rates && !dataHeadline) failures.push(`${relative}: missing authored headline items/s`);
   const perSignal = [
     ["spans", benchmark.sustained.spans_per_second],
     ["log records", benchmark.sustained.log_records_per_second],

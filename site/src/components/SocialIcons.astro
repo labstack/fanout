@@ -1,0 +1,14 @@
+---
+import SocialIcons from "@astrojs/starlight/components/SocialIcons.astro";
+---
+
+<a class="fo-link fo-header-docs" href="/start/what-fanout-is">Docs</a>
+<a class="fo-link fo-header-demo" href="https://demo.fanout.run">Live demo</a>
+<SocialIcons />
+
+<style>
+  a { font-family: var(--fo-font-display); font-size: 0.8125rem; white-space: nowrap; }
+  @media (max-width: 39.999rem) {
+    .fo-header-docs { display: none; }
+  }
+</style>

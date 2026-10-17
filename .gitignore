@@ -28,6 +28,8 @@ ui/host/test-results/
 # Documentation site workspace outputs.
 site/dist/
 site/.astro/
+site/src/assets/landing/*.webm
+site/src/assets/landing/*.mp4
 
 # Test/temp
 # Root-scoped: a bare `testdata/` would also ignore Go package fixtures, which

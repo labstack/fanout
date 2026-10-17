@@ -45,6 +45,8 @@
 :root {
   --fo-font-display: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --fo-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --fo-frame-radius: 8px;
+  --fo-frame-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
 
   /* Mono owns the brand, navigation, headings and technical artifacts. Sans is
      opted into by prose, below. */
@@ -76,6 +78,7 @@
 }
 
 :root[data-theme="light"] {
+  --fo-frame-shadow: 0 2px 4px rgb(23 27 36 / 0.04), 0 12px 32px rgb(23 27 36 / 0.08);
   --sl-color-accent-low: #ece3fb;
   --sl-color-accent: #7c4dcc;
   --sl-color-accent-high: #5b32a3;
@@ -107,6 +110,35 @@
   height: 1.35rem;
   flex: 0 0 auto;
   background: url("/favicon.svg") center / contain no-repeat;
+}
+
+.fo-link {
+  color: var(--sl-color-accent-high);
+  text-decoration: none;
+  text-underline-offset: 0.25em;
+}
+.fo-link:hover { color: var(--sl-color-accent); text-decoration: underline; }
+.fo-link:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+
+.fo-product-frame {
+  overflow: hidden;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: var(--fo-frame-radius);
+  background: var(--sl-color-black);
+  box-shadow: var(--fo-frame-shadow);
+}
+
+@media (max-width: 49.999rem) {
+  header.header .right-group { display: flex; flex-shrink: 0; }
+  header.header .header { gap: 0.5rem; }
+  header.header :is(.right-group, .social-icons) { gap: 0.75rem; }
+  header.header .social-icons::after { display: none; }
+}
+
+@media (max-width: 39.999rem) {
+  header.header .site-title { font-size: 1.125rem; }
+  header.header starlight-theme-select select { width: 2rem; padding-inline: 0; color: transparent; }
+  header.header starlight-theme-select .caret { display: none; }
 }
 
 /* The landing page stays mono-led; the proportional face is reserved for the
@@ -150,6 +182,24 @@ body:has(.fo-hero) .sl-markdown-content > * {
   min-width: 0;
   margin: 0;
 }
+
+.fo-mcp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 1.25rem 0 0;
+}
+
+.fo-mcp-tools > li {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+.fo-mcp-tools code { font-family: var(--fo-font-display); }
 
 @media (max-width: 71.999rem) {
   body:has(.fo-hero) { --fo-section-gap: 3.5rem; }

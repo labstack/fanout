@@ -1,16 +1,4 @@
----
-import { benchmark, formatRate } from "../../data/benchmark";
-
-// Keep the Markdown statistic readable in llms.txt and enforce the shared report
-// as its authority: a changed result requires updating the authored text too.
-const content = await Astro.slots.render("default");
-const sustained = `${formatRate(benchmark.sustained.accepted_per_second)} items/s`;
-if (!content.includes(`<strong>${sustained}</strong>`)) {
-  throw new Error(`Landing stat band must use the published sustained rate: ${sustained}`);
-}
----
-
-<div class="fo-proof not-content" set:html={content} />
+<div class="fo-proof not-content"><slot /></div>
 
 <style>
   .fo-proof :global(ul) {
@@ -18,7 +6,7 @@ if (!content.includes(`<strong>${sustained}</strong>`)) {
     margin: 0;
     padding: 1.25rem 0;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     align-items: center;
     justify-content: space-between;
     gap: 1rem 1.5rem;
@@ -41,6 +29,5 @@ if (!content.includes(`<strong>${sustained}</strong>`)) {
   }
   @media (max-width: 39.999rem) {
     .fo-proof :global(ul) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .fo-proof :global(li:first-child) { grid-column: 1 / -1; }
   }
 </style>
