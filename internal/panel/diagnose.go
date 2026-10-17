@@ -15,8 +15,8 @@ const maxDiagnosedFilters = 8
 // diagnose explains an empty structured panel. It counts the signal in the
 // window, then reruns the count with each of the first maxDiagnosedFilters
 // filters removed in turn. The filter whose removal recovers the most rows is
-// named, with the values seen for its field when it was an equality. Ties
-// keep the author's filter order.
+// named in the context of the active combination, with the values seen for its
+// field when it was an equality. Ties keep the author's filter order.
 func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
 	if p.Query == nil {
 		return "The query returned no rows for this time range."
@@ -78,6 +78,13 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 		f := active[best]
 		others := append(append([]Filter{}, active[:best]...), active[best+1:]...)
 		message := fmt.Sprintf("No %s match %s. Without that filter, %d do.", sig.name, f.Source, recovered)
+		if len(active) > 1 {
+			var sources []string
+			for _, filter := range active {
+				sources = append(sources, "("+filter.Source+")")
+			}
+			message = fmt.Sprintf("No %s match the combination of filters: %s. Without %s, %d match the remaining filters.", sig.name, strings.Join(sources, " AND "), f.Source, recovered)
+		}
 		if f.EqField != "" {
 			if seen := e.topValues(ctx, sig, f.EqField, others, scope); seen != "" {
 				message += " Values seen: " + seen + "."

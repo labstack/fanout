@@ -247,7 +247,7 @@ func TestFragmentVarsRoundTripAndAppHelpers(t *testing.T) {
 	}
 }
 
-func TestFragmentPresetsExecutedSummariesAndEndpointScope(t *testing.T) {
+func TestFragmentPresetsExecutedSummariesAndOperationScope(t *testing.T) {
 	s := panelServerFixture(t, true)
 	for _, name := range []string{"overview", "performance", "topology", "logs", "trace"} {
 		content, f, err := s.presetFragment(t.Context(), QueryInput{Namespace: "shop"}, name, "checkout", "ERROR", "timeout")
@@ -261,25 +261,25 @@ func TestFragmentPresetsExecutedSummariesAndEndpointScope(t *testing.T) {
 			if r.Status == panel.StatusError {
 				t.Fatalf("%s: %+v", name, r)
 			}
-			if r.ID == "endpoints" {
+			if r.ID == "operations" {
 				if r.Frame == nil {
-					t.Fatal("missing endpoints frame")
+					t.Fatal("missing operations frame")
 				}
 				cart := false
 				for c, col := range r.Frame.Columns {
-					if col.Name == "http_route" {
+					if col.Name == "operation" {
 						for _, value := range r.Frame.Values[c] {
-							if value == "/cart" {
+							if value == "GET cart" {
 								cart = true
 							}
 							if value == "" {
-								t.Fatal("empty route included")
+								t.Fatal("unexpected empty operation")
 							}
 						}
 					}
 				}
 				if !cart {
-					t.Fatal("missing /cart endpoint")
+					t.Fatal("missing GET cart operation")
 				}
 			}
 		}

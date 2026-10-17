@@ -197,8 +197,8 @@ func fragmentPreset(kind, service, namespace, severity, search string, limit int
 		add("latency", "p95 latency", "timeseries", "spans", "p95(duration_ms)", "ms", nil, "auto")
 		add("errors", "Error rate", "timeseries", "spans", "error_rate()", "percent", nil, "auto")
 		add("requests", "Request rate", "timeseries", "spans", "rate()", "per_second", nil, "auto")
-		add("endpoints", "Slow endpoints", "table", "spans", "p95(duration_ms)", "ms", []string{"http_route"}, "")
-		d.Panels[len(d.Panels)-1].Query.Where = append(d.Panels[len(d.Panels)-1].Query.Where, "http_route <> ''")
+		add("operations", "Slow operations", "table", "spans", "p95(duration_ms)", "ms", []string{"operation"}, "")
+		d.Panels[len(d.Panels)-1].Query.Where = append(d.Panels[len(d.Panels)-1].Query.Where, "kind IN ('SPAN_KIND_SERVER','SPAN_KIND_CONSUMER')")
 	case "logs":
 		if severity != "" {
 			filters = append(filters, "severity = "+literal(severity))

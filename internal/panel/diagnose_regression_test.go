@@ -65,11 +65,42 @@ func TestDiagnosisNamesOnlyEmptyingRouteFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := results[0]
-	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "match http_route <> ''. Without that filter, 120 do.") {
+	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without http_route <> '', 120 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
-	if strings.Contains(r.Diagnosis, "match service = $service") {
+	if strings.Contains(r.Diagnosis, "Without service = $service") {
 		t.Fatalf("wrong filter blamed: %s", r.Diagnosis)
+	}
+}
+
+func TestDiagnosisReportsCombinationWhenEachFilterMatchesAlone(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, []telemetry.Span{
+		{ServiceName: "checkout", Kind: "SPAN_KIND_SERVER", Name: "PlaceOrder", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
+		{ServiceName: "fraud-detection", Kind: "SPAN_KIND_CONSUMER", Name: "orders process", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
+	}, nil)
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	service, kind := "service = 'checkout'", "kind = 'SPAN_KIND_CONSUMER'"
+	d := Dashboard{Name: "Diagnosis", Time: Time{Range: "1h"}}
+	for i, where := range [][]string{{service}, {kind}, {service, kind}} {
+		d.Panels = append(d.Panels, Panel{ID: fmt.Sprintf("p%d", i), Title: "Spans", Viz: "table", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: where}})
+	}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results[:2] {
+		if r.Status != StatusOK || r.Frame == nil || r.Frame.Rows != 1 {
+			t.Fatalf("filter alone should match: %+v", r)
+		}
+	}
+	// Removing either filter recovers a row. Author order breaks the tie,
+	// but checkout is present, so the diagnosis must name the combination.
+	want := "No spans match the combination of filters: (service = 'checkout') AND (kind = 'SPAN_KIND_CONSUMER'). Without service = 'checkout', 1 match the remaining filters. Values seen: fraud-detection (1)."
+	if r := results[2]; r.Status != StatusEmpty || r.Diagnosis != want {
+		t.Fatalf("result = %+v, want diagnosis %q", r, want)
 	}
 }
 
@@ -83,7 +114,10 @@ func TestDiagnosisChoosesMostSelectiveQualifyingFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := results[0]; r.Status != "empty" || !strings.Contains(r.Diagnosis, "match http_route = '/api/cart'. Without that filter, 120 do.") {
+	want := "No spans match the combination of filters: (service = $service) AND (http_route = '/api/cart'). Without http_route = '/api/cart', 120 match the remaining filters. Values seen: /cart (60), /quote (60)."
+	// Each filter alone matches spans: checkout has 120 and /api/cart has
+	// 60. Only their combination is empty; neither filter is absent globally.
+	if r := results[0]; r.Status != StatusEmpty || r.Diagnosis != want {
 		t.Fatalf("result = %+v", r)
 	}
 }
@@ -107,7 +141,7 @@ func TestDiagnosisSkipsFailingFilterRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "match http_route = '/missing'. Without that filter, 1 do.") {
+	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without http_route = '/missing', 1 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
 }

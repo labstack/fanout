@@ -146,7 +146,7 @@ it("shares one zoom group and batches all performance panels when brushing a sib
     expect(latency.group).toBe(errors.group); expect(errors.group).toBe(requests.group);
     await act(async () => { latency.onZoom!(100000, 200000); errors.onZoom!(100000, 200000); });
     expect(view.onQuery).toHaveBeenCalledTimes(1);
-    expect(view.onQuery.mock.lastCall![0].dashboard.panels.map((p: { id: string }) => p.id)).toEqual(["latency", "errors", "requests", "endpoints"]);
+    expect(view.onQuery.mock.lastCall![0].dashboard.panels.map((p: { id: string }) => p.id)).toEqual(["latency", "errors", "requests", "operations"]);
     for (const id of ["latency", "errors", "requests"]) expect(ui.cards[id].zoomed).toBe(true);
     await act(async () => ui.cards.requests.onZoomReset!());
     expect(view.onQuery.mock.lastCall![0].time).toEqual(f.dashboard.time);

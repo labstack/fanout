@@ -1,7 +1,7 @@
 {
   "view": {
     "kind": "preset",
-    "key": "fa7c95c69601faab1058f0577d8429987d4df9a77bfd478c2696518c3cd591f7"
+    "key": "c21eb2595c4e2f51f3112f98f0fba1d7783a3a61fe0d0b88f9a767b9d23ff890"
   },
   "dashboard": {
     "version": 1,
@@ -73,8 +73,8 @@
         "drill": "traces"
       },
       {
-        "id": "endpoints",
-        "title": "Slow endpoints",
+        "id": "operations",
+        "title": "Slow operations",
         "viz": "table",
         "width": 12,
         "height": "m",
@@ -82,13 +82,13 @@
           "from": "spans",
           "where": [
             "namespace = 'shop'",
-            "http_route \u003c\u003e ''"
+            "kind IN ('SPAN_KIND_SERVER','SPAN_KIND_CONSUMER')"
           ],
           "measures": [
             "p95(duration_ms)"
           ],
           "by": [
-            "http_route"
+            "operation"
           ],
           "limit": 400
         },
@@ -228,12 +228,12 @@
       "better": "higher"
     },
     {
-      "id": "endpoints",
+      "id": "operations",
       "status": "ok",
       "frame": {
         "columns": [
           {
-            "name": "http_route",
+            "name": "operation",
             "type": "string",
             "role": "dimension"
           },
@@ -246,7 +246,7 @@
         ],
         "values": [
           [
-            "/cart"
+            "GET cart"
           ],
           [
             100
@@ -254,7 +254,7 @@
         ],
         "rows": 1
       },
-      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop')) AND ((http_route != ''))) SELECT coalesce(\"http_route\", '') AS \"http_route\", quantile_cont(\"duration_ms\", 0.95)::DOUBLE AS \"p95\" FROM base GROUP BY \"http_route\" ORDER BY \"p95\" DESC NULLS LAST LIMIT 400",
+      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop')) AND ((kind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER')))) SELECT coalesce(\"operation\", '') AS \"operation\", quantile_cont(\"duration_ms\", 0.95)::DOUBLE AS \"p95\" FROM base GROUP BY \"operation\" ORDER BY \"p95\" DESC NULLS LAST LIMIT 400",
       "elapsed_ms": 0,
       "from_ms": 1791398700000,
       "to_ms": 1791402300000,

@@ -26,7 +26,7 @@ export function presetFixture(preset: typeof presets[number]): PanelFragment {
 }
 export function assertPresetData(node: HTMLElement, preset: typeof presets[number]) {
   expect(node.textContent).not.toMatch(/Explain|fix it|Duplicate|Remove panel|Copy link/);
-  if (preset === "performance") expect(node.textContent).toContain("/cart");
+  if (preset === "performance") expect(node.textContent).toContain("GET cart");
   else if (preset === "logs") expect(node.textContent).toContain("timeout");
   else if (preset === "trace") {
     expect(node.querySelector('[data-trace-id="trace-1"]')?.textContent).toBe("trace-1");

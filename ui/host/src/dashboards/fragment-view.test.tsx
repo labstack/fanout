@@ -121,7 +121,7 @@ it("keeps performance siblings visible with only one focused visualization", asy
     await act(async () => view.el.querySelector<HTMLButtonElement>('[aria-label="p95 latency menu"]')!.click());
     await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
     expect(view.el.querySelector('[data-panel="latency"]')?.textContent).toContain("Shown in full-screen");
-    expect(view.el.querySelector('[data-panel="endpoints"]')?.textContent).toContain("/cart");
+    expect(view.el.querySelector('[data-panel="operations"]')?.textContent).toContain("GET cart");
     expect(document.body.querySelectorAll('[data-panel="latency"]')).toHaveLength(2);
     expect(document.body.querySelectorAll('[data-panel]')).toHaveLength(5);
     expect(view.onQuery).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ it.each(["service_map", "table"] as const)("names the %s dialog and returns focu
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "View")!.click());
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.getAttribute("aria-label")).toBe(menu.getAttribute("aria-label")!.replace(/ menu$/, ""));
-  expect(dialog.textContent).toContain(viz === "table" ? "/cart" : "checkout");
+  expect(dialog.textContent).toContain(viz === "table" ? "GET cart" : "checkout");
   await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Close panel view"]')!.dispatchEvent(new KeyboardEvent("keydown", {key:"Escape",bubbles:true})));
   await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
   await vi.waitFor(() => expect(document.activeElement).toBe(menu));
