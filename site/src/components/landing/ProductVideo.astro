@@ -1,0 +1,84 @@
+---
+import MediaCaption from "./MediaCaption.astro";
+import { hasProductVideo, type LandingMedia } from "./landing-media";
+import chatLight from "../../assets/landing/chat-light.png";
+import chatDark from "../../assets/landing/chat-dark.png";
+import dashboardLight from "../../assets/landing/dashboard-light.png";
+import dashboardDark from "../../assets/landing/dashboard-dark.png";
+
+interface Props {
+  view: "chat" | "dashboard";
+  alt: string;
+  description: string;
+  eager?: boolean;
+  spedUp?: boolean;
+}
+
+const { view, alt, description, eager = false, spedUp = false } = Astro.props;
+const posters = { chat: { light: chatLight, dark: chatDark }, dashboard: { light: dashboardLight, dark: dashboardDark } };
+// Optional manifest: a checkout without published clips still builds with posters.
+const manifests = import.meta.glob<LandingMedia>("../../data/landing-media.json", { eager: true, import: "default" });
+const clips = manifests["../../data/landing-media.json"] ?? {};
+const themes = (["light", "dark"] as const).map(theme => ({
+  theme, poster: posters[view][theme],
+  webm: clips[`${view}-${theme}`]?.webm,
+  mp4: clips[`${view}-${theme}`]?.mp4,
+}));
+const id = `product-video-${view}`;
+const available = hasProductVideo(clips, view);
+---
+
+<figure class="fo-video not-content" data-product-video aria-label={alt} aria-describedby={`${id}-description ${id}-caption`}>
+  <div class="fo-video-frame fo-product-frame">
+    {themes.map(({ theme, poster, webm, mp4 }) => (
+      <div class={`fo-video-theme fo-video-${theme}`} data-video-theme={theme}>
+        <img src={poster.src} width="1280" height="800" alt={available ? alt : `${alt} Recording pending.`}
+          loading={eager ? "eager" : "lazy"} fetchpriority={eager ? "high" : "auto"} />
+        {available && <template data-video-template>
+          <video autoplay muted loop playsinline preload="metadata" poster={poster.src} width="1280" height="800"
+            aria-label={alt} aria-describedby={`${id}-description`}>
+            <source src={webm} type='video/webm; codecs="vp9"' />
+            <source src={mp4} type="video/mp4" />
+            {description}
+          </video>
+        </template>}
+      </div>
+    ))}
+  </div>
+  <p id={`${id}-description`} class="fo-video-sr">{description}</p>
+  <MediaCaption id={`${id}-caption`}
+    caption={available ? `Recorded on the OpenTelemetry Demo${spedUp ? " · sped up" : ""}` : "Recording pending · OpenTelemetry Demo"}
+    light={themes[0].mp4 ?? themes[0].poster.src} dark={themes[1].mp4 ?? themes[1].poster.src}>
+    <button type="button" data-video-control hidden aria-label="Pause clip">Pause</button>
+  </MediaCaption>
+</figure>
+
+<script>
+  import { mountProductVideo } from "./product-video";
+  document.querySelectorAll<HTMLElement>("[data-product-video]").forEach(root => {
+    const cleanup = mountProductVideo(root);
+    document.addEventListener("astro:before-swap", cleanup, { once: true });
+  });
+</script>
+
+<style>
+  .fo-video { width: 100%; min-width: 0; margin: 0; }
+  .fo-video-theme { position: relative; aspect-ratio: 1280 / 800; }
+  img, video { display: block; width: 100%; max-width: 100%; height: auto; margin: 0; }
+  video { position: absolute; inset: 0; visibility: hidden; }
+  .fo-video-theme[data-playing] video { visibility: visible; }
+  .fo-video-light { display: none; }
+  :global(:root[data-theme="light"]) .fo-video-dark { display: none; }
+  :global(:root[data-theme="light"]) .fo-video-light { display: block; }
+  button { min-height: 44px; padding: 0.25rem 0.5rem; border: 0; border-radius: 3px; background: none; color: inherit; font: inherit; cursor: pointer; }
+  button:hover { color: var(--sl-color-white); }
+  button:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+  .fo-video-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce), print {
+    .fo-video-theme video, [data-video-control] { display: none; }
+  }
+  @media print {
+    .fo-video-dark { display: none; }
+    .fo-video-light { display: block; }
+  }
+</style>

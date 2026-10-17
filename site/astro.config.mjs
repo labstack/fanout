@@ -29,7 +29,7 @@ export default defineConfig({
       // The separator between a page's title and the site's: "Install · Fanout".
       titleDelimiter: "·",
       description:
-        "One binary that ingests OpenTelemetry, stores it, and answers questions about it.",
+        "Send OpenTelemetry to one binary. Investigate with Fanout's built-in agent, or connect yours over MCP.",
       social: [
         {
           icon: "github",
@@ -49,6 +49,7 @@ export default defineConfig({
       },
       customCss: ["./src/styles/fanout.css"],
       components: {
+        SocialIcons: "./src/components/SocialIcons.astro",
         // Advertises the Markdown alternate for the current page, so an agent
         // that reads the HTML head never has to parse the HTML body.
         Head: "./src/components/Head.astro",

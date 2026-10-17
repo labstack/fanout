@@ -1,0 +1,18 @@
+{
+  "chat-dark": {
+    "mp4": "https://assets.fanout.run/landing/chat-dark-060356746cef.mp4",
+    "webm": "https://assets.fanout.run/landing/chat-dark-3afac098a9b8.webm"
+  },
+  "chat-light": {
+    "mp4": "https://assets.fanout.run/landing/chat-light-3ff97d86374f.mp4",
+    "webm": "https://assets.fanout.run/landing/chat-light-3947b9e88408.webm"
+  },
+  "dashboard-dark": {
+    "mp4": "https://assets.fanout.run/landing/dashboard-dark-edf139c5a5a1.mp4",
+    "webm": "https://assets.fanout.run/landing/dashboard-dark-288fcd70d685.webm"
+  },
+  "dashboard-light": {
+    "mp4": "https://assets.fanout.run/landing/dashboard-light-b51d120624a4.mp4",
+    "webm": "https://assets.fanout.run/landing/dashboard-light-dc0e9675651a.webm"
+  }
+}

@@ -1,6 +1,15 @@
-<section class="fo-capture-row not-content">
-  <div class="fo-capture-copy"><slot /></div>
-  <div class="fo-capture-media"><slot name="capture" /></div>
+---
+interface Props {
+  eyebrow: string;
+  columns?: boolean;
+}
+
+const { eyebrow, columns = false } = Astro.props;
+---
+
+<section class:list={["fo-capture-row not-content", { "fo-capture-columns": columns }]}>
+  <div class="fo-capture-copy"><span class="fo-capture-eyebrow">{eyebrow}</span><slot /></div>
+  {Astro.slots.has("capture") && <div class="fo-capture-media"><slot name="capture" /></div>}
 </section>
 
 <style>
@@ -11,6 +20,16 @@
     gap: var(--fo-capture-gap);
   }
   .fo-capture-copy, .fo-capture-media { min-width: 0; width: 100%; margin: 0; }
+  .fo-capture-eyebrow {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-family: var(--fo-font-display);
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+  }
+  .fo-capture-copy :global(.sl-heading-wrapper) { margin: 0; }
   .fo-capture-copy :global(h2) {
     margin: 0;
     font-size: clamp(1.5rem, 2.5vw, 2rem);
@@ -27,5 +46,8 @@
     line-height: 1.7;
     max-width: 60ch;
     text-wrap: pretty;
+  }
+  @media (min-width: 60rem) {
+    .fo-capture-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; }
   }
 </style>

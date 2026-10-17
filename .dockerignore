@@ -39,6 +39,8 @@ tmp/
 # Local documentation-site outputs.
 site/dist/
 site/.astro/
+site/src/assets/landing/*.webm
+site/src/assets/landing/*.mp4
 
 # Local browser-test outputs.
 ui/host/playwright-report/

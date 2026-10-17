@@ -20,7 +20,6 @@ const paths = layers.map((_, layer) => {
   const lower = [...sustainedSeries].reverse().map(point => `${x(point.at_seconds).toFixed(2)},${y(bound(point, layer)).toFixed(2)}`);
   return `M${upper.join(" L")} L${lower.join(" L")} Z`;
 });
-const averageDuration = sustained.seconds >= 60 ? `${Math.round(sustained.seconds / 60)}-minute` : `${sustained.seconds}-second`;
 const clock = (time: number) => `${String(Math.floor(time / 60)).padStart(2, "0")}:${String(Math.floor(time % 60)).padStart(2, "0")}`;
 const rateWidth = `· ${formatRate(maximum)} items/s, 5 s rate`.length;
 const machine = host.description.split(",")[0].replace("Cloud ", "");
@@ -33,9 +32,9 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
     <div class="fo-replay-heading">
       <span id={`${id}-name`} class="fo-replay-eyebrow">{benchmark.development_preview ? "Development preview · mixed ingest" : "Sustained mixed ingest"}</span>
       <span class="fo-replay-headline">
-        <strong data-counter>{formatRate(sustained.accepted_per_second)}</strong><span>items/s</span>
+        <strong data-counter>{formatRate(sustained.accepted_per_second)}</strong><span>telemetry items/s</span>
       </span>
-      <span class="fo-replay-average">{averageDuration} {sustained.phase === "mixed-sustained" ? "average" : "preview average"}</span>
+      <span class="fo-replay-average">Five-minute mixed-ingest average</span>
     </div>
     <div class="fo-replay-legend" aria-label="Chart legend">
       <span><i class="fo-replay-spans" aria-hidden="true"></i>Spans <b data-value="spans">{formatRate(sustained.spans_per_second)}</b></span>
@@ -74,7 +73,7 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
   </div>
   </div>
   <div class="fo-replay-status"><span data-state>Full measured run</span><span class="fo-replay-readout"><span data-elapsed>{clock(seconds)} / {clock(seconds)}</span><span class="fo-replay-rate" data-rate hidden style={`min-width: ${rateWidth}ch`}></span></span></div>
-  <p class="fo-replay-setup">Replay of the measured run · {machine} · {host.logical_cpus} vCPU</p>
+  <p class="fo-replay-setup"><span>Replay of the measured run · {machine} · {host.logical_cpus} vCPU</span><a class="fo-link" href="/explanation/performance">How we measured →</a></p>
   {benchmark.development_preview && <p class="fo-replay-note">{benchmark.series_phase} · Partial run · Completion gate failed</p>}
 </figure>
 
@@ -87,7 +86,7 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
     margin: 0;
     padding: 1rem 1.5rem;
     border: 1px solid var(--sl-color-gray-5);
-    border-radius: 8px;
+    border-radius: var(--fo-frame-radius);
     background: var(--sl-color-black);
     font-family: var(--fo-font-display);
     color: var(--sl-color-white);
@@ -96,7 +95,7 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
   figcaption { display: grid; grid-template-columns: minmax(0, 1fr) auto 5rem; align-items: center; gap: 1rem; }
   .fo-replay-heading { display: grid; grid-template-columns: max-content auto; align-items: baseline; gap: 0.25rem 1rem; min-width: 0; }
   .fo-replay-eyebrow, .fo-replay-setup, .fo-replay-average { color: var(--sl-color-gray-2); font-size: 0.75rem; }
-  .fo-replay-setup { margin: 0.5rem 0 0; line-height: 1.7; text-wrap: pretty; }
+  .fo-replay-setup { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: 0.5rem 0 0; line-height: 1.7; text-wrap: pretty; }
   .fo-replay-eyebrow { grid-column: 1 / -1; }
   .fo-replay-average { white-space: nowrap; }
   .fo-replay-headline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; }

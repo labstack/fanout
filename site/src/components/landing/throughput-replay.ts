@@ -123,7 +123,8 @@ export function mountReplay(root: HTMLElement, load: () => Promise<typeof uPlot>
       cursor: { drag: { x: false, y: false }, points: { show: false } },
       scales: { x: { time: false, auto: false, range: () => [frame.min, frame.max] }, y: { auto: false, range: () => [0, ceiling] } },
       axes: [
-        { stroke: () => ink, font, size: 36, space: 70, grid: { show: false }, ticks: { show: false },
+        // Keep the first time label below the zero tick, even beside the y-axis.
+        { stroke: () => ink, font, size: 36, gap: 16, space: 70, grid: { show: false }, ticks: { show: false },
           values: (_, ticks) => ticks.map(value => value < 0 ? "" : clock(value)) },
         { stroke: () => ink, font, size: 52, grid: { stroke: () => grid, width: 0.5 }, ticks: { show: false },
           splits: () => Array.from({ length: 4 }, (_, i) => i * step),

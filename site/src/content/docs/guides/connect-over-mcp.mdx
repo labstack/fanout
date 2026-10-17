@@ -53,6 +53,16 @@ needs only the URL:
 You authorize it in the browser as yourself, which ties the agent to your
 account without delegating your first-party account role.
 
+### Claude Code
+
+Add Fanout as a remote MCP server:
+
+```sh
+claude mcp add --transport http fanout https://fanout.example.com/mcp
+```
+
+Use your instance's public URL, then authorize the connection in your browser.
+
 ## Protocol
 
 Fanout serves MCP protocol version `2026-07-28` over stateless Streamable

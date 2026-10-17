@@ -3,8 +3,6 @@ import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cardSelector, readyCard, settle, test } from "./accessibility-support";
 import type { DashboardSpec } from "../../panels/types";
-import type { Result, TraceDetail } from "../../contracts";
-import { compareTracePages, scoreTracePage } from "./landing-trace-support";
 
 // Use either the real seeded server or an existing instance, without intercepts.
 const externalBaseURL = process.env.FANOUT_LANDING_BASE_URL;
@@ -39,7 +37,7 @@ async function readyOverviewViewport(page: Page) {
   }).toEqual([]);
 }
 
-test("capture the overview, service map and trace waterfall for the landing page", async ({ page, request }, info) => {
+test("capture the README overview", async ({ page, request }, info) => {
   // The normal matrix also includes 1100px. Write each stable asset only once.
   test.skip(info.project.use.viewport?.width !== 1440, "landing captures use the 1440px projects");
   const theme = info.project.use.colorScheme as "light" | "dark";
@@ -105,109 +103,6 @@ test("capture the overview, service map and trace waterfall for the landing page
     });
     expect(clip.width).toBeGreaterThanOrEqual(clip.height);
     expect(clip.height).toBeGreaterThan(0);
-    return clip;
-  });
-
-  const mapPanel = dashboard.spec.panels.find(panel => panel.viz === "service_map");
-  if (!mapPanel) throw new Error("System overview has no service map");
-  const map = await readyCard(page, mapPanel);
-  await map.getByRole("button", { name: `${mapPanel.title} menu`, exact: true }).click();
-  await page.getByRole("menuitem", { name: "View", exact: true }).click();
-  const fullView = page.locator("[data-panel-fullscreen]");
-  await expect(fullView).toBeVisible();
-  const fullMap = fullView.locator(cardSelector(mapPanel.id));
-  await expect(fullMap.locator('[aria-label="Loading panel"], [aria-label="Refreshing"]')).toHaveCount(0);
-  await expect(fullMap.getByRole("region", { name: /service dependency graph/ }).getByRole("button").first()).toBeVisible();
-  await settle(page);
-  await page.waitForTimeout(250);
-  const wholeGraph = fullMap.getByRole("button", { name: `Show whole ${mapPanel.title} graph`, exact: true });
-  if (await wholeGraph.isVisible()) await wholeGraph.click();
-  await expect(fullMap.getByRole("region", { name: /service dependency graph/ }).getByRole("button").first()).toBeVisible();
-  await expect(fullMap.locator("[data-panel-title]")).toHaveText(mapPanel.title);
-  await capture("service-map", fullMap, async () => {
-    // Crop the settled graph itself: resizing the card refits and recentres
-    // its contents, which can reintroduce the whitespace being removed.
-    const clip = await fullMap.getByRole("region", { name: /service dependency graph/ }).evaluate(region => {
-      const boxes = [...region.querySelectorAll("button, svg > g > path, span")]
-        .map(node => node.getBoundingClientRect()).filter(box => box.width > 0 || box.height > 0);
-      if (!boxes.length) throw new Error("The service graph has no rendered bounds");
-      const left = Math.min(...boxes.map(box => box.left)), right = Math.max(...boxes.map(box => box.right));
-      const top = Math.min(...boxes.map(box => box.top)), bottom = Math.max(...boxes.map(box => box.bottom));
-      // Keep 24 CSS pixels (48 source pixels at 2x) beyond every rendered
-      // node, connector and label. Let the graph determine the aspect ratio.
-      const x = Math.floor(left - 24), y = Math.floor(top - 24);
-      return { x, y, width: Math.ceil(right + 24) - x, height: Math.ceil(bottom + 24) - y };
-    });
-    const viewport = page.viewportSize()!;
-    expect(clip.x).toBeGreaterThanOrEqual(0); expect(clip.x + clip.width).toBeLessThanOrEqual(viewport.width);
-    expect(clip.y).toBeGreaterThanOrEqual(0); expect(clip.y + clip.height).toBeLessThanOrEqual(viewport.height);
-    expect(clip.width).toBeGreaterThanOrEqual(clip.height);
-    return clip;
-  });
-
-  await page.getByRole("button", { name: "Close panel view", exact: true }).click();
-  await expect(fullView).toHaveCount(0);
-  // The drawer needs enough vertical room for all eight visible waterfall
-  // spans, pagination and the first correlated log rows.
-  await page.setViewportSize({ width: 1440, height: 1200 });
-  // Open a service, then one of its server-returned exemplar traces.
-  const inlineMap = page.locator(cardSelector(mapPanel.id));
-  const inlineWholeGraph = inlineMap.getByRole("button", { name: `Show whole ${mapPanel.title} graph`, exact: true });
-  if (await inlineWholeGraph.isVisible()) await inlineWholeGraph.click();
-  const drawer = page.getByRole("dialog");
-  const traceRows = drawer.getByRole("button", { name: / · .* · [\d.]+ ms$/ });
-  if (externalBaseURL) {
-    const services = inlineMap.getByRole("region", { name: /service dependency graph/ }).getByRole("button");
-    const labels = await services.evaluateAll(nodes => nodes.map(node => node.getAttribute("aria-label")!));
-    // Prefer the demo's checkout path, then its frontend, before other services.
-    const priority = (label: string) => /checkout/i.test(label.split(",")[0]) ? 0 : /frontend/i.test(label.split(",")[0]) ? 1 : 2;
-    labels.sort((a, b) => priority(a) - priority(b) || a.localeCompare(b));
-    if (!labels.length) throw new Error("The live service map has no services");
-    const exemplarsReady = page.waitForResponse(response => new URL(response.url()).pathname === "/api/panels/exemplars" && response.request().method() === "POST");
-    await inlineMap.getByRole("button", { name: labels[0], exact: true }).click();
-    const exemplarsResponse = await exemplarsReady;
-    expect(exemplarsResponse.status()).toBe(200);
-    const { traces } = await exemplarsResponse.json() as { traces: { trace_id: string; namespace: string }[] };
-    const selection = exemplarsResponse.request().postDataJSON() as { time: { from: string; to: string } };
-    const candidates = await Promise.all(traces.map(async (trace, index) => {
-      const params = new URLSearchParams({ namespace: trace.namespace, from: selection.time.from, to: selection.time.to, limit: "200" });
-      const response = await request.get(`/api/traces/${encodeURIComponent(trace.trace_id)}?${params}`);
-      expect(response.status()).toBe(200);
-      const { data } = await response.json() as Result<TraceDetail>;
-      return { index, data };
-    }));
-    // Rank the actual first waterfall page of complete, error-free traces.
-    const ranked = candidates.flatMap(({ index, data }) => {
-      const score = scoreTracePage(data);
-      return score ? [{ index, score }] : [];
-    }).sort((a, b) => compareTracePages(a.score, b.score));
-    if (!ranked.length) throw new Error("No complete, error-free live exemplar has at least 3 services on its first waterfall page and a positive duration; send more workload before capturing");
-    await expect(drawer).toBeVisible();
-    await expect(traceRows).toHaveCount(traces.length);
-    await traceRows.nth(ranked[0].index).click();
-  } else {
-    await inlineMap.getByRole("button", { name: /^checkout, / }).click();
-    await expect(drawer).toBeVisible();
-    await traceRows.first().click();
-  }
-  await expect(drawer.getByRole("button", { name: "Waterfall", exact: true })).toHaveAttribute("aria-pressed", "true");
-  // Capture-only width gives the waterfall and logs a landscape frame without
-  // changing the product drawer or shrinking its text to fit a portrait crop.
-  await drawer.evaluate(dialog => Object.assign(dialog.style, { flex: "0 0 1200px", width: "1200px", maxWidth: "100vw" }));
-  await settle(page);
-  await expect(drawer.getByRole("columnheader", { name: "Timeline", exact: true })).toBeVisible();
-  await expect(drawer.getByRole("img", { name: / took / }).first()).toBeVisible();
-  await expect(drawer.getByRole("img", { name: / took / }).last()).toBeInViewport({ ratio: 1 });
-  await expect(drawer.getByText("Correlated logs", { exact: true })).toBeVisible();
-  const logs = drawer.locator("tbody tr").filter({ has: page.locator("[data-field=body]") });
-  await expect(logs.first()).toBeVisible();
-  const lastLog = logs.nth(Math.min(2, await logs.count() - 1));
-  await expect(lastLog).toBeInViewport({ ratio: 1 });
-  await expect(drawer.getByRole("alert")).toHaveCount(0);
-  await capture("trace", drawer, async () => {
-    const dialog = (await drawer.boundingBox())!, last = (await lastLog.boundingBox())!;
-    const clip = { x: dialog.x, y: dialog.y, width: dialog.width, height: Math.ceil(last.y + last.height - dialog.y) };
-    expect(clip.width).toBeGreaterThanOrEqual(clip.height);
     return clip;
   });
 });

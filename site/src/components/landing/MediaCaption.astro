@@ -1,0 +1,34 @@
+---
+interface Props {
+  id?: string;
+  caption: string;
+  light: string;
+  dark: string;
+}
+
+const { id, caption, light, dark } = Astro.props;
+---
+
+<figcaption id={id}>
+  <span>{caption}</span>
+  <span class="fo-media-actions">
+    <a class="fo-media-light" href={light}>View full size</a>
+    <a class="fo-media-dark" href={dark}>View full size</a>
+    <slot />
+  </span>
+</figcaption>
+
+<style>
+  figcaption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.25rem 1rem; margin-top: 0.5rem; color: var(--sl-color-gray-2); font-family: var(--fo-font-display); font-size: 0.75rem; }
+  .fo-media-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-underline-offset: 0.2em; }
+  a:hover { color: var(--sl-color-white); }
+  a:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+  a.fo-media-light { display: none; }
+  :global(:root[data-theme="light"]) a.fo-media-dark { display: none; }
+  :global(:root[data-theme="light"]) a.fo-media-light { display: inline-flex; }
+  @media print {
+    a.fo-media-dark { display: none; }
+    a.fo-media-light { display: inline-flex; }
+  }
+</style>

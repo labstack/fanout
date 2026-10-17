@@ -1,0 +1,33 @@
+---
+import CopyButton from "./CopyButton.astro";
+---
+
+<div class="fo-mcp-terminal">
+  <div class="fo-mcp-terminal-heading">
+    <span>Claude Code · replace the URL with your instance</span>
+    <CopyButton target="fo-mcp-command" />
+  </div>
+  <pre tabindex="0" role="region" aria-label="Claude Code MCP command, scrollable"><code id="fo-mcp-command">claude mcp add --transport http fanout \
+  https://fanout.example.com/mcp</code></pre>
+  <p>Any remote MCP client works. You authorize it in your browser.</p>
+</div>
+
+<style>
+  .fo-mcp-terminal {
+    min-width: 0;
+    padding: 1rem 1.5rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: var(--fo-frame-radius);
+    background: var(--sl-color-gray-6);
+    font-family: var(--fo-font-display);
+    font-size: 0.8125rem;
+  }
+  .fo-mcp-terminal-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--sl-color-white); }
+  pre { min-width: 0; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 1rem 0; padding: 0.5rem 0; }
+  pre:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 3px; }
+  code { font: inherit; color: var(--sl-color-white); }
+  p { margin: 0; color: var(--sl-color-gray-2); font-size: 0.75rem; overflow-wrap: anywhere; }
+  @media (max-width: 39.999rem) {
+    .fo-mcp-terminal { padding-inline: 1rem; }
+  }
+</style>
