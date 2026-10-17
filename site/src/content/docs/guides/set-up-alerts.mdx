@@ -17,8 +17,8 @@ Rules are managed over HTTP. There is no browser page for them yet — see
 
 | Endpoint | Does |
 |---|---|
-| `GET /api/alerts` | Current alert state |
-| `GET /api/alerts/summary` | Counts by state |
+| `GET /api/alerting/alerts` | Current alert state |
+| `GET /api/alerting/summary` | Counts by state |
 | `GET /api/alerting/rules` | List rules |
 | `POST /api/alerting/rules` | Create and compile a rule |
 | `PUT /api/alerting/rules/:id` | Replace a rule; recompile it when enabled |
@@ -82,7 +82,7 @@ An alert moves through three states:
 what stops a metric hovering at the threshold from delivering repeatedly.
 
 Each alert records its last delivery status and timestamp, so a webhook endpoint
-that started rejecting is visible in `GET /api/alerts` rather than silent.
+that started rejecting is visible in `GET /api/alerting/alerts` rather than silent.
 
 :::caution[The namespace field on a rule is not applied]
 A rule carries a `namespace` selector and it is stored, but evaluation reads
