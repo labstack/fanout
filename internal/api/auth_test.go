@@ -166,7 +166,11 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
 		{http.MethodHead, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/intelligence", routePolicyCapability, ReadTelemetry},
-		{http.MethodGet, "/api/alerts", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/alerting/alerts", routePolicyCapability, ReadTelemetry},
+		{http.MethodHead, "/api/alerting/alerts", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/alerting/summary", routePolicyCapability, ReadTelemetry},
+		{http.MethodHead, "/api/alerting/summary", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/alerting/rules", routePolicyCapability, ReadTelemetry},
 		{http.MethodPost, "/api/alerting/rules", routePolicyCapability, ManageAlerts},
 		{http.MethodPut, "/api/alerting/rules/rule-1", routePolicyCapability, ManageAlerts},
 		{http.MethodGet, "/api/dashboards/dashboard-1", routePolicyCapability, ManageOwnDashboards},
@@ -252,11 +256,11 @@ func TestMetricsRequiresValidScraperToken(t *testing.T) {
 
 func TestKnownRouteWrongMethodReturns405(t *testing.T) {
 	s := newTestAuthServer(t)
-	s.e.GET("/api/alerts", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.GET("/api/alerting/alerts", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	rec := httptest.NewRecorder()
-	s.e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/alerts", nil))
+	s.e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/alerting/alerts", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("POST /api/alerts = %d, want 405", rec.Code)
+		t.Fatalf("POST /api/alerting/alerts = %d, want 405", rec.Code)
 	}
 }
 

@@ -49,7 +49,7 @@ The supported programmatic interface is **MCP**, at `/mcp` — see
 [MCP tools](/reference/mcp-tools). The stable non-MCP surfaces are OTLP
 ingest, and the operational endpoints in [endpoints](/reference/endpoints).
 
-Alert rules (`/api/alerting/rules`, `/api/alerts`) currently have no browser
+Alert rules (`/api/alerting/rules`, `/api/alerting/alerts`) currently have no browser
 page. Ingest-token rotation uses `POST /api/settings/ingest/token/rotate`
 and is also available to administrators on **Connect telemetry**.
 :::
@@ -108,13 +108,13 @@ Capabilities map to roles in [roles](/reference/roles).
 | `DELETE` | `/api/agent/threads/:id` | `agent:run` |
 | `GET` | `/api/agent/threads/:id` | `agent:run` |
 | `PATCH` | `/api/agent/threads/:id` | `agent:run` |
+| `GET` | `/api/alerting/alerts` | `telemetry:read` |
 | `GET` | `/api/alerting/rules` | `telemetry:read` |
 | `POST` | `/api/alerting/rules` | `alerts:manage` |
 | `DELETE` | `/api/alerting/rules/:id` | `alerts:manage` |
 | `PUT` | `/api/alerting/rules/:id` | `alerts:manage` |
 | `POST` | `/api/alerting/rules/:id/test` | `alerts:manage` |
-| `GET` | `/api/alerts` | `telemetry:read` |
-| `GET` | `/api/alerts/summary` | `telemetry:read` |
+| `GET` | `/api/alerting/summary` | `telemetry:read` |
 | `POST` | `/api/annotations` | `telemetry:read` |
 | `POST` | `/api/auth/code/send` | none |
 | `POST` | `/api/auth/code/verify` | none |
