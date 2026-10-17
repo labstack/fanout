@@ -99,7 +99,7 @@ it.each(["traces", "logs", "table"] as const)("renders iframe %s trace IDs as dr
   raw.results[0] = { ...raw.results[0], status: "ok", frame: { rows: 1, columns: [{ name: "trace_id", type: "string", role: "dimension" }, { name: "namespace", type: "string", role: "dimension" }], values: [["abc"], ["shop"]] } };
   const view = await mount(raw);
   try {
-    const trace = view.el.querySelector<HTMLButtonElement>(viz === "table" ? '[title="abc"]' : '[aria-label="Trace ID abc"]');
+    const trace = view.el.querySelector<HTMLButtonElement>('[title="abc"]');
     expect(trace?.tagName).toBe("BUTTON"); expect(trace?.hasAttribute("href")).toBe(false);
     await act(async () => trace!.click());
     expect(view.drill.trace).toHaveBeenCalledWith(expect.objectContaining({ trace_id: "abc", namespace: "shop" }), expect.any(AbortSignal));

@@ -146,7 +146,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       </Group>
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
-        {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} size="compact-xs" variant="light" aria-label={`Remove filter ${name}`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
+        {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} size="compact-xs" variant="light" aria-label={`$${name} = ${Array.isArray(value) ? value.join(", ") : value} ×: remove filter`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
       </Group>}
       {data.annotationError && <Alert color="warn" title="Annotations unavailable">{data.annotationError}</Alert>}
       {data.annotations?.truncated && <Text size="xs" c="warn" role="status">Annotation history is limited.</Text>}

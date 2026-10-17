@@ -396,8 +396,8 @@ describe("Session", () => {
     const root = createRoot(container);
 
     await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
-    await vi.waitFor(() => expect(document.querySelector('button[aria-label="Account menu"]')).not.toBeNull());
-    expect(document.querySelector('button[aria-label="Account menu"]')?.textContent?.trim()).toBe("V");
+    await vi.waitFor(() => expect(document.querySelector('button[aria-label="V account menu"]')).not.toBeNull());
+    expect(document.querySelector('button[aria-label="V account menu"]')?.textContent?.trim()).toBe("V");
 
     await act(async () => root.unmount());
   });

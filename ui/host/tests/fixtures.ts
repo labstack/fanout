@@ -29,7 +29,7 @@ export function assertPresetData(node: HTMLElement, preset: typeof presets[numbe
   if (preset === "performance") expect(node.textContent).toContain("/cart");
   else if (preset === "logs") expect(node.textContent).toContain("timeout");
   else if (preset === "trace") {
-    expect(node.querySelector('[aria-label="Trace ID trace-1"]')).not.toBeNull();
+    expect(node.querySelector('[data-trace-id="trace-1"]')?.textContent).toBe("trace-1");
     expect(node.querySelector('[role="img"][aria-label^="GET cart on checkout took"]')).not.toBeNull();
     expect(node.textContent).toContain("timeout");
   } else expect(node.textContent).toContain("checkout");

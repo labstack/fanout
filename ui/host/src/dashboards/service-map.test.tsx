@@ -2,6 +2,7 @@ import type { Frame } from "../../../panels/types";
 import * as mapLayout from "./viz/service-map-layout";
 import * as serviceMapExports from "./viz/service-map";
 import { MantineProvider } from "@mantine/core";
+import { within } from "@testing-library/dom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,6 +44,9 @@ for (const [width,height] of [[780,460],[1100,220],[1440,480]]) for (const dark 
     expect(parseFloat(text.style.fontSize)+.01).toBeGreaterThanOrEqual(typeScale.micro);
     expect(text.style.visibility).not.toBe("hidden");
     expect(card.querySelector('[data-service-name]')!.textContent).toBe(card.dataset.serviceNode);
+    const health = card.title.split("\n")[0].split(" · ")[1];
+    const visibleName = card.querySelector('[data-service-name]')!.textContent!;
+    expect(within(host).getByRole("button", { name: name => name.replace(" ,", ",").startsWith(`${visibleName}, ${health}`) })).toBe(card);
     expect(card.title).toContain("p95"); expect(card.title).toContain("err");
     expect(card.querySelector<HTMLElement>('[data-service-name]')!.style.textOverflow).not.toBe("ellipsis");
     const theme=chartThemeFor(dark);
@@ -162,6 +166,9 @@ describe("shared map interactions", () => {
     await act(async () => root.render(<MantineProvider><ServiceMapViz panel={{ id: "m", title: "Map", viz: "service_map" }} result={{ id: "m", status: "ok", elapsed_ms: 1, frame }} dark={false} height={200} onPoint={point} /></MantineProvider>));
     const button = [...host.querySelectorAll<HTMLButtonElement>('[data-service-node]')].find(n => n.dataset.serviceNode === attack)!;
     expect(host.querySelector("img")).toBeNull(); expect(button.title).toContain(attack);
+    const visibleName = button.querySelector('[data-service-name]')!.textContent!;
+    expect(visibleName).toBe(`${attack.slice(0,24)}…`);
+    expect(within(host).getByRole("button", { name: name => name.startsWith(visibleName) })).toBe(button);
     await act(async () => button.click()); expect(point).toHaveBeenCalledWith({ dimensions: { service: attack } });
     expect(makeDrill({ id: "m", title: "Map", viz: "service_map" }, { id: "m", status: "ok", elapsed_ms: 1, from_ms: 0, to_ms: 3600000 }, point.mock.lastCall![0])).toMatchObject({ kind: "traces", dimensions: { service: attack } });
   });

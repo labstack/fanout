@@ -31,12 +31,12 @@ export function RowPanel(props: AnalysisProps) {
     const name = column.name;
     if (name === "trace_id" && value) {
       const target = makeDrill(props.panel, props.result, selection);
-      if (!target) return <Text size="sm" ff="monospace" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`}>{String(value).slice(0,16)}</Text>;
-      if (props.traceLinks === "button") return <Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" onClick={event => {
+      if (!target) return <Text size="sm" ff="monospace" style={traceIdStyle} title={String(value)} data-trace-id={String(value)}>{String(value).slice(0,16)}</Text>;
+      if (props.traceLinks === "button") return <Anchor component="button" type="button" style={traceIdStyle} title={String(value)} data-trace-id={String(value)} ff="monospace" onClick={event => {
         event.stopPropagation(); props.onPoint?.(selection);
       }}>{String(value).slice(0,16)}</Anchor>;
       const href = drillHref(window.location.href, target);
-      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={href} onClick={event => {
+      return <Anchor style={traceIdStyle} title={String(value)} data-trace-id={String(value)} ff="monospace" href={href} onClick={event => {
         if (props.onPoint && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
           event.preventDefault(); event.stopPropagation(); props.onPoint(selection);
         }
