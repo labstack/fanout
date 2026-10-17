@@ -386,3 +386,19 @@ func connectTestClient(t *testing.T, server *Server, capabilities *mcp.ClientCap
 	}
 	return session
 }
+
+func TestMCPAppsCapabilitiesAreRequestScoped(t *testing.T) {
+	request := &mcp.ListToolsRequest{Params: &mcp.ListToolsParams{Meta: mcp.Meta{
+		mcp.MetaKeyProtocolVersion: ProtocolVersion,
+		mcp.MetaKeyClientCapabilities: map[string]any{"extensions": map[string]any{
+			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
+		}},
+	}}}
+	if !clientSupportsMCPApps(request) {
+		t.Fatal("request capabilities require no initialized session")
+	}
+	request.Params.Meta[mcp.MetaKeyClientCapabilities] = map[string]any{}
+	if clientSupportsMCPApps(request) {
+		t.Fatal("Apps support leaked between requests")
+	}
+}

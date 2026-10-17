@@ -45,7 +45,7 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 		}},
 	})
-	session, err := client.Connect(ctx, clientTransport, nil)
+	session, err := client.Connect(ctx, clientTransport, &mcp.ClientSessionOptions{ProtocolVersion: fanoutmcp.ProtocolVersion})
 	if err != nil {
 		serverSession.Close()
 		return nil, fmt.Errorf("connect internal MCP client: %w", err)

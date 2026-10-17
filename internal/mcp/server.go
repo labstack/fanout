@@ -18,10 +18,13 @@ import (
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/toolerror"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const mcpUIExtension = "io.modelcontextprotocol/ui"
+
+const ProtocolVersion = "2026-07-28"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
@@ -112,7 +115,7 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 			Name:    "fanout",
 			Title:   "Fanout Observability",
 			Version: version,
-		}, &mcp.ServerOptions{Instructions: serverInstructions, Capabilities: &mcp.ServerCapabilities{
+		}, &mcp.ServerOptions{SupportedProtocolVersions: []string{ProtocolVersion}, Instructions: serverInstructions, Capabilities: &mcp.ServerCapabilities{
 			Extensions: map[string]any{
 				mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 			},
@@ -254,15 +257,17 @@ func filterMCPAppToolMetadata(next mcp.MethodHandler) mcp.MethodHandler {
 }
 
 func clientSupportsMCPApps(req mcp.Request) bool {
-	session, ok := req.GetSession().(*mcp.ServerSession)
+	request, ok := req.(interface {
+		ClientCapabilities() *mcp.ClientCapabilities
+	})
 	if !ok {
 		return false
 	}
-	params := session.InitializeParams()
-	if params == nil || params.Capabilities == nil {
+	capabilities := request.ClientCapabilities()
+	if capabilities == nil {
 		return false
 	}
-	settings, ok := params.Capabilities.Extensions[mcpUIExtension].(map[string]any)
+	settings, ok := capabilities.Extensions[mcpUIExtension].(map[string]any)
 	if !ok {
 		return false
 	}
@@ -290,16 +295,34 @@ func (s *Server) HTTPHandler() http.Handler {
 	// localhost Host heuristic because a legitimate local reverse proxy connects
 	// over loopback while preserving the public Host (for example,
 	// fanout.example.com); the heuristic otherwise rejects every browser MCP App.
-	// Keep browser connections stateful so MCP Apps can open the protocol's GET
-	// event stream instead of producing an expected-but-noisy 405 fallback in
-	// the browser console. Expire abandoned iframe sessions promptly.
-	return mcp.NewStreamableHTTPHandler(
+	handler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return s.mcp },
 		&mcp.StreamableHTTPOptions{
-			SessionTimeout:             10 * time.Minute,
-			DisableLocalhostProtection: true,
+			Stateless:                    true,
+			PropagateRequestCancellation: true,
+			DisableLocalhostProtection:   true,
 		},
 	)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// SDK v1.8 still accepts headerless legacy initialize requests even
+		// with SupportedProtocolVersions narrowed. Require the modern header
+		// here and reject legacy versions with the modern error body. Modern
+		// version negotiation, body mirrors and metadata belong to the SDK.
+		version := r.Header.Get("MCP-Protocol-Version")
+		if r.Method == http.MethodPost && version < ProtocolVersion {
+			data, _ := json.Marshal(mcp.UnsupportedProtocolVersionData{Supported: []string{ProtocolVersion}, Requested: version})
+			failure := &jsonrpc.Error{Code: mcp.CodeUnsupportedProtocolVersion, Message: "unsupported protocol version", Data: data}
+			if version == "" {
+				failure = &jsonrpc.Error{Code: mcp.CodeHeaderMismatch, Message: "MCP-Protocol-Version header is required"}
+			}
+			body, _ := jsonrpc.EncodeMessage(&jsonrpc.Response{Error: failure})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write(body)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) registerTools() {

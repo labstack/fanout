@@ -53,6 +53,22 @@ needs only the URL:
 You authorize it in the browser as yourself, which ties the agent to your
 account without delegating your first-party account role.
 
+## Protocol
+
+Fanout serves MCP protocol version `2026-07-28` over stateless Streamable
+HTTP. Every request carries `MCP-Protocol-Version: 2026-07-28`; a request
+without it, or with an earlier version, is rejected, and there are no
+sessions or `initialize` handshake. Use a client that supports this version.
+
+A request that carries an `Origin` header must come from the origin of
+`FANOUT_PUBLIC_URL`; any other origin receives `403` before authentication.
+Clients that do not send `Origin`, such as command-line agents, are
+unaffected.
+
+Tool calls are limited to 20 per second for each user and client, with
+bursts of up to 100. A client above the limit receives `429` with
+`Retry-After`.
+
 ## Scopes
 
 | Scope | Grants |

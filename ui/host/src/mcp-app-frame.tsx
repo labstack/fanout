@@ -11,6 +11,8 @@ const mcpUIExtension = "io.modelcontextprotocol/ui";
 const maxConnectionAcquireAttempts = 3;
 const maxReconnectAttempts = 5;
 const maxAppHeight = 2000;
+// Stable MCP Apps declares host display modes in HostContext.
+const availableDisplayModes: Array<"inline" | "fullscreen"> = ["inline", "fullscreen"];
 
 class InvalidMCPAppResourceError extends Error {}
 
@@ -32,6 +34,8 @@ async function createBrowserMCPConnection(): Promise<BrowserMCPConnection> {
     fetch: (url, init) => authorizedFetch(url, init),
   });
   const client = new Client({ name: "fanout-browser", version: "0.2.0" }, {
+    supportedProtocolVersions: ["2026-07-28"],
+    versionNegotiation: { mode: { pin: "2026-07-28" } },
     capabilities: {
       extensions: {
         [mcpUIExtension]: { mimeTypes: [mcpAppMIME] },
@@ -161,7 +165,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   modeRef.current = displayMode;
   const changeDisplayMode = (mode: "inline" | "fullscreen") => {
     setDisplayMode(mode);
-    bridgeRef.current?.setHostContext({ theme: colorSchemeRef.current, displayMode: mode, availableDisplayModes: ["inline", "fullscreen"] });
+    bridgeRef.current?.setHostContext({ theme: colorSchemeRef.current, displayMode: mode, availableDisplayModes });
     if (mode === "inline" && document.activeElement !== iframeRef.current) iframeRef.current?.focus();
   };
   useEffect(() => {
@@ -191,7 +195,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
   colorSchemeRef.current = colorScheme;
 
   useEffect(() => {
-    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: modeRef.current, availableDisplayModes: ["inline", "fullscreen"] });
+    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: modeRef.current, availableDisplayModes });
   }, [colorScheme]);
 
   useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resource_uri]);
@@ -262,7 +266,7 @@ function ValidatedMCPAppFrame({ content }: { content: MCPAppContent }) {
         null,
         { name: "Fanout", version: "0.2.0" },
         { serverTools: {}, logging: {} },
-        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline", availableDisplayModes: ["inline", "fullscreen"] } },
+        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline", availableDisplayModes } },
       );
       const connection = connectionRef.current;
       if (!connection) throw new Error("MCP connection unavailable");

@@ -365,7 +365,7 @@ func main() {
 		}
 		mcpAuthorization.Register(e)
 		e.Any("/mcp", echo.WrapHandler(mcpAuthorization.ProtectMCP(mcpServer.HTTPHandler())))
-		e.Any("/api/mcp", api.ProtectBrowserMCP(browserSessions, mcpServer.HTTPHandler()))
+		e.Any("/api/mcp", mcpAuthorization.ProtectBrowserMCP(browserSessions, mcpServer.HTTPHandler()))
 		slog.Info("MCP server enabled", "path", "/mcp", "auth", "oauth", "resource", mcpResourceURL)
 		slog.Info("browser MCP server enabled", "path", "/api/mcp", "auth", "session")
 	}
