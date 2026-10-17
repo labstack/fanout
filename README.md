@@ -7,8 +7,8 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/labstack/fanout.svg)](https://pkg.go.dev/github.com/labstack/fanout)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/system-overview-dark.png">
-  <img src="docs/images/system-overview-light.png" alt="Fanout System overview dashboard showing request rates, errors, latency, and service charts.">
+  <source media="(prefers-color-scheme: dark)" srcset="site/src/assets/landing/overview-dark.png">
+  <img src="site/src/assets/landing/overview-light.png" alt="Fanout System overview dashboard showing request rates, errors, latency, and service charts.">
 </picture>
 
 Fanout keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
