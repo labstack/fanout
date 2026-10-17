@@ -96,7 +96,7 @@ function AccountMenu({ onError }: { onError: (message: string) => void }) {
   const initial = label.charAt(0).toUpperCase();
   return <Menu position="bottom-end" withinPortal shadow="md">
     <Menu.Target>
-      <ActionIcon variant="subtle" color="gray" size="lg" radius="xl" aria-label="Account menu">
+      <ActionIcon variant="subtle" color="gray" size="lg" radius="xl" aria-label={`${initial} account menu`}>
         <Avatar size={26} radius="xl" color="brand">{initial}</Avatar>
       </ActionIcon>
     </Menu.Target>

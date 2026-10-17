@@ -362,12 +362,12 @@ describe("DashboardPage", () => {
     expect(onSearch).toHaveBeenLastCalledWith({ ...initial, vars: { other: "kept", service: "cart" } }, true);
     const filtered = onSearch.mock.lastCall![0] as DashboardSearch;
     await rerender(filtered);
-    const chip = host.querySelector<HTMLButtonElement>('[aria-label="Remove filter service"]')!;
+    const chip = within(host).getByRole("button", {name: "$service = cart ×: remove filter"});
     await vi.waitFor(() => expect(chip.textContent).toContain("$service = cart"), { interval: 5, timeout: 3000 });
     await act(async () => chip.click());
     expect(onSearch).toHaveBeenLastCalledWith(initial, true);
     await rerender(initial);
-    expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
+    expect(within(host).queryByRole("button", {name: "$service = cart ×: remove filter"})).toBeNull();
     await act(async () => {
       const zoom = host.querySelector<HTMLButtonElement>('[aria-label="Zoom Services: time series"]')!;
       for (let i = 0; i < 20; i++) zoom.click();
@@ -746,14 +746,13 @@ it("shows fix for a loaded owner-scoped dashboard without maintaining a client r
 it("removes an explicit empty multi-select chip and restores its default",async()=>{
  servedRecord={...record,spec:{...spec,variables:[{name:"service",kind:"custom",options:["checkout","cart"],multi:true,default:"checkout"}]}};
  const {host,onSearch,rerender}=await render({compare:"1",vars:{service:[],other:"kept"}});
- await vi.waitFor(()=>expect(host.querySelector('[aria-label="Remove filter service"]')).not.toBeNull());
- const chip=host.querySelector<HTMLButtonElement>('[aria-label="Remove filter service"]')!;
+ const chip=await vi.waitFor(()=>within(host).getByRole("button", {name: "$service = ×: remove filter"}));
  expect(queryBodies.at(-1)).toMatchObject({vars:{service:[]}});
  await act(async()=>chip.click());
  expect(onSearch).toHaveBeenLastCalledWith({compare:"1",vars:{other:"kept"}},true);
  await rerender({compare:"1",vars:{other:"kept"}});
  await vi.waitFor(()=>{
-  expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
+  expect(within(host).queryByRole("button", {name: /^\$service = .*: remove filter$/})).toBeNull();
   expect(queryBodies.at(-1)).toMatchObject({vars:{service:"checkout"}});
  });
 });

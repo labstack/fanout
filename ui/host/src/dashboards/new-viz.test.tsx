@@ -194,7 +194,7 @@ it("highlights log bodies and opens captured trace links without activating the 
     expect(container.querySelector('[data-trace-id="abc"]')?.textContent).toBe("abc");
     expect(container.querySelector('[data-trace-id="abc"]')?.closest("a")).not.toBeNull();
     expect(container.querySelector("tbody button")).toBeNull();
-    expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBe("Trace ID abc");
+    expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBeNull();
     expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("◆ ERROR");
     expect(onPoint).not.toHaveBeenCalled();
     const link = container.querySelector<HTMLAnchorElement>('[data-trace-id="abc"]')!;

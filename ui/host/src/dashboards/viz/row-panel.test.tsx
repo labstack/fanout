@@ -1,4 +1,5 @@
 import { MantineProvider } from "@mantine/core";
+import { within } from "@testing-library/dom";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -35,8 +36,8 @@ const resultFor = (name: string, text: string): PanelResult => ({
   id: "p", status: "ok", elapsed_ms: 1,
   frame: { columns: [{ name, type: "string", role: "dimension" }], values: [[text]], rows: 1 },
 });
-const render = async (panel: Panel, result: PanelResult) => {
-  await act(async () => root.render(<MantineProvider theme={{ colors: { bad: [...bad] } }}><RowPanel panel={panel} result={result} dark={false} height={200} /></MantineProvider>));
+const render = async (panel: Panel, result: PanelResult, traceLinks?: "button") => {
+  await act(async () => root.render(<MantineProvider theme={{ colors: { bad: [...bad] } }}><RowPanel panel={panel} result={result} dark={false} height={200} traceLinks={traceLinks} /></MantineProvider>));
 };
 const marks = () => [...container.querySelectorAll("tbody mark")].map(mark => mark.textContent);
 
@@ -57,15 +58,18 @@ it.each(["rows", "formatted table"])("builds a %s trace href byte-identical to t
   } finally { window.history.replaceState(null, "", previous); }
 });
 
-it("clips trace IDs to a fixed width while retaining the full accessible ID", async () => {
+it.each(["text", "link", "button"])("names trace ID %s from its visible text and retains the full ID in its title", async surface => {
   const id = "0123456789abcdef0123456789abcdef";
-  await render({...panel,viz:"traces"},resultFor("trace_id",id));
+  const result = resultFor("trace_id",id);
+  await render({...panel,viz:"traces"}, surface === "text" ? result : {...result,from_ms:0,to_ms:60000}, surface === "button" ? "button" : undefined);
   const link = container.querySelector<HTMLElement>("[data-trace-id]")!;
   expect(link.style.width).toBe("16ch");
   expect(link.style.overflow).toBe("hidden");
   expect(link.style.textOverflow).toBe("ellipsis");
   expect(link.style.whiteSpace).toBe("nowrap");
-  expect(link.getAttribute("aria-label")).toContain(id);
+  expect(link.textContent).toBe(id.slice(0,16));
+  expect(link.hasAttribute("aria-label")).toBe(false);
+  if (surface !== "text") expect(within(container).getByRole(surface, {name: id.slice(0,16)})).toBe(link);
   expect(link.title).toBe(id);
 });
 

@@ -69,7 +69,7 @@ test("default system overview shows all six self-observation scenarios within tw
   await map.scrollIntoViewIfNeeded();
   const wholeGraph = map.getByRole("button", { name: "Show whole Services and external dependencies graph", exact: true });
   if (await wholeGraph.isVisible()) await wholeGraph.click();
-  await expect(map.getByRole("button", { name: /warehouse-api\.example\.test, unhealthy/ })).toBeVisible();
+  await expect(map.getByRole("button", { name: /^warehouse-api\.example\.te.*, unhealthy/ })).toBeVisible();
 
   const versions = page.locator(cardSelector("versions"));
   await versions.scrollIntoViewIfNeeded();

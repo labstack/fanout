@@ -44,7 +44,7 @@ function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean
               const failed = span.status.toUpperCase().includes("ERROR");
               const compact = width < 7;
               const color = failed ? statusHex(dark).bad : seriesSlot(services.indexOf(span.service), dark);
-              const label = `${span.operation} · ${span.service} · ${duration(span.duration_ms)}`;
+              const label = `${span.operation} · ${duration(span.duration_ms)} · ${span.service}`;
               const content = <Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text>;
               const geometry = { position: "absolute" as const, left: `${left}%`, top: lane * 36 + 6, width: `${Math.max(width, .35)}%`, height: 30, overflow: "hidden", minWidth: 3 };
               return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow events={{ hover: true, focus: true, touch: false }}>
