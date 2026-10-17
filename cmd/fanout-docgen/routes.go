@@ -277,7 +277,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("The supported programmatic interface is **MCP**, at `/mcp` — see\n")
 	b.WriteString("[MCP tools](/reference/mcp-tools). The stable non-MCP surfaces are OTLP\n")
 	b.WriteString("ingest, and the operational endpoints in [endpoints](/reference/endpoints).\n\n")
-	b.WriteString("Alert rules (`/api/alerting/rules`, `/api/alerts`) currently have no browser\n")
+	b.WriteString("Alert rules (`/api/alerting/rules`, `/api/alerting/alerts`) currently have no browser\n")
 	b.WriteString("page. Ingest-token rotation uses `POST /api/settings/ingest/token/rotate`\n")
 	b.WriteString("and is also available to administrators on **Connect telemetry**.\n")
 	b.WriteString(":::\n\n")
