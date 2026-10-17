@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -33,10 +32,6 @@ const mcpReadScope = appauth.MCPScopeTelemetryRead
 
 const browserMCPSessionBearer = "fanout-browser-session"
 
-const maxMCPAuthorizationBodyBytes = 4 << 20
-
-var errMCPAuthorizationBodyTooLarge = errors.New("MCP request body exceeds authorization limit")
-
 type browserMCPUserContextKey struct{}
 
 var mcpSupportedScopes = []string{mcpReadScope, dashboard.OAuthScope}
@@ -49,6 +44,7 @@ type MCPAuthorization struct {
 	metadataURL     string
 	allowedHost     string
 	registerLimiter *appauth.KeyedLimiter
+	toolLimiter     *mcpToolLimiter
 }
 
 func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, resourceURL string) (*MCPAuthorization, error) {
@@ -67,6 +63,7 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, re
 		issuer:      issuer,
 		metadataURL: issuer + "/.well-known/oauth-protected-resource/mcp",
 		allowedHost: resource.Host,
+		toolLimiter: newMCPToolLimiter(),
 		// Registration is unauthenticated by design (RFC 7591 dynamic
 		// registration). Bound how many clients one source can create before
 		// the janitor collects the abandoned ones. The budget is per client
@@ -88,29 +85,23 @@ func (h *MCPAuthorization) Register(e *echo.Echo) {
 }
 
 func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
+	next = h.toolLimiter.protect(next)
 	scopeChecked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := mcpgoauth.TokenInfoFromContext(r.Context())
-		if info != nil && slices.Contains(info.Scopes, dashboard.OAuthScope) {
+		if info != nil && slices.Contains(info.Scopes, mcpReadScope) && slices.Contains(info.Scopes, dashboard.OAuthScope) {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		requiredScope, err := requiredMCPToolScope(r)
-		if err != nil {
-			status := http.StatusBadRequest
-			message := "invalid MCP request body"
-			if errors.Is(err, errMCPAuthorizationBodyTooLarge) {
-				status = http.StatusRequestEntityTooLarge
-				message = "MCP request body is too large"
-			}
-			http.Error(w, message, status)
-			return
+		requiredScope := requiredMCPToolScope(r)
+		requiredScopes := []string{mcpReadScope}
+		if requiredScope != "" && requiredScope != mcpReadScope {
+			requiredScopes = append(requiredScopes, requiredScope)
 		}
-		if requiredScope != "" {
-			if info == nil || !slices.Contains(info.Scopes, requiredScope) {
+		for _, scope := range requiredScopes {
+			if info == nil || !slices.Contains(info.Scopes, scope) {
 				w.Header().Set("WWW-Authenticate", fmt.Sprintf(
 					`Bearer error="insufficient_scope", scope=%q, resource_metadata=%q`,
-					requiredScope,
+					strings.Join(requiredScopes, " "),
 					h.metadataURL,
 				))
 				http.Error(w, "insufficient scope", http.StatusForbidden)
@@ -121,7 +112,6 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 	})
 	protected := mcpgoauth.RequireBearerToken(h.verifyMCPToken, &mcpgoauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: h.metadataURL,
-		Scopes:              []string{mcpReadScope},
 	})(scopeChecked)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(strings.TrimSpace(r.Host), h.allowedHost) {
@@ -132,65 +122,13 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 	})
 }
 
-func requiredMCPToolScope(r *http.Request) (string, error) {
-	if r.Method != http.MethodPost || r.Body == nil {
-		return "", nil
-	}
-	original := r.Body
-	body, err := io.ReadAll(io.LimitReader(original, maxMCPAuthorizationBodyBytes+1))
-	r.Body = struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: io.MultiReader(bytes.NewReader(body), original),
-		Closer: original,
-	}
-	if err != nil {
-		return "", fmt.Errorf("read MCP request body: %w", err)
-	}
-	if len(body) > maxMCPAuthorizationBodyBytes {
-		return "", errMCPAuthorizationBodyTooLarge
-	}
-
-	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) == 0 {
-		return "", errors.New("invalid MCP request body")
-	}
-	switch trimmed[0] {
-	case '{':
-		var single mcpAuthorizationRequest
-		if json.Unmarshal(trimmed, &single) != nil {
-			return "", errors.New("invalid MCP request body")
-		}
-		return single.requiredScope(), nil
-	case '[':
-		var batch []mcpAuthorizationRequest
-		if json.Unmarshal(trimmed, &batch) != nil || len(batch) == 0 {
-			return "", errors.New("invalid MCP request body")
-		}
-		for _, request := range batch {
-			if scope := request.requiredScope(); scope != "" {
-				return scope, nil
-			}
-		}
-		return "", nil
-	default:
-		return "", errors.New("invalid MCP request body")
-	}
-}
-
-type mcpAuthorizationRequest struct {
-	Method string `json:"method"`
-	Params struct {
-		Name string `json:"name"`
-	} `json:"params"`
-}
-
-func (r mcpAuthorizationRequest) requiredScope() string {
-	if r.Method != "tools/call" {
+func requiredMCPToolScope(r *http.Request) string {
+	// HTTPHandler requires the modern protocol; the SDK checks these headers
+	// against its decoded request before dispatch, including notifications.
+	if r.Method != http.MethodPost || r.Header.Get("Mcp-Method") != "tools/call" {
 		return ""
 	}
-	return appmcp.RequiredToolScope(r.Params.Name)
+	return appmcp.RequiredToolScope(r.Header.Get("Mcp-Name"))
 }
 
 // ProtectBrowserMCP adapts an already-authenticated browser session to the
@@ -198,7 +136,7 @@ func (r mcpAuthorizationRequest) requiredScope() string {
 // remains OAuth bearer-only; this adapter is used only by the same-origin
 // /api/mcp route after AuthMiddleware has validated the session and CSRF
 // header.
-func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) echo.HandlerFunc {
+func (h *MCPAuthorization) ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) echo.HandlerFunc {
 	if sessions == nil || next == nil {
 		panic("api: browser MCP dependencies are required")
 	}
@@ -217,7 +155,7 @@ func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) ech
 			UserID:     user.ID,
 			Extra:      map[string]any{"credential": "browser_session"},
 		}, nil
-	}, nil)(next)
+	}, nil)(h.toolLimiter.protect(next))
 
 	return func(c *echo.Context) error {
 		user := GetCurrentUser(c)

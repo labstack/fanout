@@ -21,13 +21,15 @@ import (
 
 func TestOmittedArgumentsRawJSONRPC(t *testing.T) {
 	s := newPanelServer(t)
-	h := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return s.mcp }, &sdk.StreamableHTTPOptions{Stateless: true})
+	h := s.HTTPHandler()
 	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_observability_overview"} {
 		t.Run(name, func(t *testing.T) {
-			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q}}`, name)))
+			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`, name)))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Accept", "application/json, text/event-stream")
-			request.Header.Set("MCP-Protocol-Version", "2025-11-25")
+			request.Header.Set("MCP-Protocol-Version", ProtocolVersion)
+			request.Header.Set("Mcp-Method", "tools/call")
+			request.Header.Set("Mcp-Name", name)
 			recorder := httptest.NewRecorder()
 			h.ServeHTTP(recorder, request)
 			body := recorder.Body.String()

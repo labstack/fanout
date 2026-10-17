@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -32,6 +31,9 @@ func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Browse
 
 func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	t.Helper()
+	if cfg.PublicURL == "" {
+		cfg.PublicURL = "https://fanout.example.com"
+	}
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
@@ -68,7 +70,7 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))))
-	e.Any("/api/mcp", ProtectBrowserMCP(sessions, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	e.Any("/api/mcp", handler.ProtectBrowserMCP(sessions, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := mcpgoauth.TokenInfoFromContext(r.Context())
 		if info == nil {
 			http.Error(w, "missing MCP token info", http.StatusInternalServerError)
@@ -291,7 +293,6 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	if remoteWithSessionOnly.Code != http.StatusUnauthorized {
 		t.Fatalf("remote MCP accepted browser session: %d", remoteWithSessionOnly.Code)
 	}
-
 }
 
 func TestMCPOAuthRegistrationRejectsUnsafeRedirect(t *testing.T) {
@@ -506,28 +507,6 @@ func TestMCPOAuthScopePolicyRejectsRetiredNames(t *testing.T) {
 	}
 	if userCanUseMCPScopes(auth.User{Role: auth.Role("retired")}, want) {
 		t.Fatal("unknown role received MCP capabilities")
-	}
-}
-
-func TestRequiredMCPToolScopeUsesPayloadAndReplaysBody(t *testing.T) {
-	body := `[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_observability_overview"}},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_dashboard"}}]`
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
-	req.Header.Set("Mcp-Method", "tools/call")
-	req.Header.Set("Mcp-Name", "get_observability_overview")
-
-	got, err := requiredMCPToolScope(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != auth.MCPScopeDashboardManage {
-		t.Fatalf("required scope = %q, want %q", got, auth.MCPScopeDashboardManage)
-	}
-	replayed, err := io.ReadAll(req.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(replayed) != body {
-		t.Fatalf("replayed body = %q, want original payload", replayed)
 	}
 }
 
@@ -759,6 +738,8 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 			rejected := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{
 				"Authorization": "Bearer " + tokens["access_token"].(string),
 				"Content-Type":  "application/json",
+				"Mcp-Method":    "tools/call",
+				"Mcp-Name":      name,
 			})
 			if rejected.Code != http.StatusForbidden {
 				t.Fatalf("read-only token calling %s = %d, want 403", name, rejected.Code)
@@ -769,40 +750,17 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	challenged := serve(t, e, http.MethodPost, "/mcp", dashboardCall, map[string]string{
 		"Authorization": "Bearer " + tokens["access_token"].(string),
 		"Content-Type":  "application/json",
+		"Mcp-Method":    "tools/call",
+		"Mcp-Name":      "list_dashboards",
 	})
 	if challenged.Code != http.StatusForbidden {
 		t.Fatalf("dashboard step-up = %d %s, want 403", challenged.Code, challenged.Body.String())
 	}
 	wwwAuthenticate := challenged.Header().Get("WWW-Authenticate")
 	if !strings.Contains(wwwAuthenticate, `error="insufficient_scope"`) ||
-		!strings.Contains(wwwAuthenticate, `scope="dashboard:manage"`) ||
+		!strings.Contains(wwwAuthenticate, `scope="telemetry:read dashboard:manage"`) ||
 		!strings.Contains(wwwAuthenticate, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
 		t.Fatalf("dashboard step-up challenge = %q", wwwAuthenticate)
-	}
-	spoofed := serve(t, e, http.MethodPost, "/mcp", dashboardCall, map[string]string{
-		"Authorization": "Bearer " + tokens["access_token"].(string),
-		"Content-Type":  "application/json",
-		"Mcp-Method":    "tools/call",
-		"Mcp-Name":      "get_observability_overview",
-	})
-	if spoofed.Code != http.StatusForbidden {
-		t.Fatalf("spoofed dashboard step-up = %d %s, want 403", spoofed.Code, spoofed.Body.String())
-	}
-	for _, body := range []string{"{", "null", "[]"} {
-		malformed := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{
-			"Authorization": "Bearer " + tokens["access_token"].(string),
-			"Content-Type":  "application/json",
-		})
-		if malformed.Code != http.StatusBadRequest {
-			t.Fatalf("malformed MCP body %q = %d %s, want 400", body, malformed.Code, malformed.Body.String())
-		}
-	}
-	oversized := serve(t, e, http.MethodPost, "/mcp", strings.Repeat(" ", maxMCPAuthorizationBodyBytes+1), map[string]string{
-		"Authorization": "Bearer " + tokens["access_token"].(string),
-		"Content-Type":  "application/json",
-	})
-	if oversized.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("oversized MCP body = %d %s, want 413", oversized.Code, oversized.Body.String())
 	}
 }
 
@@ -836,18 +794,11 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 	allowed := serve(t, e, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_dashboards","arguments":{}}}`, map[string]string{
 		"Authorization": "Bearer " + tokens["access_token"].(string),
 		"Content-Type":  "application/json",
+		"Mcp-Method":    "tools/call",
+		"Mcp-Name":      "list_dashboards",
 	})
 	if allowed.Code != http.StatusNoContent {
 		t.Fatalf("dashboard scope was rejected: %d %s", allowed.Code, allowed.Body.String())
-	}
-	// Fully scoped tokens bypass authorization-body buffering; payload validity
-	// remains the MCP protocol handler's responsibility.
-	unparsed := serve(t, e, http.MethodPost, "/mcp", `{`, map[string]string{
-		"Authorization": "Bearer " + tokens["access_token"].(string),
-		"Content-Type":  "application/json",
-	})
-	if unparsed.Code != http.StatusNoContent {
-		t.Fatalf("fully scoped request was parsed by authorization gate: %d %s", unparsed.Code, unparsed.Body.String())
 	}
 }
 

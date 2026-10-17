@@ -65,6 +65,17 @@ func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, sessions *auth.
 	if users == nil || sessions == nil || audit == nil {
 		panic("api: auth middleware dependencies are required")
 	}
+	// Pre-routing middleware runs before session loading and authentication,
+	// including on the browser MCP mount and methods other than POST.
+	publicOrigin := serializedMCPOrigin(cfg.PublicURL)
+	e.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if path := c.Request().URL.Path; (path == "/mcp" || path == "/api/mcp") && !trustedMCPOrigin(c.Request(), publicOrigin) {
+				return echo.NewHTTPError(http.StatusForbidden, "untrusted MCP origin")
+			}
+			return next(c)
+		}
+	})
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			c.Set(authAuditKey, audit)
