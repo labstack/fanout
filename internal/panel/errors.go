@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -132,8 +133,7 @@ func PresentMessage(message string) string {
 			if parts == nil {
 				continue
 			}
-			name := candidateName(parts[1])
-			candidates = append(candidates, `"`+name+`"`)
+			candidates = append(candidates, strconv.Quote(candidateName(parts[1])))
 		}
 		if len(candidates) > 0 {
 			message += "\nCandidate bindings: " + strings.Join(candidates, ", ")
