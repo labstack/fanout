@@ -63,7 +63,7 @@ func TestSaveCheckFailuresAreStructuredAndDoNotRetrySave(t *testing.T) {
 			if tc.name == "failing_panel" && (check.Panels[0].Status != "error" || *check.Panels[0].ElapsedMS != 17 || len(out.Warnings) != 1) {
 				t.Fatal(out)
 			}
-			if tc.name == "failing_panel" && (check.Panels[0].Error != panel.RedactPaths(longError) || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "final diagnostic")) {
+			if tc.name == "failing_panel" && (check.Panels[0].Error != panel.ReadFailure || strings.Contains(result.Content[0].(*mcp.TextContent).Text, "final diagnostic")) {
 				t.Fatal("receipt lost the complete sanitized diagnostic")
 			}
 			versions, err := s.dashboards.Versions(t.Context(), "owner", out.Dashboard.ID)

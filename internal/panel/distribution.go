@@ -85,7 +85,7 @@ func boundAnalysisFrame(f *Frame) error {
 	}
 	for _, value := range f.Values[0] {
 		if _, ok := value.(int64); !ok {
-			return fmt.Errorf("time column must contain non-null timestamps")
+			return Problems{{Message: "time column must contain non-null timestamps"}}
 		}
 	}
 	order := make([]int, f.Rows)

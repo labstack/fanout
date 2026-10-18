@@ -30,7 +30,7 @@ func TestDiagnosisHighlightOnlyWhenActiveFiltersMatch(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "match service = 'missing'") || strings.Contains(r.Diagnosis, "No logs contain") {
+			if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "for service missing") || strings.Contains(r.Diagnosis, "No logs contain") {
 				t.Errorf("filter-caused empty result blames highlight: %+v", r)
 			}
 			d.Panels[0].Query.Where = []string{"service = 'checkout'"}
@@ -65,7 +65,7 @@ func TestDiagnosisNamesOnlyEmptyingRouteFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := results[0]
-	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without http_route <> '', 120 match the remaining filters.") {
+	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without HTTP route filter, 120 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
 	if strings.Contains(r.Diagnosis, "Without service = $service") {
@@ -98,7 +98,7 @@ func TestDiagnosisReportsCombinationWhenEachFilterMatchesAlone(t *testing.T) {
 	}
 	// Removing either filter recovers a row. Author order breaks the tie,
 	// but checkout is present, so the diagnosis must name the combination.
-	want := "No spans match the combination of filters: (service = 'checkout') AND (kind = 'SPAN_KIND_CONSUMER'). Without service = 'checkout', 1 match the remaining filters. Values seen: fraud-detection (1)."
+	want := "No spans match this combination of filters in this time range. Without service checkout, 1 match the remaining filters. Values seen: fraud-detection (1)."
 	if r := results[2]; r.Status != StatusEmpty || r.Diagnosis != want {
 		t.Fatalf("result = %+v, want diagnosis %q", r, want)
 	}
@@ -114,7 +114,7 @@ func TestDiagnosisChoosesMostSelectiveQualifyingFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "No spans match the combination of filters: (service = $service) AND (http_route = '/api/cart'). Without http_route = '/api/cart', 120 match the remaining filters. Values seen: /cart (60), /quote (60)."
+	want := "No spans match this combination of filters in this time range. Without HTTP route /api/cart, 120 match the remaining filters. Values seen: /cart (60), /quote (60)."
 	// Each filter alone matches spans: checkout has 120 and /api/cart has
 	// 60. Only their combination is empty; neither filter is absent globally.
 	if r := results[0]; r.Status != StatusEmpty || r.Diagnosis != want {
@@ -141,7 +141,7 @@ func TestDiagnosisSkipsFailingFilterRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without http_route = '/missing', 1 match the remaining filters.") {
+	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without HTTP route /missing, 1 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
 }

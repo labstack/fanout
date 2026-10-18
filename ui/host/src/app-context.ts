@@ -3,7 +3,7 @@ import { createContext, useContext, useMemo, useRef, type FormEvent, type RefObj
 
 import { receiptForTurn, type BuildReceipt } from "./dashboard-receipt";
 
-export type TurnOptions = { answer_only?: boolean };
+export type TurnOptions = { answer_only?: boolean; context?: { description: string; value: string }[] };
 
 export type FanoutAppContextValue = {
   agentAvailable: boolean;
@@ -14,7 +14,6 @@ export type FanoutAppContextValue = {
   ready: boolean;
   running: boolean;
   activity: string;
-  provisional: { id: string; text: string; collapsed: boolean } | null;
   stopped: boolean;
   input: string;
   setInput: (value: string) => void;
@@ -48,23 +47,31 @@ const toolLabels: Record<string, { activity: string; title: string }> = {
   query_telemetry: { activity: "Querying telemetry…", title: "Telemetry panels" },
   get_observability_overview: { activity: "Checking system health…", title: "System health" },
   get_service_topology: { activity: "Mapping service dependencies…", title: "Service map" },
+  get_service_dependencies: { activity: "Tracing service dependencies…", title: "Service dependencies" },
+  list_panel_exemplars: { activity: "Finding example traces…", title: "Example traces" },
+  resolve_panel_variables: { activity: "Reading filter choices…", title: "Filter choices" },
+  query_panel_fragment: { activity: "Refreshing panels…", title: "Panel refresh" },
   get_service_performance: { activity: "Reading performance signals…", title: "Performance" },
-  inspect_trace: { activity: "Inspecting a trace…", title: "Trace analysis" },
+  inspect_trace: { activity: "Inspecting a trace…", title: "Trace lookup" },
   search_logs: { activity: "Searching logs…", title: "Logs" },
   get_intelligence_snapshot: { activity: "Reviewing detected anomalies…", title: "Detected anomalies" },
-  get_telemetry_schema: { activity: "Reading what telemetry exists…", title: "Telemetry schema" },
+  get_telemetry_schema: { activity: "Reading what telemetry exists…", title: "Telemetry discovery" },
   preview_panels: { activity: "Checking dashboard panels…", title: "Panel check" },
   list_dashboards: { activity: "Looking through your dashboards…", title: "Dashboards" },
   get_dashboard: { activity: "Opening your dashboard…", title: "Dashboard" },
-  create_dashboard: { activity: "Building your dashboard…", title: "Dashboard" },
-  edit_dashboard: { activity: "Updating your dashboard…", title: "Dashboard" },
-  replace_dashboard: { activity: "Redesigning your dashboard…", title: "Dashboard" },
+  create_dashboard: { activity: "Building your dashboard…", title: "Dashboard save" },
+  edit_dashboard: { activity: "Updating your dashboard…", title: "Dashboard save" },
+  replace_dashboard: { activity: "Redesigning your dashboard…", title: "Dashboard save" },
   list_dashboard_versions: { activity: "Reading your dashboard history…", title: "Dashboard history" },
   restore_dashboard_version: { activity: "Restoring your dashboard…", title: "Dashboard" },
 };
 
 export function activityLabel(toolName: string): string {
   return toolLabels[toolName]?.activity ?? "Working on it…";
+}
+
+export function toolFailureLabel(toolName: string): string {
+  return toolLabels[toolName]?.title ?? "Analysis step";
 }
 
 export function runErrorMessage(code?: string): string {

@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-const DependenciesSchema = "fanout.dependencies.result@1"
-
 const dependencyDeadline = 20 * time.Second
 
 type DependencyOptions struct {
@@ -123,7 +121,7 @@ func (s *Service) Dependencies(ctx context.Context, scope Scope, options Depende
 	if err := rows.Err(); err != nil {
 		return Result[Dependencies]{}, err
 	}
-	provenance := s.provenanceFor(scope, "edge_rollup")
+	provenance := s.provenanceFor(scope)
 	provenance.Complete = !data.Truncated
-	return Result[Dependencies]{Schema: DependenciesSchema, Summary: fmt.Sprintf("%d services in %s dependencies of %s", len(data.Nodes), data.Direction, data.Service), Data: data, Provenance: provenance}, nil
+	return Result[Dependencies]{Summary: fmt.Sprintf("%d services in %s dependencies of %s", len(data.Nodes), data.Direction, data.Service), Data: data, Provenance: provenance}, nil
 }

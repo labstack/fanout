@@ -86,7 +86,7 @@ describe("visualizations",()=>{
 it("formats distinct scatter axis units and numeric bucket order",()=>{
  const panel:Panel={id:"p",title:"Rows versus latency",viz:"scatter",x_unit:"count",unit:"ms",query:{from:"spans",by:["service"],measures:["count()","p95(duration_ms)"]}};
  const option=analysisOption(panel,resultFor("scatter"),chartThemeFor(false)) as {xAxis:{name:string;axisLabel:{formatter:(n:number)=>string}};yAxis:{name:string;axisLabel:{formatter:(n:number)=>string}}};
- expect(option.xAxis.name).toBe("count");expect(option.yAxis.name).toBe("p95");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
+ expect(option.xAxis.name).toBe("Count");expect(option.yAxis.name).toBe("P95 (ms)");expect(option.xAxis.axisLabel.formatter(2)).toBe("2");expect(option.yAxis.axisLabel.formatter(50)).toContain("ms");
  const frame={columns:fixtures.histogram!.columns,values:[[10,null,2],[20,1,10],[1,2,3]],rows:3};
  for(const viz of ["histogram","heatmap"] as const){
   const f=viz==="heatmap"?{columns:[col("time","time","time"),...frame.columns],values:[[3000,1000,2000],...frame.values],rows:3}:frame;

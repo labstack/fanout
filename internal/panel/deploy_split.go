@@ -19,7 +19,7 @@ func (e *Executor) runDeploySplit(ctx context.Context, p *Panel, checked *Checke
 			if f.EqField == "service" {
 				frame, text, err := e.runScope(ctx, &copyPanel, checked, scope)
 				if frame != nil {
-					frame.Note = "Service is All; showing the unsplit whole-window frame."
+					frame.Note = "Service is All; showing the full time range."
 				}
 				return frame, text, err
 			}

@@ -34,6 +34,9 @@ func TestAppToolModelContentAndVisibility(t *testing.T) {
 	if err != nil || !denied.IsError || denied.Structured != nil || denied.AppResourceURI != "" {
 		t.Fatalf("app-only model call accepted: %+v %v", denied, err)
 	}
+	if strings.Contains(denied.Content, "query_panel_fragment") {
+		t.Fatal("unavailable step exposed its tool name")
+	}
 	for _, d := range registry.Definitions() {
 		if d.Name == "query_panel_fragment" {
 			t.Fatal("app-only tool exposed to model")

@@ -208,7 +208,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Trace: %v", err)
 	}
-	if result.Schema != TraceSchema || !result.Data.HasError || len(result.Data.Spans) != 2 || len(result.Data.Services) != 2 || len(result.Data.Logs) != 2 {
+	if !result.Data.HasError || len(result.Data.Spans) != 2 || len(result.Data.Services) != 2 || len(result.Data.Logs) != 2 {
 		t.Fatalf("unexpected trace detail: %#v", result)
 	}
 	if want := `charge failed: token=[REDACTED] {"client_secret":"[REDACTED]"}`; result.Data.Logs[1].Body != want {
@@ -273,9 +273,6 @@ func TestTraceUsesIndexedParquet(t *testing.T) {
 	if len(result.Data.Spans) != 1 || len(result.Data.Logs) != 1 || !result.Data.HasError {
 		t.Fatalf("indexed Parquet trace detail = %#v", result.Data)
 	}
-	if result.Provenance.DataSource != "parquet_index" {
-		t.Fatalf("trace data source = %q", result.Provenance.DataSource)
-	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +301,7 @@ func TestTraceCombinesIndexedSpansAcrossBatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Spans) != 2 || !result.Data.HasError || len(result.Data.Services) != 2 || result.Provenance.DataSource != "parquet_index" {
+	if len(result.Data.Spans) != 2 || !result.Data.HasError || len(result.Data.Services) != 2 {
 		t.Fatalf("multi-batch trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -330,7 +327,7 @@ func TestTraceReadsRecentRootFromParquetIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "root" || result.Provenance.DataSource != "parquet_index" {
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "root" {
 		t.Fatalf("indexed trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -356,7 +353,7 @@ func TestTraceFiltersIndexedSpansByNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "child" || result.Provenance.DataSource != "parquet_index" {
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "child" {
 		t.Fatalf("namespace-filtered trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

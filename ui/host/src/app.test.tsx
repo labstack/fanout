@@ -61,8 +61,8 @@ function setValue(input: HTMLTextAreaElement, value: string) {
 }
 
 function SessionProbe() {
-  const {provisional,send}=useFanoutApp();
-  return <><ChatPage/><output data-provisional-state>{JSON.stringify(provisional)}</output><button onClick={()=>void send("Hello")}>Start probe</button></>;
+  const {send}=useFanoutApp();
+  return <><ChatPage/><button onClick={()=>void send("Hello")}>Start probe</button></>;
 }
 
 describe("Session", () => {
@@ -128,8 +128,7 @@ describe("Session", () => {
       const content = JSON.stringify({ dashboard: { id: "saved-1", name: "Cart errors", version: 2, spec: { name: "Cart errors" } }, receipt: {base_version: name === "create_dashboard" ? 0 : 1, version: 2, changes: [], layout_changed: false, save_check: {checked: true, elapsed_ms: 12, panels: []}} });
       const messages = [
         { id: "user", role: "user", content: "Build errors" },
-        { id: "provisional", role: "reasoning", content: "Saving it now" },
-        { id: "before", role: "assistant", content: "", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
+        { id: "before", role: "assistant", content: "Saving it now", toolCalls: [{ id: "call-1", type: "function", function: { name, arguments: "{}" } }] },
         { id: "result", role: "tool", toolCallId: "call-1", content },
         { id: "after", role: "assistant", content: "All done" },
       ] as Message[];
@@ -251,7 +250,7 @@ describe("Session", () => {
     await act(async () => root.unmount());
   });
 
-  it.each(["failure_callback","run_throw","thread_switch"])("clears provisional context on %s independently of the running render gate",async terminal=>{
+  it.each(["failure_callback","run_throw","thread_switch"])("clears tool activity on %s",async terminal=>{
     const log=vi.spyOn(console,"error").mockImplementation(()=>undefined);
     let rejectRun:(reason:Error)=>void=()=>{};
     if(terminal==='run_throw')agentMocks.runAgent.mockImplementationOnce(()=>new Promise<undefined>((_resolve,reject)=>{rejectRun=reject;}));
@@ -269,12 +268,12 @@ describe("Session", () => {
       await vi.waitFor(()=>expect(document.querySelector('textarea')?.disabled).toBe(false));
       await act(async()=>button("Start probe")!.click());
       const subscriber=agentMocks.instances.at(-1)!.subscriber!;
-      for(const event of [{type:"REASONING_MESSAGE_START",messageId:"provisional",role:"reasoning"},{type:"REASONING_MESSAGE_CONTENT",messageId:"provisional",delta:"Unfinished narration"}])await act(async()=>{await subscriber.onEvent?.({event,messages:[]} as unknown as Parameters<NonNullable<AgentSubscriber["onEvent"]>>[0]);});
-      expect(document.querySelector('[data-provisional-state]')?.textContent).toContain("Unfinished narration");
+      await act(async()=>{await subscriber.onToolCallStartEvent?.({event:{type:"TOOL_CALL_START",toolCallId:"call",toolCallName:"inspect_trace"},messages:[]} as unknown as Parameters<NonNullable<AgentSubscriber["onToolCallStartEvent"]>>[0]);});
+      expect(document.body.textContent).toContain("Inspecting a trace…");
       if(terminal==='failure_callback')await act(async()=>{await subscriber.onRunFailed?.({error:new Error("socket closed"),messages:[]} as unknown as Parameters<NonNullable<AgentSubscriber["onRunFailed"]>>[0]);});
       else if(terminal==='run_throw')await act(async()=>rejectRun(new Error("run failed")));
       else await act(async()=>{await router.navigate({to:"/chat/$threadId",params:{threadId:"another"}});});
-      await vi.waitFor(()=>expect(document.querySelector('[data-provisional-state]')?.textContent).toBe('null'));
+      expect(document.body.textContent).not.toContain("Inspecting a trace…");
     }finally{log.mockRestore();await act(async()=>root.unmount());}
   });
 

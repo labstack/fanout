@@ -105,7 +105,6 @@
     }
   ],
   "trace": {
-    "schema": "fanout.trace.result@1",
     "summary": "Trace trace-1 contains 1 spans across 1 services",
     "data": {
       "trace_id": "trace-1",
@@ -139,11 +138,9 @@
       "truncated": false
     },
     "provenance": {
-      "query_id": "seeded-trace",
       "window": "2026-10-07T18:45:00Z/2026-10-07T19:45:00Z",
       "generated_at": "2026-10-07T19:45:00Z",
-      "complete": true,
-      "data_source": "parquet_index"
+      "complete": true
     }
   }
 }

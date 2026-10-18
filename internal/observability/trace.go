@@ -62,7 +62,6 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		rows.Close()
 	}
 
-	dataSource := "parquet_index"
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	if traceID != "" {
 		storedSpans, totals, readErr := s.repository.Trace(ctx, telemetry.TraceQuery{
@@ -116,7 +115,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			summary += fmt.Sprintf("; showing %d", len(data.Spans))
 		}
 	}
-	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, dataSource)}, nil
+	return Result[TraceDetail]{Summary: summary, Data: data, Provenance: s.provenanceFor(scope)}, nil
 }
 
 func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID string, limit int) ([]LogEntry, error) {

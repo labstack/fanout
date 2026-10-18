@@ -77,13 +77,24 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 	if best >= 0 {
 		f := active[best]
 		others := append(append([]Filter{}, active[:best]...), active[best+1:]...)
-		message := fmt.Sprintf("No %s match %s. Without that filter, %d do.", sig.name, f.Source, recovered)
-		if len(active) > 1 {
-			var sources []string
-			for _, filter := range active {
-				sources = append(sources, "("+filter.Source+")")
+		selection := "one filter"
+		if f.DisplayField != "" {
+			value := f.DisplayLiteral
+			if f.DisplayParam != "" {
+				value = strings.Join(scope.Vars[f.DisplayParam].Values, ", ")
 			}
-			message = fmt.Sprintf("No %s match the combination of filters: %s. Without %s, %d match the remaining filters.", sig.name, strings.Join(sources, " AND "), f.Source, recovered)
+			if value != "" {
+				selection = f.DisplayField + " " + value
+			} else {
+				selection = f.DisplayField + " filter"
+			}
+		}
+		message := fmt.Sprintf("No %s match the selected filters in this time range. Without %s, %d match.", sig.name, selection, recovered)
+		if f.DisplayField != "" && (f.DisplayLiteral != "" || f.DisplayParam != "") {
+			message = fmt.Sprintf("No %s for %s in this time range. Without that filter, %d match.", sig.name, selection, recovered)
+		}
+		if len(active) > 1 {
+			message = fmt.Sprintf("No %s match this combination of filters in this time range. Without %s, %d match the remaining filters.", sig.name, selection, recovered)
 		}
 		if f.EqField != "" {
 			if seen := e.topValues(ctx, sig, f.EqField, others, scope); seen != "" {
@@ -257,31 +268,24 @@ func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []
 			continue
 		}
 		k := kinds[0]
-		measure := m.Func + "()"
-		if m.Field != nil {
-			measure = m.Func + "(" + m.Field.Text + ")"
-			if m.Func == "quantile" {
-				measure = m.Func + "(" + m.Field.Text + ", " + sqlFloat(m.Q) + ")"
-			}
-		}
 
 		if m.Func == "rate" && (k.kind == "updown" || k.kind == "gauge") {
 			article := "a"
 			if k.kind == "updown" {
 				article = "an"
 			}
-			return fmt.Sprintf("rate() needs a counter; %s is %s %s; use last(value) or avg(value)", k.name, article, k.kind)
+			return fmt.Sprintf("A rate needs a counter; %s is %s %s. Show its latest or average value instead.", k.name, article, k.kind)
 		}
-		suggestion := "last(value) or avg(value)"
+		suggestion := "the latest or average value"
 		switch k.kind {
 		case "counter":
-			suggestion = "rate() or last(value)"
+			suggestion = "the rate or latest value"
 		case "histogram":
-			suggestion = "rate(), avg(value) or p95(value)"
+			suggestion = "the rate, average or 95th percentile"
 		case "summary":
-			suggestion = "count()"
+			suggestion = "the number of observations"
 		}
-		return fmt.Sprintf("%s is not defined for %s (%s); use %s", measure, k.name, k.kind, suggestion)
+		return fmt.Sprintf("This measure is unavailable for %s (%s). Show %s instead.", k.name, k.kind, suggestion)
 	}
 	return ""
 }

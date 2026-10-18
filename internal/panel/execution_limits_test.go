@@ -1,10 +1,12 @@
 package panel
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/labstack/fanout/internal/queryrows"
+	"log/slog"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -213,18 +215,25 @@ func TestEmptyMultiSelectMatchesNothing(t *testing.T) {
 func TestPanelErrorsRedactPaths(t *testing.T) {
 	for _, path := range []string{"/srv/data/telemetry/a.parquet", "/tmp/duckdb.db", "C:\\data\\telemetry\\a.parquet"} {
 		r := failed(Result{ID: "a"}, fmt.Errorf("IO Error: cannot open '%s'", path), context.Canceled)
-		if strings.Contains(r.Error, path) || !strings.Contains(r.Error, "<path>") {
+		if strings.Contains(r.Error, path) || r.Error != ReadFailure {
 			t.Errorf("leaked path: %s", r.Error)
 		}
 	}
 }
 
-func TestPanelErrorsKeepTheCompleteRedactedMessage(t *testing.T) {
+func TestPanelOperationalErrorsKeepDetailsInLogs(t *testing.T) {
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer slog.SetDefault(old)
 	detail := strings.Repeat("memory pressure; ", 80) + "final diagnostic"
 	got := failed(Result{ID: "p"}, fmt.Errorf("IO Error at /srv/fanout/private.parquet: %s", detail), nil)
 	if strings.Contains(got.Error, "/srv/fanout/private.parquet") ||
-		!strings.Contains(got.Error, "<path>") || !strings.HasSuffix(got.Error, "final diagnostic") {
+		got.Error != ReadFailure {
 		t.Fatalf("message lost or leaked: %q", got.Error)
+	}
+	if !strings.Contains(logs.String(), "final diagnostic") || !strings.Contains(logs.String(), "/srv/fanout/private.parquet") {
+		t.Fatalf("missing operational cause in logs: %s", logs.String())
 	}
 }
 
@@ -238,10 +247,10 @@ func TestPanelErrorsKeepLongLogBindingDiagnosticsRedacted(t *testing.T) {
 	// Exercise the execution error boundary directly: Run's validation normally
 	// catches binding failures before execution, using the same native binder.
 	got := e.runPanel(t.Context(), &p, nil, Time{Range: "1h"}, fixtureStart.Add(time.Hour), nil, 800, false)
-	if got.Status != StatusError || !strings.Contains(got.Error, "Binder Error") || len(got.Error) <= 500 || !strings.Contains(got.Error, "final diagnostic") {
+	if got.Status != StatusError || strings.Contains(got.Error, "Binder Error") || len(got.Error) <= 500 || !strings.Contains(got.Error, "final diagnostic") {
 		t.Fatalf("binding diagnostic lost: %+v", got)
 	}
-	if !strings.Contains(got.Error, "<path>") || strings.Contains(got.Error, "/srv/fanout/private.parquet") || strings.Contains(got.Error, "bodysecret") || strings.Contains(got.Error, "templatesecret") {
+	if strings.Contains(got.Error, "/srv/fanout/private.parquet") || strings.Contains(got.Error, "bodysecret") || strings.Contains(got.Error, "templatesecret") {
 		t.Fatalf("unsafe binding diagnostic: %q", got.Error)
 	}
 }
@@ -266,7 +275,7 @@ func TestNormalizeBetter(t *testing.T) {
 }
 
 func TestPanelErrorsStopAtTheByteBoundOnARuneBoundary(t *testing.T) {
-	got := failed(Result{ID: "p"}, errors.New(strings.Repeat("界", maxPanelErrorBytes)), nil)
+	got := failed(Result{ID: "p"}, Problems{{Message: strings.Repeat("界", maxPanelErrorBytes)}}, nil)
 	if !utf8.ValidString(got.Error) || !strings.HasSuffix(got.Error, "…") || len(got.Error) > maxPanelErrorBytes+len("…") {
 		t.Fatalf("unbounded or split error: %d bytes", len(got.Error))
 	}

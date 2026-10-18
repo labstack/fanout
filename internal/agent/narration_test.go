@@ -25,7 +25,7 @@ func TestRuntimeKeepsToolNarrationOutOfTranscript(t *testing.T) {
 	if _, err := r.execute(context.Background(), "thread", "run", &messages, emitter); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(answerSSE(out.String()), "Fixing the sort.") {
+	if strings.Contains(out.String(), "Fixing the sort.") {
 		t.Fatal("intermediate text escaped on SSE")
 	}
 	if !strings.Contains(out.String(), "Updated the latency panel.") {
@@ -62,7 +62,7 @@ func TestRuntimeSuppressesNarrationAcrossToolSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, hidden := range []string{"Before tool.", "After tool.", "Another step.", "private-reasoning"} {
-		if strings.Contains(answerSSE(out.String()), hidden) {
+		if strings.Contains(out.String(), hidden) {
 			t.Fatalf("SSE leaked %q", hidden)
 		}
 	}
@@ -147,15 +147,14 @@ func (f narrationProviderFunc) Stream(ctx context.Context, p StreamParams, cb fu
 	return f(ctx, p, cb)
 }
 
-func TestRuntimeStreamsProvisionalTextBeforeSuccessfulStop(t *testing.T) {
+func TestRuntimeBuffersTextUntilSuccessfulStop(t *testing.T) {
 	emitter, out := newTestEmitter()
 	p := narrationProviderFunc(func(_ context.Context, _ StreamParams, cb func(StreamEvent) error) error {
 		if err := cb(StreamEvent{Type: EventText, Delta: "Buffered final"}); err != nil {
 			return err
 		}
-		assertEventOrder(t, out.String(), "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT")
-		if strings.Contains(out.String(), `"type":"TEXT_MESSAGE_CONTENT"`) {
-			t.Fatal("provisional text became an answer before stop")
+		if strings.Contains(out.String(), "Buffered final") || strings.Contains(out.String(), "TEXT_MESSAGE_") || strings.Contains(out.String(), "REASONING_") {
+			t.Fatal("buffered text escaped before stop")
 		}
 		return cb(StreamEvent{Type: EventStop, StopReason: "end_turn"})
 	})
@@ -198,7 +197,7 @@ func TestRuntimeCancellationDiscardsBufferedText(t *testing.T) {
 			if !errors.Is(err, want) {
 				t.Fatalf("err=%v", err)
 			}
-			if len(messages) != 0 || strings.Contains(answerSSE(out.String()), "TEXT_MESSAGE_") || strings.Contains(answerSSE(out.String()), "Unfinished text") {
+			if len(messages) != 0 || strings.Contains(out.String(), "TEXT_MESSAGE_") || strings.Contains(out.String(), "Unfinished text") {
 				t.Fatal("failed text escaped")
 			}
 			assertEventOrder(t, out.String(), "RUN_STARTED", "RUN_ERROR")
@@ -220,26 +219,8 @@ func (w *narrationFailWriter) Write(p []byte) (int, error) {
 	return w.out.Write(p)
 }
 
-// Reasoning frames are provisional live UI, never committed answer events.
-func answerSSE(stream string) string {
-	var out strings.Builder
-	for _, line := range strings.Split(stream, "\n") {
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		var event struct {
-			Type string `json:"type"`
-		}
-		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event) == nil && !strings.HasPrefix(event.Type, "REASONING_") {
-			out.WriteString(line)
-			out.WriteByte('\n')
-		}
-	}
-	return out.String()
-}
-
 func TestRuntimeFinalEmitterFailurePreservesAnswer(t *testing.T) {
-	for _, eventType := range []string{"TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "REASONING_END", "model_call_usage", "RUN_FINISHED"} {
+	for _, eventType := range []string{"TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "model_call_usage", "RUN_FINISHED"} {
 		t.Run(eventType, func(t *testing.T) {
 			emitter, _ := newTestEmitter()
 			writer := &narrationFailWriter{target: eventType}
@@ -281,7 +262,7 @@ func TestRuntimeFinalEmitterFailurePreservesAnswer(t *testing.T) {
 	}
 }
 
-func TestRuntimeReasoningStepsNeverPersistProvisionalText(t *testing.T) {
+func TestRuntimeNeverEmitsOrPersistsProvisionalText(t *testing.T) {
 	p := &scriptedProvider{steps: [][]StreamEvent{
 		{{Type: EventText, Delta: "Fixing "}, {Type: EventText, Delta: "the sort."}, {Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "edit_dashboard", Input: `{}`}}, {Type: EventStop, StopReason: "tool_use"}},
 		{{Type: EventText, Delta: "Updated "}, {Type: EventText, Delta: "the panel."}, {Type: EventStop, StopReason: "end_turn"}},
@@ -291,10 +272,10 @@ func TestRuntimeReasoningStepsNeverPersistProvisionalText(t *testing.T) {
 	if _, err := NewRuntime(p, &fakeTools{execution: ToolExecution{Content: `{}`}}, nil).execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out.String(), "THINKING_") {
-		t.Fatal("deprecated thinking event emitted")
+	if strings.Contains(out.String(), "THINKING_") || strings.Contains(out.String(), "REASONING_") || strings.Contains(out.String(), "Fixing") {
+		t.Fatal("provisional event or narration emitted")
 	}
-	assertEventOrder(t, out.String(), "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT", "REASONING_MESSAGE_CONTENT", "REASONING_MESSAGE_END", "REASONING_END", "TOOL_CALL_START", "TOOL_CALL_RESULT", "REASONING_START", "REASONING_MESSAGE_START", "REASONING_MESSAGE_CONTENT", "REASONING_MESSAGE_END", "REASONING_END", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED")
+	assertEventOrder(t, out.String(), "TOOL_CALL_START", "TOOL_CALL_RESULT", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED")
 	if strings.Count(out.String(), `"type":"TEXT_MESSAGE_CONTENT"`) != 1 {
 		t.Fatal("tool narration became answer text")
 	}

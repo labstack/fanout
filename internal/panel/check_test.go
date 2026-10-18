@@ -66,11 +66,11 @@ func TestCheckBindsFilters(t *testing.T) {
 		paths[p.Path] = p.Message
 	}
 	for _, path := range []string{"variables[1].where[2]", "panels[1].query.where[0]", "panels[1].query.where[1]"} {
-		if !strings.Contains(paths[path], "does not bind") || !strings.Contains(paths[path], "Cannot compare") {
+		if !strings.Contains(paths[path], "Cannot compare") {
 			t.Errorf("%s: problem = %q", path, paths[path])
 		}
 	}
-	if !strings.Contains(paths["panels[1].query.where[0]"], "CAST($service AS DOUBLE)") {
+	if !strings.Contains(paths["panels[1].query.where[0]"], "explicit cast is required") {
 		t.Errorf("hint missing: %q", paths["panels[1].query.where[0]"])
 	}
 	if len(problems) != 3 {

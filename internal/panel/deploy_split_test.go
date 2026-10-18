@@ -73,7 +73,7 @@ func TestDeploySplitAllFallsBackAndRequiresEquality(t *testing.T) {
 	d.Panels[0].Options = &Options{Split: "deploy"}
 	d.Variables[0].IncludeAll = true
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d, Vars: map[string]Value{"service": {All: true}}})
-	if err != nil || got[0].Frame == nil || got[0].Frame.Note != "Service is All; showing the unsplit whole-window frame." || len(got[0].Frame.Columns) != 2 {
+	if err != nil || got[0].Frame == nil || got[0].Frame.Note != "Service is All; showing the full time range." || len(got[0].Frame.Columns) != 2 {
 		t.Fatalf("All: %+v %v", got, err)
 	}
 	d.Panels[0].Query.Where = nil

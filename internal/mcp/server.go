@@ -195,6 +195,17 @@ func normalizeToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
 			}
 		}
 		payload := toolerror.Normalize(content)
+		// Product guidance is already presented and may contain observed routes.
+		switch failure := payload["error"].(type) {
+		case *toolerror.Error:
+			if failure.Code != "no_data" && failure.Code != "unknown_service" {
+				failure.Message = panel.PresentMessage(failure.Message)
+			}
+		case map[string]any:
+			if message, ok := failure["message"].(string); ok && failure["code"] != "no_data" && failure["code"] != "unknown_service" {
+				failure["message"] = panel.PresentMessage(message)
+			}
+		}
 		raw, marshalErr := json.Marshal(payload)
 		if marshalErr != nil {
 			return nil, marshalErr

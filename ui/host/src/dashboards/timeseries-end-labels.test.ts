@@ -1,3 +1,4 @@
+import { displayLabel } from "../../../panels/labels";
 import { describe, expect, it } from "vitest";
 import { timeseriesOption, chartThemeFor } from "../../../panels/compile";
 import { withAnnotations } from "../../../panels/annotations";
@@ -55,14 +56,15 @@ it.each(["p50 latency", "a".repeat(24), "a".repeat(30)])("keeps end-label metric
  const frame={columns:[result.frame!.columns[0],...names.map(name=>({name,type:"number" as const,role:"measure" as const,unit:"ms"}))],values:[[0,3599999],[900,900],[901,901]],rows:2};
  const measureText=(text:string)=>Array.from(text).length*7;
  const o=timeseriesOption(panel,{...result,frame},chartThemeFor(false),{width:1400,height:800,measureText}) as any;
- const measured=Math.max(...names.map(n=>measureText(Array.from(n).slice(0,24).join(""))));
+ const measured=Math.max(...names.map(n=>measureText(Array.from(displayLabel({name:n,type:"number",role:"measure",unit:"ms"})).slice(0,24).join(""))));
  const label=o.series[0].endLabel;
  expect(label.width).toBe(measured+12);
  expect(o.grid.right).toBe(label.width+24);
  expect(label).toMatchObject({overflow:"truncate",ellipsis:"…"});
  // Allow a metric discrepancy without truncating names through the cap;
  // longer names exceed the ECharts truncate box even with the same slack.
- expect(measureText(name)+2<=label.width).toBe(name.length<=24);
+ const labelName=displayLabel({name,type:"number",role:"measure",unit:"ms"});
+ expect(measureText(labelName)+2<=label.width).toBe(labelName.length<=24);
 });
 
 it("drops lower-priority end labels when one padded line fits and retains the legend",()=>{

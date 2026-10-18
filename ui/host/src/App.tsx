@@ -1,10 +1,9 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
-import type { ReasoningMessageContentEvent, ReasoningMessageStartEvent } from "@ag-ui/core";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { threadHistoryQueryKey } from "./api";
-import { activityLabel, FanoutAppContext, runErrorMessage, type FanoutAppContextValue, type TurnOptions } from "./app-context";
+import { activityLabel, FanoutAppContext, runErrorMessage, type TurnOptions } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
 import { createID } from "./id";
 import { dashboardsKey } from "./dashboards/api";
@@ -28,8 +27,6 @@ function Session() {
   const [threadMissing, setThreadMissing] = useState(false);
   const [running, setRunning] = useState(false);
   const [activity, setActivity] = useState("");
-  const [provisional, setProvisional] = useState<FanoutAppContextValue["provisional"]>(null);
-  const provisionalRef = useRef<FanoutAppContextValue["provisional"]>(null);
   const [stopped, setStopped] = useState(false);
   const stoppingRef = useRef(false);
   const [input, setInput] = useState("");
@@ -47,12 +44,7 @@ function Session() {
   const agent = useMemo(() => new HttpAgent({ url: "/api/agent/runs", threadId: threadID, fetch: (url, init) => authorizedFetch(url, init) }), [threadID]);
   const ready = !agentAvailable || loadedThreadID === threadID;
 
-  function clearActivity() { toolCallsRef.current.clear(); setActivity(""); provisionalRef.current = null; setProvisional(null); }
-  const transcript = (next: readonly Message[]) => next.filter(message => message.role !== "reasoning");
-  function provisionalStatus() {
-    const first = provisionalRef.current?.text.split(/(?<=[.!?])\s/)[0]?.trim().replace(/[.!?]+$/, "");
-    return first ? first + "…" : "";
-  }
+  function clearActivity() { toolCallsRef.current.clear(); setActivity(""); }
   function isAbort(cause: unknown) { return stoppingRef.current || cause instanceof Error && cause.name === "AbortError"; }
 
   // Keyed on the thread, not on the route. Naming a draft moves the same
@@ -84,8 +76,8 @@ function Session() {
       }).then((thread) => {
         if (!active) return;
         if (thread === null) { setThreadMissing(true); setLoadedThreadID(threadID); return; }
-        agent.setMessages(transcript(thread.messages ?? []));
-        setMessages(transcript(thread.messages ?? []));
+        agent.setMessages(thread.messages ?? []);
+        setMessages(thread.messages ?? []);
         setLoadedThreadID(threadID);
       }).catch(() => {
         if (!active) return;
@@ -94,40 +86,16 @@ function Session() {
       });
     }
     const subscription = agent.subscribe({
-      // Intercept native reasoning events before the default reducer can
-      // put provisional text in agent.messages.
-      onEvent: ({ event, messages: next }) => {
-        switch (event.type) {
-          case "REASONING_MESSAGE_START": {
-            const start = event as ReasoningMessageStartEvent;
-            provisionalRef.current = { id: start.messageId, text: "", collapsed: false };
-            setProvisional(provisionalRef.current);
-            setActivity("");
-            return { stopPropagation: true };
-          }
-          case "REASONING_MESSAGE_CONTENT": {
-            const content = event as ReasoningMessageContentEvent;
-            const text = { id: content.messageId, text: (provisionalRef.current?.text ?? "") + content.delta, collapsed: false };
-            provisionalRef.current = text;
-            setProvisional(text);
-            return { stopPropagation: true };
-          }
-          case "REASONING_START": case "REASONING_MESSAGE_END": case "REASONING_END":
-            return { stopPropagation: true };
-          default: setMessages(transcript(next));
-        }
-      },
-      onMessagesChanged: ({ messages: next }) => setMessages(transcript(next)),
+      onMessagesChanged: ({ messages: next }) => setMessages([...next]),
       onRunInitialized: () => { stoppingRef.current = false; setStopped(false); setRunning(true); setError(""); },
-      onTextMessageContentEvent: ({ event }) => { if (event.delta) {provisionalRef.current = null;setProvisional(null);setActivity("");} },
+      onTextMessageContentEvent: ({ event }) => { if (event.delta) setActivity(""); },
       onToolCallStartEvent: ({ event }) => {
         toolCallsRef.current.set(event.toolCallId, activityLabel(event.toolCallName));
         setActivity(activityLabel(event.toolCallName));
-        if (provisionalRef.current) {provisionalRef.current = {...provisionalRef.current, collapsed: true};setProvisional(provisionalRef.current);}
       },
       onToolCallResultEvent: ({ event, messages: next }) => {
         toolCallsRef.current.delete(event.toolCallId);
-        setActivity([...toolCallsRef.current.values()].at(-1) ?? provisionalStatus());
+        setActivity([...toolCallsRef.current.values()].at(-1) ?? "Analyzing your system");
         // Only a committed server receipt may refresh the dashboard/rail cache.
         const saved = dashboardToolResult(event.toolCallId, event.content, next);
         if (!saved) return;
@@ -142,7 +110,7 @@ function Session() {
         clearActivity();
       },
       onRunFinalized: ({ messages: next }) => {
-        const finished = transcript(next);
+        const finished = [...next];
         setMessages(finished);
         setMessageTimes((times) => {
           const stamped = { ...times };
@@ -188,7 +156,10 @@ function Session() {
   async function run() {
     setRunning(true);
     setError("");
-    try { await agent.runAgent({ forwardedProps: { ...turnOptionsRef.current } }); } catch (cause) {
+    try {
+      const { context = [], ...forwardedProps } = turnOptionsRef.current;
+      await agent.runAgent({ context, forwardedProps });
+    } catch (cause) {
       if (isAbort(cause)) {setError("");setStopped(true);}
       else {console.error("Agent run failed", cause);setError(runErrorMessage());}
       setRunning(false);
@@ -244,7 +215,7 @@ function Session() {
   }
   function reloadThread() { setReloadCount((n) => n + 1); }
 
-  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, provisional, stopped, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
+  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, stopped, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
     <Shell><Outlet /></Shell>
   </FanoutAppContext.Provider>;
 }

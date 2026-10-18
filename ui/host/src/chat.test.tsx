@@ -55,13 +55,7 @@ async function mountStreamChat(stored: Message[] = [{ id: "old-answer", role: "a
   return { root, emit, close, begin, requests };
 }
 
-async function reasoning(emit: (event: Record<string, unknown>) => Promise<void>, text: string) {
-  await emit({type:"REASONING_START",messageId:"provisional"});
-  await emit({type:"REASONING_MESSAGE_START",messageId:"provisional",role:"reasoning"});
-  await emit({type:"REASONING_MESSAGE_CONTENT",messageId:"provisional",delta:text});
-}
-
-describe("provisional answer stream", () => {
+describe("final answer stream", () => {
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
   it("shows escaped structured tool errors while the SSE run is live", async () => {
     const { root, emit, close, requests } = await mountStreamChat();
@@ -76,10 +70,10 @@ describe("provisional answer stream", () => {
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "failed", delta: "{}" });
       await emit({ type: "TOOL_CALL_END", toolCallId: "failed" });
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "failed", messageId: "result", content: toolError("failed", "escaped", true).content });
-      await vi.waitFor(() => expect(button("1 tool call failed")).toBeTruthy());
-      await act(async () => button("1 tool call failed")!.click());
-      expect(button("1 tool call failed")!.closest("[data-chat-anchor]")!.textContent).toContain("<img src=x onerror=alert(1)>");
-      expect(button("1 tool call failed")!.closest("[data-chat-anchor]")!.textContent).not.toMatch(/isError|\{|\}/);
+      await vi.waitFor(() => expect(button("1 step failed")).toBeTruthy());
+      await act(async () => button("1 step failed")!.click());
+      expect(button("1 step failed")!.closest("[data-chat-anchor]")!.textContent).toContain("<img src=x onerror=alert(1)>");
+      expect(button("1 step failed")!.closest("[data-chat-anchor]")!.textContent).not.toMatch(/isError|\{|\}/);
       expect(document.querySelector("img")).toBeNull();
       await emit({ type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });
       await close();
@@ -115,10 +109,6 @@ describe("provisional answer stream", () => {
     try {
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
       expect(document.body.textContent).toContain("Analyzing your system");
-      await emit({ type: "REASONING_START", messageId: "provisional" });
-      await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
-      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Unfinished narration" });
-      expect(document.querySelector('[data-provisional]')?.textContent).toBe("Unfinished narration");
       if (outcome === "cancel") await act(async () => (document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement).click());
       else {
         await emit(outcome === "error" ? { type: "RUN_ERROR", code: "provider_unavailable", message: "model provider unavailable" } : { type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });
@@ -126,103 +116,61 @@ describe("provisional answer stream", () => {
       }
       await vi.waitFor(() => expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
       expect(document.body.textContent).not.toContain("Analyzing your system");
-      expect(document.querySelector('[data-provisional]')).toBeNull();
-      expect(document.body.textContent).not.toContain("Unfinished narration");
       if (outcome === "error") expect(document.querySelector('[role="alert"]')?.textContent).toContain("Fanout could not reach the model provider. Please try again.");
       if (outcome === "cancel") {expect(document.querySelector('[role="alert"]')).toBeNull();expect(document.body.textContent).toContain("Stopped");}
     } finally { log.mockRestore(); await act(async () => root.unmount()); }
   });
-  it("types provisional text live, collapses it on tools, and replaces the final block in place", async () => {
+  it("uses mapped tool activity until the final answer", async () => {
     const { root, emit, close } = await mountStreamChat();
     try {
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
-      await emit({ type: "REASONING_START", messageId: "provisional" });await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
-      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Fixing the sort. Checking another thing." });
-      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Fixing the sort."));
-      expect(document.querySelector('[data-provisional]')?.classList.contains('chat-markdown--provisional')).toBe(true);
-      expect(document.querySelector('[data-answer-position] .mantine-Loader-root')).not.toBeNull();
-      await emit({ type: "REASONING_MESSAGE_END", messageId: "provisional" });await emit({ type: "REASONING_END", messageId: "provisional" });
-      await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "edit_dashboard", parentMessageId: "step" });
-      await emit({ type: "TOOL_CALL_ARGS", toolCallId: "call", delta: "{}" });await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
-      expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).toContain("Building dashboard");
+      expect(document.querySelector('[role="status"]')?.textContent).toBe("Analyzing your system");
+      expect(document.querySelector('[data-answer-position]')).toBeNull();
+      await emit({ type: "TOOL_CALL_START", toolCallId: "call", toolCallName: "inspect_trace", parentMessageId: "step" });
+      expect(document.querySelector('[role="status"]')?.textContent).toBe("Inspecting a trace…");
+      await emit({ type: "TOOL_CALL_END", toolCallId: "call" });
       await emit({ type: "TOOL_CALL_RESULT", toolCallId: "call", messageId: "result", content: "{}" });
-      expect(document.querySelector('[role="status"]')?.textContent).toContain("Fixing the sort…");
-      expect(document.body.textContent).not.toContain("Checking another thing.");
-      await emit({ type: "REASONING_START", messageId: "provisional" });await emit({ type: "REASONING_MESSAGE_START", messageId: "provisional", role: "reasoning" });
-      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "Updated " });
-      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')?.textContent).toContain("Updated"));
-      const position = document.querySelector('[data-answer-position]');
-      await emit({ type: "REASONING_MESSAGE_CONTENT", messageId: "provisional", delta: "the latency panel." });
-      await emit({ type: "REASONING_MESSAGE_END", messageId: "provisional" });await emit({ type: "REASONING_END", messageId: "provisional" });
+      expect(document.querySelector('[role="status"]')?.textContent).toBe("Analyzing your system");
+      expect(document.querySelector('[role="log"]')?.textContent).not.toMatch(/DuckDB|Parquet|query_telemetry/);
       await emit({ type: "TEXT_MESSAGE_START", messageId: "final", role: "assistant" });
-      await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Updated the latency panel." });
+      await emit({ type: "TEXT_MESSAGE_CONTENT", messageId: "final", delta: "Checkout is healthy." });
       await emit({ type: "TEXT_MESSAGE_END", messageId: "final" });
-      await vi.waitFor(() => expect(document.querySelector('[data-provisional]')).toBeNull());
-      expect(document.querySelector('[data-answer-position]')).toBe(position);
-      expect(position?.querySelector('.chat-markdown')?.textContent).toBe("Updated the latency panel.");
-      await emit({ type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" });await close();
-      expect(document.querySelector('[role="log"]')?.textContent).not.toContain("Fixing");
-    } finally {await act(async () => root.unmount());}
-    const reloaded = await mountStreamChat([{id:"user",role:"user",content:"Sort"},{id:"final",role:"assistant",content:"Updated the latency panel."}], false);
-    try {expect(document.querySelector('[role="log"]')?.textContent).toContain("Updated the latency panel.");expect(document.querySelector('[data-provisional]')).toBeNull();expect(document.body.textContent).not.toContain("Fixing");}finally{await act(async()=>reloaded.root.unmount());}
+      expect(document.querySelector('[data-answer-position]')?.textContent).toContain("Checkout is healthy.");
+      expect(document.querySelector('[role="status"]')).toBeNull();
+      await emit({ type: "RUN_FINISHED", threadId: "thread-stream", runId: "run" }); await close();
+    } finally { await act(async () => root.unmount()); }
   });
-  it("renders the same markdown tree and meta height when provisional text becomes final", async () => {
-    const {root,emit,close}=await mountStreamChat();
-    const text="## Health\n\n**Healthy** services:\n\n- Cart\n- Checkout\n\n| Service | Errors |\n| --- | --- |\n| Cart | 0 |\n\n```sql\nSELECT 1\n```";
-    try {
-      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});
-      await reasoning(emit,text);
-      const position=document.querySelector('[data-answer-position]')!;
-      const markdown=position.querySelector('.chat-markdown');
-      expect(markdown).not.toBeNull();
-      expect(markdown?.classList.contains('chat-markdown--provisional')).toBe(true);
-      const tree=markdown?.innerHTML;
-      const metaHeight=position.querySelector<HTMLElement>('.chat-message-meta')?.style.height;
-      expect(metaHeight).toBe('calc(1.5rem * var(--mantine-scale))');
-      await emit({type:"REASONING_MESSAGE_END",messageId:"provisional"});await emit({type:"REASONING_END",messageId:"provisional"});
-      await emit({type:"TEXT_MESSAGE_START",messageId:"final",role:"assistant"});
-      await emit({type:"TEXT_MESSAGE_CONTENT",messageId:"final",delta:text});
-      await emit({type:"TEXT_MESSAGE_END",messageId:"final"});
-      expect(position.querySelector('.chat-markdown')).toBe(markdown);
-      expect(markdown?.classList.contains('chat-markdown--provisional')).toBe(false);
-      // happy-dom has no layout engine: identical markdown DOM + a fixed meta
-      // slot is the layout proxy, rather than a vacuous zero-height assertion.
-      expect(markdown?.innerHTML).toBe(tree);
-      expect(position.querySelector<HTMLElement>('.chat-message-meta')?.style.height).toBe(metaHeight);
-      await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"run"});await close();
-    } finally {await act(async()=>root.unmount());}
-  });
-  it("keeps native reasoning out of the next posted transcript without console warnings",async()=>{
+  it("posts only the completed answer in the next transcript without console warnings",async()=>{
     const {root,emit,close,begin,requests}=await mountStreamChat();
     const warn=vi.spyOn(console,"warn").mockImplementation(()=>undefined);
     try {
-      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});await reasoning(emit,"Private provisional text");
-      await emit({type:"REASONING_MESSAGE_END",messageId:"provisional"});await emit({type:"REASONING_END",messageId:"provisional"});
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});
+      await emit({type:"TEXT_MESSAGE_START",messageId:"final",role:"assistant"});
+      await emit({type:"TEXT_MESSAGE_CONTENT",messageId:"final",delta:"Checkout is healthy."});
+      await emit({type:"TEXT_MESSAGE_END",messageId:"final"});
       await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"run"});await close();
       await vi.waitFor(()=>expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
       await begin();
       expect(requests[1].messages.some(message=>message.role==='reasoning')).toBe(false);
-      expect(JSON.stringify(requests[1])).not.toContain("Private provisional text");
+      expect(requests[1].messages.filter(message=>message.id==='final')).toEqual([expect.objectContaining({role:'assistant',content:'Checkout is healthy.'})]);
       expect(warn).not.toHaveBeenCalled();
       await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"next"});await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"next"});await close();
     } finally {warn.mockRestore();await act(async()=>root.unmount());}
   });
-  it.each(["empty","error","cancel"])("clears provisional state before a tool-first next run after %s",async outcome=>{
+  it.each(["empty","error","cancel"])("starts a tool-first next run after %s",async outcome=>{
     const {root,emit,close,begin}=await mountStreamChat();
     const log=vi.spyOn(console,"error").mockImplementation(()=>undefined);
     const warn=vi.spyOn(console,"warn").mockImplementation(()=>undefined);
     try {
-      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});await reasoning(emit,"Stale narration without punctuation");
+      await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"run"});
       if(outcome==='cancel')await act(async()=>(document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement).click());
       else {await emit(outcome==='error'?{type:"RUN_ERROR",code:"provider_unavailable",message:"private"}:{type:"RUN_FINISHED",threadId:"thread-stream",runId:"run"});await close();}
       await vi.waitFor(()=>expect(document.querySelector('button[aria-label="Stop"]')).toBeNull());
       await begin();
-      expect(document.querySelector('[data-provisional]')).toBeNull();
       await emit({type:"RUN_STARTED",threadId:"thread-stream",runId:"next"});
       await emit({type:"TOOL_CALL_START",toolCallId:"call",toolCallName:"edit_dashboard",parentMessageId:"step"});await emit({type:"TOOL_CALL_ARGS",toolCallId:"call",delta:"{}"});await emit({type:"TOOL_CALL_END",toolCallId:"call"});
       await emit({type:"TOOL_CALL_RESULT",toolCallId:"call",messageId:"result",content:"{}"});
       expect(document.querySelector('[role="status"]')?.textContent).toContain("Analyzing your system");
-      expect(document.body.textContent).not.toContain("Stale narration");
       await emit({type:"RUN_FINISHED",threadId:"thread-stream",runId:"next"});await close();
     } finally {warn.mockRestore();log.mockRestore();await act(async()=>root.unmount());}
   });
@@ -242,7 +190,7 @@ describe("provisional answer stream", () => {
 
 function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContextValue {
   return {
-    agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "", provisional: null, stopped: false,
+    agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "",  stopped: false,
     input: "", setInput: vi.fn(), error: "", inputRef: createRef<HTMLTextAreaElement>(),
     send: vi.fn(async () => undefined), submit: vi.fn((event: FormEvent) => event.preventDefault()), stop: vi.fn(), retry: vi.fn(), reloadThread: vi.fn(),
     openChat: vi.fn(), newThread: vi.fn(), selectThread: vi.fn(),
@@ -349,13 +297,13 @@ it("groups recovered tool failures quietly and expands escaped names/messages",a
  const messages=[{id:"a",role:"assistant",content:"",toolCalls:[{id:"c1",type:"function",function:{name:"query_telemetry",arguments:"{}"}},{id:"c2",type:"function",function:{name:"edit_dashboard",arguments:"{}"}}]},
  toolError('c1','escaped'),toolError('c2','invalid_panel'),{id:"done",role:"assistant",content:"Recovered answer"}] as Message[];
  const root=await mount(value({messages}));try {
- expect(document.querySelector('[role="alert"]')).toBeNull();const toggle=button("2 tool calls failed")!;expect(toggle).toBeTruthy();expect(toggle.getAttribute("aria-expanded")).toBe("false");expect(document.body.textContent).not.toContain("Invalid panel");
- await act(async()=>toggle.click());expect(document.body.textContent).toContain("query_telemetry");expect(document.body.textContent).toContain("edit_dashboard");expect(document.body.textContent).toContain("<img src=x onerror=alert(1)>");expect(document.querySelector("img")).toBeNull();
+ expect(document.querySelector('[role="alert"]')).toBeNull();const toggle=button("2 steps failed")!;expect(toggle).toBeTruthy();expect(toggle.getAttribute("aria-expanded")).toBe("false");expect(document.body.textContent).not.toContain("Invalid panel");
+ await act(async()=>toggle.click());expect(document.body.textContent).toContain("Telemetry panels");expect(document.body.textContent).toContain("Dashboard save");expect(document.body.textContent).not.toMatch(/query_telemetry|edit_dashboard/);expect(document.body.textContent).toContain("<img src=x onerror=alert(1)>");expect(document.querySelector("img")).toBeNull();
  }finally{await act(async()=>root.unmount());}
 });
 it("keeps a single recovered failure quiet and preserves the run-error alert",async()=>{
  const messages=[toolError('c','temporary'),{id:"answer",role:"assistant",content:"Answer"}] as Message[];
- for(const error of ["","Provider unavailable"]) {const root=await mount(value({messages,error}));try {expect(button("1 tool call failed")).toBeTruthy();expect(document.querySelectorAll('[role="alert"]')).toHaveLength(error?1:0);if(error)expect(document.querySelector('[role="alert"]')?.textContent).toContain(error);}finally{await act(async()=>root.unmount());}}
+ for(const error of ["","Provider unavailable"]) {const root=await mount(value({messages,error}));try {expect(button("1 step failed")).toBeTruthy();expect(document.querySelectorAll('[role="alert"]')).toHaveLength(error?1:0);if(error)expect(document.querySelector('[role="alert"]')?.textContent).toContain(error);}finally{await act(async()=>root.unmount());}}
 });
 it("uses server view keys and kinds even when tool names and specifications differ",async()=>{
  const first=appMessage("one","renamed_preset","Requested"),second=appMessage("two","get_service_performance","Discovery");
@@ -439,7 +387,7 @@ it("collapses earlier views, dedupes within a turn, expands accessibly and resto
 it("shows app tool errors and old string activities without throwing", async () => {
   const messages = [toolError('call','invalid_window'), { id: "old", role: "activity", activityType: "mcp-app", content: { resource_uri: "ui://fanout/panels.html", tool_name: "query_telemetry", tool_input: {}, tool_result: "old response", is_error: false } }] as Message[];
   const root = await mount(value({ messages }));
-  await act(async()=>button("1 tool call failed")!.click());
+  await act(async()=>button("1 step failed")!.click());
   expect(document.body.textContent).toContain("Invalid telemetry window");
   expect(document.body.textContent).toContain("This view could not be loaded. Please try again.");
   await act(async () => root.unmount());
@@ -636,9 +584,9 @@ it("groups failed calls by assistant message within one user turn",async()=>{
  {id:"a2",role:"assistant",content:"",toolCalls:[{id:"c2",type:"function",function:{name:"search_logs",arguments:"{}"}},{id:"c3",type:"function",function:{name:"search_logs",arguments:"{}"}}]},
  toolError('c1','first'),toolError('c2','second'),toolError('c3','third')] as Message[];
  const root=await mount(value({messages}));try {
- expect(button("1 tool call failed")).toBeTruthy();expect(button("2 tool calls failed")).toBeTruthy();
- await act(async()=>button("1 tool call failed")!.click());expect(document.body.textContent).toContain("first failure");expect(document.body.textContent).not.toContain("second failure");
- await act(async()=>button("2 tool calls failed")!.click());expect(document.body.textContent).toContain("second failure");expect(document.body.textContent).toContain("third failure");
+ expect(button("1 step failed")).toBeTruthy();expect(button("2 steps failed")).toBeTruthy();
+ await act(async()=>button("1 step failed")!.click());expect(document.body.textContent).toContain("first failure");expect(document.body.textContent).not.toContain("second failure");
+ await act(async()=>button("2 steps failed")!.click());expect(document.body.textContent).toContain("second failure");expect(document.body.textContent).toContain("third failure");
  }finally{await act(async()=>root.unmount());}
 });
 
@@ -646,11 +594,13 @@ it.each(['live','reloaded'])('shows the same escaped plain tool error during %s 
  const messages=[user(),call('failed','query_telemetry'),toolError('failed','escaped',mode==='live')];
  const root=await mount(value({messages:mode==='reloaded'?JSON.parse(JSON.stringify(messages)):messages}));
  try {
-  expect(button('1 tool call failed')).toBeTruthy();
-  await act(async()=>button('1 tool call failed')!.click());
+  expect(button('1 step failed')).toBeTruthy();
+  await act(async()=>button('1 step failed')!.click());
   expect(document.body.textContent).toContain('<img src=x onerror=alert(1)>');
+  expect(document.body.textContent).toContain('Telemetry panels');
+  expect(document.body.textContent).not.toContain('query_telemetry');
   expect(document.querySelector('img')).toBeNull();
-  expect(button('1 tool call failed')!.closest('[data-chat-anchor]')!.textContent).not.toMatch(/isError|\{|\}/);
+  expect(button('1 step failed')!.closest('[data-chat-anchor]')!.textContent).not.toMatch(/isError|\{|\}/);
  } finally {await act(async()=>root.unmount());document.body.innerHTML='';}
 });
 

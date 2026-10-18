@@ -18,7 +18,7 @@ vi.mock("./auth", () => ({
 function Controls() {
   const app = useFanoutApp();
   return <div>
-    <button disabled={!app.ready || app.running} onClick={() => app.openChat("Explain observed latency", { answer_only: true })}>Explain observed panel</button>
+    <button disabled={!app.ready || app.running} onClick={() => app.openChat("Explain observed latency", { answer_only: true, context: [{ description: "Observed panel diagnostics", value: "private spec" }] })}>Explain observed panel</button>
     <button disabled={!app.ready || app.running} onClick={app.retry}>Retry observed turn</button>
     <button disabled={!app.ready || app.running} onClick={() => void app.send("Please fix the dashboard")}>Ordinary edit</button>
     <button disabled={!app.ready || app.running} onClick={app.newThread}>New ordinary thread</button>
@@ -27,7 +27,7 @@ function Controls() {
 afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 it("carries answer-only through openChat and HttpAgent, retains it on retry and clears it on ordinary sends and new threads", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const requests: { threadId: string; runId: string; messages: Message[]; forwardedProps: { answer_only?: boolean } }[] = [];
+  const requests: { threadId: string; runId: string; messages: Message[]; forwardedProps: { answer_only?: boolean }; context: {description:string;value:string}[] }[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input), "https://fanout.example.test").pathname;
     if (path === "/api/agent/runs") {
@@ -53,13 +53,17 @@ it("carries answer-only through openChat and HttpAgent, retains it on retry and 
     await press("Explain observed panel");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     expect(requests[0].forwardedProps).toEqual({ answer_only: true });
+    expect(requests[0].context).toEqual([{ description: "Observed panel diagnostics", value: "private spec" }]);
+    expect(JSON.stringify(requests[0].messages)).not.toContain("private spec");
     expect(requests[0].messages.at(-1)?.content).toBe("Explain observed latency");
     await press("Retry observed turn");
     await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].context).toEqual(requests[0].context);
     expect(requests[1].forwardedProps).toEqual({ answer_only: true });
     expect(requests[1].messages.filter(message => message.role === "user")).toHaveLength(1);
     await press("Ordinary edit");
     await vi.waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2].context).toEqual([]);
     expect(requests[2].forwardedProps.answer_only).toBeUndefined();
     expect(requests[2].messages.at(-1)?.content).toBe("Please fix the dashboard");
     await press("Explain observed panel");

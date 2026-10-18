@@ -11,9 +11,3 @@ func New() (string, error) {
 	}
 	return value.String(), nil
 }
-
-// MustNew returns a time-ordered UUIDv7 string or panics if secure randomness
-// is unavailable. Use New when the caller has a useful error path.
-func MustNew() string {
-	return uuid.Must(uuid.NewV7()).String()
-}

@@ -79,11 +79,12 @@ it.each(["empty", "error"] as const)("preserves %s state and separate answer/edi
   expect(dialog.textContent).toContain(status === "empty" ? "No rows here" : "Invalid measure");
   await act(async () => within(dialog as HTMLElement).getByRole("button", {name: /^Latency menu/}).click());
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(el => el.textContent === "Explain in chat")!.click());
-  expect(onOpenChat.mock.calls[0][1]).toEqual({ answer_only: true });
+  expect(onOpenChat.mock.calls[0][1]).toMatchObject({ answer_only: true, context: [{description:"Observed panel diagnostics",value:expect.any(String)}] });
   expect(onOpenChat.mock.calls[0][0]).not.toContain("Please fix");
   if (status === "error") {
     await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find(el => el.textContent === "Ask Fanout to fix it")!.click());
-    expect(onOpenChat.mock.calls[1][1]).toBeUndefined();
+    expect(onOpenChat.mock.calls[1][0]).toBe("Fix the panel “Latency”");
+    expect(JSON.parse(onOpenChat.mock.calls[1][1].context[0].value)).toMatchObject({error:"Invalid measure"});
   }
 });
 

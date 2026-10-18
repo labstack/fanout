@@ -68,7 +68,7 @@ it.each([120,159,160,238,300])("gauge fills its measured body, readable untrunca
   expect(o.graphic.filter((g:any)=>g.type==="text"&&g.style.text.includes("%"))).toHaveLength(3);
 });
 it("puts the interaction hint in the subtitle and recovers the footer row",async()=>{
-  const h=await render();expect(h.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · spans · click for exemplar traces");
+  const h=await render();expect(h.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · click for exemplar traces");
   expect(h.querySelector('[data-panel-hint]')).toBeNull();expect(h.querySelector('[data-panel-notes]')).toBeNull();
 });
 it.each([160,200,260])("adaptive y ticks use the plot budget at %ipx",height=>{
@@ -113,8 +113,8 @@ it.each([false,true])("retains seven monotonic colours while skewed counts encod
 it("scatter has muted 11px alias titles outside the plot",()=>{
   const frame={...r.frame!,columns:[{name:"operation",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const},{name:"p95",type:"number" as const,role:"measure" as const,unit:"ms"}],values:[["GET"],[100],[50]],rows:1};
   const theme=chartThemeFor(false),o=analysisOption({...p,viz:"scatter"},{...r,frame},theme) as any;
-  expect(o.xAxis).toMatchObject({name:"calls",nameLocation:"middle",nameGap:28,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"top"}});
-  expect(o.yAxis).toMatchObject({name:"p95",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"bottom"}});
+  expect(o.xAxis).toMatchObject({name:"Calls",nameLocation:"middle",nameGap:28,nameTextStyle:{fontSize:11,color:theme.muted,align:"right",verticalAlign:"top"}});
+  expect(o.yAxis).toMatchObject({name:"P95 (ms)",nameLocation:"end",nameGap:8,nameRotate:0,nameTextStyle:{fontSize:11,color:theme.muted,align:"left",verticalAlign:"bottom"}});
 });
 it.each(["logs","traces","table","log_patterns"] as const)("%s notes follow the bounded scroll body",async viz=>{
   const h=await render({...p,viz},{...r,frame:{...r.frame!,truncated:true}});

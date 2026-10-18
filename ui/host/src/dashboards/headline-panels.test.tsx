@@ -28,7 +28,7 @@ describe("headline panel views", () => {
       const host=await render({...panel,viz:"stat"},dark);
       expect(host.querySelector('[role="group"][aria-label="Latency view"]')).toBeNull();
       const subtitle=host.querySelector<HTMLElement>('[data-panel-subtitle]')!;
-      expect(subtitle.textContent).toBe("stat · spans");expect(subtitle.dataset.truncate).toBeUndefined();
+      expect(subtitle.textContent).toBe("stat");expect(subtitle.dataset.truncate).toBeUndefined();
       const menu=host.querySelector<HTMLButtonElement>('[aria-label="Latency menu"]')!;
       await act(async()=>menu.click());
       const items=()=>[...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
@@ -41,7 +41,7 @@ describe("headline panel views", () => {
   });
   it.each([false, true])("provides subtitle, accessible Chart/Data/Spec, syntax tokens and 16px body padding (%s)", async dark => {
     const host = await render(panel, dark);
-    expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · spans · click for exemplar traces");
+    expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("time series · click for exemplar traces");
     expect((host.querySelector('[data-panel-title]') as HTMLElement).style.fontSize).toBe("calc(0.9375rem * var(--mantine-scale))");
     expect((host.querySelector('[data-panel-body]') as HTMLElement).style.padding).toBe("16px");
     expect(host.textContent).toContain("click for exemplar traces");
@@ -63,7 +63,7 @@ describe("headline panel views", () => {
     [{ ...panel, viz: "logs", query: { from: "logs" }, drill: undefined }, ""],
   ] as [Panel, string][])("uses the interaction hint for %s", async (p, hint) => {
     const host = await render(p); expect(host.querySelector('[data-panel-hint]')).toBeNull(); if(hint) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toContain(hint);
-    if (p.sql) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · sql · click to open trace");
+    if (p.sql) expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table · click to open trace");
   });
 });
 

@@ -32,6 +32,10 @@ structured content is the same bounded full fragment persisted for reload, at
 most 256 KiB, with visible row truncation. Oversized authored spec/variables
 are rejected before execution at 128 KiB rather than changing their semantics.
 
+Trace and dependency results include data, a summary, and provenance with `window`,
+`generated_at` and `complete`. Truncation and traversal limits remain in the data.
+Storage sources, schema identifiers and query IDs are omitted.
+
 AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
 `tool_input`, `tool_result`, and `is_error`. Protocol `structuredContent`,
 `resourceUri`, `toolCallId`, `threadId`, and `runId` keep their spelling.

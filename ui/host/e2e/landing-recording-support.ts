@@ -77,8 +77,7 @@ export function recordingTimeline(stream: string, responseAt: number) {
     const at = responseAt + (event.timestamp - first.timestamp) / 1000;
     switch (event.type) {
       case "RUN_STARTED": thinking = at; break;
-      case "REASONING_MESSAGE_START": case "TEXT_MESSAGE_START": endThinking(at); break;
-      case "REASONING_MESSAGE_END": if (thinking === undefined && tools.size === 0) thinking = at; break;
+      case "TEXT_MESSAGE_START": endThinking(at); break;
       case "TOOL_CALL_START":
         endThinking(at);
         if (!event.toolCallId || !event.toolCallName) throw new Error("Tool call has no id or name");
