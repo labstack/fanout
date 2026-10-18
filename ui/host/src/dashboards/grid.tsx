@@ -9,7 +9,7 @@ import { interpolate } from "../../../panels/variables";
 import { panelHandlers } from "./panel-handlers";
 import { PanelCard } from "./panel-card";
 import { PanelFullscreen } from "./panel-fullscreen";
-import { explainPrompt, fixPrompt, type ExplainContext } from "./explain";
+import { explainPrompt, fixPrompt, panelContext, type ExplainContext } from "./explain";
 import type { TurnOptions } from "../app-context";
 
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
@@ -161,8 +161,8 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onEditSQL={canManage && typeof panel.sql === "string" ? () => { sqlReturnFocus.current = fullscreen ? fullscreenMenu.current : menus.current.get(panel.id) ?? null; setSqlEdit({ panel, spec, version }); } : undefined}
-    onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true }) : undefined}
-    onFix={dashboardId && canManage ? () => onOpenChat(fixPrompt(context(panel))) : undefined}
+    onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true, context: panelContext(context(panel)) }) : undefined}
+    onFix={dashboardId && canManage ? () => onOpenChat(fixPrompt(context(panel)), { context: panelContext(context(panel)) }) : undefined}
     staleAt={staleAt.get(panel.id)} onDuplicate={canEdit && !fullscreen ? () => duplicate.mutate(panel) : undefined}
     onRemove={canEdit && !fullscreen ? () => remove.mutate(panel.id) : undefined} />;
 

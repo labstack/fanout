@@ -740,7 +740,7 @@ it("shows fix for a loaded owner-scoped dashboard without maintaining a client r
  panelResponse=async()=>json({results:[{id:"requests",status:"error",error:"Observed invalid measure",elapsed_ms:1}]});
  const {host}=await render();
  const fix=within(host).getByRole("button", {name:"Ask Fanout to fix it"});
- expect(fix).toBeDefined();await act(async()=>fix!.click());expect(app.openChat.mock.lastCall![0]).toContain("explicit dashboard edit request");
+ expect(fix).toBeDefined();await act(async()=>fix!.click());expect(app.openChat.mock.lastCall![0]).toBe("Fix the panel “Requests”");expect(JSON.parse(app.openChat.mock.lastCall![1]!.context![0].value)).toMatchObject({error:"Observed invalid measure"});
 });
 
 it("removes an explicit empty multi-select chip and restores its default",async()=>{

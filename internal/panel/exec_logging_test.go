@@ -3,6 +3,7 @@ package panel
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,32 @@ import (
 	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/queryrows"
 )
+
+func TestFailedLogsOperationalCauseExactlyOnce(t *testing.T) {
+	for _, authoredSQL := range []bool{false, true} {
+		t.Run(fmt.Sprintf("authoredSQL=%t", authoredSQL), func(t *testing.T) {
+			var output bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+			defer slog.SetDefault(old)
+			cause := errors.New("IO Error: cannot open /srv/data/private.parquet: permission denied")
+			result := failed(Result{ID: "p"}, cause, nil)
+			if result.Error != ReadFailure {
+				t.Fatalf("operational cause escaped: %+v", result)
+			}
+			var record struct {
+				Error   string `json:"error"`
+				PanelID string `json:"panel_id"`
+			}
+			if err := json.Unmarshal(output.Bytes(), &record); err != nil {
+				t.Fatalf("expected exactly one log record: %s: %v", output.String(), err)
+			}
+			if record.Error != cause.Error() || record.PanelID != "p" {
+				t.Fatalf("lost cause or panel: %+v", record)
+			}
+		})
+	}
+}
 
 type callerCancelledEngine struct {
 	Engine

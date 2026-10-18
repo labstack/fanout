@@ -7,9 +7,8 @@ import logs from "./go-fragments/logs.json";
 import trace from "./go-fragments/trace.json";
 import type { Result, TraceDetail } from "../../contracts";
 
-export const traceFixture: Result<TraceDetail> = {
-  schema: "fanout.trace.v1", summary: "Trace",
-  provenance: { query_id: "q", window: "1h", generated_at: "2026-10-08T00:00:00Z", complete: true, data_source: "spans" },
+export const traceFixture: Result<TraceDetail> = { summary: "Trace",
+  provenance: { window: "1h", generated_at: "2026-10-08T00:00:00Z", complete: true },
   data: { trace_id: "abc", duration_ms: 10, has_error: true, services: ["checkout"],
     spans: [{ span_id: "root", service: "checkout", operation: "cart", kind: "SPAN_KIND_SERVER", start: "2026-10-08T00:00:00Z", duration_ms: 10, status: "STATUS_CODE_ERROR" }],
     logs: [{ time: "2026-10-08T00:00:00Z", severity: "ERROR", service: "checkout", body: "correlated failure" }], span_count: 3, service_count: 2, truncated: true },

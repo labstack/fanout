@@ -172,7 +172,7 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 		logCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: lo, End: hi})
 		rows, err := e.engine.QueryContext(logCtx, compiled.SQL, compiled.Args...)
 		if err != nil {
-			return out, fmt.Errorf("drill logs: %s", SafeError(err))
+			return out, err
 		}
 		out.Logs, err = scanFrame(rows, compiled.Columns, 200)
 		return out, err
@@ -249,22 +249,11 @@ SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesc
 FROM roots WHERE n=1 ORDER BY %s LIMIT %d`, where, candidateOrder, limit, traceRootsSQL(), order, limit)
 }
 
-// The safe message preserves errors.Is without exposing paths in Error().
-type exemplarReadError struct {
-	message string
-	cause   error
-}
-
-func (e exemplarReadError) Error() string { return e.message }
-func (e exemplarReadError) Unwrap() error { return e.cause }
 func exemplarError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if isOperational(err) {
-		return err
-	}
-	return fmt.Errorf("exemplars: %w", exemplarReadError{message: SafeError(err), cause: err})
+	return err
 }
 func outsideSelection() error {
 	return Problems{{Path: "from", Message: "selection does not overlap the panel window"}}

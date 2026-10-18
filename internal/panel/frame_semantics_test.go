@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
@@ -112,12 +111,12 @@ func TestErrorCountDirections(t *testing.T) {
 	}
 }
 
-func TestSafeErrorWarn(t *testing.T) {
+func TestPresentedErrorLogsCause(t *testing.T) {
 	var output bytes.Buffer
 	old := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
 	defer slog.SetDefault(old)
-	if got := SafeError(errors.New("bad filter /srv/data/file.parquet")); !strings.Contains(got, "<path>") {
+	if got := PresentError(errors.New("bad filter /srv/data/file.parquet"), ReadError); got != ReadFailure {
 		t.Fatal(got)
 	}
 	var record map[string]any

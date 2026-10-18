@@ -125,12 +125,12 @@ func TestDashboardOwnerRejectsTokenMissingDashboardScope(t *testing.T) {
 
 func (f *fakeObservability) Dependencies(_ context.Context, scope observability.Scope, options observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
 	f.scope = scope
-	return observability.Result[observability.Dependencies]{Schema: observability.DependenciesSchema, Data: observability.Dependencies{Service: options.Service, Direction: options.Direction, MaxDepth: options.MaxDepth, MaxNodes: options.MaxNodes}}, nil
+	return observability.Result[observability.Dependencies]{Data: observability.Dependencies{Service: options.Service, Direction: options.Direction, MaxDepth: options.MaxDepth, MaxNodes: options.MaxNodes}}, nil
 }
 
 func (f *fakeObservability) Trace(_ context.Context, scope observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
 	f.scope = scope
-	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema, Summary: "trace", Data: observability.TraceDetail{Spans: nil}}, nil
+	return observability.Result[observability.TraceDetail]{Summary: "trace", Data: observability.TraceDetail{Spans: nil}}, nil
 }
 
 func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
@@ -182,7 +182,7 @@ func TestDependencyToolForwardsScopeAndBounds(t *testing.T) {
 	if err := json.Unmarshal(data, &output); err != nil {
 		t.Fatal(err)
 	}
-	if output.Schema != observability.DependenciesSchema || output.Data.Service != "checkout" || output.Data.Direction != "upstream" || output.Data.MaxDepth != 3 || output.Data.MaxNodes != 25 || backend.scope.Namespace != "prod" || !backend.scope.Start.Equal(now.Add(-15*time.Minute)) {
+	if output.Data.Service != "checkout" || output.Data.Direction != "upstream" || output.Data.MaxDepth != 3 || output.Data.MaxNodes != 25 || backend.scope.Namespace != "prod" || !backend.scope.Start.Equal(now.Add(-15*time.Minute)) {
 		t.Fatalf("scope or parameters lost: %#v %#v", output, backend.scope)
 	}
 }

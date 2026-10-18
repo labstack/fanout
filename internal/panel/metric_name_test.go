@@ -73,7 +73,7 @@ func TestMetricKindMismatchHasActionableDiagnosis(t *testing.T) {
 	m.Name = "system.memory.usage"
 	insertMetrics(t, db, m)
 	r := runMetricPanel(t, e, Panel{Viz: "timeseries", Query: &Query{From: "metrics", Where: []string{"name='system.memory.usage'"}, Measures: []string{"rate()"}, Bucket: "1m"}}, fixtureStart, fixtureStart.Add(time.Minute))
-	want := "rate() needs a counter; system.memory.usage is an updown; use last(value) or avg(value)"
+	want := "A rate needs a counter; system.memory.usage is an updown. Show its latest or average value instead."
 	if r.Status != StatusEmpty || r.Diagnosis != want {
 		t.Fatalf("diagnosis=%+v", r)
 	}
@@ -84,7 +84,7 @@ func TestMetricHistogramDiagnosisSuggestsCompatibleMeasuresWithoutAliases(t *tes
 		e, db := metricFixture(t)
 		insertMetrics(t, db, metricHistogram(fixtureStart, "[10]", "[1,0]", 1, 5, "a"))
 		r := runMetricMeasure(t, e, []string{"last(value) " + alias}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
-		if r.Status != StatusEmpty || r.Diagnosis != "last(value) is not defined for net (histogram); use rate(), avg(value) or p95(value)" {
+		if r.Status != StatusEmpty || r.Diagnosis != "This measure is unavailable for net (histogram). Show the rate, average or 95th percentile instead." {
 			t.Fatalf("%s: %+v", alias, r)
 		}
 	}

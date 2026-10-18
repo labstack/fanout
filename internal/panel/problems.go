@@ -11,6 +11,14 @@ type Problem struct {
 	Path    string `json:"path"`
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
+
+	productDiagnosis bool
+}
+
+// DiagnosisProblem marks product-authored no-data guidance so subsequent error
+// adapters never reinterpret observed values as engine or filesystem failures.
+func DiagnosisProblem(path, message, hint string) Problem {
+	return Problem{Path: path, Message: PresentDiagnosis(message), Hint: PresentDiagnosis(hint), productDiagnosis: true}
 }
 
 // Problems is a validation result; empty means valid. It is an error so a
@@ -19,7 +27,7 @@ type Problems []Problem
 
 func (p Problems) Error() string {
 	parts := make([]string, 0, min(len(p), 6))
-	for i, problem := range p {
+	for i, problem := range PresentProblems(p) {
 		if i == 5 {
 			parts = append(parts, fmt.Sprintf("and %d more", len(p)-5))
 			break
@@ -37,9 +45,9 @@ func (p Problems) Error() string {
 }
 
 func (p *Problems) add(path, message string) {
-	*p = append(*p, Problem{Path: path, Message: message})
+	*p = append(*p, Problem{Path: path, Message: PresentMessage(message)})
 }
 
 func (p *Problems) addHint(path, message, hint string) {
-	*p = append(*p, Problem{Path: path, Message: message, Hint: hint})
+	*p = append(*p, Problem{Path: path, Message: PresentMessage(message), Hint: PresentMessage(hint)})
 }

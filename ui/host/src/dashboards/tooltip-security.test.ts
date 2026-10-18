@@ -20,7 +20,7 @@ describe("telemetry tooltip HTML security", () => {
     const scatterFrame: Frame = { columns: [{ name: "item", role: "dimension", type: "string" }, { name: "calls", role: "measure", type: "number", unit: "count" }, { name: "latency", role: "measure", type: "number", unit: "ms" }], values: [[attack],[12],[1500]], rows: 1 };
     const scatter = analysisOption({ id: "x", title: "x", viz: "scatter" }, { ...result, frame: scatterFrame }, theme);
     const point = (scatter.tooltip as Tooltip).formatter({ name: attack, seriesName: "Items", value: [12,1500] });
-    safe(point); expect(point).toContain("calls: 12"); expect(point).toContain("latency: 1.50s");
+    safe(point); expect(point).toContain("Calls: 12"); expect(point).toContain("Latency (ms): 1.50s");
   });
   it("escapes service labels across shared timeseries, heatmap and bar formatters",()=>{
     for(const option of [timeseriesOption({id:"x",title:attack,viz:"timeseries"},result,theme),analysisOption({id:"x",title:attack,viz:"heatmap"},result,theme),barOption({id:"x",title:attack,viz:"bar"},frame,theme)]) safe((option.tooltip as Tooltip).formatter({name:attack,seriesName:attack,axisValueLabel:attack,value:[1000,0,3]}));

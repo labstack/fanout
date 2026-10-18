@@ -4,7 +4,7 @@ import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } f
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useFanoutApp, useDashboardReceipts } from "./app-context";
+import { toolFailureLabel, useFanoutApp, useDashboardReceipts } from "./app-context";
 import { useTurnAnchor } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
@@ -72,8 +72,8 @@ function toolFailures(messages: Message[]) {
       firstFailures.set(owner, first);
       const failures = groups.get(first) ?? [];
       const failure = object(payload?.error) ? payload?.error : undefined;
-      const text = typeof failure?.message === "string" ? failure.message : typeof message.error === "string" && message.error ? message.error : "Tool execution failed";
-      failures.push({ name: call?.name ?? "Tool", message: text, readOnly: failure?.code === "answer_only" });
+      const text = typeof failure?.message === "string" ? failure.message : typeof message.error === "string" && message.error ? message.error : "Could not complete this step. Try again.";
+      failures.push({ name: toolFailureLabel(call?.name ?? ""), message: text, readOnly: failure?.code === "answer_only" });
       groups.set(first, failures);
     }
   }
@@ -86,7 +86,7 @@ function ToolFailures({failures}:{failures:ToolFailure[]}) {
     {failures.some(f => f.readOnly) && <Text size="sm" c="dimmed">Not saved: Explain is read-only</Text>}
     {failed.length > 0 && <>
     <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)} style={{color:"var(--mantine-color-dimmed)"}}>
-      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failed.length} tool {failed.length === 1 ? "call" : "calls"} failed</span>
+      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failed.length} {failed.length === 1 ? "step" : "steps"} failed</span>
     </UnstyledButton>
     {expanded && <Stack gap="xs" pl="md">{failed.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}</>}
   </Box>;
@@ -117,7 +117,7 @@ const suggestions = [
 ];
 
 export function ChatPage() {
-  const { agentAvailable, messages, messageTimes, ready, running, activity, provisional, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
+  const { agentAvailable, messages, messageTimes, ready, running, activity, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
   const receipts = useDashboardReceipts(messages);
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
   const { scrollRef, contentRef, turnRef, showJump, jumpToLatest } = useTurnAnchor<HTMLDivElement, HTMLDivElement>(lastSent);
@@ -136,7 +136,6 @@ export function ChatPage() {
   const turnStart = messages.findIndex(message => message.id === lastSent);
   const hasFinalText = messages.slice(turnStart + 1).some(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.length > 0);
   const answer = messages.slice(turnStart + 1).filter(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.trim().length > 0).at(-1);
-  const liveText = running && provisional && !provisional.collapsed && provisional.text && !hasFinalText;
   // Keep each turn's wrapper when the next question arrives so iframe views
   // retain their mounted state as the current turn becomes history.
   const turns: Array<{ id: string; messages: Message[] }> = [];
@@ -149,7 +148,7 @@ export function ChatPage() {
     ? <ToolFailures key={message.id} failures={failures.get(message.id)!} />
     : <Box key={message.id}>
       <ChatMessage message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />
-      {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText && !liveText} activity={activity} /></Box>}
+      {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText} activity={activity} /></Box>}
     </Box>;
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
@@ -171,10 +170,10 @@ export function ChatPage() {
               {turns.map((turn, index) => <Stack gap="lg" key={turn.id} ref={turn.id === lastSent ? turnRef : undefined} data-chat-turn={turn.id === lastSent ? lastSent : undefined}>
                 {turn.messages.filter(message => message.id !== answer?.id).map(renderMessage)}
                 {index === turns.length - 1 && <>
-                  {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
-                    <ChatMessage message={liveText ? { id: provisional.id, role: "assistant", content: provisional.text } : answer!} provisional={!!liveText} time={liveText ? undefined : messageTimes[answer!.id]} />
+                  {answer && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
+                    <ChatMessage message={answer!} time={messageTimes[answer!.id]} />
                   </Box>}
-                  {running && !hasFinalText && !liveText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+                  {running && !hasFinalText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
                   {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
                   {error && <RunError message={error} onRetry={retry} />}
                 </>}
@@ -228,7 +227,7 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   </Stack>;
 }
 
-function ChatMessage({ message, time, appView, provisional = false }: { message: Message; time?: number; appView?: AppView; provisional?: boolean }) {
+function ChatMessage({ message, time, appView }: { message: Message; time?: number; appView?: AppView }) {
 
   if (message.role === "activity") {
     if (message.activityType === "agent-outcome" && message.content && typeof message.content === "object" && "message" in message.content && typeof message.content.message === "string") {
@@ -242,15 +241,13 @@ function ChatMessage({ message, time, appView, provisional = false }: { message:
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";
   const stamp = time ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(time)) : "";
-  return <Box className={`chat-message${provisional ? " chat-message--provisional" : ""}`} data-chat-anchor data-role={user ? "user" : "assistant"}>
+  return <Box className="chat-message" data-chat-anchor data-role={user ? "user" : "assistant"}>
     {user
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
-      : <Typography className={`chat-markdown${provisional ? " chat-markdown--provisional" : ""}`} data-provisional={provisional || undefined}><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
-    {(provisional || stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
-      {provisional ? <Loader type="dots" size={20} /> : <>
-        {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
-        {!user && <CopyButton text={content} label="Copy message" />}
-      </>}
+      : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
+    {(stamp || !user) && <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4} h={24}>
+      {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
+      {!user && <CopyButton text={content} label="Copy message" />}
     </Group>}
   </Box>;
 }

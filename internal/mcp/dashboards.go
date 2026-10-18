@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -283,14 +282,14 @@ func (s *Server) checkDashboardPanels(ctx context.Context, spec panel.Dashboard)
 		if exists && r.Status == panel.StatusOK {
 			continue
 		}
-		diagnosis := r.Diagnosis
+		diagnosis := panel.PresentDiagnosis(r.Diagnosis)
 		if diagnosis == "" {
-			diagnosis = r.Error
+			diagnosis = panel.PresentMessage(r.Error)
 		}
 		if diagnosis == "" {
 			diagnosis = "Preview returned no rows."
 		}
-		problems = append(problems, panel.Problem{Path: fmt.Sprintf("panels[%d]", i), Message: fmt.Sprintf("%s: %s", p.Title, panel.RedactPaths(diagnosis)), Hint: "Replace or drop this panel; dashboards contain only panels that return data."})
+		problems = append(problems, panel.DiagnosisProblem(fmt.Sprintf("panels[%d]", i), fmt.Sprintf("%s: %s", p.Title, diagnosis), "Replace or drop this panel; dashboards contain only panels that return data."))
 	}
 	if len(problems) > 0 {
 		return problems
@@ -363,7 +362,7 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 		}
 		cancel()
 		if err != nil {
-			check.Reason = panel.SafeError(err)
+			check.Reason = panel.PresentError(err, panel.ReadError)
 			if errors.Is(err, context.DeadlineExceeded) {
 				check.Reason = fmt.Sprintf("the check took longer than %d seconds", int(saveCheckBudget/time.Second))
 			}
@@ -391,14 +390,14 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 					complete = false
 					continue
 				}
-				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: r.Diagnosis, ElapsedMS: &r.ElapsedMS}
+				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: panel.PresentDiagnosis(r.Diagnosis), ElapsedMS: &r.ElapsedMS}
 				if r.Frame != nil {
 					c.Rows = r.Frame.Rows
 				} else if r.Status == panel.StatusOK && p.Viz == "text" && strings.TrimSpace(p.Content) != "" {
 					c.Rows = 1
 				}
 				if r.Error != "" {
-					c.Error = panel.RedactPaths(r.Error)
+					c.Error = panel.PresentMessage(r.Error)
 				}
 				check.Panels[i] = c
 				switch r.Status {
@@ -418,7 +417,7 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 	out.Receipt.SaveCheck = check
 	text := fmt.Sprintf("%s %q, version %d, with %d panels.", verb, record.Name, record.Version, len(record.Spec.Panels))
 	if len(out.Warnings) > 0 {
-		text += " Needs attention: " + strings.Join(out.Warnings, " ") + " Fix these with edit_dashboard or tell the user why they are empty."
+		text += " Needs attention: " + strings.Join(out.Warnings, " ") + " Correct these panels or explain why they are empty."
 	}
 	if !check.Checked {
 		text += " Panels were not checked: " + check.Reason + "."
@@ -462,17 +461,14 @@ func dashboardToolError(err error) error {
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		return safePanelToolError(err)
 	case errors.As(err, &problems):
-		return problems
+		return panel.PresentProblems(problems)
 	case errors.Is(err, dashboard.ErrNotFound):
 		return errors.New("dashboard not found")
 	case errors.Is(err, dashboard.ErrConflict):
 		return errors.New("a dashboard with that name already exists")
 	case errors.Is(err, dashboard.ErrStale):
-		return errors.New("the dashboard changed since you read it; get_dashboard again and reapply the change")
+		return errors.New("the dashboard changed since you read it; open it again and reapply the change")
 	default:
-		// MCP tool errors bypass the HTTP request logger, so this is the only
-		// place the underlying storage failure gets recorded.
-		slog.Error("dashboard tool operation failed", "error", err)
-		return errors.New("dashboard operation failed")
+		return safePanelToolError(err)
 	}
 }

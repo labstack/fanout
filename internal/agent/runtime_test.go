@@ -191,7 +191,7 @@ func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	if strings.Contains(stream, "secret") {
 		t.Errorf("RUN_ERROR leaks provider body: %s", stream)
 	}
-	if strings.Contains(answerSSE(stream), "Unfinished provider text") || strings.Contains(answerSSE(stream), "TEXT_MESSAGE_") || len(messages) != 1 {
+	if strings.Contains(stream, "Unfinished provider text") || strings.Contains(stream, "TEXT_MESSAGE_") || len(messages) != 1 {
 		t.Fatalf("failed step leaked text: stream=%s messages=%#v", stream, messages)
 	}
 

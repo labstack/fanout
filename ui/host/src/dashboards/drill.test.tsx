@@ -178,14 +178,11 @@ it("aborts an obsolete selection and keeps the next selection visible", async ()
 });
 it("renders the existing waterfall and correlated logs with visible truncation", async () => {
   wire.trace.mockResolvedValue({
-    schema: "fanout.trace.v1",
     summary: "Trace",
     provenance: {
-      query_id: "q",
       window: "w",
       generated_at: target.to,
-      complete: true,
-      data_source: "spans",
+      complete: true
     },
     data: {
       trace_id: "abc",

@@ -1,3 +1,4 @@
+import { displayLabel } from "./labels";
 import { htmlTooltip } from "./escape";
 import { chartTheme, seriesSlot, statusHex } from "../chart";
 import { fonts } from "../tokens";
@@ -69,11 +70,7 @@ function chartSeries(frame: Frame, panel: Panel) {
   const series = toSeries(frame);
   if (!frame.columns.some(column => column.role === "dimension")) {
     for (const item of series) {
-      const name = item.name;
-      item.name = /^p\d+(?:\(.*\))?$/.test(name) && ["ms", "s", "ns"].includes(item.unit ?? "") ? `${name.match(/^p\d+/)![0]} latency`
-        : /^error_rate(?:\(\))?$/.test(name) ? "Error rate"
-        : /^rate(?:\(\))?$/.test(name) ? "Request rate"
-        : name.replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase());
+      item.name = displayLabel(frame.columns.find(c => c.name === item.name) ?? item.name, panel);
     }
   }
   return visibleSeries(series, panel);
@@ -217,6 +214,9 @@ function middleEllipsis(text: string, width: number, measure: (text: string) => 
 
 export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: ChartSize = { width: 500, height: 248 }): Option {
   const pivot = toCategories(frame);
+  if (frame.columns.filter(c => c.role === "dimension").length < 2) {
+    for (const series of pivot.series) series.name = displayLabel(frame.columns.find(c => c.name === series.name) ?? series.name, panel);
+  }
   const categories = pivot.categories;
   const { shown: series, hidden } = visibleSeries(pivot.series, panel);
   const dims = frame.columns.flatMap((column, index) => column.role === "dimension" ? [index] : []);

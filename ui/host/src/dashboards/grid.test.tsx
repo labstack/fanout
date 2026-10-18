@@ -186,15 +186,17 @@ it("pins dashboard Explain to the executed panel window and keeps fix a separate
   const { host, props } = await render({ results: observed, time: { from: "2026-10-08T00:00:00.123456789Z", to: "2026-10-08T01:00:00.987654321Z" }, vars: { service: "$__all" }, staleAt: new Map([["broken", 42]]) });
   await menu(host, "Broken", "Explain in chat");
   const [prompt, options] = vi.mocked(props.onOpenChat).mock.calls[0];
-  for (const value of ["dashboard id d1", "version 2", "panel id broken", "1970-01-01T00:00:00.000Z", "1970-01-01T01:00:00.000Z", '"service":"$__all"', "2026-10-08T00:00:00.123456789Z", "2026-10-08T01:00:00.987654321Z", "Observed diagnosis", '"stale_since":42', '"truncated":true', "Partial result", "Do not create, edit, replace or restore"]) expect(prompt).toContain(value);
-  expect(options).toEqual({ answer_only: true });
-  expect(prompt).not.toContain("Please fix");
+  expect(prompt).toBe("Explain the panel “Broken”");
+  expect(options?.answer_only).toBe(true);
+  const diagnostic = JSON.parse(options!.context![0].value);
+  expect(diagnostic).toMatchObject({dashboard_id:"d1",version:2,panel_id:"broken",from_ms:0,to_ms:3600000,vars:{service:"$__all"},diagnosis:"Observed diagnosis",stale_since:42,truncated:true,note:"Partial result"});
+  expect(JSON.stringify(diagnostic.spec)).toContain("2026-10-08T00:00:00.123456789Z");
+  expect(JSON.stringify(diagnostic.spec)).toContain("2026-10-08T01:00:00.987654321Z");
   const fix = within(host).getByRole("button", {name: "Ask Fanout to fix it"});
   await act(async () => fix.click());
   const [edit, editOptions] = vi.mocked(props.onOpenChat).mock.calls[1];
-  expect(edit).toContain("Please fix");
-  expect(edit).toContain("version 2");
-  expect(edit).toContain("Could not convert");
+  expect(edit).toBe("Fix the panel “Broken”");
+  expect(JSON.parse(editOptions!.context![0].value)).toMatchObject({version:2,error:expect.stringContaining("Could not convert")});
   expect(editOptions?.answer_only).not.toBe(true);
 });
 
@@ -202,7 +204,7 @@ it("hides fix without manage permission while keeping Explain answer-only", asyn
   const { host, props } = await render({ canManage: false });
   expect(host.textContent).not.toContain("Ask Fanout to fix it");
   await menu(host, "Broken", "Explain in chat");
-  expect(vi.mocked(props.onOpenChat).mock.calls[0][1]).toEqual({ answer_only: true });
+  expect(vi.mocked(props.onOpenChat).mock.calls[0][1]).toMatchObject({ answer_only: true, context: [{description:"Observed panel diagnostics",value:expect.any(String)}] });
 });
 
 it("copies a view link without edit mode and reports success", async () => {

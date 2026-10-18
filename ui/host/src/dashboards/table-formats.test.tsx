@@ -150,7 +150,7 @@ it.each([ ["number",42], ["string","[1,2]"], ["json","42"], ["json","{\"a\":1}"]
  const frame:Frame={columns:[{name:"trend",type,role:"dimension"}],values:[[value]],rows:1};
  const {host}=await render(<TableViz panel={{id:"p",title:"SQL",viz:"table",sql:"SELECT 1",options:{columns:[{field:"trend",format:"sparkline"},{field:"gone",format:"unit"}]}}} result={{...result,frame}} height={200}/>);
  expect([...host.querySelectorAll('[role="status"]')].filter(node=>node.textContent==="Sparkline requires an array column")).toHaveLength(1);
- expect(host.textContent).toContain("Column formats unavailable: gone");
+ expect(host.textContent).toContain("Column formats unavailable: Gone");
  expect(host.textContent).not.toContain("No trend");
 });
 

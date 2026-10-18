@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	appid "github.com/labstack/fanout/internal/id"
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 )
@@ -77,14 +76,12 @@ func normalizeLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-func (s *Service) provenanceFor(scope Scope, source string) Provenance {
+func (s *Service) provenanceFor(scope Scope) Provenance {
 	return Provenance{
-		QueryID:   appid.MustNew(),
 		Window:    scope.Start.Format(time.RFC3339Nano) + "/" + scope.End.Format(time.RFC3339Nano),
 		Generated: s.now().UTC(),
 		// Complete is always true today; reserved for partial-scan results.
-		Complete:   true,
-		DataSource: source,
+		Complete: true,
 	}
 }
 

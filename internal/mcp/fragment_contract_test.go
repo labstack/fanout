@@ -204,7 +204,6 @@ func TestFragmentNamedToolsMCPSeededGoldens(t *testing.T) {
 			f.Results[i].ElapsedMS = 0
 		}
 		if f.Trace != nil {
-			f.Trace.Provenance.QueryID = "seeded-trace"
 			f.Trace.Provenance.Generated = now
 		}
 		raw, err = json.MarshalIndent(f, "", "  ")

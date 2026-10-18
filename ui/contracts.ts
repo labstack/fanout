@@ -3,15 +3,12 @@
 export type Health = "healthy" | "degraded" | "unhealthy" | "unknown";
 
 export interface Provenance {
-  query_id: string;
   window: string;
   generated_at: string;
   complete: boolean;
-  data_source: string;
 }
 
 export interface Result<T> {
-  schema: string;
   summary: string;
   data: T;
   provenance: Provenance;

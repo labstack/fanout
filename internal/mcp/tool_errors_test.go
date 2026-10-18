@@ -25,7 +25,7 @@ func (p pathErrorObservability) Trace(context.Context, observability.Scope, stri
 func TestMCPRedactsEnginePaths(t *testing.T) {
 	s := NewWithIntelligence(pathErrorObservability{}, nil, nil, nil, "test")
 	_, _, err := s.trace(t.Context(), nil, TraceInput{})
-	if err == nil || strings.Contains(err.Error(), "/srv/") || !strings.Contains(err.Error(), "<path>") {
+	if err == nil || strings.Contains(err.Error(), "/srv/") || err.Error() != panel.ReadFailure {
 		t.Fatalf("MCP error=%v", err)
 	}
 }

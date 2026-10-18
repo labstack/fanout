@@ -111,7 +111,7 @@ func (s *Server) previewPanels(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	out.ElapsedMS = time.Since(start).Milliseconds()
 	var problems panel.Problems
 	if errors.As(err, &problems) {
-		for _, problem := range problems {
+		for _, problem := range panel.PresentProblems(problems) {
 			if m := panelPath.FindStringSubmatch(problem.Path); m != nil {
 				i, _ := strconv.Atoi(m[1])
 				if i < len(out.Panels) {
@@ -128,7 +128,7 @@ func (s *Server) previewPanels(ctx context.Context, _ *mcp.CallToolRequest, inpu
 		return nil, PreviewOutput{}, safePanelToolError(err)
 	}
 	for i, r := range results {
-		preview := PanelPreview{ElapsedMS: &r.ElapsedMS, ID: r.ID, Status: r.Status, Interval: r.Interval, Diagnosis: r.Diagnosis, Error: r.Error}
+		preview := PanelPreview{ElapsedMS: &r.ElapsedMS, ID: r.ID, Status: r.Status, Interval: r.Interval, Diagnosis: panel.PresentDiagnosis(r.Diagnosis), Error: panel.PresentMessage(r.Error)}
 		if r.Frame != nil {
 			preview.Rows = r.Frame.Rows
 			for _, c := range r.Frame.Columns {
@@ -173,14 +173,6 @@ func previewSummary(out PreviewOutput) string {
 	return text
 }
 
-// Preserve cancellation identity while keeping wrapped engine paths private.
-type redactedToolError struct {
-	cause   error
-	message string
-}
-
-func (e redactedToolError) Error() string { return e.message }
-func (e redactedToolError) Unwrap() error { return e.cause }
 func safePanelToolError(err error) error {
-	return redactedToolError{cause: err, message: panel.SafeError(err)}
+	return panel.PresentedError(err, panel.ReadError)
 }

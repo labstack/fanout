@@ -115,7 +115,7 @@ func writeProblems(c *echo.Context, err error) (bool, error) {
 		return false, nil
 	}
 	failure := newAPIError(http.StatusBadRequest, "invalid_spec", "The dashboard spec is invalid.")
-	failure.Problems = problems
+	failure.Problems = panel.PresentProblems(problems)
 	return true, failure
 }
 

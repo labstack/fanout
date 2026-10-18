@@ -61,6 +61,11 @@ func (s *Store) Thread(ctx context.Context, ownerID, threadID string) (Thread, e
 	if err := json.Unmarshal([]byte(raw), &messages); err != nil {
 		return Thread{}, fmt.Errorf("decode thread messages: %w", err)
 	}
+	// The internal metadata belongs only to provider reconstruction. Neither
+	// visible content nor the thread API exposes it.
+	for i := range messages {
+		messages[i] = withoutDiagnosticContext(messages[i])
+	}
 	return Thread{ThreadID: threadID, Messages: messages, Updated: updated}, nil
 }
 
@@ -204,7 +209,7 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	var messages []agtypes.Message
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		messages = mergeThreadMessages(nil, input.Messages)
+		messages = mergeThreadMessages(nil, input.Messages, input.Context)
 		messagesJSON, err := json.Marshal(messages)
 		if err != nil {
 			return nil, fmt.Errorf("encode messages: %w", err)
@@ -224,7 +229,7 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
 			return nil, fmt.Errorf("decode stored messages: %w", err)
 		}
-		messages = mergeThreadMessages(stored, input.Messages)
+		messages = mergeThreadMessages(stored, input.Messages, input.Context)
 		// A retry cannot remove the mode of the run that introduced this user
 		// turn. Inspect immutable run inputs under the same write transaction.
 		userCount := func(items []agtypes.Message) int {
@@ -323,7 +328,7 @@ func (s *Store) runAnswerOnly(ctx context.Context, runID string) (bool, error) {
 // the loss runtime.Run already tolerates — is no longer healed by the next
 // request carrying the browser's copy. The thread keeps the question and loses
 // the answer, where before it might have been restored by accident.
-func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
+func mergeThreadMessages(stored, incoming []agtypes.Message, runContext []agtypes.Context) []agtypes.Message {
 	stored = completeInterruptedToolCalls(stored)
 	known := make(map[string]struct{}, len(stored))
 	for _, message := range stored {
@@ -332,6 +337,7 @@ func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
 		}
 	}
 	merged := append([]agtypes.Message(nil), stored...)
+	newUser := -1
 	for _, message := range incoming {
 		if message.Role != agtypes.RoleUser {
 			continue
@@ -342,9 +348,35 @@ func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
 			}
 			known[message.ID] = struct{}{}
 		}
-		merged = append(merged, message)
+		merged = append(merged, withoutDiagnosticContext(message))
+		newUser = len(merged) - 1
+	}
+	if newUser >= 0 && len(runContext) > 0 {
+		metadata := agtypes.Metadata{}
+		for key, value := range merged[newUser].Metadata {
+			metadata[key] = value
+		}
+		metadata[diagnosticContextMetadata] = diagnosticContext(runContext)
+		merged[newUser].Metadata = metadata
 	}
 	return merged
+}
+
+// Keep this reserved key server-owned even when a client posts metadata.
+const diagnosticContextMetadata = "_fanout_diagnostic_context"
+
+func withoutDiagnosticContext(message agtypes.Message) agtypes.Message {
+	metadata := agtypes.Metadata{}
+	for key, value := range message.Metadata {
+		if key != diagnosticContextMetadata {
+			metadata[key] = value
+		}
+	}
+	if len(metadata) == 0 {
+		metadata = nil
+	}
+	message.Metadata = metadata
+	return message
 }
 
 // completeInterruptedToolCalls preserves observed calls and supplies a stable

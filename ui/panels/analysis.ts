@@ -1,3 +1,4 @@
+import { displayLabel } from "./labels";
 import { heatRamp, heatStep } from "./heat-scale";
 import { escapeHTML, htmlTooltip, tooltipLines, type TooltipPoint } from "./escape";
 import { seriesSlot } from "../chart";
@@ -43,7 +44,7 @@ function compareBuckets(a: Record<string, Cell>, b: Record<string, Cell>): numbe
 }
 
 export function analysisSummary(panel: Panel, result: PanelResult): string {
-  const columns = (result.frame?.columns ?? []).map(column => column.name + (column.unit ? ` (${column.unit})` : "")).join(", ");
+  const columns = (result.frame?.columns ?? []).map(column => displayLabel(column, panel)).join(", ");
   return `${panel.title}: ${result.frame?.rows ?? 0} rows; ${columns}${result.frame?.truncated ? ", limited data" : ""}`;
 }
 
@@ -85,13 +86,13 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         const points = Array.isArray(params) ? params : [params];
         return points.map(point => {
           const value = Array.isArray(point.value) ? point.value : [];
-          return tooltipLines([`${point.seriesName ?? ""} · ${point.name ?? ""}`, `${measures[0]?.name ?? "x"}: ${formatValue(xUnit, Number(value[0]))}`, `${measures[1]?.name ?? "y"}: ${formatValue(yUnit, Number(value[1]))}`]);
+          return tooltipLines([`${point.seriesName ?? ""} · ${point.name ?? ""}`, `${displayLabel(measures[0] ? { ...measures[0], unit: xUnit } : "x", panel)}: ${formatValue(xUnit, Number(value[0]))}`, `${displayLabel(measures[1] ? { ...measures[1], unit: yUnit } : "y", panel)}: ${formatValue(yUnit, Number(value[1]))}`]);
         }).join("<br/>");
       } },
       legend: legendLayout.option,
       grid: { ...base.grid, top: legendLayout.option.show ? legendLayout.top + 20 : 28, left: 8, right: 16, bottom: 32 },
-      xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: measures[0]?.name ?? "x", nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
-      yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: measures[1]?.name ?? "y", nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "bottom" } },
+      xAxis: { ...axis(xUnit, xScale, measures[0]?.name, size.width - 80), name: displayLabel(measures[0] ? { ...measures[0], unit: xUnit } : "x", panel), nameLocation: "middle", nameGap: 28, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "right", verticalAlign: "top" } },
+      yAxis: { ...axis(yUnit, yScale, measures[1]?.name, size.height-legendLayout.top-74), name: displayLabel(measures[1] ? { ...measures[1], unit: yUnit } : "y", panel), nameLocation: "end", nameGap: 8, nameRotate: 0, nameTextStyle: { color: theme.muted, fontFamily: theme.font, fontSize: 11, align: "left", verticalAlign: "bottom" } },
       series: groups.map(({ name, items }, index) => ({
         type: "scatter", name, interactive: true, keyboard_unit: yUnit, keyboard_x_unit: xUnit, itemStyle: markStyle(isOtherSeries(name) ? theme.muted : seriesSlot(index, theme.dark),theme),
         data: rows.filter(row => !colour || items.some(item => item.name === String(row[colour] ?? "")))
@@ -125,7 +126,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
       legend: legendLayout.option,
       grid: { ...base.grid, left:16,right:8,top:legendLayout.option.show ? legendLayout.top + 20 : 28,bottom:8 },
       xAxis: { ...base.xAxis, type: "category", data: labels, splitLine:{show:false} },
-      yAxis: { ...base.yAxis, type: "value", name:"count",nameLocation:"end",nameGap:8,nameRotate:0,...valueAxis(0, Math.max(0, ...series.flatMap(s => s.data.map(d => d.value))), "count", size.height-(legendLayout.option.show ? legendLayout.top + 20 : 28)-30),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"right",verticalAlign:"bottom"} },
+      yAxis: { ...base.yAxis, type: "value", name:displayLabel("count"),nameLocation:"end",nameGap:8,nameRotate:0,...valueAxis(0, Math.max(0, ...series.flatMap(s => s.data.map(d => d.value))), "count", size.height-(legendLayout.option.show ? legendLayout.top + 20 : 28)-30),axisLabel:{...base.yAxis.axisLabel,hideOverlap:true},nameTextStyle:{color:theme.muted,fontFamily:theme.font,fontSize:11,align:"right",verticalAlign:"bottom"} },
       series,
     };
   }
@@ -169,7 +170,7 @@ export function analysisOption(panel: Panel, result: PanelResult, theme: ChartTh
         return points.map(point => {
           const v = Array.isArray(point.value) ? point.value : [];
           return tooltipLines([`${point.seriesName ?? ""} · ${point.name ?? ""}`, heat ? labels.get(names[Number(v[1])]) ?? "" : names[Number(v[1])] ?? "",
-            `${formatTimestamp(Number(v[0]))} – ${formatTimestamp(Number(v[3]))}`, `${measure}: ${formatValue(heat ? "count" : panel.unit ?? measures[0]?.unit, typeof v[2] === "number" ? v[2] : null)}`]);
+            `${formatTimestamp(Number(v[0]))} – ${formatTimestamp(Number(v[3]))}`, `${displayLabel(measures[0] ?? measure, panel)}: ${formatValue(heat ? "count" : panel.unit ?? measures[0]?.unit, typeof v[2] === "number" ? v[2] : null)}`]);
         }).join("<br/>");
       } },
       axisPointer: { link: [{ xAxisIndex: "all" }] },

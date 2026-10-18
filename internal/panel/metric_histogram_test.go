@@ -266,7 +266,7 @@ func TestHistogramSummaryDiagnosisStillSuggestsCount(t *testing.T) {
 	m.Type, m.Temporality, m.Monotonic = "summary", "", false
 	insertMetrics(t, db, m)
 	r := runMetricMeasure(t, e, []string{"p95(value) as tail"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
-	if r.Status != StatusEmpty || r.Diagnosis != "p95(value) is not defined for net (summary); use count()" {
+	if r.Status != StatusEmpty || r.Diagnosis != "This measure is unavailable for net (summary). Show the number of observations instead." {
 		t.Fatalf("summary diagnosis=%+v", r)
 	}
 }

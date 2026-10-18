@@ -1,3 +1,4 @@
+import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle, Wrench } from "@phosphor-icons/react";
@@ -5,7 +6,6 @@ import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
 import { panelTimeLabel } from "../../../panels/interaction";
-import { logConstants } from "../../../panels/rows";
 import { useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { fonts } from "../../../tokens";
 import { PanelData, PanelSpec } from "./inspect";
@@ -66,9 +66,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     : panel.drill === "logs" ? "click for matching logs"
     : panel.drill === "traces" && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
   const bodyHeight = Math.max(40, height - 88);
-  const constants = logConstants(panel,result?.frame);
-  const source = constants.length ? [...new Set(constants.map(c => c.value))].join(" · ") : panel.sql ? "sql" : panel.query?.from ?? (panel.viz === "service_map" || panel.viz === "health" ? "spans" : panel.viz === "log_patterns" ? "logs" : "spec");
-  const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")} · ${source}${hint ? ` · ${hint}` : ""}`;
+  const constants = [...new Set(logConstants(panel, result?.frame).map(c => c.value))];
+  const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")}${constants.length ? ` · ${constants.join(" · ")}` : ""}${hint ? ` · ${hint}` : ""}`;
   const canvas = ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline", "gauge", "service_map"].includes(panel.viz);
   const scrolls = view !== "Chart" || !canvas || !result || result.status !== "ok" || result.frame?.truncated || result.previous?.truncated;
   const rows = ["table", "logs", "traces", "log_patterns", "text"].includes(panel.viz);

@@ -32,10 +32,20 @@ type Checked struct {
 // (cancellation, deadline, interrupt, closed database) rather than a fault in
 // the spec. The engine reports a cancelled query as a bare interrupt.
 func isOperational(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, sql.ErrConnDone) || (err != nil && strings.Contains(err.Error(), "database is closed")) {
+		return true
+	}
 	var engineError *duckdb.Error
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, sql.ErrConnDone) || (err != nil && strings.Contains(err.Error(), "database is closed")) ||
-		errors.As(err, &engineError) && engineError.Type == duckdb.ErrorTypeInterrupt
+	if errors.As(err, &engineError) {
+		switch engineError.Type {
+		case duckdb.ErrorTypeIO, duckdb.ErrorTypeOutOfMemory, duckdb.ErrorTypeInterrupt,
+			duckdb.ErrorTypeInternal, duckdb.ErrorTypeFatal, duckdb.ErrorTypeConnection,
+			duckdb.ErrorTypeSerialization, duckdb.ErrorTypeTransaction:
+			return true
+		}
+	}
+	return false
 }
 
 // Check runs Validate and then the checks that need DuckDB's parser: every
@@ -59,7 +69,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 						if isOperational(err) {
 							return nil, nil, err
 						}
-						problems.add(fmt.Sprintf("variables[%d].where[%d]", i, j), SafeError(err))
+						problems.add(fmt.Sprintf("variables[%d].where[%d]", i, j), PresentError(err, SQLError))
 						continue
 					}
 					checked.VarFilters[v.Name] = append(checked.VarFilters[v.Name], f)
@@ -85,7 +95,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 					if isOperational(err) {
 						return nil, nil, err
 					}
-					problems.add(fmt.Sprintf("%s.query.where[%d]", path, j), SafeError(err))
+					problems.add(fmt.Sprintf("%s.query.where[%d]", path, j), PresentError(err, SQLError))
 					continue
 				}
 				checked.Filters[p.ID] = append(checked.Filters[p.ID], f)
@@ -93,7 +103,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 					if isOperational(err) {
 						return nil, nil, err
 					}
-					problems.addHint(path+".options.split", SafeError(err), "use standalone service and optional namespace equalities")
+					problems.addHint(path+".options.split", PresentError(err, SQLError), "use standalone service and optional namespace equalities")
 				}
 
 				if p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" || p.Viz == "health" {
@@ -102,7 +112,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 						if isOperational(err) {
 							return nil, nil, err
 						}
-						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), SafeError(err), "use a supported service or namespace predicate")
+						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), PresentError(err, SQLError), "use a supported service or namespace predicate")
 					} else if projected != nil {
 						checked.AnnotationFilters[p.ID] = append(checked.AnnotationFilters[p.ID], *projected)
 					}
@@ -117,7 +127,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 						if isOperational(err) {
 							return nil, nil, err
 						}
-						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), SafeError(err), "use namespace or service equality with a literal or single-value variable")
+						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), PresentError(err, SQLError), "use namespace or service equality with a literal or single-value variable")
 					}
 				}
 
@@ -140,7 +150,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 				if isOperational(err) {
 					return nil, nil, err
 				}
-				problems.add(path+".sql", SafeError(err))
+				problems.add(path+".sql", PresentError(err, SQLError))
 			}
 		}
 	}
@@ -222,7 +232,7 @@ func checkSQLPanel(ctx context.Context, parser Parser, p *Panel, vars map[string
 
 func validateTimelineColumns(columns []Column) error {
 	if len(columns) < 3 || len(columns) > 4 || columns[0].Name != "time" || columns[0].Type != "time" || columns[1].Type != "string" || columns[2].Type != "number" || (len(columns) == 4 && (columns[3].Name != "state" || columns[3].Type != "string")) {
-		return fmt.Errorf("SQL state_timeline requires timestamp time, a string item, one numeric measure and optional string state")
+		return Problems{{Message: "SQL state_timeline requires timestamp time, a string item, one numeric measure and optional string state"}}
 	}
 	return nil
 }

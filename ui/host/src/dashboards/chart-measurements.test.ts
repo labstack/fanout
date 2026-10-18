@@ -158,7 +158,7 @@ it.each([false,true])("native small gauges and m-height plots have unclipped, no
    const audit=nativeAudit(chart,compiled,{width,height},rect);expect(audit.plot!.y_ticks.length).toBeGreaterThan(0);
    const ticks=audit.texts.filter(t=>t.right<=rect.x&&t.top>=rect.y-6&&t.bottom<=rect.y+rect.height+6);
    for(const [i,t] of ticks.entries())for(const other of ticks.slice(i+1))expect(overlaps(t,other),`${viz} tick overlap`).toBe(false);
-   if(viz==="scatter"||viz==="histogram")for(const name of viz==="scatter"?["calls","p95"]:["count"]) {const title=audit.texts.find(t=>t.text===name)!;expect(title).toBeDefined();expect(title.left).toBeGreaterThanOrEqual(0);expect(title.right).toBeLessThanOrEqual(width);expect(title.top).toBeGreaterThanOrEqual(0);expect(title.bottom).toBeLessThanOrEqual(height);expect(overlaps(title,{left:rect.x,top:rect.y,right:rect.x+rect.width,bottom:rect.y+rect.height})).toBe(false);for(const tick of ticks)expect(overlaps(title,tick)).toBe(false);}
+   if(viz==="scatter"||viz==="histogram")for(const name of viz==="scatter"?["Calls","P95 (ms)"]:["Count"]) {const title=audit.texts.find(t=>t.text===name)!;expect(title).toBeDefined();expect(title.left).toBeGreaterThanOrEqual(0);expect(title.right).toBeLessThanOrEqual(width);expect(title.top).toBeGreaterThanOrEqual(0);expect(title.bottom).toBeLessThanOrEqual(height);expect(overlaps(title,{left:rect.x,top:rect.y,right:rect.x+rect.width,bottom:rect.y+rect.height})).toBe(false);for(const tick of ticks)expect(overlaps(title,tick)).toBe(false);}
   }
  }finally{chart.dispose();el.remove();}
 });

@@ -14,5 +14,5 @@ it("single series has neither legend nor direct labels; grouped labels name the 
 });
 it("gives ungrouped measures reader-facing series names too", () => {
   const option = timeseriesOption({ id: "p", title: "Performance", viz: "timeseries" }, { id: "p", status: "ok", elapsed_ms: 0, frame: { rows: 1, columns: [{ name: "time", role: "time", type: "time" }, { name: "p95", role: "measure", type: "number", unit: "ms" }, { name: "error_rate", role: "measure", type: "number", unit: "percent" }], values: [[0], [42], [5]] } }, chartThemeFor(false));
-  expect((option.series as { name: string }[]).map(series => series.name)).toEqual(["p95 latency", "Error rate"]);
+  expect((option.series as { name: string }[]).map(series => series.name)).toEqual(["P95 (ms)", "Error rate (%)"]);
 });

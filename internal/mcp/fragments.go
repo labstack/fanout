@@ -104,15 +104,15 @@ func (s *Server) noDataError(ctx context.Context, out PanelFragment) error {
 		return safePanelToolError(err)
 	}
 	if code == "unknown_service" {
-		return guidanceError(code, guidance)
+		return guidanceError(code, panel.PresentDiagnosis(guidance))
 	}
-	notes := []string{"No matching data.", guidance}
+	notes := []string{"No matching data.", panel.PresentDiagnosis(guidance)}
 	for i, r := range out.Results {
 		title := r.ID
 		if i < len(out.Dashboard.Panels) {
 			title = out.Dashboard.Panels[i].Title
 		}
-		notes = append(notes, fmt.Sprintf("%s: %s", title, r.Diagnosis))
+		notes = append(notes, fmt.Sprintf("%s: %s", title, panel.PresentDiagnosis(r.Diagnosis)))
 	}
 	return guidanceError("no_data", strings.Join(notes, " "))
 }

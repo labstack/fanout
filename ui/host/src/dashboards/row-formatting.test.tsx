@@ -32,10 +32,10 @@ const frame:Frame={columns:[{name:"time",type:"time",role:"time"},{name:"severit
 const result:PanelResult={id:"logs",status:"ok",elapsed_ms:1,frame};
 it("retains constant context columns on single-row logs but hides them with at least two rows", async () => {
  await mount(<RowPanel panel={panel} result={{...result,frame:{...frame,rows:1,values:frame.values.map(values=>values.slice(0,1))}}} height={350} dark={false}/>,false);
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("namespace");
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("service");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("Namespace");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("Service");
  await mount(<RowPanel panel={panel} result={result} height={350} dark={false}/>,false);
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).not.toContain("namespace");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).not.toContain("Namespace");
 });
 it.each([false,true])("collector sync: state legend labels reach 4.5:1 in both themes (%s)",async dark=>{
  await mount(<StateTimelineViz panel={{id:"states",title:"States",viz:"state_timeline"}} result={result} height={200} dark={dark}/>,dark);
@@ -50,8 +50,8 @@ it.each([false,true])("highlight chip explains soft marks and constant namespace
  await mount(<PanelCard panel={panel} title={panel.title} result={result} loading={false} height={350} group="g" editing={false} agentAvailable={false} onView={()=>{}} onCopyLink={()=>{}} onExplain={()=>{}}/>,dark);
  expect(host.querySelector("[data-highlight-term]")?.textContent).toBe("highlight: error");
  expect(host.querySelector("[data-panel-subtitle]")?.textContent).toBe("logs · otel-demo");
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).not.toContain("namespace");
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("severity");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).not.toContain("Namespace");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("Severity");
  const mark=host.querySelector<HTMLElement>("mark")!;
  expect(mark.textContent).toBe("ERROR"); expect(mark.style.background).toContain(dark?"0.22":"0.3");
  expect(mark.style.color).toBe("inherit"); expect(mark.style.borderRadius).toBe("3px");
@@ -81,14 +81,14 @@ it.each([false,true])("templates use five accent chips, numeric dimensions align
 });
 it("empty/mixed/null constants are retained and severity is never hidden",async()=>{
  await mount(<RowPanel panel={panel} result={{...result,frame:{...frame,values:[...frame.values.slice(0,5),["otel-demo",null]]}}} height={350} dark={false}/>,false);
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("namespace");
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toContain("Namespace");
 });
 
 it.each([false,true])("pattern severity, chips, service, count and area trend in preview order, dark=%s",async dark=>{
  const p:Panel={id:"p",title:"Patterns",viz:"log_patterns",query:{from:"logs",by:["body_template"],measures:["count()"]}};
  const f:Frame={columns:[{name:"body_template",type:"string",role:"dimension"},{name:"count",type:"number",role:"measure",unit:"count"},{name:"trend",type:"json",role:"dimension"},{name:"severity",type:"string",role:"dimension"},{name:"service",type:"string",role:"dimension"}],values:[["failed <*> <num>","warning <str>","info <time>"],[12,8,3],["[1,3,8]","[1,2,5]","[1,1,1]"],["ERROR","WARN","INFO"],["payments","checkout","frontend"]],rows:3,trend:{start_ms:0,step_ms:60000}};
  await mount(<RowPanel panel={p} result={{...result,frame:f}} height={350} dark={dark}/>,dark);
- expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toEqual(["severity","body_template","service","count","trend"]);
+ expect([...host.querySelectorAll("thead th")].map(e=>e.textContent)).toEqual(["Severity","Message template","Service","Count","Trend"]);
  expect([...host.querySelectorAll("tbody tr")].map(r=>r.querySelector("td")?.textContent)).toEqual(["◆ ERROR","■ WARN","● INFO"]);
  expect(host.querySelectorAll("[data-template-chip]")).toHaveLength(4);
  expect(host.querySelectorAll("[data-pattern-area]")).toHaveLength(3);

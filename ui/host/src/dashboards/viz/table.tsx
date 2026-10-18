@@ -2,6 +2,7 @@ import { Anchor, Badge, Box, Table, Text, UnstyledButton, useComputedColorScheme
 import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { createSortedRowModel, rowSortingFeature, sortFn_alphanumeric, sortFn_basic, tableFeatures, useTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { displayLabel } from "../../../../panels/labels";
 import { logConstants, rowModel } from "../../../../panels/rows";
 import type { Selection, Cell, Column, Panel, PanelResult, Unit } from "../../../../panels/types";
 import { statusFor } from "../../../../panels/thresholds";
@@ -41,7 +42,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
   const maxima = useMemo(() => frame.columns.map((c, i) => (c.role === "measure" ? Math.max(0, ...frame.values[i].filter((v): v is number => typeof v === "number" && Number.isFinite(v))) : 0)), [frame]);
   const columns = useMemo<ColumnDef<typeof features, Row>[]>(() => frame.columns.map<ColumnDef<typeof features, Row>>((column, index) => ({
     id: column.name,
-    header: column.name,
+    header: displayLabel(column, panel),
     accessorFn: (row) => row[index],
     cell: (info) => {
       const value = info.getValue() as Cell;
@@ -110,7 +111,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
           {group.headers.map((header) => {
             const measure = frame.columns.find(c=>c.name===header.column.id)?.type === "number";
             return <Table.Th aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : "none"} key={header.id} ta={measure ? "right" : undefined}>
-              <UnstyledButton onClick={header.column.getToggleSortingHandler()} fz="xs" c="dimmed" ff="monospace" fw={500} title={header.column.id} style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <UnstyledButton onClick={header.column.getToggleSortingHandler()} fz="xs" c="dimmed" ff="monospace" fw={500} title={String(header.column.columnDef.header)} style={{ maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <table.FlexRender header={header} />{header.column.getIsSorted() === "asc" ? <CaretUp size={10} /> : header.column.getIsSorted() === "desc" ? <CaretDown size={10} /> : null}
               </UnstyledButton>
             </Table.Th>;
@@ -130,7 +131,7 @@ export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderC
         </Table.Tr>)}
       </Table.Tbody>
     </Table>
-    {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Text fz={12} c="dimmed" role="status">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>c.field).join(", ")}</Text>}
+    {(panel.options?.columns??[]).some(c=>!frame.columns.some(column=>column.name===c.field))&&<Text fz={12} c="dimmed" role="status">Column formats unavailable: {(panel.options?.columns??[]).filter(c=>!frame.columns.some(column=>column.name===c.field)).map(c=>displayLabel(c.field, panel)).join(", ")}</Text>}
   </Box>;
 }
 

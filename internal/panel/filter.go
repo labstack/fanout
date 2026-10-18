@@ -19,11 +19,14 @@ type Filter struct {
 	InParams map[string]bool `json:"-"`
 	// EqField is the field compared when the filter is `field = value`; the
 	// empty-panel diagnosis lists values seen for it.
-	EqField   string `json:"-"`
-	EqLiteral string `json:"-"`
-	EqParam   string `json:"-"`
-	EqValue   bool   `json:"-"`
-	NameInAnd bool   `json:"-"`
+	EqField        string `json:"-"`
+	EqLiteral      string `json:"-"`
+	EqParam        string `json:"-"`
+	EqValue        bool   `json:"-"`
+	DisplayField   string `json:"-"`
+	DisplayLiteral string `json:"-"`
+	DisplayParam   string `json:"-"`
+	NameInAnd      bool   `json:"-"`
 }
 
 var (
@@ -71,6 +74,7 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 		}
 	}
 	f.EqField = equalityField(node["where_clause"])
+	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(node["where_clause"])
 	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(node["where_clause"])
 	f.NameInAnd = nameEqualityInAnd(node["where_clause"])
 	if f.EqValue {
@@ -105,16 +109,7 @@ func bindFilter(ctx context.Context, parser Parser, sig *signal, vars map[string
 	}
 	prefix := "SELECT 1 FROM " + sig.name + " WHERE ("
 	if _, _, err := parser.PrepareTelemetrySQL(ctx, prefix+query+")", prefix+describe+")", 1); err != nil {
-		if isOperational(err) {
-			return err
-		}
-		message, _, _ := strings.Cut(err.Error(), "\n")
-		message = "does not bind: " + strings.TrimSpace(message)
-		if len(f.Params) > 0 {
-			name := f.Params[0]
-			message += fmt.Sprintf("; cast variables to the compared type, e.g. CAST($%s AS DOUBLE) or CAST($%s AS TIMESTAMPTZ_NS)", name, name)
-		}
-		return errors.New(message)
+		return err
 	}
 	return nil
 }
@@ -617,4 +612,49 @@ func nameEqualityInAnd(n any) bool {
 		}
 	}
 	return false
+}
+
+// filterDisplay derives product wording from the checked AST, never SQL text.
+func filterDisplay(n any) (field, literal, parameter string) {
+	node, _ := n.(map[string]any)
+	if node["class"] != "COMPARISON" {
+		return "", "", ""
+	}
+	other := node["right"]
+	field = fieldText(node["left"])
+	if field == "" {
+		field, other = fieldText(node["right"]), node["left"]
+	}
+	if field == "" {
+		return "", "", ""
+	}
+	switch field {
+	case "http_route":
+		field = "HTTP route"
+	case "http_method":
+		field = "HTTP method"
+	case "http_status_code":
+		field = "HTTP status code"
+	case "name":
+		field = "metric"
+	default:
+		field = strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
+	}
+	if node["type"] != "COMPARE_EQUAL" {
+		return field, "", ""
+	}
+	for {
+		value, _ := other.(map[string]any)
+		switch value["class"] {
+		case "CAST":
+			other = value["child"]
+		case "CONSTANT":
+			return field, constantText(value), ""
+		case "PARAMETER":
+			parameter, _ = value["identifier"].(string)
+			return field, "", parameter
+		default:
+			return field, "", ""
+		}
+	}
 }

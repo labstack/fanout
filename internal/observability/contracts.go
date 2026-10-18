@@ -2,8 +2,6 @@ package observability
 
 import "time"
 
-const TraceSchema = "fanout.trace.result@1"
-
 // Scope is the mandatory boundary for every telemetry query. Namespace is a
 // query filter, not an authorization boundary: every MCP tool input exposes
 // it (Server.scope copies input.Namespace into the Scope) and the HTTP API
@@ -16,13 +14,11 @@ type Scope struct {
 	End       time.Time `json:"end"`
 }
 
-// Provenance makes every rendered answer traceable to its source query.
+// Provenance describes the observed window and freshness.
 type Provenance struct {
-	QueryID    string    `json:"query_id"`
-	Window     string    `json:"window"`
-	Generated  time.Time `json:"generated_at"`
-	Complete   bool      `json:"complete"`
-	DataSource string    `json:"data_source"`
+	Window    string    `json:"window"`
+	Generated time.Time `json:"generated_at"`
+	Complete  bool      `json:"complete"`
 }
 
 // Result is the canonical query envelope shared by REST and MCP.
@@ -30,7 +26,6 @@ type Provenance struct {
 // UI selection is deliberately absent: MCP Apps link tools to UI resources
 // through standard tool metadata rather than a Fanout-specific view registry.
 type Result[T any] struct {
-	Schema     string     `json:"schema"`
 	Summary    string     `json:"summary"`
 	Data       T          `json:"data"`
 	Provenance Provenance `json:"provenance"`

@@ -67,7 +67,8 @@ func TestExemplarSafeErrors(t *testing.T) {
 	e := NewExecutor(probe, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	_, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
-	if !errors.Is(err, query.ErrParquetReadWait) || strings.Contains(err.Error(), "/private/telemetry") || !strings.Contains(err.Error(), "<path>") {
+	err = PresentedError(err, ReadError)
+	if !errors.Is(err, query.ErrParquetReadWait) || strings.Contains(err.Error(), "/private/telemetry") || err.Error() != ReadFailure {
 		t.Fatalf("lost safe error chain: %v", err)
 	}
 }
