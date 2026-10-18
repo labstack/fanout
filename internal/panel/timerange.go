@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+// ResolveWindow applies the executor's time bounds before callers validate or
+// execute a tool, so guidance and all subsequent queries use the same interval.
+func (e *Executor) ResolveWindow(start, end time.Time) (time.Time, time.Time, error) {
+	return resolveWindow(Time{From: &start, To: &end}, nil, e.now(), e.maxWindow)
+}
+
 // resolveWindow turns a dashboard time, optionally overridden by a panel,
 // into a concrete UTC range no longer than retention. A range longer than
 // retention keeps its end and loses its oldest part rather than failing.

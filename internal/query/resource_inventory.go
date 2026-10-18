@@ -11,16 +11,17 @@ import (
 // are exact only inside the logical window; boundary and unacknowledged files
 // must supply actual observations, rather than overlapping resource envelopes.
 func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, markers map[string]bool, window queryrows.Window) string {
+	retained := window.RetainedInventory
 	var contributions []string
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		var interior []string
 		var raw []telemetry.BatchMetadata
 		for _, batch := range batches {
-			if !overlapping(batch, signal, window) {
+			bounds, count := batchTime(batch, signal)
+			if count == 0 || !retained && !overlapping(batch, signal, window) {
 				continue
 			}
-			bounds, _ := batchTime(batch, signal)
-			if markers[batch.ID] && bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano() {
+			if markers[batch.ID] && (retained || bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano()) {
 				interior = append(interior, batch.ID)
 			} else {
 				raw = append(raw, batch)
@@ -34,7 +35,11 @@ func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, marker
 			if signal == "spans" {
 				clock = "start_time"
 			}
-			contributions = append(contributions, `SELECT `+sqlLiteral(signal)+` AS signal,namespace,service,resource,min(`+clock+`) AS first_seen,max(`+clock+`) AS last_seen FROM (`+cleanSource(signal, d.snapshotSource(signal, raw, batches))+`) WHERE `+windowPredicate(clock, window)+` GROUP BY namespace,service,resource`)
+			predicate := "true"
+			if !retained {
+				predicate = windowPredicate(clock, window)
+			}
+			contributions = append(contributions, `SELECT `+sqlLiteral(signal)+` AS signal,namespace,service,resource,min(`+clock+`) AS first_seen,max(`+clock+`) AS last_seen FROM (`+cleanSource(signal, d.snapshotSource(signal, raw, batches))+`) WHERE `+predicate+` GROUP BY namespace,service,resource`)
 		}
 	}
 	if len(contributions) == 0 {
