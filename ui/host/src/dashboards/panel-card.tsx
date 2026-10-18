@@ -14,11 +14,11 @@ import { ChartHintContext, compactHint } from "./chart-keyboard";
 import { Viz } from "./viz";
 import { PanelTooltipContext } from "./panel-fullscreen";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, staleAt, traceLinks, suspended = false, menuRef }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEditSQL, staleAt, traceLinks, suspended = false, menuRef }: {
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button";
   onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
-  suspended?: boolean; menuRef?: Ref<HTMLButtonElement>;
+  suspended?: boolean; menuRef?: Ref<HTMLButtonElement>; onEditSQL?(): void;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
   zoomed?: boolean; onZoomReset?: () => void; onRangePending?(pending: boolean): void;
 }) {
@@ -178,6 +178,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           {onView && <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>}
           {agentAvailable && onExplain && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
           {onCopyLink && <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>}
+          {typeof panel.sql === "string" && onEditSQL && <Menu.Item onClick={onEditSQL}>Edit SQL</Menu.Item>}
           {onDuplicate && <Menu.Item leftSection={<Copy size={14} />} onClick={onDuplicate}>Duplicate</Menu.Item>}
           {onRemove && <><Menu.Divider /><Menu.Item color="bad" leftSection={<Trash size={14} />} onClick={onRemove}>Remove panel</Menu.Item></>}
         </Menu.Dropdown>

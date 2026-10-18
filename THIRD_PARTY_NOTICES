@@ -79,6 +79,13 @@ COMPONENT INVENTORY
 - npm: @ag-ui/encoder 1.0.2 (declared license: MIT)
 - npm: @ag-ui/proto 1.0.2 (declared license: MIT)
 - npm: @bufbuild/protobuf 2.16.0 (declared license: (Apache-2.0 AND BSD-3-Clause)); no license file was present in the installed package
+- npm: @codemirror/autocomplete 6.20.3 (declared license: MIT)
+- npm: @codemirror/commands 6.11.1 (declared license: MIT)
+- npm: @codemirror/lang-sql 6.10.0 (declared license: MIT)
+- npm: @codemirror/language 6.12.4 (declared license: MIT)
+- npm: @codemirror/lint 6.9.7 (declared license: MIT)
+- npm: @codemirror/state 6.7.6 (declared license: MIT)
+- npm: @codemirror/view 6.43.13 (declared license: MIT)
 - npm: @dagrejs/dagre 3.1.1 (declared license: MIT)
 - npm: @dagrejs/graphlib 4.0.5 (declared license: MIT)
 - npm: @floating-ui/core 1.8.0 (declared license: MIT)
@@ -88,8 +95,12 @@ COMPONENT INVENTORY
 - npm: @floating-ui/utils 0.2.12 (declared license: MIT)
 - npm: @fontsource-variable/geist 5.3.0 (declared license: OFL-1.1)
 - npm: @fontsource-variable/geist-mono 5.3.0 (declared license: OFL-1.1)
+- npm: @lezer/common 1.5.3 (declared license: MIT)
+- npm: @lezer/highlight 1.2.5 (declared license: MIT)
+- npm: @lezer/lr 1.4.11 (declared license: MIT)
 - npm: @mantine/core 9.7.2 (declared license: MIT)
 - npm: @mantine/hooks 9.7.2 (declared license: MIT)
+- npm: @marijn/find-cluster-break 1.0.4 (declared license: MIT)
 - npm: @modelcontextprotocol/client 2.3.1 (declared license: Apache-2.0)
 - npm: @modelcontextprotocol/core 2.3.1 (declared license: Apache-2.0)
 - npm: @modelcontextprotocol/ext-apps 2.0.3 (declared license: MIT)
@@ -127,6 +138,7 @@ COMPONENT INVENTORY
 - npm: comma-separated-tokens 2.0.3 (declared license: MIT)
 - npm: compare-versions 6.1.1 (declared license: MIT)
 - npm: cookie-es 3.1.1 (declared license: MIT)
+- npm: crelt 1.0.7 (declared license: MIT)
 - npm: cross-spawn 7.0.6 (declared license: MIT)
 - npm: csstype 3.2.3 (declared license: MIT)
 - npm: debug 4.4.3 (declared license: MIT)
@@ -247,6 +259,7 @@ COMPONENT INVENTORY
 - npm: space-separated-tokens 2.0.2 (declared license: MIT)
 - npm: stringify-entities 4.0.4 (declared license: MIT)
 - npm: strip-json-comments 5.0.3 (declared license: MIT)
+- npm: style-mod 4.1.4 (declared license: MIT)
 - npm: style-to-js 1.1.21 (declared license: MIT)
 - npm: style-to-object 1.0.14 (declared license: MIT)
 - npm: tabbable 6.5.0 (declared license: MIT)
@@ -272,6 +285,7 @@ COMPONENT INVENTORY
 - npm: uuid 14.0.3 (declared license: MIT)
 - npm: vfile 6.0.3 (declared license: MIT)
 - npm: vfile-message 4.0.3 (declared license: MIT)
+- npm: w3c-keyname 2.2.8 (declared license: MIT)
 - npm: walk-up-path 4.0.0 (declared license: ISC)
 - npm: which 2.0.2 (declared license: ISC)
 - npm: yaml 2.9.1 (declared license: ISC)
@@ -7306,6 +7320,38 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 
 --- Applies to -------------------------------------------------------------
+- npm: @codemirror/autocomplete 6.20.3 / LICENSE
+- npm: @codemirror/commands 6.11.1 / LICENSE
+- npm: @codemirror/lang-sql 6.10.0 / LICENSE
+- npm: @codemirror/language 6.12.4 / LICENSE
+- npm: @codemirror/lint 6.9.7 / LICENSE
+- npm: @codemirror/state 6.7.6 / LICENSE
+- npm: @codemirror/view 6.43.13 / LICENSE
+----------------------------------------------------------------------------
+
+MIT License
+
+Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--- Applies to -------------------------------------------------------------
 - npm: @dagrejs/dagre 3.1.1 / LICENSE
 - npm: @dagrejs/graphlib 4.0.5 / LICENSE
 ----------------------------------------------------------------------------
@@ -7556,6 +7602,34 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
+- npm: @lezer/common 1.5.3 / LICENSE
+- npm: @lezer/highlight 1.2.5 / LICENSE
+- npm: @lezer/lr 1.4.11 / LICENSE
+----------------------------------------------------------------------------
+
+MIT License
+
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--- Applies to -------------------------------------------------------------
 - npm: @mantine/core 9.7.2 / LICENSE
 - npm: @mantine/hooks 9.7.2 / LICENSE
 ----------------------------------------------------------------------------
@@ -7581,6 +7655,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--- Applies to -------------------------------------------------------------
+- npm: @marijn/find-cluster-break 1.0.4 / LICENSE
+----------------------------------------------------------------------------
+
+MIT License
+
+Copyright (C) 2024 by Marijn Haverbeke <marijn@haverbeke.berlin>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: @modelcontextprotocol/client 2.3.1 / LICENSE
@@ -8169,6 +8269,30 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--- Applies to -------------------------------------------------------------
+- npm: crelt 1.0.7 / LICENSE
+----------------------------------------------------------------------------
+
+Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: cross-spawn 7.0.6 / LICENSE
@@ -9980,6 +10104,30 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --- Applies to -------------------------------------------------------------
+- npm: style-mod 4.1.4 / LICENSE
+----------------------------------------------------------------------------
+
+Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+--- Applies to -------------------------------------------------------------
 - npm: style-to-js 1.1.21 / LICENSE
 ----------------------------------------------------------------------------
 
@@ -10369,6 +10517,30 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--- Applies to -------------------------------------------------------------
+- npm: w3c-keyname 2.2.8 / LICENSE
+----------------------------------------------------------------------------
+
+Copyright (C) 2016 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: walk-up-path 4.0.0 / LICENSE

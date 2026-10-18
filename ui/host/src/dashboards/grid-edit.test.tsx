@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { Layout } from "react-grid-layout";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSpec } from "../../../panels/types";
+import { EditorView } from "@codemirror/view";
 
 type GridOptions = { children: ReactNode; className: string; width?: number; layouts: { lg: Layout; sm: Layout }; dragConfig: {enabled:boolean;handle:string;cancel:string}; resizeConfig:{enabled:boolean}; rowHeight: number; onBreakpointChange?(breakpoint: string): void; onDragStop(next: Layout): void; onResizeStop(next: Layout): void; onLayoutChange?: (next: Layout) => void };
 const grid = vi.hoisted(() => ({ current: undefined as GridOptions | undefined }));
@@ -48,22 +49,54 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
-async function render(editing = true, dashboardSpec = spec) {
+async function render(editing = true, dashboardSpec = spec, canManage = false) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   const client = new QueryClient();
   cleanups.push(() => { root.unmount(); client.clear(); });
   const onEditExit = vi.fn();
-  const rerender = async (editing: boolean) => { await act(async () => { root.render(<MantineProvider><QueryClientProvider client={client}>
-    <PanelGrid dashboardId="d1" version={2} spec={dashboardSpec} vars={{}} results={new Map()} fetching={false} editing={editing}
-      agentAvailable={false} onOpenChat={vi.fn()} onVariable={vi.fn()} onView={vi.fn()} onVisible={vi.fn()} onEditExit={onEditExit} />
+  const rerender = async (editing: boolean, version = 2) => { await act(async () => { root.render(<MantineProvider><QueryClientProvider client={client}>
+    <PanelGrid dashboardId="d1" version={version} spec={dashboardSpec} vars={{}} results={new Map()} fetching={false} editing={editing}
+      canManage={canManage} agentAvailable={false} onOpenChat={vi.fn()} onVariable={vi.fn()} onView={vi.fn()} onVisible={vi.fn()} onEditExit={onEditExit} />
   </QueryClientProvider></MantineProvider>); }); };
   await rerender(editing);
   return { host, client, rerender, onEditExit, save: () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent === "Save layout")! };
 }
 
 describe("dashboard layout editing", () => {
+  it("captures the SQL edit base version even when the dashboard refreshes while the dialog is open", async () => {
+    fetchMock.mockImplementation(async (input) => String(input) === "/api/telemetry/schema"
+      ? Response.json({ signals: {}, sql_relations: {} })
+      : Response.json({ code: "dashboard_version_conflict", message: "Conflict" }, { status: 409 }));
+    const sqlSpec: DashboardSpec = { ...spec, panels: [{ id: "sql", title: "SQL", viz: "stat", sql: "SELECT count(*) FROM spans WHERE $__window(start_time)" }] };
+    const { host, rerender } = await render(false, sqlSpec, true);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="SQL menu"]')!.click());
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === "Edit SQL")!.click());
+    const textbox = await vi.waitFor(() => { const el = document.querySelector<HTMLElement>('[data-sql-editor] [role="textbox"]'); expect(el).not.toBeNull(); return el!; });
+    const view = EditorView.findFromDOM(textbox)!;
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "SELECT count(*) + 1 FROM spans WHERE $__window(start_time)" } }));
+    await rerender(false, 9);
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save SQL")!.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Load latest"));
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH")!;
+    expect(JSON.parse(String(patch[1]?.body)).base_version).toBe(2);
+  });
+  it.each([true, false])("gates Edit SQL by the dashboard manage permission (%s), independently of layout mode", async canManage => {
+    const sqlSpec: DashboardSpec = { ...spec, panels: [{ id: "sql", title: "SQL", viz: "stat", sql: "SELECT count(*) FROM spans WHERE $__window(start_time)" }] };
+    const { host, rerender } = await render(false, sqlSpec, canManage);
+    for (const editing of [false, true]) {
+      await rerender(editing);
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="SQL menu"]')!.click());
+      expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit SQL")).toBe(canManage);
+      await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    }
+  });
+  it("does not offer Edit SQL for structured panels even to dashboard editors", async () => {
+    const { host } = await render(false, { ...spec, panels: [{ id: "structured", title: "Structured", viz: "stat", query: { from: "spans", measures: ["count()"] } }] }, true);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Structured menu"]')!.click());
+    expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit SQL")).toBe(false);
+  });
   it("defaults service maps without a saved grid to large rows, preserving explicit sizes",async()=>{
     await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map"}]});
     expect(grid.current!.layouts.lg[0].h).toBe(10);
