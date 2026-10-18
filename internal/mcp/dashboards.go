@@ -120,17 +120,17 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "create_dashboard", Title: "Create dashboard",
-		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. " + saveReceiptGuide + specGuide,
+		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every non-text panel returns data. Empty or failing panels are rejected with their path, title and diagnosis. " + saveReceiptGuide + specGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "replace_dashboard", Title: "Replace dashboard",
-		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
+		Description: "Every non-text panel must return data in the preview or the save is rejected. Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "edit_dashboard", Title: "Edit dashboard",
-		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
+		Description: "Every non-text panel must return data in the preview or the save is rejected. Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 	{
@@ -222,7 +222,7 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 			ctx = dashboard.WithBuildOrigin(ctx, origin)
 		}
 	}
-	record, err := s.dashboards.CreateWithChanges(ctx, owner, input.Dashboard, agentAuthor(owner))
+	record, err := s.dashboards.CreateWithChanges(dashboard.WithSaveCheck(ctx, s.checkDashboardPanels), owner, input.Dashboard, agentAuthor(owner))
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
@@ -234,7 +234,7 @@ func (s *Server) dashboardReplace(ctx context.Context, req *mcp.CallToolRequest,
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	record, err := s.dashboards.ReplaceWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Dashboard, input.BaseVersion, agentAuthor(owner), input.Message)
+	record, err := s.dashboards.ReplaceWithChanges(dashboard.WithSaveCheck(ctx, s.checkDashboardPanels), owner, strings.TrimSpace(input.ID), input.Dashboard, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
@@ -246,11 +246,56 @@ func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	record, err := s.dashboards.EditWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Operations, input.BaseVersion, agentAuthor(owner), input.Message)
+	record, err := s.dashboards.EditWithChanges(dashboard.WithSaveCheck(ctx, s.checkDashboardPanels), owner, strings.TrimSpace(input.ID), input.Operations, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
 	return s.saved(ctx, "Updated", record)
+}
+
+func (s *Server) checkDashboardPanels(ctx context.Context, spec panel.Dashboard) error {
+	telemetry := false
+	for _, p := range spec.Panels {
+		telemetry = telemetry || p.Viz != "text"
+	}
+	if !telemetry {
+		return nil
+	}
+	if s.panels == nil {
+		return errors.New("panels are unavailable")
+	}
+	results, err := s.panels.Run(ctx, panel.RunRequest{Dashboard: spec})
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]panel.Result, len(results))
+	for _, r := range results {
+		byID[r.ID] = r
+	}
+	var problems panel.Problems
+	for i, p := range spec.Panels {
+		if p.Viz == "text" {
+			continue
+		}
+		r, exists := byID[p.ID]
+		// Execution status records data presence before the shared batch budget
+		// truncates frames, which can remove every row from a populated panel.
+		if exists && r.Status == panel.StatusOK {
+			continue
+		}
+		diagnosis := r.Diagnosis
+		if diagnosis == "" {
+			diagnosis = r.Error
+		}
+		if diagnosis == "" {
+			diagnosis = "Preview returned no rows."
+		}
+		problems = append(problems, panel.Problem{Path: fmt.Sprintf("panels[%d]", i), Message: fmt.Sprintf("%s: %s", p.Title, panel.RedactPaths(diagnosis)), Hint: "Replace or drop this panel; dashboards contain only panels that return data."})
+	}
+	if len(problems) > 0 {
+		return problems
+	}
+	return nil
 }
 
 func (s *Server) dashboardVersions(ctx context.Context, req *mcp.CallToolRequest, input DashboardIDInput) (*mcp.CallToolResult, dashboardVersionsOutput, error) {

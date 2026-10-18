@@ -107,7 +107,7 @@ func TestLargeTraceKeepsRootErrorsAndSlowest(t *testing.T) {
 	}
 }
 func TestNullArgumentsRawJSONRPC(t *testing.T) {
-	s := newPanelServer(t)
+	s := panelServerFixture(t, true)
 	h := s.HTTPHandler()
 	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_observability_overview"} {
 		t.Run(name, func(t *testing.T) {
@@ -127,7 +127,7 @@ func TestNullArgumentsRawJSONRPC(t *testing.T) {
 	}
 }
 func TestViewMetadataOnWire(t *testing.T) {
-	s := newPanelServer(t)
+	s := panelServerFixture(t, true)
 	client := connectTestClient(t, s, nil)
 	for _, name := range []string{"query_telemetry", "get_service_topology"} {
 		args := map[string]any{}

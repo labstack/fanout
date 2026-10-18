@@ -141,3 +141,128 @@ SELECT * FROM known
 UNION ALL
 SELECT kind,namespace,service,n FROM alias_users WHERE rank<=10
 ORDER BY kind,n DESC,namespace,service`
+
+// EmptyGuidance is used only after a complete fragment returned no matching
+// data. Reuse checked filters and resolved variables to find exact service scopes.
+func (e *Executor) EmptyGuidance(ctx context.Context, req RunRequest) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
+	d := req.Dashboard
+	Normalize(&d)
+	checked, err := e.check(ctx, &d)
+	if err != nil {
+		return "", "", err
+	}
+	t := d.Time
+	if req.Time != nil {
+		t = *req.Time
+	}
+	start, end, err := resolveWindow(t, nil, e.now(), e.maxWindow)
+	if err != nil {
+		return "", "", err
+	}
+	vars, err := e.values(ctx, &d, checked, start, end, req.Vars)
+	if err != nil {
+		return "", "", err
+	}
+	scope := Scope{Start: start, End: end, Vars: vars}
+	seen := map[[2]string]bool{}
+	var notes []string
+	for _, p := range d.Panels {
+		var namespace, service string
+		unsafeScope := false
+		for _, f := range checked.Filters[p.ID] {
+			if scope.dropped(f) {
+				continue
+			}
+			tree, err := e.engine.ParseSQL(ctx, "SELECT 1 FROM spans WHERE ("+f.Source+")")
+			if err != nil {
+				return "", "", err
+			}
+			var visit func(map[string]any)
+			visit = func(node map[string]any) {
+				if node["class"] == "CONJUNCTION" && node["type"] == "CONJUNCTION_AND" {
+					children, _ := node["children"].([]any)
+					for _, child := range children {
+						visit(rollupFilterNode(child))
+					}
+					return
+				}
+				field, value, err := rollupNodeValue(node, scope)
+				if err != nil {
+					// A string scope cannot represent every checked predicate.
+					// Never drop a namespace restriction to obtain guidance.
+					unsafeScope = unsafeScope || guidanceReferencesNamespace(node)
+					return
+				}
+				if field == "service" {
+					unsafeScope = unsafeScope || (service != "" && service != value)
+					service = value
+				}
+				if field == "namespace" {
+					unsafeScope = unsafeScope || (namespace != "" && namespace != value)
+					namespace = value
+				}
+			}
+			visit(rollupFilterNode(tree["where_clause"]))
+		}
+		key := [2]string{namespace, service}
+		if unsafeScope || service == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		message, err := e.ServiceGuidance(ctx, start, end, namespace, service)
+		if err != nil {
+			return "", "", err
+		}
+		if message != "" {
+			return "unknown_service", message, nil
+		}
+		ctx := queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: namespace, Service: service})
+		rows, err := e.engine.QueryContext(ctx, `
+SELECT
+ (SELECT count(*) FROM spans WHERE start_time >= $1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < $2::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ($3='' OR namespace=$3) AND service=$4),
+ (SELECT count(*) FROM logs WHERE time >= $1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < $2::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ($3='' OR namespace=$3) AND service=$4),
+ (SELECT count(*) FROM metrics WHERE time >= $1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < $2::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ($3='' OR namespace=$3) AND service=$4)`, start, end, namespace, service)
+		if err != nil {
+			return "", "", err
+		}
+		var spans, logs, metrics int64
+		if rows.Next() {
+			err = rows.Scan(&spans, &logs, &metrics)
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		rows.Close()
+		if err != nil {
+			return "", "", err
+		}
+		notes = append(notes, fmt.Sprintf("Service %q in the requested window: spans=%d, logs=%d, metrics=%d.", service, spans, logs, metrics))
+		if len(seen) == 10 {
+			break
+		}
+	}
+	return "no_data", strings.Join(notes, " "), nil
+}
+
+func guidanceReferencesNamespace(node any) bool {
+	switch v := node.(type) {
+	case map[string]any:
+		if v["class"] == "COLUMN_REF" && fieldText(v) == "namespace" {
+			return true
+		}
+		for _, child := range v {
+			if guidanceReferencesNamespace(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if guidanceReferencesNamespace(child) {
+				return true
+			}
+		}
+	}
+	return false
+}

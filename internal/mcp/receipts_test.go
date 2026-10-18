@@ -94,7 +94,11 @@ func TestSaveCheckMatchesEverySavedIDRatherThanResultOrder(t *testing.T) {
 			}}
 			spec := textDashboard("IDs")
 			spec.Panels = append(spec.Panels, panel.Panel{ID: "b", Title: "B", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}})
-			_, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
+			mutation, err := s.dashboards.CreateWithChanges(t.Context(), "owner", spec, agentAuthor("owner"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, out, err := s.saved(t.Context(), "Created", mutation)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -222,15 +226,20 @@ func TestRemoveReceiptPacksNeighborsWithoutAuthoredChips(t *testing.T) {
 func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 	s := newPanelServer(t)
 	spec := panel.Dashboard{Name: "Receipt", Panels: []panel.Panel{
-		{ID: "notes", Title: "Notes", Viz: "text", Content: "Deliberately empty spans below."},
-		{ID: "requests", Title: "Requests", Description: "Deliberately empty on this source.", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
+		{ID: "notes", Title: "Notes", Viz: "text", Content: "Notes."},
+		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
 	}}
+	_, rejected, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
+	if err == nil || rejected.Dashboard != nil || !strings.Contains(err.Error(), "panels[1]") || !strings.Contains(err.Error(), "Requests") || !strings.Contains(err.Error(), "No spans") {
+		t.Fatalf("save=%+v err=%v", rejected, err)
+	}
+	spec.Panels = spec.Panels[:1]
 	_, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := out.Receipt
-	if r == nil || r.BaseVersion != 0 || r.Version != out.Dashboard.Version || !r.SaveCheck.Checked || r.SaveCheck.ElapsedMS < 0 || len(r.SaveCheck.Panels) != 2 {
+	if r == nil || r.BaseVersion != 0 || r.Version != out.Dashboard.Version || !r.SaveCheck.Checked || r.SaveCheck.ElapsedMS < 0 || len(r.SaveCheck.Panels) != 1 {
 		t.Fatalf("receipt=%+v", r)
 	}
 	for i, p := range r.SaveCheck.Panels {
@@ -238,7 +247,7 @@ func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 			t.Fatal(p)
 		}
 	}
-	if r.SaveCheck.Panels[0].Rows != 1 || r.SaveCheck.Panels[0].Status != "ok" || r.SaveCheck.Panels[1].Status != "empty" || r.SaveCheck.Panels[1].Diagnosis == "" {
+	if r.SaveCheck.Panels[0].Rows != 1 || r.SaveCheck.Panels[0].Status != "ok" {
 		t.Fatal(r)
 	}
 	_, edited, err := s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: out.Dashboard.ID, BaseVersion: 1, Operations: []dashboard.Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": "Changed note."}}}})
@@ -254,7 +263,7 @@ func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 		t.Fatalf("read=%+v err=%v", read, err)
 	}
 	_, preview, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: spec.Panels})
-	if err != nil || preview.ElapsedMS < 0 || len(preview.Panels) != 2 || *preview.Panels[0].ElapsedMS < 0 {
+	if err != nil || preview.ElapsedMS < 0 || len(preview.Panels) != 1 || *preview.Panels[0].ElapsedMS < 0 {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
 }

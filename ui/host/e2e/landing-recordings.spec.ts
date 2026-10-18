@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cardSelector, readyCard, settle } from "./accessibility-support";
 import { recordingTimeline, revealRecording } from "./landing-recording-support";
-import type { DashboardSpec } from "../../panels/types";
+import type { DashboardSpec, PanelResult } from "../../panels/types";
 
 const baseURL = process.env.FANOUT_LANDING_BASE_URL;
 const directory = fileURLToPath(new URL("../test-results/landing-recordings/", import.meta.url));
@@ -22,7 +22,7 @@ test.use({
 
 const prompts = {
   chat: "Why is checkout slower in the last hour?",
-  dashboard: "Build a dashboard for checkout: request rate, error rate, p95 latency, and its slowest dependencies",
+  dashboard: "Build a dashboard for checkout: request rate, error rate, p95 latency by operation, its slowest dependencies, and recent slow traces",
 };
 
 for (const view of ["chat", "dashboard"] as const) {
@@ -97,7 +97,19 @@ for (const view of ["chat", "dashboard"] as const) {
       const response = await responseReady;
       const responseAt = (Date.now() - startedAt) / 1000;
       expect(response.ok(), "Agent request failed; check chat configuration and the session's agent:run capability").toBe(true);
-      const timeline = recordingTimeline(await response.text(), responseAt);
+      const stream = await response.text();
+      const timeline = recordingTimeline(stream, responseAt);
+      // Check every evidence view, including collapsed views without a mounted iframe.
+      const evidence = stream.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => JSON.parse(line.slice(5)) as {
+        type: string; messageId?: string; activityType?: string;
+        content?: { tool_result?: { view: { key: string }; results: PanelResult[] } };
+      }).filter(event => event.type === "ACTIVITY_SNAPSHOT" && event.activityType === "mcp-app")
+        .map(event => event.content!.tool_result!);
+      expect(new Set(evidence.map(fragment => fragment.view.key)).size, "Chat must show at least four evidence views").toBeGreaterThanOrEqual(4);
+      for (const fragment of evidence) {
+        expect(fragment.results.some(result => result.status === "ok" && (result.frame?.rows ?? 0) > 0),
+          "Chat must not contain an empty evidence view").toBe(true);
+      }
       // RUN_FINISHED in the real stream plus the UI's idle state gates the reveal.
       await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
       await expect(page.locator(".chat-pane .mantine-Loader-root")).toHaveCount(0);
@@ -118,7 +130,17 @@ for (const view of ["chat", "dashboard"] as const) {
         const saved = await context.request.get(`/api/dashboards/${encodeURIComponent(timeline.dashboardId)}`);
         expect(saved.ok()).toBe(true);
         const { spec } = await saved.json() as { spec: DashboardSpec };
-        expect(spec.panels.length, "The created dashboard must contain panels").toBeGreaterThan(0);
+        expect(spec.panels.length, "The created dashboard must contain at least six panels").toBeGreaterThanOrEqual(6);
+        const preview = await context.request.post("/api/panels/query", {
+          headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
+        });
+        expect(preview.ok()).toBe(true);
+        const { results } = await preview.json() as { results: PanelResult[] };
+        for (const panel of spec.panels.filter(panel => panel.viz !== "text")) {
+          const result = results.find(result => result.id === panel.id);
+          expect(result?.status, `${panel.title} must return data`).toBe("ok");
+          expect(result?.frame?.rows ?? 0, `${panel.title} must have rows`).toBeGreaterThan(0);
+        }
         for (const panel of spec.panels) await readyCard(page, panel);
         await page.evaluate(() => window.scrollTo(0, 0));
         // Lazy panels returning to the first fold must be settled too.

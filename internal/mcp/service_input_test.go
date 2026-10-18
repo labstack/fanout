@@ -42,7 +42,7 @@ func serviceInputFixture(t testing.TB) (*Server, *query.Duck, *telemetrystore.Re
 			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: service, SpanID: fmt.Sprint(j), Name: "orders process", Kind: "SPAN_KIND_CONSUMER", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n, DBSystem: "postgresql", PeerService: "broker", Attributes: map[string]any{"messaging.system": "kafka"}})
 		}
 	}
-	batch.Logs = []telemetry.Log{{Namespace: "shop", ServiceName: "logger", TimeUnixNanos: from.Add(time.Minute).UnixNano(), Severity: "INFO", Body: "log only"}}
+	batch.Logs = []telemetry.Log{{Namespace: "shop", ServiceName: "logger", TraceID: "logs-only", TimeUnixNanos: from.Add(time.Minute).UnixNano(), Severity: "INFO", Body: "log only"}}
 	batch.Metrics = []telemetry.Metric{{Namespace: "shop", ServiceName: "collector", Name: "load", Type: "gauge", TimeUnixNanos: from.Add(time.Minute).UnixNano(), Value: 1}}
 	// These names are valid, but have no traffic in the requested window.
 	batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: "idle", TraceID: "idle", SpanID: "idle", StartUnixNanos: from.Add(-time.Hour).UnixNano(), EndUnixNanos: from.Add(-time.Hour).UnixNano() + 1}, telemetry.Span{Namespace: "other", ServiceName: "elsewhere", TraceID: "elsewhere", SpanID: "elsewhere", StartUnixNanos: from.Add(time.Minute).UnixNano(), EndUnixNanos: from.Add(time.Minute).UnixNano() + 1})
@@ -100,18 +100,18 @@ func TestServiceInputsKeepKnownAndIdleServices(t *testing.T) {
 		}
 		for _, service := range []string{"checkout", "idle", "logger", "collector"} {
 			result, out, err := s.performance(t.Context(), nil, PerformanceInput{Service: service, Namespace: "shop", From: &from, To: &to})
-			if err != nil || result.IsError || len(out.Results) != 4 {
-				t.Fatalf("cached=%v %s: result=%+v output=%+v err=%v", cached, service, result, out, err)
+			if service != "checkout" {
+				if err == nil || !strings.Contains(err.Error(), `"no_data"`) || result != nil || len(out.Results) != 0 {
+					t.Fatalf("%s: %+v %v", service, out, err)
+				}
+				volume := map[string]string{"idle": "spans=0, logs=0, metrics=0", "logger": "spans=0, logs=1, metrics=0", "collector": "spans=0, logs=0, metrics=1"}[service]
+				if !strings.Contains(err.Error(), volume) {
+					t.Fatalf("missing volumes: %v", err)
+				}
+				continue
 			}
-			want := panel.StatusEmpty
-			if service == "checkout" {
-				want = panel.StatusOK
-			}
-			if out.Results[3].Status != want {
-				t.Fatalf("%s operations=%+v want %s", service, out.Results[3], want)
-			}
-			if service != "checkout" && !allResultsEmpty(out.Results) {
-				t.Fatalf("known empty service changed response: %s %+v", service, out.Results)
+			if err != nil || result.IsError || len(out.Results) != 4 || out.Results[3].Status != panel.StatusOK {
+				t.Fatalf("cached=%v %s: %+v %v", cached, service, out, err)
 			}
 		}
 	}
@@ -135,6 +135,20 @@ func (e *serviceGuidanceSpy) ServiceGuidance(ctx context.Context, start, end tim
 	return e.panelExecutor.ServiceGuidance(ctx, start, end, namespace, service)
 }
 
+func (e *serviceGuidanceSpy) EmptyGuidance(ctx context.Context, req panel.RunRequest) (string, string, error) {
+	for _, p := range req.Dashboard.Panels {
+		if p.Query != nil {
+			for _, f := range p.Query.Where {
+				if strings.HasPrefix(f, "service = ") {
+					e.calls++
+					return e.panelExecutor.EmptyGuidance(ctx, req)
+				}
+			}
+		}
+	}
+	return e.panelExecutor.EmptyGuidance(ctx, req)
+}
+
 func TestServiceInputsWithResultsSkipMembership(t *testing.T) {
 	s, duck, _, from, to := serviceInputFixture(t)
 	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
@@ -153,8 +167,7 @@ func TestServiceInputsWithResultsSkipMembership(t *testing.T) {
 		{"get_service_dependencies", map[string]any{"service": "broker", "namespace": "shop", "window": "1h"}},
 		{"search_logs", map[string]any{"service": "logger", "namespace": "shop", "from": from, "to": to}},
 		{"inspect_trace", map[string]any{"service": "checkout", "namespace": "shop", "from": from, "to": to}},
-		// An exact trace ID still returns its detail when the service filter has
-		// no list rows; that is not an entirely empty result.
+		// Exact trace details survive an optional service filter with no list rows.
 		{"inspect_trace", map[string]any{"service": "missing", "trace_id": "checkout", "namespace": "shop", "from": from, "to": to}},
 	} {
 		t.Run(tc.name+"/"+tc.args["service"].(string), func(t *testing.T) {
@@ -179,10 +192,11 @@ func TestServiceInputsValidateOnlyAfterAllResultsEmpty(t *testing.T) {
 		runErr   error
 		lookups  int
 		unknown  bool
+		empty    bool
 	}{
-		{name: "unknown", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, lookups: 1, unknown: true},
-		{name: "known empty", service: "idle", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, lookups: 1},
-		{name: "no service", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}},
+		{name: "unknown", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, lookups: 1, unknown: true, empty: true},
+		{name: "known empty", service: "idle", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, lookups: 1, empty: true},
+		{name: "no service", statuses: []string{panel.StatusEmpty, panel.StatusEmpty}, empty: true},
 		{name: "one populated", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusOK}},
 		{name: "panel error", service: "missing", statuses: []string{panel.StatusEmpty, panel.StatusError}},
 		{name: "execution error", service: "missing", runErr: errors.New("execution failed")},
@@ -208,6 +222,10 @@ func TestServiceInputsValidateOnlyAfterAllResultsEmpty(t *testing.T) {
 			if tc.unknown {
 				if err == nil || !strings.Contains(err.Error(), `"unknown_service"`) || result != nil || len(out.Results) != 0 {
 					t.Fatalf("unknown result=%+v out=%+v err=%v", result, out, err)
+				}
+			} else if tc.empty {
+				if err == nil || !strings.Contains(err.Error(), `"no_data"`) || result != nil || len(out.Results) != 0 {
+					t.Fatalf("empty result=%+v out=%+v err=%v", result, out, err)
 				}
 			} else if (err != nil) != (tc.runErr != nil) || tc.runErr == nil && (result == nil || len(out.Results) != len(tc.statuses)) {
 				t.Fatalf("result=%+v out=%+v err=%v", result, out, err)
@@ -241,7 +259,7 @@ func TestServiceInputsClampWindowBeforeValidation(t *testing.T) {
 	wantWindow := to.Add(-7*24*time.Hour).Format(time.RFC3339Nano) + "/" + to.Format(time.RFC3339Nano)
 	for _, name := range []string{"get_service_performance", "get_service_dependencies", "search_logs", "inspect_trace"} {
 		t.Run(name, func(t *testing.T) {
-			result, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"service": "checkout", "namespace": "shop", "window": "720h"}})
+			result, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"service": map[bool]string{true: "logger", false: "checkout"}[name == "search_logs"], "namespace": "shop", "window": "720h"}})
 			if err != nil || result.IsError {
 				t.Fatalf("clamped known service: %+v %v", result, err)
 			}
@@ -310,8 +328,8 @@ func TestServiceInputsKeepRetainedEventTimes(t *testing.T) {
 				}
 			}
 			result, out, err := s.performance(t.Context(), nil, PerformanceInput{Service: service, Namespace: "shop", From: &from, To: &to})
-			if err != nil || result.IsError || !allResultsEmpty(out.Results) {
-				t.Fatalf("retained service lost its empty response: cached=%v service=%s out=%+v err=%v", cached, service, out, err)
+			if err == nil || !strings.Contains(err.Error(), `"no_data"`) || result != nil || len(out.Results) != 0 {
+				t.Fatalf("retained service lost its no_data response: cached=%v service=%s out=%+v err=%v", cached, service, out, err)
 			}
 		}
 		message, err := s.panels.ServiceGuidance(t.Context(), from, to, "shop", "missing")

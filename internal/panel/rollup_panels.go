@@ -26,7 +26,10 @@ func rollupFilterValue(ctx context.Context, parser Parser, f Filter, scope Scope
 	}
 	// Parse the author's source, not the canonical filter with its injected
 	// parameter casts. Explicit casts cannot be represented by a string scope.
-	node := rollupFilterNode(tree["where_clause"])
+	return rollupNodeValue(rollupFilterNode(tree["where_clause"]), scope)
+}
+
+func rollupNodeValue(node map[string]any, scope Scope) (string, string, error) {
 	if node == nil || node["class"] != "COMPARISON" || node["type"] != "COMPARE_EQUAL" {
 		return "", "", fmt.Errorf("rollup panels support equality filters on namespace or service")
 	}

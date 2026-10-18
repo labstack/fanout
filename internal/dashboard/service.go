@@ -191,6 +191,14 @@ func decodeRecord(row generated.Dashboard) (Record, error) {
 	return record, nil
 }
 
+type saveCheckKey struct{}
+
+// WithSaveCheck adds a transport-specific check of the exact spec before each
+// write attempt, including edits retried against a concurrent version.
+func WithSaveCheck(ctx context.Context, check func(context.Context, panel.Dashboard) error) context.Context {
+	return context.WithValue(ctx, saveCheckKey{}, check)
+}
+
 // prepare normalizes, validates and packs a spec for storage.
 func (s *Service) prepare(ctx context.Context, spec *panel.Dashboard, repack bool) error {
 	panel.Normalize(spec)
@@ -198,6 +206,11 @@ func (s *Service) prepare(ctx context.Context, spec *panel.Dashboard, repack boo
 	defer cancel()
 	if err := s.validator.Validate(validationCtx, spec); err != nil {
 		return err
+	}
+	if check, ok := ctx.Value(saveCheckKey{}).(func(context.Context, panel.Dashboard) error); ok {
+		if err := check(validationCtx, *spec); err != nil {
+			return err
+		}
 	}
 	if repack {
 		for i := range spec.Panels {

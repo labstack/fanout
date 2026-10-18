@@ -62,7 +62,7 @@ func (s *Server) registerPanelTools() {
 	}, s.telemetrySchema)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "preview_panels", Title: "Preview panels",
-		Description: "Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels omit elapsed_ms because they were not executed. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.",
+		Description: "Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels omit elapsed_ms because they were not executed. Fix every invalid panel and replace or drop every empty one before saving. Spec guide: see create_dashboard.",
 		Annotations: readOnly,
 	}, s.previewPanels)
 }

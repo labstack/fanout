@@ -44,7 +44,7 @@ func textDashboard(name string) panel.Dashboard {
 }
 
 func TestCreateDashboardAcceptsTheDocumentedShape(t *testing.T) {
-	s := newPanelServer(t)
+	s := panelServerFixture(t, true)
 	session := connectTestClient(t, s, nil)
 	// Metadata carries the in-process owner, as the agent runtime does.
 	call := func(args string) *mcp.CallToolResult {
@@ -162,21 +162,13 @@ func TestOtherOwnersDashboardIsNotFound(t *testing.T) {
 	}
 }
 
-func TestSaveReportsPanelsItCouldNotCheck(t *testing.T) {
-	// The structural validator accepts a filter the executor then rejects, so
-	// the post-save run fails after the dashboard is already stored.
+func TestSaveRejectsPanelsItCannotPreview(t *testing.T) {
 	panels := newPanelServer(t).panels
 	s := newToolServer(t, structural{}, panels)
 	spec := panel.Dashboard{Name: "Unchecked", Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Where: []string{"service = = 'x'"}, Measures: []string{"count()"}}}}}
-	result, out, err := s.dashboardCreate(t.Context(), requestFor("owner"), DashboardCreateInput{Dashboard: spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Dashboard.Version != 1 {
-		t.Fatalf("dashboard not saved: %+v", out.Dashboard)
-	}
-	if text := result.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "Panels were not checked:") {
-		t.Fatalf("summary hides the failed check: %q", text)
+	_, out, err := s.dashboardCreate(t.Context(), requestFor("owner"), DashboardCreateInput{Dashboard: spec})
+	if err == nil || out.Dashboard != nil || out.Receipt != nil {
+		t.Fatalf("save=%+v err=%v", out, err)
 	}
 }
 

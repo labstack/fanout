@@ -18,9 +18,6 @@ import { DashboardReceiptView } from "./dashboard-receipt-view";
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
 const isPreset = (content: MCPAppContent) => content.tool_result.view.kind === "preset";
-// An all-empty view has nothing to show beyond its summary row, so it never
-// opens by default; the turn's last view with data opens instead.
-const isEmpty = (content: MCPAppContent) => content.tool_result.results.length > 0 && content.tool_result.results.every(result => result.status === "empty");
 type AppView = { content: MCPAppContent; expanded: boolean };
 function chatAppViews(messages: Message[]) {
   const views = new Map<string, AppView>(), duplicates = new Set<string>();
@@ -33,10 +30,10 @@ function chatAppViews(messages: Message[]) {
     }
     const chosen = new Set([...winners.values()].map(item => item.id));
     const hasPreset = [...winners.values()].some(item => isPreset(item.content));
-    const last = turn.filter(item => chosen.has(item.id) && !isEmpty(item.content)).at(-1)?.id;
+    const last = turn.filter(item => chosen.has(item.id)).at(-1)?.id;
     for (const item of turn) {
       if (!chosen.has(item.id)) duplicates.add(item.id);
-      else views.set(item.id, { content: item.content, expanded: !isEmpty(item.content) && (isPreset(item.content) || !hasPreset && item.id === last) });
+      else views.set(item.id, { content: item.content, expanded: isPreset(item.content) || !hasPreset && item.id === last });
     }
     turn = [];
   };
