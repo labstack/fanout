@@ -334,6 +334,21 @@ Read-only.
 
 ## Panel SQL relations
 
+### edge_rollup
+
+Dependency analytical rollup by namespace, time bucket, caller, callee and edge type. Panel SQL only; filter bucket with $__window(bucket).
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | OpenTelemetry service namespace |
+| `bucket` | `TIMESTAMP` | Rollup time bucket |
+| `caller` | `VARCHAR` | Calling service |
+| `callee` | `VARCHAR` | Called service |
+| `calls` | `BIGINT` | Calls between services |
+| `avg_ms` | `DOUBLE` | Average call duration |
+| `error_rate` | `DOUBLE` | Error rate |
+| `edge_type` | `VARCHAR` | Dependency edge type |
+
 ### resource_inventory
 
 Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window, not a historical registry.
@@ -346,6 +361,23 @@ Distinct full resource identities per signal, namespace and service observed ins
 | `resource` | `VARIANT` | Complete typed resource; use resource['key'], with dotted keys written literally |
 | `first_seen` | `TIMESTAMPTZ_NS` | Earliest actual event observation inside the selected panel window |
 | `last_seen` | `TIMESTAMPTZ_NS` | Latest actual event observation inside the selected panel window |
+
+### service_rollup
+
+Per-service analytical rollup by namespace and time bucket. Panel SQL only; filter bucket with $__window(bucket).
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | OpenTelemetry service namespace |
+| `bucket` | `TIMESTAMP` | Rollup time bucket |
+| `service` | `VARCHAR` | Service name |
+| `spans` | `BIGINT` | Total spans |
+| `served_spans` | `BIGINT` | Spans describing work performed by this service |
+| `p50_ms` | `DOUBLE` | Median service latency |
+| `p95_ms` | `DOUBLE` | 95th percentile service latency |
+| `error_rate` | `DOUBLE` | Error rate |
+| `log_count` | `BIGINT` | Log events |
+| `metric_count` | `BIGINT` | Metric data points |
 
 ## Authentication
 

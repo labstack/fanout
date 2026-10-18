@@ -107,7 +107,7 @@ func TestVariableAndSchemaRoutes(t *testing.T) {
 		t.Fatalf("resolve %d %s", rec.Code, rec.Body)
 	}
 	rec = servePanels(t, &fakePanels{}, http.MethodGet, "/api/telemetry/schema?window=6h", "")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"window":"6h"`) || !strings.Contains(rec.Body.String(), `"sql_relations":{"resource_inventory":`) || !strings.Contains(rec.Body.String(), `"sql_type":"TIMESTAMPTZ_NS"`) {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"window":"6h"`) || !strings.Contains(rec.Body.String(), `"sql_relations":{`) || !strings.Contains(rec.Body.String(), `"resource_inventory":`) || !strings.Contains(rec.Body.String(), `"service_rollup":`) || !strings.Contains(rec.Body.String(), `"edge_rollup":`) || !strings.Contains(rec.Body.String(), `"sql_type":"TIMESTAMPTZ_NS"`) {
 		t.Fatalf("schema %d %s", rec.Code, rec.Body)
 	}
 }

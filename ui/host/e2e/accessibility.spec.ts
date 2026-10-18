@@ -2,6 +2,8 @@ import AxeBuilder from "@axe-core/playwright";
 import axe from "axe-core";
 import { expect, type Frame, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { cardSelector, chooseView, longError, openSurface, readyCard, settle, spec, staleSurface, test, type Scenario, type Surface } from "./accessibility-support";
+import { editedSQL, openSqlDashboard, openSqlEditor } from "./panel-sql-editor-support";
+import { editorOverlapTargets, proveEditorText } from "./editor-contrast";
 
 const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 // Contrast and ARIA follow the theme, not these two desktop widths, so this spec
@@ -29,6 +31,13 @@ async function scan(surface: Page | Frame, info: TestInfo, label: string, select
   const proven = await proveGlyphs(surface, contrast.flatMap(item => item.nodes));
   if (proven.length) await info.attach(`${label}-glyph-contrast.json`, { body: JSON.stringify(proven, null, 2), contentType: "application/json" });
   const passed = new Set(proven.filter(glyph => glyph.ratio !== null && glyph.ratio >= 3).map(glyph => glyph.target));
+  const editorTargets = editorOverlapTargets(contrast.flatMap(item => item.nodes));
+  if (editorTargets.length) {
+    if (!await surface.evaluate(() => "axe" in window)) await surface.evaluate(axe.source);
+    const editorText = await surface.evaluate(proveEditorText, editorTargets);
+    await info.attach(`${label}-editor-contrast.json`, { body: JSON.stringify(editorText, null, 2), contentType: "application/json" });
+    for (const text of editorText) if (text.ratio !== null && text.ratio >= 4.5) passed.add(text.target);
+  }
   const unresolved = contrast.map(item => ({ ...item, nodes: item.nodes.filter(node => !passed.has(JSON.stringify(node.target))) })).filter(item => item.nodes.length > 0);
   expect.soft(unresolved, `${label}: unresolved contrast requires computed-style proof or controller review`).toEqual([]);
 }
@@ -75,6 +84,25 @@ test("dashboard controls satisfy WCAG AA", async ({ page, request }, info) => {
     await settle(page);
     await scan(page, info, `history-${name}`, '[role="dialog"]');
   }
+});
+
+test("SQL editor satisfies WCAG AA while editing, previewing and reporting validation errors", async ({ page, request }, info) => {
+  const { cleanup } = await openSqlDashboard(page, request, info);
+  try {
+    const dialog = await openSqlEditor(page);
+    const editor = dialog.getByRole("textbox", { name: "Panel SQL" });
+    await editor.fill(editedSQL);
+    await scan(page, info, "sql-editor-edit", '[role="dialog"]');
+    await dialog.getByRole("button", { name: "Run", exact: true }).click();
+    await expect(dialog.locator("[data-stat-value]")).toBeVisible();
+    await scan(page, info, "sql-editor-preview", '[role="dialog"]');
+    await editor.fill("SELECT missing_column FROM spans WHERE $__window(start_time)");
+    await dialog.getByRole("button", { name: "Run", exact: true }).click();
+    await expect(editor).toHaveAttribute("aria-invalid", "true");
+    await expect(dialog.getByRole("alert")).toBeVisible();
+    await expect(dialog.locator("li.panel-sql-problem")).toContainText('Referenced column "missing_column"');
+    await scan(page, info, "sql-editor-invalid", '[role="dialog"]');
+  } finally { await cleanup(); }
 });
 
 // One panel per renderer takes the menu and full-screen states: ECharts canvas,

@@ -5,6 +5,7 @@ import type { Frame, Selection, DashboardSpec, DashboardTime, Panel, PanelResult
 import { authorizedFetch } from "../auth";
 import type { Change } from "../dashboard-receipt";
 import { ApiError, type Problem } from "../api-error";
+import type { TelemetrySchema } from "../sql-editor/schema";
 export { ApiError, type Problem } from "../api-error";
 
 export type BuildOrigin = { thread_id: string; message_id: string; request_excerpt: string };
@@ -52,6 +53,7 @@ export const replaceDashboard = (id: string, spec: DashboardSpec, baseVersion: n
 export const patchDashboard = (id: string, operations: Operation[], baseVersion: number, message?: string) =>
   request<DashboardRecord>(path(id), { method: "PATCH", json: { operations, base_version: baseVersion, message } });
 export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/panels/query", { method: "POST", json: body, signal }).then((r) => r.results);
+export const getTelemetrySchema = (signal?: AbortSignal) => request<TelemetrySchema>("/api/telemetry/schema", { signal });
 export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
   request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/panels/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);

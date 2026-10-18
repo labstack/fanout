@@ -16,7 +16,7 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	spans := schema.Signals["spans"]
-	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 1 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
+	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 3 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
 		t.Fatalf("SQL relation discovery: %+v", schema)
 	}
 	if got := schema.SQLRelations["resource_inventory"]; got.Columns[3].SQLType != "VARIANT" || got.Columns[4].SQLType != "TIMESTAMPTZ_NS" {
@@ -59,6 +59,30 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 	}
 	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "7d"}); err == nil {
 		t.Fatal("window over 24h accepted")
+	}
+}
+
+func TestSchemaRollupColumnsMatchEngine(t *testing.T) {
+	_, db := metricFixture(t)
+	for _, name := range []string{"service_rollup", "edge_rollup"} {
+		rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+name+" LIMIT 0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.ColumnTypes()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog := SQLRelations()[name].Columns
+		if len(columns) != len(catalog) {
+			t.Fatalf("%s: engine has %d columns, catalog has %d", name, len(columns), len(catalog))
+		}
+		for i, column := range columns {
+			if column.Name() != catalog[i].Name || column.DatabaseTypeName() != catalog[i].SQLType {
+				t.Errorf("%s column %d: engine %s %s, catalog %+v", name, i, column.Name(), column.DatabaseTypeName(), catalog[i])
+			}
+		}
 	}
 }
 

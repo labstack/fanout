@@ -1,6 +1,6 @@
-import { Alert, Button, Group, Text } from "@mantine/core";
+import { Alert, Button, Group, Loader, Modal, Text } from "@mantine/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Responsive, verticalCompactor, type Layout } from "react-grid-layout";
 import type { DashboardSpec, DashboardTime, Panel, PanelResult, Selection, VarValue } from "../../../panels/types";
 import type { AnnotationsResponse } from "../../../panels/annotations";
@@ -15,6 +15,8 @@ import type { TurnOptions } from "../app-context";
 /** Grid rows are 40 px with 12 px gaps; internal/dashboard/layout.go packs
  *  with the same row unit. */
 import { rowHeight, margin, pixels, defaultRows } from "./layout";
+
+const PanelSqlEditor = lazy(() => import("./panel-sql-editor"));
 
 export type GridProps = {
   dashboardId: string; version: number; spec: DashboardSpec; vars: Record<string, VarValue>; results: Map<string, PanelResult>; fetching: boolean; editing: boolean; view?: string;
@@ -38,6 +40,9 @@ function newPanelId(panels: Panel[]): string {
 
 export function PanelGrid({ dashboardId, version, spec, vars, results, fetching, annotations, fetchingIds = [], staleAt = new Map(), time = spec.time, onEditExit, editing, view, agentAvailable, canManage = false, onOpenChat, onVariable, onRetry, onPoint, onZoom, onZoomReset, zoomed, onView, onVisible, onRangePending, shortcutScope, onShortcuts, overlayOpen, returnViewFocus }: GridProps) {
   const client = useQueryClient();
+  // Capture the authored spec and base version when editing starts, so a
+  // background refresh cannot silently rebase a draft over another edit.
+  const [sqlEdit, setSqlEdit] = useState<{ panel: Panel; spec: DashboardSpec; version: number }>();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) }))); }, [spec]);
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
@@ -49,6 +54,13 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   }, []);
   const container = useRef<HTMLDivElement>(null);
   const menus = useRef(new Map<string, HTMLButtonElement>());
+  const fullscreenMenu = useRef<HTMLButtonElement>(null);
+  const sqlReturnFocus = useRef<HTMLButtonElement | null>(null);
+  const closeSql = () => {
+    const id = sqlEdit?.panel.id;
+    setSqlEdit(undefined);
+    requestAnimationFrame(() => (sqlReturnFocus.current?.isConnected ? sqlReturnFocus.current : menus.current.get(id ?? ""))?.focus());
+  };
   const focusedPanel = useRef<string | undefined>(view);
   if (view) focusedPanel.current = view;
   const [width, setWidth] = useState(0);
@@ -141,13 +153,14 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   });
   const card = (panel: Panel, height: number, fullscreen = false) => <PanelCard panel={panel} title={interpolate(panel.title, vars)} result={results.get(panel.id)} loading={fetching && fetchingIds.includes(panel.id)} height={height} group={group} editing={canEdit && !fullscreen} agentAvailable={agentAvailable}
     suspended={!fullscreen && panel.id === view}
-    menuRef={!fullscreen ? node => { if (node) menus.current.set(panel.id, node); else menus.current.delete(panel.id); } : undefined}
+    menuRef={!fullscreen ? node => { if (node) menus.current.set(panel.id, node); else menus.current.delete(panel.id); } : fullscreenMenu}
     compare={time.compare === "previous_period"} range={panel.time?.range ?? time.range} annotations={annotations} vars={vars} onVariable={onVariable}
     {...panelHandlers(panel, results.get(panel.id), onVariable, onPoint ? selection => onPoint(panel, selection) : undefined)}
     onRangePending={pending => onRangePending?.(panel.id, pending)} onZoom={onZoom} zoomed={zoomed} onZoomReset={onZoomReset}
     onRetry={onRetry ? () => onRetry(panel.id) : undefined}
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
+    onEditSQL={canManage && typeof panel.sql === "string" ? () => { sqlReturnFocus.current = fullscreen ? fullscreenMenu.current : menus.current.get(panel.id) ?? null; setSqlEdit({ panel, spec, version }); } : undefined}
     onExplain={dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true }) : undefined}
     onFix={dashboardId && canManage ? () => onOpenChat(fixPrompt(context(panel))) : undefined}
     staleAt={staleAt.get(panel.id)} onDuplicate={canEdit && !fullscreen ? () => duplicate.mutate(panel) : undefined}
@@ -175,8 +188,11 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
       onDragStop={changeLayout} onResizeStop={changeLayout}>
       {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
-    <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
+    <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen && !sqlEdit} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
       {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
     </PanelFullscreen>
+    {sqlEdit && <Suspense fallback={<Modal opened onClose={closeSql} title="Loading SQL editor"><Loader size="sm" aria-label="Loading SQL editor" /></Modal>}>
+      <PanelSqlEditor dashboardId={dashboardId} version={sqlEdit.version} spec={sqlEdit.spec} panel={sqlEdit.panel} time={time} vars={vars} onClose={closeSql} />
+    </Suspense>}
   </div>;
 }
