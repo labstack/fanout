@@ -27,12 +27,12 @@ func TestTopologyExternalPeerAggregatesAndScopes(t *testing.T) {
 		})
 		return i
 	}
-	first := add("shop", "api", "external", "SPAN_KIND_CLIENT", "ERROR", 10)
+	first := add("shop", "api", "external", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 10)
 	add("shop", "api", "external", "SPAN_KIND_CLIENT", "OK", 30)
 	add("shop", "worker", "external", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 50)
 	add("shop", "worker", "external", "SPAN_KIND_CLIENT", "error", 70)
 	add("shop", "worker", "healthy", "SPAN_KIND_CLIENT", "OK", 100)
-	add("other", "api", "external", "SPAN_KIND_CLIENT", "ERROR", 50)
+	add("other", "api", "external", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 50)
 
 	// Neither same-service children nor matching IDs in another trace or
 	// namespace make a remote peer instrumented.
@@ -46,14 +46,14 @@ func TestTopologyExternalPeerAggregatesAndScopes(t *testing.T) {
 	}
 	// Observations must suppress peers even when a service filter excludes
 	// the observed service; a cross-service child suppresses its client too.
-	add("shop", "api", "observed", "SPAN_KIND_CLIENT", "ERROR", 900)
+	add("shop", "api", "observed", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 900)
 	add("shop", "observed", "", "SPAN_KIND_SERVER", "OK", 1)
-	client := add("shop", "api", "child-peer", "SPAN_KIND_CLIENT", "ERROR", 900)
+	client := add("shop", "api", "child-peer", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 900)
 	child := add("shop", "child", "", "SPAN_KIND_SERVER", "OK", 1)
 	spans[child].TraceID, spans[child].ParentSpanID = spans[client].TraceID, spans[client].SpanID
-	add("shop", "api", "api", "SPAN_KIND_CLIENT", "ERROR", 900)
-	add("shop", "api", "", "SPAN_KIND_CLIENT", "ERROR", 900)
-	add("shop", "api", "external", "SPAN_KIND_SERVER", "ERROR", 900)
+	add("shop", "api", "api", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 900)
+	add("shop", "api", "", "SPAN_KIND_CLIENT", "STATUS_CODE_ERROR", 900)
+	add("shop", "api", "external", "SPAN_KIND_SERVER", "STATUS_CODE_ERROR", 900)
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "peers", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,10 +85,10 @@ func TestTopologyExternalPeerAggregatesAndScopes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(got.Data.Nodes) != len(tc.want.Nodes) || !reflect.DeepEqual(got.Data.Edges, tc.want.Edges) {
-				t.Fatalf("topology = %+v, want %+v", got.Data, tc.want)
+			if len(got.Nodes) != len(tc.want.Nodes) || !reflect.DeepEqual(got.Edges, tc.want.Edges) {
+				t.Fatalf("topology = %+v, want %+v", got, tc.want)
 			}
-			for i, node := range got.Data.Nodes {
+			for i, node := range got.Nodes {
 				want := tc.want.Nodes[i]
 				if node.Service != want.Service || node.Health != want.Health || node.Spans != want.Spans ||
 					node.ErrorRate != want.ErrorRate || node.LogCount != want.LogCount || node.MetricCount != want.MetricCount ||
@@ -109,8 +109,8 @@ func TestTopologyExternalPeersIgnoreOutOfWindowParquetSpans(t *testing.T) {
 			for _, shared := range []bool{false, true} {
 				_, repo, svc := newCompletedReadTest(t)
 				clients := []telemetry.Span{
-					{Namespace: "shop", ServiceName: "api", PeerService: "observed-peer", TraceID: "observed-trace", SpanID: "observed-client", Kind: "SPAN_KIND_CLIENT", StatusCode: "ERROR", StartUnixNanos: start.UnixNano(), EndUnixNanos: start.Add(time.Millisecond).UnixNano(), DurationMS: 1, IngestedAt: end.UnixNano()},
-					{Namespace: "shop", ServiceName: "api", PeerService: "child-peer", TraceID: "child-trace", SpanID: "child-client", Kind: "SPAN_KIND_CLIENT", StatusCode: "ERROR", StartUnixNanos: start.UnixNano(), EndUnixNanos: start.Add(time.Millisecond).UnixNano(), DurationMS: 1, IngestedAt: end.UnixNano()},
+					{Namespace: "shop", ServiceName: "api", PeerService: "observed-peer", TraceID: "observed-trace", SpanID: "observed-client", Kind: "SPAN_KIND_CLIENT", StatusCode: "STATUS_CODE_ERROR", StartUnixNanos: start.UnixNano(), EndUnixNanos: start.Add(time.Millisecond).UnixNano(), DurationMS: 1, IngestedAt: end.UnixNano()},
+					{Namespace: "shop", ServiceName: "api", PeerService: "child-peer", TraceID: "child-trace", SpanID: "child-client", Kind: "SPAN_KIND_CLIENT", StatusCode: "STATUS_CODE_ERROR", StartUnixNanos: start.UnixNano(), EndUnixNanos: start.Add(time.Millisecond).UnixNano(), DurationMS: 1, IngestedAt: end.UnixNano()},
 				}
 				stale := []telemetry.Span{
 					{Namespace: "shop", ServiceName: "observed-peer", TraceID: "old-trace", SpanID: "old-observation", Kind: "SPAN_KIND_SERVER", StartUnixNanos: outside.UnixNano(), EndUnixNanos: outside.Add(time.Millisecond).UnixNano(), DurationMS: 1, IngestedAt: end.UnixNano()},
@@ -136,18 +136,18 @@ func TestTopologyExternalPeersIgnoreOutOfWindowParquetSpans(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(got.Data.Nodes) != 2 || len(got.Data.Edges) != 2 {
-					t.Fatalf("shared=%v: missing failing peers: %+v", shared, got.Data)
+				if len(got.Nodes) != 2 || len(got.Edges) != 2 {
+					t.Fatalf("shared=%v: missing failing peers: %+v", shared, got)
 				}
-				for _, node := range got.Data.Nodes {
+				for _, node := range got.Nodes {
 					if node.Health != HealthUnhealthy || node.Spans != 1 || node.ErrorRate != 1 {
 						t.Fatalf("shared=%v: peer=%+v", shared, node)
 					}
 				}
-				if shared && !reflect.DeepEqual(got.Data, separate) {
-					t.Fatalf("file grouping changed topology: shared=%+v separate=%+v", got.Data, separate)
+				if shared && !reflect.DeepEqual(got, separate) {
+					t.Fatalf("file grouping changed topology: shared=%+v separate=%+v", got, separate)
 				}
-				separate = got.Data
+				separate = got
 			}
 		})
 	}

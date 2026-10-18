@@ -37,7 +37,7 @@ func TestTracePagedSpansStillDescribeTheWholeTrace(t *testing.T) {
 		{
 			Namespace: "prod", TraceID: "wide-trace", SpanID: "leaf", ParentSpanID: "child", ServiceName: "flagd",
 			Name: "resolveBoolean", Kind: "SERVER",
-			StartUnixNanos: start.Add(2 * time.Millisecond).UnixNano(), DurationMS: 1, StatusCode: "ERROR",
+			StartUnixNanos: start.Add(2 * time.Millisecond).UnixNano(), DurationMS: 1, StatusCode: "STATUS_CODE_ERROR",
 			StatusMsg: "error evaluating flag with key failedReadinessProbe",
 		},
 	}}); err != nil {

@@ -27,7 +27,7 @@ LIMIT ?`
 // aggregates, so their anti-joins do not repeat the underlying span scans.
 const topologyExternalQuery = `WITH clients AS MATERIALIZED (
  SELECT s.service AS caller,s.peer_service AS callee,s.duration_ms,
- CASE WHEN s.status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END AS error
+ CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END AS error
  FROM spans s WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
  AND (?='' OR s.namespace=?) AND (?='' OR s.service=? OR s.peer_service=?)
  AND s.kind='SPAN_KIND_CLIENT' AND coalesce(s.peer_service,'')<>'' AND s.peer_service<>s.service
@@ -38,24 +38,24 @@ const topologyExternalQuery = `WITH clients AS MATERIALIZED (
  SELECT e.caller,e.callee,e.calls,e.average_ms,e.error_rate,p.spans,p.error_rate,p.p50,p.p95 FROM edges e JOIN peers p USING(callee)
  ORDER BY p.error_rate DESC,p.p95 DESC,e.calls DESC,e.caller,e.callee LIMIT ?`
 
-func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[Topology], error) {
+func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Topology, error) {
 	scope, err := s.normalizeScope(scope)
 	if err != nil {
-		return Result[Topology]{}, err
+		return Topology{}, err
 	}
 	limit, err = normalizeLimit(limit)
 	if err != nil {
-		return Result[Topology]{}, err
+		return Topology{}, err
 	}
 
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace})
 	nodes, err := s.serviceHealth(ctx, scope, limit)
 	if err != nil {
-		return Result[Topology]{}, err
+		return Topology{}, err
 	}
 	rows, err := s.db.QueryContext(ctx, topologyEdgesQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Service, scope.Service, scope.Service, limit)
 	if err != nil {
-		return Result[Topology]{}, fmt.Errorf("query topology edges: %w", err)
+		return Topology{}, fmt.Errorf("query topology edges: %w", err)
 	}
 	defer rows.Close()
 
@@ -63,19 +63,19 @@ func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[
 	for rows.Next() {
 		var edge Edge
 		if err := rows.Scan(&edge.Caller, &edge.Callee, &edge.Type, &edge.Calls, &edge.AverageMS, &edge.ErrorRate); err != nil {
-			return Result[Topology]{}, fmt.Errorf("scan topology edge: %w", err)
+			return Topology{}, fmt.Errorf("scan topology edge: %w", err)
 		}
 		edges = append(edges, edge)
 	}
 	if err := rows.Err(); err != nil {
-		return Result[Topology]{}, fmt.Errorf("iterate topology edges: %w", err)
+		return Topology{}, fmt.Errorf("iterate topology edges: %w", err)
 	}
 
 	// Close the first stream before acquiring another read-pool slot.
 	rows.Close()
 	external, err := s.db.QueryContext(ctx, topologyExternalQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Service, scope.Service, scope.Service, scope.Start, scope.End, scope.Start, scope.End, limit)
 	if err != nil {
-		return Result[Topology]{}, fmt.Errorf("query external peers: %w", err)
+		return Topology{}, fmt.Errorf("query external peers: %w", err)
 	}
 	defer external.Close()
 	known := map[string]bool{}
@@ -87,7 +87,7 @@ func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[
 		var peer ServiceHealth
 		edge.Type = "call"
 		if err := external.Scan(&edge.Caller, &edge.Callee, &edge.Calls, &edge.AverageMS, &edge.ErrorRate, &peer.Spans, &peer.ErrorRate, &peer.P50MS, &peer.P95MS); err != nil {
-			return Result[Topology]{}, fmt.Errorf("scan external peer: %w", err)
+			return Topology{}, fmt.Errorf("scan external peer: %w", err)
 		}
 		peer.Service = edge.Callee
 		peer.Health = classify(peer.ErrorRate, peer.P95MS)
@@ -98,7 +98,7 @@ func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[
 		edges = append(edges, edge)
 	}
 	if err := external.Err(); err != nil {
-		return Result[Topology]{}, err
+		return Topology{}, err
 	}
 	sort.SliceStable(nodes, func(i, j int) bool {
 		a, b := nodes[i], nodes[j]
@@ -129,11 +129,5 @@ func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[
 	nodes = nodes[:min(len(nodes), limit)]
 	edges = edges[:min(len(edges), limit)]
 
-	data := Topology{Nodes: nodes, Edges: edges}
-	return Result[Topology]{
-		Schema:     TopologySchema,
-		Summary:    fmt.Sprintf("%d services connected by %d dependency edges", len(nodes), len(edges)),
-		Data:       data,
-		Provenance: s.provenance(scope),
-	}, nil
+	return Topology{Nodes: nodes, Edges: edges}, nil
 }

@@ -103,7 +103,7 @@ func TestTimelineQueriesUseAdaptiveBucket(t *testing.T) {
 	}
 }
 
-func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
+func TestOverviewReturnsServiceHealth(t *testing.T) {
 	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
@@ -118,17 +118,11 @@ func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
-	if result.Schema != OverviewSchema {
-		t.Fatalf("unexpected envelope: %#v", result)
+	if result.Health != HealthUnhealthy || result.Counts.Unhealthy != 1 || result.Counts.Healthy != 1 {
+		t.Fatalf("unexpected health: %#v", result)
 	}
-	if result.Data.Health != HealthUnhealthy || result.Data.Counts.Unhealthy != 1 || result.Data.Counts.Healthy != 1 {
-		t.Fatalf("unexpected health: %#v", result.Data)
-	}
-	if result.Data.TotalSpans != 1500 {
-		t.Fatalf("total spans = %d, want 1500", result.Data.TotalSpans)
-	}
-	if result.Provenance.Window == "" || !result.Provenance.Complete {
-		t.Fatalf("missing provenance: %#v", result.Provenance)
+	if result.TotalSpans != 1500 {
+		t.Fatalf("total spans = %d, want 1500", result.TotalSpans)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -147,14 +141,11 @@ func TestOverviewReportsEmptyWindowAsUnknownNotHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
-	if result.Data.Health != HealthUnknown {
-		t.Fatalf("health = %q, want %q: an empty window is not a clean bill of health", result.Data.Health, HealthUnknown)
+	if result.Health != HealthUnknown {
+		t.Fatalf("health = %q, want %q: an empty window is not a clean bill of health", result.Health, HealthUnknown)
 	}
-	if result.Data.ServiceCount != 0 || result.Data.Counts.Healthy != 0 {
-		t.Fatalf("unexpected counts: %#v", result.Data)
-	}
-	if !strings.Contains(result.Summary, "no services reported") {
-		t.Fatalf("summary = %q, want it to state the window is empty", result.Summary)
+	if result.ServiceCount != 0 || result.Counts.Healthy != 0 {
+		t.Fatalf("unexpected counts: %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -180,11 +171,11 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Topology: %v", err)
 	}
-	if len(result.Data.Nodes) != 2 || len(result.Data.Edges) != 1 {
-		t.Fatalf("unexpected topology: %#v", result.Data)
+	if len(result.Nodes) != 2 || len(result.Edges) != 1 {
+		t.Fatalf("unexpected topology: %#v", result)
 	}
-	if result.Data.Edges[0].Callee != "postgres" {
-		t.Fatalf("unexpected edge/envelope: %#v", result)
+	if result.Edges[0].Callee != "postgres" {
+		t.Fatalf("unexpected edge: %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -199,7 +190,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
-		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "ERROR", StatusMsg: "declined"},
+		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined"},
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "child", ParentSpanID: "root", ServiceName: "payments", Name: "charge", Kind: "CLIENT", StartUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), DurationMS: 80, StatusCode: "OK"},
 	}, Logs: []telemetry.Log{
 		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
@@ -267,7 +258,7 @@ func TestTraceUsesIndexedParquet(t *testing.T) {
 	end := start.Add(time.Hour)
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "indexed-trace", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "parquet-trace", SpanID: "root", ServiceName: "checkout", Name: "pay",
-		Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 25, StatusCode: "ERROR", StatusMsg: "declined",
+		Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 25, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined",
 	}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +287,7 @@ func TestTraceCombinesIndexedSpansAcrossBatches(t *testing.T) {
 	end := start.Add(time.Hour)
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-old-root", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "split-trace", SpanID: "root", ServiceName: "frontend",
-		StartUnixNanos: start.Add(10 * time.Minute).UnixNano(), DurationMS: 100, StatusCode: "ERROR",
+		StartUnixNanos: start.Add(10 * time.Minute).UnixNano(), DurationMS: 100, StatusCode: "STATUS_CODE_ERROR",
 	}}}); err != nil {
 		t.Fatal(err)
 	}

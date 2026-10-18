@@ -1,0 +1,39 @@
+{
+  "columns": [
+    {
+      "name": "time",
+      "type": "time",
+      "role": "time"
+    },
+    {
+      "name": "endpoint_from",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "failure",
+      "type": "number",
+      "role": "measure"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "role": "dimension"
+    }
+  ],
+  "values": [
+    [
+      1790856000000
+    ],
+    [
+      "prod / GET https://example.test from same-host"
+    ],
+    [
+      0
+    ],
+    [
+      "reachable"
+    ]
+  ],
+  "rows": 1
+}

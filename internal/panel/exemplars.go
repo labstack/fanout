@@ -216,7 +216,7 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 	return out, nil
 }
 func traceRootsSQL() string {
-	return `SELECT s.trace_id,s.namespace,s.service,s.operation,s.duration_ms,CASE WHEN max(CASE WHEN s.status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END) OVER(PARTITION BY s.namespace,s.trace_id)>0 THEN 'STATUS_CODE_ERROR' ELSE coalesce(s.status,'') END AS status,s.start_time,row_number() OVER(PARTITION BY s.namespace,s.trace_id ORDER BY (coalesce(s.parent_span_id,'')='') DESC,s.start_time,s.span_id) AS n
+	return `SELECT s.trace_id,s.namespace,s.service,s.operation,s.duration_ms,CASE WHEN max(CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) OVER(PARTITION BY s.namespace,s.trace_id)>0 THEN 'STATUS_CODE_ERROR' ELSE coalesce(s.status,'') END AS status,s.start_time,row_number() OVER(PARTITION BY s.namespace,s.trace_id ORDER BY (coalesce(s.parent_span_id,'')='') DESC,s.start_time,s.span_id) AS n
 FROM spans s JOIN candidates c ON s.namespace=c.namespace AND s.trace_id=c.trace_id
 WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS`
 }

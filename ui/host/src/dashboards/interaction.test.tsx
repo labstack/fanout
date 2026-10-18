@@ -18,7 +18,7 @@ describe("interactions", () => {
   it("selects real dimensions and never Other or comparison overlays", () => {
     expect(pointSelection(panel, result, { seriesName: "checkout", value: [2000, 3] })).toEqual({ time: 2000, dimensions: { service: "checkout" } });
     expect(pointSelection(panel, result, { seriesName: "Other", value: [2000, 3] })).toBeUndefined();
-    expect(pointSelection(panel, result, { seriesName: "checkout · previous", value: [2000, 3] })).toBeUndefined();
+    expect(pointSelection(panel, result, { seriesName: "checkout · previous", interactive: false, value: [2000, 3] })).toBeUndefined();
     expect(panelTimeLabel(panel)).toBe("Shifted 1d");
   });
 

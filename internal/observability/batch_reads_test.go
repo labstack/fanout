@@ -64,7 +64,7 @@ func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 			trace := fmt.Sprint("trace", i%3)
 			status := "OK"
 			if i == 5 {
-				status = "ERROR"
+				status = "STATUS_CODE_ERROR"
 			}
 			b.Spans = append(b.Spans, telemetry.Span{Namespace: ns, ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(id, i), StartUnixNanos: n, EndUnixNanos: n + int64((i+1)*1000000), DurationMS: float64(i + 1), StatusCode: status, HTTPMethod: "GET", HTTPRoute: "/test", IngestedAt: at.UnixNano()})
 			sev := []string{"Error", "warn", "", "İ", "i"}[i%5]
@@ -126,7 +126,7 @@ func TestCompletedTraceKeepsTraceWithSpansOutsideWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "inside", Spans: []telemetry.Span{
-		span("T", "t2", t0.Add(10*time.Second), time.Second, "ERROR"),
+		span("T", "t2", t0.Add(10*time.Second), time.Second, "STATUS_CODE_ERROR"),
 		span("U", "u1", t0.Add(20*time.Second), 5*time.Second, "OK"),
 	}}); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 	raw := New(SQLDB(d.DB), d, 30)
 	rng := rand.New(rand.NewPCG(11, 104729))
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	statuses := []string{"OK", "ERROR", "error", "UNSET", ""}
+	statuses := []string{"STATUS_CODE_OK", "STATUS_CODE_ERROR", "STATUS_CODE_UNSET"}
 	commit := func(k int) {
 		t.Helper()
 		lo := t0.Add(-40*time.Minute + time.Duration(k)*37*time.Second)

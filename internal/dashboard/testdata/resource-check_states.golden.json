@@ -1,0 +1,43 @@
+{
+  "columns": [
+    {
+      "name": "time",
+      "type": "time",
+      "role": "time"
+    },
+    {
+      "name": "endpoint_from",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "failure",
+      "type": "number",
+      "role": "measure"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "role": "dimension"
+    }
+  ],
+  "values": [
+    [
+      1790856000000,
+      1790856060000
+    ],
+    [
+      "prod / GET https://example.test from same-host (all checks run on service hosts; outside reachability unverified)",
+      "prod / GET https://example.test from same-host (all checks run on service hosts; outside reachability unverified)"
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      "no recent result",
+      "no recent result"
+    ]
+  ],
+  "rows": 2
+}

@@ -35,7 +35,7 @@ func compileRowsWhere(p *Panel, where string, args []any, scope Scope) (Compiled
 	if p.Viz == "traces" {
 		order := "duration_ms DESC,trace_id,namespace"
 		if p.Query.Sort == "errors" {
-			where += " AND status IN ('STATUS_CODE_ERROR','ERROR')"
+			where += " AND status = 'STATUS_CODE_ERROR'"
 		}
 		if p.Query.Sort == "+start" {
 			order = "start_time ASC,trace_id,namespace"

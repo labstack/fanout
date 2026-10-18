@@ -36,21 +36,22 @@ it('does not invent an executor error for successful panel checks', async () => 
     expect(got).toEqual({checked:true,valid:true,checks:[{id:'p',status:'ok',rows:1}]});
   }
 });
-const result={type:'TOOL_CALL_RESULT',toolCallId:'save',content:JSON.stringify({dashboard:saved}),isError:false};
+const result={type:'TOOL_CALL_RESULT',toolCallId:'save',content:JSON.stringify({dashboard:saved})};
 it('decodes split UTF-8, multiline frames, assistant call names and immutable saves',async()=>{
   const s=await readSSE(response(frame({type:'TEXT_MESSAGE_START',messageId:'text',role:'assistant'})+': ping\r\nevent: TEXT_MESSAGE_CONTENT\r\ndata: {"messageId":"text","delta":\r\ndata: "✓"}\r\n\r\n'+frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'read',toolCallName:'get_dashboard'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'read',content:JSON.stringify({dashboard:{...saved,id:'unrelated',version:9}})})+frame(finish)),new AbortController().signal);
-  expect(s.incomplete).toBe(false);expect(s.tools[0].name).toBe('create_dashboard');expect(findSaved(s)?.record).toEqual(saved);
+  expect(s.incomplete).toBe(false);expect(s.tools[0].name).toBe('create_dashboard');expect(findSaved(s,[{role:'tool',toolCallId:'save'}])?.record).toEqual(saved);
 });
 it('rejects duplicate tool IDs and error mutations',async()=>{
   expect((await readSSE(response(frame(start)+frame(start)+frame(result)+frame(finish)),new AbortController().signal)).incomplete).toBe(true);
-  const s=await readSSE(response(frame(start)+frame({...result,isError:true})+frame(finish)),new AbortController().signal);expect(findSaved(s)).toBeNull();
-  const unknown=await readSSE(response(frame(start)+frame({...result,isError:undefined})+frame(finish)),new AbortController().signal);expect(findSaved(unknown)).toBeNull();
+  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({error:{code:'tool_failed',message:'Synthetic failure'},isError:true})})+frame(finish)),new AbortController().signal);expect(findSaved(s)).toBeNull();
+  const unknown=await readSSE(response(frame(start)+frame(result)+frame(finish)),new AbortController().signal);expect(findSaved(unknown)).toBeNull();
   expect(findSaved(unknown,[{role:'tool',toolCallId:'save',error:'failed'}])).toBeNull();
 });
 it('uses the final committed restore after an earlier edit',async()=>{
  const restored={...saved,version:3};
- const s=await readSSE(response(frame({...start,toolCallName:'edit_dashboard'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'restore',toolCallName:'restore_dashboard_version'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'restore',content:JSON.stringify({dashboard:restored}),isError:false})+frame(finish)),new AbortController().signal);
- expect(findSaved(s)?.record).toEqual(restored);expect(findSaved(s)?.tool_id).toBe('restore');
+ const s=await readSSE(response(frame({...start,toolCallName:'edit_dashboard'})+frame(result)+frame({type:'TOOL_CALL_START',toolCallId:'restore',toolCallName:'restore_dashboard_version'})+frame({type:'TOOL_CALL_RESULT',toolCallId:'restore',content:JSON.stringify({dashboard:restored})})+frame(finish)),new AbortController().signal);
+ const messages=[{role:'tool',toolCallId:'save'},{role:'tool',toolCallId:'restore'}];
+ expect(findSaved(s,messages)?.record).toEqual(restored);expect(findSaved(s,messages)?.tool_id).toBe('restore');
 });
 it('records missing terminal, truncation, RUN_ERROR and socket failure as incomplete',async()=>{
   const g=JSON.parse(readFileSync(join(import.meta.dir,'testdata/server.json'),'utf8'));
@@ -156,18 +157,18 @@ it('collects only the final assistant message by its stream ID',async()=>{
 it('preserves nested tool errors and persisted flags without allowing saves or answers',async()=>{
  for(const content of [{error:{code:'tool_failed',message:'Synthetic invalid spec'}},
  {error:{code:'tool_failed',message:'Synthetic operation failed'}},{dashboard:saved}]) {
-  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify(content),isError:true})+frame(finish)),new AbortController().signal);
-  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:false}])).toBeNull();
+  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({...content,isError:true})})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:''}])).toBeNull();
   expect(s.tools[0].is_error).toBe(true);
  }
  const s=await readSSE(response(frame(start)+frame(result)+frame(finish)),new AbortController().signal);
- expect(findSaved(s,[{role:'tool',toolCallId:'save',isError:true}])).toBeNull();
+ expect(findSaved(s,[{role:'tool',toolCallId:'save',error:'failed'}])).toBeNull();
 });
 
 it('reads stable tool error codes and messages while preserving error flags from all sources',async()=>{
  for(const message of ['Synthetic invalid spec','Synthetic operation failed']) {
-  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({dashboard:saved,error:{code:'tool_failed',message}}),isError:false})+frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:false}})+frame(finish)),new AbortController().signal);
-  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:false}])).toBeNull();
+  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({dashboard:saved,error:{code:'tool_failed',message}})})+frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:false}})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:''}])).toBeNull();
   expect(s.tools[0]).toMatchObject({is_error:true,error_code:'tool_failed',error_message:message});
  }
 });
@@ -177,13 +178,13 @@ it('recognises a save from the server encoded persisted thread without an error 
  expect(g.saved_thread).toHaveLength(1);
  expect(Object.keys(g.saved_thread[0]).sort()).toEqual(['content','id','role','toolCallId']);
  const output=JSON.parse(g.saved_thread[0].content);
- const s=await readSSE(response(frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame({...result,content:g.saved_thread[0].content,isError:undefined})+frame(finish)),new AbortController().signal);
+ const s=await readSSE(response(frame(start)+frame({type:'TOOL_CALL_END',toolCallId:'save'})+frame({...result,content:g.saved_thread[0].content})+frame(finish)),new AbortController().signal);
  expect(findSaved(s,g.saved_thread)?.record).toEqual(output.dashboard);
  expect(mutationEvidence(s,g.saved_thread)).toEqual({mutation_observed:true,mutation_evidence_complete:true});
 });
 it('recognises persisted success when the optional error field is absent or empty',async()=>{
- for(const flag of [{},{error:null},{error:''}]) {
-  const s=await readSSE(response(frame(start)+frame({...result,isError:undefined})+frame(finish)),new AbortController().signal);
+ for(const flag of [{},{error:''}]) {
+  const s=await readSSE(response(frame(start)+frame(result)+frame(finish)),new AbortController().signal);
   expect(findSaved(s,[{role:'tool',toolCallId:'save',...flag}])?.record).toEqual(saved);
  }
 });
@@ -198,9 +199,16 @@ it('marks assistant content without a started message ID as incomplete',async()=
  expect(s.incomplete).toBe(true);expect(s.final_text).toBe('');
 });
 
-it('never clears an earlier activity error or conflicting protocol error flag',async()=>{
+it('never clears an earlier activity or payload error',async()=>{
  for(const prefix of [frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:true}}),'']) {
-  const s=await readSSE(response(frame(start)+prefix+frame({...result,...(prefix?{}:{is_error:true})})+frame(finish)),new AbortController().signal);
-  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:false}])).toBeNull();
+  const s=await readSSE(response(frame(start)+prefix+frame({...result,...(prefix?{}:{content:JSON.stringify({dashboard:saved,isError:true})})})+frame(finish)),new AbortController().signal);
+  expect(findSaved(s,[{role:'tool',toolCallId:'save',error:''}])).toBeNull();
  }
+});
+
+it('preserves current activity success received before the result',async()=>{
+ const activity={type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:false}};
+ const s=await readSSE(response(frame(start)+frame(activity)+frame(result)+frame(finish)),new AbortController().signal);
+ expect(s.tools[0].is_error).toBe(false);
+ expect(findSaved(s)?.record).toEqual(saved);
 });

@@ -1,0 +1,87 @@
+{
+  "columns": [
+    {
+      "name": "namespace",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "service",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "version",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "first_seen",
+      "type": "time",
+      "role": "time"
+    },
+    {
+      "name": "runtime_name",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "runtime_version",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "sdk_language",
+      "type": "string",
+      "role": "dimension"
+    },
+    {
+      "name": "sdk_version",
+      "type": "string",
+      "role": "dimension"
+    }
+  ],
+  "values": [
+    [
+      "prod",
+      "other",
+      "prod"
+    ],
+    [
+      "api",
+      "api",
+      "api"
+    ],
+    [
+      "v1",
+      "v1",
+      "v1"
+    ],
+    [
+      1790856000000,
+      1790856000000,
+      1790856000000
+    ],
+    [
+      "node",
+      "go",
+      "go"
+    ],
+    [
+      "1",
+      "1",
+      "1"
+    ],
+    [
+      "go",
+      "go",
+      "go"
+    ],
+    [
+      "2",
+      "2",
+      "2"
+    ]
+  ],
+  "rows": 3
+}

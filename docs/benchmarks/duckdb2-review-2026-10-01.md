@@ -10,7 +10,7 @@ This report addresses the nine comments in [review 5383705777](https://github.co
 | Retained trace-index rewrite | One candidate row per trace, incrementally upserted from new contributions; no global DELETE/reinsert on normal append. Temporary trace parts contain only the current pass. |
 | Compaction markers disable the index | Transfer complete cached contributions before the namespace swap. Follow replacement lineage across multiple compaction levels. Retention and incomplete replacements repair only affected trace IDs. |
 | Cache footprint | Remove full span-event and log-timestamp copies and the four scope-expanded trace indexes. Keep minute counts, scoped per-batch trace parts, and one candidate per trace. |
-| Stale severity semantics | A schema/aggregation version atomically discards all private read tables on mismatch and rebuilds from format-3 Parquet. Matching versions preserve acknowledgements. The already-existing endpoint_rollup/watermark cleanup now has regression coverage. |
+| Stale severity semantics | A schema/aggregation version atomically discards all private read tables on mismatch and rebuilds from format-3 Parquet. Matching versions preserve acknowledgements. |
 | Broad file lists | Use a glob at 64+ selected files when at least 80% of active signal files overlap; retain a captured-ID filename filter. Narrow selections retain explicit lists. Only relations actually referenced are bound. |
 | Ingestion throughput interpretation | Keep #277 open. The 20→10ms admission change helps closed-loop acknowledgement latency; it does not remove CPU cost per row. |
 | Warm read comparison | Explicitly label cache-current reads and add the five-minute mixed run with pending-batch samples. |

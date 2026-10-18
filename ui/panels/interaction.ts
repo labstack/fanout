@@ -14,7 +14,7 @@ export function panelTimeLabel(panel: Panel): string | undefined {
 }
 
 export function pointSelection(panel: Panel, result: PanelResult, event: ChartEvent): Selection | undefined {
-  if (event.interactive === false || (event.interactive !== true && event.seriesName?.endsWith(" · previous"))) return undefined;
+  if (event.interactive === false) return undefined;
   if ((event.data as { value?: unknown } | undefined)?.value === null) return undefined;
   const embedded = (event.data as { selection?: Selection } | undefined)?.selection;
   if (embedded) return Object.values(embedded.dimensions).some(isOtherSeries) ? undefined : embedded;

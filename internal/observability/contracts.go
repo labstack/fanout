@@ -2,11 +2,7 @@ package observability
 
 import "time"
 
-const (
-	OverviewSchema = "fanout.overview.result@1"
-	TopologySchema = "fanout.topology.result@1"
-	TraceSchema    = "fanout.trace.result@1"
-)
+const TraceSchema = "fanout.trace.result@1"
 
 // Scope is the mandatory boundary for every telemetry query. Namespace is a
 // query filter, not an authorization boundary: every MCP tool input exposes

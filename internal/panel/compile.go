@@ -287,7 +287,7 @@ func errorCase(sig *signal) string {
 	if sig.name == "logs" {
 		return "CASE WHEN upper(severity) IN ('ERROR', 'FATAL', 'CRITICAL') OR severity_number >= 17 THEN 1.0 ELSE 0.0 END"
 	}
-	return "CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END"
+	return "CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END"
 }
 
 // Wilson's 95% lower bound (z=1.96), using candidate aggregate aliases.

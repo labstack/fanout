@@ -18,7 +18,7 @@ func TestHealthErrorTrendWeightsScopedServicesAndPreservesEmptyScope(t *testing.
 		t.Fatalf("trend=%v err=%v", trend, err)
 	}
 	overview, err := svc.Overview(t.Context(), scope, 400)
-	if err != nil || math.Abs(overview.Data.ErrorRate*100-2.5) > 1e-9 {
+	if err != nil || math.Abs(overview.ErrorRate*100-2.5) > 1e-9 {
 		t.Fatalf("overview=%+v err=%v", overview, err)
 	}
 	scope.Namespace = "missing"
@@ -27,7 +27,7 @@ func TestHealthErrorTrendWeightsScopedServicesAndPreservesEmptyScope(t *testing.
 		t.Fatalf("empty trend=%v err=%v", trend, err)
 	}
 	overview, err = svc.Overview(t.Context(), scope, 400)
-	if err != nil || overview.Data.Health != HealthUnknown {
+	if err != nil || overview.Health != HealthUnknown {
 		t.Fatalf("empty health=%+v err=%v", overview, err)
 	}
 }

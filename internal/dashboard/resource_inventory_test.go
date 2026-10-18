@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -18,22 +19,26 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func baselineResourcePanel(t *testing.T, p panel.Panel) panel.Panel {
+func assertResourceFrame(t *testing.T, name string, frame *panel.Frame) {
 	t.Helper()
-	name := "check-states-resource-baseline.sql"
-	if p.ID == "versions" {
-		name = "versions-resource-baseline.sql"
-	}
-	sql, err := os.ReadFile(filepath.Join("testdata", name))
+	got, err := json.MarshalIndent(frame, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.ID == "versions" {
-		p.SQL = strings.Replace(p.SQL, versionObservationsSQL, strings.TrimSpace(string(sql)), 1)
-	} else {
-		p.SQL = strings.TrimSpace(string(sql))
+	got = append(got, '\n')
+	path := filepath.Join("testdata", "resource-"+name+".golden.json")
+	if os.Getenv("UPDATE_RESOURCE_GOLDENS") == "1" {
+		if err := os.WriteFile(path, got, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	return p
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s frame differs from golden:\n%s", name, got)
+	}
 }
 
 func resourcePanels() []panel.Panel {
@@ -48,7 +53,7 @@ func resourcePanels() []panel.Panel {
 
 func executeResourcePanel(t *testing.T, e *panel.Executor, p panel.Panel, start, end time.Time) panel.Result {
 	t.Helper()
-	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: panel.Dashboard{Name: "Resource inventory comparison", Time: panel.Time{From: &start, To: &end}, Panels: []panel.Panel{p}}})
+	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: panel.Dashboard{Name: "Resource inventory", Time: panel.Time{From: &start, To: &end}, Panels: []panel.Panel{p}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +63,7 @@ func executeResourcePanel(t *testing.T, e *panel.Executor, p panel.Panel, start,
 	return results[0]
 }
 
-func TestDefaultResourcePanelsMatchRawAcrossCacheStates(t *testing.T) {
+func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
@@ -111,19 +116,13 @@ func TestDefaultResourcePanelsMatchRawAcrossCacheStates(t *testing.T) {
 				}
 			}
 			for _, p := range resourcePanels() {
-				want := executeResourcePanel(t, e, baselineResourcePanel(t, p), start, end)
 				got := executeResourcePanel(t, e, p, start, end)
-				if !reflect.DeepEqual(want.Frame, got.Frame) {
-					t.Fatalf("%s frames differ: raw=%+v inventory=%+v", p.ID, want.Frame, got.Frame)
-				}
+				assertResourceFrame(t, p.ID, got.Frame)
 				// A shifted SQL execution carries its own logical inventory window.
 				shifted := p
 				shifted.Time = &panel.PanelTime{Shift: "1m"}
-				want = executeResourcePanel(t, e, baselineResourcePanel(t, shifted), start, end)
 				got = executeResourcePanel(t, e, shifted, start, end)
-				if !reflect.DeepEqual(want.Frame, got.Frame) {
-					t.Fatalf("shifted %s frames differ: raw=%+v inventory=%+v", p.ID, want.Frame, got.Frame)
-				}
+				assertResourceFrame(t, p.ID+"-shifted", got.Frame)
 			}
 		})
 	}
@@ -157,11 +156,8 @@ func TestDefaultResourceInventoryKeepsVantageNamespacesSeparate(t *testing.T) {
 			if p.ID != "check_states" {
 				continue
 			}
-			want := executeResourcePanel(t, e, baselineResourcePanel(t, p), start, end)
 			got := executeResourcePanel(t, e, p, start, end)
-			if !reflect.DeepEqual(want.Frame, got.Frame) {
-				t.Fatal("namespace vantage frames differ")
-			}
+			assertResourceFrame(t, "namespaces", got.Frame)
 			for _, value := range defaultValues(t, got, "endpoint_from") {
 				if strings.Contains(value.(string), "all checks run on service hosts") {
 					t.Fatal("another namespace made a check local")
@@ -219,8 +215,7 @@ func TestResourceInventoryFrozenSnapshotFrames(t *testing.T) {
 	stats := map[string]any{"engine": engine, "start": start, "end": end}
 	sqlEvidence := map[string]string{}
 	for _, p := range resourcePanels() {
-		sqlEvidence[p.ID+"-before"] = baselineResourcePanel(t, p).SQL
-		sqlEvidence[p.ID+"-after"] = p.SQL
+		sqlEvidence[p.ID] = p.SQL
 	}
 	write("panel-sql.json", sqlEvidence)
 	build := time.Now()
@@ -268,28 +263,19 @@ func TestResourceInventoryFrozenSnapshotFrames(t *testing.T) {
 	}
 	stats["inventory_rows_by_signal"] = bySignal
 	for _, p := range resourcePanels() {
-		var before, after []int64
+		var elapsed []int64
 		var want *panel.Frame
 		for i := range 4 {
-			r := executeResourcePanel(t, e, baselineResourcePanel(t, p), start, end)
-			before = append(before, r.ElapsedMS)
+			r := executeResourcePanel(t, e, p, start, end)
+			elapsed = append(elapsed, r.ElapsedMS)
 			if i == 0 {
 				want = r.Frame
 			} else if !reflect.DeepEqual(want, r.Frame) {
-				t.Fatal("unstable baseline frame")
+				t.Fatalf("unstable frozen %s frame", p.ID)
 			}
 		}
-		write(p.ID+"-before.json", want)
-		for range 4 {
-			r := executeResourcePanel(t, e, p, start, end)
-			after = append(after, r.ElapsedMS)
-			if !reflect.DeepEqual(want, r.Frame) {
-				t.Fatalf("frozen %s rows, ordering or frame metadata differ", p.ID)
-			}
-			write(p.ID+"-after.json", r.Frame)
-		}
-		stats[p.ID+"_before_ms"] = before
-		stats[p.ID+"_after_ms"] = after
+		write(p.ID+".json", want)
+		stats[p.ID+"_ms"] = elapsed
 		stats[p.ID+"_rows"] = want.Rows
 	}
 	stats["cache_wal_bytes_before_checkpoint"] = int64(0)

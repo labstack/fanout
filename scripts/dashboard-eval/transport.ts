@@ -86,7 +86,7 @@ export async function readSSE(response:Response,signal:AbortSignal,onUsage?:(u:C
       case 'TOOL_CALL_START': {const t=tool(e.toolCallId);if(t.name)throw new Error('duplicate_tool_id');if(typeof e.toolCallName!=='string'||!e.toolCallName)throw new Error('missing_tool_name');t.name=e.toolCallName;break;}
       case 'TOOL_CALL_ARGS':tool(e.toolCallId).args+=e.delta??'';break;
       case 'TOOL_CALL_END':tool(e.toolCallId).ended=true;break;
-      case 'TOOL_CALL_RESULT': {const t=tool(e.toolCallId);if(t.result!==null)throw new Error('duplicate_tool_result');t.result=structuredClone(decode(e.content));t.elapsed_ms=performance.now()-started;t.is_error=t.is_error===true||e.isError===true||e.is_error===true?true:typeof e.isError==='boolean'?e.isError:typeof e.is_error==='boolean'?e.is_error:null;if(t.result?.error||t.result?.isError||t.result?.is_error)t.is_error=true;if(typeof t.result?.error?.code==='string')t.error_code=t.result.error.code;if(typeof t.result?.error?.message==='string')t.error_message=t.result.error.message;break;}
+      case 'TOOL_CALL_RESULT': {const t=tool(e.toolCallId);if(t.result!==null)throw new Error('duplicate_tool_result');t.result=structuredClone(decode(e.content));t.elapsed_ms=performance.now()-started;if(t.result?.error||t.result?.isError)t.is_error=true;if(typeof t.result?.error?.code==='string')t.error_code=t.result.error.code;if(typeof t.result?.error?.message==='string')t.error_message=t.result.error.message;break;}
       case 'ACTIVITY_SNAPSHOT': {
         if(e.activityType==='mcp-app') {const c=e.content;const matches=state.tools.filter(t=>t.name===c?.tool_name&&stable(decode(t.args))===stable(c?.tool_input));if(matches.length===1&&typeof c.is_error==='boolean')matches[0].is_error=matches[0].is_error===true||c.is_error;}
         break;
@@ -120,7 +120,7 @@ export function findSaved(state:StreamState,messages:ObjectValue[]=[]):{record:O
     const matches=messages.filter(m=>m.role==='tool'&&m.toolCallId===t.id);
     if(matches.length===1) {
       const m=matches[0];
-      if(t.is_error===true||m.error||m.isError===true||m.is_error===true)t.is_error=true;
+      if(t.is_error===true||m.error)t.is_error=true;
       else t.is_error=false;
     }
     if(matches.length>1)t.is_error=true;

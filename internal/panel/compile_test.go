@@ -78,7 +78,7 @@ func TestCompileTableDropsAllAndSorts(t *testing.T) {
 		t.Fatal(err)
 	}
 	route := `TRY_CAST(attributes['http.route'] AS VARCHAR)`
-	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + `) SELECT coalesce(` + route + `, '') AS "http.route", 100.0 * avg(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS "error_rate", count(*)::DOUBLE AS "count" FROM base GROUP BY ` + route + ` ORDER BY "count" DESC NULLS LAST LIMIT 5`
+	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + `) SELECT coalesce(` + route + `, '') AS "http.route", 100.0 * avg(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS "error_rate", count(*)::DOUBLE AS "count" FROM base GROUP BY ` + route + ` ORDER BY "count" DESC NULLS LAST LIMIT 5`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}

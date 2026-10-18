@@ -9,8 +9,8 @@ import (
 )
 
 type RollupReader interface {
-	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
-	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
+	Topology(context.Context, observability.Scope, int) (observability.Topology, error)
+	Overview(context.Context, observability.Scope, int) (observability.Overview, error)
 	HealthErrorTrend(context.Context, observability.Scope) (observability.HealthTrend, error)
 }
 
@@ -100,13 +100,13 @@ func (e *Executor) runRollupPanel(ctx context.Context, p *Panel, filters []Filte
 			return nil, "", err
 		}
 		f := newFrame(healthColumns())
-		f.Truncated = len(result.Data.Services) == limit
+		f.Truncated = len(result.Services) == limit
 		trend, err := e.rollups.HealthErrorTrend(ctx, request)
 		if err != nil {
 			return nil, "", err
 		}
-		f.Health = &HealthFrame{Health: string(result.Data.Health), Counts: result.Data.Counts, TotalSpans: result.Data.TotalSpans, ErrorRate: result.Data.ErrorRate * 100, ServiceCount: result.Data.ServiceCount, ErrorTrend: trend.Values, ErrorTrendTimes: trend.Times}
-		for _, s := range result.Data.Services {
+		f.Health = &HealthFrame{Health: string(result.Health), Counts: result.Counts, TotalSpans: result.TotalSpans, ErrorRate: result.ErrorRate * 100, ServiceCount: result.ServiceCount, ErrorTrend: trend.Values, ErrorTrendTimes: trend.Times}
+		for _, s := range result.Services {
 			appendPanelRow(f, s.Service, string(s.Health), float64(s.Spans), s.ErrorRate*100, s.P50MS, s.P95MS, float64(s.LogCount), float64(s.MetricCount))
 		}
 		return f, "observability.Service.Overview", nil
@@ -116,11 +116,11 @@ func (e *Executor) runRollupPanel(ctx context.Context, p *Panel, filters []Filte
 		return nil, "", err
 	}
 	f := newFrame(mapColumns())
-	f.Truncated = len(result.Data.Nodes) == limit || len(result.Data.Edges) == limit
-	for _, n := range result.Data.Nodes {
+	f.Truncated = len(result.Nodes) == limit || len(result.Edges) == limit
+	for _, n := range result.Nodes {
 		appendPanelRow(f, "node", n.Service, "", "", "", nil, nil, n.ErrorRate*100, string(n.Health), n.P95MS, float64(n.Spans))
 	}
-	for _, edge := range result.Data.Edges {
+	for _, edge := range result.Edges {
 		appendPanelRow(f, "edge", "", edge.Caller, edge.Callee, edge.Type, float64(edge.Calls), edge.AverageMS, edge.ErrorRate*100, "", nil, nil)
 	}
 	return f, "observability.Service.Topology", nil

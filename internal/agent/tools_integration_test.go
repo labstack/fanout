@@ -23,14 +23,6 @@ func (registryIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot 
 	return &intelligence.IntelligenceSnapshot{Summary: "healthy", HealthScore: 100}
 }
 
-func (registryQueries) Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error) {
-	return observability.Result[observability.Overview]{}, nil
-}
-
-func (registryQueries) Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error) {
-	return observability.Result[observability.Topology]{}, nil
-}
-
 func (registryQueries) Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
 	return observability.Result[observability.Dependencies]{}, nil
 }

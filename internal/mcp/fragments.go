@@ -261,7 +261,7 @@ func fragmentSummary(fragment PanelFragment) string {
 		for _, kind := range []string{"slowest", "erroring"} {
 			count := 0
 			for _, span := range spans {
-				if kind == "erroring" && !strings.Contains(strings.ToUpper(span.Status), "ERROR") {
+				if kind == "erroring" && span.Status != "STATUS_CODE_ERROR" {
 					continue
 				}
 				fmt.Fprintf(&out, "  %s: %s / %s duration=%s ms status=%s start=%s\n", kind, clip(span.Service, 80), clip(span.Operation, 160), number(span.DurationMS), clip(span.Status, 80), span.Start.UTC().Format(time.RFC3339Nano))
@@ -550,7 +550,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 			if span.ParentSpanID == "" || !parents[span.ParentSpanID] {
 				return 0
 			}
-			if strings.EqualFold(span.Status, "error") {
+			if span.Status == "STATUS_CODE_ERROR" {
 				return 1
 			}
 			return 2
