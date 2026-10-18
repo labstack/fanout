@@ -590,6 +590,17 @@ it("groups failed calls by assistant message within one user turn",async()=>{
  }finally{await act(async()=>root.unmount());}
 });
 
+it("does not count no-data or unknown-service guidance as failed steps",async()=>{
+ const guidance=(id:string,code:string)=>({id:`${id}-result`,role:"tool",toolCallId:id,content:JSON.stringify({error:{code,message:`${code} guidance`}})});
+ const messages=[{id:"u",role:"user",content:"Help"},
+ {id:"a",role:"assistant",content:"",toolCalls:[{id:"g1",type:"function",function:{name:"get_service_performance",arguments:"{}"}},{id:"g2",type:"function",function:{name:"search_logs",arguments:"{}"}},{id:"c",type:"function",function:{name:"query_telemetry",arguments:"{}"}}]},
+ guidance("g1","no_data"),guidance("g2","unknown_service"),toolError('c','first')] as Message[];
+ const root=await mount(value({messages}));try {
+ expect(button("1 step failed")).toBeTruthy();expect(button("3 steps failed")).toBeFalsy();
+ await act(async()=>button("1 step failed")!.click());expect(document.body.textContent).toContain("first failure");expect(document.body.textContent).not.toContain("guidance");
+ }finally{await act(async()=>root.unmount());}
+});
+
 it.each(['live','reloaded'])('shows the same escaped plain tool error during %s chat',async mode=>{
  const messages=[user(),call('failed','query_telemetry'),toolError('failed','escaped',mode==='live')];
  const root=await mount(value({messages:mode==='reloaded'?JSON.parse(JSON.stringify(messages)):messages}));

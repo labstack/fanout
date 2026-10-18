@@ -67,11 +67,13 @@ function toolFailures(messages: Message[]) {
       if (!message.error && !payload?.error && payload?.isError !== true) continue;
       const call = calls.get(message.toolCallId);
       if(call && mutationNames.has(call.name) && interruptedResult(message)) continue;
+      const failure = object(payload?.error) ? payload?.error : undefined;
+      // Guidance tells the agent which signal exists; it is not a failed step.
+      if (failure?.code === "no_data" || failure?.code === "unknown_service") continue;
       const owner = call?.assistant ?? assistant;
       const first = firstFailures.get(owner) ?? message.id;
       firstFailures.set(owner, first);
       const failures = groups.get(first) ?? [];
-      const failure = object(payload?.error) ? payload?.error : undefined;
       const text = typeof failure?.message === "string" ? failure.message : typeof message.error === "string" && message.error ? message.error : "Could not complete this step. Try again.";
       failures.push({ name: toolFailureLabel(call?.name ?? ""), message: text, readOnly: failure?.code === "answer_only" });
       groups.set(first, failures);
