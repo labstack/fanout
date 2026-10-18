@@ -28,7 +28,7 @@ const ProtocolVersion = "2026-07-28"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every panel is ok or deliberately empty, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
+const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. Do not present empty results; state no matching data findings in the answer and prefer the signal a service actually has. Dashboards contain only panels that return data; text panels are exempt. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every non-text panel returns data, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
 
 type Observability interface {
 	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
@@ -95,6 +95,7 @@ type panelExecutor interface {
 	ResolveVariables(context.Context, panel.ResolveRequest) (map[string][]panel.Option, error)
 	ResolveWindow(time.Time, time.Time) (time.Time, time.Time, error)
 	ServiceGuidance(context.Context, time.Time, time.Time, string, string) (string, error)
+	EmptyGuidance(context.Context, panel.RunRequest) (string, string, error)
 }
 
 type Server struct {
@@ -411,16 +412,14 @@ func (s *Server) presetFragment(ctx context.Context, input QueryInput, kind, ser
 	}
 	d := fragmentPreset(kind, service, input.Namespace, severity, search, input.Limit)
 	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
-	result, out, err := s.runFragment(ctx, panel.RunRequest{Dashboard: d}, "preset")
+	out, err := s.executeFragment(ctx, panel.RunRequest{Dashboard: d})
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
 	if allResultsEmpty(out.Results) {
-		if err := s.checkService(ctx, scope, service); err != nil {
-			return nil, PanelFragment{}, err
-		}
+		return nil, PanelFragment{}, s.noDataError(ctx, out)
 	}
-	return result, out, nil
+	return finishFragment(ctx, out, "preset")
 }
 func (s *Server) overview(ctx context.Context, _ *mcp.CallToolRequest, input QueryInput) (*mcp.CallToolResult, PanelFragment, error) {
 	return s.presetFragment(ctx, input, "overview", "", "", "")
@@ -457,9 +456,7 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 		return nil, PanelFragment{}, err
 	}
 	if allResultsEmpty(out.Results) && len(detail.Data.Spans) == 0 && len(detail.Data.Logs) == 0 {
-		if err := s.checkService(ctx, scope, strings.TrimSpace(input.Service)); err != nil {
-			return nil, PanelFragment{}, err
-		}
+		return nil, PanelFragment{}, s.noDataError(ctx, out)
 	}
 	if detail.Data.Spans == nil {
 		detail.Data.Spans = []observability.TraceSpan{}
@@ -504,6 +501,10 @@ func (s *Server) checkService(ctx context.Context, scope observability.Scope, se
 	if message == "" {
 		return nil
 	}
+	return guidanceError("unknown_service", message)
+}
+
+func guidanceError(code, message string) error {
 	// JSON escaping expands a byte by at most six bytes. Reserve the envelope
 	// and bound before encoding so the agent's 16 KiB app cap cannot cut JSON.
 	const maxMessageBytes = (16*1024 - 128) / 6
@@ -514,7 +515,7 @@ func (s *Server) checkService(ctx context.Context, scope observability.Scope, se
 		}
 		message += "…"
 	}
-	return errors.New(toolerror.JSON("unknown_service", message))
+	return errors.New(toolerror.JSON(code, message))
 }
 
 func (s *Server) scope(input QueryInput) (observability.Scope, error) {

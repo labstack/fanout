@@ -14,9 +14,9 @@ import (
 )
 
 func TestQueryTelemetryReturnsExecutableFragment(t *testing.T) {
-	s := newPanelServer(t)
+	s, _, _, from, to := serviceInputFixture(t)
 	p := panel.Panel{ID: "latency", Title: "Latency", Viz: "timeseries", Query: &panel.Query{From: "spans", Measures: []string{"p95(duration_ms)"}, Bucket: "auto"}}
-	_, got, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: p})
+	_, got, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: p, Time: &panel.Time{From: &from, To: &to}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestFragmentNamedToolsMCPSeededContract(t *testing.T) {
 }
 
 func TestQueryTelemetryDoesNotMutateAuthoredInput(t *testing.T) {
-	s := newPanelServer(t)
+	s := panelServerFixture(t, true)
 	input := QueryTelemetryInput{Panel: panel.Panel{ID: "latency", Title: "Latency", Viz: "timeseries", Query: &panel.Query{From: "spans", Measures: []string{"p95(duration_ms)"}}}}
 	before, _ := json.Marshal(input)
 	_, _, err := s.queryTelemetry(t.Context(), nil, input)

@@ -403,16 +403,6 @@ it.each(["mixed", "presets", "custom"])("expands requested presets over discover
     } finally { await act(async () => root.unmount()); }
   }
 });
-it("keeps all-empty views collapsed and opens the turn's last view with data", async () => {
-  const empty = appMessage("two", "query_telemetry", "No matches") as Message & { content: { tool_result: ReturnType<typeof fixture> } };
-  for (const result of empty.content.tool_result.results) result.status = "empty";
-  const root = await mount(value({ messages: [appMessage("one", "query_telemetry", "Data"), empty] }));
-  try {
-    const toggles = [...document.querySelectorAll('button[aria-expanded]')];
-    expect(toggles.map(toggle => toggle.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
-    expect(toggles[1].textContent).toContain("empty");
-  } finally { await act(async () => root.unmount()); }
-});
 it("renders the latest server view snapshot without a host preset-winner rule", async () => {
   const preset = appMessage("one", "get_service_topology", "Requested");
   const custom = structuredClone(preset) as Message & { content: Record<string, unknown> }; custom.id = "two"; custom.content.tool_name = "query_telemetry"; (custom.content.tool_result as ReturnType<typeof fixture>).view.kind="query";

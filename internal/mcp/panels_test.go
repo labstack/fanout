@@ -118,7 +118,7 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 }
 
 func TestCreateAndEditDashboardTools(t *testing.T) {
-	s := newPanelServer(t)
+	s := panelServerFixture(t, true)
 	spec := panel.Dashboard{Name: "Checkout", Panels: []panel.Panel{
 		{ID: "notes", Title: "Notes", Viz: "text", Content: "Money path."},
 		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
@@ -128,10 +128,10 @@ func TestCreateAndEditDashboardTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
-	if out.Dashboard.Version != 1 || !strings.Contains(text, "requests") || !strings.Contains(text, "No spans") {
+	if out.Dashboard.Version != 1 || !out.Receipt.SaveCheck.Checked || out.Receipt.SaveCheck.Panels[1].Rows == 0 {
 		t.Fatalf("create summary %q record %+v", text, out.Dashboard)
 	}
-	_, edited, err := s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: out.Dashboard.ID, Operations: []dashboard.Operation{{Op: "remove_panel", ID: "requests"}}, Message: "Drop the empty panel"})
+	_, edited, err := s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: out.Dashboard.ID, Operations: []dashboard.Operation{{Op: "remove_panel", ID: "requests"}}, Message: "Drop the requests panel"})
 	if err != nil || edited.Dashboard.Version != 2 || len(edited.Dashboard.Spec.Panels) != 1 {
 		t.Fatalf("edit = %+v %v", edited, err)
 	}

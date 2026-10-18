@@ -64,6 +64,9 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 	if err != nil {
 		panic(err)
 	}
+	if reflect.TypeFor[Out]() == reflect.TypeFor[PanelFragment]() {
+		tool.Description += " All-empty results return no_data guidance instead of a view. State no matching data findings in the answer and prefer signals the service actually has."
+	}
 	tool.InputSchema = input
 	tool.OutputSchema = output
 	server.limitTools[tool.Name] = input.Properties["limit"] != nil
@@ -75,6 +78,14 @@ func (s *Server) runFragment(ctx context.Context, req panel.RunRequest, kinds ..
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
+	if allResultsEmpty(out.Results) {
+		return nil, PanelFragment{}, s.noDataError(ctx, out)
+	}
+	return finishFragment(ctx, out, kinds...)
+}
+
+func finishFragment(ctx context.Context, out PanelFragment, kinds ...string) (*mcp.CallToolResult, PanelFragment, error) {
+	var err error
 	kind := "query"
 	if len(kinds) > 0 {
 		kind = kinds[0]
@@ -85,6 +96,25 @@ func (s *Server) runFragment(ctx context.Context, req panel.RunRequest, kinds ..
 		return nil, PanelFragment{}, err
 	}
 	return summary(fragmentSummary(out)), out, nil
+}
+
+func (s *Server) noDataError(ctx context.Context, out PanelFragment) error {
+	code, guidance, err := s.panels.EmptyGuidance(ctx, panel.RunRequest{Dashboard: out.Dashboard, Vars: out.Vars})
+	if err != nil {
+		return safePanelToolError(err)
+	}
+	if code == "unknown_service" {
+		return guidanceError(code, guidance)
+	}
+	notes := []string{"No matching data.", guidance}
+	for i, r := range out.Results {
+		title := r.ID
+		if i < len(out.Dashboard.Panels) {
+			title = out.Dashboard.Panels[i].Title
+		}
+		notes = append(notes, fmt.Sprintf("%s: %s", title, r.Diagnosis))
+	}
+	return guidanceError("no_data", strings.Join(notes, " "))
 }
 
 func (s *Server) executeFragment(ctx context.Context, req panel.RunRequest) (PanelFragment, error) {

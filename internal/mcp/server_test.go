@@ -139,8 +139,9 @@ func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
 		want   time.Duration
 	}{{"15m", 15 * time.Minute}, {"720h", 30 * 24 * time.Hour}} {
 		t.Run(tt.window, func(t *testing.T) {
-			s := newPanelServer(t)
-			result, output, err := s.overview(t.Context(), nil, QueryInput{Window: tt.window, Namespace: "prod"})
+			s := panelServerFixture(t, true)
+			s.now = func() time.Time { return time.Now().UTC().Add(-20 * time.Minute) }
+			result, output, err := s.overview(t.Context(), nil, QueryInput{Window: tt.window, Namespace: "shop"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -310,7 +311,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 }
 
 func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
-	server := newPanelServer(t)
+	server := panelServerFixture(t, true)
 	session := connectTestClient(t, server, nil)
 	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_observability_overview") || !strings.Contains(instructions, "authenticated user") {
 		t.Fatalf("server instructions = %q", instructions)
@@ -331,7 +332,7 @@ func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 	called, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "get_observability_overview",
 		Arguments: map[string]any{
-			"window": "15m",
+			"window": "1h",
 		},
 	})
 	if err != nil {
