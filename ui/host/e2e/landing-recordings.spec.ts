@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cardSelector, readyCard, settle } from "./accessibility-support";
-import { recordingTimeline, revealRecording } from "./landing-recording-support";
+import { recordingTimeline, revealRecording, waitForConversation } from "./landing-recording-support";
 import type { DashboardSpec, PanelResult } from "../../panels/types";
 
 const baseURL = process.env.FANOUT_LANDING_BASE_URL;
@@ -22,7 +22,7 @@ test.use({
 
 const prompts = {
   chat: "Why is checkout slower in the last hour?",
-  dashboard: "Build a dashboard for checkout: request rate, error rate, p95 latency by operation, its slowest dependencies, and recent slow traces",
+  dashboard: "Build a dashboard for checkout: headline stats and trends for request rate, error rate and p95 latency, p95 by operation, slowest dependencies, and recent slow traces",
 };
 
 for (const view of ["chat", "dashboard"] as const) {
@@ -89,7 +89,7 @@ for (const view of ["chat", "dashboard"] as const) {
       await input.click();
       // A steady human typing cadence, including a short pause at punctuation.
       for (const character of prompts[view]) {
-        await input.pressSequentially(character, { delay: /[,:?]/.test(character) ? 180 : 55 });
+        await input.pressSequentially(character, { delay: /[,:?]/.test(character) ? 120 : 28 });
       }
       const responseReady = page.waitForResponse(response => new URL(response.url()).pathname === "/api/agent/runs"
         && response.request().method() === "POST", { timeout: 30_000 });
@@ -105,26 +105,33 @@ for (const view of ["chat", "dashboard"] as const) {
         content?: { tool_result?: { view: { key: string }; results: PanelResult[] } };
       }).filter(event => event.type === "ACTIVITY_SNAPSHOT" && event.activityType === "mcp-app")
         .map(event => event.content!.tool_result!);
-      expect(new Set(evidence.map(fragment => fragment.view.key)).size, "Chat must show at least four evidence views").toBeGreaterThanOrEqual(4);
+      if (view === "chat") expect(new Set(evidence.map(fragment => fragment.view.key)).size, "Chat must show at least four evidence views").toBeGreaterThanOrEqual(4);
       for (const fragment of evidence) {
         expect(fragment.results.some(result => result.status === "ok" && (result.frame?.rows ?? 0) > 0),
           "Chat must not contain an empty evidence view").toBe(true);
       }
+      const conversationWaitStart = (Date.now() - startedAt) / 1000;
       // RUN_FINISHED in the real stream plus the UI's idle state gates the reveal.
       await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
       await expect(page.locator(".chat-pane .mantine-Loader-root")).toHaveCount(0);
       await expect(page.locator(".chat-pane").getByRole("alert")).toHaveCount(0);
+      await expect(page.locator(".chat-pane").getByText(/^\d+ steps? failed$/), "The run must not show failed steps").toHaveCount(0);
       await expect(page.locator('[data-answer-position] [data-role="assistant"]')).toBeVisible();
       const views = page.locator('iframe[title="Fanout analysis view"]');
       for (let index = 0; index < await views.count(); index++) {
         const frame = views.nth(index).contentFrame();
+        await expect.poll(() => frame.locator("html").evaluate(element => element.ownerDocument.readyState)).toBe("complete");
         await expect(frame.locator("[data-panel-body]").first()).toBeAttached();
         await expect(frame.locator(".mantine-Loader-root, [data-panel-error]")).toHaveCount(0);
       }
+      await settle(page);
+      await waitForConversation(page);
+      timeline.waits.push({ kind: "conversation_ready", start: conversationWaitStart, end: (Date.now() - startedAt) / 1000 });
 
       if (view === "dashboard") {
         if (!timeline.dashboardId) throw new Error("No successful create_dashboard result with a committed save receipt; the recording requires a newly saved dashboard");
         const receipt = page.locator(`[data-dashboard-result="${timeline.dashboardId}"]`);
+        const dashboardWaitStart = (Date.now() - startedAt) / 1000;
         await receipt.getByRole("link", { name: "Open dashboard", exact: true }).click();
         await expect(page).toHaveURL(new RegExp(`/dashboards/${timeline.dashboardId}(?:\\?|$)`));
         const saved = await context.request.get(`/api/dashboards/${encodeURIComponent(timeline.dashboardId)}`);
@@ -148,13 +155,30 @@ for (const view of ["chat", "dashboard"] as const) {
           const card = page.locator(cardSelector(panel.id));
           await expect(card.locator('[aria-label="Loading panel"], [aria-label="Refreshing"], [data-panel-error]')).toHaveCount(0);
         }
+        await settle(page);
+        timeline.waits.push({ kind: "dashboard_ready", start: dashboardWaitStart, end: (Date.now() - startedAt) / 1000 });
       }
-      await settle(page);
       await page.mouse.move(0, 0);
       const holdStart = (Date.now() - startedAt) / 1000;
       await revealRecording(page, view);
       timeline.waits.push({ kind: "hold", start: holdStart, end: (Date.now() - startedAt) / 1000 });
-      await page.waitForTimeout(view === "dashboard" ? 5_000 : 4_000);
+      if (view === "chat") {
+        const visible = await page.locator("[data-answer-position]").evaluate(answer => {
+          const pane = answer.closest(".chat-scroll")!;
+          const top = pane.getBoundingClientRect().top + pane.clientTop;
+          const bottom = top + pane.clientHeight;
+          const markdown = answer.querySelector(".chat-markdown")!;
+          const walker = document.createTreeWalker(markdown, NodeFilter.SHOW_TEXT);
+          let last: Node | undefined;
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent?.trim()) last = node;
+          const range = document.createRange();
+          if (last) range.selectNodeContents(last);
+          const line = [...range.getClientRects()].at(-1);
+          return { aligned: Math.abs(answer.getBoundingClientRect().bottom - bottom) <= 2,
+            lastLineVisible: !!line && line.top >= top && line.bottom <= bottom + 1 };
+        });
+        expect(visible, "The final answer end must stay at the pane bottom with its last line in view").toEqual({ aligned: true, lastLineVisible: true });
+      }
       const duration = (Date.now() - startedAt) / 1000;
       await context.close();
       const rawFile = `${view}-${theme}.webm`;

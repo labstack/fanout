@@ -1,0 +1,6 @@
+[Parsed_freezedetect_0 @ 0x5678] lavfi.freezedetect.freeze_start: 1.2e-1
+[Parsed_freezedetect_0 @ 0x5678] lavfi.freezedetect.freeze_duration: 2
+[Parsed_freezedetect_0 @ 0x5678] lavfi.freezedetect.freeze_end: 2.12
+[Parsed_freezedetect_0 @ 0x5678] lavfi.freezedetect.freeze_start: 3.24
+[out#0/null @ 0x9876] video:100KiB audio:0KiB
+frame= 250 fps=0.0 q=-0.0 Lsize=N/A time=00:00:10.00 bitrate=N/A

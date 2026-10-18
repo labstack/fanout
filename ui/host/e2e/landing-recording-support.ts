@@ -7,9 +7,43 @@ export type AgentEvent = {
   toolCallName?: string;
   content?: string;
 };
-export type WaitInterval = { kind: "model_thinking" | "tool_call" | "hold"; start: number; end: number; tool?: string };
+export type WaitInterval = { kind: "model_thinking" | "tool_call" | "conversation_ready" | "dashboard_ready" | "hold"; start: number; end: number; tool?: string };
 
-/** Show the completed result at reading speed before the recording's final dwell. */
+/** Iframe load and panel readiness are checked by the caller before measuring layout. */
+export async function waitForConversation(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    const scroller = document.querySelector<HTMLElement>(".chat-pane .chat-scroll");
+    if (!scroller?.firstElementChild) throw new Error("No conversation content for the landing recording");
+    await new Promise<void>((resolve, reject) => {
+      let changedAt = performance.now();
+      let frame: number;
+      const resized = new ResizeObserver(() => { changedAt = performance.now(); });
+      const observe = () => {
+        for (const element of [scroller, scroller.firstElementChild!,
+          ...scroller.querySelectorAll("[data-chat-turn], [data-chat-anchor], [data-answer-position], iframe")]) resized.observe(element);
+      };
+      const mutated = new MutationObserver(() => { changedAt = performance.now(); observe(); });
+      const cleanup = () => { resized.disconnect(); mutated.disconnect(); cancelAnimationFrame(frame); clearTimeout(timeout); };
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Conversation did not stop resizing for 1.5 seconds"));
+      }, 30_000);
+      observe();
+      mutated.observe(scroller, { childList: true, subtree: true, characterData: true });
+      const check = () => {
+        const answer = scroller.querySelector('[data-answer-position] .chat-markdown:not([data-provisional])');
+        if (answer?.textContent?.trim() && performance.now() - changedAt >= 1_500) {
+          cleanup();
+          resolve();
+        } else frame = requestAnimationFrame(check);
+      };
+      frame = requestAnimationFrame(check);
+    });
+  });
+}
+
+/** Show the completed result at reading speed, then hold its final frame. */
 export async function revealRecording(page: Page, view: "chat" | "dashboard") {
   await page.evaluate(async view => {
     const scroller = view === "chat"
@@ -17,14 +51,19 @@ export async function revealRecording(page: Page, view: "chat" | "dashboard") {
       : document.scrollingElement as HTMLElement | null;
     if (!scroller) throw new Error(`No ${view} scroll container for the landing recording`);
 
-    // Tell the chat's stick-to-bottom hook that the reader is scrolling up.
+    const answer = view === "chat" ? scroller.querySelector<HTMLElement>("[data-answer-position]") : null;
+    if (view === "chat" && !answer) throw new Error("No final answer for the landing recording");
+    const answerEnd = () => scroller.scrollTop + answer!.getBoundingClientRect().bottom
+      - scroller.getBoundingClientRect().top - scroller.clientTop - scroller.clientHeight;
+
+    // Release the question anchor before controlling the recording's scroll.
     if (view === "chat") scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
     scroller.scrollTop = 0;
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
-    const animate = async (to: number, milliseconds: number) => {
+    const animate = async (target: () => number, milliseconds: number) => {
       const from = scroller.scrollTop;
-      if (to === from) return;
+      if (target() === from) return;
       const start = performance.now();
       await new Promise<void>(resolve => {
         const frame = (now: number) => {
@@ -34,21 +73,35 @@ export async function revealRecording(page: Page, view: "chat" | "dashboard") {
           const eased = progress < ramp ? progress * progress / (2 * ramp * (1 - ramp))
             : progress > 1 - ramp ? 1 - (1 - progress) ** 2 / (2 * ramp * (1 - ramp))
             : (progress - ramp / 2) / (1 - ramp);
-          scroller.scrollTop = from + (to - from) * eased;
+          // Re-measure every frame: evidence can still grow after readiness.
+          scroller.scrollTop = from + (target() - from) * eased;
           if (progress < 1) requestAnimationFrame(frame);
-          else requestAnimationFrame(() => resolve());
+          else requestAnimationFrame(() => { scroller.scrollTop = target(); resolve(); });
         };
         requestAnimationFrame(frame);
       });
     };
-    const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const target = view === "chat" ? answerEnd : () => Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const bottom = Math.max(0, target());
     const minimum = view === "chat" ? 8_000 : 6_000;
     // Two viewport heights take the baseline duration; longer results get more time.
     const duration = Math.min(12_000, Math.max(minimum, minimum * bottom / Math.max(1, scroller.clientHeight * 2)));
-    await animate(bottom, duration);
+    await animate(target, duration);
     if (view === "dashboard") {
       await new Promise(resolve => setTimeout(resolve, 1_500));
-      await animate(0, 1_500);
+      await animate(() => 0, 1_500);
+      await new Promise(resolve => setTimeout(resolve, 3_000));
+    } else {
+      // Keep the answer end aligned throughout the dwell, including late iframe resizes.
+      const until = performance.now() + 4_000;
+      await new Promise<void>(resolve => {
+        const hold = () => {
+          scroller.scrollTop = answerEnd();
+          if (performance.now() < until) requestAnimationFrame(hold);
+          else resolve();
+        };
+        requestAnimationFrame(hold);
+      });
     }
   }, view);
 }
