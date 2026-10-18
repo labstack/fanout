@@ -77,10 +77,6 @@ func normalizeLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-func (s *Service) provenance(scope Scope) Provenance {
-	return s.provenanceFor(scope, "service_rollup")
-}
-
 func (s *Service) provenanceFor(scope Scope, source string) Provenance {
 	return Provenance{
 		QueryID:   appid.MustNew(),

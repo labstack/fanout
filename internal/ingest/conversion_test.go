@@ -139,6 +139,52 @@ func TestExportConversionRowsMatchBaseline(t *testing.T) {
 		t.Fatalf("converted rows changed:\n%s", encoded)
 	}
 }
+func TestTraceSemanticConventionPriority(t *testing.T) {
+	for _, tc := range []struct {
+		name                                  string
+		current, older                        bool
+		method, status, database, environment string
+	}{
+		{"current wins", true, true, "GET", "200", "postgresql", "production"},
+		{"current only", true, false, "GET", "200", "postgresql", "production"},
+		{"external older names", false, true, "POST", "503", "mysql", "staging"},
+		{"absent", false, false, "", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text := func(k, v string) *common.KeyValue {
+				return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: v}}}
+			}
+			integer := func(k string, v int64) *common.KeyValue {
+				return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: v}}}
+			}
+			attrs := []*common.KeyValue{text("rpc.method", "GetOrder"), text("rpc.service", "Orders")}
+			resource := &resourcepb.Resource{}
+			// Put the older names first to verify key priority, independent of wire order.
+			if tc.older {
+				attrs = append(attrs, text("http.method", "POST"), integer("http.status_code", 503), text("db.system", "mysql"))
+				resource.Attributes = append(resource.Attributes, text("deployment.environment", "staging"))
+			}
+			if tc.current {
+				attrs = append(attrs, text("http.request.method", "GET"), integer("http.response.status_code", 200), text("db.system.name", "postgresql"))
+				resource.Attributes = append(resource.Attributes, text("deployment.environment.name", "production"))
+			}
+			var got telemetrystore.Batch
+			srv := NewServer(config.Config{}, conversionSubmitter(func(_ context.Context, b telemetrystore.Batch) error { got = b; return nil }))
+			req := &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{Resource: resource, ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{{Attributes: attrs, Status: &tracepb.Status{Code: tracepb.Status_STATUS_CODE_ERROR}}}}}}}}
+			if _, err := srv.exportTraces(t.Context(), req); err != nil {
+				t.Fatal(err)
+			}
+			span := got.Spans[0]
+			if span.HTTPMethod != tc.method || span.HTTPStatusCode != tc.status || span.DBSystem != tc.database || span.DeploymentEnv != tc.environment {
+				t.Fatalf("extracted method=%q status=%q database=%q environment=%q", span.HTTPMethod, span.HTTPStatusCode, span.DBSystem, span.DeploymentEnv)
+			}
+			if span.RPCMethod != "GetOrder" || span.RPCService != "Orders" || span.StatusCode != "STATUS_CODE_ERROR" {
+				t.Fatalf("RPC or status changed: %+v", span)
+			}
+		})
+	}
+}
+
 func BenchmarkExportConversion(b *testing.B) {
 	traces, logs, metrics := conversionExports(250)
 	srv := NewServer(config.Config{DefaultNamespace: "fallback"}, conversionSubmitter(func(context.Context, telemetrystore.Batch) error { return nil }))

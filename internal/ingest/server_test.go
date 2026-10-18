@@ -376,7 +376,7 @@ func TestSpanAttr(t *testing.T) {
 		want string
 	}{
 		{"first key matches", []string{"db.system"}, "postgresql"},
-		{"priority order respected", []string{"http.method", "http.request.method"}, "GET"},
+		{"priority order respected", []string{"http.request.method", "http.method"}, "POST"},
 		{"fallback key used", []string{"http.route", "http.request.method"}, "POST"},
 		{"no match", []string{"rpc.method"}, ""},
 		{"nil attrs", nil, ""},
@@ -410,7 +410,7 @@ func TestSpanAttrInt(t *testing.T) {
 	}{
 		{"int value extracted", []string{"http.status_code"}, "200"},
 		{"string value extracted", []string{"http.response.status_code"}, "404"},
-		{"priority order", []string{"http.status_code", "http.response.status_code"}, "200"},
+		{"priority order", []string{"http.response.status_code", "http.status_code"}, "404"},
 		{"fallback to second key", []string{"missing", "http.response.status_code"}, "404"},
 		{"no match", []string{"missing"}, ""},
 	}

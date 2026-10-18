@@ -20,19 +20,19 @@ GROUP BY service
 ORDER BY error_rate DESC, p95_ms DESC, spans DESC, service ASC
 LIMIT ?`
 
-func (s *Service) Overview(ctx context.Context, scope Scope, limit int) (Result[Overview], error) {
+func (s *Service) Overview(ctx context.Context, scope Scope, limit int) (Overview, error) {
 	scope, err := s.normalizeScope(scope)
 	if err != nil {
-		return Result[Overview]{}, err
+		return Overview{}, err
 	}
 	limit, err = normalizeLimit(limit)
 	if err != nil {
-		return Result[Overview]{}, err
+		return Overview{}, err
 	}
 
 	services, err := s.serviceHealth(ctx, scope, limit)
 	if err != nil {
-		return Result[Overview]{}, err
+		return Overview{}, err
 	}
 
 	data := Overview{Services: services, ServiceCount: len(services)}
@@ -54,19 +54,7 @@ func (s *Service) Overview(ctx context.Context, scope Scope, limit int) (Result[
 	}
 	data.Health = overallHealth(data.Counts)
 
-	// An empty window is reported as such rather than as a clean bill of
-	// health, so a model reading the summary cannot conclude the system is
-	// fine from the absence of evidence that it is.
-	summary := fmt.Sprintf("%d services: %d unhealthy, %d degraded, %d healthy", data.ServiceCount, data.Counts.Unhealthy, data.Counts.Degraded, data.Counts.Healthy)
-	if data.ServiceCount == 0 {
-		summary = "no services reported telemetry in this window"
-	}
-	return Result[Overview]{
-		Schema:     OverviewSchema,
-		Summary:    summary,
-		Data:       data,
-		Provenance: s.provenance(scope),
-	}, nil
+	return data, nil
 }
 
 func (s *Service) serviceHealth(ctx context.Context, scope Scope, limit int) ([]ServiceHealth, error) {

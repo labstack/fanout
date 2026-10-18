@@ -648,10 +648,9 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 	namespace := d.duck.DefaultNamespace()
 	scope := detectorScopeClause(namespace)
 
-	// Group logs by normalized template (falls back to first 100 chars for old data without body_template)
 	sql := fmt.Sprintf(`
 		SELECT
-			COALESCE(body_template, SUBSTRING(body, 1, 100)) AS template,
+			body_template AS template,
 			severity,
 			service as service_name,
 			COUNT(*) AS occurrence_count,
@@ -661,7 +660,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		WHERE time >= make_timestamp_ns(%d)::TIMESTAMPTZ_NS AND time < make_timestamp_ns(%d)::TIMESTAMPTZ_NS
 		AND severity IN ('WARN', 'ERROR', 'FATAL')
 		%s
-		GROUP BY COALESCE(body_template, SUBSTRING(body, 1, 100)), severity, service
+		GROUP BY body_template, severity, service
 		HAVING COUNT(*) >= 3
 		ORDER BY occurrence_count DESC
 		LIMIT 50

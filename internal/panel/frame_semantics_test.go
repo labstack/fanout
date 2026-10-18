@@ -101,7 +101,7 @@ func TestBetterOnlyInResult(t *testing.T) {
 func TestErrorCountDirections(t *testing.T) {
 	for signal, filters := range map[string][]string{
 		"logs":  {"severity = 'ERROR'", "severity IN ('ERROR', 'FATAL')", "upper(severity) = 'ERROR'", "upper(severity) IN ('ERROR', 'FATAL')", "severity_number >= 17"},
-		"spans": {"status = 'ERROR'", "status = 'STATUS_CODE_ERROR'"},
+		"spans": {"status = 'STATUS_CODE_ERROR'", "status IN ('STATUS_CODE_ERROR')"},
 	} {
 		for _, filter := range filters {
 			p := Panel{Query: &Query{From: signal, Measures: []string{"count()"}, Where: []string{filter}}}

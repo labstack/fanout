@@ -91,7 +91,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 			namespace = cfg.DefaultNamespace
 		}
 		serviceVersion := getResourceAttr(rs.Resource, "service.version")
-		deploymentEnv := getResourceAttr(rs.Resource, "deployment.environment")
+		deploymentEnv := getResourceAttr(rs.Resource, "deployment.environment.name", "deployment.environment")
 		for _, ss := range rs.ScopeSpans {
 			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
@@ -124,11 +124,11 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					Flags:        sp.Flags,
 					ScopeName:    scopeName,
 					ScopeVersion: scopeVer,
-					// Pre-extracted OTel semantic convention attributes.
-					HTTPMethod:     spanAttr(sp.Attributes, "http.method", "http.request.method"),
-					HTTPStatusCode: spanAttrInt(sp.Attributes, "http.status_code", "http.response.status_code"),
+					// Older semantic-convention names come from external producers.
+					HTTPMethod:     spanAttr(sp.Attributes, "http.request.method", "http.method"),
+					HTTPStatusCode: spanAttrInt(sp.Attributes, "http.response.status_code", "http.status_code"),
 					HTTPRoute:      spanAttr(sp.Attributes, "http.route"),
-					DBSystem:       spanAttr(sp.Attributes, "db.system"),
+					DBSystem:       spanAttr(sp.Attributes, "db.system.name", "db.system"),
 					RPCMethod:      spanAttr(sp.Attributes, "rpc.method"),
 					RPCService:     spanAttr(sp.Attributes, "rpc.service"),
 					PeerService:    spanAttr(sp.Attributes, "peer.service", "server.address"),
@@ -723,14 +723,16 @@ func getServiceNamespace(r *resourcepb.Resource) string {
 	return getResourceAttr(r, "service.namespace")
 }
 
-func getResourceAttr(r *resourcepb.Resource, key string) string {
+func getResourceAttr(r *resourcepb.Resource, keys ...string) string {
 	if r == nil {
 		return ""
 	}
-	for _, kv := range r.Attributes {
-		if kv.Key == key {
-			if s := asString(kv.Value); s != "" {
-				return s
+	for _, key := range keys {
+		for _, kv := range r.Attributes {
+			if kv.Key == key {
+				if s := asString(kv.Value); s != "" {
+					return s
+				}
 			}
 		}
 	}

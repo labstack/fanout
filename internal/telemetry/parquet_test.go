@@ -491,7 +491,7 @@ func completeTestSpan() Span {
 	return Span{
 		Namespace: "tenant", TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef",
 		ParentSpanID: "fedcba9876543210", ServiceName: "checkout", Name: "POST /orders", Kind: "SERVER",
-		StartUnixNanos: 10, EndUnixNanos: 20, DurationMS: 0.00001, StatusCode: "ERROR", StatusMsg: "declined",
+		StartUnixNanos: 10, EndUnixNanos: 20, DurationMS: 0.00001, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined",
 		Resource: map[string]any{"host": "one"}, Attributes: map[string]any{"http.request.method": "POST"},
 		EventsJSON: `[{"name":"exception"}]`, LinksJSON: `[{"trace_id":"linked"}]`,
 		TraceState: "vendor=value", Flags: 1, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 30,

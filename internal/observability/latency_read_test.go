@@ -44,7 +44,7 @@ CREATE TABLE service_rollup (
 		t.Fatalf("Overview: %v", err)
 	}
 	got := map[string]ServiceHealth{}
-	for _, service := range result.Data.Services {
+	for _, service := range result.Services {
 		got[service.Service] = service
 	}
 	if p95 := got["reviews"].P95MS; p95 > 100 {

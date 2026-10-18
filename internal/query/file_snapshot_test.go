@@ -102,7 +102,7 @@ func TestCompletedBatchCachesIncludeLatePublicationAndPartialMinutes(t *testing.
 		b := telemetrystore.Batch{ID: id}
 		for i, second := range seconds {
 			n := at.Add(time.Duration(second) * time.Second).UnixNano()
-			b.Spans = append(b.Spans, telemetry.Span{Namespace: "prod", ServiceName: "api", TraceID: fmt.Sprint("trace", i), SpanID: fmt.Sprint(id, i), StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: at.UnixNano(), StatusCode: "ERROR"})
+			b.Spans = append(b.Spans, telemetry.Span{Namespace: "prod", ServiceName: "api", TraceID: fmt.Sprint("trace", i), SpanID: fmt.Sprint(id, i), StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: at.UnixNano(), StatusCode: "STATUS_CODE_ERROR"})
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: "prod", ServiceName: "api", TimeUnixNanos: n, Severity: "Error", IngestedAt: at.UnixNano()})
 		}
 		if err := repo.Commit(t.Context(), b); err != nil {
@@ -322,7 +322,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
+	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`} {
 		if _, err := d.DB.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -344,11 +344,8 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 		t.Fatalf("obsolete edge window survived: end=%d err=%v", resumeEnd, err)
 	}
 	var obsolete int
-	if err := d.DB.QueryRow(`SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('read_obsolete','endpoint_rollup','read_endpoints','read_logs')`).Scan(&obsolete); err != nil || obsolete != 0 {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('read_obsolete','read_endpoints','read_logs')`).Scan(&obsolete); err != nil || obsolete != 0 {
 		t.Fatalf("obsolete tables=%d: %v", obsolete, err)
-	}
-	if err := d.DB.QueryRow(`SELECT count(*) FROM rollup_state WHERE starts_with(cache_key,'endpoint_rollup')`).Scan(&obsolete); err != nil || obsolete != 0 {
-		t.Fatalf("obsolete watermark=%d: %v", obsolete, err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
@@ -497,7 +494,7 @@ func TestRetiredTraceRepairsOnlyItsActiveScopeAndBounds(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	at := time.Now().UTC().Truncate(time.Hour)
 	old := at.Add(-2 * time.Hour).UnixNano()
-	if err := commitRestoredFixture(repo, t.Context(), telemetrystore.Batch{ID: "retire-scope", Spans: []telemetry.Span{{Namespace: "gone", ServiceName: "retired", TraceID: "shared", StartUnixNanos: old, EndUnixNanos: old + 1, StatusCode: "ERROR", IngestedAt: old}}}); err != nil {
+	if err := commitRestoredFixture(repo, t.Context(), telemetrystore.Batch{ID: "retire-scope", Spans: []telemetry.Span{{Namespace: "gone", ServiceName: "retired", TraceID: "shared", StartUnixNanos: old, EndUnixNanos: old + 1, StatusCode: "STATUS_CODE_ERROR", IngestedAt: old}}}); err != nil {
 		t.Fatal(err)
 	}
 	now := at.UnixNano()

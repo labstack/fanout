@@ -177,7 +177,7 @@
         ],
         "rows": 1
       },
-      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", 100.0 * avg(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS \"error_rate\" FROM base GROUP BY time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
+      "sql": "WITH base AS (SELECT * FROM spans WHERE \"start_time\" \u003e= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND \"start_time\" \u003c ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND ((namespace = 'shop'))) SELECT epoch_ms(time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS))::BIGINT AS \"_t\", 100.0 * avg(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS \"error_rate\" FROM base GROUP BY time_bucket(INTERVAL '30 seconds', \"start_time\"::TIMESTAMP_NS) ORDER BY \"_t\" LIMIT 14000",
       "interval": "30s",
       "elapsed_ms": 0,
       "from_ms": 1791398700000,

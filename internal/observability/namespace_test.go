@@ -44,7 +44,7 @@ CREATE TABLE service_rollup (
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
-	if result.Data.ServiceCount != 2 || result.Data.TotalSpans != 5 {
-		t.Fatalf("overview = %#v, want both namespaces", result.Data)
+	if result.ServiceCount != 2 || result.TotalSpans != 5 {
+		t.Fatalf("overview = %#v, want both namespaces", result)
 	}
 }

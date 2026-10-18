@@ -40,7 +40,7 @@ func TestRollupPanelsReuseServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got[0].Status != "ok" || got[0].Frame.Rows != len(overview.Data.Services) || got[0].Frame.Values[3][0].(float64) != 10 {
+	if got[0].Status != "ok" || got[0].Frame.Rows != len(overview.Services) || got[0].Frame.Values[3][0].(float64) != 10 {
 		t.Fatalf("overview frame: %+v", got[0])
 	}
 	if got[1].Status != "ok" || got[1].Frame.Rows != 3 || got[1].Frame.Values[7][2].(float64) != 10 {
@@ -78,7 +78,7 @@ func TestRollupPanelsAggregateContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &HealthFrame{Health: string(o.Data.Health), Counts: o.Data.Counts, TotalSpans: o.Data.TotalSpans, ErrorRate: o.Data.ErrorRate * 100, ServiceCount: o.Data.ServiceCount, ErrorTrend: []float64{10, 0}, ErrorTrendTimes: []int64{at.UnixMilli(), at.Add(10 * time.Minute).UnixMilli()}}
+	want := &HealthFrame{Health: string(o.Health), Counts: o.Counts, TotalSpans: o.TotalSpans, ErrorRate: o.ErrorRate * 100, ServiceCount: o.ServiceCount, ErrorTrend: []float64{10, 0}, ErrorTrendTimes: []int64{at.UnixMilli(), at.Add(10 * time.Minute).UnixMilli()}}
 	if got[0].Frame == nil || !reflect.DeepEqual(got[0].Frame.Health, want) {
 		t.Fatalf("health aggregate got %+v want %+v", got, want)
 	}

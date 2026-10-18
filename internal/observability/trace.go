@@ -16,7 +16,7 @@ SELECT trace_id
 FROM spans
 WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
 GROUP BY trace_id
-ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 ELSE 0 END) DESC,
+ORDER BY MAX(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) DESC,
          MAX(end_unix_nano) - MIN(start_unix_nano) DESC, trace_id ASC
 LIMIT 1`
 
@@ -144,7 +144,7 @@ func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID
 
 const completedTraceQuery = `WITH tail AS (
  SELECT trace_id,min(start_unix_nano) AS min_start,max(end_unix_nano) AS max_end,
- max(CASE WHEN upper(status) IN ('ERROR','STATUS_CODE_ERROR') THEN 1 ELSE 0 END) AS has_error
+ max(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS has_error
  FROM trace_tail
  WHERE start_time>=$1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time<$2::TIMESTAMP_NS::TIMESTAMPTZ_NS
  AND ($3='' OR namespace=$4) AND ($5='' OR service=$6) AND trace_id<>'' GROUP BY trace_id

@@ -34,7 +34,6 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"SELECT * FROM read_trace_candidates",
 		"SELECT * FROM read_cache_version",
 		"SELECT * FROM read_edge_buckets",
-		"SELECT * FROM endpoint_rollup",
 		"SELECT current_setting('allowed_directories')",
 		"SELECT getvariable('operator_secret')",
 		"WITH x AS MATERIALIZED (COPY (SELECT 1) TO '" + output + "') SELECT * FROM x",
@@ -117,7 +116,6 @@ func TestExecuteSQLRejectsEngineMetadataReads(t *testing.T) {
 		"SELECT * FROM read_trace_candidates",
 		"SELECT * FROM read_cache_version",
 		"SELECT * FROM read_edge_buckets",
-		"SELECT * FROM endpoint_rollup",
 		"SELECT current_setting('allowed_directories')",
 		"SELECT getvariable('operator_secret')",
 	} {

@@ -24,7 +24,7 @@ func TestRowPanelCandidatesAreBounded(t *testing.T) {
 			if !ok || !strings.Contains(candidate, want) || strings.Contains(candidate, "OVER(") {
 				t.Errorf("sort=%q: candidate must be bounded before windows: %s", tc.sort, c.SQL)
 			}
-			if tc.sort == "errors" && !strings.Contains(candidate, "status IN ('STATUS_CODE_ERROR','ERROR')") {
+			if tc.sort == "errors" && !strings.Contains(candidate, "status = 'STATUS_CODE_ERROR'") {
 				t.Error("missing erroring filter")
 			}
 		}
@@ -204,7 +204,7 @@ func TestErroringRootRanking(t *testing.T) {
 			child.SpanID = "child"
 			child.ParentSpanID = "root"
 			child.DurationMS = float64(200 - i*100)
-			child.StatusCode = "ERROR"
+			child.StatusCode = "STATUS_CODE_ERROR"
 			spans = append(spans, child)
 		}
 	}
@@ -464,7 +464,7 @@ func TestRowsTraceSortsAndSentinel(t *testing.T) {
 		spans[i] = telemetry.Span{Namespace: "shop", TraceID: fmt.Sprintf("t%04d", i), SpanID: "root", ServiceName: "s", Name: "root", StartUnixNanos: n, EndUnixNanos: n + int64(time.Millisecond), DurationMS: float64(i + 1), IngestedAt: n}
 	}
 	child := spans[0]
-	child.ParentSpanID, child.SpanID, child.StatusCode, child.DurationMS = "root", "child", "ERROR", 5000
+	child.ParentSpanID, child.SpanID, child.StatusCode, child.DurationMS = "root", "child", "STATUS_CODE_ERROR", 5000
 	other := spans[0]
 	other.Namespace, other.DurationMS = "other", 2000
 	spans = append(spans, child, other)

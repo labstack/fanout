@@ -1368,7 +1368,7 @@ WITH span_agg AS (
     -- silently reported as having no latency at all.
     ` + serviceRollupP50SQL("s") + `,
     ` + serviceRollupP95SQL("s") + `,
-    avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
+    avg(CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
   JOIN service_pass_affected a
     ON a.namespace = s.namespace
@@ -1650,7 +1650,7 @@ call_edges AS (
     child.service AS callee,
     COUNT(*) AS calls,
     AVG(child.duration_ms) AS avg_ms,
-    AVG(CASE WHEN child.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate,
+    AVG(CASE WHEN child.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate,
     'call' AS edge_type
   FROM spans child
   JOIN parent_scope parent
@@ -2190,8 +2190,8 @@ WITH spans_with_errors AS (
 )
 SELECT service_name,
        name,
-       SUM(CASE WHEN status_code IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1 ELSE 0 END) AS errors,
-       AVG(CASE WHEN status_code IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
+       SUM(CASE WHEN status_code = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS errors,
+       AVG(CASE WHEN status_code = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
 FROM spans_with_errors
 GROUP BY service_name, name
 HAVING errors > 0

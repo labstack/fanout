@@ -3,32 +3,16 @@ package query
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-// The edge rollup is the most expensive statement this process issues, and
-// until this test nothing executed it. Both of its shape defects were therefore
-// invisible: every form returns identical rows, so a row assertion passes on
-// all of them, and the only symptom was a pass that did not finish inside its
-// budget.
-//
-// The plan is the behaviour under test. This asserts it in both directions --
-// a guard that passes on the defect it was written for is worse than none --
-// and checks that the forms agree on rows, which is what makes the rewrite a
-// performance change rather than a behaviour one.
+// Guard the production join plan and the expected call and messaging edges.
 func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 	db := openTestDuck(t)
 	defer db.Close()
 	seedEdgeRollupFixture(t, db)
-
-	preFix, err := os.ReadFile("testdata/edge_rollup_pre_fix.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	commaForm := edgeRollupCommaForm(t)
 
 	// Params: the ingested window is the fresh minute only; the start_time
 	// bounds are deliberately wide, as they are in production.
@@ -52,14 +36,13 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 	parentPlan := explain(t, db, strings.TrimPrefix(createEdgeParentsSQL, "CREATE TEMP TABLE edge_pass_parents AS "), spanLo, spanHi)
 	shippedPlan := explain(t, db, edgeRollupInsertSQL, spanLo, spanHi)
 
-	// DuckDB 2 optimizes the historical comma form too. Guard the shipped plan
-	// directly rather than requiring the optimizer to retain an old defect.
+	// Guard the shipped plan directly.
 	// A nested loop against the single-row bounds CTE is legitimate. The
 	// costly span-to-span joins must remain hash joins, without correlated
 	// delim joins or an unfiltered Cartesian product.
 	for _, bad := range []string{"Cross Product", "Delim Join", "Delim Get"} {
 		if strings.Contains(shippedPlan, bad) {
-			t.Errorf("edge rollup plans a %s; the FROM clause has regressed to the comma form:\n%s", bad, shippedPlan)
+			t.Errorf("edge rollup plans a %s; the span joins must stay hash joins:\n%s", bad, shippedPlan)
 		}
 	}
 	if !strings.Contains(strings.ToUpper(parentPlan), "SEMI") {
@@ -69,55 +52,14 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 		t.Errorf("edge rollup plans no HASH_JOIN at all:\n%s", shippedPlan)
 	}
 
-	// All three forms must agree on rows. Wall-clock is logged rather than
-	// asserted: the ratios are consistent but the absolute numbers are not
-	// stable enough across machines to fail a build on.
-	var want []string
-	for _, form := range []struct {
-		name, sql string
-		args      []any
-	}{
-		{"shipped", edgeRollupInsertSQL, []any{spanLo, spanHi}},
-		{"comma", commaForm, []any{spanLo, spanHi}},
-		{"pre-fix (range predicate in the ON clause)", string(preFix), []any{windowLo, windowHi, spanLo, spanHi}},
-	} {
-		start := time.Now()
-		edges := runEdgeRollup(t, db, form.sql, form.args...)
-		t.Logf("%-44s %6.0fms  %d edges", form.name, float64(time.Since(start).Microseconds())/1000, len(edges))
-		if want == nil {
-			if len(edges) == 0 {
-				t.Fatal("the fixture produced no edges, so no plan was exercised")
-			}
-			want = edges
-			continue
-		}
-		if strings.Join(edges, "|") != strings.Join(want, "|") {
-			t.Errorf("%s disagrees on rows:\n got:  %v\n want: %v", form.name, edges, want)
-		}
-	}
+	edges := runEdgeRollup(t, db, spanLo, spanHi)
+
 	// frontend -> api -> db from the hand-built trace, svc-4 -> svc-5 from the
 	// bulk rows, and frontend -> worker across the queue.
 	const expected = "api->db call 1|frontend->api call 1|frontend->worker messaging 1|svc-4->svc-5 call 1000"
-	if strings.Join(want, "|") != expected {
-		t.Errorf("edges = %v,\n want %s", want, expected)
+	if strings.Join(edges, "|") != expected {
+		t.Errorf("edges = %v,\n want %s", edges, expected)
 	}
-}
-
-// edgeRollupCommaForm rebuilds the pre-fix FROM clause from the shipped
-// statement, so the two differ in exactly the thing under test and the guard
-// cannot rot into comparing two stale copies.
-func edgeRollupCommaForm(t *testing.T) string {
-	t.Helper()
-	const joined = "  FROM spans child\n  JOIN parent_scope parent"
-	if !strings.Contains(edgeRollupInsertSQL, joined) {
-		t.Fatal("the edge rollup FROM clause no longer matches what this test rewrites")
-	}
-	form := strings.Replace(edgeRollupInsertSQL, joined, "  FROM spans child, bounds\n  JOIN parent_scope parent", 1)
-	if !strings.Contains(form, "\n  CROSS JOIN bounds\n") {
-		t.Fatal("no CROSS JOIN bounds to remove")
-	}
-	i := strings.LastIndex(form, "\n  CROSS JOIN bounds\n")
-	return form[:i] + "\n" + form[i+len("\n  CROSS JOIN bounds\n"):]
 }
 
 func explain(t *testing.T, db *sql.DB, query string, args ...any) string {
@@ -141,14 +83,13 @@ func explain(t *testing.T, db *sql.DB, query string, args ...any) string {
 	return plan.String()
 }
 
-// runEdgeRollup executes the statement into an empty edge_rollup and returns
-// the edges it wrote, so forms can be compared on rows as well as on plan.
-func runEdgeRollup(t *testing.T, db *sql.DB, query string, args ...any) []string {
+// runEdgeRollup returns the edges written by the production statement.
+func runEdgeRollup(t *testing.T, db *sql.DB, start, end time.Time) []string {
 	t.Helper()
 	if _, err := db.Exec("DELETE FROM edge_rollup"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(query, args...); err != nil {
+	if _, err := db.Exec(edgeRollupInsertSQL, start, end); err != nil {
 		t.Fatalf("edge rollup: %v", err)
 	}
 	rows, err := db.Query(`SELECT caller, callee, edge_type, calls FROM edge_rollup ORDER BY caller, callee, edge_type`)
@@ -175,7 +116,7 @@ func runEdgeRollup(t *testing.T, db *sql.DB, query string, args ...any) []string
 // that were rolled up long ago, and one freshly ingested minute. The two differ
 // by orders of magnitude, which is what makes where the parent side is filtered
 // matter. spans is a view over Parquet, as it is in production -- against a
-// DuckDB table the planner sees different statistics and the forms converge.
+// DuckDB table the planner sees different statistics and the plan differs.
 func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(createEdgeRollupTable); err != nil {
@@ -259,7 +200,7 @@ func TestEdgeRollupParentTraceScope(t *testing.T) {
  FROM (VALUES
  ('shop','trace','parent','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
  ('other','trace','parent','','wrong-namespace','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
- ('shop','trace','child','parent','downstream','SPAN_KIND_CLIENT','ERROR',30.0,TIMESTAMP '2026-09-20 12:00:00',100),
+ ('shop','trace','child','parent','downstream','SPAN_KIND_CLIENT','STATUS_CODE_ERROR',30.0,TIMESTAMP '2026-09-20 12:00:00',100),
  ('shop','trace','late-child','parent','downstream','SPAN_KIND_CLIENT','OK',10.0,TIMESTAMP '2026-09-20 12:00:01',1),
  ('shop','outside','parent','','too-old','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 10:59:59',1),
  ('shop','outside','child','parent','downstream','SPAN_KIND_CLIENT','OK',1.0,TIMESTAMP '2026-09-20 12:00:00',100),
@@ -352,7 +293,7 @@ func TestEdgeRollupDistantParentPreservesNearParentMultiplicity(t *testing.T) {
  FROM (VALUES
  ('ns','trace','far','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:30:00',1),
  ('ns','trace','near','','upstream','SPAN_KIND_SERVER','OK',1.0,TIMESTAMP '2026-09-20 11:55:00',1),
- ('ns','trace','child-far','far','downstream','SPAN_KIND_CLIENT','ERROR',30.0,TIMESTAMP '2026-09-20 12:00:00',100),
+ ('ns','trace','child-far','far','downstream','SPAN_KIND_CLIENT','STATUS_CODE_ERROR',30.0,TIMESTAMP '2026-09-20 12:00:00',100),
  ('ns','trace','child-near','near','downstream','SPAN_KIND_CLIENT','OK',10.0,TIMESTAMP '2026-09-20 12:00:01',100)
  ) t(namespace,trace_id,span_id,parent_span_id,service,kind,status,duration_ms,start_time,ingested_unix_nano)`); err != nil {
 		t.Fatal(err)

@@ -39,7 +39,7 @@ export function Waterfall({
               const offset =
                 ((new Date(span.start).valueOf() - start) / total) * 100;
               const width = Math.max((span.duration_ms / total) * 100, 0.6);
-              const failed = span.status.toUpperCase().includes("ERROR");
+              const failed = span.status === "STATUS_CODE_ERROR";
               return (
                 <Table.Tr
                   key={span.span_id}

@@ -278,7 +278,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 	}
 	if spans := source("spans"); spans != "" {
 		if err := exec(`CREATE OR REPLACE TEMP TABLE cache_new_trace_parts AS SELECT batch_id,coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,trace_id,
-   min(start_unix_nano) AS min_start,max(start_unix_nano) AS max_start,max(end_unix_nano) AS max_end,max(CASE WHEN upper(status) IN ('ERROR','STATUS_CODE_ERROR') THEN 1 ELSE 0 END) AS has_error
+   min(start_unix_nano) AS min_start,max(start_unix_nano) AS max_start,max(end_unix_nano) AS max_end,max(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) AS has_error
    FROM (` + spans + `) WHERE trace_id<>'' GROUP BY 1,2,3,4`); err != nil {
 			return 0, err
 		}

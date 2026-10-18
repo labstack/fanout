@@ -41,7 +41,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 			service := fmt.Sprint("service", i%4)
 			status := "OK"
 			if i%101 == 0 {
-				status = "ERROR"
+				status = "STATUS_CODE_ERROR"
 			}
 			b.Spans = append(b.Spans, telemetry.Span{Namespace: "prod", ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + int64(i%1000+1)*1000000, DurationMS: float64(i%1000 + 1), StatusCode: status, HTTPMethod: "GET", HTTPRoute: fmt.Sprint("/route", i%8), IngestedAt: at.UnixNano(), Attributes: map[string]any{"http.route": fmt.Sprint("/route", i%8)}, Resource: map[string]any{"service.name": service}})
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: "prod", ServiceName: service, TraceID: trace, TimeUnixNanos: n, Severity: []string{"INFO", "WARN", "ERROR"}[i%3], Body: "request complete", IngestedAt: at.UnixNano()})

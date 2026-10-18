@@ -79,8 +79,8 @@ func TestLargeTraceKeepsRootErrorsAndSlowest(t *testing.T) {
 		spans[i] = observability.TraceSpan{SpanID: fmt.Sprint(i), ParentSpanID: "0", Operation: op, Service: "svc", DurationMS: float64(i)}
 	}
 	spans[0].ParentSpanID = ""
-	spans[1998].Status = "ERROR"
-	spans[1997].Status = "ERROR"
+	spans[1998].Status = "STATUS_CODE_ERROR"
+	spans[1997].Status = "STATUS_CODE_ERROR"
 	f.Trace = &observability.Result[observability.TraceDetail]{Data: observability.TraceDetail{TraceID: "t1", Spans: spans, Logs: []observability.LogEntry{}, Services: []string{"svc"}, SpanCount: 2000}, Provenance: observability.Provenance{Complete: true}}
 	out, err := boundFragment(t.Context(), f)
 	if err != nil {
@@ -167,7 +167,7 @@ func TestTracePrioritySurvivesNeighbourTrimming(t *testing.T) {
 		spans[i] = observability.TraceSpan{SpanID: fmt.Sprint(i), ParentSpanID: "0", Operation: strings.Repeat("operation", 80), DurationMS: float64(i)}
 	}
 	spans[0].ParentSpanID = ""
-	spans[1998].Status = "ERROR"
+	spans[1998].Status = "STATUS_CODE_ERROR"
 	f.Trace = &observability.Result[observability.TraceDetail]{Data: observability.TraceDetail{Spans: spans}}
 	out, err := boundFragment(t.Context(), f)
 	if err != nil {

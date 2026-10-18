@@ -167,12 +167,6 @@ func CreateCacheTables(db *sql.DB) error {
 		"cache_key", "last_ingested_unix_nano", "updated_at"); err != nil {
 		return err
 	}
-	if _, err := db.Exec(`DROP TABLE IF EXISTS endpoint_rollup`); err != nil {
-		return err
-	}
-	if err := forgetRollupProgress(db, "endpoint_rollup"); err != nil {
-		return err
-	}
 	if err := createAnnotationTables(db); err != nil {
 		return err
 	}

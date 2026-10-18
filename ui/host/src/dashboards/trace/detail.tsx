@@ -41,7 +41,7 @@ function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean
           <Box pos="relative" h={Math.max(150, model.laneCount * 36 + 12)} bg="var(--mantine-color-default-hover)" style={{ overflow: "hidden", borderRadius: "var(--mantine-radius-md)" }}>
             {[0, 25, 50, 75, 100].map((position) => <Box key={position} pos="absolute" left={`${position}%`} top={0} bottom={0} style={{ borderLeft: "1px solid var(--mantine-color-default-border)" }} />)}
             {model.frames.map(({ span, lane, left, width }) => {
-              const failed = span.status.toUpperCase().includes("ERROR");
+              const failed = span.status === "STATUS_CODE_ERROR";
               const compact = width < 7;
               const color = failed ? statusHex(dark).bad : seriesSlot(services.indexOf(span.service), dark);
               const label = `${span.operation} · ${duration(span.duration_ms)} · ${span.service}`;

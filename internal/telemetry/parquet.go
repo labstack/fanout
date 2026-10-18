@@ -608,7 +608,7 @@ func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange,
 			if row.Service != "" {
 				services[row.Service] = struct{}{}
 			}
-			if strings.Contains(strings.ToUpper(row.Status), "ERROR") {
+			if row.Status == "STATUS_CODE_ERROR" {
 				totals.HasError = true
 			}
 			if totals.MinStartNano == 0 || row.StartUnixNano < totals.MinStartNano {
