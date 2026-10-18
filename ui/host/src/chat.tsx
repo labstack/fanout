@@ -1,11 +1,11 @@
 import type { Message } from "@ag-ui/client";
 import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
-import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight } from "@phosphor-icons/react";
+import { Check, Copy, PaperPlaneTilt, Stop, CaretDown, CaretRight, ArrowDown } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useFanoutApp, useDashboardReceipts } from "./app-context";
-import { useStickToBottom } from "./chat-scroll";
+import { useTurnAnchor } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
 import { exactTimestamp } from "../../format";
@@ -121,12 +121,9 @@ const suggestions = [
 
 export function ChatPage() {
   const { agentAvailable, messages, messageTimes, ready, running, activity, provisional, stopped, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
-  const { scrollRef, contentRef, toBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
   const receipts = useDashboardReceipts(messages);
-  // Sending is a request to see the answer, so it returns a reader who had
-  // scrolled back through the thread to the bottom of it.
   const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
-  useEffect(() => { if (lastSent) toBottom(); }, [lastSent, toBottom]);
+  const { scrollRef, contentRef, turnRef, showJump, jumpToLatest } = useTurnAnchor<HTMLDivElement, HTMLDivElement>(lastSent);
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const appViews = chatAppViews(messages);
   const failures = toolFailures(messages);
@@ -143,37 +140,53 @@ export function ChatPage() {
   const hasFinalText = messages.slice(turnStart + 1).some(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.length > 0);
   const answer = messages.slice(turnStart + 1).filter(message => message.role === "assistant" && !message.toolCalls?.length && typeof message.content === "string" && message.content.trim().length > 0).at(-1);
   const liveText = running && provisional && !provisional.collapsed && provisional.text && !hasFinalText;
+  // Keep each turn's wrapper when the next question arrives so iframe views
+  // retain their mounted state as the current turn becomes history.
+  const turns: Array<{ id: string; messages: Message[] }> = [];
+  for (const message of visibleMessages) {
+    if (message.role === "user" || turns.length === 0) turns.push({ id: message.id, messages: [] });
+    turns.at(-1)!.messages.push(message);
+  }
+  if (turns.length === 0) turns.push({ id: "draft", messages: [] });
+  const renderMessage = (message: Message) => failures.has(message.id)
+    ? <ToolFailures key={message.id} failures={failures.get(message.id)!} />
+    : <Box key={message.id}>
+      <ChatMessage message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />
+      {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText && !liveText} activity={activity} /></Box>}
+    </Box>;
   return <Box className="chat-pane">
     {/* A scroll region has to be reachable without a mouse. Chrome makes a
         scroller focusable only when it holds no focusable children, and this
         one holds copy buttons and links, so it says so itself. */}
-    <Box className="chat-scroll" ref={scrollRef} tabIndex={0} role="log" aria-label="Conversation">
-      <Container size={880} px={{ base: "md", sm: "xl" }} py="lg" ref={contentRef}>
-        {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
-        {/* A thread whose load failed never becomes ready, so showing the
-            loader here would spin forever: state the failure instead. Retry
-            here asks the server for the thread again; there is no run to
-            retry, because the conversation never arrived. */}
-        {!threadMissing && !ready && error && <RunError message={error} onRetry={reloadThread} onNewThread={newThread} />}
-        {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
-        {!threadMissing && ready && <>
-          {visibleMessages.length === 0 && <Welcome onSelect={send} />}
-          <Stack gap="lg">
-            {visibleMessages.filter(message => message.id !== answer?.id).map((message) => {
-              return failures.has(message.id) ? <ToolFailures key={message.id} failures={failures.get(message.id)!}/> : <Box key={message.id}>
-                <ChatMessage message={message} time={messageTimes[message.id]} appView={appViews.views.get(message.id)} />
-                {receipts.has(message.id) && <Box mt="sm"><DashboardReceiptView receipt={receipts.get(message.id)!} running={running && message.id === lastSent} awaitingAnswer={!hasFinalText && !liveText} activity={activity} /></Box>}
-              </Box>;
-            })}
-            {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
-              <ChatMessage message={liveText ? { id: provisional.id, role: "assistant", content: provisional.text } : answer!} provisional={!!liveText} time={liveText ? undefined : messageTimes[answer!.id]} />
-            </Box>}
-            {running && !hasFinalText && !liveText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
-            {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
-            {error && <RunError message={error} onRetry={retry} />}
-          </Stack>
-        </>}
-      </Container>
+    <Box className="chat-viewport">
+      <Box className="chat-scroll" ref={scrollRef} tabIndex={0} role="log" aria-label="Conversation">
+        <Container size={880} px={{ base: "md", sm: "xl" }} py="lg" ref={contentRef}>
+          {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
+          {/* A thread whose load failed never becomes ready, so showing the
+              loader here would spin forever: state the failure instead. Retry
+              here asks the server for the thread again; there is no run to
+              retry, because the conversation never arrived. */}
+          {!threadMissing && !ready && error && <RunError message={error} onRetry={reloadThread} onNewThread={newThread} />}
+          {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
+          {!threadMissing && ready && <>
+            {visibleMessages.length === 0 && <Welcome onSelect={send} />}
+            <Stack gap="lg">
+              {turns.map((turn, index) => <Stack gap="lg" key={turn.id} ref={turn.id === lastSent ? turnRef : undefined} data-chat-turn={turn.id === lastSent ? lastSent : undefined}>
+                {turn.messages.filter(message => message.id !== answer?.id).map(renderMessage)}
+                {index === turns.length - 1 && <>
+                  {(answer || liveText) && <Box data-answer-position key={`answer-${lastSent ?? "draft"}`}>
+                    <ChatMessage message={liveText ? { id: provisional.id, role: "assistant", content: provisional.text } : answer!} provisional={!!liveText} time={liveText ? undefined : messageTimes[answer!.id]} />
+                  </Box>}
+                  {running && !hasFinalText && !liveText && !receipts.has(lastSent ?? "") && <Group gap="xs" role="status"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
+                  {stopped && <Text c="dimmed" size="sm">Stopped</Text>}
+                  {error && <RunError message={error} onRetry={retry} />}
+                </>}
+              </Stack>)}
+            </Stack>
+          </>}
+        </Container>
+      </Box>
+      {showJump && <Tooltip label="Jump to latest"><ActionIcon className="chat-jump" variant="default" size={36} radius="xl" aria-label="Jump to latest" onClick={jumpToLatest}><ArrowDown size={18} aria-hidden="true" /></ActionIcon></Tooltip>}
     </Box>
     {!threadMissing && <Composer />}
   </Box>;
