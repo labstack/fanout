@@ -24,11 +24,12 @@ these areas are especially relevant:
 - Authentication and session handling — local email codes, OIDC, MCP OAuth
 - Authorization between roles, and between browser sessions and MCP clients
 - Ingest credential generation, storage, rotation, and enforcement
-- Query paths that could read data outside the requesting namespace
+- Query paths that bypass an explicit namespace filter or dashboard ownership
 - Anything that turns telemetry content into executable behavior
 
-The credential classes above are deliberately separate and are never
-interchangeable. A finding that crosses those boundaries is in scope.
+Namespaces filter telemetry queries; they do not restrict account access to data.
+Every telemetry reader can query every namespace. Credential substitution and
+cross-owner dashboard access are authorization findings.
 
 ## Supported versions
 

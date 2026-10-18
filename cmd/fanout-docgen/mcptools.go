@@ -169,23 +169,7 @@ func renderMCPTools() ([]byte, error) {
 		b.WriteString("\n")
 	}
 	b.WriteString("## Authentication\n\n")
-	b.WriteString("MCP uses OAuth, not a static key, and **not the ingest token** — an agent\n")
-	b.WriteString("presenting the ingest token is rejected. A client discovers the endpoints,\n")
-	b.WriteString("registers itself, and is issued a token bound to this instance's resource\n")
-	b.WriteString("URI. [Connect an agent](/guides/connect-over-mcp) covers the flow.\n\n")
-
-	b.WriteString("The dashboard tools act on the authenticated user's **own** dashboards. The\n")
-	b.WriteString("capability boundary is `dashboards:manage-own`: an agent acts as the user\n")
-	b.WriteString("whose credential it holds and cannot reach anyone else's. A tool description\n")
-	b.WriteString("that tells a model when to call it is guidance to the model, not a\n")
-	b.WriteString("permission check — see [roles](/reference/roles).\n\n")
-
-	b.WriteString("## What is not here\n\n")
-	b.WriteString("No tool writes telemetry, changes configuration, manages users, or edits\n")
-	b.WriteString("alert rules. Ingest is OTLP only and the rest is HTTP surface — see\n")
-	b.WriteString("[HTTP routes](/reference/http-routes). An agent connected over MCP can read\n")
-	b.WriteString("everything the instance knows and manage its own dashboards, and that is the\n")
-	b.WriteString("whole envelope.\n")
+	b.WriteString("MCP uses OAuth tokens bound to the instance’s resource URI.\n[Connect an agent](/guides/connect-over-mcp#scopes) documents protocol\nrequirements and delegated scopes. Dashboard tools operate on the authenticated\nuser’s own dashboards and require the account capability\n`dashboards:manage-own`; see [roles](/reference/roles).\n\n## Other interfaces\n\nUse OTLP to write telemetry. Configuration uses environment variables, and user\nand alert management use the [HTTP API](/reference/http-routes).\n")
 
 	toolCount = tools
 	return []byte(b.String()), nil
@@ -206,7 +190,7 @@ func effect(tool mcp.ToolDoc) string {
 func effectProse(tool mcp.ToolDoc) string {
 	switch {
 	case tool.ReadOnly:
-		return "Read-only. Calling it changes nothing."
+		return "Read-only."
 	case tool.Destructive && tool.Idempotent:
 		return "**Replaces existing state.** Calling it twice with the same arguments " +
 			"leaves the same result as calling it once, but the first call has already " +

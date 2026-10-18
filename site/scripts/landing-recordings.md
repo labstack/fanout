@@ -27,11 +27,14 @@ bun run e2e landing-recordings.spec.ts --project=1440-light --project=1440-dark
 ```
 
 Recordings use a 1280 × 800 viewport and raw video at the same size; Playwright
-video captures CSS pixels, so a higher device scale only pads the frame. This only uses the external instance. It types the brief's prompts, waits for
-the real run to finish, and dwells for three seconds. The dashboard clip also
+video captures CSS pixels, so a higher device scale only pads the frame. It types the configured prompts, waits for the real run to finish, and dwells
+for four seconds on chat or five seconds on the dashboard. The dashboard clip also
 opens the dashboard from its successful `create_dashboard` result and waits
 for the saved panels to render. It creates real chats and dashboards; no data
 is mocked or intercepted.
+
+Use a dedicated recording account: before each take, the spec deletes all of
+that account’s chats and non-default dashboards.
 
 Raw WebM files and matching JSON timelines go to
 `ui/host/test-results/landing-recordings/`, excluded from Git and Docker inputs.

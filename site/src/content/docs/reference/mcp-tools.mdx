@@ -86,7 +86,7 @@ AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
 
 **Get dashboard** — Read one dashboard's complete spec and version. Read it before editing so operations name real panel ids. See create_dashboard for the spec guide.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
@@ -96,7 +96,7 @@ Read-only. Calling it changes nothing.
 
 **Latest detected anomalies** — Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 Takes no arguments.
 
@@ -104,7 +104,7 @@ Takes no arguments.
 
 **System health overview** — Summarize service health for a bounded telemetry window. Start here for incident triage.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **View resource:** `ui://fanout/panels.html` (model and app visible).
 
@@ -120,7 +120,7 @@ Read-only. Calling it changes nothing.
 
 **Service dependency traversal** — Find upstream or downstream dependencies of one service with minimum hop counts. Uses the full scoped edge rollup, handles cycles, and reports truncation from depth or node limits.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
@@ -133,9 +133,9 @@ Read-only. Calling it changes nothing.
 
 ## get_service_performance
 
-**Service performance explorer** — Display separate latency, error rate and request rate panels plus slow operations (HTTP, gRPC and consumers) for one service or the system.
+**Service performance explorer** — Display separate latency, error rate and request rate panels plus a Slow operations table showing p95 duration grouped by operation over server and consumer spans, covering HTTP, gRPC and message consumers, for one service or the system.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **View resource:** `ui://fanout/panels.html` (model and app visible).
 
@@ -152,7 +152,7 @@ Read-only. Calling it changes nothing.
 
 **Service dependency topology** — Return services and observed dependency edges with health, traffic, latency, and error data.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **View resource:** `ui://fanout/panels.html` (model and app visible).
 
@@ -168,7 +168,7 @@ Read-only. Calling it changes nothing.
 
 **Telemetry schema** — List the signals, columns with their common values, attribute keys seen per service, metric names, services, measure functions, units and SQL-only relations in sql_relations. Read this before drafting panels so filters use values that exist. See create_dashboard for the spec guide.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
@@ -179,7 +179,7 @@ Read-only. Calling it changes nothing.
 
 **Trace detail** — Inspect an exact trace, or select the most relevant recent error or slow trace, with spans, waterfall, flame graph, and correlated logs.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **View resource:** `ui://fanout/panels.html` (model and app visible).
 
@@ -197,7 +197,7 @@ Read-only. Calling it changes nothing.
 
 **List dashboard versions** — List the authenticated user's saved versions of one dashboard, newest first, with author and message. The historical version identifies a restore target; restore_dashboard_version saves it as a new version.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
@@ -207,7 +207,7 @@ Read-only. Calling it changes nothing.
 
 **List dashboards** — List the authenticated user's dashboards with panel counts and versions. See create_dashboard for the spec guide.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 Takes no arguments.
 
@@ -215,7 +215,7 @@ Takes no arguments.
 
 **Panel exemplars** — Find bounded traces for a panel selection.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **Visibility:** app only; no resource attachment.
 
@@ -235,7 +235,7 @@ Read-only. Calling it changes nothing.
 
 **Preview panels** — Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. The result includes total elapsed_ms and executed per-panel elapsed_ms; invalid and not_run panels omit elapsed_ms because they were not executed. Fix every invalid panel and replace or explain every empty one before saving. Spec guide: see create_dashboard.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
@@ -248,7 +248,7 @@ Read-only. Calling it changes nothing.
 
 **Refresh telemetry panels** — Run every panel in a dashboard fragment; panel subsets are forbidden.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **Visibility:** app only; no resource attachment.
 
@@ -264,7 +264,7 @@ Read-only. Calling it changes nothing.
 
 **Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide. The authored spec plus vars must fit 128 KiB (131072 serialized JSON bytes); larger inputs are rejected with their actual size.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **View resource:** `ui://fanout/panels.html` (model and app visible).
 
@@ -292,7 +292,7 @@ Read-only. Calling it changes nothing.
 
 **Panel variable options** — Resolve variable options within a dashboard fragment window.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **Visibility:** app only; no resource attachment.
 
@@ -317,7 +317,7 @@ Read-only. Calling it changes nothing.
 
 **Log explorer** — Search and filter logs with a severity timeline and links back to correlated traces.
 
-Read-only. Calling it changes nothing.
+Read-only.
 
 **View resource:** `ui://fanout/panels.html` (model and app visible).
 
@@ -349,21 +349,13 @@ Distinct full resource identities per signal, namespace and service observed ins
 
 ## Authentication
 
-MCP uses OAuth, not a static key, and **not the ingest token** — an agent
-presenting the ingest token is rejected. A client discovers the endpoints,
-registers itself, and is issued a token bound to this instance's resource
-URI. [Connect an agent](/guides/connect-over-mcp) covers the flow.
+MCP uses OAuth tokens bound to the instance’s resource URI.
+[Connect an agent](/guides/connect-over-mcp#scopes) documents protocol
+requirements and delegated scopes. Dashboard tools operate on the authenticated
+user’s own dashboards and require the account capability
+`dashboards:manage-own`; see [roles](/reference/roles).
 
-The dashboard tools act on the authenticated user's **own** dashboards. The
-capability boundary is `dashboards:manage-own`: an agent acts as the user
-whose credential it holds and cannot reach anyone else's. A tool description
-that tells a model when to call it is guidance to the model, not a
-permission check — see [roles](/reference/roles).
+## Other interfaces
 
-## What is not here
-
-No tool writes telemetry, changes configuration, manages users, or edits
-alert rules. Ingest is OTLP only and the rest is HTTP surface — see
-[HTTP routes](/reference/http-routes). An agent connected over MCP can read
-everything the instance knows and manage its own dashboards, and that is the
-whole envelope.
+Use OTLP to write telemetry. Configuration uses environment variables, and user
+and alert management use the [HTTP API](/reference/http-routes).

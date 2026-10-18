@@ -85,8 +85,8 @@ Attribute names such as
 `service.name` are literal keys. In SQL, use `attr(attributes, 'service.name')`
 and an explicit cast when a scalar type is needed, for example
 `TRY_CAST(attr(attributes, 'retry.count') AS BIGINT)`. General attribute extracts
-through views retain their types, but this engine preview does not propagate
-their extraction across view projections. Prefer the existing scalar service,
+through views retain their types; extraction across view projections does not
+reach the Parquet scan. Prefer the scalar service,
 namespace, version, environment, and messaging columns for those hot queries.
 
 The JSON SQL response converts nested values only when returning results.
@@ -141,7 +141,7 @@ footer, including negative timestamps. Files without complete statistics remain
 eligible. Late-arriving telemetry is selected by its event time, independently of
 its ingestion timestamp. Arbitrary SQL retains access to all active files.
 
-Endpoint panels and log counts scan footer-pruned Parquet for the exact
+Operation panels and log counts scan footer-pruned Parquet for the exact
 requested window. Text searches match the redacted body.
 Notable-trace selection keeps one indexed candidate per trace, updated
 from new batches. A candidate records whether its namespace and service are unambiguous;
@@ -160,7 +160,7 @@ is not yet cached, the output remains directly queryable until its own backfill.
 
 The private cache stores per-batch trace parts and one
 incremental candidate per trace. It does not copy every span or log timestamp
-or maintain four global trace indexes. Complete cached compaction replacements
+or maintain global scope indexes. Complete cached compaction replacements
 preserve candidate bounds without recomputation. Retention and incomplete
 replacements recompute only affected trace IDs from active contributions.
 A semantic version covers the cache schema and aggregation rules; a version
@@ -168,8 +168,8 @@ change atomically discards all private
 read tables and rebuilds from authoritative format-4 Parquet. The background
 worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
 trace backlog independently of the service and edge rollups' publication horizon.
-Version history drains on its own worker, so an analytical-gate wait cannot
-delay the completed-batch worker.
+Service-version observations populate their analytical rollup on a separate
+worker, so an analytical-gate wait cannot delay the completed-batch worker.
 Completed-batch and analytical writers use separate gates and two connections
 outside the read pool. They modify disjoint tables; maintenance holds both gates
 for checkpointing. Trace reads avoid materializing every retained candidate into

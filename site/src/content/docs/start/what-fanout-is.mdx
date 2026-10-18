@@ -1,17 +1,22 @@
 ---
 title: What Fanout is
-description: One Go process that ingests OpenTelemetry, publishes authoritative Parquet, and answers questions through indexed reads and embedded analytics.
-summary: The scope of the product in one page — what the binary contains, what it deliberately does not, and who it is for.
+description: Investigate OpenTelemetry with a built-in agent or your own MCP client, using one self-hosted binary.
+summary: Agent investigations, dashboards and telemetry storage in one process, with one data directory.
 read_when:
   - You are deciding whether Fanout fits before installing anything.
   - You want to know what Fanout replaces in an existing observability stack.
 status: preview
 ---
 
-Fanout is a single self-hosted binary for OpenTelemetry. One Go process accepts
-OTLP over gRPC and HTTP, publishes atomic Parquet batches with persistent trace
-indexes, runs DuckDB analytics and rollups, evaluates alert rules, serves a chat
-investigator and MCP tools, and hosts the browser client.
+Fanout is a self-hosted OpenTelemetry backend for agent investigations. Ask its
+built-in agent a question about traces, logs or metrics, or connect your own
+agent over MCP. Both use the same typed tools to inspect telemetry and build
+dashboards.
+
+One Go process accepts OTLP over gRPC and HTTP, stores telemetry in local Parquet,
+runs DuckDB analytics, evaluates alert rules and serves the browser client.
+The built-in agent requires a configured AI provider; external MCP clients use
+their own model provider.
 
 <figure class="docs-diagram">
   <a href="/diagrams/architecture.svg" class="docs-diagram__asset" aria-label="Open the Fanout architecture diagram at full size">
@@ -25,11 +30,9 @@ investigator and MCP tools, and hosts the browser client.
   <figcaption>One process owns the complete path from OTLP ingest to investigation.</figcaption>
 </figure>
 
-The point of that list is that it is one list. A conventional deployment of the
-same capability is a collector, a storage backend, a query layer, a dashboard
-service and an alertmanager, each with its own configuration, failure modes and
-upgrade cadence. Fanout is one process with one configuration and one thing to
-restart.
+One binary and one data directory contain ingest, storage, queries and the
+browser client. [Why one binary](/explanation/why-one-binary) explains the
+operating tradeoffs.
 
 ## What it contains
 
@@ -39,19 +42,17 @@ restart.
 | Storage | Atomically publishes indexed Parquet batches to a local data directory |
 | Query | Direct indexed trace reads plus in-process DuckDB SQL and rollups |
 | Alerts | Evaluates persisted rules on a fixed interval against rollups |
-| Investigator | A chat agent working from the same typed query tools |
+| Agent | A chat agent working from the same typed query tools |
 | MCP server | Exposes those tools to an external agent |
 | Browser client | Served by the same process, from the same binary |
 
-## What it is not
+## Deployment boundaries
 
-Fanout is not a hosted service, and it is not a collector. It sits where the
-backend sits: your SDKs or your existing Collector export to it.
+SDKs and Collectors export to Fanout as their telemetry backend. Fanout runs on
+one machine with local storage. It has no clustering, replication or object tier.
 
-It is also not a multi-tenant platform. Namespaces scope telemetry queries so
-one instance can hold several services' data without them running together, but
-a namespace is not a user, an organisation or an authorisation boundary. An
-instance is a trust domain.
+Namespaces scope queries. Every account with telemetry access can read every
+namespace; deploy separate instances for separate trust domains.
 
 ## Who it is for
 
@@ -59,9 +60,7 @@ Teams that want their telemetry on their own hardware, with a small enough
 operational surface that observability does not become its own on-call rotation.
 The reference deployment target is a single small VM.
 
-## Where it is in its life
+## Stability
 
-Fanout is pre-release. It changes without migration paths, and the shape of
-things that already run may still move. The [capabilities
-page](/status/capabilities) is the account of what is settled and what is not;
-it is worth reading before building anything durable on top.
+Fanout is alpha. User-facing contracts can change without migration paths.
+The [capabilities page](/status/capabilities) lists each feature’s stability.

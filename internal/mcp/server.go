@@ -349,7 +349,7 @@ func (s *Server) registerTools() {
 	fragmentTool(s, &mcp.Tool{
 		Name:        "get_service_performance",
 		Title:       "Service performance explorer",
-		Description: "Display separate latency, error rate and request rate panels plus slow operations (HTTP, gRPC and consumers) for one service or the system.",
+		Description: "Display separate latency, error rate and request rate panels plus a Slow operations table showing p95 duration grouped by operation over server and consumer spans, covering HTTP, gRPC and message consumers, for one service or the system.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(panelsAppURI),
 	}, s.performance)

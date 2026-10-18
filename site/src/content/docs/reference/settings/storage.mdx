@@ -36,11 +36,11 @@ Stores telemetry, query state, and the control database.
 
 ### `FANOUT_DUCKDB_MAX_CONNECTIONS`
 
-Caps the DuckDB connection pool. Reads scan immutable Parquet concurrently; rollup-cache writes are serialized by the query write gate. Zero means "size it from the machine" — the same spelling DuckDBThreads uses for deferring to a default. Resolution happens in resolveSizing and is reported in the startup configuration log.
+Caps the DuckDB read connection pool. Reads scan immutable Parquet concurrently; analytical and completed-batch writes use separate gates and connections. Zero selects available Go CPUs, bounded to 2–16. Startup logs and /readyz report the resolved pool size.
 
 ### `FANOUT_DUCKDB_MEMORY`
 
-Caps DuckDB's memory (e.g. "8GB"). Empty means Fanout sizes it from detected memory, reserving headroom for the Go runtime; see resolveSizing. DuckDB's own default is 80% of detected RAM, which is calculated as though DuckDB owned the machine and has been observed to get the process OOM-killed once the Go heap is added on top.
+Caps DuckDB's memory (e.g. "8GB"). Empty selects 60% of detected available memory, reserving headroom for Go. If detection fails, DuckDB uses its default with a process headroom adjustment. Startup logs and /readyz report the resolved budget and detection status. Set an explicit cap when memory limit detection is incomplete.
 
 ### `FANOUT_DUCKDB_THREADS`
 

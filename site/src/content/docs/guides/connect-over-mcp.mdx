@@ -8,10 +8,9 @@ read_when:
 status: preview
 ---
 
-Fanout serves MCP at `/mcp`. It is the intended way for an agent to read an
-instance: the [tools](/reference/mcp-tools) return the same typed results
-the browser client and the HTTP API use, so what an agent tells you matches what
-the dashboards show.
+Fanout serves MCP at `/mcp` for external agents. Its [tools](/reference/mcp-tools)
+query telemetry and manage the authenticated user’s dashboards. The browser
+client and built-in agent use the same typed query results.
 
 [Build and refine dashboards](/guides/build-dashboards) covers schema discovery,
 panel previews, targeted edits and saved-version restore through chat or MCP.
@@ -27,13 +26,8 @@ reachable origin that clients are issued tokens against. It must be HTTPS, and
 it must stay **stable across restarts**: tokens carry the derived resource as
 their audience, so changing it invalidates every one already issued.
 
-Getting this wrong is the most common failure. A client discovers, registers and
-receives a token, and then every call is rejected because the audience does not
-match the resource it is calling. Set it before connecting anything.
-
-The resource is derived from `FANOUT_PUBLIC_URL`; there is no separate MCP
-public-origin setting. An unrecognised `FANOUT_`-prefixed variable is a startup
-error rather than something ignored.
+The resource is derived from `FANOUT_PUBLIC_URL`; see
+[server settings](/reference/settings/server#fanout_public_url).
 
 Set `FANOUT_MCP_ENABLED=false` to turn the endpoint off entirely; it defaults
 to `true`.
@@ -70,31 +64,30 @@ HTTP. Every request carries `MCP-Protocol-Version: 2026-07-28`; a request
 without it, or with an earlier version, is rejected, and there are no
 sessions or `initialize` handshake. Use a client that supports this version.
 
-A request that carries an `Origin` header must come from the origin of
-`FANOUT_PUBLIC_URL`; any other origin receives `403` before authentication.
-Clients that do not send `Origin`, such as command-line agents, are
-unaffected.
+On `/mcp` and `/api/mcp`, an `Origin` header must exactly match the RFC 6454
+serialization of `FANOUT_PUBLIC_URL`. Malformed or untrusted origins receive
+`403` before authentication. Without a public URL, only same-authority loopback
+origins are accepted. Requests without `Origin` pass this check.
 
-Tool calls are limited to 20 per second for each user and client, with
-bursts of up to 100. A client above the limit receives `429` with
-`Retry-After`.
+`tools/call` requests are limited to 20 per second per user–OAuth client pair,
+with a burst of 100. Excess calls receive `429` with `Retry-After`. The in-process
+agent is exempt. Client disconnects cancel in-flight tool calls, including DuckDB
+queries.
 
 ## Scopes
 
 | Scope | Grants |
 |---|---|
-| `telemetry:read` | The read-only observability tools |
+| `telemetry:read` | Required for every remote MCP request. |
 | `dashboard:manage` | `list_dashboards`, `get_dashboard`, `create_dashboard`, `replace_dashboard`, `edit_dashboard`, `list_dashboard_versions`, and `restore_dashboard_version` |
 
-An agent holding only `telemetry:read` can investigate but cannot manage
-a dashboard.
+Dashboard tools additionally require `dashboard:manage`. An `insufficient_scope`
+challenge lists every scope required by the request, including scopes already
+granted.
 
-The MCP tool catalog provides `list_dashboards`, `get_dashboard`,
-`create_dashboard`, `replace_dashboard`, `edit_dashboard`,
-`list_dashboard_versions`, and `restore_dashboard_version`. Restore requires
-an explicit user request and appends the selected historical spec as a new
-saved version with a normal save receipt. Deletion is
-available in Fanout's dashboard API; there is no MCP delete tool.
+Restore requires an explicit user request and appends the selected historical
+spec as a new saved version with a save receipt. Dashboard deletion uses the
+HTTP API; there is no MCP delete tool.
 
 ## What the agent can and cannot do
 
@@ -104,11 +97,11 @@ account capabilities still permit those scopes. Two consequences:
 
 - Dashboard tools are owner-scoped. An agent can manage your dashboards and
   cannot touch anyone else's.
-- `agent:run` is not involved here. That capability gates Fanout's *own* chat
-  investigator; an external MCP client is a separate path.
+- `agent:run` is not involved here. That capability gates Fanout's *own* built-in
+  agent; an external MCP client is a separate path.
 
 There is no tool that writes telemetry, edits configuration, manages users or
-changes alert rules. That is the whole envelope, deliberately.
+changes alert rules.
 
 ## Behind a proxy
 

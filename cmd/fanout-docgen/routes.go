@@ -249,14 +249,8 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("OTLP shares this listener but uses its own handlers and ingest credential; see\n")
 	b.WriteString("[send your first telemetry](/start/send-telemetry).\n\n")
 
-	b.WriteString(":::note[What this table is, and what it is not]\n")
-	b.WriteString("Every route the binary registers, wherever it is registered — the application\n")
-	b.WriteString("handlers, the agent runtime, the operational and protocol endpoints, and the\n")
-	b.WriteString("SPA catch-all. A route the generator cannot get a classification for fails\n")
-	b.WriteString("the build, so a new route cannot quietly go undocumented.\n\n")
-	b.WriteString("It is the surface the binary *can* register, not the surface any particular\n")
-	b.WriteString("instance exposes. Some of it is conditional, so check the instance before\n")
-	b.WriteString("concluding a route is reachable — or that it is not:\n\n")
+	b.WriteString("## Conditional routes\n\nThe table includes every route the binary can register. These routes depend on\nconfiguration:\n\n")
+
 	b.WriteString("- `/debug/pprof/*` — only when `FANOUT_PPROF_ENABLED` is true, which is\n")
 	b.WriteString("  **not** the default. Enabling it also turns on mutex and block sampling.\n")
 	b.WriteString("- `/mcp`, `/api/mcp`, `/oauth/*` and `/.well-known/*` — only when\n")
@@ -267,27 +261,13 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("  `FANOUT_AUTH_MODE=oidc`.\n\n")
 	b.WriteString("Everything else is always registered. A path shown with `:name` or `*` is the\n")
 	b.WriteString("pattern Echo matches on, not a literal URL.\n")
-	b.WriteString(":::\n\n")
+	b.WriteString("\n")
 
-	b.WriteString(":::caution[Most of this is not a public API]\n")
-	b.WriteString("The `/api/*` routes are the browser client's own backend. They are listed here\n")
-	b.WriteString("so an operator can see the whole surface and what guards it — not as an\n")
-	b.WriteString("interface to build against. They change with the client, without notice and\n")
-	b.WriteString("without migration paths.\n\n")
-	b.WriteString("The supported programmatic interface is **MCP**, at `/mcp` — see\n")
-	b.WriteString("[MCP tools](/reference/mcp-tools). The stable non-MCP surfaces are OTLP\n")
-	b.WriteString("ingest, and the operational endpoints in [endpoints](/reference/endpoints).\n\n")
-	b.WriteString("Alert rules (`/api/alerting/rules`, `/api/alerting/alerts`) currently have no browser\n")
-	b.WriteString("page. Ingest-token rotation uses `POST /api/settings/ingest/token/rotate`\n")
-	b.WriteString("and is also available to administrators on **Connect telemetry**.\n")
-	b.WriteString(":::\n\n")
+	b.WriteString("## Interface stability\n\nThe `/api/*` routes serve the browser client and can change without migration\npaths. [MCP](/guides/connect-over-mcp) is the agent interface. OTLP ingest and\n[operational endpoints](/reference/endpoints) have their own contracts.\n\nManage alert rules through the [HTTP API](/guides/set-up-alerts). Administrators\nrotate ingest tokens on **Connect telemetry** or with\n`POST /api/settings/ingest/token/rotate`.\n\n")
 
 	b.WriteString("## Errors\n\nApplication API errors, including unknown routes and wrong methods, return objects shaped like\n`{\"code\":\"bad_request\",\"message\":\"Safe explanation\"}`. Codes are stable\nsnake_case identifiers; clients branch on `code` rather than message text.\nInvalid dashboard or panel specs also include `problems` with field paths,\nmessages and optional hints. Every error response uses `Cache-Control: no-store`;\nHEAD errors have no body. Server failures return a short, safe message; the\nunderlying error is logged and never returned.\n\nDefault codes by HTTP status:\n\n| Status | Code |\n|---|---|\n| 400 | `bad_request` |\n| 401 | `unauthorized` |\n| 403 | `forbidden` |\n| 404 | `not_found` |\n| 405 | `method_not_allowed` |\n| 409 | `conflict` |\n| 413 | `payload_too_large` |\n| 415 | `unsupported_media_type` |\n| 422 | `unprocessable` |\n| 429 | `rate_limited` |\n| 500 | `internal` |\n| 502 | `bad_gateway` |\n| 503 | `unavailable` |\n| 504 | `timeout` |\n\nOther 4xx statuses use `bad_request`; other 5xx statuses use `internal`.\nSpecific conditions use `already_current`, `dashboard_version_not_found`,\n`dashboard_version_conflict`, `invalid_spec` and `last_active_administrator`.\nTool failures carry `error: {code, message}` inside the tool result.\nPanel execution results keep their own status and error fields.\nOAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.\nOperational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.\n\n")
 
-	b.WriteString("The **Requires** column is not a description of the rule. It is the answer the\n")
-	b.WriteString("authorization middleware gives for that exact method and path, so a route\n")
-	b.WriteString("cannot be documented as public while the server treats it otherwise.\n")
-	b.WriteString("Capabilities map to roles in [roles](/reference/roles).\n\n")
+	b.WriteString("The **Requires** column comes from the authorization middleware for each method\nand path. [Roles](/reference/roles) maps capabilities to roles.\n\n")
 
 	b.WriteString("| Method | Path | Requires |\n")
 	b.WriteString("|---|---|---|\n")
@@ -296,19 +276,15 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	}
 
 	b.WriteString("\n## What the requirements mean\n\n")
-	b.WriteString("- **none** — reachable without a credential. The health endpoints are\n")
-	b.WriteString("  deliberately here: a probe that needs a credential fails for the wrong\n")
-	b.WriteString("  reason during an outage.\n")
+	b.WriteString("- **none** — reachable without a credential.\n")
+
 	b.WriteString("- **any signed-in user** — a session, but no particular capability.\n")
 	b.WriteString("- **protocol handshake** — the OAuth and MCP endpoints, which authenticate\n")
 	b.WriteString("  as part of their own protocol rather than through the middleware.\n")
 	b.WriteString("- **a named capability** — the caller's role must carry it.\n")
 	b.WriteString("- **or a service credential** — additionally reachable without a browser\n")
 	b.WriteString("  session, which is how a scraper reaches the metrics endpoint.\n\n")
-	b.WriteString("A method of `Any` means the route is registered for every verb, and the middleware\n")
-	b.WriteString("gives the same answer for all of them — where it would not, this page fails\n")
-	b.WriteString("to build rather than pick one. `GET /*` serves the single-page application\n")
-	b.WriteString("for browser paths. Unknown `/api/*` and OTLP paths return errors instead.\n")
+	b.WriteString("`Any` registers every HTTP method with the same authorization requirement.\n`GET /*` serves the single-page application for browser paths. Unknown `/api/*`\nand OTLP paths return errors.\n")
 
 	return []byte(b.String())
 }

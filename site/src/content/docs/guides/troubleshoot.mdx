@@ -15,11 +15,8 @@ configuration refusal names the setting. Other startup errors can report
 storage, listener, or identity-provider failures; read the error before changing
 settings.
 
-The one that surprises people is an unrecognised variable. Fanout rejects
-unknown `FANOUT_`-prefixed setting names, except platform-injected service-discovery
-names, so a typo stops the process instead of being ignored. That is deliberate;
-see
-[configuration](/reference/configuration).
+Unknown `FANOUT_` setting names fail startup, except platform-injected service
+discovery names. Check spelling against the [configuration reference](/reference/configuration).
 
 ## An unresolved compaction blocks startup
 
@@ -27,22 +24,15 @@ One startup refusal is not about configuration. If a compaction was interrupted
 and Fanout can neither finish nor undo it, recovery fails closed and the error
 names `telemetry/COMPACTION.json`.
 
-That is deliberate. The marker lists the batches the compaction retired, and
-recovery must not guess whether the original batches or their replacement are
-authoritative. A wrong guess could delete the only surviving copy of some rows,
-so Fanout stops instead and leaves things where they are: the replacement is
-either staged under `telemetry/compaction/` or already published as
-`telemetry/parquet/batches/<output id>.batch`, and the retired inputs sit under
-`telemetry/parquet/batches/`, named `<id>.retired-<output id>`.
+The marker identifies the authoritative batch set during a swap. The replacement
+is staged under `telemetry/compaction/` or published as
+`telemetry/parquet/batches/<output id>.batch`. Retired inputs are named
+`<id>.retired-<output id>` under `telemetry/parquet/batches/`.
+A partial publish can remove some retired inputs; verify every input before
+attempting a rollback.
 
-A publish that failed partway through may already have removed some of those
-retired inputs, so the rollback set is not guaranteed to be complete. That is
-what step 2 below checks, and why it has to be checked before anything is
-deleted.
-
-Usually the interruption was transient — a full disk, or the process killed
-mid-swap. **Clear the underlying cause and start Fanout again.** Recovery
-re-runs on its own and needs no manual step.
+**Clear the underlying cause, such as a full disk, and start Fanout again.**
+Recovery runs automatically at startup.
 
 If recovery keeps failing, roll the compaction back by hand. With the process
 stopped, use `telemetry/parquet/batches/` as the batch directory:
@@ -64,17 +54,10 @@ stopped, use `telemetry/parquet/batches/` as the batch directory:
 6. Delete `telemetry/COMPACTION.json`.
 7. Start Fanout.
 
-Deleting the whole `telemetry/` directory also clears the refusal, and discards
-exactly the telemetry the refusal was protecting. Neither step above needs it.
-
-:::caution[Verify the set, then restore, then delete]
-The order is load-bearing in both directions. Verifying first (step 2) is what
-keeps you from deleting a replacement that holds the only surviving copy of an
-input's rows. Restoring before deleting the marker (steps 3 and 6) matters
-because the marker is what protects the retired directories from cleanup — with
-it gone, the next successful startup treats every `*.retired-*` directory as
-reclaimable and removes it. Deleting the marker on its own is not a rollback;
-it discards the rows the compaction had retired.
+:::caution[Verify inputs before deleting the replacement]
+Restore the retired inputs before removing the compaction marker. The marker
+protects those directories from startup cleanup. Keep the replacement until
+every input is restored; it may hold the only surviving copy of some rows.
 :::
 
 ## An unreadable telemetry batch blocks startup
@@ -148,13 +131,13 @@ fanout login-link user@example.com
 The link expires after 15 minutes, works once, and is recorded in the
 authentication audit history. It is available in `local` auth mode only.
 
-A configured SMTP relay that fails delivery is reported as an error rather than
-silently claiming an invitation arrived — so "no error" and "not configured" are
-distinguishable.
+A configured SMTP relay that fails delivery returns an error. See
+[authentication operations](https://github.com/labstack/fanout/blob/main/docs/authentication.md#adding-local-users-without-smtp)
+for invitation responses and account recovery.
 
-:::caution[Do not fix this in the database]
+:::caution[Preserve the account]
 Deleting a user row cascades to sessions, OAuth grants and owned dashboards.
-The login-link path exists so that nobody has to.
+Use a login link for an active local account.
 :::
 
 ## Telemetry arrives but queries look empty
@@ -167,16 +150,11 @@ An unscoped query spans every namespace, so this is only a problem when
 something has scoped the query — a dashboard filter, or an MCP call passing
 `namespace`. Clear the scope before concluding the data is missing.
 
-Rollups also lag ingest by design — the alert engine and the overview read
-aggregates, so the newest few seconds of data are not immediately reflected in
-them even though the raw telemetry is queryable.
+The alert engine and overview read analytical rollups, which follow durable
+publication. Raw queries can see committed rows before the next rollup pass.
+See [rollup timing](/explanation/storage-model#rollups-follow-durable-publication).
 
 ## What to watch in production
 
-- `/healthz` — liveness.
-- `/readyz` — storage readiness and resolved runtime sizing.
-- `/metrics` — Prometheus metrics. Keep it private or set
-  `FANOUT_METRICS_TOKEN`. Do not make it public merely to simplify scraping.
-
-Alert on repeated restarts, readiness failures, ingest authentication failures,
-telemetry drops, sustained query latency, and free disk space.
+The [endpoint reference](/reference/endpoints#what-to-alert-on) lists health
+probes, scrape credentials and signals to monitor.

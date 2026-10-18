@@ -62,9 +62,8 @@ Run `just e2e` with Google Chrome installed for the separate CI browser smoke
 suite. See [browser smoke testing](docs/testing.md) for coverage and failure artifacts.
 
 `just install` also installs [Lefthook](https://lefthook.dev)'s Git hooks, which run
-formatting and linting on commit and the full gate on push. That is the fastest
-way to avoid a red CI run.
-The pre-push hook may be skipped when Lefthook detects no changed files;
+formatting and linting on commit and the full gate on push. The pre-push hook
+may be skipped when Lefthook detects no changed files;
 CI runs the same `just check` unconditionally and enforces the gate.
 
 The browser workspace uses `package.json` overrides for transitive security
@@ -72,7 +71,7 @@ fixes that their direct dependencies have not locked yet. Keep those overrides
 until the upstream ranges resolve to patched versions; `just ui-audit` accepts
 only the existing build-only braces advisory exception documented in the justfile.
 
-## Things that surprise people
+## Repository conventions
 
 **The browser assets are committed.** `ui/host` builds into `internal/ui/dist`
 and its MCP app builds into `internal/mcp/apps`; both outputs are tracked in
@@ -96,15 +95,11 @@ the clone is labstack/fanout and contains the pinned revision. Archify normalize
 and verifies repository identity and the pinned revision during `finalize`.
 JSON inputs, SVG outputs, and the site copy still use your contributor checkout.
 
-**The social preview card is generated.** `site/public/social-card.png` is
-rendered from `docs/media/social-card.typ` by `just social-card`, which needs Inter on a
-font path — set `FANOUT_FONT_PATH` to a directory holding it. CI has no such
-directory, so nothing re-renders the card to compare it; what `site-build` does
-assert is that the committed PNG exists and still matches the dimensions the
-site's head advertises. If you edit the source, run the recipe and commit the
-PNG in the same change. The recipe fails when the
-font is missing rather than shipping a card in a substitute face, which typst
-would otherwise do without complaint.
+**The social preview card is generated.** `just social-card` renders
+`docs/media/social-card.typ` into `site/public/social-card.png`. Set
+`FANOUT_FONT_PATH` to a directory containing Inter; the recipe requires Typst
+0.15.1 and fails if the font is missing. Commit the source and PNG together.
+The site build checks the committed image’s dimensions; CI does not rerender it.
 
 **Runtime configuration is strict.** `internal/config/config.go` owns the
 schema. New settings need an environment name, a documentation `group` tag,
@@ -168,9 +163,8 @@ Before your first pull request can be merged, you need to sign the
 [CLA](CLA.md). A bot comments on the pull request with a sentence to reply
 with; that is the whole process, and it is only needed once.
 
-The CLA grants LabStack the right to relicense contributions. That is what
-keeps future licensing decisions possible — without it, any change would
-require permission from every past contributor individually.
+The CLA grants LabStack the right to relicense contributions. Review the
+agreement before contributing.
 
 ## License
 

@@ -36,9 +36,8 @@ complete data directory is the supported and fastest restore path.
 holds the dashboards and alert rules that refer to the telemetry, and the
 accounts that own them.
 
-So the unit of backup is the whole directory. [Back up and
-restore](/guides/back-up-and-restore) covers doing that safely, which mostly
-means doing it while the process is stopped.
+[Back up and restore](/guides/back-up-and-restore) covers cold backups of the
+complete directory.
 
 ## Two engines, on purpose
 
@@ -52,7 +51,7 @@ works](/explanation/storage-model) covers the reasoning and the write path.
 DuckDB spills here when a query needs more memory than `FANOUT_DUCKDB_MEMORY`
 allows. It is regenerated as needed and holds nothing durable, but it does need
 space: a query against a wide time range can spill substantially, and a full
-disk fails the query rather than degrading it.
+disk causes the query to fail.
 
 ## Sizing
 

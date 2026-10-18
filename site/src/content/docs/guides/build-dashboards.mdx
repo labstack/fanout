@@ -33,7 +33,7 @@ panels. An incomplete save check means the panels were not all executed; it
 does not undo the save or establish that they work.
 
 A follow-up edit reads the dashboard and changes the named panels, preserving
-the others. Ask explicitly for a redesign when you want the whole board replaced.
+the others. Ask explicitly for a redesign when you want the whole dashboard replaced.
 You can also ask to add a variable, change the default time range or remove a
 panel.
 
@@ -123,28 +123,21 @@ not a historical registry. Structured `query.from`, variables and unscoped
 arbitrary SQL cannot read it. The [SQL relation reference](/reference/mcp-tools#panel-sql-relations)
 lists column types and semantics.
 
-### Update existing System overview panels deliberately
+### System overview defaults
 
-New defaults use `resource_inventory` for **What changed?** (`versions`) and
-the service-host input to **Is it reachable?** (`check_states`). Existing
-saved dashboards keep their SQL. Deploy the supporting binary before editing
-those saved definitions.
+Each user receives an owned copy of **System overview**. Saved copies retain
+their specification when the binary’s default changes. The default’s **What
+changed?** panel (`versions`) and service-host input to **Is it reachable?**
+(`check_states`) use `resource_inventory`.
 
-1. Use `list_dashboards` and `get_dashboard` to select the owner's dashboard by
-   ID and capture its current `version` and spec. Do not identify a board by
-   title alone. Compare both panel SQL fields with the known shipped definitions
-   being upgraded; skip and report customized or missing definitions.
-2. Build replacements from the new default SQL, changing only those SQL fields.
-   Run `preview_panels` with the saved time and variables and inspect the complete
-   frames, including first-seen times and reachability warnings.
-3. Call `edit_dashboard` with the captured `base_version` and two
-   `update_panel` operations, each with its panel `id` and `set: {sql: ...}`.
-   Preserve every other field, layout and variable. If the base version is
-   stale, reread and review the diff before retrying.
-4. Retain the prior SQL and version history. Before rolling back to a binary
-   without this relation, restore both prior SQL fields through reviewed edits
-   at the then-current base version. The disposable cache rebuilds independently;
-   the telemetry format remains unchanged.
+Deploy a binary supporting `resource_inventory` before editing saved panels.
+Use `list_dashboards` and `get_dashboard` to select the owner’s dashboard by ID
+and capture its version and spec. Compare `versions` and `check_states` with
+the shipped definitions; skip customized or missing definitions. Preview
+replacements with the saved time and variables, then submit two `update_panel`
+operations changing only `sql`, using the captured `base_version`. On conflict,
+reread and review before retrying. Retain the prior SQL; restore it through
+reviewed edits before rolling back to a binary without `resource_inventory`.
 
 ## Choose metric measures by kind
 
@@ -333,8 +326,11 @@ when the compact Chart preview cuts it short. On a narrow card, choose Data from
 the panel menu. **Spec** shows the authored panel definition. Text panels expose
 Content and Spec instead of Data.
 
-Empty panels show their diagnosis in Chart. Check the time range, selected
-variables and the panel's description before treating the absence as meaningful.
+Empty panels show their diagnosis in Chart. When filters together match nothing,
+the diagnosis names that combination. Chat keeps views whose results are all
+empty collapsed on an “empty” summary. Expand an empty view to inspect its
+diagnosis. Check the time range, selected variables and panel description before
+interpreting missing results.
 Truncation and other result notes remain visible below the panel. If a refresh
 fails after data was loaded, the old data can remain on screen with a warning;
 it is not a fresh successful result. Use **Retry** for a request failure, or
@@ -371,7 +367,7 @@ the same duration. Time series draw the previous series; stats display a previou
 value as a delta when available. Other panel types do not draw this comparison;
 a bar's deploy split is a separate before/since view.
 An individual panel can have its own range or time shift; its header labels that
-override. Ask chat to set it when a panel needs a different window from the board.
+override. Ask chat to set it when a panel needs a different window from the dashboard.
 
 ## Share the current view
 
@@ -385,7 +381,7 @@ range moves with the time the link is opened. Links open the current saved
 dashboard and query its data; they do not freeze a historical version or result.
 
 The recipient needs an account and access to that dashboard. Dashboards are
-currently owner-scoped: another account cannot open your dashboard just because
+owner-scoped: another account cannot open your dashboard just because
 you copied its link. A view link grants no access and is not a public snapshot.
 
 ## Layout and saved versions
@@ -396,7 +392,7 @@ from a corner. Choose **Save layout** to persist the grid as a new version;
 menus while editing. Those actions save immediately, including any pending
 layout changes. Narrow screens stack panels and do not allow layout editing.
 
-Edits use the version that was read to detect competing saves. If the board
+Edits use the version that was read to detect competing saves. If the dashboard
 changed meanwhile, use **Load latest**, then redo the change. An MCP client
 should likewise read the latest dashboard and supply `base_version` when editing
 or replacing it.

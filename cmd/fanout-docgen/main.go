@@ -486,10 +486,10 @@ var groups = map[string]groupPage{
 	},
 	"ai": {
 		Title:       "AI provider settings",
-		Description: "The provider, key, model and base URL backing the chat investigator.",
+		Description: "The provider, key, model and base URL backing the built-in agent.",
 		Summary:     "Chat is disabled unless a provider is selected; its API key is then required.",
 		ReadWhen: []string{
-			"The chat investigator is disabled and you want it on.",
+			"The built-in agent is disabled and you want it on.",
 			"You are pointing Fanout at a self-hosted or proxied model endpoint.",
 		},
 	},

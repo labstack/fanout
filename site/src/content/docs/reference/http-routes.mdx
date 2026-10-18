@@ -16,15 +16,10 @@ the image sets `:7520`).
 OTLP shares this listener but uses its own handlers and ingest credential; see
 [send your first telemetry](/start/send-telemetry).
 
-:::note[What this table is, and what it is not]
-Every route the binary registers, wherever it is registered — the application
-handlers, the agent runtime, the operational and protocol endpoints, and the
-SPA catch-all. A route the generator cannot get a classification for fails
-the build, so a new route cannot quietly go undocumented.
+## Conditional routes
 
-It is the surface the binary *can* register, not the surface any particular
-instance exposes. Some of it is conditional, so check the instance before
-concluding a route is reachable — or that it is not:
+The table includes every route the binary can register. These routes depend on
+configuration:
 
 - `/debug/pprof/*` — only when `FANOUT_PPROF_ENABLED` is true, which is
   **not** the default. Enabling it also turns on mutex and block sampling.
@@ -37,22 +32,16 @@ concluding a route is reachable — or that it is not:
 
 Everything else is always registered. A path shown with `:name` or `*` is the
 pattern Echo matches on, not a literal URL.
-:::
 
-:::caution[Most of this is not a public API]
-The `/api/*` routes are the browser client's own backend. They are listed here
-so an operator can see the whole surface and what guards it — not as an
-interface to build against. They change with the client, without notice and
-without migration paths.
+## Interface stability
 
-The supported programmatic interface is **MCP**, at `/mcp` — see
-[MCP tools](/reference/mcp-tools). The stable non-MCP surfaces are OTLP
-ingest, and the operational endpoints in [endpoints](/reference/endpoints).
+The `/api/*` routes serve the browser client and can change without migration
+paths. [MCP](/guides/connect-over-mcp) is the agent interface. OTLP ingest and
+[operational endpoints](/reference/endpoints) have their own contracts.
 
-Alert rules (`/api/alerting/rules`, `/api/alerting/alerts`) currently have no browser
-page. Ingest-token rotation uses `POST /api/settings/ingest/token/rotate`
-and is also available to administrators on **Connect telemetry**.
-:::
+Manage alert rules through the [HTTP API](/guides/set-up-alerts). Administrators
+rotate ingest tokens on **Connect telemetry** or with
+`POST /api/settings/ingest/token/rotate`.
 
 ## Errors
 
@@ -91,10 +80,8 @@ Panel execution results keep their own status and error fields.
 OAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.
 Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 
-The **Requires** column is not a description of the rule. It is the answer the
-authorization middleware gives for that exact method and path, so a route
-cannot be documented as public while the server treats it otherwise.
-Capabilities map to roles in [roles](/reference/roles).
+The **Requires** column comes from the authorization middleware for each method
+and path. [Roles](/reference/roles) maps capabilities to roles.
 
 | Method | Path | Requires |
 |---|---|---|
@@ -167,9 +154,7 @@ Capabilities map to roles in [roles](/reference/roles).
 
 ## What the requirements mean
 
-- **none** — reachable without a credential. The health endpoints are
-  deliberately here: a probe that needs a credential fails for the wrong
-  reason during an outage.
+- **none** — reachable without a credential.
 - **any signed-in user** — a session, but no particular capability.
 - **protocol handshake** — the OAuth and MCP endpoints, which authenticate
   as part of their own protocol rather than through the middleware.
@@ -177,7 +162,6 @@ Capabilities map to roles in [roles](/reference/roles).
 - **or a service credential** — additionally reachable without a browser
   session, which is how a scraper reaches the metrics endpoint.
 
-A method of `Any` means the route is registered for every verb, and the middleware
-gives the same answer for all of them — where it would not, this page fails
-to build rather than pick one. `GET /*` serves the single-page application
-for browser paths. Unknown `/api/*` and OTLP paths return errors instead.
+`Any` registers every HTTP method with the same authorization requirement.
+`GET /*` serves the single-page application for browser paths. Unknown `/api/*`
+and OTLP paths return errors.

@@ -35,4 +35,4 @@ Sets the group-commit row target; valid values are 1–50000. Individual request
 
 ### `FANOUT_INGEST_MAX_IN_FLIGHT_BYTES`
 
-Caps the decoded telemetry the process will hold across concurrent requests. Concurrency is HTTP/2 streams times connections and each handler holds its batch until the commit is durable, so without a ceiling a burst is bounded only by memory. Zero is unbounded. A single request is admitted when no other request holds budget, even if it exceeds the limit.
+Caps decoded telemetry held across concurrent requests until durable publication. Zero is unbounded. A single request is admitted when no other request holds budget, even if it exceeds the limit.
