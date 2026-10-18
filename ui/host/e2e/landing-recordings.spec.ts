@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { cardSelector, readyCard, settle } from "./accessibility-support";
-import { recordingTimeline } from "./landing-recording-support";
+import { recordingTimeline, revealRecording } from "./landing-recording-support";
 import type { DashboardSpec } from "../../panels/types";
 
 const baseURL = process.env.FANOUT_LANDING_BASE_URL;
@@ -98,7 +98,7 @@ for (const view of ["chat", "dashboard"] as const) {
       const responseAt = (Date.now() - startedAt) / 1000;
       expect(response.ok(), "Agent request failed; check chat configuration and the session's agent:run capability").toBe(true);
       const timeline = recordingTimeline(await response.text(), responseAt);
-      // RUN_FINISHED in the real stream plus the UI's idle state gates the dwell.
+      // RUN_FINISHED in the real stream plus the UI's idle state gates the reveal.
       await expect(page.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0);
       await expect(page.locator(".chat-pane .mantine-Loader-root")).toHaveCount(0);
       await expect(page.locator(".chat-pane").getByRole("alert")).toHaveCount(0);
@@ -129,6 +129,9 @@ for (const view of ["chat", "dashboard"] as const) {
       }
       await settle(page);
       await page.mouse.move(0, 0);
+      const holdStart = (Date.now() - startedAt) / 1000;
+      await revealRecording(page, view);
+      timeline.waits.push({ kind: "hold", start: holdStart, end: (Date.now() - startedAt) / 1000 });
       await page.waitForTimeout(view === "dashboard" ? 5_000 : 4_000);
       const duration = (Date.now() - startedAt) / 1000;
       await context.close();

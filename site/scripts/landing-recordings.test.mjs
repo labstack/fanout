@@ -71,6 +71,34 @@ test("invalid trim times fail before invoking ffmpeg", () => {
   assert.throws(() => clipSegments([], 0));
 });
 
+test("encoding preserves overlapping holds at real speed inside merged waits", () => {
+  const segments = clipSegments([
+    { kind: "tool_call", start: 2, end: 10 },
+    { kind: "model_thinking", start: 8, end: 18 },
+    { kind: "hold", start: 6, end: 12 },
+    { kind: "hold", start: 4, end: 9 },
+  ], 20);
+  assert.deepEqual(segments, [
+    { start: 0, end: 2, seconds: 2 },
+    { start: 2, end: 4, seconds: 0.6 },
+    { start: 4, end: 12, seconds: 8 },
+    { start: 12, end: 18, seconds: 0.6 },
+    { start: 18, end: 20, seconds: 2 },
+  ]);
+  assert.match(clipFilter(segments), /trim=start=4:end=12,setpts=\(PTS-STARTPTS\)\*1\[v2\]/);
+});
+
+test("holds can cover entire waits and are clipped at the retained video boundaries", () => {
+  assert.deepEqual(clipSegments([
+    { kind: "hold", start: 1, end: 10.1 },
+    { kind: "tool_call", start: 2, end: 8 },
+  ], 10, 4), [{ start: 4, end: 10, seconds: 6 }]);
+  assert.deepEqual(clipSegments([{ kind: "hold", start: 2, end: 6 }], 10), [
+    { start: 0, end: 10, seconds: 10 },
+  ]);
+  assert.throws(() => clipSegments([{ kind: "hold", start: 2, end: 1 }], 10));
+});
+
 test("encoding cuts frames before the clip start", () => {
   const segments = clipSegments([{ start: 1, end: 3 }, { start: 5, end: 8 }], 12, 4);
   assert.deepEqual(segments, [

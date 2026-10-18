@@ -1,3 +1,5 @@
+import type { Page } from "@playwright/test";
+
 export type AgentEvent = {
   type: string;
   timestamp: number;
@@ -5,7 +7,51 @@ export type AgentEvent = {
   toolCallName?: string;
   content?: string;
 };
-export type WaitInterval = { kind: "model_thinking" | "tool_call"; start: number; end: number; tool?: string };
+export type WaitInterval = { kind: "model_thinking" | "tool_call" | "hold"; start: number; end: number; tool?: string };
+
+/** Show the completed result at reading speed before the recording's final dwell. */
+export async function revealRecording(page: Page, view: "chat" | "dashboard") {
+  await page.evaluate(async view => {
+    const scroller = view === "chat"
+      ? document.querySelector<HTMLElement>(".chat-pane .chat-scroll")
+      : document.scrollingElement as HTMLElement | null;
+    if (!scroller) throw new Error(`No ${view} scroll container for the landing recording`);
+
+    // Tell the chat's stick-to-bottom hook that the reader is scrolling up.
+    if (view === "chat") scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+    scroller.scrollTop = 0;
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+    const animate = async (to: number, milliseconds: number) => {
+      const from = scroller.scrollTop;
+      if (to === from) return;
+      const start = performance.now();
+      await new Promise<void>(resolve => {
+        const frame = (now: number) => {
+          const progress = Math.min(1, (now - start) / milliseconds);
+          // Brief acceleration/deceleration around a constant-speed middle 80%.
+          const ramp = 0.1;
+          const eased = progress < ramp ? progress * progress / (2 * ramp * (1 - ramp))
+            : progress > 1 - ramp ? 1 - (1 - progress) ** 2 / (2 * ramp * (1 - ramp))
+            : (progress - ramp / 2) / (1 - ramp);
+          scroller.scrollTop = from + (to - from) * eased;
+          if (progress < 1) requestAnimationFrame(frame);
+          else requestAnimationFrame(() => resolve());
+        };
+        requestAnimationFrame(frame);
+      });
+    };
+    const bottom = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const minimum = view === "chat" ? 8_000 : 6_000;
+    // Two viewport heights take the baseline duration; longer results get more time.
+    const duration = Math.min(12_000, Math.max(minimum, minimum * bottom / Math.max(1, scroller.clientHeight * 2)));
+    await animate(bottom, duration);
+    if (view === "dashboard") {
+      await new Promise(resolve => setTimeout(resolve, 1_500));
+      await animate(0, 1_500);
+    }
+  }, view);
+}
 
 /** Observe the completed, unmodified SSE response; never route or replace requests. */
 export function recordingTimeline(stream: string, responseAt: number) {
