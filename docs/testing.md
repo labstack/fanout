@@ -60,22 +60,25 @@ timings and any calibrated CI ceiling must be reported separately.
 For individual panels, collect at least one hundred warm executions per query
 shape against the same snapshot and report p95 against **500 ms**. Cover the
 headline totals, grouped latency/error measures, time series and logs actually
-used by the board. Retain failures and timeout counts alongside latency; do not
+used by the dashboard. Retain failures and timeout counts alongside latency; do not
 make a slow or failed run disappear by retrying until it passes. These targets
 are acceptance criteria, not guarantees for arbitrary telemetry volumes.
 
-The current executor compiles ordinary structured aggregates against raw
+The executor compiles ordinary structured aggregates against raw
 telemetry. Its disposable read-cache version 4 stores completed-batch trace
-candidates and parts, not general minute aggregates. Service map and health
-panels use analytical rollups with their own watermark lag and approximate
-latency semantics. Do not assume those rollups answer arbitrary raw counts,
+candidates and parts, not general minute aggregates. Service maps combine
+analytical rollups with a raw client-span query for external peers. That query
+materializes the filtered client projection once for reuse by peer and edge
+aggregates; its child-span and observed-service checks also read spans. Health
+panels use analytical rollups. Rollup data has separate watermark lag and approximate latency
+semantics. Do not assume those rollups answer arbitrary raw counts,
 rates or quantiles exactly, or report every dashboard query as cached.
 
-The existing native tests exercise whole-window totals, bounded newest buckets
+The native tests exercise whole-window totals, bounded newest buckets
 and width-aware 24-hour bucket selection:
 
 ```sh
-rtk just test ./internal/panel -run '"TestGaugeTotalsMatchStat|TestBudgetKeepsCompleteNewestBuckets|TestWidthAwareCellBuckets"'
+just test ./internal/panel -run 'TestGaugeTotalsMatchStat|TestBudgetKeepsCompleteNewestBuckets|TestWidthAwareCellBuckets'
 ```
 
 Use the pinned engine wrapper through `just test`, with the workspace's offline
@@ -88,11 +91,11 @@ measurements and limitations in the milestone's `docs/benchmarks/` document.
 Run the browser-free host tests and type checks from `ui/host`:
 
 ```sh
-rtk bun run test
-rtk bun run lint
+bun run test
+bun run lint
 ```
 
-The existing theme, chart-unit and row-formatting tests check semantic text and
+The theme, chart-unit and row-formatting tests check semantic text and
 mark contrast in both schemes. Keyboard tests cover dashboard focus, chart
 navigation, range cancellation, full-screen and shortcut preferences. The exact
 palette-order test preserves six categorical colour slots; its name alone does
@@ -105,6 +108,11 @@ Shift+Left/Right, Cancel, Escape and full-screen return focus. Check the
 single-key shortcut switch, typing/menu/dialog exceptions and error inspection
 in Data, including an error longer than its Chart preview. Review populated,
 empty, failed, stale and truncated states.
+
+Check that accessible names contain the visible labels of trace links, service-map
+nodes, filter chips, flame-graph spans and the account menu. Service-map node names
+must also include health; full trace IDs and service details remain available in
+titles.
 
 Assess WCAG AA text contrast and chart marks against their actual surfaces.
 Check all six ordered categorical colours plus Other under colour-vision
@@ -122,9 +130,9 @@ an unrun or inconclusive check is not an accessibility pass.
 The evaluation runner tests scoring and transport offline without a provider:
 
 ```sh
-rtk proxy bun test scripts/dashboard-eval
-rtk proxy bun scripts/dashboard-eval/main.ts --mock --no-output
-rtk just dashboard-eval-generate-check
+bun test scripts/dashboard-eval
+bun scripts/dashboard-eval/main.ts --mock --no-output
+just dashboard-eval-generate-check
 ```
 
 The mock exercises ten saves and five consecutive edits with synthetic usage.
@@ -156,15 +164,17 @@ are generated from the server; change their generator sources when necessary,
 then regenerate and check:
 
 ```sh
-rtk just docs-generate
-rtk just docs-generate-check
-rtk just test ./cmd/fanout-docgen
+just docs-generate
+just docs-generate-check
+just test ./cmd/fanout-docgen
 ```
 
-With site dependencies already installed, run `rtk bun run build` from `site/`
-to check the sidebar and compile pages, then run the table, social-card and
-canonical guards included in that script. `just site-build` also installs site
+With site dependencies installed, run `npm run build` from `site/`
+to check the sidebar, compile pages and run its table, social-card, canonical
+and benchmark guards. `just site-build` also installs site
 dependencies; use the installed build directly when dependency installation is
 outside the verification environment's scope. Neither command publishes the site.
 
-Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance such as the live demo, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded. The landing page's chat and dashboard clips are recorded the same way with `FANOUT_LANDING_RECORDINGS=1`; see `site/scripts/landing-recordings.md`.
+Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance such as the live demo, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
+
+To record chat and dashboard clips, set `FANOUT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e landing-recordings.spec.ts --project=1440-light --project=1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.

@@ -24,15 +24,8 @@ Send it as a bearer token; this is the only accepted ingest credential form:
 Authorization: Bearer fo_<token>
 ```
 
-Two things are worth knowing before you debug a rejection:
-
-- **Browser sessions and MCP tokens are not ingest credentials.** They are
-  different credentials for different surfaces, and an exporter presenting one
-  is rejected like any other unauthenticated caller.
-- **Before setup completes, ingest rejects everything.** With no administrator
-  there is no token to check against, so a collector started ahead of setup
-  fails until you have finished it. That is the intended order: the instance
-  does not accept telemetry it cannot attribute.
+Ingest is available after administrator setup. Exporters require the ingest
+token; browser sessions and MCP OAuth tokens cannot authorize exports.
 
 ## Configure an SDK
 
@@ -80,12 +73,8 @@ service:
       exporters: [otlp/fanout]
 ```
 
-The scheme and the port both earn their place. `https://` puts the exporter on
-TLS and keeps it there, whatever `tls.insecure` says below it. The port is not
-optional: the gRPC exporter validates its endpoint before dialling and refuses
-to start without one, with `address fanout.example.com: missing port in
-address`. gRPC's own default of 443 belongs to a resolver path this exporter
-never reaches.
+The gRPC exporter requires an explicit port. Use `https://` for TLS and `:443`
+for a proxy serving standard HTTPS.
 
 If nothing in front of Fanout terminates TLS — a local instance, or one on a
 private network — the endpoint is `http://fanout.example.com:7520` and the
@@ -93,10 +82,8 @@ exporter needs `tls: { insecure: true }` under `otlp/fanout`, or it will fail
 to connect. **Connect telemetry** in the application generates this block with
 your own endpoint already in it, and includes that line when it applies.
 
-A Collector is optional. Fanout speaks the same protocol your SDKs already
-export, so it can sit directly behind them — but if you already run a Collector
-for sampling, enrichment or fan-out to a second backend, Fanout is just another
-exporter in the pipeline.
+SDKs can export directly to Fanout. Use a Collector for sampling, enrichment
+or forwarding to several backends.
 
 ## Watch hosts, containers and endpoints
 
@@ -193,9 +180,9 @@ both in the bad state. A receiver that has never sent data shows an empty panel.
 If the machine running Fanout fails, Fanout cannot report that failure on its
 own page: monitor Fanout itself from outside that machine.
 
-Existing users keep their saved copy of the default dashboard. New system
-sections appear in newly created default dashboards; existing copies are not
-automatically replaced.
+Each user owns a saved copy of **System overview**. Changes to the default
+specification apply when a copy is created; saved dashboards retain their spec.
+See [dashboard defaults](/guides/build-dashboards#system-overview-defaults) for edits.
 
 ## Namespaces
 
@@ -203,9 +190,8 @@ Fanout reads `service.namespace` from each OTLP resource, falling back to
 `FANOUT_DEFAULT_NAMESPACE` (`default`) when it is absent. Namespaces let one
 instance hold several services' telemetry without them running together.
 
-A query with no namespace set now spans **all** of them. Scoping is opt-in: you
-narrow to one namespace deliberately, rather than being silently confined to one
-and wondering where the rest of your telemetry went.
+A query with no namespace filter spans all namespaces. Add a namespace filter
+to narrow the result.
 
 They are not an authorisation boundary. A namespace is not a user, an
 organisation or a tenant, and anyone who can query the instance can query every
@@ -222,3 +208,13 @@ When using a reverse proxy, enable HTTP/2 to the backend for gRPC. Plaintext
 Fanout accepts prior-knowledge HTTP/2 (h2c); a TLS listener negotiates HTTP/2
 through ALPN. HTTP/1.1 forwarding works for OTLP/HTTP, but cannot carry gRPC.
 See [terminate TLS](/guides/terminate-tls).
+
+## Investigate the data
+
+With an [AI provider configured](/reference/settings/ai), open chat and ask a
+question such as “Why is checkout slower in the last hour?” The agent queries
+telemetry and displays its evidence in interactive views. Ask it to
+[build a dashboard](/guides/build-dashboards) to save a view for repeated use.
+
+To use your own agent, [connect over MCP](/guides/connect-over-mcp). MCP does not
+require Fanout’s built-in AI provider.

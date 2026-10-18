@@ -8,8 +8,8 @@ read_when:
 status: preview
 ---
 
-These settings govern what is on disk and how it is shaped. They do different
-jobs and are worth separating before changing any of them.
+Retention controls telemetry lifetime. Group commits and compaction control
+file count and query cost. All configuration changes require a restart.
 
 ## How long data is kept
 
@@ -19,7 +19,8 @@ export FANOUT_RETENTION_DAYS=30
 
 Zero means keep everything. Changing it does not delete anything immediately —
 expired data goes when maintenance next runs, so disk use falls on the
-maintenance cycle rather than at the moment you change the setting.
+maintenance cycle after restart. Expiry uses ingestion time; see
+[storage semantics](/explanation/storage-model#small-files-are-bounded-by-compaction).
 
 Observability API, MCP, and dashboard queries can span up to this retention
 period. With unlimited retention, each query remains capped at 30 days. Fanout
@@ -31,8 +32,8 @@ automatically uses wider timeline buckets for windows longer than 24 hours.
 export FANOUT_MAINTENANCE_INTERVAL=1h
 ```
 
-This is the expensive pass: retention deletes plus full compaction. Lower it to
-reclaim space sooner, at the cost of running the heavy work more often.
+The maintenance pass removes expired batches, compacts eligible files and
+checkpoints query state. Shorter intervals run this work more frequently.
 
 ## Group-commit target
 
@@ -54,8 +55,7 @@ setting controls admission grouping, not the durability boundary.
 Maintenance prepares merges while reads continue, then briefly gates readers
 while it swaps or removes immutable files. New batches keep encoding and need
 only the short publication lock. Ingest, queries, and maintenance still share
-CPU, memory bandwidth, and disk, so running maintenance much more often is not
-free. Change one setting at a time and watch `/metrics`.
+CPU, memory bandwidth and disk. Change one setting at a time and watch `/metrics`.
 
 The full list, with defaults and types, is in the [storage
 settings](/reference/settings/storage) reference.

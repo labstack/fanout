@@ -12,8 +12,7 @@ Fanout is one process and one persistent data directory. Back up the directory
 as a unit.
 
 The directory holds atomic telemetry Parquet batches, rebuildable query state,
-and the control SQLite database. Copying one subdirectory produces something
-that looks like a backup and does not restore.
+and the control SQLite database. Preserve all three together.
 
 ## Take a cold backup
 
@@ -25,8 +24,7 @@ that looks like a backup and does not restore.
 3. Copy or snapshot the complete data directory, preserving ownership and
    permissions.
 4. Start Fanout and confirm `/readyz`.
-5. Periodically restore a backup into an isolated directory. An untested backup
-   is not a recovery plan.
+5. Periodically restore a backup into an isolated directory. Verify sign-in and a known telemetry query after restoring.
 
 :::caution[Not while it is running]
 Do not take a recursive copy of a live data directory. A storage-level snapshot

@@ -8,32 +8,15 @@ read_when:
 status: preview
 ---
 
-Fanout validates its entire configuration before it opens any listener. A
-setting it will not accept stops the process at startup rather than failing
-later under load, so a Fanout that is running is one whose configuration was
-acceptable.
+Fanout validates configuration before opening data files or listeners. Invalid
+settings stop startup with an error naming the setting. See
+[configuration](/reference/configuration) for precedence, secret files and validation.
 
-## What it checks
-
-Timing, batch sizing and auth settings are checked together:
-
-- Addresses and the data directory must not be empty.
-- `FANOUT_ROLLUP_INTERVAL` must be at least `1s`;
-- `FANOUT_AUTH_MODE` must be `local` or `oidc`.
-- `FANOUT_SESSION_IDLE_TTL` must be at least `5m`, and the absolute TTL must be
-  positive and no shorter than the idle one.
-- `FANOUT_AUTH_CODE_SECRET` is **required** in the default `local` auth mode,
-  and must be at least 32 characters. It is the one setting a first-time
-  instance is most likely to be missing.
-- SMTP is all-or-nothing: set `FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`,
-  `FANOUT_SMTP_PASSWORD` and `FANOUT_SMTP_FROM` together, or none of them.
-- In `oidc` mode the issuer URL and `FANOUT_PUBLIC_URL` must both be HTTPS, and
-  a client ID and secret are required.
-
-An unknown `FANOUT_` setting name is an error too, except platform-injected
-service-discovery names. A typo in a setting
-name is otherwise indistinguishable from a setting you never made, and the
-failure surfaces months later as a default nobody chose.
+Local sign-in requires `FANOUT_AUTH_CODE_SECRET` with at least 32 characters.
+SMTP and an AI provider are optional; each validates its required settings when
+enabled. OIDC requires an HTTPS issuer and public URL, a client ID and a client
+secret. The generated [settings reference](/reference/settings/auth) lists the
+available authentication settings.
 
 ## Claiming the first administrator
 
@@ -65,10 +48,9 @@ show it again.
 The setup form sends `email`, `display_name`, and `setup_token` to
 `POST /api/auth/setup`. The first administrator starts with status `active`.
 
-The warning in the banner is not boilerplate. The URL carries a credential that
-creates an administrator, and container logs are routinely shipped somewhere
-else. Treat a leaked setup URL as an unclaimed admin account and restart with a
-fresh data directory if you cannot account for who has seen it.
+The setup URL is an administrator credential. Restrict access to process logs
+until it is consumed or expires. Treat a leaked setup URL as a compromised
+installation and rebuild with a fresh data directory before repeating setup.
 
 ## Signing in afterwards
 
@@ -79,5 +61,5 @@ link for an existing active user. OIDC deployments use the provider's flow inste
 
 ## Next
 
-An instance with no data is a blank browser client. [Send your first
-telemetry](/start/send-telemetry) points an exporter at it.
+[Send your first telemetry](/start/send-telemetry), then investigate it with
+[Fanout’s agent or an MCP client](/start/send-telemetry#investigate-the-data).

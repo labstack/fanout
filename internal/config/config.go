@@ -56,12 +56,9 @@ type Config struct {
 	// IngestBatchSize sets the group-commit row target; valid values are 1–50000.
 	// Individual requests remain atomic and can exceed this target.
 	IngestBatchSize int `group:"ingest" env:"FANOUT_INGEST_BATCH_SIZE" default:"50000"`
-	// IngestMaxInFlightBytes caps the decoded telemetry the process will hold
-	// across concurrent requests. Concurrency is HTTP/2 streams times
-	// connections and each handler holds its batch until the commit is
-	// durable, so without a ceiling a burst is bounded only by memory. Zero is
-	// unbounded. A single request is admitted when no other request holds budget,
-	// even if it exceeds the limit.
+	// IngestMaxInFlightBytes caps decoded telemetry held across concurrent requests
+	// until durable publication. Zero is unbounded. A single request is admitted
+	// when no other request holds budget, even if it exceeds the limit.
 	IngestMaxInFlightBytes int `group:"ingest" env:"FANOUT_INGEST_MAX_IN_FLIGHT_BYTES" default:"268435456"`
 	// RollupInterval schedules analytical rollups; use a Go duration of at least 1s.
 	RollupInterval time.Duration `group:"storage" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
@@ -99,21 +96,20 @@ type Config struct {
 	// comment: cmd/fanout-docgen publishes each field's comment as that
 	// setting's note, and this paragraph describes three of them.
 
-	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty means Fanout sizes
-	// it from detected memory, reserving headroom for the Go runtime; see
-	// resolveSizing. DuckDB's own default is 80% of detected RAM, which is
-	// calculated as though DuckDB owned the machine and has been observed to
-	// get the process OOM-killed once the Go heap is added on top.
+	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty selects 60% of detected
+	// available memory, reserving headroom for Go. If detection fails, DuckDB uses
+	// its default with a process headroom adjustment. Startup logs and /readyz
+	// report the resolved budget and detection status. Set an explicit cap when
+	// memory limit detection is incomplete.
 	DuckDBMemory string `group:"storage" env:"FANOUT_DUCKDB_MEMORY"`
 	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
 	// DuckDB's own default in place (one worker per core). Set it to leave
 	// cores free for ingest on a query-heavy co-tenant host.
 	DuckDBThreads int `group:"storage" env:"FANOUT_DUCKDB_THREADS" default:"0"`
-	// DuckDBMaxConns caps the DuckDB connection pool. Reads scan immutable Parquet
-	// concurrently; rollup-cache writes are serialized by the query write gate.
-	// Zero means "size it from the machine" — the same spelling DuckDBThreads
-	// uses for deferring to a default. Resolution happens in resolveSizing and
-	// is reported in the startup configuration log.
+	// DuckDBMaxConns caps the DuckDB read connection pool. Reads scan immutable
+	// Parquet concurrently; analytical and completed-batch writes use separate
+	// gates and connections. Zero selects available Go CPUs, bounded to 2–16.
+	// Startup logs and /readyz report the resolved pool size.
 	DuckDBMaxConns int `group:"storage" env:"FANOUT_DUCKDB_MAX_CONNECTIONS" default:"0"`
 	// AlertEnabled runs the alert evaluation engine.
 	AlertEnabled bool `group:"alerts" env:"FANOUT_ALERTS_ENABLED" default:"true"`
@@ -153,7 +149,8 @@ type Config struct {
 	SMTPFrom string `group:"smtp" env:"FANOUT_SMTP_FROM"`
 	// AuthMode selects local sign-in or oidc; each mode validates its prerequisites.
 	AuthMode string `group:"auth" env:"FANOUT_AUTH_MODE" default:"local"`
-	// PublicURL sets the external browser origin. Required for OIDC; HTTPS is required with MCP.
+	// PublicURL sets the external browser origin, MCP token audience, and trusted MCP
+	// request origin. Required for OIDC; HTTPS is required with MCP.
 	PublicURL string `group:"server" env:"FANOUT_PUBLIC_URL"`
 	// AuthCodeSecret signs local sign-in codes; required in local mode with at least 32 characters.
 	AuthCodeSecret string `group:"auth" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`

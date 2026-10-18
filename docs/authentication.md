@@ -20,7 +20,7 @@ stderr containing a **setup URL**:
 ============================================================
 ```
 
-Properties worth knowing:
+Setup credential behavior:
 
 - The credential carries 128 bits of entropy and lives only in memory. It is
   never written to the database.
@@ -37,7 +37,7 @@ Properties worth knowing:
 > [!WARNING]
 > The setup URL is an administrator credential. Anywhere the process's stderr
 > is collected — container logs, a log shipper, a terminal recording, a shared
-> screen — now holds it until the credential is consumed or expires. Treat a
+> screen — can hold it until the credential is consumed or expires. Treat a
 > leaked banner as a compromised installation and rebuild the database.
 
 ### Before you complete setup
@@ -57,7 +57,7 @@ login link remains available when delivery fails.
 
 Local accounts are invitation-only by default. To let any verified email
 address create an account, set `FANOUT_SELF_SIGNUP=true`. Fanout sends the
-existing email code and creates an active `viewer` only after that code is
+email code and creates an active `viewer` only after that code is
 successfully verified. The role is fixed: self-signup can never create an
 operator or administrator.
 The setting requires complete SMTP configuration and local auth mode.
@@ -91,7 +91,7 @@ online is supported by the control database's WAL and busy-timeout settings.
 
 Fix SMTP after regaining access if email-code login is expected. OIDC-mode
 recovery remains at the identity provider or OIDC configuration layer; local
-login links are deliberately unavailable in that mode.
+login links are unavailable in that mode.
 
 ### User account API
 
@@ -142,9 +142,9 @@ grants, and dashboards.
 
 ## Reverse proxies and client IP
 
-Rate limiting and audit attribution both key on the client IP. Behind a proxy,
-that address arrives in `X-Forwarded-For`, and trusting the header blindly lets
-any client forge both.
+Sign-in rate limiting and audit attribution use the client IP. MCP tool invocation
+limits use the authenticated user and OAuth client. Behind a proxy, the client
+address arrives in `X-Forwarded-For`; trust it only from configured proxies.
 
 - **Default (no configuration):** forwarded headers are ignored and the direct
   peer address is used. Safe when Fanout is exposed directly.
@@ -176,13 +176,13 @@ export FANOUT_OIDC_ALLOWED_DOMAINS="*"
 export FANOUT_OIDC_DEFAULT_ROLE=viewer
 ```
 
-The wildcard is deliberately explicit and is rejected with
+The wildcard is rejected with
 `FANOUT_OIDC_EMAIL_VERIFICATION=issuer`. Use a specific domain or group allowlist
 for a private installation. A wildcard makes the installation available to every
 identity accepted by the configured provider, so rate-limit public traffic and
 budget AI usage at the deployment edge.
 
-Fanout's roles remain installation-wide rather than deployment-specific:
+Fanout’s roles apply across the instance:
 
 - `viewer` reads telemetry, uses chat and MCP tools within viewer permissions,
   and manages its own dashboards.
@@ -222,9 +222,7 @@ token entirely and emits `_claim_names`/`_claim_sources` pointing at the Graph
 API instead. An omitted claim does not mean the user belongs to no groups.
 
 When any group-based policy is configured and the token signals overage, Fanout
-**denies the login** rather than reading the absence as an empty group set —
-the alternative would demote or lock out every member of a large directory at
-once. The denial names the group claim so the remediation is clear.
+**denies the login** and names the group claim in the error.
 
 Fix it at the identity provider: configure the application registration to emit
 only **groups assigned to the application** rather than all group memberships.

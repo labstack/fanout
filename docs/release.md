@@ -15,8 +15,8 @@ Fanout publishes one release from a verified commit on `main`. A release contain
 
 Tags use unpadded CalVer: `vYYYY.M.N[-alpha|-beta|-rc]`. The suffix states product
 maturity; GA has no suffix. The first release in a month is `.0`, and every
-release increments `N` regardless of suffix. Fanout is currently alpha; after
-`v2026.10.0`, the next release is `v2026.10.1-alpha`.
+release increments `N` regardless of suffix. Fanout is alpha. For example,
+`v2026.10.1-alpha` follows `v2026.10.0-alpha`.
 Container tags omit the leading `v`, so `v2026.10.1-alpha` publishes
 `ghcr.io/labstack/fanout:2026.10.1-alpha` and `labstack/fanout:2026.10.1-alpha`.
 Every release moves `latest`. GitHub Releases are not marked as prereleases:
@@ -24,11 +24,8 @@ the tag carries maturity, and the installer's `/releases/latest` must resolve.
 Only release and `latest` tags are mirrored to Docker Hub; `main` and commit
 tags remain GHCR-only.
 
-Onebox consumes that public container reference. Its deployment planner resolves
-the tag to an immutable registry digest before release, so production manifests
-can remain readable without making the running revision mutable. Live Onebox
-manifests and secret files are deployment state and do not belong in this public
-repository.
+Deployments should resolve public tags to immutable registry digests. Keep live
+manifests and secret profiles outside this public repository.
 
 ## Creating a release
 
@@ -49,14 +46,8 @@ installer, and verifies provenance. Only after those checks pass does the
 workflow publish the release's `server.json` to the MCP Registry with GitHub
 OIDC; no long-lived registry credential is stored in the repository.
 
-Fanout does not currently use GoReleaser. DuckDB requires CGO and the supported
-targets are built on four native runners. GoReleaser's supported split-and-merge
-pipeline for native CGO builds is a Pro-only feature, while maintaining four
-cross-compilation toolchains would add risk without improving the artifact. The
-custom workflow follows the same clean-tree, tag, archive, checksum, and
-post-publish verification discipline without introducing a commercial release
-dependency. Revisit this if the build becomes cross-compilable or a GoReleaser
-Pro subscription is intentionally adopted.
+The release workflow builds CGO targets on four native runners. It creates
+archives, checksums and attestations, then verifies the published artifacts.
 
 ## Consumer verification
 
@@ -78,12 +69,10 @@ docker buildx imagetools inspect docker.io/labstack/fanout:2026.10.1-alpha
 
 ## Supply-chain scope
 
-The first public release provides SHA-pinned Actions, archive checksums, GitHub
+The release workflow uses SHA-pinned Actions, archive checksums, GitHub
 build provenance, dependency and secret scanning, legal inventories, and
 post-publication verification. The container is consumed by immutable digest.
 
-Standalone signatures and SBOM publication are deferred until Fanout has a
-consumer that verifies them. Adding unconsumed artifacts would create a policy
-claim without an operational control. This decision does not block adding either
-later; provenance and the deterministic `THIRD_PARTY_NOTICES` inventory already
-establish the release source and shipped dependency set.
+Standalone signatures and SBOMs are outside the release artifact inventory.
+GitHub build provenance identifies the source; `THIRD_PARTY_NOTICES` lists the
+shipped dependencies.

@@ -172,6 +172,9 @@ with `/mcp` appended. Fanout accepts public MCP transport requests only when
 their HTTP `Host` matches that origin, so the reverse proxy must preserve the
 original host.
 
+MCP also validates `Origin` before authentication; see
+[Connect an agent over MCP](https://fanout.run/guides/connect-over-mcp#protocol).
+
 ## Health and monitoring
 
 `fanout healthcheck` derives `/healthz` from `FANOUT_ADDR` or its built-in

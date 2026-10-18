@@ -82,8 +82,8 @@ for examples.
 ## Validation
 
 The whole configuration is validated before data files or listeners open. A value the
-binary cannot accept stops startup. [First boot](/start/first-boot) lists what
-is checked. The healthcheck command derives its probe from the listener and
+binary cannot accept stops startup. The generated settings pages list individual
+constraints; [first boot](/start/first-boot) covers administrator setup. The healthcheck command derives its probe from the listener and
 TLS environment settings without validating unrelated settings or secrets.
 
 ## DuckDB sizing
@@ -94,7 +94,7 @@ headroom for Go and sizes the DuckDB connection pool from available CPUs. The
 resolved values and whether Fanout chose them are available in the
 `runtime_sizing` block returned by `/readyz`.
 
-These variables are escape hatches for measured, unusual workloads:
+Override these values when measurements justify different resource limits:
 
 | Variable | Automatic behavior | When to override |
 |---|---|---|

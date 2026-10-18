@@ -13,8 +13,7 @@ Use direct TLS or terminate TLS at a reverse proxy.
 
 ## Direct TLS
 
-Set both files. Setting one without the other is a startup error rather than a
-half-configured listener:
+Set both files; supplying only one fails startup:
 
 ```sh
 export FANOUT_TLS_CERT_FILE=/etc/fanout/tls/cert.pem
@@ -34,15 +33,16 @@ export FANOUT_PUBLIC_URL=https://fanout.example.com
 export FANOUT_TRUSTED_PROXY_CIDRS=10.0.1.0/24
 ```
 
-`FANOUT_PUBLIC_URL` is the externally reachable HTTPS origin. Fanout uses it as
-a trusted signal that TLS is terminated somewhere in front, which is what lets
-it mark session cookies `Secure`. Without it, an instance behind a proxy issues
-cookies that are not — and it warns about exactly that at startup.
+`FANOUT_PUBLIC_URL` is the externally reachable HTTPS origin. Fanout uses it to
+mark browser session cookies `Secure` when TLS terminates at the proxy.
+
+Without local TLS or an HTTPS `FANOUT_PUBLIC_URL`, browser session cookies lack
+`Secure`, and Fanout warns at startup.
 
 `FANOUT_TRUSTED_PROXY_CIDRS` is the list of networks whose forwarded client
 addresses Fanout will believe. Set it to the proxy network and nothing wider.
-Never `0.0.0.0/0`: audit records and rate limits both key on client address, and
-trusting every source means any caller can claim to be any address. Fanout warns
+Never `0.0.0.0/0`: audit attribution and sign-in rate limits use the client address.
+Trusting every source lets any caller claim any address. Fanout warns
 when a public URL is set, TLS is not terminated locally, and this is empty.
 
 ### HTTP/2 to the backend
@@ -75,3 +75,6 @@ from it, and that derived resource is what tokens are bound to as their
 audience. So it must be HTTPS and stable across restarts — changing it
 invalidates every token already issued. `FANOUT_PUBLIC_URL` is the only
 public-origin setting.
+
+MCP also validates `Origin` before authentication; see
+[Connect an agent over MCP](/guides/connect-over-mcp#protocol).

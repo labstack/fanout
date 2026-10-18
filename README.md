@@ -12,8 +12,8 @@
 </picture>
 
 Fanout keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
-external services to operate. Fanout is pre-release and changes without migration paths; the browser
-client, chat investigator, MCP tools, dashboards, and alerts are preview capabilities
+external storage services to operate. Fanout is pre-release and changes without migration paths; the browser
+client, built-in agent, MCP tools, dashboards, and alerts are preview capabilities
 ([status](https://fanout.run/status/capabilities)). Start with the
 [documentation](https://fanout.run) or run it below.
 
@@ -101,7 +101,8 @@ See [AI settings](https://fanout.run/reference/settings/ai).
 
 Set `FANOUT_PUBLIC_URL` to your stable, externally reachable HTTPS origin, then point a remote MCP
 client at that origin's `/mcp` endpoint. The client discovers and registers through OAuth; you
-authorize its scopes in the browser. See [connect over
+authorize its scopes in the browser. The client must support MCP protocol `2026-07-28` over
+stateless Streamable HTTP; older versions and the `initialize` handshake are unsupported. See [connect over
 MCP](https://fanout.run/guides/connect-over-mcp) for setup and permissions.
 
 ## How it compares
@@ -207,7 +208,7 @@ generated assets, hooks, and project layout.
 ## Releases
 
 Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
-maturity suffixes. Fanout is currently alpha (for example, `v2026.10.1-alpha`); GA has no suffix.
+maturity suffixes. Fanout is alpha (for example, `v2026.10.1-alpha`); GA has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.

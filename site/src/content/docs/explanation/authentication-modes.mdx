@@ -8,118 +8,73 @@ read_when:
 status: preview
 ---
 
-Fanout signs people in one of two ways, set by `FANOUT_AUTH_MODE`. The choice is
-not only about convenience — it decides who owns a user's role.
+Fanout supports local sign-in and OIDC, selected by `FANOUT_AUTH_MODE`.
+Both use the same [roles and capabilities](/reference/roles), browser sessions
+and account suspension rules.
 
 ## Local
 
-There are no passwords. Active users receive short-lived codes by email, which
-is why SMTP exists as a setting at all.
+Active users sign in with an emailed code when SMTP is configured. Without
+SMTP, an operator with access to the control database mints a single-use link
+with `fanout login-link <email>`. Administrators manage accounts and roles
+inside Fanout. See [account profiles and suspension](#account-profiles-and-suspension)
+for account APIs and [authentication operations](https://github.com/labstack/fanout/blob/main/docs/authentication.md)
+for invitation delivery and recovery.
 
-SMTP is optional, and that has a consequence worth understanding rather than
-discovering. Creating a user without it succeeds, and reports that it could not
-deliver an invitation. The account is real; nobody can reach it until an
-operator with shell access mints a link with `fanout login-link`. That is the
-designed path, not a workaround — see
-[troubleshooting](/guides/troubleshoot).
-
-In local mode, roles are managed inside Fanout.
-
-### Account profiles and suspension
-
-User responses from `GET /api/auth/me` and `GET /api/users` use `display_name`
-and `status`. Status is `active` or `suspended`; roles remain `viewer`,
-`operator`, and `admin`.
-
-Administrators provision users with `POST /api/users`, supplying `email`,
-`display_name`, and `role`. New users have status `active`. Profile edits use
-`PATCH /api/users/{id}` with only `email` and `display_name`. Change roles with
-`PATCH /api/users/{id}/role` and a body such as `{"role":"viewer"}`; suspend an
-account with `PATCH /api/users/{id}/status` and `{"status":"suspended"}`.
-Use `{"status":"active"}` on that same status route to restore sign-in.
-Unknown fields and invalid statuses return `400`.
-
-Email, role, and status changes revoke existing browser sessions. Suspension
-blocks both local and OIDC sign-in, as well as OAuth token use. Restoring status
-does not restore revoked sessions. The last active administrator cannot be
-demoted, suspended, or deleted. These account rules apply in both auth modes.
-
-### Self-signup
-
-`FANOUT_SELF_SIGNUP` (default `false`) lets anyone who can receive an email code
-provision themselves an account. It exists for public installations that want
-per-user access without a shared credential or an identity provider.
-
-Two conditions guard it, and both matter:
-
-- **Only after email-code verification.** An account is created when the code is
-  verified, not when it is requested, so an address nobody controls cannot
-  become a user.
-- **Never before admin setup.** Provisioning is refused while the instance has
-  no users, so the first account is always the administrator you create
-  deliberately — a race for the setup URL cannot hand someone else the instance.
-
-Self-provisioned users are `viewer`. Be clear about what that grants before
-turning this on: a viewer can read **all** telemetry the instance holds, keep
-their own dashboards, and **run the chat investigator** — which calls your model
-provider and spends money. It can change its own dashboards, but cannot manage
-alert rules, rotate the ingest token, or administer users.
-
-If that is more than you want to hand to anyone who can receive an email, leave
-self-signup off and create accounts deliberately. The full matrix is in
-[roles](/reference/roles), generated from the authorization table itself.
+`FANOUT_SELF_SIGNUP` allows verified email addresses to create viewer accounts.
+It defaults to `false` and requires complete SMTP configuration. Self-signup is
+available only after the first administrator completes setup. Viewers can read
+all telemetry, manage their own dashboards and run the built-in agent.
+The built-in agent sends requests to your configured model provider and can
+incur charges. Enabling self-signup grants that access to anyone who can verify
+an email address.
 
 ## OIDC
 
-An identity provider handles sign-in. Two behaviours are worth knowing before
-you rely on it.
+An identity provider handles sign-in. Group and domain allowlists are evaluated
+on every login, including for linked identities. Removing a user’s eligibility
+blocks their next login; it does not revoke a browser session already issued.
+Suspending the account in Fanout blocks access and revokes its sessions.
 
-### Eligibility is checked on every login
+If neither `FANOUT_OIDC_ALLOWED_GROUPS` nor `FANOUT_OIDC_ALLOWED_DOMAINS` is
+configured, no eligibility allow policy is enforced; membership is managed locally.
 
-`FANOUT_OIDC_ALLOWED_GROUPS` and `FANOUT_OIDC_ALLOWED_DOMAINS` are evaluated at
-every login, including by an identity that is already linked. Removing someone
-from an allowed group at the provider blocks their next login. It does not wait
-for a provisioning cycle, and there is no window in which a removed user
-continues to be admitted.
+### Account provisioning
 
-If neither list is set there is no allow policy, and membership is managed
-locally instead.
+`FANOUT_OIDC_AUTO_PROVISION` creates eligible accounts on first sign-in after
+administrator setup. It requires an allowed group or domain. The role comes
+from the configured group mapping, falling back to `FANOUT_OIDC_DEFAULT_ROLE`
+(`viewer`).
 
-### Verified identities can be auto-provisioned as viewers
+`FANOUT_OIDC_EMAIL_VERIFICATION=required` requires a verified email. The `issuer`
+policy trusts the configured issuer and requires an allowlist. See
+[OIDC operations](https://github.com/labstack/fanout/blob/main/docs/authentication.md#oidc)
+for public access and Microsoft Entra ID group-overage handling.
 
-`FANOUT_OIDC_AUTO_PROVISION` creates an eligible identity's account on first
-login, after administrator setup. Its role comes from the configured admin or
-operator group mapping, falling back to `FANOUT_OIDC_DEFAULT_ROLE` (`viewer`).
-With the default `FANOUT_OIDC_EMAIL_VERIFICATION=required`, the identity must
-have a verified email. The `issuer` policy trusts the configured issuer instead
-and requires an allowlist. Auto-provisioning always requires an allowed group
-or domain. Chat, MCP tools and owned dashboards are available to viewers;
-operator actions still require the corresponding capabilities.
+### Role ownership
 
-This is the OIDC counterpart to local self-signup above, and it obeys the same
-allow policy: if `FANOUT_OIDC_ALLOWED_GROUPS` or `FANOUT_OIDC_ALLOWED_DOMAINS`
-is set, an identity outside it is not admitted at all, provisioning or not.
+If `FANOUT_OIDC_ADMIN_GROUPS` or `FANOUT_OIDC_OPERATOR_GROUPS` is configured, the
+provider reapplies the mapped role on every login. Users outside mapped groups
+receive `FANOUT_OIDC_DEFAULT_ROLE`. A role change revokes browser sessions and
+writes an audit event in the same transaction.
 
-### The provider can own roles, or not
+Without a role-group mapping, administrators manage roles inside Fanout and
+OIDC sign-in preserves them. Reconciliation cannot demote the last active
+administrator; promote a second administrator before applying that mapping.
 
-If `FANOUT_OIDC_ADMIN_GROUPS` or `FANOUT_OIDC_OPERATOR_GROUPS` is set, the
-provider owns each linked user's role. The mapped role is applied on every
-login; anyone in no mapped group falls back to `FANOUT_OIDC_DEFAULT_ROLE`. A
-role change increments the user's auth version, revokes their browser sessions,
-and writes a `role.changed` audit event — in one transaction, so a demotion
-cannot half-apply and leave live sessions at the old level.
+## Account profiles and suspension
 
-If neither group list is set, roles are managed locally and logins never change
-them.
+Administrators create active accounts with `POST /api/users`, supplying `email`,
+`display_name` and `role`. Edit profiles with `PATCH /api/users/{id}`; change
+roles with `PATCH /api/users/{id}/role` and `{"role":"viewer"}`. Suspend with
+`PATCH /api/users/{id}/status` and `{"status":"suspended"}`; restore with
+`{"status":"active"}`. Unknown fields and invalid statuses return `400`.
+Email, role and status changes revoke browser sessions. Suspension blocks local
+and OIDC sign-in and OAuth token use. Reactivation does not restore revoked
+sessions. The last active administrator cannot be demoted, suspended or deleted.
 
-:::caution[The last administrator is never demoted]
-Role reconciliation refuses to demote the last active administrator, because an
-installation that cannot administer itself has no way back. If you expect the
-mapping to apply to your first admin, promote a second one first.
-:::
+## Access boundaries
 
-## What neither mode is
-
-Neither is a tenancy boundary. Namespaces scope telemetry queries, but anyone
-who can query the instance can query every namespace in it. An instance is one
-trust domain; separate trust domains want separate instances.
+Every telemetry reader can query every namespace. Namespaces filter queries;
+separate trust domains require separate instances. Dashboard access is scoped
+to the owner for every role, including administrators.
