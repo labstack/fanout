@@ -6,17 +6,15 @@ import { clipSegments, clipFilter } from "./clip-timeline.mjs";
 const stream = events => events.map(event => `data: ${JSON.stringify(event)}\n\n`).join("");
 const event = (type, at, data = {}) => ({ type, timestamp: 1_000_000 + at * 1000, ...data });
 
-test("recording times survive server clock skew and preserve visible reasoning and answer text", () => {
+test("recording times survive server clock skew and preserve the answer text", () => {
   const recorded = recordingTimeline(stream([
-    event("RUN_STARTED", 0), event("REASONING_MESSAGE_START", 2), event("REASONING_MESSAGE_CONTENT", 3),
-    event("REASONING_MESSAGE_END", 4), event("TOOL_CALL_START", 6, { toolCallId: "q", toolCallName: "query_telemetry" }),
+    event("RUN_STARTED", 0), event("TOOL_CALL_START", 6, { toolCallId: "q", toolCallName: "query_telemetry" }),
     event("TOOL_CALL_END", 6.1, { toolCallId: "q" }), // Arguments ended; the tool is still running.
     event("TOOL_CALL_RESULT", 9, { toolCallId: "q", content: "{}" }),
     event("TEXT_MESSAGE_START", 12), event("TEXT_MESSAGE_CONTENT", 13), event("RUN_FINISHED", 14),
   ]), 10);
   assert.deepEqual(recorded.waits, [
-    { kind: "model_thinking", start: 10, end: 12 },
-    { kind: "model_thinking", start: 14, end: 16 },
+    { kind: "model_thinking", start: 10, end: 16 },
     { kind: "tool_call", start: 16, end: 19, tool: "query_telemetry" },
     { kind: "model_thinking", start: 19, end: 22 },
   ]);
@@ -107,4 +105,32 @@ test("encoding cuts frames before the clip start", () => {
     { start: 8, end: 12, seconds: 4 },
   ]);
   assert.throws(() => clipSegments([], 12, 12), /Clip start must be within the raw video/);
+});
+
+test("dashboard navigation and panel loading compress while the scroll and 3-second final dwell stay real time", () => {
+  const segments = clipSegments([
+    { kind: "model_thinking", start: 9, end: 32 },
+    { kind: "conversation_ready", start: 32, end: 36 },
+    // Includes clicking Open dashboard, navigation, lazy panels, and return to top.
+    { kind: "dashboard_ready", start: 36, end: 52 },
+    { kind: "hold", start: 52, end: 70 }, // 12 down + 1.5 bottom + 1.5 up + 3 final.
+  ], 70, 2);
+  assert.deepEqual(segments, [
+    { start: 2, end: 9, seconds: 7 },
+    { start: 9, end: 52, seconds: 0.6 },
+    { start: 52, end: 70, seconds: 18 },
+  ]);
+  const duration = segments.reduce((sum, segment) => sum + segment.seconds, 0);
+  assert.ok(duration >= 20 && duration <= 35);
+});
+
+test("conversation layout settling compresses without shortening the answer scroll or 4-second dwell", () => {
+  assert.deepEqual(clipSegments([
+    { kind: "conversation_ready", start: 10, end: 18 },
+    { kind: "hold", start: 18, end: 30 }, // 8-second scroll and 4-second answer dwell.
+  ], 30), [
+    { start: 0, end: 10, seconds: 10 },
+    { start: 10, end: 18, seconds: 0.6 },
+    { start: 18, end: 30, seconds: 12 },
+  ]);
 });

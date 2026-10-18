@@ -1,0 +1,9 @@
+Input #0, matroska,webm, from 'sample.webm':
+  Duration: 00:00:12.00, start: 0.000000
+[Parsed_freezedetect_0 @ 0x1234] lavfi.freezedetect.freeze_start: 0
+[Parsed_freezedetect_0 @ 0x1234] lavfi.freezedetect.freeze_duration: 2.4
+[Parsed_freezedetect_0 @ 0x1234] lavfi.freezedetect.freeze_end: 2.4
+[Parsed_freezedetect_0 @ 0x1234] lavfi.freezedetect.freeze_start: 4.4
+[Parsed_freezedetect_0 @ 0x1234] lavfi.freezedetect.freeze_duration: 5.4
+[Parsed_freezedetect_0 @ 0x1234] lavfi.freezedetect.freeze_end: 9.8
+frame= 300 fps=0.0 q=-0.0 Lsize=N/A time=00:00:12.00 bitrate=N/A
