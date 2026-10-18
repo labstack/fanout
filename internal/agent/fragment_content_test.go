@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/toolerror"
 	"reflect"
 	"strings"
 	"testing"
@@ -142,31 +143,38 @@ func TestAppSummariesBoundedOnSuccessAndError(t *testing.T) {
 }
 
 func TestAppToolErrorHasNoActivity(t *testing.T) {
-	messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "show"}}
-	provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: "query_telemetry", Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
-	runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: "Invalid telemetry window", IsError: true, AppResourceURI: "ui://fanout/panels.html"}}, nil)
-	emitter, _ := newTestEmitter()
-	if _, err := runtime.execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, message := range messages {
-		if message.Role == agtypes.RoleActivity {
-			t.Fatal("error emitted an app activity")
-		}
-		if message.Role == agtypes.RoleTool {
-			found = true
-			var payload struct {
-				Error   struct{ Code, Message string }
-				IsError bool
+	for _, tc := range []struct{ name, tool, content, code, message string }{
+		{"plain", "query_telemetry", "Invalid telemetry window", "tool_failed", "Invalid telemetry window"},
+		{"unknown service", "get_service_performance", toolerror.JSON("unknown_service", "kafka is a messaging system used by checkout, fraud-detection, accounting"), "unknown_service", "kafka is a messaging system used by checkout, fraud-detection, accounting"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			messages := []agtypes.Message{{ID: "user", Role: agtypes.RoleUser, Content: "show"}}
+			provider := &scriptedProvider{steps: [][]StreamEvent{{{Type: EventToolUse, ToolCall: &ToolCall{ID: "call", Name: tc.tool, Input: `{}`}}, {Type: EventStop, StopReason: "tool_calls"}}, {{Type: EventStop, StopReason: "end_turn"}}}}
+			runtime := NewRuntime(provider, &fakeTools{execution: ToolExecution{Content: tc.content, IsError: true, AppResourceURI: "ui://fanout/panels.html"}}, nil)
+			emitter, _ := newTestEmitter()
+			if _, err := runtime.execute(t.Context(), "thread", "run", &messages, emitter); err != nil {
+				t.Fatal(err)
 			}
-			if json.Unmarshal([]byte(messageText(message.Content)), &payload) != nil || payload.Error.Code != "tool_failed" || payload.Error.Message != "Invalid telemetry window" || !payload.IsError || message.Error == "" {
-				t.Fatal("tool error lost")
+			found := false
+			for _, message := range messages {
+				if message.Role == agtypes.RoleActivity {
+					t.Fatal("error emitted an app activity")
+				}
+				if message.Role == agtypes.RoleTool {
+					found = true
+					var payload struct {
+						Error   struct{ Code, Message string }
+						IsError bool
+					}
+					if json.Unmarshal([]byte(messageText(message.Content)), &payload) != nil || payload.Error.Code != tc.code || payload.Error.Message != tc.message || !payload.IsError || message.Error == "" {
+						t.Fatal("tool error lost")
+					}
+				}
 			}
-		}
-	}
-	if !found {
-		t.Fatal("tool error missing")
+			if !found {
+				t.Fatal("tool error missing")
+			}
+		})
 	}
 }
 

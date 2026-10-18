@@ -93,6 +93,8 @@ type panelExecutor interface {
 	Schema(context.Context, panel.SchemaRequest) (*panel.Schema, error)
 	Exemplars(context.Context, panel.ExemplarRequest) (panel.ExemplarResponse, error)
 	ResolveVariables(context.Context, panel.ResolveRequest) (map[string][]panel.Option, error)
+	ResolveWindow(time.Time, time.Time) (time.Time, time.Time, error)
+	ServiceGuidance(context.Context, time.Time, time.Time, string, string) (string, error)
 }
 
 type Server struct {
@@ -386,6 +388,11 @@ func (s *Server) dependencies(ctx context.Context, _ *mcp.CallToolRequest, input
 	if err != nil {
 		return nil, output, safePanelToolError(err)
 	}
+	if len(output.Data.Nodes) == 0 {
+		if err := s.checkService(ctx, scope, strings.TrimSpace(input.Service)); err != nil {
+			return nil, observability.Result[observability.Dependencies]{}, err
+		}
+	}
 	return summary(output.Summary), output, nil
 }
 
@@ -404,7 +411,16 @@ func (s *Server) presetFragment(ctx context.Context, input QueryInput, kind, ser
 	}
 	d := fragmentPreset(kind, service, input.Namespace, severity, search, input.Limit)
 	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
-	return s.runFragment(ctx, panel.RunRequest{Dashboard: d}, "preset")
+	result, out, err := s.runFragment(ctx, panel.RunRequest{Dashboard: d}, "preset")
+	if err != nil {
+		return nil, PanelFragment{}, err
+	}
+	if allResultsEmpty(out.Results) {
+		if err := s.checkService(ctx, scope, service); err != nil {
+			return nil, PanelFragment{}, err
+		}
+	}
+	return result, out, nil
 }
 func (s *Server) overview(ctx context.Context, _ *mcp.CallToolRequest, input QueryInput) (*mcp.CallToolResult, PanelFragment, error) {
 	return s.presetFragment(ctx, input, "overview", "", "", "")
@@ -440,6 +456,11 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
+	if allResultsEmpty(out.Results) && len(detail.Data.Spans) == 0 && len(detail.Data.Logs) == 0 {
+		if err := s.checkService(ctx, scope, strings.TrimSpace(input.Service)); err != nil {
+			return nil, PanelFragment{}, err
+		}
+	}
 	if detail.Data.Spans == nil {
 		detail.Data.Spans = []observability.TraceSpan{}
 	}
@@ -458,6 +479,44 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 	return summary(fragmentSummary(out)), out, nil
 }
 
+func allResultsEmpty(results []panel.Result) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, result := range results {
+		if result.Status != panel.StatusEmpty {
+			return false
+		}
+	}
+	return true
+}
+
+// Called only after a service-scoped tool succeeds with entirely empty results.
+// Unknown names return a product tool error without a typed success payload.
+func (s *Server) checkService(ctx context.Context, scope observability.Scope, service string) error {
+	if service == "" || s.panels == nil {
+		return nil
+	}
+	message, err := s.panels.ServiceGuidance(ctx, scope.Start, scope.End, scope.Namespace, service)
+	if err != nil {
+		return safePanelToolError(err)
+	}
+	if message == "" {
+		return nil
+	}
+	// JSON escaping expands a byte by at most six bytes. Reserve the envelope
+	// and bound before encoding so the agent's 16 KiB app cap cannot cut JSON.
+	const maxMessageBytes = (16*1024 - 128) / 6
+	if len(message) > maxMessageBytes {
+		message = message[:maxMessageBytes-len("…")]
+		for !utf8.ValidString(message) {
+			message = message[:len(message)-1]
+		}
+		message += "…"
+	}
+	return errors.New(toolerror.JSON("unknown_service", message))
+}
+
 func (s *Server) scope(input QueryInput) (observability.Scope, error) {
 	if input.Limit < 0 || input.Limit > 500 {
 		return observability.Scope{}, errors.New("limit must be from 1 to 500")
@@ -465,26 +524,35 @@ func (s *Server) scope(input QueryInput) (observability.Scope, error) {
 	if (input.From == nil) != (input.To == nil) {
 		return observability.Scope{}, errors.New("from and to must be supplied together")
 	}
+	var start, end time.Time
 	if input.From != nil {
 		if strings.TrimSpace(input.Window) != "" {
 			return observability.Scope{}, errors.New("from/to cannot coexist with window")
 		}
-		start, end := input.From.UTC(), input.To.UTC()
+		start, end = input.From.UTC(), input.To.UTC()
 		if !end.After(start) {
 			return observability.Scope{}, errors.New("to must be after from")
 		}
-		return observability.Scope{Namespace: input.Namespace, Start: start, End: end}, nil
-	}
-	window := time.Hour
-	if strings.TrimSpace(input.Window) != "" {
-		parsed, err := time.ParseDuration(input.Window)
-		if err != nil || parsed <= 0 {
-			return observability.Scope{}, fmt.Errorf("window must be a positive duration such as 15m or 1h")
+	} else {
+		window := time.Hour
+		if strings.TrimSpace(input.Window) != "" {
+			parsed, err := time.ParseDuration(input.Window)
+			if err != nil || parsed <= 0 {
+				return observability.Scope{}, fmt.Errorf("window must be a positive duration such as 15m or 1h")
+			}
+			window = parsed
 		}
-		window = parsed
+		end = s.now().UTC()
+		start = end.Add(-window)
 	}
-	end := s.now().UTC()
-	return observability.Scope{Namespace: input.Namespace, Start: end.Add(-window), End: end}, nil
+	if s.panels != nil {
+		var err error
+		start, end, err = s.panels.ResolveWindow(start, end)
+		if err != nil {
+			return observability.Scope{}, safePanelToolError(err)
+		}
+	}
+	return observability.Scope{Namespace: input.Namespace, Start: start, End: end}, nil
 }
 
 func summary(text string) *mcp.CallToolResult {

@@ -11,6 +11,9 @@ type Window struct {
 	Start, End         time.Time
 	Namespace, Service string
 	Kind               ReadKind
+	// RetainedInventory ignores event time only for resource_inventory. Raw
+	// relations still require the caller's explicit event-time predicates.
+	RetainedInventory bool
 }
 
 type windowKey struct{}
