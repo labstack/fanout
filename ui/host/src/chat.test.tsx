@@ -67,6 +67,10 @@ describe("provisional answer stream", () => {
     const { root, emit, close, requests } = await mountStreamChat();
     try {
       expect(requests[0].forwardedProps.answer_only).toBeUndefined();
+      const sent = requests[0].messages.filter(message => message.role === "user").at(-1)!;
+      const turn = document.querySelector('[data-chat-turn]');
+      expect(turn?.getAttribute("data-chat-turn")).toBe(sent.id);
+      expect(turn?.querySelector('[data-role="user"]')?.textContent).toContain("Sort latency");
       await emit({ type: "RUN_STARTED", threadId: "thread-stream", runId: "run" });
       await emit({ type: "TOOL_CALL_START", toolCallId: "failed", toolCallName: "query_telemetry", parentMessageId: "step" });
       await emit({ type: "TOOL_CALL_ARGS", toolCallId: "failed", delta: "{}" });
@@ -253,6 +257,90 @@ async function mount(context: FanoutAppContextValue) {
   await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={context}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
   return root;
 }
+
+describe("chat turn layout", () => {
+  afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+
+  it("keeps history outside the latest turn and its evidence, answer and status inside", async () => {
+    const messages: Message[] = [
+      { id: "first-question", role: "user", content: "Earlier question" },
+      { id: "first-answer", role: "assistant", content: "Earlier answer" },
+      { id: "last-question", role: "user", content: "Latest question" },
+      appMessage("latest-evidence", "query_telemetry", "Latest evidence"),
+    ];
+    const root = await mount(value({ messages, running: true }));
+    try {
+      const turn = document.querySelector('[data-chat-turn="last-question"]')!;
+      expect(turn.querySelector('[data-role="user"]')?.textContent).toContain("Latest question");
+      expect(turn.querySelector("[data-chat-app]")).not.toBeNull();
+      expect(turn.querySelector('[role="status"]')?.textContent).toContain("Analyzing your system");
+      expect(turn.textContent).not.toContain("Earlier question");
+      expect(turn.textContent).not.toContain("Earlier answer");
+      expect(document.querySelectorAll("[data-chat-turn]")).toHaveLength(1);
+      await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={value({ messages: [...messages, { id: "last-answer", role: "assistant", content: "Latest answer" }] })}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
+      expect(document.querySelector('[data-chat-turn="last-question"]')).toBe(turn);
+      expect(turn.querySelector("[data-answer-position]")?.textContent).toContain("Latest answer");
+      expect(turn.querySelector('[role="status"]')).toBeNull();
+      const evidence = turn.querySelector("[data-chat-app]");
+      (turn as HTMLElement).style.minHeight = "500px";
+      await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={value({ messages: [...messages, { id: "last-answer", role: "assistant", content: "Latest answer" }, { id: "next-question", role: "user", content: "Next question" }], running: true })}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
+      expect(turn.isConnected).toBe(true);
+      expect(turn.querySelector("[data-chat-app]")).toBe(evidence);
+      expect((turn as HTMLElement).style.minHeight).toBe("");
+      expect(document.querySelectorAll("[data-chat-turn]")).toHaveLength(1);
+      expect(document.querySelector('[data-chat-turn="next-question"]')?.textContent).toContain("Next question");
+    } finally { await act(async () => root.unmount()); }
+  });
+
+  it.each(["Enter", " "])("returns focus to the conversation before a %s jump hides its button", async key => {
+    let resize: (() => void) | undefined;
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("ResizeObserver", class {
+      callback: () => void;
+      constructor(callback: () => void) { this.callback = callback; }
+      observe(node: Element) { if (node.matches(".chat-scroll")) resize = this.callback; }
+      unobserve() {} disconnect() {}
+    });
+    const root = await mount(value({ messages: [
+      { id: "question", role: "user", content: "Explain health" },
+      { id: "answer", role: "assistant", content: "The full answer" },
+    ] }));
+    try {
+      const pane = document.querySelector<HTMLElement>('[role="log"][aria-label="Conversation"]')!;
+      const turn = pane.querySelector<HTMLElement>("[data-chat-turn]")!;
+      Object.defineProperties(pane, {
+        clientHeight: { value: 200, configurable: true },
+        scrollHeight: { value: 2000, configurable: true },
+      });
+      pane.getBoundingClientRect = () => ({ top: 40 } as DOMRect);
+      turn.getBoundingClientRect = () => ({ top: 640 - pane.scrollTop } as DOMRect);
+      turn.lastElementChild!.getBoundingClientRect = () => ({ bottom: 1640 - pane.scrollTop } as DOMRect);
+      act(() => resize?.());
+      expect(pane.scrollTop).toBe(584);
+      const jump = document.querySelector<HTMLButtonElement>('button[aria-label="Jump to latest"]')!;
+      expect(jump).not.toBeNull();
+      expect(jump.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+      expect(pane.contains(jump)).toBe(false);
+      jump.focus();
+      expect(document.activeElement).toBe(jump);
+      const focus = vi.spyOn(pane, "focus");
+      pane.addEventListener("focus", () => {
+        expect(jump.isConnected).toBe(true);
+      }, { once: true });
+      await act(async () => {
+        jump.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+        // happy-dom does not synthesize a button's native keyboard click.
+        jump.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+        jump.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+      });
+      expect(pane.scrollTop).toBe(pane.scrollHeight);
+      expect(document.querySelector('button[aria-label="Jump to latest"]')).toBeNull();
+      expect(document.activeElement).toBe(pane);
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(turn.querySelector("[data-answer-position]")?.textContent).toContain("The full answer");
+    } finally { await act(async () => root.unmount()); vi.unstubAllGlobals(); }
+  });
+});
 
 function button(text: string) {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === text);

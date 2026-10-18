@@ -84,10 +84,25 @@ body,
   height: calc(100dvh - var(--app-shell-header-offset, 0px));
 }
 
-.chat-scroll {
+.chat-viewport {
+  position: relative;
+  display: flex;
   flex: 1;
   min-height: 0;
+}
+
+.chat-scroll {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  overflow-anchor: none;
+}
+
+.chat-jump {
+  position: absolute;
+  bottom: var(--mantine-spacing-sm);
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .chat-composer {
