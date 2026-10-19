@@ -202,6 +202,45 @@ func TestOAuthStoreRefreshGraceRejectsFutureRotation(t *testing.T) {
 	}
 }
 
+// A rotated token replayed just after it expires, though within the grace
+// window, is reuse: the family is revoked rather than left live.
+func TestOAuthStoreRefreshGraceRevokesExpiredReplay(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("expiring@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	base := time.Now().UTC()
+	store.now = func() time.Time { return base }
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://127.0.0.1:14550/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
+	if err != nil {
+		t.Fatalf("IssueTokenPair: %v", err)
+	}
+	rotatedAt := base.Add(OAuthRefreshTTL - 30*time.Second)
+	store.now = func() time.Time { return rotatedAt }
+	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	store.now = func() time.Time { return base.Add(OAuthRefreshTTL + time.Second) }
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("expired replay within grace = %v, want reuse detection", err)
+	}
+	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("descendant access token = %v, want family revoked", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, second.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("descendant refresh token = %v, want family revoked", err)
+	}
+}
+
 // A revoked family has no live sibling, so the grace window never revives it.
 func TestOAuthStoreRefreshGraceDoesNotReviveRevokedFamily(t *testing.T) {
 	sqlite := newTestSQLite(t)

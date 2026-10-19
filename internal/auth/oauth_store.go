@@ -283,8 +283,9 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 	// a rotation within the grace window, in a family that is still live, is
 	// a concurrent sibling refresh; it gets its own pair in the family.
 	sibling := false
-	// A rotation dated after now (a clock stepped back) is never in the window.
-	if elapsed := now - record.RevokedAt.Int64; record.RevokedAt.Valid && elapsed >= 0 && elapsed <= int64(OAuthRefreshReuseGrace/time.Second) {
+	// A rotation dated after now (a clock stepped back) is never in the window,
+	// and an expired rotated token is reuse, not a sibling.
+	if elapsed := now - record.RevokedAt.Int64; record.RevokedAt.Valid && elapsed >= 0 && elapsed <= int64(OAuthRefreshReuseGrace/time.Second) && record.ExpiresAt.Unix() > now {
 		if sibling, err = liveRefreshFamily(ctx, conn, record.FamilyID, now); err != nil {
 			return OAuthTokenPair{}, err
 		}
