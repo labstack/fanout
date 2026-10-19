@@ -252,8 +252,8 @@ func TestMCPRejectsUnsupportedProtocolsAndModernStreams(t *testing.T) {
 		t.Fatalf("headerless modern status=%d", response.StatusCode)
 	}
 	response = f.request(t, f.token, "POST", modernMCPBody("initialize", `"protocolVersion":"2026-07-28"`), appmcp.ProtocolVersion, "initialize", "")
-	if response.StatusCode != 404 {
-		t.Fatalf("modern initialize status=%d", response.StatusCode)
+	if response.StatusCode != 400 {
+		t.Fatalf("initialize with per-request metadata status=%d", response.StatusCode)
 	}
 }
 
@@ -329,6 +329,67 @@ func TestMCPLegacySessionsNegotiateAndCall(t *testing.T) {
 				t.Fatalf("call=%+v error=%v", called, err)
 			}
 		})
+	}
+}
+
+func TestMCPInitializeWithModernHeaderSelectsLegacySession(t *testing.T) {
+	for _, version := range []string{appmcp.ProtocolVersion, "2025-11-25"} {
+		t.Run(version, func(t *testing.T) {
+			for _, headers := range []struct{ method, name string }{
+				{"initialize", ""},
+				{"tools/call", "conformance_probe"},
+				{"tools/call", "create_dashboard"},
+			} {
+				f := newMCPHTTPFixture(t)
+				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"clientInfo":{"name":"legacy","version":"test"},"capabilities":{}}}`, version)
+				response := f.request(t, f.token, "POST", body, appmcp.ProtocolVersion, headers.method, headers.name)
+				var initialized mcp.InitializeResult
+				if err := decodeMCPResponse(t, response, &initialized); err != nil || response.StatusCode != 200 || initialized.ProtocolVersion != "2025-11-25" {
+					t.Fatalf("initialize headers=%+v status=%d result=%+v error=%v", headers, response.StatusCode, initialized, err)
+				}
+				id := response.Header.Get("Mcp-Session-Id")
+				if id == "" {
+					t.Fatal("initialize with modern header did not create a legacy session")
+				}
+				if len(f.auth.toolLimiter.entries) != 0 {
+					t.Fatal("initialize consumed the tool budget")
+				}
+				response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, initialized.ProtocolVersion, "", "", id)
+				if response.StatusCode != http.StatusAccepted {
+					t.Fatalf("initialized status=%d", response.StatusCode)
+				}
+				response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conformance_probe","arguments":{}}}`, initialized.ProtocolVersion, "", "", id)
+				var called mcp.CallToolResult
+				if err := decodeMCPResponse(t, response, &called); err != nil || response.StatusCode != 200 || called.IsError || f.calls.Load() != 1 {
+					t.Fatalf("call status=%d result=%+v error=%v", response.StatusCode, called, err)
+				}
+				response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_dashboard","arguments":{}}}`, initialized.ProtocolVersion, "tools/list", "conformance_probe", id)
+				challenge := response.Header.Get("WWW-Authenticate")
+				if response.StatusCode != 403 || !strings.Contains(challenge, `error="insufficient_scope"`) || !strings.Contains(challenge, `scope="telemetry:read dashboard:manage"`) {
+					t.Fatalf("dashboard write status=%d challenge=%s", response.StatusCode, challenge)
+				}
+			}
+		})
+	}
+}
+
+func TestBrowserMCPRejectsInitializeWithModernHeader(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	user, err := f.state.users.GetByEmail("interop@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := f.state.login(t, user)
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"capabilities":{},"clientInfo":{"name":"browser","version":"test"}}}`, appmcp.ProtocolVersion)
+	rec := serve(t, f.state.e, "POST", "/api/mcp", body, map[string]string{
+		"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "Fanout-Request": "1",
+		"MCP-Protocol-Version": appmcp.ProtocolVersion, "Mcp-Method": "initialize",
+	}, cookie)
+	if rec.Code != http.StatusBadRequest || rec.Header().Get("Mcp-Session-Id") != "" {
+		t.Fatalf("browser initialize status=%d headers=%v", rec.Code, rec.Header())
+	}
+	for range f.app.MCP().Sessions() {
+		t.Fatal("browser initialize created a legacy session")
 	}
 }
 

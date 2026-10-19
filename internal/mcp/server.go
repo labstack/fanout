@@ -344,10 +344,6 @@ func (s *Server) HTTPHandler() http.Handler {
 		},
 	)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("MCP-Protocol-Version") >= ProtocolVersion {
-			modern.ServeHTTP(w, r)
-			return
-		}
 		if r.Method == http.MethodPost {
 			// The SDK defaults headerless requests to 2025-03-26, which allows
 			// batches. Decode one message before entering that compatibility path.
@@ -357,6 +353,16 @@ func (s *Server) HTTPHandler() http.Handler {
 				return
 			}
 			if request, ok := message.(*jsonrpc.Request); ok {
+				if request.Method == "initialize" {
+					if r.Header.Get("MCP-Protocol-Version") >= ProtocolVersion {
+						// Initialize selects legacy semantics; the SDK otherwise
+						// rejects this header before negotiating the body version.
+						r = r.Clone(r.Context())
+						r.Header.Del("MCP-Protocol-Version")
+					}
+					legacy.ServeHTTP(w, r)
+					return
+				}
 				var params map[string]json.RawMessage
 				var meta mcp.Meta
 				if json.Unmarshal(request.Params, &params) == nil && json.Unmarshal(params["_meta"], &meta) == nil && meta[mcp.MetaKeyProtocolVersion] != nil {
@@ -364,6 +370,10 @@ func (s *Server) HTTPHandler() http.Handler {
 					return
 				}
 			}
+		}
+		if r.Header.Get("MCP-Protocol-Version") >= ProtocolVersion {
+			modern.ServeHTTP(w, r)
+			return
 		}
 		legacy.ServeHTTP(w, r)
 	})

@@ -134,12 +134,6 @@ func mcpRequestMethodAndName(r *http.Request) (string, string, error) {
 	if r.Method != http.MethodPost {
 		return "", "", nil
 	}
-	method, name := r.Header.Get("Mcp-Method"), r.Header.Get("Mcp-Name")
-	// Only modern headers are checked against the body by the SDK. Legacy
-	// headers are optional and untrusted even when a client supplies them.
-	if r.Header.Get("MCP-Protocol-Version") >= appmcp.ProtocolVersion && method != "" && (method != "tools/call" || name != "") {
-		return method, name, nil
-	}
 	message, err := appmcp.ReadHTTPMessage(r)
 	if err != nil {
 		return "", "", err
@@ -147,6 +141,12 @@ func mcpRequestMethodAndName(r *http.Request) (string, string, error) {
 	request, ok := message.(*jsonrpc.Request)
 	if !ok {
 		return "", "", nil
+	}
+	method, name := r.Header.Get("Mcp-Method"), r.Header.Get("Mcp-Name")
+	// Initialize selects legacy semantics regardless of headers. Only other
+	// modern requests have their headers checked against the body by the SDK.
+	if request.Method != "initialize" && r.Header.Get("MCP-Protocol-Version") >= appmcp.ProtocolVersion && method != "" && (method != "tools/call" || name != "") {
+		return method, name, nil
 	}
 	name = ""
 	var params map[string]json.RawMessage

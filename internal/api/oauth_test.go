@@ -272,7 +272,7 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("browser MCP without CSRF proof = %d %s, want 403", csrfResponse.Code, csrfResponse.Body.String())
 	}
 
-	browser := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{
+	browser := serve(t, e, http.MethodPost, "/api/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, map[string]string{
 		"Authorization":        "Bearer attacker-controlled",
 		"Fanout-Request":       "1",
 		"MCP-Protocol-Version": appmcp.ProtocolVersion,

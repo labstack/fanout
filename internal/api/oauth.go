@@ -169,6 +169,14 @@ func (h *MCPAuthorization) ProtectBrowserMCP(sessions *appauth.BrowserSessions, 
 		if c.Request().Header.Get("MCP-Protocol-Version") < appmcp.ProtocolVersion {
 			return echo.NewHTTPError(http.StatusBadRequest, "browser MCP requires the modern protocol")
 		}
+		method, _, err := mcpRequestMethodAndName(c.Request())
+		if err != nil {
+			appmcp.WriteHTTPMessageError(c.Response(), err)
+			return nil
+		}
+		if method == "initialize" {
+			return echo.NewHTTPError(http.StatusBadRequest, "browser MCP requires the modern protocol")
+		}
 		ctx := context.WithValue(c.Request().Context(), browserMCPUserContextKey{}, *user)
 		request := c.Request().Clone(ctx)
 		request.Header.Set("Authorization", "Bearer "+browserMCPSessionBearer)
