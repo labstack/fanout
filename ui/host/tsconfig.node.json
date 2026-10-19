@@ -22,6 +22,10 @@
     "vite*.ts",
     "tests/build-graph.test.ts",
     "playwright.config.ts",
-    "e2e/**/*.ts"
+    "e2e/failure-report.ts",
+    "e2e/fixtures/**/*.ts",
+    "e2e/host/**/*.ts",
+    "e2e/specs/**/*.ts",
+    "e2e/support/**/*.ts"
   ]
 }

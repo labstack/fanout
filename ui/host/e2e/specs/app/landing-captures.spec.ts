@@ -1,8 +1,8 @@
-import { expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "../../fixtures/test";
 import { mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { cardSelector, readyCard, settle, test } from "./accessibility-support";
-import type { DashboardSpec } from "../../panels/types";
+import { cardSelector, readyCard, settle } from "../../support/accessibility-support";
+import type { DashboardSpec } from "../../../../panels/types";
 
 // Use either the real seeded server or an existing instance, without intercepts.
 const externalBaseURL = process.env.FANOUT_LANDING_BASE_URL;
@@ -41,7 +41,7 @@ test("capture the README overview", async ({ page, request }, info) => {
   // The normal matrix also includes 1100px. Write each stable asset only once.
   test.skip(info.project.use.viewport?.width !== 1440, "landing captures use the 1440px projects");
   const theme = info.project.use.colorScheme as "light" | "dark";
-  const directory = fileURLToPath(new URL("../../../site/src/assets/landing/", import.meta.url));
+  const directory = fileURLToPath(new URL("../../../../../site/src/assets/landing/", import.meta.url));
   await mkdir(directory, { recursive: true });
   const capture = async (view: string, element?: Locator, clip?: () => Promise<{ x: number; y: number; width: number; height: number }>) => {
     await page.mouse.move(0, 0);

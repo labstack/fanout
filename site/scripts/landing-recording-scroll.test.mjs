@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
-import { revealRecording, waitForConversation } from "../../ui/host/e2e/landing-recording-support.ts";
+import { revealRecording, waitForConversation } from "../../ui/host/e2e/support/landing-recording-support.ts";
 
 // Execute the actual page.evaluate callbacks with a virtual layout and clock.
 // No browser is launched; iframe growth is represented by moving the answer.

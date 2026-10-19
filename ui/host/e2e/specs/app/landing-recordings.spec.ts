@@ -1,12 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../../fixtures/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { cardSelector, readyCard, settle } from "./accessibility-support";
-import { recordingTimeline, revealRecording, waitForConversation } from "./landing-recording-support";
-import type { DashboardSpec, PanelResult } from "../../panels/types";
+import { cardSelector, readyCard, settle } from "../../support/accessibility-support";
+import { recordingTimeline, revealRecording, waitForConversation } from "../../support/landing-recording-support";
+import type { DashboardSpec, PanelResult } from "../../../../panels/types";
 
 const baseURL = process.env.FANOUT_LANDING_BASE_URL;
-const directory = fileURLToPath(new URL("../test-results/landing-recordings/", import.meta.url));
+const directory = fileURLToPath(new URL("../../../test-results/landing-recordings/", import.meta.url));
 test.skip(process.env.FANOUT_LANDING_RECORDINGS !== "1", "set FANOUT_LANDING_RECORDINGS=1 to record real landing clips");
 test.setTimeout(8 * 60_000);
 test.use({

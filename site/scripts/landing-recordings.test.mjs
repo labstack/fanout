@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { recordingTimeline } from "../../ui/host/e2e/landing-recording-support.ts";
+import { recordingTimeline } from "../../ui/host/e2e/support/landing-recording-support.ts";
 import { clipSegments, clipFilter } from "./clip-timeline.mjs";
 
 const stream = events => events.map(event => `data: ${JSON.stringify(event)}\n\n`).join("");

@@ -12,7 +12,7 @@ import { diagnosticTail, installSignalCleanup, readinessCause, safeRequest, wait
 
 import { performanceReadinessCause } from "./performance-support";
 
-const root = fileURLToPath(new URL("../../../", import.meta.url));
+const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 async function freePort(): Promise<number> {
@@ -48,7 +48,7 @@ function seed(binary: string | undefined, base: string, tokenFile: string, log: 
   });
 }
 
-export default async function globalSetup() {
+export default async function globalSetup({ signalCleanup = true, onSignal = () => {}, directory }: { signalCleanup?: boolean | "startup"; onSignal?: () => void; directory?: string } = {}) {
   // Recordings require a real AI-enabled instance; never start the seeded server.
   if (process.env.FANOUT_LANDING_RECORDINGS === "1" && !process.env.FANOUT_LANDING_BASE_URL) {
     throw new Error("Landing recordings require FANOUT_LANDING_BASE_URL and FANOUT_LANDING_SESSION_COOKIE for an external instance");
@@ -56,18 +56,19 @@ export default async function globalSetup() {
   // External landing media use an existing instance and an in-memory session.
   if (process.env.FANOUT_LANDING_BASE_URL) return;
 
-  const dir = await mkdtemp(join(tmpdir(), "fanout-e2e-"));
+  const dir = directory ?? await mkdtemp(join(tmpdir(), "fanout-e2e-"));
   let child: ChildProcess | undefined;
   let seedChild: ChildProcess | undefined;
   let api: Awaited<ReturnType<typeof request.newContext>> | undefined;
   const serverLog = join(dir, "server.log");
   const seedLog = join(dir, "seed.log");
-  const removeSignalHandlers = installSignalCleanup(() => {
+  const removeSignalHandlers = signalCleanup ? installSignalCleanup(() => {
     for (const process of [child, seedChild]) {
       if (process?.pid && process.exitCode === null && process.signalCode === null) process.kill("SIGKILL");
     }
     rmSync(dir, { recursive: true, force: true });
-  });
+    onSignal();
+  }) : () => {};
   const cleanup = async () => {
     try {
       if (seedChild) await stop(seedChild);
@@ -141,7 +142,7 @@ export default async function globalSetup() {
     // fixtures below, which every other spec opens by id, so / reaches it.
     const listed = await safeRequest("/api/dashboards", () => api!.get("/api/dashboards", { timeout: 20_000 }));
     if (listed.status() !== 200) throw new Error(`HTTP ${listed.status()} /api/dashboards`);
-    const spec = JSON.parse(await readFile(join(root, "ui/host/e2e/fixtures/all-panels.json"), "utf8"));
+    const spec = JSON.parse(await readFile(join(root, "ui/host/e2e/data/all-panels.json"), "utf8"));
     const { response: created, body: record } = await requestJSON("/api/dashboards", { spec });
     if (created.status() !== 201) throw new Error(`HTTP ${created.status()} /api/dashboards`);
     if (typeof record.id !== "string") throw new Error("Created dashboard has no id");
@@ -149,7 +150,7 @@ export default async function globalSetup() {
     // 24-hour window so setup/runtime delay cannot clip its earliest minute.
     const seedWindow = (await readFile(seedLog, "utf8")).match(/seed_window=([^,\s]+),([^\s]+)/);
     if (!seedWindow || Date.parse(seedWindow[2]) - Date.parse(seedWindow[1]) !== 24 * 60 * 60_000) throw new Error("Seed did not report a 24-hour window");
-    const performanceSpec = JSON.parse(await readFile(join(root, "ui/host/e2e/fixtures/performance.json"), "utf8"));
+    const performanceSpec = JSON.parse(await readFile(join(root, "ui/host/e2e/data/performance.json"), "utf8"));
     performanceSpec.time = { from: seedWindow[1], to: seedWindow[2], refresh: "off" };
     const performanceDeadline = Date.now() + 90_000;
     await waitUntilReady(performanceDeadline, async () => {
@@ -165,6 +166,7 @@ export default async function globalSetup() {
     process.env.FANOUT_E2E_BASE_URL = base;
     process.env.FANOUT_E2E_DASHBOARD_ID = record.id;
     process.env.FANOUT_E2E_STORAGE_STATE = state;
+    if (signalCleanup === "startup") removeSignalHandlers();
     return cleanup;
   } catch (error) {
     try {

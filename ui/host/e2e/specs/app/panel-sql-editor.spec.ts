@@ -1,6 +1,5 @@
-import { expect } from "@playwright/test";
-import { test } from "./accessibility-support";
-import { editedSQL, openSqlDashboard, openSqlEditor } from "./panel-sql-editor-support";
+import { test, expect } from "../../fixtures/test";
+import { editedSQL, openSqlDashboard, openSqlEditor } from "../../support/panel-sql-editor-support";
 
 test("edits an existing SQL panel, previews it and saves a new version in history", async ({ page, request }, info) => {
   const scripts: string[] = [];

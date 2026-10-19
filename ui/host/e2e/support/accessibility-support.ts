@@ -1,21 +1,13 @@
-import { test as base, expect, type APIRequestContext, type Frame, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { expect, type APIRequestContext, type Frame, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import fixture from "./fixtures/all-panels.json" with { type: "json" };
-import type { DashboardSpec, Panel, PanelResult } from "../../panels/types";
-import type { PanelFragment } from "../../panels/fragment";
+import fixture from "../data/all-panels.json" with { type: "json" };
+import type { DashboardSpec, Panel, PanelResult } from "../../../panels/types";
+import type { PanelFragment } from "../../../panels/fragment";
 import { mountApp } from "./chat-harness";
 
 export const spec = fixture as DashboardSpec;
-export const test = base.extend({
-  baseURL: async ({}, use) => { await use(process.env.FANOUT_E2E_BASE_URL); },
-  storageState: async ({}, use) => {
-    const state = process.env.FANOUT_E2E_STORAGE_STATE;
-    if (!state) throw new Error("Global setup did not provide a session");
-    await use(state);
-  },
-});
 export type Surface = "dashboard" | "chat";
 export type Scenario = "error" | "empty" | "truncated" | "stale";
 export const longError = "Synthetic accessibility fixture: query could not bind the requested field. ".repeat(25) + "END OF ERROR DETAIL";
@@ -91,7 +83,7 @@ export async function openSurface(page: Page, request: APIRequestContext, info: 
     dashboard, results: body.results.map(result => result.id === panel?.id ? alter(result, scenario) : result), vars: { service: "$__all" },
   };
   if (scenario === "stale") fragment.dashboard.variables!.push({ name: "probe", kind: "custom", options: ["before", "after"], default: "before" });
-  const html = await readFile(fileURLToPath(new URL("../../../internal/mcp/apps/panels.html", import.meta.url)), "utf8");
+  const html = await readFile(fileURLToPath(new URL("../../../../internal/mcp/apps/panels.html", import.meta.url)), "utf8");
   // Supplement the unchanged smoke bridge with the host's existing display-mode
   // protocol. Registered before mountApp's listener on the same window, so it
   // runs first and stops the bridge's generic unsupported-request response.

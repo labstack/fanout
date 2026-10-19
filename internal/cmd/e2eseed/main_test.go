@@ -57,7 +57,7 @@ func TestSeedPayloadsAreDeterministic(t *testing.T) {
 }
 
 func TestAllPanelsFixtureValidates(t *testing.T) {
-	data, err := os.ReadFile("../../../ui/host/e2e/fixtures/all-panels.json")
+	data, err := os.ReadFile("../../../ui/host/e2e/data/all-panels.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func decodeFixture(data []byte, spec *panel.Dashboard) error {
 }
 
 func TestAllPanelsFixtureRejectsUnknownFields(t *testing.T) {
-	data, err := os.ReadFile("../../../ui/host/e2e/fixtures/all-panels.json")
+	data, err := os.ReadFile("../../../ui/host/e2e/data/all-panels.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func (s *fixtureSubmitter) Submit(ctx context.Context, batch telemetrystore.Batc
 }
 
 func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
-	data, err := os.ReadFile("../../../ui/host/e2e/fixtures/performance.json")
+	data, err := os.ReadFile("../../../ui/host/e2e/data/performance.json")
 	if err != nil {
 		t.Fatal(err)
 	}

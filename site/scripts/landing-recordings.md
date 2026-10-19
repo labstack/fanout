@@ -23,7 +23,7 @@ instance URL, and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cook
 in the process environment. Run from `ui/host`:
 
 ```sh
-bun run e2e landing-recordings.spec.ts --project=1440-light --project=1440-dark
+bun run e2e e2e/specs/app/landing-recordings.spec.ts --project=app-1440-light --project=app-1440-dark
 ```
 
 Recordings use a 1280 × 800 viewport and raw video at the same size; Playwright

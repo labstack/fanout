@@ -1,9 +1,10 @@
+import { test } from "../../fixtures/test";
 import AxeBuilder from "@axe-core/playwright";
 import axe from "axe-core";
-import { expect, type Frame, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { cardSelector, chooseView, longError, openSurface, readyCard, settle, spec, staleSurface, test, type Scenario, type Surface } from "./accessibility-support";
-import { editedSQL, openSqlDashboard, openSqlEditor } from "./panel-sql-editor-support";
-import { editorOverlapTargets, proveEditorText } from "./editor-contrast";
+import { expect, type Frame, type Locator, type Page, type TestInfo } from "../../fixtures/test";
+import { cardSelector, chooseView, longError, openSurface, readyCard, settle, spec, staleSurface, type Scenario, type Surface } from "../../support/accessibility-support";
+import { editedSQL, openSqlDashboard, openSqlEditor } from "../../support/panel-sql-editor-support";
+import { editorOverlapTargets, proveEditorText } from "../../support/editor-contrast";
 
 const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 // Contrast and ARIA follow the theme, not these two desktop widths, so this spec

@@ -1,5 +1,5 @@
-import { expect } from "@playwright/test";
-import { capture, chooseView, longError, openSurface, readyCard, settle, spec, staleSurface, test, type Capture, type Scenario, type Surface } from "./accessibility-support";
+import { test, expect } from "../../fixtures/test";
+import { capture, chooseView, longError, openSurface, readyCard, settle, spec, staleSurface, type Capture, type Scenario, type Surface } from "../../support/accessibility-support";
 
 // Screenshots are review artifacts, never pixel baselines or automatic visual PASS,
 // so they are captured only on request: FANOUT_E2E_SCREENSHOTS=1 just e2e.

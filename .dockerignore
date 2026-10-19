@@ -45,6 +45,7 @@ site/src/assets/landing/*.mp4
 # Local browser-test outputs.
 ui/host/playwright-report/
 ui/host/test-results/
+ui/host/e2e/__screenshots__/
 ui/host/tsconfig.tsbuildinfo
 
 # Docs

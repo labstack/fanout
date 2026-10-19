@@ -5,16 +5,19 @@
     "host/src/mcp-apps/main.tsx!",
     "host/src/routeTree.gen.ts!",
     "host/playwright.config.ts!",
-    "host/e2e/global-setup.ts!",
+    "host/e2e/support/app.setup.ts!",
     "host/e2e/failure-report.ts!",
-    "host/e2e/**/*.spec.ts!"
+    "host/e2e/specs/**/*.spec.ts!",
+    "host/e2e/host/{main,record}.ts!",
+    "host/e2e/host/server.mjs!",
+    "host/e2e/support/{app-server,app-teardown}.ts!"
   ],
   "project": [
     "host/src/**/*.{ts,tsx}!",
     "*.ts!",
     "panels/**/*.ts!",
     "host/playwright.config.ts!",
-    "host/e2e/**/*.ts!",
+    "host/e2e/**/*.{ts,mjs}!",
     "!host/e2e/**/*.test.ts!",
     "!host/src/**/*.test.{ts,tsx}!",
     "!panels/**/*.test.ts!"
@@ -22,7 +25,8 @@
   "vite": {
     "config": [
       "host/vite.config.ts",
-      "host/vite.apps.config.ts"
+      "host/vite.apps.config.ts",
+      "host/e2e/host/vite.config.ts"
     ]
   }
 }

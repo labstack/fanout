@@ -15,7 +15,12 @@ function workspace(file) {
   return first === "host" ? "host" : "shared";
 }
 
-function check(file, specifier, offset, source) {
+function check(file, specifier, offset, source, bindings = []) {
+  const spec = relative(ui, file).startsWith(`host${sep}e2e${sep}specs${sep}`) && /\.spec\.[jt]sx?$/.test(file);
+  if (spec && (specifier.startsWith("@playwright/test") || bindings.some(name => name === "test" || name === "expect") && resolve(dirname(file), specifier).replace(/\.ts$/, "") !== resolve(ui, "host/e2e/fixtures/test"))) {
+    console.error(`${relative(root, file)}:${source.slice(0, offset).split("\n").length}: specs must import test/expect from e2e/fixtures/test`);
+    failures++;
+  }
   const owner = workspace(file);
   const local = specifier.startsWith("./") || specifier.startsWith("../");
   const target = local ? resolve(dirname(file), specifier) : null;
@@ -42,7 +47,7 @@ function scan(file) {
     const literal = node.source ?? (node.type === "TSImportType" ? node.argument :
       node.type === "TSExternalModuleReference" ? node.expression :
       node.type === "CallExpression" && node.callee?.name === "require" ? node.arguments[0] : null);
-    if (literal?.type === "StringLiteral") check(file, literal.value, literal.start, source);
+    if (literal?.type === "StringLiteral") check(file, literal.value, literal.start, source, node.specifiers?.map(binding => binding.imported?.name ?? binding.exported?.name) ?? []);
     else if (literal?.type === "TemplateLiteral" && literal.expressions.length === 0) {
       check(file, literal.quasis[0].value.cooked, literal.start, source);
     }

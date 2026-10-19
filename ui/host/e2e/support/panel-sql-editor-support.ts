@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Page, type TestInfo } from "@playwright/test";
-import type { DashboardSpec } from "../../panels/types";
+import type { DashboardSpec } from "../../../panels/types";
 
 const initialSQL = "SELECT count(*) AS total FROM spans WHERE $__window(start_time) AND service = $service";
 export const editedSQL = "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time) AND service = $service";
