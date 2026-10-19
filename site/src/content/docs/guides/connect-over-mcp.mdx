@@ -15,6 +15,11 @@ client and built-in agent use the same typed query results.
 [Build and refine dashboards](/guides/build-dashboards) covers schema discovery,
 panel previews, targeted edits and saved-version restore through chat or MCP.
 
+You need a running instance with an HTTPS address first:
+[install Fanout](/start/install), finish [first boot](/start/first-boot), then
+[serve it over TLS](/guides/terminate-tls), directly or behind a proxy. That HTTPS
+origin is the URL your MCP client connects to.
+
 ## Set the public URL first
 
 ```sh
