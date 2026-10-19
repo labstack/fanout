@@ -64,10 +64,15 @@ Use your instance's public URL, then authorize the connection in your browser.
 
 ## Protocol
 
-Fanout serves MCP protocol version `2026-07-28` over stateless Streamable
-HTTP. Every request carries `MCP-Protocol-Version: 2026-07-28`; a request
-without it, or with an earlier version, is rejected, and there are no
-sessions or `initialize` handshake. Use a client that supports this version.
+Fanout serves modern and legacy MCP clients concurrently over Streamable HTTP
+on `/mcp`. Modern `2026-07-28` requests carry per-request metadata and
+`MCP-Protocol-Version: 2026-07-28`, with no session or `initialize` handshake.
+Legacy clients use `initialize` to negotiate `2025-11-25` or `2025-06-18` and
+receive an `Mcp-Session-Id` bound to the authenticated user. Legacy sessions
+expire after 10 idle minutes, with at most eight live sessions per user–OAuth
+client pair. An expired session or a server restart requires re-initialization.
+Versions `2025-03-26` and `2024-11-05` are not served. The browser's `/api/mcp`
+route uses only the modern protocol.
 
 On `/mcp` and `/api/mcp`, an `Origin` header must exactly match the RFC 6454
 serialization of `FANOUT_PUBLIC_URL`. Malformed or untrusted origins receive
@@ -76,8 +81,8 @@ origins are accepted. Requests without `Origin` pass this check.
 
 `tools/call` requests are limited to 20 per second per user–OAuth client pair,
 with a burst of 100. Excess calls receive `429` with `Retry-After`. The in-process
-agent is exempt. Client disconnects cancel in-flight tool calls, including DuckDB
-queries.
+agent is exempt. Modern client disconnects cancel in-flight tool calls, including
+DuckDB queries.
 
 ## Scopes
 

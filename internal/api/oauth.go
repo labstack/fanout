@@ -92,7 +92,11 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		requiredScope := requiredMCPToolScope(r)
+		requiredScope, err := requiredMCPToolScope(r)
+		if err != nil {
+			appmcp.WriteHTTPMessageError(w, err)
+			return
+		}
 		requiredScopes := []string{mcpReadScope}
 		if requiredScope != "" && requiredScope != mcpReadScope {
 			requiredScopes = append(requiredScopes, requiredScope)
@@ -112,6 +116,7 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 	})
 	protected := mcpgoauth.RequireBearerToken(h.verifyMCPToken, &mcpgoauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: h.metadataURL,
+		Scopes:              []string{mcpReadScope},
 	})(scopeChecked)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(strings.TrimSpace(r.Host), h.allowedHost) {
@@ -122,13 +127,12 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 	})
 }
 
-func requiredMCPToolScope(r *http.Request) string {
-	// HTTPHandler requires the modern protocol; the SDK checks these headers
-	// against its decoded request before dispatch, including notifications.
-	if r.Method != http.MethodPost || r.Header.Get("Mcp-Method") != "tools/call" {
-		return ""
+func requiredMCPToolScope(r *http.Request) (string, error) {
+	method, name, err := mcpRequestMethodAndName(r)
+	if err != nil || method != "tools/call" {
+		return "", err
 	}
-	return appmcp.RequiredToolScope(r.Header.Get("Mcp-Name"))
+	return appmcp.RequiredToolScope(name), nil
 }
 
 // ProtectBrowserMCP adapts an already-authenticated browser session to the
@@ -161,6 +165,17 @@ func (h *MCPAuthorization) ProtectBrowserMCP(sessions *appauth.BrowserSessions, 
 		user := GetCurrentUser(c)
 		if user == nil {
 			return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+		}
+		if c.Request().Header.Get("MCP-Protocol-Version") < appmcp.ProtocolVersion {
+			return echo.NewHTTPError(http.StatusBadRequest, "browser MCP requires the modern protocol")
+		}
+		method, _, err := mcpRequestMethodAndName(c.Request())
+		if err != nil {
+			appmcp.WriteHTTPMessageError(c.Response(), err)
+			return nil
+		}
+		if method == "initialize" {
+			return echo.NewHTTPError(http.StatusBadRequest, "browser MCP requires the modern protocol")
 		}
 		ctx := context.WithValue(c.Request().Context(), browserMCPUserContextKey{}, *user)
 		request := c.Request().Clone(ctx)

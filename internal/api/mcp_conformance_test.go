@@ -76,6 +76,11 @@ func newMCPHTTPFixture(t *testing.T) *mcpHTTPFixture {
 		f.state.e.ServeHTTP(w, r)
 	}))
 	t.Cleanup(f.server.Close)
+	t.Cleanup(func() {
+		for session := range f.app.MCP().Sessions() {
+			_ = session.Close()
+		}
+	})
 	// Release a stalled probe before Close waits for handlers if a cancellation
 	// assertion fails. This is cleanup only; success requires ctx cancellation.
 	t.Cleanup(func() { close(f.release) })
@@ -121,7 +126,7 @@ func modernMCPBody(method, params string) string {
 	return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":%q,"params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},%s}}`, method, params)
 }
 
-func (f *mcpHTTPFixture) request(t *testing.T, token, method, body, version, rpcMethod, name string) *http.Response {
+func (f *mcpHTTPFixture) request(t *testing.T, token, method, body, version, rpcMethod, name string, sessionID ...string) *http.Response {
 	t.Helper()
 	r, err := http.NewRequestWithContext(t.Context(), method, f.server.URL+"/mcp", strings.NewReader(body))
 	if err != nil {
@@ -133,6 +138,9 @@ func (f *mcpHTTPFixture) request(t *testing.T, token, method, body, version, rpc
 	r.Header.Set("Accept", "application/json, text/event-stream")
 	r.Header.Set("MCP-Protocol-Version", version)
 	r.Header.Set("Mcp-Method", rpcMethod)
+	if len(sessionID) > 0 {
+		r.Header.Set("Mcp-Session-Id", sessionID[0])
+	}
 	if name != "" {
 		r.Header.Set("Mcp-Name", name)
 	}
@@ -209,9 +217,9 @@ func TestMCPTrustedAndAbsentOriginsProceedWithAuthentication(t *testing.T) {
 	}
 }
 
-func TestMCPRejectsLegacyProtocolAndStreams(t *testing.T) {
+func TestMCPRejectsUnsupportedProtocolsAndModernStreams(t *testing.T) {
 	f := newMCPHTTPFixture(t)
-	for _, version := range []string{"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2027-01-01"} {
+	for _, version := range []string{"2027-01-01", "2099-01-01"} {
 		t.Run(version, func(t *testing.T) {
 			rpcBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":%q,"io.modelcontextprotocol/clientCapabilities":{}}}}`, version)
 			response := f.request(t, f.token, "POST", rpcBody, version, "server/discover", "")
@@ -228,7 +236,7 @@ func TestMCPRejectsLegacyProtocolAndStreams(t *testing.T) {
 			if err := json.Unmarshal(body.Error.Data, &data); err != nil {
 				t.Fatal(err)
 			}
-			if len(data.Supported) != 1 || data.Supported[0] != appmcp.ProtocolVersion || data.Requested != version {
+			if strings.Join(data.Supported, ",") != appmcp.ProtocolVersion+",2025-11-25,2025-06-18" || data.Requested != version {
 				t.Fatalf("data=%+v", data)
 			}
 		})
@@ -239,15 +247,361 @@ func TestMCPRejectsLegacyProtocolAndStreams(t *testing.T) {
 			t.Fatalf("%s status=%d headers=%v", method, response.StatusCode, response.Header)
 		}
 	}
-	for _, body := range []string{`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}`, modernMCPBody("tools/call", `"name":"conformance_probe"`)} {
-		response := f.request(t, f.token, "POST", body, "", "tools/call", "conformance_probe")
-		if response.StatusCode != 400 {
-			t.Fatalf("headerless status=%d", response.StatusCode)
+	response := f.request(t, f.token, "POST", modernMCPBody("tools/call", `"name":"conformance_probe"`), "", "tools/call", "conformance_probe")
+	if response.StatusCode != 400 {
+		t.Fatalf("headerless modern status=%d", response.StatusCode)
+	}
+	response = f.request(t, f.token, "POST", modernMCPBody("initialize", `"protocolVersion":"2026-07-28"`), appmcp.ProtocolVersion, "initialize", "")
+	if response.StatusCode != 400 {
+		t.Fatalf("initialize with per-request metadata status=%d", response.StatusCode)
+	}
+}
+
+func decodeMCPResponse(t *testing.T, response *http.Response, result any) *jsonrpc.Error {
+	t.Helper()
+	body, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+		for line := range strings.SplitSeq(string(body), "\n") {
+			if strings.HasPrefix(line, "data: ") {
+				body = []byte(strings.TrimPrefix(line, "data: "))
+				break
+			}
 		}
 	}
-	response := f.request(t, f.token, "POST", modernMCPBody("initialize", `"protocolVersion":"2026-07-28"`), appmcp.ProtocolVersion, "initialize", "")
-	if response.StatusCode != 404 {
-		t.Fatalf("modern initialize status=%d", response.StatusCode)
+	var envelope struct {
+		Result json.RawMessage `json:"result"`
+		Error  *jsonrpc.Error  `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("status=%d body=%s: %v", response.StatusCode, body, err)
+	}
+	if envelope.Error == nil && result != nil {
+		if err := json.Unmarshal(envelope.Result, result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return envelope.Error
+}
+
+func (f *mcpHTTPFixture) initializeLegacy(t *testing.T, token, version, capabilities string) (string, string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"clientInfo":{"name":"legacy","version":"test"},"capabilities":%s}}`, version, capabilities)
+	response := f.request(t, token, "POST", body, "", "", "")
+	var initialized mcp.InitializeResult
+	if err := decodeMCPResponse(t, response, &initialized); err != nil || response.StatusCode != 200 {
+		t.Fatalf("initialize status=%d error=%v", response.StatusCode, err)
+	}
+	id := response.Header.Get("Mcp-Session-Id")
+	if id == "" {
+		t.Fatal("legacy initialize did not create a session")
+	}
+	response = f.request(t, token, "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, initialized.ProtocolVersion, "", "", id)
+	if response.StatusCode != http.StatusAccepted {
+		t.Fatalf("initialized status=%d", response.StatusCode)
+	}
+	return id, initialized.ProtocolVersion
+}
+
+func TestMCPLegacySessionsNegotiateAndCall(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	for _, version := range []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05", "2099-01-01"} {
+		t.Run(version, func(t *testing.T) {
+			id, negotiated := f.initializeLegacy(t, f.token, version, "{}")
+			want := version
+			if version != "2025-06-18" {
+				want = "2025-11-25"
+			}
+			if negotiated != want {
+				t.Fatalf("negotiated=%s want=%s", negotiated, want)
+			}
+			response := f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, negotiated, "", "", id)
+			var tools mcp.ListToolsResult
+			if err := decodeMCPResponse(t, response, &tools); err != nil || len(tools.Tools) == 0 {
+				t.Fatalf("tools=%+v error=%v", tools, err)
+			}
+			response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"conformance_probe","arguments":{}}}`, negotiated, "", "", id)
+			var called mcp.CallToolResult
+			if err := decodeMCPResponse(t, response, &called); err != nil || called.IsError || len(called.Content) != 1 || called.Content[0].(*mcp.TextContent).Text != "ok" {
+				t.Fatalf("call=%+v error=%v", called, err)
+			}
+		})
+	}
+}
+
+func TestMCPInitializeWithModernHeaderSelectsLegacySession(t *testing.T) {
+	for _, version := range []string{appmcp.ProtocolVersion, "2025-11-25"} {
+		t.Run(version, func(t *testing.T) {
+			for _, headers := range []struct{ method, name string }{
+				{"initialize", ""},
+				{"tools/call", "conformance_probe"},
+				{"tools/call", "create_dashboard"},
+			} {
+				f := newMCPHTTPFixture(t)
+				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"clientInfo":{"name":"legacy","version":"test"},"capabilities":{}}}`, version)
+				response := f.request(t, f.token, "POST", body, appmcp.ProtocolVersion, headers.method, headers.name)
+				var initialized mcp.InitializeResult
+				if err := decodeMCPResponse(t, response, &initialized); err != nil || response.StatusCode != 200 || initialized.ProtocolVersion != "2025-11-25" {
+					t.Fatalf("initialize headers=%+v status=%d result=%+v error=%v", headers, response.StatusCode, initialized, err)
+				}
+				id := response.Header.Get("Mcp-Session-Id")
+				if id == "" {
+					t.Fatal("initialize with modern header did not create a legacy session")
+				}
+				if len(f.auth.toolLimiter.entries) != 0 {
+					t.Fatal("initialize consumed the tool budget")
+				}
+				response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, initialized.ProtocolVersion, "", "", id)
+				if response.StatusCode != http.StatusAccepted {
+					t.Fatalf("initialized status=%d", response.StatusCode)
+				}
+				response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conformance_probe","arguments":{}}}`, initialized.ProtocolVersion, "", "", id)
+				var called mcp.CallToolResult
+				if err := decodeMCPResponse(t, response, &called); err != nil || response.StatusCode != 200 || called.IsError || f.calls.Load() != 1 {
+					t.Fatalf("call status=%d result=%+v error=%v", response.StatusCode, called, err)
+				}
+				response = f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_dashboard","arguments":{}}}`, initialized.ProtocolVersion, "tools/list", "conformance_probe", id)
+				challenge := response.Header.Get("WWW-Authenticate")
+				if response.StatusCode != 403 || !strings.Contains(challenge, `error="insufficient_scope"`) || !strings.Contains(challenge, `scope="telemetry:read dashboard:manage"`) {
+					t.Fatalf("dashboard write status=%d challenge=%s", response.StatusCode, challenge)
+				}
+			}
+		})
+	}
+}
+
+func TestBrowserMCPRejectsInitializeWithModernHeader(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	user, err := f.state.users.GetByEmail("interop@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := f.state.login(t, user)
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"capabilities":{},"clientInfo":{"name":"browser","version":"test"}}}`, appmcp.ProtocolVersion)
+	rec := serve(t, f.state.e, "POST", "/api/mcp", body, map[string]string{
+		"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "Fanout-Request": "1",
+		"MCP-Protocol-Version": appmcp.ProtocolVersion, "Mcp-Method": "initialize",
+	}, cookie)
+	if rec.Code != http.StatusBadRequest || rec.Header().Get("Mcp-Session-Id") != "" {
+		t.Fatalf("browser initialize status=%d headers=%v", rec.Code, rec.Header())
+	}
+	for range f.app.MCP().Sessions() {
+		t.Fatal("browser initialize created a legacy session")
+	}
+}
+
+func TestMCPLegacySessionIdentityAndTermination(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	id, version := f.initializeLegacy(t, f.token, "2025-11-25", "{}")
+	other := f.issueToken(t, "other@example.com", f.clientID)
+	for _, method := range []string{"POST", "GET", "DELETE"} {
+		response := f.request(t, other, method, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, version, "", "", id)
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s with another user: status=%d", method, response.StatusCode)
+		}
+	}
+	response := f.request(t, f.token, "DELETE", "", version, "", "", id)
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status=%d", response.StatusCode)
+	}
+	for _, id := range []string{id, "unknown-after-restart"} {
+		response := f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, version, "", "", id)
+		if response.StatusCode != http.StatusNotFound {
+			t.Fatalf("unknown session status=%d", response.StatusCode)
+		}
+	}
+	response = f.request(t, f.token, "POST", modernMCPBody("tools/call", `"name":"conformance_probe"`), appmcp.ProtocolVersion, "tools/call", "conformance_probe", id)
+	if response.StatusCode != 200 || response.Header.Get("Mcp-Session-Id") != "" {
+		t.Fatalf("modern read a legacy session: status=%d headers=%v", response.StatusCode, response.Header)
+	}
+}
+
+func TestMCPAppsCapabilitiesAcrossEras(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	for _, version := range []string{"2025-11-25", "2025-06-18", "2099-01-01", appmcp.ProtocolVersion} {
+		for _, apps := range []bool{false, true} {
+			capabilities := "{}"
+			if apps {
+				capabilities = `{"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}}}`
+			}
+			id, negotiated := "", version
+			body := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
+			method := ""
+			if version == appmcp.ProtocolVersion {
+				body = fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":%q,"io.modelcontextprotocol/clientCapabilities":%s}}}`, version, capabilities)
+				method = "tools/list"
+			} else {
+				id, negotiated = f.initializeLegacy(t, f.token, version, capabilities)
+			}
+			response := f.request(t, f.token, "POST", body, negotiated, method, "", id)
+			var listed mcp.ListToolsResult
+			if err := decodeMCPResponse(t, response, &listed); err != nil {
+				t.Fatal(err)
+			}
+			ui, helpers := false, 0
+			for _, tool := range listed.Tools {
+				ui = ui || tool.Meta["ui"] != nil
+				if tool.Name == "query_panel_fragment" || tool.Name == "list_panel_exemplars" || tool.Name == "resolve_panel_variables" {
+					helpers++
+				}
+			}
+			if ui != apps || apps && helpers != 3 || !apps && helpers != 0 {
+				t.Fatalf("version=%s apps=%v ui=%v helpers=%d", version, apps, ui, helpers)
+			}
+			if version != appmcp.ProtocolVersion {
+				opposite := "{}"
+				if !apps {
+					opposite = `{"extensions":{"io.modelcontextprotocol/ui":{"mimeTypes":["text/html;profile=mcp-app"]}}}`
+				}
+				body = fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/clientCapabilities":%s}}}`, opposite)
+				response = f.request(t, f.token, "POST", body, negotiated, "", "", id)
+				if err := decodeMCPResponse(t, response, &listed); err != nil {
+					t.Fatal(err)
+				}
+				for _, tool := range listed.Tools {
+					if tool.Name == "query_telemetry" && (tool.Meta["ui"] != nil) != apps {
+						t.Fatalf("legacy request overrode initialized capabilities: version=%s apps=%v meta=%v", version, apps, tool.Meta)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestMCPDashboardScopeAcrossEras(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	for _, version := range []string{"2025-11-25", "2025-06-18", appmcp.ProtocolVersion} {
+		id := ""
+		if version != appmcp.ProtocolVersion {
+			id, _ = f.initializeLegacy(t, f.token, version, "{}")
+		}
+		for _, name := range []string{"create_dashboard", "replace_dashboard", "edit_dashboard", "restore_dashboard_version"} {
+			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":%q,"arguments":{}}}`, name)
+			method, headerName := "", ""
+			if version == appmcp.ProtocolVersion {
+				body = modernMCPBody("tools/call", fmt.Sprintf(`"name":%q,"arguments":{}`, name))
+				method, headerName = "tools/call", name
+			}
+			response := f.request(t, f.token, "POST", body, version, method, headerName, id)
+			challenge := response.Header.Get("WWW-Authenticate")
+			if response.StatusCode != 403 || !strings.Contains(challenge, `error="insufficient_scope"`) || !strings.Contains(challenge, `scope="telemetry:read dashboard:manage"`) || !strings.Contains(challenge, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
+				t.Fatalf("%s %s: status=%d challenge=%s", version, name, response.StatusCode, challenge)
+			}
+			if version != appmcp.ProtocolVersion {
+				response = f.request(t, f.token, "POST", body, version, "tools/list", "conformance_probe", id)
+				if response.StatusCode != 403 {
+					t.Fatalf("legacy headers bypassed scope: status=%d", response.StatusCode)
+				}
+			}
+		}
+	}
+}
+
+func TestMCPLegacyToolRateLimitAndClientIsolation(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	f.auth.toolLimiter.now = func() time.Time { return time.Unix(100000, 0) }
+	id, version := f.initializeLegacy(t, f.token, "2025-11-25", "{}")
+	body := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conformance_probe","arguments":{}}}`
+	for i := range mcpToolBurst {
+		// Legacy clients may send misleading modern headers; the body is authoritative.
+		response := f.request(t, f.token, "POST", body, version, "tools/list", "other_probe", id)
+		_, _ = io.Copy(io.Discard, response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != 200 {
+			t.Fatalf("call %d status=%d", i, response.StatusCode)
+		}
+	}
+	response := f.request(t, f.token, "POST", body, version, "", "", id)
+	if response.StatusCode != 429 || response.Header.Get("Retry-After") != "1" || f.calls.Load() != mcpToolBurst {
+		t.Fatalf("status=%d retry=%s executed=%d", response.StatusCode, response.Header.Get("Retry-After"), f.calls.Load())
+	}
+	response = f.request(t, f.token, "POST", modernMCPBody("tools/call", `"name":"conformance_probe"`), appmcp.ProtocolVersion, "tools/call", "conformance_probe")
+	if response.StatusCode != 429 {
+		t.Fatalf("modern did not share legacy budget: status=%d", response.StatusCode)
+	}
+	other := f.issueToken(t, "other@example.com", f.clientID)
+	otherID, _ := f.initializeLegacy(t, other, version, "{}")
+	response = f.request(t, other, "POST", body, version, "", "", otherID)
+	if response.StatusCode != 200 {
+		t.Fatalf("other user status=%d", response.StatusCode)
+	}
+	user, err := f.state.users.GetByEmail("interop@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientID := registerOAuthClient(t, f.state.e).ClientID
+	pair, err := f.auth.store.IssueTokenPair(t.Context(), clientID, user.ID, mcpReadScope, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherID, _ = f.initializeLegacy(t, pair.AccessToken, version, "{}")
+	response = f.request(t, pair.AccessToken, "POST", body, version, "", "", otherID)
+	if response.StatusCode != 200 {
+		t.Fatalf("other OAuth client status=%d", response.StatusCode)
+	}
+}
+
+func TestMCPLegacySessionLimitAndReclamation(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	var first string
+	for range 8 {
+		id, _ := f.initializeLegacy(t, f.token, "2025-11-25", "{}")
+		if first == "" {
+			first = id
+		}
+	}
+	response := f.request(t, f.token, "POST", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"overflow","version":"test"}}}`, "", "", "")
+	if err := decodeMCPResponse(t, response, nil); err == nil || !strings.Contains(err.Message, "session limit") {
+		t.Fatalf("overflow error=%v", err)
+	}
+	other := f.issueToken(t, "other@example.com", f.clientID)
+	f.initializeLegacy(t, other, "2025-11-25", "{}")
+	user, err := f.state.users.GetByEmail("interop@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientID := registerOAuthClient(t, f.state.e).ClientID
+	pair, err := f.auth.store.IssueTokenPair(t.Context(), clientID, user.ID, mcpReadScope, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.initializeLegacy(t, pair.AccessToken, "2025-11-25", "{}")
+	response = f.request(t, f.token, "POST", modernMCPBody("tools/call", `"name":"conformance_probe"`), appmcp.ProtocolVersion, "tools/call", "conformance_probe")
+	if response.StatusCode != 200 || response.Header.Get("Mcp-Session-Id") != "" {
+		t.Fatalf("modern consumed sessions: status=%d headers=%v", response.StatusCode, response.Header)
+	}
+	response = f.request(t, f.token, "DELETE", "", "2025-11-25", "", "", first)
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status=%d", response.StatusCode)
+	}
+	f.initializeLegacy(t, f.token, "2025-11-25", "{}")
+}
+
+func TestMCPRejectsLegacyBatchesAndOversizedBodies(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	id, version := f.initializeLegacy(t, f.token, "2025-11-25", "{}")
+	call := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"conformance_probe","arguments":{}}}`
+	for _, version := range []string{"", version} {
+		response := f.request(t, f.token, "POST", "["+call+"]", version, "", "", id)
+		if response.StatusCode != 400 || f.calls.Load() != 0 {
+			t.Fatalf("batch version=%q status=%d executed=%d", version, response.StatusCode, f.calls.Load())
+		}
+	}
+	response := f.request(t, f.token, "POST", call+strings.Repeat(" ", int(mcp.DefaultMaxRequestBodyBytes)), version, "", "", id)
+	if response.StatusCode != http.StatusRequestEntityTooLarge || f.calls.Load() != 0 {
+		t.Fatalf("oversized status=%d executed=%d", response.StatusCode, f.calls.Load())
+	}
+}
+
+func TestMCPUnauthenticatedChallengeNamesReadScope(t *testing.T) {
+	f := newMCPHTTPFixture(t)
+	response := f.request(t, "", "POST", "", "", "", "")
+	challenge := response.Header.Get("WWW-Authenticate")
+	if response.StatusCode != 401 || !strings.Contains(challenge, `scope="telemetry:read"`) || !strings.Contains(challenge, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("status=%d challenge=%s", response.StatusCode, challenge)
 	}
 }
 
