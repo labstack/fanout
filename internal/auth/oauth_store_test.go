@@ -82,6 +82,8 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 		t.Fatalf("Create user: %v", err)
 	}
 	store := NewOAuthStore(sqlite.DB)
+	base := time.Now().UTC()
+	store.now = func() time.Time { return base }
 	client, err := store.RegisterClient(t.Context(), "Claude Code", "", []string{"http://localhost:8765/callback"})
 	if err != nil {
 		t.Fatalf("RegisterClient: %v", err)
@@ -98,11 +100,173 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 	if second.RefreshToken == first.RefreshToken || second.AccessToken == first.AccessToken {
 		t.Fatal("rotation must issue fresh credentials")
 	}
+	store.now = func() time.Time { return base.Add(OAuthRefreshReuseGrace + time.Second) }
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("reused refresh = %v, want reuse detection", err)
 	}
 	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
 		t.Fatalf("access token after family revocation = %v, want invalid token", err)
+	}
+}
+
+// Agent processes sharing one stored credential refresh together; the
+// sibling that presents the just-rotated token gets its own pair, once per
+// grace window, and only from the same client while the family is live.
+func TestOAuthStoreRefreshGraceAdmitsConcurrentSibling(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("sibling@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	base := time.Now().UTC()
+	store.now = func() time.Time { return base }
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://127.0.0.1:14550/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	other, err := store.RegisterClient(t.Context(), "Other", "", []string{"http://127.0.0.1:14551/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
+	if err != nil {
+		t.Fatalf("IssueTokenPair: %v", err)
+	}
+	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), other.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {
+		t.Fatalf("another client's sibling refresh = %v, want invalid grant", err)
+	}
+	store.now = func() time.Time { return base.Add(OAuthRefreshReuseGrace) }
+	sibling, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("sibling refresh within grace = %v", err)
+	}
+	if sibling.RefreshToken == second.RefreshToken || sibling.AccessToken == second.AccessToken {
+		t.Fatal("a sibling must receive its own credentials")
+	}
+	for name, pair := range map[string]OAuthTokenPair{"rotated": second, "sibling": sibling} {
+		if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); err != nil {
+			t.Fatalf("%s access token = %v", name, err)
+		}
+	}
+	// The sibling refresh must not move the rotation time and extend the window.
+	store.now = func() time.Time { return base.Add(OAuthRefreshReuseGrace + time.Second) }
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("refresh after grace = %v, want reuse detection", err)
+	}
+	for name, pair := range map[string]OAuthTokenPair{"rotated": second, "sibling": sibling} {
+		if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+			t.Fatalf("%s access token after reuse = %v, want invalid token", name, err)
+		}
+	}
+}
+
+// A clock stepped back after a rotation must not stretch the window: the
+// rotation is then dated in the future, which counts as reuse.
+func TestOAuthStoreRefreshGraceRejectsFutureRotation(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("clock@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	base := time.Now().UTC()
+	store.now = func() time.Time { return base }
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://127.0.0.1:14550/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
+	if err != nil {
+		t.Fatalf("IssueTokenPair: %v", err)
+	}
+	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	store.now = func() time.Time { return base.Add(-time.Hour) }
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("refresh after a clock step back = %v, want reuse detection", err)
+	}
+	store.now = func() time.Time { return base }
+	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("access token after rejected replay = %v, want family revoked", err)
+	}
+}
+
+// A rotated token replayed just after it expires, though within the grace
+// window, is reuse: the family is revoked rather than left live.
+func TestOAuthStoreRefreshGraceRevokesExpiredReplay(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("expiring@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	base := time.Now().UTC()
+	store.now = func() time.Time { return base }
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://127.0.0.1:14550/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
+	if err != nil {
+		t.Fatalf("IssueTokenPair: %v", err)
+	}
+	rotatedAt := base.Add(OAuthRefreshTTL - 30*time.Second)
+	store.now = func() time.Time { return rotatedAt }
+	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	store.now = func() time.Time { return base.Add(OAuthRefreshTTL + time.Second) }
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("expired replay within grace = %v, want reuse detection", err)
+	}
+	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("descendant access token = %v, want family revoked", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, second.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("descendant refresh token = %v, want family revoked", err)
+	}
+}
+
+// A revoked family has no live sibling, so the grace window never revives it.
+func TestOAuthStoreRefreshGraceDoesNotReviveRevokedFamily(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("revoked-sibling@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://127.0.0.1:14550/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
+	if err != nil {
+		t.Fatalf("IssueTokenPair: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	if err := users.RevokeAllSessionsWithAudit(user.ID, AuditEvent{EventType: "session.revoked", Outcome: "success"}); err != nil {
+		t.Fatalf("RevokeAllSessions: %v", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("sibling refresh of a revoked family = %v, want reuse detection", err)
 	}
 }
 
@@ -314,7 +478,8 @@ func TestOAuthStoreCleanupExpired(t *testing.T) {
 	if deleted != 0 {
 		t.Fatalf("early cleanup deleted %d rows, want 0", deleted)
 	}
-	// The revoked row survived, so reuse detection still fires.
+	// The revoked row survived, so reuse detection still fires after the grace window.
+	store.now = func() time.Time { return base.Add(OAuthRefreshReuseGrace + time.Second) }
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("reuse after cleanup = %v, want reuse detection", err)
 	}

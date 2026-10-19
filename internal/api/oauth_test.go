@@ -700,10 +700,11 @@ func TestMCPOAuthRefreshGrantOverHTTP(t *testing.T) {
 		t.Fatalf("MCP with rotated token = %d %s", mcp.Code, mcp.Body.String())
 	}
 
-	// Replaying the consumed refresh token is invalid_grant at the HTTP layer.
-	rec = serve(t, e, http.MethodPost, "/oauth/token", rotate.Encode(), formHeaders)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_grant") {
-		t.Fatalf("refresh replay = %d %s, want 400 invalid_grant", rec.Code, rec.Body.String())
+	// A concurrent sibling replaying the consumed refresh token within the
+	// grace window gets its own pair; later reuse is covered by the store tests.
+	sibling := decodeTokens(t, serve(t, e, http.MethodPost, "/oauth/token", rotate.Encode(), formHeaders))
+	if sibling["refresh_token"] == rotated["refresh_token"] || sibling["access_token"] == rotated["access_token"] {
+		t.Fatalf("sibling refresh reused credentials: %v", sibling)
 	}
 }
 

@@ -16,9 +16,15 @@ import (
 )
 
 const (
-	OAuthAccessTTL  = 15 * time.Minute
+	// Access tokens are checked against the database on every request, so
+	// revocation is immediate whatever their lifetime.
+	OAuthAccessTTL  = time.Hour
 	OAuthRefreshTTL = 30 * 24 * time.Hour
 	OAuthCodeTTL    = 5 * time.Minute
+	// OAuthRefreshReuseGrace admits a refresh token its own client rotated
+	// moments ago, as when agent processes sharing one stored credential
+	// refresh together; later reuse still revokes the family.
+	OAuthRefreshReuseGrace = time.Minute
 )
 
 var (
@@ -273,8 +279,18 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 	}
 	// Reuse detection runs BEFORE the expiry check: replaying a refresh token
 	// that was rotated and has since expired is still evidence of theft and
-	// must revoke the family, not fall through to a plain invalid grant.
-	if record.RevokedAt.Valid {
+	// must revoke the family, not fall through to a plain invalid grant. Only
+	// a rotation within the grace window, in a family that is still live, is
+	// a concurrent sibling refresh; it gets its own pair in the family.
+	sibling := false
+	// A rotation dated after now (a clock stepped back) is never in the window,
+	// and an expired rotated token is reuse, not a sibling.
+	if elapsed := now - record.RevokedAt.Int64; record.RevokedAt.Valid && elapsed >= 0 && elapsed <= int64(OAuthRefreshReuseGrace/time.Second) && record.ExpiresAt.Unix() > now {
+		if sibling, err = liveRefreshFamily(ctx, conn, record.FamilyID, now); err != nil {
+			return OAuthTokenPair{}, err
+		}
+	}
+	if record.RevokedAt.Valid && !sibling {
 		// The family revocation is committed BEFORE returning the error on
 		// purpose: the call fails, but the revocation must persist — rolling
 		// it back with the failed transaction would undo the defense.
@@ -326,8 +342,11 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 	if !ok {
 		return OAuthTokenPair{}, ErrInvalidOAuthScope
 	}
-	if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = ? WHERE token_hash = ?`, now, oauthHash(raw)); err != nil {
-		return OAuthTokenPair{}, fmt.Errorf("oauth: rotate refresh token: %w", err)
+	// A sibling's token keeps its rotation time, so the grace window cannot extend.
+	if !sibling {
+		if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = ? WHERE token_hash = ?`, now, oauthHash(raw)); err != nil {
+			return OAuthTokenPair{}, fmt.Errorf("oauth: rotate refresh token: %w", err)
+		}
 	}
 	pair, err := s.insertTokenPair(ctx, conn, record.FamilyID, record.ClientID, record.UserID, rotationScope, record.Resource)
 	if err != nil {
@@ -442,6 +461,18 @@ func (s *OAuthStore) insertTokenPair(ctx context.Context, db oauthDB, familyID, 
 		return OAuthTokenPair{}, fmt.Errorf("oauth: store token pair: %w", err)
 	}
 	return OAuthTokenPair{AccessToken: access, RefreshToken: refresh, ExpiresIn: int64(OAuthAccessTTL.Seconds()), Scope: scope}, nil
+}
+
+func liveRefreshFamily(ctx context.Context, db oauthDB, familyID string, now int64) (bool, error) {
+	var live bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM oauth_tokens
+		WHERE family_id = ? AND kind = ? AND revoked_at IS NULL AND expires_at > ?)`,
+		familyID, string(TokenKindRefresh), now,
+	).Scan(&live); err != nil {
+		return false, fmt.Errorf("oauth: read refresh family: %w", err)
+	}
+	return live, nil
 }
 
 func readOAuthToken(ctx context.Context, db oauthDB, raw string) (OAuthTokenRecord, error) {
