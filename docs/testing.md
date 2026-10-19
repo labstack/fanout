@@ -175,6 +175,6 @@ and benchmark guards. `just site-build` also installs site
 dependencies; use the installed build directly when dependency installation is
 outside the verification environment's scope. Neither command publishes the site.
 
-Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance such as the live demo, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
+Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
 
 To record chat and dashboard clips, set `FANOUT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e landing-recordings.spec.ts --project=1440-light --project=1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.
