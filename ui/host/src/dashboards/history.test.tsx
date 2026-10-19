@@ -57,13 +57,22 @@ it.each(["light", "dark"] as const)("queries only while open and shows authors, 
   expect(document.body.textContent).toContain("Person edit"); expect(document.body.textContent).toContain("Agent edit"); expect(document.body.textContent).not.toContain("opaque-user");
   expect(document.querySelector("time")?.title).toBeTruthy();
   await act(async () => button("Version 2").click()); await settle();
-  expect(document.body.textContent).toContain("Old 2"); expect(document.body.textContent).toContain("~ note.title");
+  expect(document.body.textContent).toContain("Old 2"); expect(document.body.textContent).toContain("~ Note: title");
   expect(document.body.textContent?.match(/Layout adjusted/g)).toHaveLength(1);
   expect(document.body.textContent).toContain("Dashboard: name");
   await act(async () => button("Spec").click());
   expect(document.body.textContent).toContain("Historical content 2");
   expect(client.getQueryData(["dashboard", "board"])).toBeUndefined();
   expect(document.querySelector("textarea,input")).toBeNull();
+});
+
+it("uses readable panel and dashboard chip labels in history", async () => {
+  api.getVersion.mockResolvedValue({...historic(2),changes:[{panel_id:'raw_panel_id',title:'P95 by operation',kind:'changed',fields:['viz','x_unit'],position_changed:true}],dashboard_fields:['time','annotations']});
+  await render();
+  const chips=document.querySelector('[data-history-version] [data-edit-chips]')!;
+  expect(chips.textContent).toContain('~ P95 by operation: chart type, x-axis unit · moved');
+  expect(chips.textContent).toContain('Dashboard: time range');expect(chips.textContent).toContain('Dashboard: markers');
+  expect(chips.textContent).not.toMatch(/raw_panel_id|\bviz\b|x_unit/);
 });
 
 it("aborts prior selection and closing requests and never displays a late historical response", async () => {

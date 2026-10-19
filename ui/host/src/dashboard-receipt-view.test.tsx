@@ -20,7 +20,7 @@ it('renders one quiet status, safe chips, exact saved-version link and keyboard 
   await act(async()=>root.render(view(receiptForTurn(build(),'u')!)));
   expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
   expect(host.textContent).toContain('Read telemetry · 1 panel · Checked in 1.2 s · Saved v2');
-  expect(host.textContent).toContain('~ latency.thresholds');expect(host.textContent).toContain('Layout adjusted');
+  expect(host.textContent).toContain('~ Latency: thresholds');expect(host.textContent).toContain('Layout adjusted');
   expect(host.querySelector('img')).toBeNull();
   const link=host.querySelector('a')!;expect(link.getAttribute('href')).toBe('/dashboards/board');expect(link.textContent).toBe('Open dashboard');
   const details=host.querySelector<HTMLButtonElement>('button[aria-expanded]')!;expect(details.getAttribute('aria-expanded')).toBe('false');
@@ -28,7 +28,34 @@ it('renders one quiet status, safe chips, exact saved-version link and keyboard 
   await act(async()=>details.click());expect(details.getAttribute('aria-expanded')).toBe('true');
   expect(host.textContent?.match(/(?:Saved v|saved version |saved v)2/g)).toHaveLength(1);
   expect(host.textContent).toContain('Unknown field');expect(host.textContent).toContain('Preview');
+  expect(host.textContent).toContain('Preview · Latency: ok');expect(host.textContent).toContain('Save · Latency: ok');
+  expect(host.textContent).not.toContain('Preview · latency:');expect(host.textContent).not.toContain('Save · latency:');
  }finally{await act(async()=>root.unmount());host.remove();}
+});
+it('shows unchanged panel titles in a rename-only save receipt',async()=>{
+ const panel={id:'p95_by_operation',title:'P95 by operation'};
+ const messages=[user(),call('rename','edit_dashboard',{id:'board',operations:[{op:'rename',name:'Renamed'}]}),result('rename',{...saved,dashboard:{...saved.dashboard,name:'Renamed',spec:{panels:[panel]}},receipt:{...saved.receipt,changes:[],dashboard_fields:['name'],save_check:{...saved.receipt.save_check,panels:[{id:panel.id,status:'ok',rows:1}]}}})];
+ const host=document.createElement('div');const root=createRoot(host);
+ try{await act(async()=>root.render(view(receiptForTurn(messages,'u')!)));
+ await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+ expect(host.textContent).toContain('Save · P95 by operation: ok');expect(host.textContent).not.toContain('p95_by_operation');
+ }finally{await act(async()=>root.unmount());}
+});
+it.each(['P95 by operation',undefined])('shows one correction chip per panel with title %s and no spec paths',async title=>{
+ const panels=[{id:'p95_by_operation',...(title?{title}:{})}];
+ const messages=[user(),call('bad','preview_panels',{panels}),result('bad',{panels:[{id:'p95_by_operation',status:'invalid',problems:[{path:'query.sort',message:'Invalid sort'},{path:'panels[0].query.by',message:'Invalid grouping'}]}]}),call('fixed','preview_panels',{panels}),result('fixed',{panels:[{id:'p95_by_operation',status:'ok'}]})];
+ const receipt=receiptForTurn(messages,'u')!;
+ expect(receipt.corrections).toHaveLength(2);
+ const host=document.createElement('div');const root=createRoot(host);
+ try{await act(async()=>root.render(view(receipt)));
+ const label=title ?? 'p95_by_operation';
+ const chips=host.querySelector('[data-edit-chips]')!;
+ expect(chips.querySelectorAll('[title]')).toHaveLength(1);expect(chips.textContent).toBe(`Fixed ${label}`);
+ await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+ expect(host.textContent).toContain(`Fixed ${label}: Invalid sort`);expect(host.textContent).toContain(`Fixed ${label}: Invalid grouping`);
+ expect(host.textContent).toContain(`Preview · ${label}: ok`);
+ expect(host.textContent).not.toContain('query.sort');expect(host.textContent).not.toContain('panels[');
+ }finally{await act(async()=>root.unmount());}
 });
 it('keeps unchecked/error/empty explanations visible with details collapsed', async()=>{
  const messages=build();messages[messages.length-1]=result('save',{...saved,receipt:{...saved.receipt,save_check:{checked:false,reason:'Timed out',elapsed_ms:8000,panels:[{id:'latency',status:'empty',rows:0,diagnosis:'No matching events'}]}}});
@@ -41,13 +68,13 @@ it('keeps unchecked/error/empty explanations visible with details collapsed', as
 
 it('shows in-flight stages as progress while keeping observed failures visible',async()=>{
  const messages=build();messages.pop();const receipt=receiptForTurn(messages,'u')!;
- receipt.stages.context.state='failed';receipt.explanations=['context: failed · save: incomplete'];
+ receipt.stages.context.state='failed';receipt.explanations=['Context: failed · Save: incomplete'];
  const host=document.createElement('div');const root=createRoot(host);
  try{await act(async()=>root.render(view(receipt,true)));
  expect(host.querySelector('[data-build-running]')).not.toBeNull();
- expect(host.querySelector('[data-receipt-attention]')?.textContent).toBe('context: failed');
+ expect(host.querySelector('[data-receipt-attention]')?.textContent).toBe('Context: failed');
  await act(async()=>host.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
- expect(host.textContent).toContain('Save: in progress');expect(host.textContent).not.toContain('save: incomplete');
+ expect(host.textContent).toContain('Save: in progress');expect(host.textContent).not.toContain('Save: incomplete');
  }finally{await act(async()=>root.unmount());}
 });
 

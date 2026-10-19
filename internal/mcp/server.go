@@ -9,6 +9,7 @@ import (
 	"maps"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -196,13 +197,15 @@ func normalizeToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
 		}
 		payload := toolerror.Normalize(content)
 		// Product guidance is already presented and may contain observed routes.
+		alreadyPresented := []string{"no_data", "unknown_service", "invalid_spec"}
 		switch failure := payload["error"].(type) {
 		case *toolerror.Error:
-			if failure.Code != "no_data" && failure.Code != "unknown_service" {
+			if !slices.Contains(alreadyPresented, failure.Code) {
 				failure.Message = panel.PresentMessage(failure.Message)
 			}
 		case map[string]any:
-			if message, ok := failure["message"].(string); ok && failure["code"] != "no_data" && failure["code"] != "unknown_service" {
+			code, _ := failure["code"].(string)
+			if message, ok := failure["message"].(string); ok && !slices.Contains(alreadyPresented, code) {
 				failure["message"] = panel.PresentMessage(message)
 			}
 		}

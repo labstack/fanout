@@ -66,6 +66,7 @@ type dashboardOutput struct {
 	Warnings  []string          `json:"warnings,omitempty"`
 	Receipt   *dashboardReceipt `json:"receipt,omitempty"`
 	Error     *toolerror.Error  `json:"error,omitempty"`
+	Problems  panel.Problems    `json:"problems,omitempty"`
 }
 
 type savedPanelCheck struct {
@@ -119,17 +120,17 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "create_dashboard", Title: "Create dashboard",
-		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every non-text panel returns data. Empty or failing panels are rejected with their path, title and diagnosis. " + saveReceiptGuide + specGuide,
+		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every non-text panel returns data. Empty or failing panels return error.code invalid_spec with their path, title and diagnosis, plus structured problems. " + saveReceiptGuide + specGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "replace_dashboard", Title: "Replace dashboard",
-		Description: "Every non-text panel must return data in the preview or the save is rejected. Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
+		Description: "Every non-text panel must return data in the preview or the save returns error.code invalid_spec with the panel path, title and diagnosis, plus structured problems. A stale base_version returns error.code dashboard_version_conflict. Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "edit_dashboard", Title: "Edit dashboard",
-		Description: "Every non-text panel must return data in the preview or the save is rejected. Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
+		Description: "Every non-text panel must return data in the preview or the save returns error.code invalid_spec with the panel path, title and diagnosis, plus structured problems. A stale base_version returns error.code dashboard_version_conflict. Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. " + saveReceiptGuide + "See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 	{
@@ -139,7 +140,7 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "restore_dashboard_version", Title: "Restore dashboard version",
-		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. A missing or pruned target returns error.code dashboard_version_not_found; list_dashboard_versions shows retained versions. " + saveReceiptGuide,
+		Description: "Restore a saved historical version of the authenticated user's dashboard only on an explicit user request. The input version selects the historical spec; the result's version is the newly saved version. Every successful call appends another version, even when restoring the latest spec. A missing or pruned target returns error.code dashboard_version_not_found; list_dashboard_versions shows retained versions. Spec validation failures return error.code invalid_spec with the presented problems. " + saveReceiptGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 }
@@ -179,7 +180,8 @@ func (s *Server) dashboardList(ctx context.Context, req *mcp.CallToolRequest, _ 
 	}
 	items, err := s.dashboards.List(ctx, owner)
 	if err != nil {
-		return nil, dashboardListOutput{}, dashboardToolError(err)
+		result, _, err := dashboardToolError(err)
+		return result, dashboardListOutput{}, err
 	}
 	summaries := make([]dashboardToolSummary, 0, len(items))
 	for _, item := range items {
@@ -195,7 +197,7 @@ func (s *Server) dashboardGet(ctx context.Context, req *mcp.CallToolRequest, inp
 	}
 	record, err := s.dashboards.Get(ctx, owner, strings.TrimSpace(input.ID))
 	if err != nil {
-		return nil, dashboardOutput{}, dashboardToolError(err)
+		return dashboardToolError(err)
 	}
 	return summary(fmt.Sprintf("Loaded %q, version %d, with %d panels.", record.Name, record.Version, len(record.Spec.Panels))), dashboardOutput{Dashboard: &record}, nil
 }
@@ -223,7 +225,7 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 	}
 	record, err := s.dashboards.CreateWithChanges(dashboard.WithSaveCheck(ctx, s.checkDashboardPanels), owner, input.Dashboard, agentAuthor(owner))
 	if err != nil {
-		return nil, dashboardOutput{}, dashboardToolError(err)
+		return dashboardToolError(err)
 	}
 	return s.saved(ctx, "Created", record)
 }
@@ -235,7 +237,7 @@ func (s *Server) dashboardReplace(ctx context.Context, req *mcp.CallToolRequest,
 	}
 	record, err := s.dashboards.ReplaceWithChanges(dashboard.WithSaveCheck(ctx, s.checkDashboardPanels), owner, strings.TrimSpace(input.ID), input.Dashboard, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
-		return nil, dashboardOutput{}, dashboardToolError(err)
+		return dashboardToolError(err)
 	}
 	return s.saved(ctx, "Replaced", record)
 }
@@ -247,7 +249,7 @@ func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, in
 	}
 	record, err := s.dashboards.EditWithChanges(dashboard.WithSaveCheck(ctx, s.checkDashboardPanels), owner, strings.TrimSpace(input.ID), input.Operations, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
-		return nil, dashboardOutput{}, dashboardToolError(err)
+		return dashboardToolError(err)
 	}
 	return s.saved(ctx, "Updated", record)
 }
@@ -304,7 +306,8 @@ func (s *Server) dashboardVersions(ctx context.Context, req *mcp.CallToolRequest
 	}
 	versions, err := s.dashboards.Versions(ctx, owner, strings.TrimSpace(input.ID))
 	if err != nil {
-		return nil, dashboardVersionsOutput{}, dashboardToolError(err)
+		result, _, err := dashboardToolError(err)
+		return result, dashboardVersionsOutput{}, err
 	}
 	return summary(fmt.Sprintf("Found %d saved versions.", len(versions))), dashboardVersionsOutput{Versions: versions}, nil
 }
@@ -319,18 +322,7 @@ func (s *Server) dashboardRestore(ctx context.Context, req *mcp.CallToolRequest,
 	}
 	mutation, err := s.dashboards.RestoreWithChanges(ctx, owner, strings.TrimSpace(input.ID), input.Version, agentAuthor(owner))
 	if err != nil {
-		code := ""
-		if errors.Is(err, dashboard.ErrVersionNotFound) {
-			code = dashboard.VersionNotFoundCode
-		} else if errors.Is(err, dashboard.ErrAlreadyCurrent) {
-			code = dashboard.AlreadyCurrentCode
-		}
-		if code != "" {
-			result := summary(err.Error())
-			result.IsError = true
-			return result, dashboardOutput{Error: &toolerror.Error{Code: code, Message: err.Error()}}, nil
-		}
-		return nil, dashboardOutput{}, dashboardToolError(err)
+		return dashboardToolError(err)
 	}
 	return s.saved(ctx, "Restored", mutation)
 }
@@ -455,20 +447,29 @@ func dashboardOwner(req *mcp.CallToolRequest) (string, error) {
 	return "", errors.New("authenticated dashboard owner is required")
 }
 
-func dashboardToolError(err error) error {
+func dashboardToolError(err error) (*mcp.CallToolResult, dashboardOutput, error) {
 	var problems panel.Problems
+	code, message := "", ""
 	switch {
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
-		return safePanelToolError(err)
+		return nil, dashboardOutput{}, safePanelToolError(err)
 	case errors.As(err, &problems):
-		return panel.PresentProblems(problems)
+		problems = panel.PresentProblems(problems)
+		code, message = "invalid_spec", problems.Error()
+	case errors.Is(err, dashboard.ErrVersionNotFound):
+		code, message = dashboard.VersionNotFoundCode, err.Error()
+	case errors.Is(err, dashboard.ErrAlreadyCurrent):
+		code, message = dashboard.AlreadyCurrentCode, err.Error()
 	case errors.Is(err, dashboard.ErrNotFound):
-		return errors.New("dashboard not found")
+		return nil, dashboardOutput{}, errors.New("dashboard not found")
 	case errors.Is(err, dashboard.ErrConflict):
-		return errors.New("a dashboard with that name already exists")
+		return nil, dashboardOutput{}, errors.New("a dashboard with that name already exists")
 	case errors.Is(err, dashboard.ErrStale):
-		return errors.New("the dashboard changed since you read it; open it again and reapply the change")
+		code, message = "dashboard_version_conflict", "the dashboard changed since you read it; open it again and reapply the change"
 	default:
-		return safePanelToolError(err)
+		return nil, dashboardOutput{}, safePanelToolError(err)
 	}
+	result := summary(message)
+	result.IsError = true
+	return result, dashboardOutput{Error: &toolerror.Error{Code: code, Message: message}, Problems: problems}, nil
 }

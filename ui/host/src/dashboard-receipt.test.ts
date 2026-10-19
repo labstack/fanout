@@ -3,15 +3,40 @@ import { changeChips, receiptForTurn } from './dashboard-receipt';
 import { user, call, result, saved, build } from '../tests/dashboard-receipts';
 it('uses signed panel change chips',()=>{
  expect(changeChips({changes:[{panel_id:'pool',title:'Pool',kind:'added'}],layout_changed:false})).toEqual(['+ Pool']);
- expect(changeChips({changes:[{panel_id:'latency',title:'Latency',kind:'changed',fields:['thresholds']}],layout_changed:false})).toEqual(['~ latency.thresholds']);
+ expect(changeChips({changes:[{panel_id:'latency',title:'Latency',kind:'changed',fields:['thresholds']}],layout_changed:false})).toEqual(['~ Latency: thresholds']);
+});
+it('labels authored fields and moved panels with readable words',()=>{
+ expect(changeChips({changes:[{panel_id:'raw_panel_id',title:'P95 by operation',kind:'changed',fields:['viz','sql','content','x_unit','options','drill','click','time','annotations','better','reduce','title','query','unit','thresholds','width','height','min','max','future_field'],position_changed:true}],layout_changed:false,dashboard_fields:['time','annotations','description','name','variables','future_field']})).toEqual([
+  '~ P95 by operation: chart type, SQL, text, x-axis unit, display options, drill-down, click action, time range, markers, better direction, summary, title, query, unit, thresholds, width, height, minimum, maximum, future field · moved',
+  'Dashboard: time range','Dashboard: markers','Dashboard: description','Dashboard: name','Dashboard: variables','Dashboard: future field',
+ ]);
+ expect(changeChips({changes:[{panel_id:'raw_panel_id',title:'Latency',kind:'changed',position_changed:true},{panel_id:'raw_panel_id',title:'Latency',kind:'changed'},{panel_id:'raw_panel_id',title:'Latency',kind:'removed'}],layout_changed:false})).toEqual(['~ Latency · moved','~ Latency','− Latency']);
 });
 it('reconstructs observed stages, corrections, timings and exact saved receipt on reload',()=>{
  const messages=build(); const receipt=receiptForTurn(messages,'u')!;
  expect(receipt.panel_count).toBe(1); expect(receipt.saved).toMatchObject({id:'board',version:2,receipt:saved.receipt});
- expect(receipt.corrections).toEqual([{panel_id:'latency',path:'panels[0].query.measures[0]',message:'Unknown field'}]);
+ expect(receipt.corrections).toEqual([{panel_id:'latency',title:'Latency',path:'panels[0].query.measures[0]',message:'Unknown field'}]);
  expect(receipt.stages.preview).toMatchObject({state:'complete',elapsed_ms:200});
  expect(receipt.panels).toMatchObject([{id:'latency',status:'ok'}]);
  expect(receiptForTurn(JSON.parse(JSON.stringify(messages)),'u')).toEqual(receipt);
+});
+it.each(['preview_panels','create_dashboard','replace_dashboard'])('takes the latest correction title from %s drafts',name=>{
+ const messages=build().slice(0,5);
+ messages[3]=call('bad','preview_panels',{panels:[{id:'latency',title:'Earlier title'}]});
+ const panels=[{id:'latency',title:'P95 by operation'}];
+ messages.push(call('fixed',name,name==='preview_panels'?{panels}:{dashboard:{panels}}),result('fixed',name==='preview_panels'?{panels:[{id:'latency',status:'ok'}]}:{...saved,receipt:{...saved.receipt,changes:[]}}));
+ expect(receiptForTurn(messages,'u')?.corrections).toEqual([{panel_id:'latency',title:'P95 by operation',path:'panels[0].query.measures[0]',message:'Unknown field'}]);
+});
+it('uses saved change titles, later preview titles, and the id when no title was supplied',()=>{
+ const messages=build();
+ expect(receiptForTurn(messages,'u')?.corrections[0].title).toBe('Latency');
+ messages.push(call('later','preview_panels',{panels:[{id:'latency',title:'Latest title'}]}),result('later',{panels:[{id:'latency',status:'ok'}]}));
+ expect(receiptForTurn(messages,'u')?.corrections[0].title).toBe('Latest title');
+ expect(receiptForTurn(build().slice(0,7),'u')?.corrections[0].title).toBe('latency');
+});
+it('reads unchanged saved panel titles and preserves removed change titles',()=>{
+ const messages=[user(),call('save','replace_dashboard',{id:'board',dashboard:{panels:[{id:'latency',title:'Earlier title'}]}}),result('save',{...saved,dashboard:{...saved.dashboard,spec:{panels:[{id:'latency',title:'Saved latency'}]}},receipt:{...saved.receipt,changes:[{panel_id:'retired',title:'Retired calls',kind:'removed'}]}})];
+ expect(receiptForTurn(messages,'u')?.panel_titles).toEqual({latency:'Saved latency',retired:'Retired calls'});
 });
 it('ignores narration, reads, mismatched call IDs and other user turns',()=>{
  expect(receiptForTurn([user(),call('read','get_dashboard'),result('read',saved),{id:'text',role:'assistant',content:'create_dashboard saved v2'}],'u')).toBeNull();
@@ -23,6 +48,20 @@ it('keeps failed and interrupted saves incomplete without inventing success',()=
  const messages=[user(),call('save','create_dashboard'),result('save',{error:'failed'},'error')];
  expect(receiptForTurn(messages,'u')?.stages.save.state).toBe('failed');
  expect(receiptForTurn([user(),call('save','create_dashboard')],'u')?.stages.save.state).toBe('incomplete');
+});
+it.each(['P95 by operation',undefined])('uses panel titles and readable stage names in explanations (title=%s)',title=>{
+ const panels=[{id:'latency',...(title?{title}:{})}];
+ const messages=[user(),call('preview','preview_panels',{panels}),result('preview',{panels:[{id:'latency',status:'invalid',problems:[{path:'panels[0].query.sort',message:'Unknown sort'}]}]}),call('save','edit_dashboard'),result('save',{error:{code:'invalid_spec',message:'Rejected draft'}})];
+ const receipt=receiptForTurn(messages,'u')!,label=title ?? 'latency';
+ expect(receipt.explanations).toContain(`${label}: invalid`);expect(receipt.explanations).toContain(`${label}: Unknown sort`);
+ expect(receipt.explanations).toContain('Validation: failed · Preview: incomplete · Save: failed');
+ expect(receipt.explanations.join(' ')).not.toMatch(/panels\[|query\.sort|latency\.|validation:|preview:|save:/);
+});
+it('uses the latest title for a panel status and its diagnosis',()=>{
+ const messages=build();
+ messages.push(call('later','preview_panels',{panels:[{id:'latency',title:'Latest latency'}]}),result('later',{panels:[{id:'latency',status:'empty',diagnosis:'No matching events'}]}));
+ messages[8]=result('save',{...saved,receipt:{...saved.receipt,save_check:{...saved.receipt.save_check,panels:[{id:'latency',status:'empty',rows:0,diagnosis:'No matching events'}]}}});
+ expect(receiptForTurn(messages,'u')?.explanations).toContain('Latest latency: empty — No matching events');
 });
 it('labels removals, requires later successful previews and keeps parallel panels separate',()=>{
  const messages=build().slice(0,5);

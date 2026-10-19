@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/toolerror"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -140,9 +141,9 @@ func TestProductDiagnosesSurvivePublicationBoundaries(t *testing.T) {
 		}
 		spec := textDashboard("Empty telemetry")
 		spec.Panels[0] = panel.Panel{ID: "notes", Title: "Calls", Viz: "table", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}
-		_, _, err = s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
-		if err == nil || !strings.Contains(err.Error(), diagnosis) {
-			t.Fatalf("save validation lost diagnosis: %v", err)
+		result, rejected, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
+		if err != nil || !result.IsError || rejected.Error == nil || rejected.Error.Code != "invalid_spec" || !strings.Contains(rejected.Error.Message, diagnosis) {
+			t.Fatalf("save validation lost diagnosis: %+v %v", rejected, err)
 		}
 	}
 }
@@ -172,5 +173,52 @@ func TestNoDataRouteGuidanceSurvivesMCPMiddleware(t *testing.T) {
 	}
 	if !strings.Contains(failure.Error.Message, diagnosis) {
 		t.Fatalf("lost route guidance: %s", failure.Error.Message)
+	}
+}
+
+func TestDashboardRejectionsPreserveRouteDiagnosesThroughMiddleware(t *testing.T) {
+	const diagnosis = "No spans match these filters. Without HTTP route /api/orders/{id}, 120 match the remaining filters."
+	s := newToolServer(t, structural{}, receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
+		return []panel.Result{{ID: "calls", Status: panel.StatusEmpty, Diagnosis: diagnosis}}, nil
+	}})
+	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Saved")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := panel.Dashboard{Name: "Rejected", Panels: []panel.Panel{{ID: "calls", Title: "Calls", Viz: "table", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}}
+	want := panel.PresentProblems(panel.Problems{panel.DiagnosisProblem("panels[0]", "Calls: "+diagnosis, "Replace or drop this panel; dashboards contain only panels that return data.")}).Error()
+	if panel.PresentMessage(want) != panel.ReadFailure {
+		t.Fatal("route diagnosis no longer reproduces operational path presentation")
+	}
+	session := connectTestClient(t, s, nil)
+	for _, tc := range []struct {
+		name string
+		args any
+	}{
+		{"create_dashboard", DashboardCreateInput{Dashboard: spec}},
+		{"replace_dashboard", DashboardReplaceInput{ID: created.Dashboard.ID, Dashboard: spec}},
+		{"edit_dashboard", DashboardEditInput{ID: created.Dashboard.ID, Operations: []dashboard.Operation{{Op: "remove_panel", ID: "notes"}, {Op: "add_panel", Panel: &spec.Panels[0]}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{Name: tc.name, Arguments: tc.args, Meta: mcpsdk.Meta{dashboard.OwnerMetaKey: "owner"}})
+			if err != nil || !result.IsError {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			var failure dashboardOutput
+			if err := json.Unmarshal([]byte(result.Content[0].(*mcpsdk.TextContent).Text), &failure); err != nil || failure.Error == nil || failure.Error.Code != "invalid_spec" || failure.Error.Message != want {
+				t.Fatalf("failure=%+v err=%v", failure.Error, err)
+			}
+			if len(failure.Problems) != 1 || failure.Problems[0].Path != "panels[0]" || failure.Problems[0].Message != "Calls: "+diagnosis || failure.Problems[0].Hint != "Replace or drop this panel; dashboards contain only panels that return data." {
+				t.Fatalf("problems=%+v", failure.Problems)
+			}
+			raw, err := json.Marshal(result.StructuredContent)
+			var structured dashboardOutput
+			if err != nil || json.Unmarshal(raw, &structured) != nil || structured.Error == nil || *structured.Error != *failure.Error {
+				t.Fatalf("structured=%s err=%v", raw, err)
+			}
+			if len(structured.Problems) != 1 || structured.Problems[0] != failure.Problems[0] {
+				t.Fatalf("structured problems=%+v", structured.Problems)
+			}
+		})
 	}
 }

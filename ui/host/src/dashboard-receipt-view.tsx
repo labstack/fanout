@@ -1,14 +1,14 @@
 import { Button, Collapse, Group, Loader, Paper, Stack, Text } from "@mantine/core";
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import { changeChips, type BuildReceipt } from "./dashboard-receipt";
+import { changeChips, stageNames, type BuildReceipt } from "./dashboard-receipt";
 import { EditChips } from "./dashboard-change-chips";
 
-const stageNames = { schema: "Telemetry", context: "Context", draft: "Draft", validation: "Validation", preview: "Preview", save: "Save" };
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 export function DashboardReceiptView({ receipt, running = false, activity = "", awaitingAnswer = false }: { receipt: BuildReceipt; running?: boolean; activity?: string; awaitingAnswer?: boolean }) {
   const [expanded, setExpanded] = useState(false), detailsID = useId();
   const saved = receipt.saved, check = saved?.receipt.save_check;
+  const panelTitle = (id:string) => Object.hasOwn(receipt.panel_titles,id) ? receipt.panel_titles[id] : id;
   const completed = Object.values(receipt.stages).filter(s => s.state === "complete").length;
   const summary = [
     receipt.stages.schema.state === "complete" ? "Read telemetry" : undefined,
@@ -18,7 +18,7 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
   ].filter(Boolean).join(" · ") || "Building dashboard";
   const chips = [
     ...(saved ? changeChips(saved.receipt) : []),
-    ...receipt.corrections.map(c => `Fixed ${c.panel_id}.${c.path.replace(/^panels\[\d+\]\./, "")}`),
+    ...[...new Map(receipt.corrections.map(c => [c.panel_id, `Fixed ${c.title}`])).values()],
   ];
   return <Paper data-build-receipt={receipt.turn_id} data-dashboard-result={saved?.id} data-chat-anchor withBorder radius="md" p="sm">
     <Stack gap={6}>
@@ -37,11 +37,11 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
           {receipt.save_attempts.map((attempt,i) => attempt.state === "retried" && <Text size="xs" c="dimmed" key={attempt.call_id}>Save attempt {i+1}: retried</Text>)}
           {!!receipt.context_counts.deploys && <Text size="xs">{receipt.context_counts.deploys} deploys observed</Text>}
           {!!receipt.context_counts.anomalies && <Text size="xs">{receipt.context_counts.anomalies} anomalies observed</Text>}
-          {receipt.panels.map(p => <Text size="xs" key={p.id}>Preview · {p.id}: {p.status}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          {receipt.panels.map(p => <Text size="xs" key={p.id}>Preview · {panelTitle(p.id)}: {p.status}{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
           {check && <Text size="xs">Save check: {check.checked ? "checked" : "incomplete"} · {seconds(check.elapsed_ms)}</Text>}
-          {check?.panels.map(p => <Text size="xs" key={p.id}>Save · {p.id}: {p.status} · {p.rows ?? 0} rows{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
+          {check?.panels.map(p => <Text size="xs" key={p.id}>Save · {panelTitle(p.id)}: {p.status} · {p.rows ?? 0} rows{p.elapsed_ms !== undefined ? ` · ${seconds(p.elapsed_ms)}` : ""}</Text>)}
           {chips.slice(4).map((text,i) => <Text size="xs" key={i}>{text}</Text>)}
-          {receipt.corrections.map((c,i) => <Text size="xs" key={i}>Fixed {c.panel_id}.{c.path}: {c.message}</Text>)}
+          {receipt.corrections.map((c,i) => <Text size="xs" key={i}>Fixed {c.title}: {c.message}</Text>)}
         </Stack>
       </Collapse>
     </Stack>
