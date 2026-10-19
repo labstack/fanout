@@ -1,9 +1,100 @@
-# Browser smoke tests
+# Browser tests
 
-With Go, Bun, just and **Google Chrome** installed, run `just e2e` from the
-repository root. It rebuilds the embedded SPA and MCP app plus `bin/fanout`,
-then runs the pinned Playwright suite in `ui/host/e2e/` using system Chrome;
-no browser download or AI provider key is needed. `just check` remains browser-free.
+Install Go, Bun, just and Google Chrome, then run `just ui-deps`. From `ui/host`,
+run `bun run e2e --help` for the pinned Playwright CLI and
+`bun x --no-install playwright install chromium` to install the browser used by MCP and
+visual tests. The app matrix uses system Google Chrome. No AI provider key is
+needed. Run `just e2e` from the repository root to rebuild the embedded SPA,
+MCP App and `bin/fanout`, then run every surface. `just check` remains browser-free.
+
+One config owns `ui/host/e2e/specs/`: `app/` contains the existing seeded-server
+specs, `mcp/` checks the built MCP App through the official AppBridge, and
+`visual/` contains screenshot assertions. Each spec imports the composed
+`e2e/fixtures/test` runner; `just ui-boundaries-check` enforces this, and its
+failure-injection tests run in `just script-tests` and `just check`.
+`fixtures/` separates app sessions, browser faults, mock-host navigation,
+accessibility scans and keyboard navigation. `data/` contains synthetic JSON;
+`support/` contains shared helpers and their unit tests. Vitest still discovers
+all `*.test.ts` there and excludes Playwright specs. Site recording helper tests
+still run through the site's existing test commands.
+
+The app projects are `app-1100-light`, `app-1100-dark`, `app-1440-light` and
+`app-1440-dark`, each with one worker. Their shared `setup` dependency starts the
+seeded backend once; global teardown stops it after dependent projects finish.
+MCP and visual projects have no setup dependency and never boot Fanout.
+
+```sh
+just e2e                         # every surface, including performance
+just e2e-mcp                     # recorded MCP App protocol and accessibility
+just e2e-visual                  # screenshot comparisons on this platform
+just e2e-ui                      # Playwright UI Mode
+just e2e-update-snapshots         # accept local visual changes after review
+just e2e-linux-baselines          # accept Linux visuals in the pinned CI image
+just e2e e2e/specs/app/performance.spec.ts
+```
+
+Screenshot baselines live under
+`ui/host/e2e/__screenshots__/<project>/<platform>/<spec>/<name>.png`. Review
+actual/diff images before accepting changes; update only the visual project.
+Darwin baselines are generated locally. Linux baselines must come from the pinned
+Playwright image used by `just e2e-linux-baselines` and CI, with `--ipc=host`.
+The recipe mounts this checkout and installs Bun through npm because the image
+lacks unzip; locked UI dependencies use a separate container volume.
+In UI Mode, enable and run the `setup` project before app tests.
+No Go build is needed for visual tests. `just e2e-image-check`
+fails if the image's `/ms-playwright/.docker-info` driver version differs from
+installed `@playwright/test`. CI uploads reports, results and any generated Linux
+baselines. Missing Linux baselines fail the comparison and are available in the
+artifact for review and acceptance; CI never silently accepts changed pixels.
+
+The existing `app/screenshots.spec.ts` stays in app: it captures opt-in review
+images and manifests, but has no screenshot assertions. Its
+`FANOUT_E2E_SCREENSHOTS` gate is unchanged.
+
+## Recorded MCP host
+
+`e2e/host/server.mjs` builds current `panels.html` with `vite.apps.config.ts`,
+setting `FANOUT_APPS_OUT` to a temporary directory, then builds the test host.
+It serves only those production files on `127.0.0.1` port zero with
+`Cache-Control: no-store`; Playwright captures `listening on <port>` into
+`E2E_PORT`. SIGTERM closes the listener and removes build output. It never
+changes the embedded HTML and adds no product route.
+
+The mock host selects scenario/theme via query parameters and embeds the view
+in an `allow-scripts` sandbox. AppBridge sends tool input and structured results
+with a JSON text mirror, or cancellation, after initialization. A held result
+checks loading; an unbridged scenario checks the SDK connection deadline with
+Playwright's clock. Host context carries light/dark theme and inline display
+mode. Recorded helper calls are matched by complete input; unrecorded calls,
+resource reads, links and other requests fail loudly. The view currently requests
+only server tools and size changes; the host can read the built panels resource.
+
+To refresh recordings, build the server and run from the repository root:
+
+```sh
+just build
+cd ui/host
+bun e2e/host/record.ts
+```
+
+The recorder starts the same disposable `e2eseed` instance as app tests, calls
+real MCP tools over its authenticated loopback connection, saves only synthetic
+inputs/results to `e2e/data/mcp.json`, and cleans up. It rejects external-instance
+configuration. It records overview health, topology, performance/Slow operations,
+trace detail/correlated logs, log search, a custom panel, no-data guidance and a
+tool error, plus refresh, variable, exemplar and trace helper results. Absolute recorded
+windows keep assertions independent of the current clock. Credentials remain in
+private temporary state and are never recorded.
+
+MCP specs cover both themes, loading, every recorded view, no-data, errors,
+cancellation, connection failure, serious/critical axe violations and keyboard
+access to controls. Visual specs cover overview, performance and trace in both
+themes. These tests do not cover real ChatGPT/Claude host integration, remote
+MCP/OAuth handshakes, live telemetry, AI answers, arbitrary helper input, mobile
+layouts or every visual state. App specs retain real-server and handcrafted
+fragment coverage below.
+
+## Seeded backend lifecycle
 
 Setup creates a disposable loopback server, first administrator and near-now
 deterministic OTLP protobuf traces and logs. Teardown stops the server and removes
@@ -28,10 +119,10 @@ tooltip text without reading canvas pixels. Fragment height is capped at 2000
 pixels to match the host, and messages must stop for five seconds after the first
 settled frame. CI pins Node 24.19.0 and limits the job to 15 minutes. It runs the same recipe on
 pull requests and pushes. Failures write `ui/host/playwright-report/index.html`
-and retain traces/screenshots in `ui/host/test-results/`; both directories are
+and retain failure screenshots and first-retry traces in `ui/host/test-results/`; both directories are
 ignored by git. CI uploads available browser evidence after every run.
 
-For browser-free verification, run `bunx playwright test --list` in `ui/host`.
+For browser-free discovery, run `bun run e2e --list` in `ui/host`.
 `bun run test` runs unit tests and excludes Playwright specs.
 
 ## Dashboard performance measurements
@@ -118,7 +209,7 @@ Assess WCAG AA text contrast and chart marks against their actual surfaces.
 Check all six ordered categorical colours plus Other under colour-vision
 deficiency simulation. Browser accessibility scans cannot read canvas text, so
 supplement any scan with compiler/token assertions and screenshots.
-CI runs the performance spec (`just e2e e2e/performance.spec.ts`) in its own job and
+CI runs the performance spec (`just e2e e2e/specs/app/performance.spec.ts`) in its own job and
 the rest with `FANOUT_E2E_SKIP_PERFORMANCE=1`. `just e2e` runs the axe-core AA scan of dashboards and chat panels in both
 themes; `FANOUT_E2E_SCREENSHOTS=1 just e2e` also captures every panel type in
 both themes and states for review under `ui/host/test-results/`. Record the
@@ -177,4 +268,4 @@ outside the verification environment's scope. Neither command publishes the site
 
 Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
 
-To record chat and dashboard clips, set `FANOUT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e landing-recordings.spec.ts --project=1440-light --project=1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.
+To record chat and dashboard clips, set `FANOUT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e e2e/specs/app/landing-recordings.spec.ts --project=app-1440-light --project=app-1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.

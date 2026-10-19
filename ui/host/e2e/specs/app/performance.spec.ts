@@ -1,8 +1,8 @@
-import { test, expect, type Browser, type Page, type Request, type Response } from "@playwright/test";
+import { test, expect, type Browser, type Page, type Request, type Response } from "../../fixtures/test";
 import { createHash } from "node:crypto";
-import type { PanelResult, Frame } from "../../panels/types";
-import spec from "./fixtures/performance.json" with { type: "json" };
-import { allPanelsPainted, assertRefreshRequests, CI_RENDER_CEILING_MS, p95 } from "./performance-support";
+import type { PanelResult, Frame } from "../../../../panels/types";
+import spec from "../../data/performance.json" with { type: "json" };
+import { allPanelsPainted, assertRefreshRequests, CI_RENDER_CEILING_MS, p95 } from "../../support/performance-support";
 
 const viewport = { width: 1440, height: 3000 };
 const panelIds = spec.panels.map(panel => panel.id).sort();

@@ -1,6 +1,6 @@
-import { expect } from "@playwright/test";
-import { chooseView, openSurface, readyCard, spec, test, type Surface, type Scenario } from "./accessibility-support";
-import type { Frame, Page } from "@playwright/test";
+import { test, expect } from "../../fixtures/test";
+import { chooseView, openSurface, readyCard, spec, type Surface, type Scenario } from "../../support/accessibility-support";
+import type { Frame, Page } from "../../fixtures/test";
 
 // An opaque descendant must not paint square corners over an unclipped rounded
 // container, such as a panel body or notes footer over its card's bottom corners.
@@ -48,7 +48,7 @@ async function cornerIssues(target: Page | Frame): Promise<string[]> {
 for (const surface of ["dashboard", "chat"] as Surface[]) for (const scenario of [undefined] as (Scenario | undefined)[]) {
   test(`${surface} panels keep their rounded corners in every view`, async ({ page, request }, info) => {
     // Geometry does not depend on theme or width; one project keeps CI short.
-    test.skip(info.project.name !== "1100-light", "checked once, at 1100-light");
+    test.skip(info.project.name !== "app-1100-light", "checked once, at app-1100-light");
     const panel = spec.panels.find(p => p.viz === "logs")!;
     const document = await openSurface(page, request, info, surface, scenario ? panel : undefined, scenario);
     const panels = scenario ? [panel] : spec.panels;

@@ -5,7 +5,7 @@ import { inside, overlaps } from "./geometry";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import FailureReport from "./failure-report";
+import FailureReport from "../failure-report";
 
 describe("setup safety and readiness", () => {
   it("redacts credentials before printing the last fifty diagnostic lines", () => {

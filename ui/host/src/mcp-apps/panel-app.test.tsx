@@ -125,3 +125,26 @@ it.each([false,true])("negotiates host fullscreen only when advertised (availabl
   expect(bridge.app.callServerTool).not.toHaveBeenCalled();
  } finally {await view.cleanup();}
 });
+
+it("announces host cancellation and accepts a later result", async () => {
+  const view = await mount();
+  try {
+    await act(async () => bridge.app.ontoolcancelled!({ reason: "user action" }));
+    expect(view.node.querySelector('[role="alert"]')?.textContent).toBe("View cancelled.");
+    await act(async () => bridge.app.ontoolresult!({ structuredContent: fixture(), content: [] }));
+    expect(view.node.querySelector('[role="alert"]')).toBeNull();
+  } finally { await view.cleanup(); }
+});
+it("presents no-data guidance from structured or text tool errors", async () => {
+  const view = await mount();
+  const problem = { error: { code: "no_data", message: "No matching data. Use a signal this service emits." } };
+  try {
+    for (const result of [
+      { isError: true, structuredContent: problem, content: [] },
+      { isError: true, content: [{ type: "text" as const, text: JSON.stringify(problem) }] },
+    ]) {
+      await act(async () => bridge.app.ontoolresult!(result));
+      expect(view.node.querySelector('[role="alert"]')?.textContent).toBe(problem.error.message);
+    }
+  } finally { await view.cleanup(); }
+});

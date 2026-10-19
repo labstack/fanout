@@ -65,14 +65,39 @@ build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
     bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
 
 # Disposable seeded instance and system Google Chrome; separate from check.
-# Extra arguments go to Playwright, e.g. `just e2e e2e/performance.spec.ts`.
+# Extra arguments go to Playwright, e.g. `just e2e e2e/specs/app/performance.spec.ts`.
 e2e *ARGS:
     just build
     cd ui/host && bun run e2e {{ARGS}}
 
+# Recorded MCP App protocol and accessibility checks; no Go server.
+e2e-mcp *ARGS:
+    cd ui/host && bun run e2e --project mcp {{ARGS}}
+
+# Screenshot comparisons against the current platform's accepted baselines.
+e2e-visual *ARGS:
+    cd ui/host && bun run e2e --project visual {{ARGS}}
+
+# Explore all surfaces with Playwright UI Mode.
+e2e-ui *ARGS:
+    just build
+    cd ui/host && bun run e2e --ui {{ARGS}}
+
+# Deliberately refresh only the visual surface.
+e2e-update-snapshots *ARGS:
+    just e2e-visual --update-snapshots {{ARGS}}
+
+# Check the browser image against the installed driver before taking pixels.
+e2e-image-check:
+    node scripts/playwright-image-check.mjs
+
+# Generate Linux baselines with the same image and shared-memory setting as CI.
+e2e-linux-baselines:
+    docker run --rm --ipc=host -v "{{justfile_directory()}}:/work" -v /work/ui/host/node_modules -w /work mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf bash -euc 'npm install --global bun@1.4.2; cd ui/host; bun install --frozen-lockfile; cd ../..; node scripts/playwright-image-check.mjs; cd ui/host; bun run e2e --project visual --update-snapshots'
+
 # Refresh the README's light and dark System overview captures.
 landing-captures:
-    FANOUT_LANDING_BASE_URL="${FANOUT_LANDING_BASE_URL:-}" FANOUT_LANDING_SESSION_COOKIE="${FANOUT_LANDING_SESSION_COOKIE:-}" FANOUT_LANDING_CAPTURES=1 just e2e e2e/landing-captures.spec.ts
+    FANOUT_LANDING_BASE_URL="${FANOUT_LANDING_BASE_URL:-}" FANOUT_LANDING_SESSION_COOKIE="${FANOUT_LANDING_SESSION_COOKIE:-}" FANOUT_LANDING_CAPTURES=1 just e2e e2e/specs/app/landing-captures.spec.ts
 
 # CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
 # without pushing anything.

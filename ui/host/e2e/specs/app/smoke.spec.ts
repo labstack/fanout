@@ -1,32 +1,14 @@
-import { test as base, expect, type Locator } from "@playwright/test";
+import { test, expect, type Locator } from "../../fixtures/test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { mountApp } from "./chat-harness";
-import spec from "./fixtures/all-panels.json" with { type: "json" };
-import { inside, overlaps, type Rect } from "./geometry";
-import { typeScale } from "../../tokens";
-import { chartLabel } from "./setup-support";
+import { mountApp } from "../../support/chat-harness";
+import spec from "../../data/all-panels.json" with { type: "json" };
+import { inside, overlaps, type Rect } from "../../support/geometry";
+import { typeScale } from "../../../../tokens";
+import { chartLabel } from "../../support/setup-support";
 
 type ObservedResult = { id: string; status: string; frame?: { rows: number; values: unknown[][] } };
-const root = fileURLToPath(new URL("../../../", import.meta.url));
-const test = base.extend<{ faults: string[] }>({
-  baseURL: async ({}, use) => { await use(process.env.FANOUT_E2E_BASE_URL); },
-  storageState: async ({}, use) => {
-    const state = process.env.FANOUT_E2E_STORAGE_STATE;
-    if (!state) throw new Error("Global setup did not provide a session");
-    await use(state);
-  },
-  faults: [async ({ page }, use) => {
-    const faults: string[] = [];
-    page.on("pageerror", error => faults.push(`pageerror: ${error.message}`));
-    page.on("console", message => {
-      if (message.type() === "error" || message.type() === "warning") faults.push(`${message.type()}: ${message.text()}`);
-    });
-    await use(faults);
-    expect(faults, "No page errors, console errors or warnings (including iframe)").toEqual([]);
-  }, { auto: true }],
-});
-
+const root = fileURLToPath(new URL("../../../../../", import.meta.url));
 const expectedElements: Record<string, string> = {
   stat: "[data-stat-value]", gauge: "canvas", timeseries: "canvas", bar: "canvas",
   table: "tbody tr", text: "[data-panel-body] p", heatmap: "canvas", histogram: "canvas",

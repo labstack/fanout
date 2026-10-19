@@ -125,11 +125,11 @@ jobs:
           - group: smoke and accessibility
             slug: smoke
             skip_performance: "1"
-            args: ""
+            args: --project=app-1100-light --project=app-1100-dark --project=app-1440-light --project=app-1440-dark --project=mcp
           - group: performance
             slug: performance
             skip_performance: ""
-            args: e2e/performance.spec.ts
+            args: e2e/specs/app/performance.spec.ts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -158,6 +158,36 @@ jobs:
           path: |
             ui/host/playwright-report/
             ui/host/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  visual:
+    name: Browser visual
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The browser image lacks unzip, which setup-bun needs.
+      - name: Install Bun
+        run: npm install --global bun@1.4.2
+      - name: Install UI dependencies
+        run: cd ui/host && bun install --frozen-lockfile
+      - name: Check image driver version
+        run: node scripts/playwright-image-check.mjs
+      - name: Visual comparisons
+        run: cd ui/host && bun run e2e --project visual
+      - name: Upload browser evidence and Linux baselines
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-evidence-visual
+          path: |
+            ui/host/playwright-report/
+            ui/host/test-results/
+            ui/host/e2e/__screenshots__/visual/linux/
           if-no-files-found: ignore
           retention-days: 7
 

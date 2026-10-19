@@ -1,7 +1,7 @@
 import axe from "axe-core";
 import { defaultCssVariablesResolver, DEFAULT_THEME, mergeMantineTheme } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { fanoutCssVariables, fanoutThemeConfig } from "../../theme";
+import { fanoutCssVariables, fanoutThemeConfig } from "../../../theme";
 import { editorOverlapTargets, proveEditorText } from "./editor-contrast";
 
 beforeEach(() => {

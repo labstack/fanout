@@ -1,9 +1,9 @@
-import { expect, type Response } from "@playwright/test";
-import { cardSelector, chooseView, readyCard, test } from "./accessibility-support";
-import { chartLabel } from "./setup-support";
-import type { DashboardTime, Panel, PanelResult } from "../../panels/types";
-import { frameRows } from "../../panels/rows";
-import { statusFor } from "../../panels/thresholds";
+import { test, expect, type Response } from "../../fixtures/test";
+import { cardSelector, chooseView, readyCard } from "../../support/accessibility-support";
+import { chartLabel } from "../../support/setup-support";
+import type { DashboardTime, Panel, PanelResult } from "../../../../panels/types";
+import { frameRows } from "../../../../panels/rows";
+import { statusFor } from "../../../../panels/thresholds";
 
 const panels: Panel[] = [
   { id: "check_states", title: "Is it reachable?", viz: "state_timeline" },

@@ -50,3 +50,21 @@ test("allows workspace packages and package-free shared imports; skips comments 
     "host/node_modules/test/index.ts": 'import { X } from "../../../outside/src/x";',
   }).exitCode).toBe(0);
 });
+
+test.each([
+  'import { test, expect } from "@playwright/test";',
+  'import { test as base } from "@playwright/test";',
+  'export { expect } from "@playwright/test";',
+  'const runner = import("@playwright/test");',
+  'import { test } from "../../support/accessibility-support";',
+])("rejects bypassing composed Playwright fixtures: %s", source => {
+  const result = check({ "host/e2e/specs/mcp/panels.spec.ts": source });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain("specs must import test/expect from e2e/fixtures/test");
+});
+
+test("allows composed Playwright fixtures in every surface", () => {
+  expect(check(Object.fromEntries(["app", "mcp", "visual"].map(surface => [
+    `host/e2e/specs/${surface}/panels.spec.ts`, 'import { test, expect } from "../../fixtures/test";',
+  ]))).exitCode).toBe(0);
+});
