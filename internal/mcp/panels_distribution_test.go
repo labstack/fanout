@@ -32,8 +32,8 @@ func TestDistributionRejectsUnknownHistogramTemporality(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, edited, err := s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: created.Dashboard.ID, BaseVersion: 1, Operations: []dashboard.Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"viz": "histogram", "content": nil, "query": query}}}})
-	if err == nil || !strings.Contains(err.Error(), "temporality") || edited.Receipt != nil {
+	result, edited, err := s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: created.Dashboard.ID, BaseVersion: 1, Operations: []dashboard.Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"viz": "histogram", "content": nil, "query": query}}}})
+	if err != nil || !result.IsError || edited.Error == nil || edited.Error.Code != "invalid_spec" || !strings.Contains(edited.Error.Message, "temporality") || edited.Receipt != nil {
 		t.Fatalf("dashboard edit accepted removed option: %+v %v", edited, err)
 	}
 }

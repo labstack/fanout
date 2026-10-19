@@ -155,7 +155,7 @@ it('collects only the final assistant message by its stream ID',async()=>{
  expect(s.final_text).toBe('Final ✓');expect(s.incomplete).toBe(false);
 });
 it('preserves nested tool errors and persisted flags without allowing saves or answers',async()=>{
- for(const content of [{error:{code:'tool_failed',message:'Synthetic invalid spec'}},
+ for(const content of [{error:{code:'invalid_spec',message:'Synthetic invalid spec'}},
  {error:{code:'tool_failed',message:'Synthetic operation failed'}},{dashboard:saved}]) {
   const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({...content,isError:true})})+frame(finish)),new AbortController().signal);
   expect(findSaved(s,[{role:'tool',toolCallId:'save',error:''}])).toBeNull();
@@ -166,10 +166,10 @@ it('preserves nested tool errors and persisted flags without allowing saves or a
 });
 
 it('reads stable tool error codes and messages while preserving error flags from all sources',async()=>{
- for(const message of ['Synthetic invalid spec','Synthetic operation failed']) {
-  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({dashboard:saved,error:{code:'tool_failed',message}})})+frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:false}})+frame(finish)),new AbortController().signal);
+ for(const [code,message] of [['invalid_spec','Synthetic invalid spec'],['tool_failed','Synthetic operation failed']]) {
+  const s=await readSSE(response(frame(start)+frame({...result,content:JSON.stringify({dashboard:saved,error:{code,message}})})+frame({type:'ACTIVITY_SNAPSHOT',activityType:'mcp-app',content:{tool_name:'create_dashboard',tool_input:null,is_error:false}})+frame(finish)),new AbortController().signal);
   expect(findSaved(s,[{role:'tool',toolCallId:'save',error:''}])).toBeNull();
-  expect(s.tools[0]).toMatchObject({is_error:true,error_code:'tool_failed',error_message:message});
+  expect(s.tools[0]).toMatchObject({is_error:true,error_code:code,error_message:message});
  }
 });
 

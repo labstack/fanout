@@ -2,23 +2,27 @@ import type { Message } from "@ag-ui/client";
 import { dashboardToolResult, jsonObject, mutationNames, object, panelCheck, type DashboardToolResult, type PanelCheck } from "./dashboard-tool-result";
 
 export type Change={panel_id:string;title:string;kind:'added'|'changed'|'removed';fields?:string[];position_changed?:boolean};
-const changeLabel=(c:Change):string=>c.kind==='added'?`+ ${c.title}`:c.kind==='removed'?`− ${c.title}`:`~ ${c.panel_id}${c.fields?.length?'.'+c.fields.join(', '):''}${c.position_changed?' · order':''}`;
+const fieldWords:Record<string,string>={viz:'chart type',sql:'SQL',content:'text',x_unit:'x-axis unit',options:'display options',drill:'drill-down',click:'click action',time:'time range',annotations:'markers',better:'better direction',reduce:'summary',min:'minimum',max:'maximum'};
+const readableField=(field:string)=>Object.hasOwn(fieldWords,field) ? fieldWords[field] : field.replaceAll('_',' ');
+const changeLabel=(c:Change):string=>c.kind==='added'?`+ ${c.title}`:c.kind==='removed'?`− ${c.title}`:`~ ${c.title}${c.fields?.length?': '+c.fields.map(readableField).join(', '):''}${c.position_changed?' · moved':''}`;
 export function changeChips(receipt: { changes: Change[]; layout_changed: boolean; dashboard_fields?: string[] }): string[] {
-  return [...receipt.changes.map(changeLabel), ...(receipt.layout_changed ? ["Layout adjusted"] : []), ...(receipt.dashboard_fields?.map(field => `Dashboard: ${field}`) ?? [])];
+  return [...receipt.changes.map(changeLabel), ...(receipt.layout_changed ? ["Layout adjusted"] : []), ...(receipt.dashboard_fields?.map(field => `Dashboard: ${readableField(field)}`) ?? [])];
 }
-export type Correction={panel_id:string;path:string;message:string};
-function resolvedProblems(before:Correction[],after:Correction[],retainedIDs:Set<string>):Correction[] {
+type Problem={panel_id:string;path:string;message:string};
+export type Correction=Problem & {title:string};
+function resolvedProblems(before:Problem[],after:Problem[],retainedIDs:Set<string>):Problem[] {
   return before.filter(p=>retainedIDs.has(p.panel_id) && !after.some(q=>q.panel_id===p.panel_id && q.path===p.path));
 }
 export type Stage = { state: "unobserved" | "incomplete" | "failed" | "complete" | "interrupted"; elapsed_ms?: number };
+export const stageNames = { schema: "Telemetry", context: "Context", draft: "Draft", validation: "Validation", preview: "Preview", save: "Save" };
 export type BuildReceipt = {
-  turn_id: string; stages: Record<"schema" | "context" | "draft" | "validation" | "preview" | "save", Stage>;
-  panel_count?: number; panels: PanelCheck[]; problems: Correction[]; corrections: Correction[];
+  turn_id: string; stages: Record<keyof typeof stageNames, Stage>;
+  panel_count?: number; panel_titles: Record<string,string>; panels: PanelCheck[]; problems: Problem[]; corrections: Correction[];
   save_attempts: Array<{call_id:string;state:Stage["state"] | "retried"}>;
   explanations: string[]; context_counts: { deploys: number; anomalies: number }; saved?: DashboardToolResult;
 };
 const contextTools = new Set(["get_intelligence_snapshot", "query_telemetry", "get_observability_overview", "get_service_topology", "get_service_dependencies", "get_service_performance", "inspect_trace", "search_logs"]);
-const namedProblems = (value: unknown, id: string): Correction[] => Array.isArray(value) ? value.flatMap(p => object(p) && typeof p.path === "string" && typeof p.message === "string" ? [{panel_id:id,path:p.path,message:p.message}] : []) : [];
+const namedProblems = (value: unknown, id: string): Problem[] => Array.isArray(value) ? value.flatMap(p => object(p) && typeof p.path === "string" && typeof p.message === "string" ? [{panel_id:id,path:p.path,message:p.message}] : []) : [];
 const toolCode = (content: unknown) => { const error = jsonObject(content)?.error; return object(error) ? error.code : undefined; };
 export const interruptedResult = (message:Message) => message.role === "tool" && toolCode(message.content) === "interrupted";
 const executed = (p: PanelCheck) => !["invalid", "not_run"].includes(p.status);
@@ -34,19 +38,21 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
   const calls = turn.flatMap((m, i) => m.role === "assistant" ? (m.toolCalls ?? []).map(call => ({call,index:i})) : []).filter(({call}) => !refused.has(call.id));
   if (!calls.some(({call}) => mutationNames.has(call.function.name) || call.function.name === "preview_panels")) return null;
   const stages: BuildReceipt["stages"] = {schema:{state:"unobserved"},context:{state:"unobserved"},draft:{state:"unobserved"},validation:{state:"unobserved"},preview:{state:"unobserved"},save:{state:"unobserved"}};
-  const receipt: BuildReceipt = {turn_id:turnID,stages,panels:[],problems:[],corrections:[],save_attempts:[],explanations:[],context_counts:{deploys:0,anomalies:0}};
+  const receipt: BuildReceipt = {turn_id:turnID,stages,panel_titles:{},panels:[],problems:[],corrections:[],save_attempts:[],explanations:[],context_counts:{deploys:0,anomalies:0}};
   const callCounts = new Map<string, number>(), toolResults = new Map<string, Array<{index:number;message:Message}>>();
   for (const {call} of calls) callCounts.set(call.id,(callCounts.get(call.id) ?? 0)+1);
   turn.forEach((message,index) => {if(message.role === "tool") {const results=toolResults.get(message.toolCallId) ?? [];results.push({index,message});toolResults.set(message.toolCallId,results);}});
   const netChanges = new Map<string,Change>();
+  const titles = new Map<string,string>();
+  let corrections:Problem[] = [];
   let firstSave: DashboardToolResult | undefined, unreadableSave = false, lastMutationError = false;
-  const clearProblems = (id:string,issues:Correction[]) => {
+  const clearProblems = (id:string,issues:Problem[]) => {
     for(const problem of resolvedProblems(outstanding.get(id) ?? [],issues,new Set([id]))) {
-      if(!receipt.corrections.some(c=>c.panel_id===problem.panel_id && c.path===problem.path)) receipt.corrections.push(problem);
+      if(!corrections.some(c=>c.panel_id===problem.panel_id && c.path===problem.path)) corrections.push(problem);
     }
     outstanding.set(id,issues);
   };
-  const panels = new Map<string, PanelCheck>(), outstanding = new Map<string, Correction[]>(), previewFailures = new Set<string>();
+  const panels = new Map<string, PanelCheck>(), outstanding = new Map<string, Problem[]>(), previewFailures = new Set<string>();
   let sawPreview = false, unmatchedPreview = false;
   for (const {call,index} of calls) {
     // Evaluate in call order, so out-of-order parallel results cannot turn an
@@ -70,7 +76,10 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
     }
     if (name === "preview_panels" || name === "create_dashboard" || name === "replace_dashboard") {
       const draft = name === "preview_panels" ? input?.panels : object(input?.dashboard) ? input.dashboard.panels : undefined;
-      if (Array.isArray(draft)) { receipt.panel_count = draft.length; stages.draft = {state:"complete"}; }
+      if (Array.isArray(draft)) {
+        receipt.panel_count = draft.length; stages.draft = {state:"complete"};
+        for(const p of draft) if(object(p) && typeof p.id === "string" && typeof p.title === "string" && p.title.trim()) titles.set(p.id,p.title);
+      }
     }
     if (name === "preview_panels") {
       sawPreview = true;
@@ -110,6 +119,7 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
       if (saved) {
         if(firstSave?.id !== saved.id) {firstSave=saved;netChanges.clear();}
         for(const change of saved.receipt.changes) {
+          if(change.title.trim()) titles.set(change.panel_id,change.title);
           const prior=netChanges.get(change.panel_id);
           if(prior?.kind === "added" && change.kind === "removed") {netChanges.delete(change.panel_id);continue;}
           if(prior?.kind === "added") {netChanges.set(change.panel_id,{panel_id:change.panel_id,title:change.title,kind:"added"});continue;}
@@ -118,6 +128,8 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
             netChanges.set(change.panel_id,{...change,fields:[...new Set([...(prior.fields ?? []),...(change.fields ?? [])])].sort(),position_changed:prior.position_changed || change.position_changed});
           } else netChanges.set(change.panel_id,prior?.kind === "removed" && change.kind === "added" ? {...change,kind:"changed"} : change);
         }
+        const record = payload?.dashboard, spec = object(record) ? record.spec : undefined;
+        if(object(spec) && Array.isArray(spec.panels)) for(const p of spec.panels) if(object(p) && typeof p.id === "string" && typeof p.title === "string" && p.title.trim()) titles.set(p.id,p.title);
         const previous=receipt.saved?.id === saved.id ? receipt.saved.receipt : undefined;
         receipt.saved = {...saved,label:firstSave!.label,receipt:{...saved.receipt,base_version:firstSave!.receipt.base_version,changes:[...netChanges.values()],layout_changed:firstSave!.receipt.base_version !== 0 && (saved.receipt.layout_changed || !!previous?.layout_changed),dashboard_fields:firstSave!.receipt.base_version === 0 ? undefined : [...new Set([...(previous?.dashboard_fields ?? []),...(saved.receipt.dashboard_fields ?? [])])].sort()}};
         receipt.panel_count = saved.receipt.save_check.panels.length;
@@ -127,12 +139,14 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
           clearProblems(p.id,[]);
           previewFailures.delete(p.id);
         }
-        receipt.corrections = receipt.corrections.filter(p => retained.has(p.panel_id));
+        corrections = corrections.filter(p => retained.has(p.panel_id));
         receipt.problems = [...outstanding.values()].flat().filter(p=>retained.has(p.panel_id));
       }
     }
   }
   if(unreadableSave) return null;
+  receipt.panel_titles = Object.fromEntries(titles);
+  receipt.corrections = corrections.map(c=>({...c,title:titles.get(c.panel_id) ?? c.panel_id}));
   const retained = receipt.saved ? new Set(receipt.saved.receipt.save_check.panels.map(p => p.id)) : undefined;
   receipt.panels = [...panels.values()].filter(p => !retained || retained.has(p.id));
   if (sawPreview) {
@@ -144,9 +158,9 @@ export function receiptForTurn(messages: readonly Message[], turnID: string): Bu
   }
   const check = receipt.saved?.receipt.save_check;
   if (check && !check.checked) receipt.explanations.push(`Save check incomplete: ${check.reason || "Panels were not checked"}`);
-  for (const p of check?.panels ?? receipt.panels) if (p.status !== "ok") receipt.explanations.push(`${p.id}: ${p.status}${p.error || p.diagnosis ? ` — ${p.error || p.diagnosis}` : ""}`);
-  for (const p of receipt.problems) receipt.explanations.push(`${p.panel_id}.${p.path}: ${p.message}`);
-  const unfinished = Object.entries(stages).filter(([,s]) => s.state === "incomplete" || s.state === "failed").map(([name,s]) => `${name}: ${s.state}`);
+  for (const p of check?.panels ?? receipt.panels) if (p.status !== "ok") receipt.explanations.push(`${titles.get(p.id) ?? p.id}: ${p.status}${p.error || p.diagnosis ? ` — ${p.error || p.diagnosis}` : ""}`);
+  for (const p of receipt.problems) receipt.explanations.push(`${titles.get(p.panel_id) ?? p.panel_id}: ${p.message}`);
+  const unfinished = Object.entries(stages).filter(([,s]) => s.state === "incomplete" || s.state === "failed").map(([name,s]) => `${stageNames[name as keyof typeof stageNames]}: ${s.state}`);
   if (unfinished.length) receipt.explanations.push(unfinished.join(" · "));
   if (stages.save.state === "interrupted") receipt.explanations.push("Save interrupted · outcome unknown");
   if (lastMutationError) receipt.explanations.push(receipt.saved ? `A later change failed; v${receipt.saved.version} remains saved` : "Save failed · dashboard was not saved");

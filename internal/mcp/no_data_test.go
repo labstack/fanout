@@ -77,8 +77,8 @@ func TestDashboardMutationsRejectEmptyPanelsBeforeWriting(t *testing.T) {
 		{ID: "note", Title: "Notes", Viz: "text", Content: "Context"},
 		{ID: "requests", Title: "Collector requests", Viz: "stat", Query: &panel.Query{From: "spans", Where: []string{"service = 'collector'"}, Measures: []string{"count()"}}},
 	}}
-	_, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
-	if err == nil || out.Dashboard != nil || !strings.Contains(err.Error(), "panels[1]") || !strings.Contains(err.Error(), "Collector requests") || !strings.Contains(err.Error(), "Values seen") {
+	result, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
+	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || out.Dashboard != nil || !strings.Contains(out.Error.Message, "panels[1]") || !strings.Contains(out.Error.Message, "Collector requests") || !strings.Contains(out.Error.Message, "Values seen") {
 		t.Fatalf("rejected=%+v err=%v", out, err)
 	}
 	good := spec
@@ -88,12 +88,12 @@ func TestDashboardMutationsRejectEmptyPanelsBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := created.Dashboard.ID
-	_, _, err = s.dashboardReplace(t.Context(), ownerRequest(), DashboardReplaceInput{ID: id, Dashboard: spec, BaseVersion: 1})
-	if err == nil || !strings.Contains(err.Error(), "Collector requests") {
+	result, out, err = s.dashboardReplace(t.Context(), ownerRequest(), DashboardReplaceInput{ID: id, Dashboard: spec, BaseVersion: 1})
+	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || !strings.Contains(out.Error.Message, "Collector requests") {
 		t.Fatalf("replace: %v", err)
 	}
-	_, _, err = s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: id, BaseVersion: 1, Operations: []dashboard.Operation{{Op: "add_panel", Panel: &spec.Panels[1]}}})
-	if err == nil || !strings.Contains(err.Error(), "Collector requests") {
+	result, out, err = s.dashboardEdit(t.Context(), ownerRequest(), DashboardEditInput{ID: id, BaseVersion: 1, Operations: []dashboard.Operation{{Op: "add_panel", Panel: &spec.Panels[1]}}})
+	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || !strings.Contains(out.Error.Message, "Collector requests") {
 		t.Fatalf("edit: %v", err)
 	}
 	versions, err := s.dashboards.Versions(t.Context(), "owner", id)

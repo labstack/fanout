@@ -113,12 +113,12 @@ func TestToolRegistryNoDataAndDashboardPanelErrors(t *testing.T) {
 	}{
 		{"get_service_performance", "no_data", "spans=0, logs=0, metrics=1", map[string]any{"service": "collector", "from": from, "to": to}},
 		{"search_logs", "no_data", "INFO (1)", map[string]any{"service": "logger", "severity": "ERROR", "from": from, "to": to}},
-		{"create_dashboard", "tool_failed", "panels[0]: Collector requests", map[string]any{"dashboard": spec}},
+		{"create_dashboard", "invalid_spec", "panels[0]: Collector requests", map[string]any{"dashboard": spec}},
 	} {
 		input, _ := json.Marshal(tc.args)
 		result, err := registry.Execute(dashboard.WithOwner(t.Context(), "owner"), ToolCall{Name: tc.name, Input: string(input)})
 		var failure toolerror.Result
-		if err != nil || !result.IsError || result.Structured != nil || json.Unmarshal([]byte(result.Content), &failure) != nil || failure.Error == nil || failure.Error.Code != tc.code || !strings.Contains(failure.Error.Message, tc.want) {
+		if err != nil || !result.IsError || (result.Structured != nil) != (tc.name == "create_dashboard") || json.Unmarshal([]byte(result.Content), &failure) != nil || failure.Error == nil || failure.Error.Code != tc.code || !strings.Contains(failure.Error.Message, tc.want) {
 			t.Fatalf("%s: %+v %v", tc.name, result, err)
 		}
 	}

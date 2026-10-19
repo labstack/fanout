@@ -86,8 +86,12 @@ func TestConcurrentFileBackedSaveReceiptsNameOnlyTheirOwnEdit(t *testing.T) {
 			versions := map[int]bool{}
 			for i, a := range answers {
 				if a.err != nil {
-					if !strings.Contains(a.err.Error(), "the dashboard changed since you read it") {
-						t.Errorf("loser %d: unexpected error %v", i, a.err)
+					t.Errorf("writer %d: unexpected error %v", i, a.err)
+					continue
+				}
+				if failure := a.out.Error; failure != nil {
+					if failure.Code != "dashboard_version_conflict" || !strings.Contains(failure.Message, "the dashboard changed since you read it") {
+						t.Errorf("loser %d: unexpected failure %+v", i, failure)
 					}
 					if a.out.Receipt != nil || a.out.Dashboard != nil {
 						t.Errorf("loser %d has receipt %+v", i, a.out)

@@ -144,8 +144,8 @@ func TestFailedMutationsReturnNoReceiptOrVersion(t *testing.T) {
 		{ID: created.Dashboard.ID, BaseVersion: 1, Operations: []dashboard.Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"viz": "unknown"}}}},
 		{ID: created.Dashboard.ID, BaseVersion: 2, Operations: []dashboard.Operation{{Op: "rename", Name: "Stale"}}},
 	} {
-		_, out, err := s.dashboardEdit(t.Context(), ownerRequest(), input)
-		if err == nil || out.Receipt != nil || out.Dashboard != nil {
+		result, out, err := s.dashboardEdit(t.Context(), ownerRequest(), input)
+		if err == nil && (result == nil || !result.IsError || out.Error == nil) || out.Receipt != nil || out.Dashboard != nil {
 			t.Fatalf("failed save=%+v err=%v", out, err)
 		}
 	}
@@ -155,8 +155,8 @@ func TestFailedMutationsReturnNoReceiptOrVersion(t *testing.T) {
 	}
 	bad := textDashboard("Invalid")
 	bad.Panels[0].Viz = "unknown"
-	_, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: bad})
-	if err == nil || out.Receipt != nil || out.Dashboard != nil {
+	result, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: bad})
+	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || out.Receipt != nil || out.Dashboard != nil {
 		t.Fatalf("failed create=%+v err=%v", out, err)
 	}
 }
@@ -229,8 +229,8 @@ func TestSaveReceiptsCheckCommittedPanelsAndAuthoredChanges(t *testing.T) {
 		{ID: "notes", Title: "Notes", Viz: "text", Content: "Notes."},
 		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
 	}}
-	_, rejected, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
-	if err == nil || rejected.Dashboard != nil || !strings.Contains(err.Error(), "panels[1]") || !strings.Contains(err.Error(), "Requests") || !strings.Contains(err.Error(), "No spans") {
+	result, rejected, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
+	if err != nil || !result.IsError || rejected.Error == nil || rejected.Error.Code != "invalid_spec" || rejected.Dashboard != nil || !strings.Contains(rejected.Error.Message, "panels[1]") || !strings.Contains(rejected.Error.Message, "Requests") || !strings.Contains(rejected.Error.Message, "No spans") {
 		t.Fatalf("save=%+v err=%v", rejected, err)
 	}
 	spec.Panels = spec.Panels[:1]

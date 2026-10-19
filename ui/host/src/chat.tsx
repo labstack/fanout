@@ -46,10 +46,19 @@ function chatAppViews(messages: Message[]) {
   }
   finish(); return { views, duplicates };
 }
-type ToolFailure = {name:string;message:string;readOnly:boolean};
+type ToolFailure = {name:string;message:string;details:string[];readOnly:boolean;rejected:boolean};
+function draftProblems(value:unknown,titles?:string[]):string[] {
+  return Array.isArray(value) ? value.flatMap(p => {
+    if(!object(p) || typeof p.message !== "string") return [];
+    const index = typeof p.path === "string" ? /^panels\[(\d+)\](?:\.|$)/.exec(p.path)?.[1] : undefined;
+    const title = index === undefined ? undefined : titles?.[Number(index)];
+    // Hints instruct the agent; the user sees what was wrong with the draft.
+    return [title && !p.message.startsWith(title) ? `${title}: ${p.message}` : p.message];
+  }) : [];
+}
 function toolFailures(messages: Message[]) {
   const groups = new Map<string, ToolFailure[]>();
-  const calls = new Map<string, { assistant: string; name: string }>();
+  const calls = new Map<string, { assistant: string; name: string; titles?: string[] }>();
   const firstFailures = new Map<string, string>();
   let assistant = "unattributed";
   for (const message of messages) {
@@ -60,7 +69,11 @@ function toolFailures(messages: Message[]) {
     }
     if (message.role === "assistant") {
       assistant = message.id;
-      for (const call of message.toolCalls ?? []) calls.set(call.id, { assistant, name: call.function.name });
+      for (const call of message.toolCalls ?? []) {
+        const draft = ["create_dashboard", "replace_dashboard"].includes(call.function.name) ? jsonObject(call.function.arguments)?.dashboard : undefined;
+        const titles = object(draft) && Array.isArray(draft.panels) ? draft.panels.map(p => object(p) && typeof p.title === "string" ? p.title : "") : undefined;
+        calls.set(call.id, { assistant, name: call.function.name, titles });
+      }
     }
     if (message.role === "tool") {
       const payload = jsonObject(message.content);
@@ -75,22 +88,28 @@ function toolFailures(messages: Message[]) {
       firstFailures.set(owner, first);
       const failures = groups.get(first) ?? [];
       const text = typeof failure?.message === "string" ? failure.message : typeof message.error === "string" && message.error ? message.error : "Could not complete this step. Try again.";
-      failures.push({ name: toolFailureLabel(call?.name ?? ""), message: text, readOnly: failure?.code === "answer_only" });
+      const rejected = ["create_dashboard", "edit_dashboard", "replace_dashboard"].includes(call?.name ?? "") && (failure?.code === "invalid_spec" || failure?.code === "dashboard_version_conflict");
+      failures.push({ name: toolFailureLabel(call?.name ?? ""), message: text, details: rejected ? draftProblems(payload?.problems,call?.titles) : [], readOnly: failure?.code === "answer_only", rejected });
       groups.set(first, failures);
     }
   }
   return groups;
 }
 function ToolFailures({failures}:{failures:ToolFailure[]}) {
-  const [expanded,setExpanded]=useState(false);
-  const failed = failures.filter(f => !f.readOnly);
+  const [expanded,setExpanded]=useState({rejected:false,failed:false});
+  const rejected = failures.filter(f => f.rejected), failed = failures.filter(f => !f.readOnly && !f.rejected);
+  const groups = [
+    {key:"rejected",items:rejected,label:`${rejected.length} ${rejected.length === 1 ? "draft" : "drafts"} rejected`},
+    {key:"failed",items:failed,label:`${failed.length} ${failed.length === 1 ? "step" : "steps"} failed`},
+  ] as const;
   return <Box data-chat-anchor>
     {failures.some(f => f.readOnly) && <Text size="sm" c="dimmed">Not saved: Explain is read-only</Text>}
-    {failed.length > 0 && <>
-    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)} style={{color:"var(--mantine-color-dimmed)"}}>
-      <span className="chat-app-chevron" aria-hidden="true">{expanded?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{failed.length} {failed.length === 1 ? "step" : "steps"} failed</span>
-    </UnstyledButton>
-    {expanded && <Stack gap="xs" pl="md">{failed.map((failure,i)=><Text key={i} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{failure.name}: {failure.message}</Text>)}</Stack>}</>}
+    {groups.map(({key,items,label}) => items.length > 0 && <Box key={key}>
+      <UnstyledButton className="chat-app-toggle" aria-expanded={expanded[key]} onClick={()=>setExpanded(v=>({...v,[key]:!v[key]}))} style={{color:"var(--mantine-color-dimmed)"}}>
+        <span className="chat-app-chevron" aria-hidden="true">{expanded[key]?<CaretDown size={14}/>:<CaretRight size={14}/>}</span><span className="chat-app-summary">{label}</span>
+      </UnstyledButton>
+      {expanded[key] && <Stack gap="xs" pl="md">{items.flatMap((failure,i)=>(failure.details.length ? failure.details : [`${failure.name}: ${failure.message}`]).map((text,j)=><Text key={`${i}-${j}`} size="sm" c="dimmed" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{text}</Text>))}</Stack>}
+    </Box>)}
   </Box>;
 }
 function ChatAppView({ view }: { view: AppView }) {

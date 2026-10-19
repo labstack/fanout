@@ -601,6 +601,61 @@ it("does not count no-data or unknown-service guidance as failed steps",async()=
  }finally{await act(async()=>root.unmount());}
 });
 
+it.each([
+ {label:'rejected create followed by a successful save',name:'create_dashboard',code:'invalid_spec',save:true,draft:true},
+ {label:'rejected edit that is never saved',name:'edit_dashboard',code:'invalid_spec',save:false,draft:true},
+ {label:'operational mutation failure',name:'edit_dashboard',code:'tool_failed',save:false,draft:false},
+ {label:'stale edit',name:'edit_dashboard',code:'dashboard_version_conflict',save:false,draft:true},
+ {label:'rejected restore',name:'restore_dashboard_version',code:'invalid_spec',save:false,draft:false},
+])('labels $label',async({name,code,save,draft})=>{
+ const messages=[user(),call('rejected',name),result('rejected',{error:{code,message:'Rejected request'}})];
+ if(save)messages.push(call('saved','create_dashboard'),result('saved',receiptFixture));
+ const {root}=await mountStreamChat(messages,false);try {
+ expect(!!button('1 draft rejected')).toBe(draft);expect(!!button('1 step failed')).toBe(!draft);
+ const toggle=button(draft?'1 draft rejected':'1 step failed')!;
+ expect(toggle.getAttribute('aria-expanded')).toBe('false');expect(document.body.textContent).not.toContain('Rejected request');
+ await act(async()=>toggle.click());expect(document.body.textContent).toContain('Rejected request');
+ expect(document.body.textContent).toContain(save?'Saved v2':'Save failed · dashboard was not saved');
+ }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+
+it('keeps rejected drafts and failed steps in independently collapsed groups in one anchored block',async()=>{
+ const messages=[user(),{id:'a',role:'assistant',content:'',toolCalls:[
+  {id:'draft',type:'function',function:{name:'create_dashboard',arguments:'{}'}},
+  {id:'stale',type:'function',function:{name:'replace_dashboard',arguments:'{}'}},
+  {id:'failed',type:'function',function:{name:'query_telemetry',arguments:'{}'}},
+ ]},result('draft',{error:{code:'invalid_spec',message:'Draft diagnosis'}}),result('stale',{error:{code:'dashboard_version_conflict',message:'Stale diagnosis'}}),result('failed',{error:{code:'tool_failed',message:'Operational diagnosis'}})] as Message[];
+ const {root}=await mountStreamChat(messages,false);try {
+ const rejected=button('2 drafts rejected')!,failed=button('1 step failed')!;
+ expect(rejected.closest('[data-chat-anchor]')).toBe(failed.closest('[data-chat-anchor]'));
+ expect(rejected.style.color).toBe('var(--mantine-color-dimmed)');
+ expect(rejected.getAttribute('aria-expanded')).toBe('false');expect(failed.getAttribute('aria-expanded')).toBe('false');
+ await act(async()=>rejected.click());expect(document.body.textContent).toContain('Draft diagnosis');expect(document.body.textContent).toContain('Stale diagnosis');expect(document.body.textContent).not.toContain('Operational diagnosis');
+ expect(failed.getAttribute('aria-expanded')).toBe('false');
+ await act(async()=>failed.click());expect(document.body.textContent).toContain('Operational diagnosis');
+ await act(async()=>rejected.click());expect(document.body.textContent).not.toContain('Draft diagnosis');expect(document.body.textContent).toContain('Operational diagnosis');
+ }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+
+it.each(['create_dashboard','replace_dashboard','edit_dashboard'])('shows presented problems without spec paths for %s',async name=>{
+ const panels=[{id:'calls',title:'Calls'}];
+ const input=name==='edit_dashboard'?{id:'board',operations:[{op:'update_panel',id:'calls',set:{title:'Calls'}}]}:{id:'board',dashboard:{name:'Calls',panels}};
+ const problems=[{path:'panels[0]',message:'Calls: No matching events',hint:'Choose a wider window'},{path:'panels[0].query.sort',message:'Unknown sort column',hint:'Use calls'},{path:'time.range',message:'Invalid time range'}];
+ const messages=[user(),call('rejected',name,input),result('rejected',{error:{code:'invalid_spec',message:'panels[0]: Calls: No matching events; panels[0].query.sort: Unknown sort column'},problems})];
+ const {root}=await mountStreamChat(messages,false);try {
+ await act(async()=>button('1 draft rejected')!.click());
+ const details=button('1 draft rejected')!.closest('[data-chat-anchor]')!;
+ expect(details.textContent).toContain('Calls: No matching events');
+ expect(details.textContent).toContain(`${name==='edit_dashboard'?'':'Calls: '}Unknown sort column`);
+ expect(details.textContent).not.toMatch(/Choose a wider window|Use calls/);
+ expect(details.textContent).toContain('Invalid time range');
+ expect(details.textContent).not.toMatch(/panels\[|query\.sort|time\.range|Calls: Calls:/);
+ expect(details.textContent).not.toContain('Calls: Invalid time range');
+ if(name==='edit_dashboard')expect(details.textContent).not.toContain('Calls: Unknown sort column');
+ expect(document.body.textContent).not.toContain('panels[');
+ }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
+});
+
 it.each(['live','reloaded'])('shows the same escaped plain tool error during %s chat',async mode=>{
  const messages=[user(),call('failed','query_telemetry'),toolError('failed','escaped',mode==='live')];
  const root=await mount(value({messages:mode==='reloaded'?JSON.parse(JSON.stringify(messages)):messages}));
@@ -637,7 +692,7 @@ it('labels in-flight stages as progress and reserves attention for ended runs',a
  const {root,emit,close}=await mountStreamChat();
  try{await emit({type:'RUN_STARTED',threadId:'thread-stream',runId:'run'});await emit({type:'TOOL_CALL_START',toolCallId:'pending',toolCallName:'create_dashboard',parentMessageId:'step'});await emit({type:'TOOL_CALL_ARGS',toolCallId:'pending',delta:'{}'});await emit({type:'TOOL_CALL_END',toolCallId:'pending'});
  expect(document.querySelector('[data-receipt-attention]')).toBeNull();expect(document.querySelector('[data-build-running]')).not.toBeNull();
- await emit({type:'RUN_FINISHED',threadId:'thread-stream',runId:'run'});await close();await vi.waitFor(()=>expect(document.querySelector('[data-build-running]')).toBeNull());expect(document.querySelector('[data-receipt-attention]')?.textContent).toContain('save: incomplete');
+ await emit({type:'RUN_FINISHED',threadId:'thread-stream',runId:'run'});await close();await vi.waitFor(()=>expect(document.querySelector('[data-build-running]')).toBeNull());expect(document.querySelector('[data-receipt-attention]')?.textContent).toContain('Save: incomplete');
  }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();document.body.innerHTML='';}
 });
 it('renders nothing for an empty final-answer slot after the run',async()=>{

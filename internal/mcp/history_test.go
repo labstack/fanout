@@ -59,6 +59,7 @@ func TestRestoreLosesTwoContestedBasesWithoutReceipt(t *testing.T) {
 			type answer struct {
 				receipt *dashboardReceipt
 				err     error
+				code    string
 			}
 			done := make(chan answer, 1)
 			go func() {
@@ -71,7 +72,11 @@ func TestRestoreLosesTwoContestedBasesWithoutReceipt(t *testing.T) {
 					return
 				}
 				_, out, err := s.dashboardRestore(t.Context(), ownerRequest(), DashboardRestoreInput{ID: created.Dashboard.ID, Version: 1})
-				done <- answer{out.Receipt, err}
+				code := ""
+				if out.Error != nil {
+					code = out.Error.Code
+				}
+				done <- answer{receipt: out.Receipt, err: err, code: code}
 			}()
 			for attempt := 1; attempt <= 2; attempt++ {
 				select {
@@ -106,7 +111,7 @@ func TestRestoreLosesTwoContestedBasesWithoutReceipt(t *testing.T) {
 				v.release <- struct{}{}
 			}
 			result := <-done
-			if result.receipt != nil || result.err == nil || transport == "service" && !errors.Is(result.err, dashboard.ErrStale) || transport == "mcp" && !strings.Contains(result.err.Error(), "the dashboard changed since you read it") {
+			if result.receipt != nil || transport == "service" && !errors.Is(result.err, dashboard.ErrStale) || transport == "mcp" && (result.err != nil || result.code != "dashboard_version_conflict") {
 				t.Fatalf("restore=%+v", result)
 			}
 			versions, err := s.dashboards.Versions(t.Context(), "owner", created.Dashboard.ID)
