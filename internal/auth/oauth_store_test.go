@@ -167,6 +167,41 @@ func TestOAuthStoreRefreshGraceAdmitsConcurrentSibling(t *testing.T) {
 	}
 }
 
+// A clock stepped back after a rotation must not stretch the window: the
+// rotation is then dated in the future, which counts as reuse.
+func TestOAuthStoreRefreshGraceRejectsFutureRotation(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("clock@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	base := time.Now().UTC()
+	store.now = func() time.Time { return base }
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://127.0.0.1:14550/callback"})
+	if err != nil {
+		t.Fatalf("RegisterClient: %v", err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
+	if err != nil {
+		t.Fatalf("IssueTokenPair: %v", err)
+	}
+	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("RotateRefreshToken: %v", err)
+	}
+	store.now = func() time.Time { return base.Add(-time.Hour) }
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("refresh after a clock step back = %v, want reuse detection", err)
+	}
+	store.now = func() time.Time { return base }
+	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("access token after rejected replay = %v, want family revoked", err)
+	}
+}
+
 // A revoked family has no live sibling, so the grace window never revives it.
 func TestOAuthStoreRefreshGraceDoesNotReviveRevokedFamily(t *testing.T) {
 	sqlite := newTestSQLite(t)
