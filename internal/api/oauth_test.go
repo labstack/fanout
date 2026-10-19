@@ -17,6 +17,7 @@ import (
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
+	appmcp "github.com/labstack/fanout/internal/mcp"
 	appstore "github.com/labstack/fanout/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
@@ -272,8 +273,10 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	}
 
 	browser := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{
-		"Authorization":  "Bearer attacker-controlled",
-		"Fanout-Request": "1",
+		"Authorization":        "Bearer attacker-controlled",
+		"Fanout-Request":       "1",
+		"MCP-Protocol-Version": appmcp.ProtocolVersion,
+		"Mcp-Method":           "tools/list",
 	}, cookie)
 	if browser.Code != http.StatusNoContent {
 		t.Fatalf("session browser MCP = %d %s", browser.Code, browser.Body.String())

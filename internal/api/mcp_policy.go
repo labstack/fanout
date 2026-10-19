@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"math"
 	"net"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 	"sync"
 	"time"
 
+	appmcp "github.com/labstack/fanout/internal/mcp"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
+	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"golang.org/x/time/rate"
 )
 
@@ -107,7 +110,12 @@ func (l *mcpToolLimiter) allow(key mcpToolKey) (bool, int) {
 func (l *mcpToolLimiter) protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		info := mcpgoauth.TokenInfoFromContext(r.Context())
-		if info != nil && r.Method == http.MethodPost && r.Header.Get("Mcp-Method") == "tools/call" {
+		method, _, err := mcpRequestMethodAndName(r)
+		if err != nil {
+			appmcp.WriteHTTPMessageError(w, err)
+			return
+		}
+		if info != nil && method == "tools/call" {
 			client, _ := info.Extra["client_id"].(string)
 			if allowed, retry := l.allow(mcpToolKey{info.UserID, client}); !allowed {
 				// MCP 2026-07-28 server/tools#security-considerations requires
@@ -120,4 +128,30 @@ func (l *mcpToolLimiter) protect(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func mcpRequestMethodAndName(r *http.Request) (string, string, error) {
+	if r.Method != http.MethodPost {
+		return "", "", nil
+	}
+	method, name := r.Header.Get("Mcp-Method"), r.Header.Get("Mcp-Name")
+	// Only modern headers are checked against the body by the SDK. Legacy
+	// headers are optional and untrusted even when a client supplies them.
+	if r.Header.Get("MCP-Protocol-Version") >= appmcp.ProtocolVersion && method != "" && (method != "tools/call" || name != "") {
+		return method, name, nil
+	}
+	message, err := appmcp.ReadHTTPMessage(r)
+	if err != nil {
+		return "", "", err
+	}
+	request, ok := message.(*jsonrpc.Request)
+	if !ok {
+		return "", "", nil
+	}
+	name = ""
+	var params map[string]json.RawMessage
+	if json.Unmarshal(request.Params, &params) == nil {
+		_ = json.Unmarshal(params["name"], &name)
+	}
+	return request.Method, name, nil
 }

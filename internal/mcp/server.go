@@ -27,6 +27,8 @@ const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 const ProtocolVersion = "2026-07-28"
 
+var supportedProtocolVersions = []string{ProtocolVersion, "2025-11-25", "2025-06-18"}
+
 const staticCatalogTTLMs = 5 * 60 * 1000
 
 const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. Do not present empty results; state no matching data findings in the answer and prefer the signal a service actually has. Dashboards contain only panels that return data; text panels are exempt. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every non-text panel returns data, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
@@ -119,7 +121,7 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 			Name:    "fanout",
 			Title:   "Fanout Observability",
 			Version: version,
-		}, &mcp.ServerOptions{SupportedProtocolVersions: []string{ProtocolVersion}, Instructions: serverInstructions, Capabilities: &mcp.ServerCapabilities{
+		}, &mcp.ServerOptions{SupportedProtocolVersions: supportedProtocolVersions, Instructions: serverInstructions, Capabilities: &mcp.ServerCapabilities{
 			Extensions: map[string]any{
 				mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 			},
@@ -140,7 +142,7 @@ func newServer(queries Observability, dashboards *dashboard.Service, panels *pan
 	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
-	s.mcp.AddReceivingMiddleware(normalizeToolErrors, recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
+	s.mcp.AddReceivingMiddleware(limitLegacySessions(s.mcp), normalizeToolErrors, recoverToolPanic, addStaticCacheHints, filterMCPAppToolMetadata, s.validateToolArguments)
 	return s
 }
 
@@ -276,11 +278,25 @@ func filterMCPAppToolMetadata(next mcp.MethodHandler) mcp.MethodHandler {
 func clientSupportsMCPApps(req mcp.Request) bool {
 	request, ok := req.(interface {
 		ClientCapabilities() *mcp.ClientCapabilities
+		ProtocolVersion() string
 	})
 	if !ok {
 		return false
 	}
 	capabilities := request.ClientCapabilities()
+	legacy := request.ProtocolVersion() < ProtocolVersion
+	if extra := req.GetExtra(); extra != nil && extra.Header != nil {
+		legacy = extra.Header.Get("MCP-Protocol-Version") < ProtocolVersion
+	}
+	// The SDK prefers per-request capabilities even on legacy sessions; their
+	// declaration belongs to initialize, including when its version negotiated down.
+	if legacy {
+		if session, ok := req.GetSession().(*mcp.ServerSession); ok && session != nil {
+			if initialized := session.InitializeParams(); initialized != nil {
+				capabilities = initialized.Capabilities
+			}
+		}
+	}
 	if capabilities == nil {
 		return false
 	}
@@ -312,7 +328,7 @@ func (s *Server) HTTPHandler() http.Handler {
 	// localhost Host heuristic because a legitimate local reverse proxy connects
 	// over loopback while preserving the public Host (for example,
 	// fanout.example.com); the heuristic otherwise rejects every browser MCP App.
-	handler := mcp.NewStreamableHTTPHandler(
+	modern := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return s.mcp },
 		&mcp.StreamableHTTPOptions{
 			Stateless:                    true,
@@ -320,25 +336,36 @@ func (s *Server) HTTPHandler() http.Handler {
 			DisableLocalhostProtection:   true,
 		},
 	)
+	legacy := mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return s.mcp },
+		&mcp.StreamableHTTPOptions{
+			SessionTimeout:             legacySessionTimeout,
+			DisableLocalhostProtection: true,
+		},
+	)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// SDK v1.8 still accepts headerless legacy initialize requests even
-		// with SupportedProtocolVersions narrowed. Require the modern header
-		// here and reject legacy versions with the modern error body. Modern
-		// version negotiation, body mirrors and metadata belong to the SDK.
-		version := r.Header.Get("MCP-Protocol-Version")
-		if r.Method == http.MethodPost && version < ProtocolVersion {
-			data, _ := json.Marshal(mcp.UnsupportedProtocolVersionData{Supported: []string{ProtocolVersion}, Requested: version})
-			failure := &jsonrpc.Error{Code: mcp.CodeUnsupportedProtocolVersion, Message: "unsupported protocol version", Data: data}
-			if version == "" {
-				failure = &jsonrpc.Error{Code: mcp.CodeHeaderMismatch, Message: "MCP-Protocol-Version header is required"}
-			}
-			body, _ := jsonrpc.EncodeMessage(&jsonrpc.Response{Error: failure})
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write(body)
+		if r.Header.Get("MCP-Protocol-Version") >= ProtocolVersion {
+			modern.ServeHTTP(w, r)
 			return
 		}
-		handler.ServeHTTP(w, r)
+		if r.Method == http.MethodPost {
+			// The SDK defaults headerless requests to 2025-03-26, which allows
+			// batches. Decode one message before entering that compatibility path.
+			message, err := ReadHTTPMessage(r)
+			if err != nil {
+				WriteHTTPMessageError(w, err)
+				return
+			}
+			if request, ok := message.(*jsonrpc.Request); ok {
+				var params map[string]json.RawMessage
+				var meta mcp.Meta
+				if json.Unmarshal(request.Params, &params) == nil && json.Unmarshal(params["_meta"], &meta) == nil && meta[mcp.MetaKeyProtocolVersion] != nil {
+					modern.ServeHTTP(w, r)
+					return
+				}
+			}
+		}
+		legacy.ServeHTTP(w, r)
 	})
 }
 
