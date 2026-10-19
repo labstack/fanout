@@ -247,7 +247,7 @@ it only with a provider you administer.
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
 | Ingest token | OTLP ingest | Settings page |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |
-| MCP OAuth tokens | MCP clients | Refresh rotation with replay-family revocation |
+| MCP OAuth tokens | MCP clients | One-hour access tokens; refresh rotation with replay-family revocation, admitting the same client's just-rotated token for one minute so processes sharing a credential can refresh together |
 
 Local email codes allow three attempts per code and expire after five minutes.
 Attempts are reserved atomically, so concurrent guesses cannot exceed the limit.
