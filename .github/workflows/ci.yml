@@ -146,6 +146,9 @@ jobs:
           node-version: 24.19.0
       - name: just ui-deps
         run: just ui-deps
+      - name: just e2e-browsers
+        if: matrix.slug == 'smoke'
+        run: just e2e-browsers
       - name: just e2e
         run: just e2e ${{ matrix.args }}
         env:

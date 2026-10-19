@@ -1,9 +1,11 @@
 # Browser tests
 
-Install Go, Bun, just and Google Chrome, then run `just ui-deps`. From `ui/host`,
-run `bun run e2e --help` for the pinned Playwright CLI and
-`bun x --no-install playwright install chromium` to install the browser used by MCP and
-visual tests. The app matrix uses system Google Chrome. No AI provider key is
+Install Go, Bun, just and Google Chrome, then run `just ui-deps` and
+`just e2e-browsers`. The latter invokes the locked Playwright CLI to install its
+bundled Chromium and required Linux OS libraries; CI smoke uses the same recipe
+before running MCP tests on a clean Ubuntu runner. Linux may request sudo for OS
+packages. From `ui/host`, run `bun run e2e --help` for the pinned Playwright CLI.
+The app matrix uses system Google Chrome. No AI provider key is
 needed. Run `just e2e` from the repository root to rebuild the embedded SPA,
 MCP App and `bin/fanout`, then run every surface. `just check` remains browser-free.
 
@@ -21,9 +23,19 @@ still run through the site's existing test commands.
 The app projects are `app-1100-light`, `app-1100-dark`, `app-1440-light` and
 `app-1440-dark`, each with one worker. Their shared `setup` dependency starts the
 seeded backend once; global teardown stops it after dependent projects finish.
+Rerunning setup in UI Mode stops owned instances before replacement. Each launch
+has a unique identity, PID and private directory in a separate ownership registry;
+readiness must match the spawned PID and identity. Teardown checks ownership before
+signalling and removes every registered instance and its session/data directory,
+including failed launches, even if shared readiness was overwritten.
+Run ownership regressions without a browser using
+`bun test e2e/support/app-lifecycle.test.ts` from `ui/host`;
+`bun run test -- e2e/support` runs all support tests with the configured Vitest
+environment.
 MCP and visual projects have no setup dependency and never boot Fanout.
 
 ```sh
+just e2e-browsers                # locked Chromium and its OS dependencies
 just e2e                         # every surface, including performance
 just e2e-mcp                     # recorded MCP App protocol and accessibility
 just e2e-visual                  # screenshot comparisons on this platform

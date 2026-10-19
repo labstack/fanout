@@ -64,6 +64,10 @@ ui: ui-lint ui-host ui-apps
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
     bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
 
+# Install Chromium from the locked Playwright package, plus Linux OS libraries.
+e2e-browsers:
+    cd ui/host && bun node_modules/playwright/cli.js install --with-deps chromium
+
 # Disposable seeded instance and system Google Chrome; separate from check.
 # Extra arguments go to Playwright, e.g. `just e2e e2e/specs/app/performance.spec.ts`.
 e2e *ARGS:
