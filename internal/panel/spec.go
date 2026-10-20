@@ -58,7 +58,7 @@ type Panel struct {
 	Width       int         `json:"width,omitempty" jsonschema:"Grid columns from 1 to 12; default depends on viz"`
 	Height      string      `json:"height,omitempty" jsonschema:"s, m or l; default depends on viz"`
 	Query       *Query      `json:"query,omitempty" jsonschema:"Structured query; exactly one of query or sql, except text panels"`
-	SQL         string      `json:"sql,omitempty" jsonschema:"One read-only SELECT over spans, logs, metrics, service_rollup or edge_rollup; must use $__window(time_column)"`
+	SQL         string      `json:"sql,omitempty" jsonschema:"One read-only SELECT over spans, logs, metrics, service_rollup or edge_rollup; must use $__window(time_column). Compare time columns with TIMESTAMP 'YYYY-MM-DD HH:MM:SS' (UTC), or cast TIMESTAMPTZ literals with ::TIMESTAMPTZ_NS."`
 	Unit        string      `json:"unit,omitempty" jsonschema:"ms, s, ns, percent, ratio, count, per_second, per_minute, bytes or none; inferred when omitted"`
 	XUnit       string      `json:"x_unit,omitempty" jsonschema:"scatter x axis unit; unit describes y"`
 	Reduce      string      `json:"reduce,omitempty" jsonschema:"stat and gauge: window (default), last, mean, min, max or sum"`

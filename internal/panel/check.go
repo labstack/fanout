@@ -150,7 +150,7 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 				if isOperational(err) {
 					return nil, nil, err
 				}
-				problems.add(path+".sql", PresentError(err, SQLError))
+				problems = append(problems, sqlProblem(path+".sql", err))
 			}
 		}
 	}

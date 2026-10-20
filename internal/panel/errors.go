@@ -22,6 +22,11 @@ const (
 
 const ReadFailure = "Could not read the requested data. Try again."
 
+// SQLTimestampGuide is the time-literal rule shared by diagnostics and MCP guidance.
+const SQLTimestampGuide = "Compare time columns with TIMESTAMP 'YYYY-MM-DD HH:MM:SS' (UTC), or cast TIMESTAMPTZ literals with ::TIMESTAMPTZ_NS."
+
+var timestampComparison = regexp.MustCompile(`^Binder Error: Cannot compare values of type (?:TIMESTAMPTZ_NS and type TIMESTAMP WITH TIME ZONE|TIMESTAMP WITH TIME ZONE and type TIMESTAMPTZ_NS) - an explicit cast is required$`)
+
 var (
 	engineClass      = regexp.MustCompile(`(?i)(?:[a-z ]+ Error):\s*`)
 	operationalClass = regexp.MustCompile(`(?i)(?:IO|Out of Memory|Internal|Fatal|Interrupt|Connection|Serialization|Transaction) Error:`)
@@ -33,6 +38,20 @@ var (
 	sqlEcho          = regexp.MustCompile(`(?i)(?:\bLINE [0-9]+:|Candidate bindings:|\b(?:SQL|Query):\s*(?:SELECT|WITH)\s)`)
 	candidateBinding = regexp.MustCompile(`^"?([\pL_][\pL\pN_$.]*)"?$`)
 )
+
+// sqlProblem sanitizes the engine message before marking the fixed repair hint
+// as product prose, so repeated presentation preserves the literal's cast.
+func sqlProblem(path string, err error) Problem {
+	message := PresentError(err, SQLError)
+	var engineError *duckdb.Error
+	if errors.As(err, &engineError) && engineError.Type == duckdb.ErrorTypeBinder {
+		first, _, _ := strings.Cut(engineError.Msg, "\n")
+		if timestampComparison.MatchString(first) {
+			return DiagnosisProblem(path, message, SQLTimestampGuide)
+		}
+	}
+	return Problem{Path: path, Message: message}
+}
 
 // PresentError logs the complete cause and publishes only the chosen audience's
 // message. It never changes cancellation identity at the calling boundary.

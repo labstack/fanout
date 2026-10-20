@@ -2,10 +2,13 @@ package panel
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 type interruptingParser struct{ Parser }
@@ -42,6 +45,54 @@ func TestCheckCollectsFiltersAndSQLProblems(t *testing.T) {
 	}
 	if got := checked.VarFilters["route"]; len(got) != 2 {
 		t.Errorf("route variable filters = %+v", got)
+	}
+}
+
+func TestSQLTimestampComparisonsReturnRepairHintOrExactResults(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	cutoff := fixtureStart.Add(30 * time.Minute)
+	var spans []telemetry.Span
+	for i, offset := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+		n := cutoff.Add(offset).UnixNano()
+		spans = append(spans, telemetry.Span{TraceID: "trace", SpanID: string(rune('a' + i)), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n})
+	}
+	commit(t, repo, spans, nil)
+	executor := NewExecutor(engine, 30)
+	executor.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	for _, tc := range []struct {
+		name, predicate string
+		invalid         bool
+	}{
+		{"timestamptz", "start_time < TIMESTAMPTZ '2026-10-01 12:30:00+00'", true},
+		{"timestamptz_reversed", "TIMESTAMPTZ '2026-10-01 12:30:00+00' > start_time", true},
+		{"timestamp_utc", "start_time < TIMESTAMP '2026-10-01 12:30:00'", false},
+		{"explicit_cast", "start_time < TIMESTAMPTZ '2026-10-01 12:30:00+00'::TIMESTAMPTZ_NS", false},
+		{"explicit_cast_offset", "start_time < TIMESTAMPTZ '2026-10-01 14:30:00+02'::TIMESTAMPTZ_NS", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := Dashboard{Name: "Time literals", Panels: []Panel{{ID: "p", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND " + tc.predicate}}}
+			results, err := executor.Run(t.Context(), RunRequest{Dashboard: d})
+			if tc.invalid {
+				var problems Problems
+				if !errors.As(err, &problems) || len(problems) != 1 {
+					t.Fatalf("expected one SQL problem, got %v", err)
+				}
+				// Each publication boundary may present the same problem again.
+				for range 3 {
+					problems = PresentProblems(problems)
+					if p := problems[0]; p.Path != "panels[0].sql" || !strings.Contains(p.Message, "explicit cast is required") || p.Hint != SQLTimestampGuide || !strings.Contains(problems.Error(), SQLTimestampGuide) {
+						t.Fatalf("lost repair hint: %+v", p)
+					}
+				}
+				return
+			}
+			if err != nil || len(results) != 1 || results[0].Status != StatusOK {
+				t.Fatalf("results=%+v err=%v", results, err)
+			}
+			if got := metricValues(t, results[0], "n"); len(got) != 1 || got[0] != float64(1) {
+				t.Fatalf("nanosecond boundary count=%v, want [1]", got)
+			}
+		})
 	}
 }
 

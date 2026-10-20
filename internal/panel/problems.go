@@ -15,8 +15,8 @@ type Problem struct {
 	productDiagnosis bool
 }
 
-// DiagnosisProblem marks product-authored no-data guidance so subsequent error
-// adapters never reinterpret observed values as engine or filesystem failures.
+// DiagnosisProblem marks product-authored guidance so subsequent error adapters
+// never reinterpret it as engine or filesystem failures.
 func DiagnosisProblem(path, message, hint string) Problem {
 	return Problem{Path: path, Message: PresentDiagnosis(message), Hint: PresentDiagnosis(hint), productDiagnosis: true}
 }
