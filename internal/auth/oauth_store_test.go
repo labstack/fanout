@@ -109,8 +109,8 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 	}
 }
 
-// Agent processes sharing one stored credential refresh together; the
-// sibling that presents the just-rotated token gets its own pair, once per
+// Agent processes sharing one stored credential refresh from stale copies;
+// the sibling that presents the rotated token gets its own pair within the
 // grace window, and only from the same client while the family is live.
 func TestOAuthStoreRefreshGraceAdmitsConcurrentSibling(t *testing.T) {
 	sqlite := newTestSQLite(t)
@@ -142,6 +142,9 @@ func TestOAuthStoreRefreshGraceAdmitsConcurrentSibling(t *testing.T) {
 	if _, err := store.RotateRefreshToken(t.Context(), other.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {
 		t.Fatalf("another client's sibling refresh = %v, want invalid grant", err)
 	}
+	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); err != nil {
+		t.Fatalf("rotated access token = %v", err)
+	}
 	store.now = func() time.Time { return base.Add(OAuthRefreshReuseGrace) }
 	sibling, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
 	if err != nil {
@@ -150,20 +153,16 @@ func TestOAuthStoreRefreshGraceAdmitsConcurrentSibling(t *testing.T) {
 	if sibling.RefreshToken == second.RefreshToken || sibling.AccessToken == second.AccessToken {
 		t.Fatal("a sibling must receive its own credentials")
 	}
-	for name, pair := range map[string]OAuthTokenPair{"rotated": second, "sibling": sibling} {
-		if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); err != nil {
-			t.Fatalf("%s access token = %v", name, err)
-		}
+	if _, err := store.VerifyAccessToken(t.Context(), sibling.AccessToken, resource); err != nil {
+		t.Fatalf("sibling access token = %v", err)
 	}
 	// The sibling refresh must not move the rotation time and extend the window.
 	store.now = func() time.Time { return base.Add(OAuthRefreshReuseGrace + time.Second) }
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("refresh after grace = %v, want reuse detection", err)
 	}
-	for name, pair := range map[string]OAuthTokenPair{"rotated": second, "sibling": sibling} {
-		if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
-			t.Fatalf("%s access token after reuse = %v, want invalid token", name, err)
-		}
+	if _, err := store.VerifyAccessToken(t.Context(), sibling.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("sibling access token after reuse = %v, want invalid token", err)
 	}
 }
 
@@ -287,6 +286,13 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	code, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
+		ClientID: client.ClientID, UserID: user.ID, RedirectURI: "http://localhost/callback",
+		Scope: MCPScopeTelemetryRead, Resource: resource, CodeChallenge: "challenge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := users.RevokeAllSessionsWithAudit(user.ID, AuditEvent{EventType: "session.revoked", Outcome: "success"}); err != nil {
 		t.Fatalf("RevokeAllSessions: %v", err)
 	}
@@ -295,6 +301,9 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	}
 	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("replayed refresh token = %v, want reuse detection", err)
+	}
+	if _, err := store.ConsumeAuthorizationCode(t.Context(), code); !errors.Is(err, ErrInvalidOAuthGrant) {
+		t.Fatalf("pending authorization code after revocation = %v, want invalid grant", err)
 	}
 }
 
@@ -574,5 +583,213 @@ func TestOAuthStoreExpiredCodeFails(t *testing.T) {
 	store.now = func() time.Time { return now.Add(OAuthCodeTTL + time.Second) }
 	if _, err := store.ConsumeAuthorizationCode(t.Context(), raw); !errors.Is(err, ErrInvalidOAuthGrant) {
 		t.Fatalf("expired code = %v, want invalid grant", err)
+	}
+}
+
+func TestOAuthConnectionsListLiveFamilies(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("connections@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := users.CreateWithAudit("other-connections@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	register := func(name string) OAuthClient {
+		t.Helper()
+		client, err := store.RegisterClient(t.Context(), name, "", []string{"http://localhost/callback"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client
+	}
+	issue := func(client OAuthClient, owner User) OAuthTokenPair {
+		t.Helper()
+		pair, err := store.IssueTokenPair(t.Context(), client.ClientID, owner.ID, MCPScopeTelemetryRead+" "+MCPScopeDashboardManage, "https://fanout.example.com/mcp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pair
+	}
+	client := register("Codex")
+	issue(client, user)
+	if _, err := sqlite.DB.Exec(`UPDATE oauth_tokens SET revoked_at = ? WHERE client_id = ?`, now.Unix(), client.ClientID); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Hour)
+	connected := now
+	first := issue(client, user)
+	now = now.Add(time.Hour)
+	issue(client, user)
+	now = now.Add(time.Hour)
+	newest := register("Claude Code")
+	issue(newest, user)
+	now = now.Add(time.Hour)
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, "https://fanout.example.com/mcp", MCPScopeTelemetryRead); err != nil {
+		t.Fatal(err)
+	}
+	expired := register("Expired")
+	issue(expired, user)
+	if _, err := sqlite.DB.Exec(`UPDATE oauth_tokens SET expires_at = ? WHERE client_id = ? AND kind = 'refresh'`, now.Unix(), expired.ClientID); err != nil {
+		t.Fatal(err)
+	}
+	revoked := register("Revoked")
+	issue(revoked, user)
+	if _, err := sqlite.DB.Exec(`UPDATE oauth_tokens SET revoked_at = ? WHERE client_id = ? AND kind = 'refresh'`, now.Unix(), revoked.ClientID); err != nil {
+		t.Fatal(err)
+	}
+	otherClient := register("Other user's agent")
+	issue(otherClient, other)
+	issue(client, other)
+	unused := register("Unused")
+
+	connections, err := store.ListConnections(t.Context(), user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connections) != 2 || connections[0].ClientID != newest.ClientID || connections[1].ClientID != client.ClientID {
+		t.Fatalf("connections = %+v", connections)
+	}
+	got := connections[1]
+	if got.ClientName != "Codex" || !got.ConnectedAt.Equal(connected) || !got.RefreshedAt.Equal(now) || got.Scope != MCPScopeTelemetryRead {
+		t.Fatalf("connection = %+v", got)
+	}
+	for _, clientID := range []string{expired.ClientID, revoked.ClientID, unused.ClientID, otherClient.ClientID, "unknown"} {
+		if err := store.RevokeConnection(t.Context(), user.ID, clientID, AuditEvent{}); !errors.Is(err, ErrOAuthConnectionNotFound) {
+			t.Fatalf("non-live connection revoke = %v", err)
+		}
+	}
+	connections, err = store.ListConnections(t.Context(), "unknown")
+	if err != nil || connections == nil || len(connections) != 0 {
+		t.Fatalf("empty connections = %+v, %v", connections, err)
+	}
+}
+
+func TestOAuthConnectionRevocationIsScopedAndImmediate(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("revoke-connection@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := users.CreateWithAudit("other-revoke@example.com", "", "viewer", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://localhost/callback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.RegisterClient(t.Context(), "Claude Code", "", []string{"http://localhost/callback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := func(clientID, userID string) OAuthTokenPair {
+		t.Helper()
+		pair, err := store.IssueTokenPair(t.Context(), clientID, userID, MCPScopeTelemetryRead, "https://fanout.example.com/mcp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pair
+	}
+	pair := issue(client.ClientID, user.ID)
+	sibling, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, "https://fanout.example.com/mcp", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	family := issue(client.ClientID, user.ID)
+	otherUser := issue(client.ClientID, other.ID)
+	otherClient := issue(second.ClientID, user.ID)
+	code := func(userID string) string {
+		t.Helper()
+		raw, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
+			ClientID: client.ClientID, UserID: userID, RedirectURI: "http://localhost/callback",
+			Scope: MCPScopeTelemetryRead, Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	pendingCode, otherUserCode := code(user.ID), code(other.ID)
+	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://fanout.example.com/mcp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeConnection(t.Context(), user.ID, client.ClientID, AuditEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{pair.AccessToken, sibling.AccessToken, family.AccessToken} {
+		if _, err := store.VerifyAccessToken(t.Context(), token, "https://fanout.example.com/mcp"); !errors.Is(err, ErrInvalidOAuthToken) {
+			t.Fatalf("revoked access = %v", err)
+		}
+	}
+	for _, token := range []string{pair.RefreshToken, sibling.RefreshToken, family.RefreshToken} {
+		if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, token, "https://fanout.example.com/mcp", ""); err == nil {
+			t.Fatal("disconnected refresh token accepted")
+		}
+	}
+	for _, token := range []string{otherUser.AccessToken, otherClient.AccessToken} {
+		if _, err := store.VerifyAccessToken(t.Context(), token, "https://fanout.example.com/mcp"); err != nil {
+			t.Fatalf("unrelated access = %v", err)
+		}
+	}
+	if _, err := store.ConsumeAuthorizationCode(t.Context(), pendingCode); !errors.Is(err, ErrInvalidOAuthGrant) {
+		t.Fatalf("pending code after disconnect = %v, want invalid grant", err)
+	}
+	if _, err := store.ConsumeAuthorizationCode(t.Context(), otherUserCode); err != nil {
+		t.Fatalf("other user's pending code = %v", err)
+	}
+	var live int
+	if err := sqlite.DB.QueryRow(`SELECT COUNT(*) FROM oauth_tokens WHERE client_id = ? AND user_id = ? AND revoked_at IS NULL`, client.ClientID, user.ID).Scan(&live); err != nil || live != 0 {
+		t.Fatalf("unrevoked tokens = %d, %v", live, err)
+	}
+	if err := store.RevokeConnection(t.Context(), user.ID, client.ClientID, AuditEvent{}); !errors.Is(err, ErrOAuthConnectionNotFound) {
+		t.Fatalf("second revoke = %v", err)
+	}
+	if err := store.RevokeConnection(t.Context(), "unknown", second.ClientID, AuditEvent{}); !errors.Is(err, ErrOAuthConnectionNotFound) {
+		t.Fatalf("other user's connection = %v", err)
+	}
+	if err := store.RevokeConnection(t.Context(), user.ID, "unknown", AuditEvent{}); !errors.Is(err, ErrOAuthConnectionNotFound) {
+		t.Fatalf("unknown connection = %v", err)
+	}
+	var events int
+	if err := sqlite.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'oauth_connection.revoked' AND actor_user_id = ? AND target_type = 'oauth_client' AND target_id = ? AND json_extract(metadata_json, '$.client_name') = 'Codex'`, user.ID, client.ClientID).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("revocation audits = %d, %v", events, err)
+	}
+}
+
+func TestOAuthConnectionRevocationRollsBackWithAuditFailure(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.CreateWithAudit("rollback-connection@example.com", "", "admin", AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	client, err := store.RegisterClient(t.Context(), "Codex", "", []string{"http://localhost/callback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, "https://fanout.example.com/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sqlite.DB.Exec(`CREATE TRIGGER reject_connection_audit BEFORE INSERT ON auth_audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeConnection(t.Context(), user.ID, client.ClientID, AuditEvent{}); err == nil {
+		t.Fatal("audit failure must fail revocation")
+	}
+	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, "https://fanout.example.com/mcp"); err != nil {
+		t.Fatalf("rolled-back access = %v", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, "https://fanout.example.com/mcp", ""); err != nil {
+		t.Fatalf("rolled-back refresh = %v", err)
 	}
 }

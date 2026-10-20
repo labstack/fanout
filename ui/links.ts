@@ -12,4 +12,5 @@ export const docs = {
   home: "https://fanout.run/start/what-fanout-is",
   /** Sending telemetry: endpoint, authentication, collector and SDK setup. */
   ingest: "https://fanout.run/start/send-telemetry",
+  connect: "https://fanout.run/guides/connect-over-mcp",
 } as const;

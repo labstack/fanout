@@ -82,6 +82,49 @@ func (h *MCPAuthorization) Register(e *echo.Echo) {
 	e.POST("/oauth/token", h.Token)
 	e.GET("/api/auth/oauth/authorize", h.Authorize)
 	e.POST("/api/auth/oauth/authorize", h.Authorize)
+	e.GET("/api/auth/oauth/connections", h.ListConnections, browserOAuthConnection)
+	e.POST("/api/auth/oauth/connections/:id/revoke", h.RevokeConnection, browserOAuthConnection)
+}
+
+func browserOAuthConnection(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		c.Response().Header().Set("Cache-Control", "no-store")
+		if fields := strings.Fields(c.Request().Header.Get("Authorization")); len(fields) > 0 && strings.EqualFold(fields[0], "Bearer") {
+			return echo.NewHTTPError(http.StatusUnauthorized, "browser session required")
+		}
+		return next(c)
+	}
+}
+
+func (h *MCPAuthorization) ListConnections(c *echo.Context) error {
+	userID, err := RequestOwner(c)
+	if err != nil {
+		return err
+	}
+	connections, err := h.store.ListConnections(c.Request().Context(), userID)
+	if err != nil {
+		slog.Error("list OAuth connections failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list connections")
+	}
+	return c.JSON(http.StatusOK, map[string]any{"connections": connections})
+}
+
+func (h *MCPAuthorization) RevokeConnection(c *echo.Context) error {
+	userID, err := RequestOwner(c)
+	if err != nil {
+		return err
+	}
+	err = h.store.RevokeConnection(c.Request().Context(), userID, c.Param("id"), appauth.AuditEvent{
+		RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(),
+	})
+	if errors.Is(err, appauth.ErrOAuthConnectionNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "connection not found")
+	}
+	if err != nil {
+		slog.Error("revoke OAuth connection failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to revoke connection")
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {

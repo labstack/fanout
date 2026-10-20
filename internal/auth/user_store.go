@@ -422,6 +422,9 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?`, time.Now().UTC().Unix(), id); err != nil {
 		return fmt.Errorf("auth: revoke user OAuth tokens: %w", err)
 	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE user_id = ?`, id); err != nil {
+		return fmt.Errorf("auth: delete user OAuth authorization codes: %w", err)
+	}
 	if event != nil {
 		event.TargetType = "user"
 		event.TargetID = id

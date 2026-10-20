@@ -278,6 +278,11 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyAuthenticated}, method == http.MethodPost
 	case path == "/api/auth/oauth/authorize":
 		return routePolicy{kind: routePolicyAuthenticated}, read || method == http.MethodPost
+	case path == "/api/auth/oauth/connections":
+		return routePolicy{kind: routePolicyAuthenticated}, read
+	case strings.HasPrefix(path, "/api/auth/oauth/connections/"):
+		id, action, _ := strings.Cut(strings.TrimPrefix(path, "/api/auth/oauth/connections/"), "/")
+		return routePolicy{kind: routePolicyAuthenticated}, id != "" && action == "revoke" && method == http.MethodPost
 	case strings.HasPrefix(path, "/.well-known/"):
 		return routePolicy{kind: routePolicyProtocol}, read
 	case path == "/oauth/register" || path == "/oauth/token":
