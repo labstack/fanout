@@ -65,7 +65,10 @@ func TestSQLTimestampComparisonsReturnRepairHintOrExactResults(t *testing.T) {
 	}{
 		{"timestamptz", "start_time < TIMESTAMPTZ '2026-10-01 12:30:00+00'", true},
 		{"timestamptz_reversed", "TIMESTAMPTZ '2026-10-01 12:30:00+00' > start_time", true},
+		{"between_timestamptz", "start_time BETWEEN TIMESTAMPTZ '2026-10-01 12:30:00+00' AND TIMESTAMPTZ '2026-10-01 12:30:00+00'", true},
+		{"between_timestamptz_reversed", "TIMESTAMPTZ '2026-10-01 12:30:00+00' BETWEEN start_time AND start_time", true},
 		{"timestamp_utc", "start_time < TIMESTAMP '2026-10-01 12:30:00'", false},
+		{"between_timestamp_utc", "start_time BETWEEN TIMESTAMP '2026-10-01 12:30:00' AND TIMESTAMP '2026-10-01 12:30:00'", false},
 		{"explicit_cast", "start_time < TIMESTAMPTZ '2026-10-01 12:30:00+00'::TIMESTAMPTZ_NS", false},
 		{"explicit_cast_offset", "start_time < TIMESTAMPTZ '2026-10-01 14:30:00+02'::TIMESTAMPTZ_NS", false},
 	} {

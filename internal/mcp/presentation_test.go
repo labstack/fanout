@@ -21,15 +21,17 @@ func TestTimestampLiteralHintSurvivesMCPPreviewAndDashboardRejection(t *testing.
 	from := now.Add(-time.Hour)
 	window := panel.Time{From: &from, To: &now}
 	for _, tc := range []struct {
-		name, literal string
-		invalid       bool
+		name, predicate string
+		invalid         bool
 	}{
-		{"timestamptz", "TIMESTAMPTZ '2026-10-20 17:36:15+00'", true},
-		{"timestamp", "TIMESTAMP '2026-10-20 17:36:15'", false},
-		{"explicit_cast", "TIMESTAMPTZ '2026-10-20 17:36:15+00'::TIMESTAMPTZ_NS", false},
+		{"timestamptz", "start_time < TIMESTAMPTZ '2026-10-20 17:36:15+00'", true},
+		{"between_timestamptz", "start_time BETWEEN TIMESTAMPTZ '2026-10-20 17:36:00+00' AND TIMESTAMPTZ '2026-10-20 17:36:14+00'", true},
+		{"timestamp", "start_time < TIMESTAMP '2026-10-20 17:36:15'", false},
+		{"between_timestamp", "start_time BETWEEN TIMESTAMP '2026-10-20 17:36:00' AND TIMESTAMP '2026-10-20 17:36:14'", false},
+		{"explicit_cast", "start_time < TIMESTAMPTZ '2026-10-20 17:36:15+00'::TIMESTAMPTZ_NS", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := panel.Panel{ID: "calls", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND start_time < " + tc.literal}
+			p := panel.Panel{ID: "calls", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND " + tc.predicate}
 			_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{p}, Time: &window})
 			if err != nil || len(out.Panels) != 1 {
 				t.Fatalf("preview=%+v err=%v", out, err)

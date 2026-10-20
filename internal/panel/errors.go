@@ -25,7 +25,7 @@ const ReadFailure = "Could not read the requested data. Try again."
 // SQLTimestampGuide is the time-literal rule shared by diagnostics and MCP guidance.
 const SQLTimestampGuide = "Compare time columns with TIMESTAMP 'YYYY-MM-DD HH:MM:SS' (UTC), or cast TIMESTAMPTZ literals with ::TIMESTAMPTZ_NS."
 
-var timestampComparison = regexp.MustCompile(`^Binder Error: Cannot compare values of type (?:TIMESTAMPTZ_NS and type TIMESTAMP WITH TIME ZONE|TIMESTAMP WITH TIME ZONE and type TIMESTAMPTZ_NS) - an explicit cast is required$`)
+var timestampComparison = regexp.MustCompile(`^Binder Error: Cannot (?:compare values of type (?:TIMESTAMPTZ_NS and type TIMESTAMP WITH TIME ZONE|TIMESTAMP WITH TIME ZONE and type TIMESTAMPTZ_NS)|mix values of type (?:TIMESTAMPTZ_NS and TIMESTAMP WITH TIME ZONE|TIMESTAMP WITH TIME ZONE and TIMESTAMPTZ_NS) in BETWEEN clause) - an explicit cast is required$`)
 
 var (
 	engineClass      = regexp.MustCompile(`(?i)(?:[a-z ]+ Error):\s*`)
