@@ -185,6 +185,56 @@ func TestTraceSemanticConventionPriority(t *testing.T) {
 	}
 }
 
+func TestTraceRPCSemanticConventions(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		attrs           map[string]string
+		service, method string
+	}{
+		{"old convention", map[string]string{"rpc.service": "oteldemo.CurrencyService", "rpc.method": "Convert"}, "oteldemo.CurrencyService", "Convert"},
+		{"new convention", map[string]string{"rpc.method": "oteldemo.CurrencyService/Convert"}, "oteldemo.CurrencyService", "Convert"},
+		{"explicit service with qualified method", map[string]string{"rpc.service": "CurrencyService", "rpc.method": "oteldemo.CurrencyService/Convert"}, "CurrencyService", "oteldemo.CurrencyService/Convert"},
+		{"method without slash", map[string]string{"rpc.method": "Convert"}, "", "Convert"},
+		{"last slash", map[string]string{"rpc.method": "package/CurrencyService/Convert"}, "package/CurrencyService", "Convert"},
+		{"trailing slash", map[string]string{"rpc.method": "oteldemo.CurrencyService/"}, "oteldemo.CurrencyService", ""},
+		{"leading slash", map[string]string{"rpc.method": "/Convert"}, "", "Convert"},
+		{"slash only", map[string]string{"rpc.method": "/"}, "", ""},
+		{"empty method", map[string]string{"rpc.method": ""}, "", ""},
+		{"empty service with qualified method", map[string]string{"rpc.service": "", "rpc.method": "oteldemo.CurrencyService/Convert"}, "", "oteldemo.CurrencyService/Convert"},
+		{"empty values", map[string]string{"rpc.service": "", "rpc.method": ""}, "", ""},
+		{"service only", map[string]string{"rpc.service": "CurrencyService"}, "CurrencyService", ""},
+		{"absent", nil, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var attrs []*common.KeyValue
+			for k, v := range tc.attrs {
+				attrs = append(attrs, &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: v}}})
+			}
+			var got telemetrystore.Batch
+			srv := NewServer(config.Config{}, conversionSubmitter(func(_ context.Context, b telemetrystore.Batch) error { got = b; return nil }))
+			req := &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{{Attributes: attrs}}}}}}}
+			if _, err := srv.exportTraces(t.Context(), req); err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Spans) != 1 {
+				t.Fatalf("got %d spans, want 1", len(got.Spans))
+			}
+			span := got.Spans[0]
+			if span.RPCService != tc.service || span.RPCMethod != tc.method {
+				t.Fatalf("extracted service=%q method=%q, want service=%q method=%q", span.RPCService, span.RPCMethod, tc.service, tc.method)
+			}
+			if len(span.Attributes) != len(tc.attrs) {
+				t.Fatalf("raw attributes changed: got %v, want %v", span.Attributes, tc.attrs)
+			}
+			for k, v := range tc.attrs {
+				if span.Attributes[k] != v {
+					t.Errorf("raw attribute %q = %v, want %q", k, span.Attributes[k], v)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkExportConversion(b *testing.B) {
 	traces, logs, metrics := conversionExports(250)
 	srv := NewServer(config.Config{DefaultNamespace: "fallback"}, conversionSubmitter(func(context.Context, telemetrystore.Batch) error { return nil }))

@@ -135,6 +135,13 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					ServiceVersion: serviceVersion,
 					DeploymentEnv:  deploymentEnv,
 				}
+				// Current conventions fold rpc.service into a qualified rpc.method.
+				if _, ok := attrs["rpc.service"]; !ok {
+					if i := strings.LastIndex(row.RPCMethod, "/"); i >= 0 {
+						row.RPCService = row.RPCMethod[:i]
+						row.RPCMethod = row.RPCMethod[i+1:]
+					}
+				}
 				// Pre-extracted exception info from span events.
 				excType, excMsg := extractException(sp.Events)
 				row.ExceptionType = excType
