@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,31 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func TestSQLTimestampRuleAppearsOnceInAgentGuidance(t *testing.T) {
+	field, ok := reflect.TypeOf(panel.Panel{}).FieldByName("SQL")
+	if !ok || strings.Count(field.Tag.Get("jsonschema"), panel.SQLTimestampGuide) != 1 {
+		t.Fatalf("SQL field guidance=%s", field.Tag.Get("jsonschema"))
+	}
+	docs, err := DescribeTools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"create_dashboard", "get_telemetry_schema"} {
+		found := false
+		for _, doc := range docs {
+			if doc.Name == name {
+				found = true
+				if strings.Count(doc.Description, panel.SQLTimestampGuide) != 1 {
+					t.Fatalf("%s must state the timestamp rule once", name)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s", name)
+		}
+	}
+}
 
 func TestExamplesAndPreviewCoverNewTypes(t *testing.T) {
 	s := newPanelServer(t)

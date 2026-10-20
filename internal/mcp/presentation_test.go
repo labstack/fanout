@@ -7,12 +7,72 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/toolerror"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+func TestTimestampLiteralHintSurvivesMCPPreviewAndDashboardRejection(t *testing.T) {
+	now := time.Date(2026, 10, 20, 18, 6, 0, 0, time.UTC)
+	s := panelServerFixtureAt(t, true, now)
+	from := now.Add(-time.Hour)
+	window := panel.Time{From: &from, To: &now}
+	for _, tc := range []struct {
+		name, predicate string
+		invalid         bool
+	}{
+		{"timestamptz", "start_time < TIMESTAMPTZ '2026-10-20 17:36:15+00'", true},
+		{"between_timestamptz", "start_time BETWEEN TIMESTAMPTZ '2026-10-20 17:36:00+00' AND TIMESTAMPTZ '2026-10-20 17:36:14+00'", true},
+		{"timestamp", "start_time < TIMESTAMP '2026-10-20 17:36:15'", false},
+		{"between_timestamp", "start_time BETWEEN TIMESTAMP '2026-10-20 17:36:00' AND TIMESTAMP '2026-10-20 17:36:14'", false},
+		{"explicit_cast", "start_time < TIMESTAMPTZ '2026-10-20 17:36:15+00'::TIMESTAMPTZ_NS", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := panel.Panel{ID: "calls", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND " + tc.predicate}
+			_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{p}, Time: &window})
+			if err != nil || len(out.Panels) != 1 {
+				t.Fatalf("preview=%+v err=%v", out, err)
+			}
+			got := out.Panels[0]
+			if !tc.invalid {
+				if got.Status != "ok" || got.Rows != 1 || len(got.Sample) != 1 || len(got.Sample[0]) != 1 || got.Sample[0][0] != float64(15) {
+					t.Fatalf("preview=%+v, want count 15", got)
+				}
+				return
+			}
+			if got.Status != "invalid" || len(got.Problems) != 1 || got.Problems[0].Path != "panels[0].sql" || got.Problems[0].Hint != panel.SQLTimestampGuide {
+				t.Fatalf("preview lost hint: %+v", got)
+			}
+			session := connectTestClient(t, s, nil)
+			result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{
+				Name: "create_dashboard", Arguments: DashboardCreateInput{Dashboard: panel.Dashboard{Name: "Time literals", Time: window, Panels: []panel.Panel{p}}},
+				Meta: mcpsdk.Meta{dashboard.OwnerMetaKey: "owner"},
+			})
+			if err != nil || !result.IsError {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			check := func(raw []byte) {
+				t.Helper()
+				var failure dashboardOutput
+				if err := json.Unmarshal(raw, &failure); err != nil || failure.Error == nil || failure.Error.Code != "invalid_spec" || !strings.Contains(failure.Error.Message, panel.SQLTimestampGuide) {
+					t.Fatalf("failure=%s err=%v", raw, err)
+				}
+				if len(failure.Problems) != 1 || failure.Problems[0].Path != "panels[0].sql" || failure.Problems[0].Hint != panel.SQLTimestampGuide {
+					t.Fatalf("lost problem hint: %+v", failure.Problems)
+				}
+			}
+			check([]byte(result.Content[0].(*mcpsdk.TextContent).Text))
+			raw, err := json.Marshal(result.StructuredContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(raw)
+		})
+	}
+}
 
 type presentationExecutor struct {
 	receiptExecutor

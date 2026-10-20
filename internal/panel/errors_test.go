@@ -13,6 +13,19 @@ import (
 
 var forbiddenPresentation = regexp.MustCompile(`(?i)duckdb|parquet|sqlite|(?:binder|catalog|conversion|io|parser) error|variant|timestamptz_ns|timestamp_ns|telemetry\.|parquet_index|/srv/|cast\(\$`)
 
+func TestSQLTimestampHintOnlyAppliesToTheEngineComparisonError(t *testing.T) {
+	for _, cause := range []error{
+		&duckdb.Error{Type: duckdb.ErrorTypeBinder, Msg: "Binder Error: Cannot compare values of type TIMESTAMPTZ_NS and type VARCHAR - an explicit cast is required"},
+		&duckdb.Error{Type: duckdb.ErrorTypeBinder, Msg: "Binder Error: Referenced column TIMESTAMPTZ_NS not found"},
+		errors.New("Binder Error: Cannot compare values of type TIMESTAMPTZ_NS and type TIMESTAMP WITH TIME ZONE - an explicit cast is required"),
+		&duckdb.Error{Type: duckdb.ErrorTypeIO, Msg: "IO Error: Cannot compare values of type TIMESTAMPTZ_NS and type TIMESTAMP WITH TIME ZONE - an explicit cast is required"},
+	} {
+		if got := sqlProblem("panels[0].sql", cause); got.Hint != "" {
+			t.Fatalf("unrelated error received timestamp hint: %+v", got)
+		}
+	}
+}
+
 func TestAuthorDiagnosticsPreserveSQLVocabulary(t *testing.T) {
 	for _, tc := range []struct{ message, want string }{
 		{`Catalog Error: Table with name telemetry.service_rollup does not exist!`, `Table with name service_rollup does not exist!`},
