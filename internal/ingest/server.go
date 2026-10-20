@@ -135,10 +135,10 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					ServiceVersion: serviceVersion,
 					DeploymentEnv:  deploymentEnv,
 				}
-				// gRPC and Connect RPC fold rpc.service into a qualified rpc.method.
+				// gRPC and Connect RPC (current and deprecated spellings) fold rpc.service into a qualified rpc.method.
 				if _, ok := attrs["rpc.service"]; !ok {
 					rpcSystem := spanAttr(sp.Attributes, "rpc.system.name", "rpc.system")
-					if i := strings.LastIndex(row.RPCMethod, "/"); i >= 0 && (rpcSystem == "grpc" || rpcSystem == "connect_rpc") {
+					if i := strings.LastIndex(row.RPCMethod, "/"); i >= 0 && (rpcSystem == "grpc" || rpcSystem == "connectrpc" || rpcSystem == "connect_rpc") {
 						row.RPCService = row.RPCMethod[:i]
 						row.RPCMethod = row.RPCMethod[i+1:]
 					}
