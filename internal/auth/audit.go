@@ -54,7 +54,7 @@ func recordAudit(ctx context.Context, executor auditExecutor, event AuditEvent) 
 	if !validAuditValue(event.EventType, map[AuditEventType]struct{}{
 		"authorization.denied": {}, "identity.linked": {}, "ingest_key.rotated": {},
 		"login.failed": {}, "login.requested": {}, "login.succeeded": {}, "logout": {},
-		"login_link.issued": {}, "login_link.redeemed": {},
+		"login_link.issued": {}, "login_link.redeemed": {}, "oauth_connection.revoked": {},
 		"oidc.denied": {}, "role.changed": {}, "session.revoked": {}, "setup.completed": {},
 		"user.created": {}, "user.suspended": {}, "user.deleted": {}, "user.provisioned": {}, "user.updated": {},
 	}) {
@@ -65,7 +65,7 @@ func recordAudit(ctx context.Context, executor auditExecutor, event AuditEvent) 
 		appmetrics.AuthAuditWriteFailures.Inc()
 		return fmt.Errorf("auth: invalid audit outcome %q", event.Outcome)
 	}
-	if event.TargetType != "" && !validAuditValue(event.TargetType, map[AuditTargetType]struct{}{"email": {}, "identity": {}, "ingest": {}, "route": {}, "user": {}}) {
+	if event.TargetType != "" && !validAuditValue(event.TargetType, map[AuditTargetType]struct{}{"email": {}, "identity": {}, "ingest": {}, "oauth_client": {}, "route": {}, "user": {}}) {
 		appmetrics.AuthAuditWriteFailures.Inc()
 		return fmt.Errorf("auth: invalid audit target type %q", event.TargetType)
 	}

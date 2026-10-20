@@ -253,7 +253,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 
 	b.WriteString("- `/debug/pprof/*` — only when `FANOUT_PPROF_ENABLED` is true, which is\n")
 	b.WriteString("  **not** the default. Enabling it also turns on mutex and block sampling.\n")
-	b.WriteString("- `/mcp`, `/api/mcp`, `/oauth/*` and `/.well-known/*` — only when\n")
+	b.WriteString("- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*` — only when\n")
 	b.WriteString("  `FANOUT_MCP_ENABLED` is true, which **is** the default.\n")
 	b.WriteString("- `/api/agent/*` — only when `FANOUT_AI_PROVIDER` selects `anthropic` or\n")
 	b.WriteString("  `openai`, with that provider's required key. An empty provider disables chat.\n")

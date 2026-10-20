@@ -15,6 +15,76 @@ type IngestSettings = {
 
 const ingestQueryKey = ["settings", "ingest"] as const;
 
+type OAuthConnection = {
+  client_id: string;
+  client_name: string;
+  connected_at: string;
+  refreshed_at: string;
+  scope: string;
+};
+
+const agentsQueryKey = ["settings", "oauth", "connections"] as const;
+
+function ConnectedAgents() {
+  const queryClient = useQueryClient();
+  const agents = useQuery({ queryKey: agentsQueryKey, queryFn: () => getJSON<{ connections: OAuthConnection[] }>("/api/auth/oauth/connections") });
+  const [selected, setSelected] = useState<OAuthConnection | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const disconnect = useMutation({
+    onMutate: async () => {
+      setAnnouncement("");
+      await queryClient.cancelQueries({ queryKey: agentsQueryKey });
+    },
+    mutationFn: async (agent: OAuthConnection) => {
+      const response = await authorizedFetch(`/api/auth/oauth/connections/${encodeURIComponent(agent.client_id)}/revoke`, { method: "POST" });
+      if (!response.ok) throw new Error("Fanout could not disconnect this agent. Try again.");
+    },
+    onSuccess: (_, agent) => {
+      queryClient.setQueryData<{ connections: OAuthConnection[] }>(agentsQueryKey, (data) => data && ({ connections: data.connections.filter((connection) => connection.client_id !== agent.client_id) }));
+      setSelected(null);
+      setAnnouncement(`${agent.client_name} disconnected.`);
+    },
+  });
+
+  return <Stack gap="sm">
+    <Box>
+      <Title order={2} fz={22} lts="-0.02em">Connected agents</Title>
+      <Text c="dimmed" size="sm" mt={2}>Agents you have authorized to access Fanout through MCP.</Text>
+    </Box>
+    <Paper withBorder radius="lg" p="lg">
+      {!agents.data
+        ? agents.isLoading
+          ? <Text c="dimmed" size="sm" role="status">Loading connected agents…</Text>
+          : <Stack gap="sm" align="flex-start">
+              <Alert color="bad" radius="md" icon={<WarningCircle size={18} weight="fill" />}>Fanout could not load your connected agents.</Alert>
+              <Button size="compact-sm" variant="light" onClick={() => void agents.refetch()}>Try again</Button>
+            </Stack>
+        : agents.data.connections.length === 0
+          ? <Text c="dimmed" size="sm">No agents connected. <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" inherit>Connect an agent over MCP</Anchor> to get started.</Text>
+          : <Stack gap="md">
+              {agents.data.connections.map((agent) => <Group key={agent.client_id} justify="space-between" align="center">
+                <Box style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                  <Text size="sm" fw={600}>{agent.client_name}</Text>
+                  <Text size="xs" c="dimmed">Connected <time dateTime={agent.connected_at}>{new Date(agent.connected_at).toLocaleDateString()}</time></Text>
+                </Box>
+                <Button variant="default" size="sm" onClick={() => { disconnect.reset(); setSelected(agent); }} disabled={disconnect.isPending}>Disconnect</Button>
+              </Group>)}
+            </Stack>}
+    </Paper>
+    <Text size="sm" c="dimmed" role="status" aria-live="polite">{announcement}</Text>
+    <Modal opened={selected !== null} onClose={() => !disconnect.isPending && setSelected(null)} title={`Disconnect ${selected?.client_name ?? "agent"}?`} centered radius="md">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">This agent loses access immediately. Your other agents and browser session stay connected. You can authorize the agent again to reconnect.</Text>
+        {disconnect.isError && <Alert color="bad" radius="md" icon={<WarningCircle size={18} weight="fill" />}>Fanout could not disconnect this agent. Try again.</Alert>}
+        <Group justify="flex-end" gap="sm">
+          <Button variant="default" size="sm" onClick={() => { disconnect.reset(); setSelected(null); }} disabled={disconnect.isPending}>Cancel</Button>
+          <Button color="bad" size="sm" loading={disconnect.isPending} onClick={() => selected && disconnect.mutate(selected)}>Disconnect</Button>
+        </Group>
+      </Stack>
+    </Modal>
+  </Stack>;
+}
+
 /** Whether the exporter reaches this instance over TLS.
  *
  *  Three things can say so: the process holds the certificate itself, the
@@ -225,6 +295,7 @@ export default function Settings() {
       <Text c="dimmed" size="xs">
         <Anchor href={docs.ingest} target="_blank" rel="noopener noreferrer" inherit>Sending telemetry</Anchor> covers SDK setup, the collector, and the OTLP/HTTP endpoint.
       </Text>
+      <ConnectedAgents />
     </Stack>
 
     <Modal opened={confirming} onClose={() => !rotate.isPending && setConfirming(false)} title={hasToken ? "Rotate the ingest token?" : "Issue an ingest token?"} centered radius="md">

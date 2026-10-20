@@ -6,11 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Settings from "./settings";
 
 const fetchMock = vi.fn<typeof fetch>();
+const agentsFetchMock = vi.fn<typeof fetch>();
 let role = "admin";
 
 vi.mock("./auth", () => ({
   useViewer: () => ({ id: "u1", email: "v@labstack.com", display_name: "V", status: "active" as const, role }),
-  authorizedFetch: (url: string, init?: RequestInit) => fetchMock(url, init),
+  authorizedFetch: (url: string, init?: RequestInit) => url.startsWith("/api/auth/oauth/connections") ? agentsFetchMock(url, init) : fetchMock(url, init),
 }));
 
 function json(body: unknown, status = 200) {
@@ -43,6 +44,8 @@ describe("connect telemetry", () => {
     role = "admin";
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
+    agentsFetchMock.mockReset();
+    agentsFetchMock.mockImplementation(async () => json({ connections: [] }));
     fetchMock.mockImplementation(async () => json(connection));
   });
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
@@ -211,6 +214,124 @@ describe("connect telemetry", () => {
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("rejecting telemetry"));
     expect([...document.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Issue token")).toBe(true);
+    await act(async () => root.unmount());
+  });
+});
+
+
+describe("connected agents", () => {
+  const codex = { client_id: "codex-id", client_name: "Codex", connected_at: "2026-10-01T12:00:00Z", refreshed_at: "2026-10-02T12:00:00Z", scope: "telemetry:read" };
+  const claude = { ...codex, client_id: "claude-id", client_name: "Claude Code" };
+
+  beforeEach(() => {
+    role = "viewer";
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+    agentsFetchMock.mockReset();
+    fetchMock.mockImplementation(async () => json(connection));
+    agentsFetchMock.mockImplementation(async () => json({ connections: [codex, claude] }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+
+  function disconnectButton(scope: ParentNode = document) {
+    const button = [...scope.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Disconnect");
+    if (!button) throw new Error("disconnect button not found");
+    return button;
+  }
+
+  async function openDisconnect() {
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Claude Code"));
+    await act(async () => disconnectButton().click());
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
+    const dialog = document.querySelector('[role="dialog"]');
+    if (!dialog) throw new Error("confirmation dialog not found");
+    return dialog;
+  }
+
+  it("lists names and connection dates for a viewer", async () => {
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Claude Code"));
+    expect(document.body.textContent).toContain("Connected agents");
+    expect(document.body.textContent).toContain("Codex");
+    expect(document.body.textContent).toContain(`Connected ${new Date(codex.connected_at).toLocaleDateString()}`);
+    expect(document.querySelector("time")?.getAttribute("datetime")).toBe(codex.connected_at);
+    expect(document.querySelectorAll("time")).toHaveLength(2);
+    await act(async () => root.unmount());
+  });
+
+  it("links the empty state to the MCP connect guide", async () => {
+    agentsFetchMock.mockImplementation(async () => json({ connections: [] }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("No agents connected"));
+    expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/guides/connect-over-mcp"]')?.textContent).toBe("Connect an agent over MCP");
+    await act(async () => root.unmount());
+  });
+
+  it("confirms before disconnecting and allows cancellation", async () => {
+    const root = await mount();
+    const dialog = await openDisconnect();
+    expect(dialog.textContent).toContain("Disconnect Codex?");
+    expect(agentsFetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    const cancel = [...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Cancel");
+    if (!cancel) throw new Error("cancel button not found");
+    await act(async () => cancel.click());
+    expect(agentsFetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(document.querySelectorAll("time")).toHaveLength(2);
+    await act(async () => root.unmount());
+  });
+
+  it("removes only the disconnected row and announces the result", async () => {
+    agentsFetchMock.mockImplementation(async (_url, init) => json(init?.method === "POST" ? { ok: true } : { connections: [codex, claude] }));
+    const root = await mount();
+    const dialog = await openDisconnect();
+    await act(async () => disconnectButton(dialog).click());
+    await vi.waitFor(() => expect([...document.querySelectorAll('[role="status"]')].some((status) => status.textContent === "Codex disconnected.")).toBe(true));
+    expect(agentsFetchMock).toHaveBeenCalledWith("/api/auth/oauth/connections/codex-id/revoke", { method: "POST" });
+    expect(document.querySelectorAll("time")).toHaveLength(1);
+    expect(document.body.textContent).toContain("Claude Code");
+    const cached = client.getQueryData<{ connections: typeof codex[] }>(["settings", "oauth", "connections"]);
+    expect(cached?.connections.map((agent) => agent.client_id)).toEqual(["claude-id"]);
+    await act(async () => root.unmount());
+  });
+
+  it("keeps the row and shows a failed disconnect so it can be retried", async () => {
+    agentsFetchMock.mockImplementation(async (_url, init) => init?.method === "POST" ? json({ code: "internal", message: "failed" }, 500) : json({ connections: [codex, claude] }));
+    const root = await mount();
+    const dialog = await openDisconnect();
+    await act(async () => disconnectButton(dialog).click());
+    await vi.waitFor(() => expect(dialog.textContent).toContain("could not disconnect this agent"));
+    expect(document.querySelectorAll("time")).toHaveLength(2);
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Try again");
+    expect(document.body.textContent).not.toContain("Codex disconnected.");
+    agentsFetchMock.mockImplementation(async () => json({ ok: true }));
+    await act(async () => disconnectButton(dialog).click());
+    await vi.waitFor(() => expect(document.querySelectorAll("time")).toHaveLength(1));
+    await act(async () => root.unmount());
+  });
+
+  it("shows a network failure without removing the agent", async () => {
+    agentsFetchMock.mockImplementation(async (_url, init) => {
+      if (init?.method === "POST") throw new Error("Failed to fetch");
+      return json({ connections: [codex, claude] });
+    });
+    const root = await mount();
+    const dialog = await openDisconnect();
+    await act(async () => disconnectButton(dialog).click());
+    await vi.waitFor(() => expect(dialog.textContent).toContain("could not disconnect this agent"));
+    expect(document.querySelectorAll("time")).toHaveLength(2);
+    await act(async () => root.unmount());
+  });
+
+  it("offers a retry when agents cannot be loaded", async () => {
+    agentsFetchMock.mockImplementation(async () => json({ code: "internal", message: "failed" }, 500));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("could not load your connected agents"));
+    expect(document.body.textContent).not.toContain("No agents connected");
+    agentsFetchMock.mockImplementation(async () => json({ connections: [codex] }));
+    const retry = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Try again");
+    if (!retry) throw new Error("retry button not found");
+    await act(async () => retry.click());
+    await vi.waitFor(() => expect(document.querySelectorAll("time")).toHaveLength(1));
     await act(async () => root.unmount());
   });
 });

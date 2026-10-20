@@ -23,7 +23,7 @@ configuration:
 
 - `/debug/pprof/*` — only when `FANOUT_PPROF_ENABLED` is true, which is
   **not** the default. Enabling it also turns on mutex and block sampling.
-- `/mcp`, `/api/mcp`, `/oauth/*` and `/.well-known/*` — only when
+- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*` — only when
   `FANOUT_MCP_ENABLED` is true, which **is** the default.
 - `/api/agent/*` — only when `FANOUT_AI_PROVIDER` selects `anthropic` or
   `openai`, with that provider's required key. An empty provider disables chat.
@@ -110,6 +110,8 @@ and path. [Roles](/reference/roles) maps capabilities to roles.
 | `GET` | `/api/auth/me` | any signed-in user |
 | `GET` | `/api/auth/oauth/authorize` | any signed-in user |
 | `POST` | `/api/auth/oauth/authorize` | any signed-in user |
+| `GET` | `/api/auth/oauth/connections` | any signed-in user |
+| `POST` | `/api/auth/oauth/connections/:id/revoke` | any signed-in user |
 | `GET` | `/api/auth/oidc/callback` | none |
 | `GET` | `/api/auth/oidc/start` | none |
 | `POST` | `/api/auth/setup` | none |

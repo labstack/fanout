@@ -163,6 +163,8 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/api/auth/logout", routePolicyAuthenticated, ""},
 		{http.MethodGet, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
 		{http.MethodPost, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
+		{http.MethodGet, "/api/auth/oauth/connections", routePolicyAuthenticated, ""},
+		{http.MethodPost, "/api/auth/oauth/connections/client-1/revoke", routePolicyAuthenticated, ""},
 		{http.MethodGet, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
 		{http.MethodHead, "/api/traces/abc", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/intelligence", routePolicyCapability, ReadTelemetry},

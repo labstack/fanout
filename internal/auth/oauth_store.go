@@ -17,22 +17,26 @@ import (
 
 const (
 	// Access tokens are checked against the database on every request, so
-	// revocation is immediate whatever their lifetime.
-	OAuthAccessTTL  = time.Hour
-	OAuthRefreshTTL = 30 * 24 * time.Hour
+	// revocation is immediate whatever their lifetime. A long lifetime keeps
+	// agent clients from refreshing, and racing each other, more than monthly.
+	OAuthAccessTTL  = 30 * 24 * time.Hour
+	OAuthRefreshTTL = 90 * 24 * time.Hour
 	OAuthCodeTTL    = 5 * time.Minute
 	// OAuthRefreshReuseGrace admits a refresh token its own client rotated
-	// moments ago, as when agent processes sharing one stored credential
-	// refresh together; later reuse still revokes the family.
-	OAuthRefreshReuseGrace = time.Minute
+	// within one access-token lifetime. Agent processes sharing one stored
+	// credential refresh from stale copies minutes or hours apart, and the
+	// holder of that credential already holds an access token that lives as
+	// long; later reuse still revokes the family.
+	OAuthRefreshReuseGrace = OAuthAccessTTL
 )
 
 var (
-	ErrOAuthClientNotFound = errors.New("oauth client not found")
-	ErrInvalidOAuthGrant   = errors.New("invalid oauth grant")
-	ErrInvalidOAuthScope   = errors.New("invalid oauth scope")
-	ErrOAuthRefreshReuse   = errors.New("oauth refresh token reuse detected")
-	ErrInvalidOAuthToken   = errors.New("invalid oauth token")
+	ErrOAuthClientNotFound     = errors.New("oauth client not found")
+	ErrOAuthConnectionNotFound = errors.New("oauth connection not found")
+	ErrInvalidOAuthGrant       = errors.New("invalid oauth grant")
+	ErrInvalidOAuthScope       = errors.New("invalid oauth scope")
+	ErrOAuthRefreshReuse       = errors.New("oauth refresh token reuse detected")
+	ErrInvalidOAuthToken       = errors.New("invalid oauth token")
 )
 
 // TokenKind discriminates the two token rows stored per grant.
@@ -88,6 +92,14 @@ type OAuthTokenPair struct {
 	Scope        string
 }
 
+type OAuthConnection struct {
+	ClientID    string    `json:"client_id"`
+	ClientName  string    `json:"client_name"`
+	ConnectedAt time.Time `json:"connected_at"`
+	RefreshedAt time.Time `json:"refreshed_at"`
+	Scope       string    `json:"scope"`
+}
+
 // String implements fmt.Stringer with the token material redacted so that a
 // stray %v/%s log of a pair can never leak raw credentials.
 func (p OAuthTokenPair) String() string {
@@ -101,6 +113,96 @@ type OAuthStore struct {
 
 func NewOAuthStore(db *sql.DB) *OAuthStore {
 	return &OAuthStore{db: db, now: time.Now}
+}
+
+func (s *OAuthStore) ListConnections(ctx context.Context, userID string) ([]OAuthConnection, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		WITH live_refresh AS (
+			SELECT client_id, family_id, scope, created_at, token_hash
+			FROM oauth_tokens
+			WHERE user_id = ? AND kind = 'refresh' AND revoked_at IS NULL AND expires_at > ?
+		)
+		SELECT c.client_id, c.client_name, MIN(t.created_at), MAX(t.created_at),
+		       (SELECT scope FROM live_refresh WHERE client_id = c.client_id
+		        ORDER BY created_at DESC, token_hash LIMIT 1)
+		FROM oauth_tokens t JOIN oauth_clients c ON c.client_id = t.client_id
+		WHERE t.user_id = ? AND EXISTS (
+			SELECT 1 FROM live_refresh live
+			WHERE live.client_id = t.client_id AND live.family_id = t.family_id
+		)
+		GROUP BY c.client_id, c.client_name
+		ORDER BY MIN(t.created_at) DESC, c.client_id`, userID, s.now().UTC().Unix(), userID)
+	if err != nil {
+		return nil, fmt.Errorf("oauth: list connections: %w", err)
+	}
+	defer rows.Close()
+	connections := []OAuthConnection{}
+	for rows.Next() {
+		var connection OAuthConnection
+		var connected, refreshed int64
+		if err := rows.Scan(&connection.ClientID, &connection.ClientName, &connected, &refreshed, &connection.Scope); err != nil {
+			return nil, fmt.Errorf("oauth: scan connection: %w", err)
+		}
+		connection.ConnectedAt = time.Unix(connected, 0).UTC()
+		connection.RefreshedAt = time.Unix(refreshed, 0).UTC()
+		connections = append(connections, connection)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("oauth: read connections: %w", err)
+	}
+	return connections, nil
+}
+
+func (s *OAuthStore) RevokeConnection(ctx context.Context, userID, clientID string, event AuditEvent) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("oauth: open connection revocation: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("oauth: begin connection revocation: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollbackConn(conn, "OAuth connection revocation")
+		}
+	}()
+	now := s.now().UTC().Unix()
+	var name string
+	err = conn.QueryRowContext(ctx, `
+		SELECT c.client_name FROM oauth_clients c
+		WHERE c.client_id = ? AND EXISTS (
+			SELECT 1 FROM oauth_tokens t WHERE t.client_id = c.client_id AND t.user_id = ?
+			AND t.kind = 'refresh' AND t.revoked_at IS NULL AND t.expires_at > ?
+		)`, clientID, userID, now).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrOAuthConnectionNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("oauth: read connection for revocation: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `
+		UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?)
+		WHERE client_id = ? AND user_id = ?`, now, clientID, userID); err != nil {
+		return fmt.Errorf("oauth: revoke connection: %w", err)
+	}
+	// A pending code would otherwise mint a new family after the disconnect.
+	if _, err := conn.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE client_id = ? AND user_id = ?`, clientID, userID); err != nil {
+		return fmt.Errorf("oauth: delete connection authorization codes: %w", err)
+	}
+	event.ActorUserID = userID
+	event.EventType, event.Outcome = "oauth_connection.revoked", "success"
+	event.TargetType, event.TargetID = "oauth_client", clientID
+	event.Metadata = map[string]any{"client_name": name}
+	if err := recordAudit(ctx, conn, event); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("oauth: commit connection revocation: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 func (s *OAuthStore) RegisterClient(ctx context.Context, name, clientURI string, redirectURIs []string) (OAuthClient, error) {

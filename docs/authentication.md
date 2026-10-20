@@ -238,6 +238,19 @@ The `issuer` value relaxes that check and is accepted only when an allow policy
 is configured, on the basis that the issuer itself vouches for the address. Use
 it only with a provider you administer.
 
+## MCP OAuth connections
+
+Signed-in users can review their connected agents in Settings and disconnect
+one agent at a time. Disconnecting immediately revokes that client's access and
+refresh tokens for the current user. Other agents and browser sessions stay
+connected. To reconnect, authorize the agent again.
+
+`GET /api/auth/oauth/connections` lists the current user's live connections;
+`POST /api/auth/oauth/connections/{id}/revoke` disconnects one client. Both
+require a browser session. Administrators can still revoke all of a user's
+access, including browser sessions and OAuth tokens, through
+`POST /api/users/{id}/access/revoke`.
+
 ## Credentials at a glance
 
 | Credential | Purpose | Rotation |
@@ -247,7 +260,7 @@ it only with a provider you administer.
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
 | Ingest token | OTLP ingest | Settings page |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |
-| MCP OAuth tokens | MCP clients | One-hour access tokens; refresh rotation with replay-family revocation, admitting the same client's just-rotated token for one minute so processes sharing a credential can refresh together |
+| MCP OAuth tokens | MCP clients | 30-day access tokens, checked on every request; 90-day refresh tokens renewed on each use. Refresh rotation with replay-family revocation, admitting the same client's rotated token for one access-token lifetime so processes sharing a credential can refresh from stale copies. Users disconnect individual agents in Settings; admins can still revoke all of a user's access |
 
 Local email codes allow three attempts per code and expire after five minutes.
 Attempts are reserved atomically, so concurrent guesses cannot exceed the limit.

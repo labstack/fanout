@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -859,5 +860,127 @@ func TestMCPOAuthConsentMarksDynamicClientUnverified(t *testing.T) {
 	// The screen must show provenance the name cannot forge.
 	if !strings.Contains(strings.ToLower(page), "unverified") {
 		t.Fatalf("consent screen presents an attacker-chosen client name with no provenance warning: %s", page)
+	}
+}
+
+func TestOAuthConnectionsRequireBrowserSession(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := auth.NewOAuthStore(s.db.DB)
+	handler, err := NewMCPAuthorization(store, s.users, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Register(s.e)
+	user, err := s.users.CreateWithAudit("connections-auth@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := registerOAuthClient(t, s.e)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, mcpReadScope, testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, user)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/auth/oauth/connections"},
+		{http.MethodPost, "/api/auth/oauth/connections/" + client.ClientID + "/revoke"},
+	} {
+		for _, credential := range []string{"anonymous", "bearer", "bearer with cookie"} {
+			t.Run(route.method+" "+credential, func(t *testing.T) {
+				req := httptest.NewRequest(route.method, route.path, nil)
+				req.Header.Set("Fanout-Request", "1")
+				if credential != "anonymous" {
+					req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+				}
+				if credential == "bearer with cookie" {
+					req.AddCookie(cookie)
+				}
+				rec := httptest.NewRecorder()
+				s.e.ServeHTTP(rec, req)
+				if rec.Code != http.StatusUnauthorized || rec.Header().Get("Cache-Control") != "no-store" {
+					t.Fatalf("response = %d %v %s", rec.Code, rec.Header(), rec.Body.String())
+				}
+				var body map[string]any
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["code"] != "unauthorized" || body["message"] == nil {
+					t.Fatalf("error body = %s, %v", rec.Body.String(), err)
+				}
+			})
+		}
+	}
+}
+
+func TestOAuthConnectionsAreOwnAccountOnlyForEveryRole(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleOperator, auth.RoleViewer} {
+		t.Run(string(role), func(t *testing.T) {
+			s := newTestAuthServer(t)
+			store := auth.NewOAuthStore(s.db.DB)
+			handler, err := NewMCPAuthorization(store, s.users, testMCPResource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler.Register(s.e)
+			user, err := s.users.CreateWithAudit("connections-owner@example.com", "", role, auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			other, err := s.users.CreateWithAudit("connections-other@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ownClient := registerOAuthClient(t, s.e)
+			otherClient := registerOAuthClient(t, s.e)
+			issue := func(clientID, userID string) auth.OAuthTokenPair {
+				t.Helper()
+				pair, err := store.IssueTokenPair(t.Context(), clientID, userID, mcpReadScope, testMCPResource)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return pair
+			}
+			ownToken := issue(ownClient.ClientID, user.ID)
+			otherToken := issue(otherClient.ClientID, other.ID)
+			cookie := s.login(t, user)
+			list := serve(t, s.e, http.MethodGet, "/api/auth/oauth/connections?user_id="+other.ID, "", nil, cookie)
+			var body struct {
+				Connections []auth.OAuthConnection `json:"connections"`
+			}
+			if err := json.Unmarshal(list.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if list.Code != http.StatusOK || list.Header().Get("Cache-Control") != "no-store" || len(body.Connections) != 1 || body.Connections[0].ClientID != ownClient.ClientID || body.Connections[0].ClientName != ownClient.ClientName || body.Connections[0].ConnectedAt.IsZero() || body.Connections[0].RefreshedAt.IsZero() || body.Connections[0].Scope != mcpReadScope {
+				t.Fatalf("list = %d %s", list.Code, list.Body.String())
+			}
+			for _, clientID := range []string{otherClient.ClientID, "unknown"} {
+				rec := serve(t, s.e, http.MethodPost, "/api/auth/oauth/connections/"+clientID+"/revoke", "", map[string]string{"Fanout-Request": "1"}, cookie)
+				if rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != "no-store" || !strings.Contains(rec.Body.String(), `"code":"not_found"`) {
+					t.Fatalf("other or unknown revoke = %d %s", rec.Code, rec.Body.String())
+				}
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/auth/oauth/connections/"+ownClient.ClientID+"/revoke", nil)
+			request.AddCookie(cookie)
+			blocked := httptest.NewRecorder()
+			s.e.ServeHTTP(blocked, request)
+			if blocked.Code != http.StatusForbidden {
+				t.Fatalf("revoke without CSRF header = %d", blocked.Code)
+			}
+			revoked := serve(t, s.e, http.MethodPost, "/api/auth/oauth/connections/"+ownClient.ClientID+"/revoke", "", map[string]string{"Fanout-Request": "1", "User-Agent": "connection-test"}, cookie)
+			if revoked.Code != http.StatusOK || revoked.Header().Get("Cache-Control") != "no-store" || !strings.Contains(revoked.Body.String(), `"ok":true`) {
+				t.Fatalf("revoke = %d %s", revoked.Code, revoked.Body.String())
+			}
+			if _, err := store.VerifyAccessToken(t.Context(), ownToken.AccessToken, testMCPResource); !errors.Is(err, auth.ErrInvalidOAuthToken) {
+				t.Fatalf("revoked token = %v", err)
+			}
+			if _, err := store.VerifyAccessToken(t.Context(), otherToken.AccessToken, testMCPResource); err != nil {
+				t.Fatalf("other token = %v", err)
+			}
+			list = serve(t, s.e, http.MethodGet, "/api/auth/oauth/connections", "", nil, cookie)
+			if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"connections":[]`) {
+				t.Fatalf("browser session after revoke = %d %s", list.Code, list.Body.String())
+			}
+			var events int
+			if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'oauth_connection.revoked' AND actor_user_id = ? AND target_type = 'oauth_client' AND target_id = ? AND user_agent = 'connection-test' AND json_extract(metadata_json, '$.client_name') = ?`, user.ID, ownClient.ClientID, ownClient.ClientName).Scan(&events); err != nil || events != 1 {
+				t.Fatalf("revocation audits = %d, %v", events, err)
+			}
+		})
 	}
 }
