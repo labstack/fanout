@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # directory here, then copy it with the runtime user's ownership below.
 RUN mkdir -p /runtime/var/lib/fanout/data
 
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:205572d5e48117e14b44b42627890fa8d3e8e65bb37a80abb3317e5151e7f35b AS fanout
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:3f1283dc2a6a48c25cd2e1c7730a871b19b721975240e108e0d6a73b555a3a20 AS fanout
 ARG VERSION=dev
 
 LABEL org.opencontainers.image.title="Fanout" \
