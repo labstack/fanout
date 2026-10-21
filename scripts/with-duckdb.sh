@@ -3,26 +3,26 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version=v2.0.0-alpha46057
+version=v2.0.0
 case "$(uname -s)/$(uname -m)" in
 Darwin/arm64)
 	platform=osx-arm64
-	checksum=e78e6a3ab5c35c1451650cdd234e9f42c8c9485412aaf063dfaae995f0dcda6a
+	checksum=c3a571e6d4a0da97534c631df463ab13c07f8cf78049625f5df936b7beaab9ce
 	system_libs='-lc++ -Wl,-no_warn_duplicate_libraries'
 	;;
 Darwin/x86_64)
 	platform=osx-amd64
-	checksum=a1dd2b83754484dcd0980ed1c46d5726ec2a2fd26090d43341dc74f1060abff3
+	checksum=7e6101ddc8de73e8dcc66f790e658e07891165d026992b40ceba20e50b01f8ec
 	system_libs='-lc++ -Wl,-no_warn_duplicate_libraries'
 	;;
 Linux/x86_64)
 	platform=linux-amd64
-	checksum=4cb2df2e767f2a08fb38a0c39b8dadd1ad0eb07fd5cd6431092e709be41a323e
+	checksum=112d62c980f5447cd303a70b3dacbc09acd41ccb4ef6d154e8629f543a0f8568
 	system_libs='-lstdc++ -lm -ldl -pthread'
 	;;
 Linux/aarch64)
 	platform=linux-arm64
-	checksum=81cf834f18a7004d412862d25bbbd334c1e335432c94a2cbcb6c0f560ebbc3eb
+	checksum=8171b4842e68a85b2e82b342d3bf7b542a88fd6666e0c18438d7b459012494ee
 	system_libs='-lstdc++ -lm -ldl -pthread'
 	;;
 *)
@@ -53,7 +53,7 @@ if [[ ! -f "$libs/.verified" ]]; then
 		if [[ ! -f "$libs/.verified" ]]; then
 			stage="$(mktemp -d "$(dirname "$libs")/.download.XXXXXX")"
 			trap 'rm -rf "$stage"; rmdir "$lock"' EXIT
-			url="https://github.com/labstack/fanout/releases/download/duckdb-$version/duckdb-static-libs-$platform.tar.gz"
+			url="https://github.com/duckdb/duckdb/releases/download/$version/duckdb-static-libs-$platform.tar.gz"
 			curl --fail --location --silent --show-error "$url" -o "$stage/archive.tar.gz"
 			if [[ "$platform" == osx-* ]]; then
 				actual="$(shasum -a 256 "$stage/archive.tar.gz" | awk '{print $1}')"

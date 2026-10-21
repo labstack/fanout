@@ -73,7 +73,7 @@ COMPONENT INVENTORY
 - Go: modernc.org/mathutil v1.7.1
 - Go: modernc.org/memory v1.12.1
 - Go: modernc.org/sqlite v1.60.1
-- Native: DuckDB v2.0.0-alpha46057 (b15358c371)
+- Native: DuckDB v2.0.0 (d54cbbe3df)
 - npm: @ag-ui/client 1.0.2 (declared license: MIT)
 - npm: @ag-ui/core 1.0.2 (declared license: MIT)
 - npm: @ag-ui/encoder 1.0.2 (declared license: MIT)
@@ -5136,11 +5136,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- Native: DuckDB v2.0.0-alpha46057 (b15358c371) / duckdb-NOTICE
+- Native: DuckDB v2.0.0 (d54cbbe3df) / duckdb-NOTICE
 ----------------------------------------------------------------------------
 
-DuckDB b15358c371 — upstream license and bundled third-party notices.
-Source: https://github.com/duckdb/duckdb/tree/b15358c371
+DuckDB d54cbbe3df — upstream license and bundled third-party notices.
+Source: https://github.com/duckdb/duckdb/tree/d54cbbe3df
 
 --- LICENSE ---
 
