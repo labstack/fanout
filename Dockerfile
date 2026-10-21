@@ -17,7 +17,7 @@ RUN cd ui/host && bun run build
 # is no cross toolchain here. `--platform=$BUILDPLATFORM` is therefore only
 # correct while TARGETPLATFORM equals BUILDPLATFORM. Adding an architecture to
 # the CI matrix means either a native runner for it or QEMU, not a GOARCH flag.
-FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # directory here, then copy it with the runtime user's ownership below.
 RUN mkdir -p /runtime/var/lib/fanout/data
 
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:205572d5e48117e14b44b42627890fa8d3e8e65bb37a80abb3317e5151e7f35b AS fanout
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:3f1283dc2a6a48c25cd2e1c7730a871b19b721975240e108e0d6a73b555a3a20 AS fanout
 ARG VERSION=dev
 
 LABEL org.opencontainers.image.title="Fanout" \
