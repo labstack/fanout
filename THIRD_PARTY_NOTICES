@@ -290,7 +290,7 @@ COMPONENT INVENTORY
 - npm: which 2.0.2 (declared license: ISC)
 - npm: yaml 2.9.1 (declared license: ISC)
 - npm: zod 3.25.76 (declared license: MIT)
-- npm: zod 4.6.5 (declared license: MIT)
+- npm: zod 4.6.6 (declared license: MIT)
 - npm: zrender 6.1.0 (declared license: BSD-3-Clause)
 - npm: zwitch 2.0.4 (declared license: MIT)
 
@@ -10582,7 +10582,7 @@ THIS SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: zod 3.25.76 / LICENSE
-- npm: zod 4.6.5 / LICENSE
+- npm: zod 4.6.6 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
