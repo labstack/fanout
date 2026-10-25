@@ -7,8 +7,7 @@
   "excludeFolders": [
     "docs/specs",
     "docs/media",
-    "docs/diagrams",
-    "docs/benchmarks"
+    "docs/diagrams"
   ],
   "rules": [
     "Fanout is one Go process with no external dependencies to operate. There is no separate ingester, query service, metadata database, object store, or dashboard server to deploy.",
