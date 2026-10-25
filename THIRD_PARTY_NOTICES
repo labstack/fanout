@@ -30,7 +30,7 @@ COMPONENT INVENTORY
 - Go: github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0
 - Go: github.com/klauspost/compress v1.20.3
 - Go: github.com/klauspost/cpuid/v2 v2.4.0
-- Go: github.com/labstack/echo/v5 v5.4.0
+- Go: github.com/labstack/echo/v5 v5.4.2
 - Go: github.com/mattn/go-isatty v0.0.24
 - Go: github.com/mfridman/interpolate v0.0.2
 - Go: github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -1635,7 +1635,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- Go: github.com/labstack/echo/v5 v5.4.0 / LICENSE
+- Go: github.com/labstack/echo/v5 v5.4.2 / LICENSE
 ----------------------------------------------------------------------------
 
 The MIT License (MIT)
