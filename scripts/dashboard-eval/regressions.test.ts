@@ -73,7 +73,7 @@ it('automatically settles metered failures without using them for p95',()=>{
  }
 });
 it('manually settles unknown usage without deleting metered spend across invocations',async()=>{
- const root=resolve('.superpowers/eval/settlement-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
+ const root=resolve('.cache/dashboard-eval/settlement-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
  const l=ledger();transport.beginPrompt(l,'unknown');transport.recordUsage(l,usage('unknown'));transport.recordUsage(l,{...usage('unknown'),step:2,usage:null});
  expect(transport.settlePrompt(l,'unknown',false)).toBe(false);const path=join(root,'ledger.json');writeFileSync(path,JSON.stringify(l));
  expect(await cli.main(['--settle','unknown','--cost-usd','0.25','--reason','Controller verified usage','--cost-ledger',path],()=>{})).toBe(0);
@@ -93,7 +93,7 @@ it('refuses nonexistent format fields and stale replay manifests',()=>{
  expect(()=>(cli as any).assertPromptHash('benchmark','a74ce656679ca792'+'0'.repeat(49))).toThrow();
 });
 it('refuses controller-only runs before output creation and gives safe categories',async()=>{
- const root=resolve('.superpowers/eval/refusal-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
+ const root=resolve('.cache/dashboard-eval/refusal-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
  const file=(n:string,v:any)=>{const p=join(root,n);writeFileSync(p,JSON.stringify(v));return p;};
  const args=['--base','http://127.0.0.1:1','--cookies',file('cookies.txt',''),'--out',join(root,'out'),'--prompts-file',file('prompts.json',[]),'--set','holdout','--budget-usd','1','--cost-ledger',file('ledger.json',ledger()),'--snapshot-manifest',file('snapshot.json',{}),'--edits-file',file('edits.json',[])];
  const lines:string[]=[];
@@ -105,7 +105,7 @@ it('uses separate bounded timers for post-stream evidence',async()=>{
  try{expect((await mockEvaluation()).exit_code).toBe(0);expect(timers.filter(ms=>ms===30_000).length).toBe(30);}finally{spy.mockRestore();}
 });
 it('does not write mock artifacts when CI opts out',async()=>{
- const out=resolve('.superpowers/eval/no-output-'+crypto.randomUUID());roots.push(out);
+ const out=resolve('.cache/dashboard-eval/no-output-'+crypto.randomUUID());roots.push(out);
  expect(await cli.main(['--mock','--no-output','--out',out],()=>{})).toBe(0);expect(existsSync(out)).toBe(false);
 });
 
@@ -146,13 +146,13 @@ it('does not create controller output on a frozen hash mismatch',async()=>{
  try{process.chdir(candidate);expect(await cli.main(['--base','http://127.0.0.1:1','--cookies',file('cookies.txt',''),'--out',out,'--prompts-file',file('prompts.json',[]),'--set','holdout','--holdout-sha','0'.repeat(64),'--budget-usd','1','--cost-ledger',file('ledger.json',ledger()),'--snapshot-manifest',file('snapshot.json',{}),'--edits-file',file('edits.json',[])],x=>lines.push(x))).toBe(2);expect(lines.at(-1)).toContain('sealed_hash');expect(existsSync(out)).toBe(false);}finally{process.chdir(previousCwd);if(previous===undefined)delete process.env.FANOUT_HOLDOUT_OUT_ROOT;else process.env.FANOUT_HOLDOUT_OUT_ROOT=previous;}
 });
 it('reports a stale lock category without printing paths or reasons',async()=>{
- const root=resolve('.superpowers/eval/locking-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});const path=join(root,'ledger.json');const l=ledger();transport.beginPrompt(l,'unknown');writeFileSync(path,JSON.stringify(l));writeFileSync(path+'.lock','');
+ const root=resolve('.cache/dashboard-eval/locking-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});const path=join(root,'ledger.json');const l=ledger();transport.beginPrompt(l,'unknown');writeFileSync(path,JSON.stringify(l));writeFileSync(path+'.lock','');
  const lines:string[]=[];expect(await cli.main(['--settle','unknown','--cost-usd','1','--reason','private reason','--cost-ledger',path],x=>lines.push(x))).toBe(2);
  expect(lines.at(-1)).toContain('ledger_lock');expect(lines.join('')).not.toContain(path);expect(lines.join('')).not.toContain('private reason');expect(existsSync(path+'.lock')).toBe(true);
 });
 it('blocks unknown HTTP usage until settlement and preserves the cap across CLI invocations',async()=>{
  for(const failure of ['unauthorized','rate_limited']){
-  const root=resolve('.superpowers/eval/http-settlement-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
+  const root=resolve('.cache/dashboard-eval/http-settlement-'+crypto.randomUUID());roots.push(root);mkdirSync(root,{recursive:true});
   const file=(n:string,v:any)=>{const p=join(root,n);writeFileSync(p,JSON.stringify(v));return p;};const path=file('ledger.json',ledger());const cookies=join(root,'cookies.txt');writeFileSync(cookies,'');
   const end=BigInt(Date.now())*1_000_000n;const snapshot=file('snapshot.json',{source_hash:'0'.repeat(64),start_ns:String(end-3_600_000_000_000n),end_ns:String(end),shift_ns:'0',replayed_at:new Date().toISOString()});
   const prompts=file('prompts.json',Array.from({length:10},(_,i)=>({id:String(i),prompt:'Fixture '+i,expect:'dashboard',rationale:'Synthetic benchmark'})));const edits=file('edits.json',mockEdits());const mock=startMock(failure as any);

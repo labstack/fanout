@@ -39,7 +39,7 @@ for(const mode of ["exported","test-only","cmd-helper","dbmigrate-helper","notic
   put(root,dir+"/gate_probe.go",`package ${mode.endsWith("helper")?"main":"id"}\nfunc ${name}() {}\n`);
   if(mode==="new-main-helper") put(root,dir+"/main.go","package main\nfunc main() {}\n");
   if(mode==="test-only") put(root,dir+"/gate_probe_test.go",'package id\nimport "testing"\nfunc TestGateProbe(t *testing.T) { UnusedExportGateProbe() }\n');
-  const out=Bun.spawnSync(["node","scripts/go-deadcode.mjs"],{cwd:root,env:{...process.env,GOCACHE:join(source,".superpowers/gocache"),GOFLAGS:"-mod=readonly"}});
+  const out=Bun.spawnSync(["node","scripts/go-deadcode.mjs"],{cwd:root,env:{...process.env,GOCACHE:join(source,".cache/gocache"),GOFLAGS:"-mod=readonly"}});
   expect(out.exitCode).not.toBe(0);expect(out.stdout.toString()+out.stderr.toString()).toContain(name);expect(out.stdout.toString()+out.stderr.toString()).toContain("gate_probe.go");
  },120_000);
 }
@@ -48,7 +48,7 @@ test("rejects stale and wildcard Go allowlist entries", () => {
  const root = goCopy(), file = join(root, "scripts/go-deadcode.allowlist"), original = readFileSync(file, "utf8");
  for (const [entry, message] of [["github.com/labstack/fanout/internal/id.AbsentGateProbe\tNot a real entry point", "Stale allowlist entry"], ["github.com/labstack/fanout/internal/id.*\tNo wildcard allowance", "Invalid allowlist entry"]]) {
   writeFileSync(file, original + "\n" + entry + "\n");
-  const out = Bun.spawnSync(["node", "scripts/go-deadcode.mjs"], { cwd: root, env: { ...process.env, GOCACHE: join(source, ".superpowers/gocache"),  GOFLAGS: "-mod=readonly" } });
+  const out = Bun.spawnSync(["node", "scripts/go-deadcode.mjs"], { cwd: root, env: { ...process.env, GOCACHE: join(source, ".cache/gocache"),  GOFLAGS: "-mod=readonly" } });
   expect(out.exitCode).not.toBe(0);
   expect(out.stdout.toString() + out.stderr.toString()).toContain(message);
  }

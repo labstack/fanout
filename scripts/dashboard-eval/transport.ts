@@ -230,8 +230,8 @@ export function noSymlinks(path:string):string {
 }
 export function privateFile(path:string):string {const target=noSymlinks(path);if(!lstatSync(target).isFile())throw new Error('Input must be a regular file');return target;}
 export function validateOutput(path:string,set:string,worktree=process.cwd(),sealedRoot=process.env.FANOUT_HOLDOUT_OUT_ROOT):string {
-  const root=realpathSync(worktree),target=noSymlinks(path),evalRoot=resolve(root,'.superpowers/eval');
-  if(set==='benchmark') {if(!inside(evalRoot,target)||target===evalRoot)throw new Error('Benchmark output must be under .superpowers/eval/');}
+  const root=realpathSync(worktree),target=noSymlinks(path),evalRoot=resolve(root,'.cache/dashboard-eval');
+  if(set==='benchmark') {if(!inside(evalRoot,target)||target===evalRoot)throw new Error('Benchmark output must be under .cache/dashboard-eval/');}
   else if(set==='holdout') {if(!sealedRoot)throw new Error('Controller output root required');const outRoot=noSymlinks(sealedRoot);if(inside(root,outRoot)||inside(root,target)||!inside(outRoot,target)||target===outRoot)throw new Error('Sealed output must be outside the worktree');}
   else throw new Error('Invalid evaluation set');
   if(existsSync(target))throw new Error('Output already exists');
