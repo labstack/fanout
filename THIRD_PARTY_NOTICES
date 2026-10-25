@@ -30,7 +30,7 @@ COMPONENT INVENTORY
 - Go: github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0
 - Go: github.com/klauspost/compress v1.20.3
 - Go: github.com/klauspost/cpuid/v2 v2.4.0
-- Go: github.com/labstack/echo/v5 v5.4.0
+- Go: github.com/labstack/echo/v5 v5.4.2
 - Go: github.com/mattn/go-isatty v0.0.24
 - Go: github.com/mfridman/interpolate v0.0.2
 - Go: github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -290,7 +290,7 @@ COMPONENT INVENTORY
 - npm: which 2.0.2 (declared license: ISC)
 - npm: yaml 2.9.1 (declared license: ISC)
 - npm: zod 3.25.76 (declared license: MIT)
-- npm: zod 4.6.5 (declared license: MIT)
+- npm: zod 4.6.6 (declared license: MIT)
 - npm: zrender 6.1.0 (declared license: BSD-3-Clause)
 - npm: zwitch 2.0.4 (declared license: MIT)
 
@@ -1635,7 +1635,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- Go: github.com/labstack/echo/v5 v5.4.0 / LICENSE
+- Go: github.com/labstack/echo/v5 v5.4.2 / LICENSE
 ----------------------------------------------------------------------------
 
 The MIT License (MIT)
@@ -10582,7 +10582,7 @@ THIS SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: zod 3.25.76 / LICENSE
-- npm: zod 4.6.5 / LICENSE
+- npm: zod 4.6.6 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License

@@ -198,8 +198,13 @@ ui-boundaries-check:
 # Audit the one locked browser graph. GHSA-vfj7-8cjw-p6xm reaches host
 # through vite-plugin-singlefile > micromatch at build time, on our own globs.
 # Drop this exception when a patched braces release is available.
+# GHSA-mrhx-c7xc-m3w5 remains only in the zod 3 copy that @ag-ui/client and
+# @ag-ui/proto require; zod 3 has no patched release. In the browser it parses
+# events from Fanout's own authenticated /api/agent/runs, so the worst case is
+# the user's own tab running out of memory. Drop this exception when AG-UI
+# moves to zod 4.6.6 or later.
 ui-audit:
-    cd ui/host && bun audit --ignore=GHSA-vfj7-8cjw-p6xm
+    cd ui/host && bun audit --ignore=GHSA-vfj7-8cjw-p6xm --ignore=GHSA-mrhx-c7xc-m3w5
 
 # Compare temporary builds without requiring clean or committed embeds.
 ui-check:
