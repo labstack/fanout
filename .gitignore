@@ -53,6 +53,7 @@ cover.out
 /*.png
 
 # Local agent and editor tooling indexes — machine-specific, never committed.
+.claude/
 .codegraph/
 .serena/
 .superpowers/

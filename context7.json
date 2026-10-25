@@ -5,7 +5,7 @@
   "branch": "main",
   "folders": ["site/src/content/docs", "docs", "README.md"],
   "excludeFolders": [
-    "docs/superpowers",
+    "docs/specs",
     "docs/media",
     "docs/diagrams",
     "docs/benchmarks"

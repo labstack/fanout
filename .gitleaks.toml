@@ -1,0 +1,20 @@
+# Default rules, plus known non-secrets: a fixed test-only auth code secret,
+# a redaction fixture, a cache key name, and content hashes in fixtures.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "test-only fake secrets and cache key names"
+regexes = [
+  '''^0123456789abcdef0123456789abcdef$''',
+  '''^sk-live-abc123$''',
+  '''^edge_rollup_v2_rawmax$''',
+]
+
+[[allowlists]]
+description = "content hashes in fixtures and the retired Atlas checksum file"
+paths = [
+  '''^ui/host/e2e/data/mcp\.json$''',
+  '''^ui/host/tests/go-fragments/[^/]+\.json$''',
+  '''^internal/db/migrations/atlas\.sum$''',
+]

@@ -272,8 +272,8 @@ real Collector observing real local containers confirms the same page.
 S1 to S16, S20 and S22 run on the final commit: the eval harness (within $5,
 with new public host-metric prompts for S22), the browser collector, the
 Playwright smoke, accessibility and performance tests at demo volume, and the
-demo-data metric cross-check. Results go into
-`docs/benchmarks/2026-10-agent-dashboards-m5.md`.
+demo-data metric cross-check. Verification records stay outside the
+repository.
 
 ## Testing
 
