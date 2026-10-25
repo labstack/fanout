@@ -10,7 +10,7 @@ just build     # browser assets, then the binary
 just check     # the full gate
 ```
 
-You need Go 1.27.2 and a C/C++ toolchain on native Linux or macOS (amd64 or arm64),
+You need Go 1.27.3 and a C/C++ toolchain on native Linux or macOS (amd64 or arm64),
 [Bun](https://bun.sh), Node.js 24.19.0, [just](https://just.systems),
 [golangci-lint](https://golangci-lint.run/), and
 [Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
@@ -29,7 +29,7 @@ Keep this file out of Git and Docker inputs. See
 [runtime secret delivery](docs/operations.md#runtime-secret-delivery).
 
 The DuckDB wrapper downloads the pinned, checksum-verified engine from
-[Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha46057)
+[DuckDB's `v2.0.0` release](https://github.com/duckdb/duckdb/releases/tag/v2.0.0)
 on the first build. Linux needs the C++ runtime (`libstdc++`); macOS needs
 Xcode Command Line Tools and `libc++`. Cross-compilation is unsupported.
 Use `just` recipes or prefix Go commands with the wrapper:
@@ -46,11 +46,10 @@ Alternatively configure your editor to launch `gopls` through
 `bash scripts/with-duckdb.sh gopls serve`. An already-running editor process
 must be restarted to inherit these variables.
 
-The dependency mirror preserves the original DuckDB `v2.0.0-alpha46057`
-archives at upstream commit `b15358c371` byte for byte. Its `duckdb-` tag
-namespace is separate from Fanout's product CalVer releases; new engine bytes
-require a new artifact tag and checksum pins. It never supplies a second engine
-or downloads extensions at runtime.
+The wrapper uses DuckDB's published static-library archives for upstream
+commit `d54cbbe3df` and rejects any archive whose SHA-256 differs from its pin.
+A new engine version requires new checksum pins. The wrapper never supplies a
+second engine or downloads extensions at runtime.
 
 ## Before you open a pull request
 
