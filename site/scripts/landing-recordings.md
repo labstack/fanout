@@ -10,7 +10,9 @@ Expected assets (all at 1280 × 800):
 
 Encoded videos stay local and are ignored by Git and Docker; PNG posters stay
 in the repository so Astro can optimize them. Published videos live in the
-Cloudflare R2 bucket `fanout`, served at `https://assets.fanout.run/`.
+Cloudflare R2 bucket `fanout` under `videos/`, served at
+`https://assets.fanout.run/videos/`. The bucket holds public assets only, in one
+folder per file type.
 
 Each slot stays poster-only until both themes have both video formats in
 `site/src/data/landing-media.json`. An absent manifest also shows posters. The
