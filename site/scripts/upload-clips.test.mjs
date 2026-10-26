@@ -59,7 +59,7 @@ require("node:fs").appendFileSync(process.env.CLIP_UPLOAD_LOG, JSON.stringify(pr
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   for (const [index, [name, format]] of names.flatMap(name => ["mp4", "webm"].map(format => [name, format])).entries()) {
     const { key, url } = clipObject(name, format, Buffer.from("abc"));
-    assert.deepEqual(uploads[index], ["r2", "object", "put", `fanout-assets/${key}`, "--file", join(input, `${name}.${format}`),
+    assert.deepEqual(uploads[index], ["r2", "object", "put", `fanout/${key}`, "--file", join(input, `${name}.${format}`),
       "--content-type", `video/${format}`, "--cache-control", "public, max-age=31536000, immutable", "--remote"]);
     assert.equal(manifest[name][format], url);
   }

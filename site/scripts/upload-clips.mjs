@@ -32,7 +32,7 @@ export function uploadClips({ input = defaultInput, manifestPath = defaultManife
       const file = join(input, filename);
       const { key, url } = clipObject(name, format, readFileSync(file));
       if (manifest[name]?.[format] === url) continue;
-      upload(["r2", "object", "put", `fanout-assets/${key}`, "--file", file,
+      upload(["r2", "object", "put", `fanout/${key}`, "--file", file,
         "--content-type", `video/${format}`, "--cache-control", "public, max-age=31536000, immutable", "--remote"]);
       manifest[name] = { ...manifest[name], [format]: url };
     }
