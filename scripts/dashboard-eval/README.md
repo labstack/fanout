@@ -17,7 +17,7 @@ consecutive edits through the real transport/scorer, then checks nonzero exit
 codes and specific S flags for twenty-three injected failures. Its $0 and synthetic snapshot are fixture
 evidence of scoring, not evidence of model quality or real telemetry replay.
 `just check` uses `--mock --no-output`, leaving no artifacts. An explicit
-mock invocation without that flag uses a fresh `.superpowers/eval/mock-<uuid>/mock/summary.json`;
+mock invocation without that flag uses a fresh `.cache/dashboard-eval/mock-<uuid>/mock/summary.json`;
 `--out` and `--model-label` can select another fresh destination.
 
 ## Controller inputs
@@ -179,7 +179,7 @@ or a successful POST is not validation evidence.
 Schema 3 output includes timestamps, label and observed provider/model,
 candidate and source/manifest hashes and bounds, immutable save/version/check
 evidence, expected/actual authored and physical edit diffs, terminal events,
-S1–S5 and ledger cost. Benchmark output must be under `.superpowers/eval/`.
+S1–S5 and ledger cost. Benchmark output must be under `.cache/dashboard-eval/`.
 Benchmark inputs also reject the sealed hash prefix, including renamed or hard-linked
 copies. Frozen sealed hashes are verified before creating any output.
 Input/output paths reject symlinks and outputs cannot overwrite an existing run.
@@ -259,7 +259,7 @@ Only the controller's final frozen-candidate invocation may use `--set holdout`
 with `--holdout-sha` matching the complete frozen prompt file hash. Dispatches
 must never open sealed prompts or use aggregate results to tune the candidate.
 Set `FANOUT_HOLDOUT_OUT_ROOT` to a controller-owned location outside the worktree
-and `.superpowers/eval/`; the ledger must also be outside the worktree. Use a
+and `.cache/dashboard-eval/`; the ledger must also be outside the worktree. Use a
 fresh label and output directory. Output is whitelisted to aggregate evidence
 and prompt IDs/hashes; it omits prompts, rationales, responses, tool inputs,
 specs, edit text and

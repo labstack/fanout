@@ -74,7 +74,7 @@ it('imports safely, prints help without HTTP and refuses missing private inputs'
   expect(exitCode({passed:true},true)).toBe(2);expect(exitCode({passed:false},false)).toBe(1);
 });
 it('gates real CLI HTTP at zero balance and reuses persisted prompt costs across invocations',async()=>{
-  const root=resolve('.superpowers/eval/cli-test-'+crypto.randomUUID());dirs.push(root);mkdirSync(root,{recursive:true});
+  const root=resolve('.cache/dashboard-eval/cli-test-'+crypto.randomUUID());dirs.push(root);mkdirSync(root,{recursive:true});
   const file=(name:string,data:any)=>{const p=join(root,name);writeFileSync(p,JSON.stringify(data));return p;};
   const ledger=file('ledger.json',{schema:1,rates:[{provider:'mock',model:'mock-no-provider',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:0,output:0,cache_read:0,cache_write:0}],calls:[],prompts:[]});
   const prompts=file('prompts.json',Array.from({length:10},(_,i)=>({id:String(i),prompt:'Fixture '+i,expect:'dashboard',rationale:'Synthetic benchmark'})));
@@ -112,7 +112,7 @@ it('requires explicit intents while keeping benchmark and edit counts strict',as
 });
 
 it('runs optional mock judging through main on the shared ledger and retains explicit skips',async()=>{
- const root=resolve('.superpowers/eval/judge-cli-'+crypto.randomUUID());dirs.push(root);
+ const root=resolve('.cache/dashboard-eval/judge-cli-'+crypto.randomUUID());dirs.push(root);
  expect(await main(['--mock','--judge','--out',root],()=>{})).toBe(0);
  const result=JSON.parse(readFileSync(join(root,'mock/summary.json'),'utf8'));
  expect(result.judge_summary).toMatchObject({status:'complete',paired:10,cost_usd:0});

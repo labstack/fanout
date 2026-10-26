@@ -202,7 +202,7 @@ func panelBenchScratch(tb testing.TB) string {
 		}
 		root = parent
 	}
-	base := filepath.Join(root, ".superpowers", "panel-bench")
+	base := filepath.Join(root, ".cache", "panel-bench")
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		tb.Fatal(err)
 	}
