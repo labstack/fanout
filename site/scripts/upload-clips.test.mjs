@@ -19,8 +19,8 @@ function setup(t) {
 test("object keys and public URLs use the first 12 hex digits of SHA-256", () => {
   for (const format of ["webm", "mp4"]) {
     assert.deepEqual(clipObject("chat-light", format, Buffer.from("abc")), {
-      key: `landing/chat-light-ba7816bf8f01.${format}`,
-      url: `https://assets.fanout.run/landing/chat-light-ba7816bf8f01.${format}`,
+      key: `videos/chat-light-ba7816bf8f01.${format}`,
+      url: `https://assets.fanout.run/videos/chat-light-ba7816bf8f01.${format}`,
     });
     assert.notEqual(clipObject("chat-light", format, Buffer.from("abcd")).key,
       clipObject("chat-light", format, Buffer.from("abc")).key);

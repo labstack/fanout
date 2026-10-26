@@ -11,7 +11,7 @@ const formats = ["mp4", "webm"];
 
 export function clipObject(name, format, contents) {
   const hash = createHash("sha256").update(contents).digest("hex").slice(0, 12);
-  const key = `landing/${name}-${hash}.${format}`;
+  const key = `videos/${name}-${hash}.${format}`;
   return { key, url: `https://assets.fanout.run/${key}` };
 }
 
