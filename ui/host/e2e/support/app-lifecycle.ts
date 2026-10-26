@@ -91,7 +91,9 @@ export async function startAppServer(path: string, { command = ["bun", manager],
     for (;;) {
       if (failed || child.exitCode !== null || child.signalCode !== null) throw new Error("Seeded server setup exited before readiness");
       const candidate = await readJSON<Ready>(join(dir, "ready.json"));
-      if (candidate?.id === id && candidate.pid === child.pid && candidate.env) { ready = candidate; break; }
+      // The launch directory is new, so another launch's readiness can never become valid.
+      if (candidate && (candidate.id !== id || candidate.pid !== child.pid)) throw new Error("Seeded server reported readiness for another launch");
+      if (candidate?.env) { ready = candidate; break; }
       if (Date.now() >= deadline) throw new Error("Timed out waiting for the spawned seeded server");
       await new Promise(resolve => setTimeout(resolve, 50));
     }

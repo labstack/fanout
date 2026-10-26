@@ -28,11 +28,11 @@ async function fixture(mode = "ready") {
     writeFileSync(join(dir, "session.json"), "synthetic session");
     const mode = ${JSON.stringify(mode)};
     if (mode === "exit") process.exit(1);
-    writeFileSync(join(dir, "ready.json"), JSON.stringify({ id: mode === "wrong_id" ? "previous" : id, pid: mode === "wrong_pid" ? process.pid + 1 : process.pid, env: { FANOUT_E2E_STORAGE_STATE: join(dir, "session.json") } }));
+    if (mode !== "silent") writeFileSync(join(dir, "ready.json"), JSON.stringify({ id: mode === "wrong_id" ? "previous" : id, pid: mode === "wrong_pid" ? process.pid + 1 : process.pid, env: { FANOUT_E2E_STORAGE_STATE: join(dir, "session.json") } }));
     process.on("SIGTERM", () => { if (mode !== "stubborn") process.exit(0); });
     setInterval(() => {}, 60000);
   `);
-  return { state, started, options: { command: [process.execPath, script], timeout: 500 } };
+  return { state, started, options: { command: [process.execPath, script], timeout: 30_000 } };
 }
 async function exists(path: string) { return stat(path).then(() => true, () => false); }
 function running(pid: number) { try { process.kill(pid, 0); return true; } catch { return false; } }
@@ -55,10 +55,17 @@ it("stops the previous owned server and removes its session/data before replacem
 
 it.each(["wrong_pid", "wrong_id"])("rejects %s readiness and cleans up the failed launch", async mode => {
   const { state, started, options } = await fixture(mode);
-  await expect(startAppServer(state, options)).rejects.toThrow("Timed out waiting for the spawned seeded server");
+  await expect(startAppServer(state, options)).rejects.toThrow("Seeded server reported readiness for another launch");
   const instance = JSON.parse(await readFile(started, "utf8"));
   expect(running(instance.pid)).toBe(false);
   expect(await exists(instance.dir)).toBe(false);
+  expect(await exists(state)).toBe(false);
+  expect(await exists(`${state}.instances`)).toBe(false);
+});
+
+it("times out and cleans up when the manager never reports readiness", async () => {
+  const { state, options } = await fixture("silent");
+  await expect(startAppServer(state, { ...options, timeout: 200 })).rejects.toThrow("Timed out waiting for the spawned seeded server");
   expect(await exists(state)).toBe(false);
   expect(await exists(`${state}.instances`)).toBe(false);
 });
