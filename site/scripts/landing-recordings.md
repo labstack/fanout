@@ -10,7 +10,7 @@ Expected assets (all at 1280 × 800):
 
 Encoded videos stay local and are ignored by Git and Docker; PNG posters stay
 in the repository so Astro can optimize them. Published videos live in the
-Cloudflare R2 bucket `fanout-assets`, served at `https://assets.fanout.run/`.
+Cloudflare R2 bucket `fanout`, served at `https://assets.fanout.run/`.
 
 Each slot stays poster-only until both themes have both video formats in
 `site/src/data/landing-media.json`. An absent manifest also shows posters. The
@@ -111,7 +111,7 @@ It writes VP9 WebM and H.264
 MP4 at 1280 × 800 and 30 fps with a two-pass target of about 4 MB per file.
 It extracts each PNG poster from the final encoded frame. Review the clips and
 posters, then upload from the repository root with Wrangler logged in to the
-account that owns `fanout-assets`:
+account that owns `fanout`:
 
 ```sh
 bash site/scripts/upload-clips.sh
