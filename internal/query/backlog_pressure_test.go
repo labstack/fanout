@@ -210,7 +210,7 @@ func pressureDiagnostics(ctx context.Context, t *testing.T, d *Duck, repo *telem
 
 func pressureDuck(ctx context.Context, t *testing.T, batches int) (*Duck, *telemetrystore.Repository, time.Time) {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", ".superpowers", "sdd", "2026-10-09-agent-dashboards-m4", "task-2-artifacts"))
+	root, err := filepath.Abs(filepath.Join("..", "..", ".cache", "readbench"))
 	if err != nil {
 		t.Fatal(err)
 	}

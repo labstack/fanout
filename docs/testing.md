@@ -186,8 +186,9 @@ just test ./internal/panel -run 'TestGaugeTotalsMatchStat|TestBudgetKeepsComplet
 
 Use the pinned engine wrapper through `just test`, with the workspace's offline
 Go cache/temp environment configured. Those small fixtures verify semantics and
-budgets; they do not replace the representative performance run. Record actual
-measurements and limitations in the milestone's `docs/benchmarks/` document.
+budgets; they do not replace the representative performance run. Keep actual
+measurements and limitations with the milestone's verification records, outside
+the repository.
 
 ## Dashboard accessibility verification
 

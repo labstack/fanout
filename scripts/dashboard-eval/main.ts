@@ -18,7 +18,7 @@ export const HELP=`Usage: bun scripts/dashboard-eval/main.ts [options]
   --base ORIGIN                  Controller's disposable Fanout origin
   --cookies PATH                 Private Netscape cookie jar
   --model-label LABEL            Expected model or provider:model (does not select it)
-  --out PATH                     Fresh run parent; benchmark: .superpowers/eval/
+  --out PATH                     Fresh run parent; benchmark: .cache/dashboard-eval/
   --prompts-file PATH            Private JSON prompt array
   --set benchmark|holdout        Default: benchmark; holdout is controller-only
   --budget-usd USD               Whole-ledger task cap; required for real runs
@@ -219,7 +219,7 @@ export async function main(args=process.argv.slice(2),log:(message:string)=>void
       category='mock_verification';const {mockEvaluation,verifyMock}=await import('./mock');
       const checked=await verifyMock();const result=await mockEvaluation(undefined,{...(opts['model-label']?{model_label:opts['model-label']}:{}),judge:opts.judge?true:undefined});result.evidence.candidate_source_hash=candidateSourceHash();
       if(!opts['no-output']){
-        category='output';const out=safeOutput(join(opts.out??`.superpowers/eval/mock-${crypto.randomUUID()}`,opts['model-label']??'mock'),'benchmark');
+        category='output';const out=safeOutput(join(opts.out??`.cache/dashboard-eval/mock-${crypto.randomUUID()}`,opts['model-label']??'mock'),'benchmark');
         writeFileSync(join(out,'summary.json'),JSON.stringify(result.evidence,null,2)+'\n',{flag:'wx',mode:0o600});
       }
       log(result.exit_code===0?`MOCK PASS: ten saves, five edits, ${checked} failure injections, S1-S5 verified, $0`:`MOCK evaluation exit ${result.exit_code}; aggregate S1-S5 fail; $0`);return result.exit_code;

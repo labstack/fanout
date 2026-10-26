@@ -91,11 +91,11 @@ it('applies cookie expiry, domain, secure and path rules without exposing secret
   expect(cookieHeader(jar,new URL('https://evil.test/api/x'))).toBe('');
 });
 it('refuses collisions, unsafe labels, symlink ancestors and internal sealed-set output',()=>{
-  const root=mkdtempSync(join(realpathSync(tmpdir()),'fanout-eval-'));roots.push(root);mkdirSync(join(root,'.superpowers/eval'),{recursive:true});
-  const out=join(root,'.superpowers/eval/run');expect(safeOutput(out,'benchmark',root)).toBe(out);
+  const root=mkdtempSync(join(realpathSync(tmpdir()),'fanout-eval-'));roots.push(root);mkdirSync(join(root,'.cache/dashboard-eval'),{recursive:true});
+  const out=join(root,'.cache/dashboard-eval/run');expect(safeOutput(out,'benchmark',root)).toBe(out);
   expect(()=>safeOutput(out,'benchmark',root)).toThrow();
-  symlinkSync(join(root,'.superpowers/eval'),join(root,'link'));expect(()=>safeOutput(join(root,'link/run2'),'benchmark',root)).toThrow();
-  expect(()=>safeOutput(join(root,'.superpowers/eval/sealed-run'),'holdout',root,root)).toThrow();
+  symlinkSync(join(root,'.cache/dashboard-eval'),join(root,'link'));expect(()=>safeOutput(join(root,'link/run2'),'benchmark',root)).toThrow();
+  expect(()=>safeOutput(join(root,'.cache/dashboard-eval/sealed-run'),'holdout',root,root)).toThrow();
 });
 const ledger=():Ledger=>({schema:1,rates:[{provider:'fake',model:'observed',verified_at:'2026-10-08T00:00:00Z',input_includes_cache:true,input:1,output:2,cache_read:0.1,cache_write:1.5}],calls:[],prompts:[]});
 const call=(run_id:string,step=1)=>({run_id,step,provider:'fake',model:'observed',status:'completed',usage:{input_tokens:100000,output_tokens:10000,cache_read_tokens:10000,cache_write_tokens:0,reasoning_tokens:5000}});
