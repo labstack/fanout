@@ -329,7 +329,7 @@ it("aligns collapsed and expanded summaries with a leading chevron and singular/
     expect(document.querySelector('button[aria-expanded="true"]')?.textContent).toContain("2 rows");
   } finally { await act(async () => root.unmount()); }
 });
-it("summarizes multi-panel views with panel counts and only non-ok status counts",async()=>{
+it("summarizes multi-panel views by what they show and only non-ok status counts",async()=>{
   const fragment=fixture();const base=fragment.dashboard.panels[0];
   fragment.dashboard.panels=Array.from({length:4},(_,i)=>({...base,id:`p${i}`,title:"Performance"}));
   fragment.results=fragment.dashboard.panels.map((p,i)=>({id:p.id,status:i===3?"empty":"ok",elapsed_ms:0}));
@@ -337,7 +337,7 @@ it("summarizes multi-panel views with panel counts and only non-ok status counts
   for(const status of ["empty","error","ok"] as const) {
     fragment.results[3].status=status;
     const root=await mount(value({messages:[JSON.parse(JSON.stringify(message))]}));
-    try {const summary=document.querySelector('button[aria-expanded]')!.textContent!;expect(summary).toContain(status==="ok"?"4 panels":"4 panels · 1 "+status);expect(summary).not.toContain("ok,");expect(summary).not.toContain("rows");}
+    try {const summary=document.querySelector('button[aria-expanded]')!.textContent!;if(status!=="ok")expect(summary).toContain("1 "+status);expect(summary).not.toContain("panels");expect(summary).not.toContain("ok,");expect(summary).not.toContain("rows");}
     finally {await act(async()=>root.unmount());}
   }
 });
