@@ -121,11 +121,12 @@ function ChatAppView({ view }: { view: AppView }) {
   const rows = fragment.results.reduce((count, result) => count + (result.frame?.rows ?? 0), 0);
   const counts=new Map<string,number>();
   for(const result of fragment.results) if(result.status!=="ok") counts.set(result.status,(counts.get(result.status)??0)+1);
+  // The kinds of chart already say what a view shows; only what went wrong is counted.
   const status = fragment.dashboard.panels.length>1
-    ? [`${fragment.dashboard.panels.length} panels`,...Array.from(counts,([status,count])=>`${count} ${status}`)].join(" · ")
+    ? Array.from(counts,([status,count])=>`${count} ${status}`).join(" · ")
     : counts.size ? [...counts.keys()].join(", ") : `${rows} ${rows === 1 ? "row" : "rows"}`;
   return <Paper data-chat-app data-chat-anchor withBorder radius="lg" style={{ overflow: "hidden" }}>
-    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{title} · {viz} · {status}</span></UnstyledButton>
+    <UnstyledButton className="chat-app-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span className="chat-app-chevron" aria-hidden="true">{expanded ? <CaretDown size={14} /> : <CaretRight size={14} />}</span><span className="chat-app-summary">{[title, viz, status].filter(Boolean).join(" · ")}</span></UnstyledButton>
     {expanded && <Suspense fallback={<Center mih={180}><Loader size="sm" /></Center>}><MCPAppFrame content={view.content} /></Suspense>}
   </Paper>;
 }
