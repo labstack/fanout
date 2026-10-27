@@ -16,7 +16,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   failOnFlakyTests: true,
   timeout: 120_000,
-  globalTimeout: (process.env.FANOUT_LANDING_RECORDINGS === "1" ? 40 : 12) * 60_000,
+  globalTimeout: 12 * 60_000,
   expect: { timeout: 30_000, toHaveScreenshot: { animations: "disabled" } },
   reporter: [["list"], ["./e2e/failure-report.ts", { outputFolder: "playwright-report" }]],
   outputDir: "test-results",

@@ -49,10 +49,6 @@ function seed(binary: string | undefined, base: string, tokenFile: string, log: 
 }
 
 export default async function globalSetup({ signalCleanup = true, onSignal = () => {}, directory }: { signalCleanup?: boolean | "startup"; onSignal?: () => void; directory?: string } = {}) {
-  // Recordings require a real AI-enabled instance; never start the seeded server.
-  if (process.env.FANOUT_LANDING_RECORDINGS === "1" && !process.env.FANOUT_LANDING_BASE_URL) {
-    throw new Error("Landing recordings require FANOUT_LANDING_BASE_URL and FANOUT_LANDING_SESSION_COOKIE for an external instance");
-  }
   // External landing media use an existing instance and an in-memory session.
   if (process.env.FANOUT_LANDING_BASE_URL) return;
 
