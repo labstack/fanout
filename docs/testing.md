@@ -282,3 +282,67 @@ outside the verification environment's scope. Neither command publishes the site
 Refresh the README's light and dark System overview captures with `just landing-captures` (real seeded server and local Chrome). To capture an existing instance, set `FANOUT_LANDING_BASE_URL` to its URL and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie before running the same command; no server starts and no data is seeded.
 
 To record chat and dashboard clips, set `FANOUT_LANDING_RECORDINGS=1` and the external-instance variables above, then run `bun run e2e e2e/specs/app/landing-recordings.spec.ts --project=app-1440-light --project=app-1440-dark` from `ui/host`. Follow [landing-recordings.md](../site/scripts/landing-recordings.md) to encode and upload them.
+
+## Local product catalog
+
+Run `just design` to review the product at `http://127.0.0.1:6706`.
+Use `just design 6707` for another port. Storybook is local review only, never
+published. The Docs tab shows every state in each entry; pages and flows have
+separate 800px iframes. Review light and dark at 1280×800 (the recording size)
+and 1024×768 using the toolbar.
+
+- `just design-check` runs every story and play in headless Chromium, in both
+  schemes at both widths. Install the locked browser with `just e2e-browsers`
+  first. Accessibility errors, clipped or overlapping text, horizontal page
+  overflow, covered scrollbars, and unexpected API requests fail the check.
+- CI runs the catalog in the browser smoke job, after installing Chromium;
+  `just check` stays browser-free. The check uses one worker, no file
+  parallelism, and a 60-second story timeout to remain runnable on shared
+  machines.
+- From `ui/host`, `bun run design-build` checks the static catalog build. Its
+  ignored `storybook-static/` output is for local inspection only.
+- `bun run test` keeps the unit suite in `vitest.unit.config.ts`. The standard
+  `vitest.config.ts` owns only the catalog.
+
+`Pages` uses the shipping route tree, shell, auth gate, query client, and screens
+with memory history. The dashboard index opens the default dashboard when one
+exists; an empty workspace shows its creation prompt. `Flows/Ask a question`
+and `Flows/Ask chat for a dashboard` contain independently reproducible stages
+and complete interactions through the real SSE client. Select the interactive
+story canvas to replay the typing and focus steps; Docs does not autoplay plays.
+
+For landing clips, select **Stream pace → Recording** in the Storybook toolbar
+before replaying a flow: mocked tool calls take 1.5 seconds and text streams at
+about 31 characters per second; catalog checks default to **Fast**.
+
+Typed fixtures use fictional checkout, cart, accounting, and payment telemetry,
+fixed timestamps and generated IDs. A fresh fetch service per story responds
+only to listed API and MCP operations, records unexpected calls, and cancels
+streams and timers during cleanup. Storage is mocked in memory per story.
+No backend, provider, email, or persistent store is contacted.
+
+The inline analysis stories use the shipping sandboxed `MCPAppFrame` and
+AppBridge. Every design command first runs the shipping `vite.apps.config.ts`
+build into an ignored dependency cache. Storybook serves that fresh `panels.html`
+under `/catalog-apps`; the mocked MCP `resources/read` returns those exact bytes.
+This leaves the committed app assets untouched and keeps the catalog current.
+No alternate iframe markup or app transport is introduced.
+The sandbox has an opaque origin, so parent-document accessibility and text
+checks cannot inspect its contents. `Embedded/Analysis views` renders the same
+shipping `FragmentView` directly to check health, latency, and service-map
+content; the browser MCP suite continues to check the built iframe itself.
+
+Keep stories and fixtures under their existing catalog locations. Both production
+Vite builds reject any runtime import of `src/catalog`, `.storybook`, or a story
+file. Knip excludes those local review inputs from its production analysis.
+
+Known accessibility exceptions are recorded in `src/catalog/accessibility.ts`:
+the shipping shell and dashboard/settings screens nest main landmarks; the
+panel loader labels a span without a role; and the light-theme degraded-health
+label measures 3.27:1 on white. The last two exceptions target only those elements;
+all other contrast and ARIA checks remain active. Settings also exempts only
+the existing hover-underlined Sending telemetry link from `link-in-text-block`
+until its resting-state link treatment is fixed. The selected chat timestamp
+also has a targeted contrast exception (3.9:1 on its light selection background). These exceptions preserve the
+shipping UI within this catalog-only change and should be removed when the
+product markup and semantic ink are corrected.

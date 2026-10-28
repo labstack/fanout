@@ -159,7 +159,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
                 if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 event.preventDefault(); onSelectThread(dashboard.origin!.thread_id);
               }}>
-                <Text size="xs" c="dimmed" lineClamp={2}>Built from: {dashboard.origin.request_excerpt}</Text>
+                <Text size="xs" c="dimmed" lineClamp={2} title={`Built from: ${dashboard.origin.request_excerpt}`}>Built from: {dashboard.origin.request_excerpt}</Text>
               </UnstyledButton>}
             </Stack>;
           })}
@@ -205,7 +205,7 @@ function ThreadRow({ thread, active, onSelect, onRename, onDelete }: { thread: T
           the length of the time. On its own line the title gets the row. */}
       <UnstyledButton onClick={onSelect} aria-current={active ? "page" : undefined} p="sm" flex={1} style={{ minWidth: 0 }}>
         <Stack gap={0}>
-          <Text size="sm" fw={active ? 600 : 500} truncate>{thread.title}</Text>
+          <Text size="sm" fw={active ? 600 : 500} truncate title={thread.title}>{thread.title}</Text>
           <Text c="dimmed" size="xs">{threadTime(thread.updated_at)}</Text>
         </Stack>
       </UnstyledButton>

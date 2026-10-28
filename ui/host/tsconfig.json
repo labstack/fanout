@@ -24,7 +24,9 @@
     ]
   },
   "include": [
-    "src"
+    "src",
+    ".storybook/**/*.tsx",
+    ".storybook/**/*.ts"
   ],
   "references": [],
   "exclude": [
