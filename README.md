@@ -1,6 +1,7 @@
 # Fanout
 
-**Single-binary, agent-native OpenTelemetry investigation.**
+**Observability your agents can operate.** Send OpenTelemetry to one binary, then investigate with
+Fanout's built-in agent or connect your own over MCP.
 
 [![CI](https://github.com/labstack/fanout/actions/workflows/ci.yml/badge.svg)](https://github.com/labstack/fanout/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -56,7 +57,7 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
 fanout
 ```
 
-Set `FANOUT_VERSION=v2026.10.1-alpha` to pin a release and `FANOUT_PREFIX` to choose the installation
+Set `FANOUT_VERSION` to a [release tag](https://github.com/labstack/fanout/releases), such as `v2026.10.23-alpha`, to pin a release, and `FANOUT_PREFIX` to choose the installation
 directory. Native installs bind `127.0.0.1:7520`; set `FANOUT_ADDR=:7520` for remote access, then
 follow the same first-boot setup.
 
@@ -101,8 +102,8 @@ See [AI settings](https://fanout.run/reference/settings/ai).
 
 Set `FANOUT_PUBLIC_URL` to your stable, externally reachable HTTPS origin, then point a remote MCP
 client at that origin's `/mcp` endpoint. The client discovers and registers through OAuth; you
-authorize its scopes in the browser. The client must support MCP protocol `2026-07-28` over
-stateless Streamable HTTP; older versions and the `initialize` handshake are unsupported. See [connect over
+authorize its scopes in the browser. Fanout serves MCP `2026-07-28` and, through the `initialize`
+handshake, `2025-11-25` and `2025-06-18` over Streamable HTTP. See [connect over
 MCP](https://fanout.run/guides/connect-over-mcp) for setup and permissions.
 
 ## How it compares
@@ -208,7 +209,7 @@ generated assets, hooks, and project layout.
 ## Releases
 
 Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each month across all
-maturity suffixes. Fanout is alpha (for example, `v2026.10.1-alpha`); GA has no suffix.
+maturity suffixes. Fanout is alpha (for example, `v2026.10.23-alpha`); GA has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`. Tagged releases publish
 identical manifests to Docker Hub (`labstack/fanout`) and GHCR (`ghcr.io/labstack/fanout`); GHCR is
 canonical and also carries development images.
@@ -216,9 +217,9 @@ canonical and also carries development images.
 | Image tag | Points at |
 | --- | --- |
 | `labstack/fanout:latest` | the newest release, mirrored on Docker Hub |
-| `labstack/fanout:2026.10.1-alpha` | that exact release, mirrored on Docker Hub |
+| `labstack/fanout:2026.10.23-alpha` | that exact release, mirrored on Docker Hub |
 | `ghcr.io/labstack/fanout:latest` | the newest release |
-| `ghcr.io/labstack/fanout:2026.10.1-alpha` | that exact release |
+| `ghcr.io/labstack/fanout:2026.10.23-alpha` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 
