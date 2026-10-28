@@ -11,9 +11,13 @@
     "build:watch": "bun --bun vite build --watch",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.node.json",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.unit.config.ts",
     "e2e": "playwright test",
-    "deadcode": "cd .. && bun host/node_modules/knip/bin/knip.js --production --config knip.json --include files,exports"
+    "deadcode": "cd .. && bun host/node_modules/knip/bin/knip.js --production --config knip.json --include files,exports",
+    "design": "bun run design:apps && storybook dev --host 127.0.0.1 --no-open",
+    "design-check": "bun run design:apps && vitest run",
+    "design-build": "bun run design:apps && storybook build --output-dir storybook-static",
+    "design:apps": "FANOUT_APPS_OUT=node_modules/.cache/fanout-catalog-apps bun run build:apps"
   },
   "dependencies": {
     "@ag-ui/client": "1.0.2",
@@ -47,18 +51,24 @@
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
+    "@storybook/addon-a11y": "10.6.3",
+    "@storybook/addon-docs": "10.6.3",
+    "@storybook/addon-vitest": "10.6.3",
+    "@storybook/react-vite": "10.6.3",
     "@tanstack/router-plugin": "1.168.45",
     "@testing-library/dom": "10.4.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
+    "@vitest/browser-playwright": "5.0.5",
     "axe-core": "4.14.0",
     "happy-dom": "21.0.4",
     "knip": "6.41.0",
+    "storybook": "10.6.3",
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vite-plugin-singlefile": "2.3.3",
-    "vitest": "5.0.4"
+    "vitest": "5.0.5"
   },
   "overrides": {
     "@hono/node-server": "1.19.15",

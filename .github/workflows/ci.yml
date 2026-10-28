@@ -149,6 +149,11 @@ jobs:
       - name: just e2e-browsers
         if: matrix.slug == 'smoke'
         run: just e2e-browsers
+      # The local Storybook catalog needs the same Chromium, so it runs here
+      # rather than in the browser-free `just check`.
+      - name: just design-check
+        if: matrix.slug == 'smoke'
+        run: just design-check
       - name: just e2e
         run: just e2e ${{ matrix.args }}
         env:
