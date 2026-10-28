@@ -102,8 +102,8 @@ See [AI settings](https://fanout.run/reference/settings/ai).
 
 Set `FANOUT_PUBLIC_URL` to your stable, externally reachable HTTPS origin, then point a remote MCP
 client at that origin's `/mcp` endpoint. The client discovers and registers through OAuth; you
-authorize its scopes in the browser. The client must support MCP protocol `2026-07-28` over
-stateless Streamable HTTP; older versions and the `initialize` handshake are unsupported. See [connect over
+authorize its scopes in the browser. Fanout serves MCP `2026-07-28` and, through the `initialize`
+handshake, `2025-11-25` and `2025-06-18` over Streamable HTTP. See [connect over
 MCP](https://fanout.run/guides/connect-over-mcp) for setup and permissions.
 
 ## How it compares
