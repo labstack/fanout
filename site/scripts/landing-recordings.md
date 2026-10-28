@@ -3,7 +3,7 @@
 Record the chat and dashboard slots from an OpenTelemetry Demo instance with
 chat enabled.
 
-Expected assets (all at 1280 × 800):
+Expected assets (16:10; posters at 1280 × 800, videos at 1280 × 800 or larger):
 
 - `site/src/assets/landing/chat-{light,dark}.{webm,mp4,png}`
 - `site/src/assets/landing/dashboard-{light,dark}.{webm,mp4,png}`
@@ -17,8 +17,8 @@ folder per file type.
 Each slot stays poster-only until both themes have both video formats in
 `site/src/data/landing-media.json`. An absent manifest also shows posters. The
 component follows the site theme, pauses off screen and in hidden tabs, and
-shows only the poster when reduced motion is enabled. Its `spedUp` prop marks
-recordings with shortened waits in the caption.
+shows only the poster when reduced motion is enabled. The caption names the
+interface and data source; keep it accurate for how each clip was produced.
 
 Set `FANOUT_LANDING_RECORDINGS=1`, `FANOUT_LANDING_BASE_URL` to the existing
 instance URL, and `FANOUT_LANDING_SESSION_COOKIE` to a `name=value` session cookie

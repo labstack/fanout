@@ -7,10 +7,12 @@ Fanout's built-in agent or connect your own over MCP.
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/labstack/fanout.svg)](https://pkg.go.dev/github.com/labstack/fanout)
 
+<a href="https://fanout.run">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="site/src/assets/landing/overview-dark.png">
-  <img src="site/src/assets/landing/overview-light.png" alt="Fanout System overview dashboard showing request rates, errors, latency, and service charts.">
+  <img src="site/src/assets/landing/overview-light.png" alt="A Fanout dashboard the built-in agent built from one request: store request rate, error rate, p95 latency and error logs, with request and error rates by service.">
 </picture>
+</a>
 
 Fanout keeps OpenTelemetry traces, logs, and metrics in one binary and one data directory, with no
 external storage services to operate. Fanout is pre-release and changes without migration paths; the browser
