@@ -24,13 +24,37 @@ var numberPattern = regexp.MustCompile(`^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[e
 var durationPattern = regexp.MustCompile(`(?i)^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:us|ms|s|m|h)$`)
 
 type parser struct {
-	tokens       Tokens
-	runes        []rune
-	i            int
-	problems     panel.Problems
-	bounded      bool
-	nodes, depth int
-	heights      map[any]int
+	tokens          Tokens
+	runes           []rune
+	i               int
+	problems        panel.Problems
+	bounded         bool
+	nodes, depth    int
+	heights         map[any]int
+	completion      bool
+	expected        []Expect
+	completionQuery *Query
+	completionUsed  map[string]bool
+}
+
+// Completion uses the same productions and alternatives as Parse. Unwinding at
+// the first unfinished production preserves its context without error recovery
+// inventing a different position for the cursor.
+type completionEnd struct{}
+
+func (p *parser) expectNext(alternatives ...Expect) {
+	if p.completion && p.peek().Kind == EOF {
+		p.expected = append(p.expected, alternatives...)
+		panic(completionEnd{})
+	}
+}
+
+func (p *parser) expectTerm(nested bool) {
+	alternatives := []Expect{{Class: "field"}, {Class: "free_text"}, {Class: "operator", Scope: "term"}, {Class: "variable"}}
+	if !nested {
+		alternatives = append([]Expect{{Class: "clause"}}, alternatives...)
+	}
+	p.expectNext(alternatives...)
 }
 
 // A private sentinel unwinds only a bound failure, before further recursion or
@@ -108,6 +132,9 @@ func (p *parser) previousEnd() int {
 }
 func (p *parser) text(at Span) string { return string(p.runes[at.Start:at.End]) }
 func (p *parser) issue(at Span, message, hint string) {
+	if p.completion {
+		return
+	}
 	p.problems = append(p.problems, panel.Problem{Path: "text", Message: message, Hint: hint, Span: &panel.TextSpan{Start: at.Start, End: at.End}})
 }
 func (p *parser) report(at Span, code string, args ...any) {
@@ -153,6 +180,7 @@ func (p *parser) finish() panel.Problems {
 
 func (p *parser) query(source string) *Query {
 	q := &Query{Span: Span{0, len(p.runes)}}
+	p.completionQuery = q
 	if source != "" {
 		q.Source = strings.ToLower(source)
 		if !sources[q.Source] {
@@ -168,6 +196,7 @@ func (p *parser) query(source string) *Query {
 		}
 		return q
 	}
+	p.expectNext(Expect{Class: "source"})
 	first := p.take()
 	q.Source = strings.ToLower(first.Text)
 	q.SourceSpan = first.Span
@@ -266,6 +295,7 @@ func (p *parser) filters(nested bool) []Expr {
 	var ops []string
 	mode := ""
 	mixed := -1
+	p.expectTerm(nested)
 	for !p.filterStop(nested) {
 		before := p.i
 		if len(terms) > 0 {
@@ -274,6 +304,7 @@ func (p *parser) filters(nested bool) []Expr {
 				tok := p.take()
 				op = strings.ToLower(tok.Text)
 				if p.filterStop(nested) {
+					p.expectTerm(nested)
 					p.report(tok.Span, "sides", op)
 					break
 				}
@@ -298,7 +329,11 @@ func (p *parser) filters(nested bool) []Expr {
 			p.unexpected()
 		}
 	}
-	if mixed >= 0 && len(terms) >= 3 && len(ops) == len(terms)-1 {
+	if p.completion && !nested {
+		p.completionQuery.Where = terms
+	}
+	p.expectTerm(nested)
+	if !p.completion && mixed >= 0 && len(terms) >= 3 && len(ops) == len(terms)-1 {
 		at := Span{terms[0].Span().Start, terms[len(terms)-1].Span().End}
 		first := p.groupingEdit(terms, ops, ops[mixed])
 		second := p.groupingEdit(terms, ops, ops[0])
@@ -403,6 +438,7 @@ func isFieldWordOperator(op string) bool {
 }
 
 func (p *parser) term(nested bool) Expr {
+	p.expectTerm(nested)
 	if p.is("-") || p.is("not") {
 		t := p.take()
 		p.enter(t.Span)
@@ -481,6 +517,7 @@ func (p *parser) primary(nested bool) Expr {
 		return nil
 	}
 	op := p.lower()
+	p.expectNext(Expect{Class: "operator", Field: &field})
 	if isComparison(op) || op == ":" || op == "~" || op == "!~" {
 		if numberPattern.MatchString(field.Key) || durationPattern.MatchString(field.Key) {
 			p.report(field.At, "fieldBefore", op)
@@ -504,6 +541,7 @@ func (p *parser) primary(nested bool) Expr {
 		if op == ":" && isComparison(p.lower()) {
 			op = p.take().Text
 		}
+		p.expectNext(Expect{Class: "value", Field: &field, Scope: op})
 		v, valid := p.value()
 		if !valid {
 			example := "api"
@@ -547,11 +585,13 @@ func (p *parser) primary(nested bool) Expr {
 		return p.in(field, neg)
 	case "between":
 		p.take()
+		p.expectNext(Expect{Class: "value", Field: &field, Scope: "between"})
 		lo, ok := p.value()
 		if !ok || !p.eat("and") {
 			p.report(Span{field.At.Start, p.previousEnd()}, "between")
 			return nil
 		}
+		p.expectNext(Expect{Class: "value", Field: &field, Scope: "between"})
 		hi, ok := p.value()
 		if !ok {
 			p.report(Span{field.At.Start, p.previousEnd()}, "between")
@@ -572,6 +612,7 @@ func (p *parser) primary(nested bool) Expr {
 		return x
 	case "like", "ilike":
 		p.take()
+		p.expectNext(Expect{Class: "value", Field: &field})
 		v, ok := p.value()
 		if !ok || v.Kind != StringValue {
 			p.report(Span{field.At.Start, p.previousEnd()}, "like")
@@ -616,6 +657,7 @@ func (p *parser) field() (Field, bool) {
 	f := Field{Key: t.Text, Single: !strings.Contains(t.Text, "."), At: t.Span}
 	if p.is("[") && (strings.EqualFold(t.Text, "attributes") || strings.EqualFold(t.Text, "resource")) {
 		p.take()
+		p.expectNext(Expect{Class: "bracket_key", Scope: strings.ToLower(t.Text)})
 		key := p.peek()
 		if key.Kind != BracketKey && key.Kind != String {
 			p.report(key.Span, "bracket")
@@ -692,6 +734,7 @@ func (p *parser) value() (Value, bool) {
 
 func (p *parser) in(f Field, neg bool) Expr {
 	p.take()
+	p.expectNext(Expect{Class: "value", Field: &f, Scope: "in"})
 	x := &In{Field: f, Negated: neg, At: Span{f.At.Start, p.previousEnd()}}
 	if p.peek().Kind == Word && strings.HasPrefix(p.peek().Text, "$") {
 		v, _ := p.value()
@@ -704,6 +747,7 @@ func (p *parser) in(f Field, neg bool) Expr {
 		p.report(p.peek().Span, "list")
 		return nil
 	}
+	p.expectNext(Expect{Class: "value", Field: &f, Scope: "in"})
 	for p.peek().Kind != EOF && !p.is(")") {
 		v, ok := p.value()
 		if !ok {
@@ -715,12 +759,16 @@ func (p *parser) in(f Field, neg bool) Expr {
 			p.bound(v.At, "listBound")
 		}
 		x.Values = append(x.Values, v)
+		if p.completion {
+			p.completionUsed[strings.ToLower(v.Text)] = true
+		}
 		if v.Kind == StarValue {
 			p.issue(v.At, diagnostic("wildcard"), wildcardHint(v.Text))
 		}
 		if !p.eat(",") {
 			break
 		}
+		p.expectNext(Expect{Class: "value", Field: &f, Scope: "in"})
 		if p.is(")") {
 			p.report(p.peek().Span, "listValue")
 		}
@@ -953,11 +1001,13 @@ func (p *parser) skipStage() {
 
 func (p *parser) parseSort() *Sort {
 	start := p.take()
+	p.expectNext(Expect{Class: "sort_key"})
 	x := &Sort{At: start.Span}
 	signed := p.is("+") || p.is("-")
 	if signed {
 		x.Ascending = p.take().Text == "+"
 	}
+	p.expectNext(Expect{Class: "sort_key"})
 	t := p.peek()
 	if t.Kind != Word && t.Kind != Ident {
 		p.report(t.Span, "sortKey")
@@ -976,6 +1026,7 @@ func (p *parser) parseSort() *Sort {
 
 func (p *parser) parseLimit() *Limit {
 	start := p.take()
+	p.expectNext(Expect{Class: "integer"})
 	t := p.peek()
 	x := &Limit{At: start.Span}
 	n, err := strconv.Atoi(t.Text)
@@ -994,6 +1045,10 @@ func (p *parser) parseLimit() *Limit {
 
 func (p *parser) stage(start int) *Stage {
 	s := &Stage{At: Span{Start: start}}
+	if p.completion {
+		p.completionQuery.Stage = s
+	}
+	p.expectNext(Expect{Class: "measure"})
 	for p.peek().Kind != EOF && !p.is("|") && !clauses[p.lower()] {
 		before := p.i
 		if p.peek().Kind == Ident && foreignStages[p.lower()] {
@@ -1058,6 +1113,7 @@ func (p *parser) stage(start int) *Stage {
 			}
 		}
 		if p.eat(",") {
+			p.expectNext(Expect{Class: "measure"})
 			if p.peek().Kind == EOF || clauses[p.lower()] {
 				p.report(p.peek().Span, "measure")
 			}
@@ -1070,6 +1126,7 @@ func (p *parser) stage(start int) *Stage {
 			p.unexpected()
 		}
 	}
+	p.expectNext(Expect{Class: "clause", Scope: "measure"})
 	for p.is("by") || p.is("every") {
 		if p.eat("by") {
 			if len(s.By) > 0 {
@@ -1082,6 +1139,7 @@ func (p *parser) stage(start int) *Stage {
 				p.report(p.tokens[p.i-1].Span, "byFirst")
 			}
 			for {
+				p.expectNext(Expect{Class: "field", Func: "by", Arg: len(s.By)})
 				f, ok := p.field()
 				if !ok {
 					if p.peek().Kind != EOF && !clauses[p.lower()] {
@@ -1102,6 +1160,7 @@ func (p *parser) stage(start int) *Stage {
 			}
 		} else {
 			at := p.take().Span
+			p.expectNext(Expect{Class: "bucket"})
 			if len(s.Measures) == 0 && s.Histogram == nil {
 				p.report(at, "everyFirst")
 			}
@@ -1118,6 +1177,7 @@ func (p *parser) stage(start int) *Stage {
 			}
 		}
 	}
+	p.expectNext(Expect{Class: "clause", Scope: "stage"})
 	if len(s.Measures) == 0 && s.Histogram == nil && len(p.problems) == 0 {
 		p.report(p.peek().Span, "measure")
 	}
@@ -1166,6 +1226,7 @@ func (p *parser) mexpr(minPrec int) MExpr {
 }
 
 func (p *parser) mfactor() MExpr {
+	p.expectNext(Expect{Class: "measure"})
 	t := p.peek()
 	if p.eat("-") {
 		p.enter(t.Span)
@@ -1234,6 +1295,7 @@ func (p *parser) mcall() MExpr {
 		return x
 	}
 	x := &MCall{Name: strings.ToLower(name.Text), At: at}
+	p.expectNext(Expect{Class: "marg", Func: x.Name, Arg: 0})
 	for p.peek().Kind != EOF && !p.is(")") && !p.is("|") {
 		t := p.peek()
 		arg := MArg{At: t.Span}
@@ -1268,6 +1330,7 @@ func (p *parser) mcall() MExpr {
 		if !p.eat(",") {
 			break
 		}
+		p.expectNext(Expect{Class: "marg", Func: x.Name, Arg: len(x.Args)})
 	}
 	if !p.eat(")") {
 		p.report(open.Span, "callClose")
