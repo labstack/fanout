@@ -88,7 +88,7 @@ func Resolve(q *Query, opts ResolveOptions) (*Resolved, panel.Problems) {
 				vars[v.Name] = v
 			}
 		}
-		if opts.Viz != "" {
+		if opts.Viz != "" && len(ps) == 0 {
 			ps, _ = panel.QueryShape(&pq, opts.Viz, vars)
 			for _, p := range ps {
 				p.Span = textSpan(queryPathSpan(q, p.Path))

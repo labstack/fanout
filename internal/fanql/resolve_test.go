@@ -285,7 +285,8 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	if !reflect.DeepEqual(names, []string{"bar", "table"}) {
 		t.Fatal(r.Compatible)
 	}
-	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto" {
+	// Task 5 supplies the canonical printer used for edit text.
+	if resolvePrint != nil && (len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto") {
 		t.Fatal(r.Edits)
 	}
 	r, ps = resolvedText(t, "spans where status:error", ResolveOptions{})
