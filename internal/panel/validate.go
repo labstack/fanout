@@ -430,9 +430,50 @@ func inferBetter(p *Panel) string {
 	if message != "" {
 		return ""
 	}
+	return inferBetterExpr(m.Expr, p, sig)
+}
+
+func inferBetterExpr(e MeasureExpr, p *Panel, sig *signal) string {
+	base, a, _, ok := affineBase(e)
+	if ok && a != 0 {
+		if _, call := base.(MeasureCall); !call {
+			if leaf, binomial := binomial(base); binomial {
+				better := ""
+				if errorCountFilter.MatchString(leaf.Filter) {
+					better = "lower"
+				}
+				if a < 0 {
+					better = flipBetter(better)
+				}
+				return better
+			}
+			if leaf, conditional := base.(MeasureCountIf); conditional {
+				better := ""
+				if errorCountFilter.MatchString(leaf.Filter) {
+					better = "lower"
+				}
+				if a < 0 {
+					better = flipBetter(better)
+				}
+				return better
+			}
+			return ""
+		}
+		call := base.(MeasureCall)
+		better := inferBetterCall(call, p, sig)
+		if a < 0 {
+			better = flipBetter(better)
+		}
+		return better
+	}
+	return ""
+}
+
+func inferBetterCall(m MeasureCall, p *Panel, sig *signal) string {
 	if unitFamilies[p.Unit] == "duration" || m.Func == "error_rate" || (m.Field != nil && unitFamilies[m.Field.Unit] == "duration") {
 		return "lower"
 	}
+
 	errorFiltered := false
 	for _, filter := range p.Query.Where {
 		if errorCountFilter.MatchString(filter) {

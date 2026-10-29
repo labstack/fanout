@@ -84,50 +84,9 @@ func queryShapeVariables(q *Query, vars map[string]Variable, path string, proble
 	}
 }
 
-// Measures with arithmetic are structurally known before their engine compiler
-// is installed. Binding and measure-expression semantics remain Check's job.
+// Query shape and validation share the bounded measure parser.
 func shapeMeasures(sig *signal, texts []string, path string, problems *Problems) []Measure {
-	out := make([]Measure, 0, len(texts))
-	for i, text := range texts {
-		m, message, hint := parseMeasure(sig, text)
-		if message != "" && (strings.Contains(text, "count_if(") || strings.ContainsAny(stripQuoted(text), "+-*/")) {
-			alias := ""
-			if at := strings.LastIndex(text, " as "); at >= 0 {
-				alias = strings.TrimSpace(text[at+4:])
-			} else if strings.HasPrefix(text, "count_if(") && strings.HasSuffix(text, ")") {
-				alias = "count_if"
-			}
-			if aliasPattern.MatchString(alias) {
-				m = Measure{Text: text, Func: "expr", Alias: alias, Unit: "none"}
-				message = ""
-			}
-		}
-		if message != "" {
-			problems.addHint(fmt.Sprintf("%s[%d]", path, i), fmt.Sprintf("%q %s", text, message), hint)
-			continue
-		}
-		out = append(out, m)
-	}
-	uses := map[string]int{}
-	for _, m := range out {
-		if m.Alias == "" {
-			uses[m.Func]++
-		}
-	}
-	seen := map[string]bool{}
-	for i := range out {
-		if out[i].Alias == "" {
-			out[i].Alias = out[i].Func
-			if uses[out[i].Func] > 1 && out[i].Field != nil {
-				out[i].Alias = out[i].Func + "_" + sanitize(out[i].Field.alias())
-			}
-		}
-		if seen[out[i].Alias] {
-			problems.add(path, fmt.Sprintf("two measures are named %s; add distinct aliases with as", out[i].Alias))
-		}
-		seen[out[i].Alias] = true
-	}
-	return out
+	return parseMeasures(sig, texts, path, problems)
 }
 
 func queryShapeAggregate(p *Panel, spec vizSpec, path string, problems *Problems, shapeOnly bool) ([]Measure, bool) {

@@ -52,6 +52,17 @@
   },
   "results": [
     {
+      "ranking": {
+        "rule": "builtin",
+        "better": "higher",
+        "floor": 20,
+        "support_column": "count(*)",
+        "below_floor": 0,
+        "tie_breakers": [
+          "n desc",
+          "dimension asc"
+        ]
+      },
       "annotation_scope": {
         "services": [
           {

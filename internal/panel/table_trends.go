@@ -97,7 +97,7 @@ func (e *Executor) attachTableTrends(ctx context.Context, p *Panel, checked *Che
 		if wanted[m.Alias] {
 			expression := "NULL::DOUBLE"
 			if sig.name != "metrics" {
-				expression = measureSQL(m, sig, interval.Seconds(), "PARTITION BY "+bucket)
+				expression = measureExprSQL(m, sig, interval.Seconds(), "PARTITION BY "+bucket)
 			}
 			if m.Func == "share" {
 				share = true

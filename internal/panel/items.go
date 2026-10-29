@@ -59,7 +59,7 @@ func compileItems(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		if p.Unit != "" && (p.Viz != "scatter" || i == 1) {
 			unit = p.Unit
 		}
-		selects = append(selects, measureSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
+		selects = append(selects, measureExprSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
 		columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: unit})
 	}
 	text := "WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")"

@@ -69,6 +69,12 @@ func metricMeasureKinds(m Measure) []string {
 }
 
 func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
+	for _, m := range measures {
+		if m.IsExpression() || m.Func == "count_if" {
+			return Compiled{}, fmt.Errorf("measure arithmetic is not available for metrics")
+		}
+	}
+
 	sig := signals["metrics"]
 	where, args, err := buildWhere(sig, filters, scope)
 	if err != nil {

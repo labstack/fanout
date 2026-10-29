@@ -77,7 +77,7 @@ type Panel struct {
 type Query struct {
 	From      string     `json:"from" jsonschema:"spans, logs or metrics"`
 	Where     []string   `json:"where,omitempty" jsonschema:"Filter expressions joined by AND, e.g. service = $service or attributes['http.route'] = '/cart'"`
-	Measures  []string   `json:"measures,omitempty" jsonschema:"Fixed logs, traces, service_map and health take no measures; other queries take 1 to 6 of fn(field) [as alias]: count(), rate(), error_rate(), share(), avg, min, max, sum, last, p50, p75, p90, p95, p99, quantile(field, q), count_distinct(field)"`
+	Measures  []string   `json:"measures,omitempty" jsonschema:"For spans and logs aggregate panels: count_if(SQL filter) and + - * / expressions with constants; expressions require as alias and an aggregate, share() stands alone, division by zero returns null. Metrics do not support arithmetic. At most 256 tokens, 64 nodes, depth 8 and 8 aggregates per measure; 256 nodes and 24 aggregates per query. Fixed logs, traces, service_map and health take no measures; other queries take 1 to 6 of fn(field) [as alias]: count(), rate(), error_rate(), share(), avg, min, max, sum, last, p50, p75, p90, p95, p99, quantile(field, q), count_distinct(field)"`
 	By        []string   `json:"by,omitempty" jsonschema:"Up to 3 grouping fields: columns or attributes['key']"`
 	Bucket    string     `json:"bucket,omitempty" jsonschema:"auto or 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d; required for timeseries"`
 	Histogram *Histogram `json:"histogram,omitempty" jsonschema:"heatmap and histogram panels (milestone 2)"`

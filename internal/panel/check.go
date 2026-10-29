@@ -89,6 +89,24 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 			}
 			var ignored Problems
 			checked.Measures[p.ID] = parseMeasures(sig, p.Query.Measures, "", &ignored)
+			for j := range checked.Measures[p.ID] {
+				m := &checked.Measures[p.ID][j]
+				expr, err := checkMeasureExpr(ctx, parser, sig, m.Expr)
+				if err != nil {
+					if isOperational(err) {
+						return nil, nil, err
+					}
+					problems.add(fmt.Sprintf("%s.query.measures[%d]", path, j), PresentError(err, SQLError))
+					continue
+				}
+				m.Expr = expr
+				better := p.Better
+				if better == "" {
+					better = inferBetterExpr(m.Expr, p, sig)
+				}
+				m.Rank = rankRule(*m, sig, better)
+			}
+
 			for j, expr := range p.Query.Where {
 				f, err := checkFilter(ctx, parser, sig, earlier, expr)
 				if err != nil {
@@ -235,4 +253,40 @@ func validateTimelineColumns(columns []Column) error {
 		return Problems{{Message: "SQL state_timeline requires timestamp time, a string item, one numeric measure and optional string state"}}
 	}
 	return nil
+}
+
+// checkMeasureExpr sends each conditional aggregate through the same WHERE
+// allowlist as panel filters, with no dashboard variables in its population.
+func checkMeasureExpr(ctx context.Context, parser Parser, sig *signal, e MeasureExpr) (MeasureExpr, error) {
+	switch leaf := e.(type) {
+	case MeasureCountIf:
+		if varRefPattern.MatchString(stripQuoted(leaf.Filter)) {
+			return nil, errors.New("variables are not allowed inside count_if")
+		}
+		f, err := checkFilter(ctx, parser, sig, nil, leaf.Filter)
+		if err != nil {
+			return nil, err
+		}
+		if len(f.Params) > 0 {
+			return nil, errors.New("variables are not allowed inside count_if")
+		}
+		leaf.Expr = f.Expr
+		return leaf, nil
+	case MeasureBinary:
+		l, err := checkMeasureExpr(ctx, parser, sig, leaf.L)
+		if err != nil {
+			return nil, err
+		}
+		r, err := checkMeasureExpr(ctx, parser, sig, leaf.R)
+		if err != nil {
+			return nil, err
+		}
+		leaf.L, leaf.R = l, r
+		return leaf, nil
+	case MeasureNeg:
+		x, err := checkMeasureExpr(ctx, parser, sig, leaf.X)
+		leaf.X = x
+		return leaf, err
+	}
+	return e, nil
 }
