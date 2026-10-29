@@ -46,7 +46,7 @@ func lower(r *Resolved) (panel.Query, panel.Problems) {
 	}
 	if q.Sort != nil {
 		key := q.Sort.Key
-		if key == "duration" {
+		if key == "duration" && !sortIsMeasureAlias(q) {
 			key = "duration_ms"
 		}
 		out.Sort = key
@@ -109,7 +109,14 @@ func lowerValue(f Field, v Value) string {
 	return sqlString(text)
 }
 
-func lowerEntry(e Expr) string { return lowerNegated(e, false) }
+func lowerEntry(e Expr) string {
+	// A whole raw entry is the exact interchange spelling (section 0.8).
+	// Raw fragments inside boolean expressions are parenthesized below.
+	if raw, ok := e.(*RawExpr); ok {
+		return raw.Text
+	}
+	return lowerNegated(e, false)
+}
 func lowerNegated(e Expr, neg bool) string {
 	switch x := e.(type) {
 	case *Not:
@@ -241,7 +248,7 @@ func lowerNegated(e Expr, neg bool) string {
 		if neg {
 			return nullNegation(x.Text)
 		}
-		return x.Text
+		return "(" + x.Text + ")"
 	}
 	return ""
 }
@@ -305,7 +312,7 @@ func lowerCall(c *Call) string {
 		if c.Cmp.Value.Kind == BooleanValue {
 			v = strings.ToLower(v)
 		}
-		if c.Cmp.Value.Kind != NumberValue && c.Cmp.Value.Kind != BooleanValue {
+		if c.Cmp.Value.Kind != NumberValue && c.Cmp.Value.Kind != BooleanValue && c.Cmp.Value.Kind != VariableValue {
 			v = sqlString(v)
 		}
 		p += " " + c.Cmp.Op + " " + v

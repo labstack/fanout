@@ -62,6 +62,25 @@ func TestQueryShapeRequires(t *testing.T) {
 	}
 }
 
+func TestQueryShapeRejectsIncompleteMeasure(t *testing.T) {
+	q := &Query{From: "spans", Measures: []string{"count() + as x"}}
+	got, _ := QueryShape(q, "table", nil)
+	if len(got) == 0 {
+		t.Fatal("shape accepted an incomplete arithmetic expression")
+	}
+	d := Dashboard{Name: "test", Panels: []Panel{{ID: "t", Title: "t", Viz: "table", Query: q}}}
+	var want Problems
+	for _, p := range Validate(&d) {
+		if strings.HasPrefix(p.Path, "panels[0].query.") {
+			p.Path = strings.TrimPrefix(p.Path, "panels[0].query.")
+			want = append(want, p)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("shape = %+v; validate = %+v", got, want)
+	}
+}
+
 func TestQueryShapeCountIfDefaultAlias(t *testing.T) {
 	q := &Query{From: "spans", Measures: []string{"count_if(status = 'STATUS_CODE_ERROR')"}, Sort: "count_if"}
 	if problems, _ := QueryShape(q, "table", nil); len(problems) != 0 {

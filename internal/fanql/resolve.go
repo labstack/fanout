@@ -2,8 +2,10 @@ package fanql
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/fanout/internal/panel"
@@ -133,6 +135,9 @@ func (r *resolver) field(f *Field) {
 	}
 	key := f.Key
 	scope := f.Scope
+	if f.Bracket && key == "" {
+		r.issue(f.At, "attribute keys must not be empty")
+	}
 	if strings.HasPrefix(key, "$__") {
 		r.issue(f.At, messages["variable"])
 	}
@@ -250,13 +255,16 @@ func isRange(op string) bool {
 }
 func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
 	v.Stored = v.Text
-	if v.Kind == VariableValue {
-		r.variable(v.Text, f.Key, v.At, multi)
+	if !r.finiteValue(*v) {
 		return
 	}
 	ref := f.Ref
 	if ref.Column == "http_status_code" && ref.Key == "" && isRange(op) {
 		ref.CompareAs = "integer"
+	}
+	if v.Kind == VariableValue {
+		r.variable(v.Text, f.Key, v.At, multi)
+		return
 	}
 	if v.Kind == DurationValue {
 		if !strings.EqualFold(f.Key, "duration") || f.Scope != "" {
@@ -344,6 +352,20 @@ func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
 		}
 		r.issue(v.At, fmt.Sprintf("unknown %s %q; use %s", ref.Column, v.Text, choices))
 	}
+}
+
+func (r *resolver) finiteValue(v Value) bool {
+	var n float64
+	if v.Kind == NumberValue {
+		n, _ = strconv.ParseFloat(v.Text, 64)
+	} else if v.Kind == DurationValue {
+		n, _ = durationMS(v.Text)
+	}
+	if math.IsInf(n, 0) || math.IsNaN(n) {
+		r.issue(v.At, "number must be finite")
+		return false
+	}
+	return true
 }
 
 func (r *resolver) bands(f Field, op string, lo Value, hi *Value) []string {
@@ -446,6 +468,10 @@ func (r *resolver) call(c *Call) {
 	}
 	if c.Cmp != nil {
 		c.Cmp.Value.Stored = c.Cmp.Value.Text
+		r.finiteValue(c.Cmp.Value)
+		if c.Cmp.Value.Kind == VariableValue {
+			r.variable(c.Cmp.Value.Text, "", c.Cmp.Value.At, false)
+		}
 	}
 }
 
@@ -549,6 +575,17 @@ func measureAlias(m Measure, all []Measure) string {
 		return c.Name + "_" + strings.Trim(b.String(), "_")
 	}
 	return c.Name
+}
+
+func sortIsMeasureAlias(q *Query) bool {
+	if q.Sort != nil && q.Stage != nil {
+		for _, m := range q.Stage.Measures {
+			if measureAlias(m, q.Stage.Measures) == q.Sort.Key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (r *resolver) sort() {

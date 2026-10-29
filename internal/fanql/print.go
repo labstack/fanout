@@ -52,7 +52,7 @@ func Print(q *Query) string {
 			text += "+"
 		}
 		key := q.Sort.Key
-		if key == "duration_ms" {
+		if key == "duration_ms" && !sortIsMeasureAlias(q) {
 			key = "duration"
 		}
 		text += key
@@ -245,6 +245,11 @@ func validPath(s string) bool { return identifierPath.MatchString(s) }
 func quoteText(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
 func printValue(v Value, f Field, aliases bool) string {
+	if v.Kind == NumberValue && f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
+		if n, err := strconv.ParseFloat(v.Text, 64); err == nil {
+			return durationText(n)
+		}
+	}
 	if aliases && v.Kind != VariableValue {
 		stored := v.Stored
 		if stored == "" {
@@ -348,7 +353,7 @@ func bareValue(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if unicode.IsSpace(r) || strings.ContainsRune("|(),:=!<>~\"'`[]#{}@", r) {
+		if unicode.IsSpace(r) || strings.ContainsRune("|(),:=!<>~\"'`[]#{}@$*", r) {
 			return false
 		}
 	}

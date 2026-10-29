@@ -300,7 +300,7 @@ func checkAttributeLookup(v map[string]any) error {
 	}
 	key, _ := children[1].(map[string]any)
 	text := constantText(key)
-	if key["class"] != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s['%s']", names[0], text)) {
+	if key["class"] != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s[%s]", names[0], sqlString(text))) {
 		return errors.New("attribute keys must be literal strings such as attributes['http.route']")
 	}
 	return nil

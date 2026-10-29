@@ -1,6 +1,7 @@
 package fanql
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,7 +22,8 @@ func durationMS(text string) (float64, bool) {
 	}{{"us", .001}, {"ms", 1}, {"s", 1000}, {"m", 60000}, {"h", 3600000}} {
 		if strings.HasSuffix(text, u.name) {
 			n, err := strconv.ParseFloat(strings.TrimSuffix(text, u.name), 64)
-			return n * u.scale, err == nil
+			ms := n * u.scale
+			return ms, err == nil && !math.IsNaN(ms) && !math.IsInf(ms, 0)
 		}
 	}
 	return 0, false

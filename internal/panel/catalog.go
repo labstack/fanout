@@ -147,12 +147,12 @@ type FieldRef struct {
 	Unit   string
 }
 
-var attributePattern = regexp.MustCompile(`^(attributes|resource)\['([A-Za-z0-9_.\-/:@]{1,128})'\]$`)
+var attributePattern = regexp.MustCompile(`(?s)^(attributes|resource)\['((?:[^']|'')+)'\]$`)
 
 func (s *signal) field(text string) (FieldRef, error) {
 	text = strings.TrimSpace(text)
 	if m := attributePattern.FindStringSubmatch(text); m != nil {
-		return FieldRef{Text: text, Column: m[1], Key: m[2], Type: TypeString, Unit: "none"}, nil
+		return FieldRef{Text: text, Column: m[1], Key: strings.ReplaceAll(m[2], "''", "'"), Type: TypeString, Unit: "none"}, nil
 	}
 	f, ok := s.index[text]
 	if !ok {
