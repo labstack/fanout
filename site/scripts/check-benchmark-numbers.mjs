@@ -3,7 +3,7 @@
 import { readFile } from "node:fs/promises";
 import { benchmark, acceptedTotal, peak } from "../src/data/benchmark.ts";
 
-const files = ["../src/content/docs/index.mdx", "../src/content/docs/explanation/performance.mdx", "../../README.md"];
+const files = ["../src/content/docs/index.mdx", "../src/content/docs/docs/concepts/performance.mdx", "../../README.md"];
 const failures = [];
 const digits = "([0-9][0-9,]*(?:\\.[0-9]+)?)";
 const amount = value => Number(value.replaceAll(",", ""));

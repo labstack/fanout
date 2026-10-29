@@ -11,13 +11,17 @@ import { toPlainMarkdown } from "../lib/markdown";
 // listed explicitly — otherwise it is dropped from a document headed "complete
 // documentation".
 const ROOT = "index";
-const ORDER = [ROOT, "start", "guides", "reference", "explanation", "status", "privacy"];
+const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "privacy"];
+
+function groupOf(id: string): string {
+  return id.replace(/^docs\//, "").split("/")[0] ?? ROOT;
+}
 
 export const GET: APIRoute = async () => {
   const docs = await getCollection("docs");
 
   const unlisted = [
-    ...new Set(docs.map((doc) => doc.id.split("/")[0] ?? ROOT)),
+    ...new Set(docs.map((doc) => groupOf(doc.id))),
   ].filter((group) => !ORDER.includes(group));
   if (unlisted.length > 0) {
     throw new Error(
@@ -27,8 +31,8 @@ export const GET: APIRoute = async () => {
   }
 
   const ranked = [...docs].sort((a, b) => {
-    const ga = ORDER.indexOf(a.id.split("/")[0] ?? ROOT);
-    const gb = ORDER.indexOf(b.id.split("/")[0] ?? ROOT);
+    const ga = ORDER.indexOf(groupOf(a.id));
+    const gb = ORDER.indexOf(groupOf(b.id));
     return ga === gb ? a.id.localeCompare(b.id) : ga - gb;
   });
 

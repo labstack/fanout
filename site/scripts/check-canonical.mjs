@@ -3,8 +3,8 @@
 //
 // Starlight derives the canonical from the file it wrote to disk, and under
 // `build.format: "file"` that carries a `.html` nothing else here uses: the
-// sitemap lists `/start/install`, links point at `/start/install`, `llms.txt`
-// points at `/start/install.md`, and Cloudflare Pages 301s the `.html` form to
+// sitemap lists `/docs/get-started/install`, links point at `/docs/get-started/install`, `llms.txt`
+// points at `/docs/get-started/install.md`, and Cloudflare Pages 301s the `.html` form to
 // the extensionless one. `src/starlight-route-data.ts` corrects the tags, and
 // this asserts the correction still holds — the failure it guards against is
 // silent, produces a build that looks perfect, and is only visible in a crawler

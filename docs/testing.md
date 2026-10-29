@@ -263,7 +263,7 @@ evidence. Unknown cost stops further paid calls pending settlement.
 ## Documentation checks
 
 Dashboard workflow prose lives in
-`site/src/content/docs/guides/build-dashboards.mdx`. HTTP, MCP and role references
+`site/src/content/docs/docs/guides/dashboards.mdx`. HTTP, MCP and role references
 are generated from the server; change their generator sources when necessary,
 then regenerate and check:
 

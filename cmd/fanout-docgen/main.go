@@ -52,7 +52,7 @@ func main() {
 		// list going stale is loud rather than a quietly shorter table.
 		routeDirs = flag.String("route-dirs", "internal/api,internal/agent,cmd/fanout",
 			"comma-separated directories whose files register HTTP routes")
-		outDir     = flag.String("out", "site/src/content/docs/reference", "reference root to write generated pages into")
+		outDir     = flag.String("out", "site/src/content/docs/docs/reference", "reference root to write generated pages into")
 		envExample = flag.String("env-example", ".env.example", "path to the generated environment template")
 		check      = flag.Bool("check", false, "exit non-zero when a written page differs from the one on disk")
 	)
@@ -99,7 +99,7 @@ func run(source, alertSource, routeDirs, outDir, envExample string, check bool) 
 	if err != nil {
 		return err
 	}
-	pages["http-routes.mdx"] = renderRoutes(routes)
+	pages["api.mdx"] = renderRoutes(routes)
 
 	// The role/capability matrix, from the same map the middleware consults.
 	// It was hand-written until a review found it claiming `viewer` could not
@@ -116,7 +116,7 @@ func run(source, alertSource, routeDirs, outDir, envExample string, check bool) 
 	if err != nil {
 		return err
 	}
-	pages["mcp-tools.mdx"] = toolsPage
+	pages["mcp.mdx"] = toolsPage
 
 	outputs := map[string][]byte{envExample: renderEnvironment(fields)}
 	for name, body := range pages {
@@ -267,7 +267,7 @@ func renderAlertEnv(vars []field) []byte {
 		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", v.Key, v.Type, doc)
 	}
 
-	b.WriteString("\nSee [Set up alerts](/guides/set-up-alerts) for the rule model these sit in,\n")
+	b.WriteString("\nSee [Set up alerts](/docs/guides/alerts) for the rule model these sit in,\n")
 	b.WriteString("including the pending/firing/resolved lifecycle and webhook delivery.\n")
 
 	return []byte(b.String())
@@ -530,7 +530,7 @@ func render(fields []field) (map[string][]byte, error) {
 				name,
 			)
 		}
-		pages["settings/"+name+".mdx"] = renderPage(name, page, group)
+		pages["configuration/"+name+".mdx"] = renderPage(name, page, group)
 	}
 	return pages, nil
 }

@@ -172,7 +172,7 @@ func renderMCPTools() ([]byte, error) {
 		b.WriteString("\n")
 	}
 	b.WriteString("## Authentication\n\n")
-	b.WriteString("MCP uses OAuth tokens bound to the instance’s resource URI.\n[Connect an agent](/guides/connect-over-mcp#scopes) documents protocol\nrequirements and delegated scopes. Dashboard tools operate on the authenticated\nuser’s own dashboards and require the account capability\n`dashboards:manage-own`; see [roles](/reference/roles).\n\n## Other interfaces\n\nUse OTLP to write telemetry. Configuration uses environment variables, and user\nand alert management use the [HTTP API](/reference/http-routes).\n")
+	b.WriteString("MCP uses OAuth tokens bound to the instance’s resource URI.\n[Connect an agent](/docs/guides/mcp#scopes) documents protocol\nrequirements and delegated scopes. Dashboard tools operate on the authenticated\nuser’s own dashboards and require the account capability\n`dashboards:manage-own`; see [roles](/docs/reference/roles).\n\n## Other interfaces\n\nUse OTLP to write telemetry. Configuration uses environment variables, and user\nand alert management use the [HTTP API](/docs/reference/api).\n")
 
 	toolCount = tools
 	return []byte(b.String()), nil

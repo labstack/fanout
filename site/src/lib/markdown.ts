@@ -3,7 +3,7 @@
 // The pages are MDX, so their source carries three things that are noise to
 // anything that is not Astro: ESM `import` lines, Starlight component tags, and
 // the `:::` directive syntax. Serving that raw under `text/markdown` — which is
-// what the alternates did — means `/start/install.md` opens with an import
+// what the alternates did — means `/docs/get-started/install.md` opens with an import
 // statement and `<Steps>`, and the caution blocks that carry the shipped versus
 // proposed distinction arrive as literal colons.
 //

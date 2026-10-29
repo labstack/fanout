@@ -77,7 +77,7 @@ func TestDefaultSpecKeepsExistingPanelsBeforeSystemSections(t *testing.T) {
 	var ids []string
 	for i, p := range spec.Panels {
 		ids = append(ids, p.ID)
-		if i >= 8 && (!strings.Contains(p.Description, "Collector `") || !strings.Contains(p.Description, "https://fanout.run/start/send-telemetry#watch-hosts-containers-and-endpoints")) {
+		if i >= 8 && (!strings.Contains(p.Description, "Collector `") || !strings.Contains(p.Description, "https://fanout.run/docs/get-started/send-telemetry#watch-hosts-containers-and-endpoints")) {
 			t.Fatalf("receiver guidance missing: %+v", p)
 		}
 	}

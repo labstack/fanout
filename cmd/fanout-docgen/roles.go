@@ -117,7 +117,7 @@ func renderRoles() ([]byte, error) {
 	b.WriteString("In `oidc` mode it depends on configuration. If `FANOUT_OIDC_ADMIN_GROUPS` or\n")
 	b.WriteString("`FANOUT_OIDC_OPERATOR_GROUPS` is set, the provider owns every linked user's\n")
 	b.WriteString("role and reapplies it on each login; otherwise roles stay local.\n")
-	b.WriteString("[Authentication modes](/explanation/authentication-modes) covers the details,\n")
+	b.WriteString("[Authentication modes](/docs/concepts/authentication) covers the details,\n")
 	b.WriteString("including why the last active administrator is never demoted.\n\n")
 
 	b.WriteString(":::caution[A role is not a data boundary]\n")
