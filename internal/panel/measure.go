@@ -165,3 +165,19 @@ func sanitize(value string) string {
 	}
 	return strings.Trim(b.String(), "_")
 }
+
+// ParseMeasure parses one stored aggregate measure for the named signal.
+func ParseMeasure(signal, text string) (Measure, error) {
+	sig, ok := lookupSignal(signal)
+	if !ok {
+		return Measure{}, fmt.Errorf("unknown signal %q", signal)
+	}
+	m, message, hint := parseMeasure(sig, text)
+	if message != "" {
+		if hint != "" {
+			message += "; " + hint
+		}
+		return Measure{}, fmt.Errorf("%s", message)
+	}
+	return m, nil
+}

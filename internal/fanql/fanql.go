@@ -36,5 +36,5 @@ func Compile(text string, opts Options) (*Compiled, panel.Problems) {
 	if len(problems) != 0 {
 		return nil, problems
 	}
-	return &Compiled{Query: pq, Notices: r.Notices, Compatible: r.Compatible, Edits: r.Edits}, nil
+	return &Compiled{Query: pq, Canonical: Print(q), Notices: r.Notices, Compatible: r.Compatible, Edits: r.Edits}, nil
 }

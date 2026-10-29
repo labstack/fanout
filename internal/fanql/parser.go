@@ -465,7 +465,9 @@ func (p *parser) primary(nested bool) Expr {
 	if p.foreignTerm() {
 		return nil
 	}
-	if reserved[word] {
+	next := strings.ToLower(p.ahead(1).Text)
+	fieldOperator := isComparison(next) || next == ":" || next == "~" || next == "!~" || next == "is" || isFieldWordOperator(next) || next == "not" && isFieldWordOperator(strings.ToLower(p.ahead(2).Text))
+	if reserved[word] && !fieldOperator {
 		p.report(t.Span, "reserved", word)
 		p.take()
 		return nil

@@ -298,6 +298,13 @@ func lowerCall(c *Call) string {
 	p := c.Name + "(" + strings.Join(args, ", ") + ")"
 	if c.Cmp != nil {
 		v := c.Cmp.Value.Text
+		if c.Cmp.Value.Kind == NumberValue {
+			n, _ := strconv.ParseFloat(v, 64)
+			v = decimal(n)
+		}
+		if c.Cmp.Value.Kind == BooleanValue {
+			v = strings.ToLower(v)
+		}
 		if c.Cmp.Value.Kind != NumberValue && c.Cmp.Value.Kind != BooleanValue {
 			v = sqlString(v)
 		}

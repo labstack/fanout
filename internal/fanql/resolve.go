@@ -99,7 +99,11 @@ func Resolve(q *Query, opts ResolveOptions) (*Resolved, panel.Problems) {
 		if pq.Bucket == "" && q.Stage != nil && q.Stage.Histogram == nil {
 			pq.Bucket = "auto"
 			if ps, _ := panel.QueryShape(&pq, "timeseries", vars); len(ps) == 0 && resolvePrint != nil {
-				r.out.Edits = append(r.out.Edits, VizEdit{Viz: "timeseries", Text: resolvePrint(q) + " every auto"})
+				edit := *q
+				stage := *q.Stage
+				stage.Bucket = "auto"
+				edit.Stage = &stage
+				r.out.Edits = append(r.out.Edits, VizEdit{Viz: "timeseries", Text: resolvePrint(&edit)})
 			}
 		}
 	}
@@ -293,7 +297,7 @@ func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
 	if v.Kind == BooleanValue {
 		v.Stored = strings.ToLower(v.Text)
 	}
-	if v.Kind == StringValue || !(op == ":" || op == "=" || op == "!=" || op == "<>" || op == "in") || ref.Key != "" {
+	if v.Kind != WordValue || !(op == ":" || op == "=" || op == "!=" || op == "<>" || op == "in") || ref.Key != "" {
 		return
 	}
 	var table map[string]string

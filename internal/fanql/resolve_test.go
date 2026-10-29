@@ -138,6 +138,16 @@ func TestResolveSeverityRanges(t *testing.T) {
 }
 
 func TestResolveTypedLiterals(t *testing.T) {
+	for _, text := range []string{"logs where severity:14", "logs where severity:true", "spans where status:500", "metrics where type:false"} {
+		r, ps := resolvedText(t, text, ResolveOptions{})
+		if len(ps) != 0 {
+			t.Fatal(text, ps)
+		}
+		v := r.Query.Where[0].(*Compare).Value
+		if v.Stored != v.Text {
+			t.Fatalf("typed literals must not be vocabulary words: %#v", v)
+		}
+	}
 	for _, text := range []string{"spans where duration_ms>500", `spans where start_time>"2026-10-29T10:00:00Z"`, `spans where start_time>"2026-10-29 10:00:00"`} {
 		_, ps := resolvedText(t, text, ResolveOptions{})
 		if len(ps) > 0 {
@@ -271,9 +281,6 @@ func TestResolveVariables(t *testing.T) {
 }
 
 func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
-	if resolveLower == nil {
-		t.Skip("Task 4 installs the lowering hook")
-	}
 	r, ps := resolvedText(t, "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route", ResolveOptions{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
@@ -285,8 +292,7 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	if !reflect.DeepEqual(names, []string{"bar", "table"}) {
 		t.Fatal(r.Compatible)
 	}
-	// Task 5 supplies the canonical printer used for edit text.
-	if resolvePrint != nil && (len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto") {
+	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto" {
 		t.Fatal(r.Edits)
 	}
 	r, ps = resolvedText(t, "spans where status:error", ResolveOptions{})

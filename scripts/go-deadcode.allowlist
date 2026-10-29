@@ -10,3 +10,4 @@ github.com/labstack/fanout/internal/panel.QueryShape	FanQL shape-check library e
 github.com/labstack/fanout/internal/panel.CompatibleVizzes	FanQL visualization compatibility library entry point; production HTTP consumers land in batch 1 Task 8.
 github.com/labstack/fanout/internal/telemetry.SeverityAliases	Shared FanQL vocabulary/reference library entry point; production consumers land in batch 1 Tasks 8–10.
 github.com/labstack/fanout/internal/telemetry.SeverityRank	FanQL severity range library entry point; production HTTP/MCP consumers land in batch 1 Tasks 8–9.
+github.com/labstack/fanout/internal/panel.ParseMeasure	FanQL stored-query formatting library entry point; production HTTP consumer lands in batch 1 Task 8.
