@@ -111,10 +111,10 @@ COMPONENT INVENTORY
 - npm: @tanstack/history 1.162.5 (declared license: MIT)
 - npm: @tanstack/query-core 5.104.2 (declared license: MIT)
 - npm: @tanstack/react-query 5.104.2 (declared license: MIT)
-- npm: @tanstack/react-router 1.170.44 (declared license: MIT)
+- npm: @tanstack/react-router 1.170.46 (declared license: MIT)
 - npm: @tanstack/react-store 0.11.2 (declared license: MIT)
 - npm: @tanstack/react-table 9.3.1 (declared license: MIT)
-- npm: @tanstack/router-core 1.171.37 (declared license: MIT)
+- npm: @tanstack/router-core 1.171.39 (declared license: MIT)
 - npm: @tanstack/store 0.11.2 (declared license: MIT)
 - npm: @tanstack/table-core 9.3.1 (declared license: MIT)
 - npm: @types/debug 4.1.13 (declared license: MIT)
@@ -251,8 +251,8 @@ COMPONENT INVENTORY
 - npm: resolve-pkg-maps 1.0.0 (declared license: MIT)
 - npm: rxjs 7.8.1 (declared license: Apache-2.0)
 - npm: scheduler 0.28.0 (declared license: MIT)
-- npm: seroval 1.6.8 (declared license: MIT)
-- npm: seroval-plugins 1.6.8 (declared license: MIT)
+- npm: seroval 1.7.5 (declared license: MIT)
+- npm: seroval-plugins 1.7.6 (declared license: MIT)
 - npm: shebang-command 2.0.0 (declared license: MIT)
 - npm: shebang-regex 3.0.0 (declared license: MIT)
 - npm: smol-toml 1.9.0 (declared license: BSD-3-Clause)
@@ -7990,8 +7990,8 @@ SOFTWARE.
 - npm: @tanstack/history 1.162.5 / LICENSE
 - npm: @tanstack/query-core 5.104.2 / LICENSE
 - npm: @tanstack/react-query 5.104.2 / LICENSE
-- npm: @tanstack/react-router 1.170.44 / LICENSE
-- npm: @tanstack/router-core 1.171.37 / LICENSE
+- npm: @tanstack/react-router 1.170.46 / LICENSE
+- npm: @tanstack/router-core 1.171.39 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -10048,8 +10048,8 @@ Apache License
  limitations under the License.
 
 --- Applies to -------------------------------------------------------------
-- npm: seroval 1.6.8 / LICENSE
-- npm: seroval-plugins 1.6.8 / LICENSE
+- npm: seroval 1.7.5 / LICENSE
+- npm: seroval-plugins 1.7.6 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License Copyright (c) 2025 Alexis Munsayac <alexis.munsayac@gmail.com>
