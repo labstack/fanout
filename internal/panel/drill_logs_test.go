@@ -2,7 +2,6 @@ package panel
 
 import (
 	"errors"
-	"slices"
 	"testing"
 	"time"
 
@@ -37,7 +36,7 @@ func TestExemplarKindValidation(t *testing.T) {
 	_, err := e.Exemplars(t.Context(), req)
 	var got Problems
 	want := Problem{Path: "kind", Message: "kind must be traces or logs", Hint: "choose traces or logs"}
-	if !errors.As(err, &got) || !slices.Contains(got, want) {
+	if !errors.As(err, &got) || !containsProblem(got, want) {
 		t.Fatalf("got %v want %+v", err, want)
 	}
 }
@@ -75,7 +74,7 @@ func TestDrillLogsCapAndSource(t *testing.T) {
 	req.Dimensions = nil
 	_, err = e.Exemplars(t.Context(), req)
 	var problems Problems
-	if !errors.As(err, &problems) || !slices.Contains(problems, Problem{Path: "kind", Message: "log selections need a logs-source panel"}) {
+	if !errors.As(err, &problems) || !containsProblem(problems, Problem{Path: "kind", Message: "log selections need a logs-source panel"}) {
 		t.Fatalf("source accepted: %v", err)
 	}
 }

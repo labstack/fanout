@@ -189,7 +189,7 @@ func TestDistributionValidation(t *testing.T) {
 		d := Dashboard{Name: "Rule", Panels: []Panel{tc.p}}
 		Normalize(&d)
 		got := Validate(&d)
-		if !slices.Contains(got, tc.want) {
+		if !containsProblem(got, tc.want) {
 			t.Fatalf("got %+v want %+v", got, tc.want)
 		}
 	}

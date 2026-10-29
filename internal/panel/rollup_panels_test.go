@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -198,7 +197,7 @@ func TestRollupPanelsRejectUnrepresentableFilters(t *testing.T) {
 		err := e.Validate(t.Context(), &d)
 		var got Problems
 		want := Problem{Path: "panels[0].query.where[0]", Message: tc.message, Hint: "use namespace or service equality with a literal or single-value variable"}
-		if !errors.As(err, &got) || !slices.Contains(got, want) {
+		if !errors.As(err, &got) || !containsProblem(got, want) {
 			t.Fatalf("%s: got %v want %+v", tc.where, err, want)
 		}
 	}
