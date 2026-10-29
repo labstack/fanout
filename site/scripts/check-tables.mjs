@@ -38,7 +38,10 @@ function unwrappedTables(html) {
   for (;;) {
     const at = html.indexOf("<table", from);
     if (at === -1) return count;
-    const before = html.slice(Math.max(0, at - 200), at);
+    // Markdown can emit hundreds of whitespace-only text nodes before a wide
+    // table. They do not change its parent; exclude them from the look-behind
+    // budget while retaining the closing-div check below.
+    const before = html.slice(0, at).trimEnd().slice(-200);
     // Match the class token rather than the whole attribute. A wrapper emitted
     // by the rehype plugin carries exactly `class="table-wrap"`, but one
     // authored inside an Astro component gets the component's scoped class

@@ -1,5 +1,3 @@
 # Exact symbol<TAB>reviewed reason for genuine non-main entry points only.
 github.com/labstack/fanout/internal/auth.OAuthTokenPair.String	fmt.Stringer security boundary: formatting token pairs must redact both credentials; not a callable product action.
 github.com/labstack/fanout/internal/fanql.expectAt	Completion parser contract seam for token and expected-class fixtures; Complete shares its underlying context parser to avoid parsing twice.
-github.com/labstack/fanout/internal/panel.LowCardinalityColumns	FanQL completion/reference library entry point; production consumers land in batch 1 Tasks 7–10.
-github.com/labstack/fanout/internal/telemetry.SeverityAliases	Shared FanQL vocabulary/reference library entry point; production consumers land in batch 1 Tasks 8–10.
