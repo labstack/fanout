@@ -5,6 +5,10 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Settings from "./settings";
 
+const app = vi.hoisted(() => ({ agentAvailable: true }));
+vi.mock("./app-context", () => ({ useFanoutApp: () => app }));
+beforeEach(() => { app.agentAvailable = true; });
+
 const fetchMock = vi.fn<typeof fetch>();
 const agentsFetchMock = vi.fn<typeof fetch>();
 let role = "admin";
@@ -49,6 +53,24 @@ describe("connect telemetry", () => {
     fetchMock.mockImplementation(async () => json(connection));
   });
   afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+
+  it.each([false, true])("shows chat setup guidance only when agent_available=%s is false", async (available) => {
+    app.agentAvailable = available;
+    const root = await mount();
+    try {
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Connected agents"));
+      expect(document.body.textContent?.includes("Chat is disabled")).toBe(!available);
+      expect(document.body.textContent?.includes("FANOUT_AI_PROVIDER")).toBe(!available);
+      if (!available) {
+        expect(document.body.textContent).toContain("anthropic");
+        expect(document.body.textContent).toContain("ANTHROPIC_API_KEY");
+        expect(document.body.textContent).toContain("openai");
+        expect(document.body.textContent).toContain("OPENAI_API_KEY");
+        expect(document.body.textContent).toContain("Claude, Codex, or ChatGPT");
+        expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/guides/connect-over-mcp"]')).not.toBeNull();
+      }
+    } finally { await act(async () => root.unmount()); }
+  });
 
   it("gives the collector its own endpoint and leaves the token an environment variable", async () => {
     const root = await mount();
