@@ -30,6 +30,7 @@ type Compare struct {
 	Field Field
 	Op    string
 	Value Value
+	Bands []string
 	At    Span
 }
 type In struct {
@@ -43,6 +44,7 @@ type Between struct {
 	Field   Field
 	Lo, Hi  Value
 	Negated bool
+	Bands   []string
 	At      Span
 }
 type Like struct {
@@ -77,8 +79,9 @@ type Comparison struct {
 	Value Value
 }
 type FreeText struct {
-	Value Value
-	At    Span
+	Value  Value
+	At     Span
+	column string // resolved search column: body on logs, operation on spans
 }
 
 // RawExpr is a raw SQL filter entry. Raw names its lexical token kind.

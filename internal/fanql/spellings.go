@@ -1,0 +1,37 @@
+package fanql
+
+import (
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var statusAliases = map[string]string{"error": "STATUS_CODE_ERROR", "ok": "STATUS_CODE_OK", "unset": "STATUS_CODE_UNSET"}
+var kindAliases = map[string]string{"server": "SPAN_KIND_SERVER", "client": "SPAN_KIND_CLIENT", "internal": "SPAN_KIND_INTERNAL", "producer": "SPAN_KIND_PRODUCER", "consumer": "SPAN_KIND_CONSUMER", "unspecified": "SPAN_KIND_UNSPECIFIED"}
+var typeAliases = map[string]string{"gauge": "gauge", "counter": "counter", "updown": "updown", "histogram": "histogram", "summary": "summary"}
+var identifierPath = regexp.MustCompile(`^[A-Za-z_][A-Za-z_0-9]*(\.[A-Za-z_][A-Za-z_0-9]*)*$`)
+var aliasName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
+
+func durationMS(text string) (float64, bool) {
+	text = strings.ToLower(text)
+	for _, u := range []struct {
+		name  string
+		scale float64
+	}{{"us", .001}, {"ms", 1}, {"s", 1000}, {"m", 60000}, {"h", 3600000}} {
+		if strings.HasSuffix(text, u.name) {
+			n, err := strconv.ParseFloat(strings.TrimSuffix(text, u.name), 64)
+			return n * u.scale, err == nil
+		}
+	}
+	return 0, false
+}
+
+func timestamp(text string) bool {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05Z07:00", "2006-01-02 15:04:05Z0700", "2006-01-02 15:04:05"} {
+		if _, err := time.Parse(layout, text); err == nil {
+			return true
+		}
+	}
+	return false
+}
