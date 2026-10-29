@@ -14,16 +14,19 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/labstack/fanout/internal/fanql"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type QueryTelemetryInput struct {
-	Panel     panel.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
-	Variables []panel.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
-	Time      *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
-	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
+	Panel        panel.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
+	Text         string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
+	FanQLVersion int                    `json:"fanql_version,omitempty" jsonschema:"FanQL version of text; this server reads 1"`
+	Variables    []panel.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
+	Time         *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
+	Vars         map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 type FragmentView struct {
 	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
@@ -160,6 +163,23 @@ func (s *Server) executeFragment(ctx context.Context, req panel.RunRequest) (Pan
 	return PanelFragment{Dashboard: req.Dashboard, Results: results, Vars: req.Vars}, nil
 }
 func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, input QueryTelemetryInput) (*mcp.CallToolResult, PanelFragment, error) {
+	if input.Text != "" && (input.Panel.Query != nil || input.Panel.SQL != "") {
+		return nil, PanelFragment{}, guidanceError("invalid_input", "text cannot be combined with panel.query or panel.sql")
+	}
+	if input.FanQLVersion != 0 && input.FanQLVersion != fanql.Version {
+		return nil, PanelFragment{}, guidanceError("unsupported_fanql_version", "this server reads FanQL 1")
+	}
+	if input.Text != "" {
+		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
+		if len(problems) != 0 {
+			messages := make([]string, len(problems))
+			for i, p := range problems {
+				messages[i] = p.Message
+			}
+			return nil, PanelFragment{}, guidanceError("invalid_fanql", strings.Join(messages, "; "))
+		}
+		input.Panel.Query = &compiled.Query
+	}
 	d := panel.Dashboard{Name: input.Panel.Title, Variables: input.Variables, Panels: []panel.Panel{input.Panel}}
 	return s.runFragment(ctx, panel.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
 }
