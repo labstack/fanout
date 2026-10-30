@@ -133,7 +133,17 @@ cmd/fanout/        process composition and the single entry point
 internal/          ingest, storage, query, agent, MCP, auth, alerts
 ui/host/           React browser host and shared MCP app renderer (build-time)
 docs/diagrams/     archify JSON sources and exported dual-theme SVGs
+docs/proposals/    numbered design proposals for significant changes
+docs/adr/          numbered architecture decision records
 ```
+
+## Design proposals and decisions
+
+Write a [design proposal](docs/proposals/README.md) before building a
+significant change to a capability, a public contract or a cross-cutting
+design. Record a settled decision that should not be re-argued as an
+[ADR](docs/adr/README.md). Agent working plans and scratch notes stay out of
+the repository.
 
 ## Commits and pull requests
 
