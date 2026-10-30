@@ -12,8 +12,8 @@ import (
 	"github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/writegate"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
@@ -76,13 +76,13 @@ func TestDetectorRetriesFailedQueriesAtUnchangedWatermark(t *testing.T) {
 				connector := &detectorFailureConnector{Connector: native}
 				db := sql.OpenDB(connector)
 				defer db.Close()
-				if err := query.CreateCacheTables(db); err != nil {
+				if err := engine.CreateCacheTables(db); err != nil {
 					t.Fatal(err)
 				}
 				createDetectorLogs(t, db)
 				end := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Hour)
 				seedDetectorRecoveryRollup(t, db, end)
-				d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+				d := NewDetector(&engine.Duck{DB: db}, DefaultDetectorConfig())
 				if withPrevious {
 					d.publishSnapshot(Snapshot{GeneratedAt: time.Now().Add(-time.Minute), evaluatedThrough: end.Add(-time.Minute), HealthScore: 85})
 					<-d.annotationBatches
@@ -128,7 +128,7 @@ func TestDetectorRetriesPersistenceAtUnchangedWatermark(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,13 +219,13 @@ func TestDetectorRetriesPatternFailureWithoutPublishingHealthySnapshot(t *testin
 			connector := &detectorFailureConnector{Connector: native}
 			db := sql.OpenDB(connector)
 			defer db.Close()
-			if err := query.CreateCacheTables(db); err != nil {
+			if err := engine.CreateCacheTables(db); err != nil {
 				t.Fatal(err)
 			}
 			createDetectorLogs(t, db)
 			end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
 			seedDetectorRecoveryRollup(t, db, end)
-			d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+			d := NewDetector(&engine.Duck{DB: db}, DefaultDetectorConfig())
 			if withPrevious {
 				d.runCheck(t.Context())
 				<-d.annotationBatches
@@ -264,13 +264,13 @@ func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
 	connector := &detectorFailureConnector{Connector: native, fail: "AS occurrence_count"}
 	db := sql.OpenDB(connector)
 	defer db.Close()
-	if err := query.CreateCacheTables(db); err != nil {
+	if err := engine.CreateCacheTables(db); err != nil {
 		t.Fatal(err)
 	}
 	createDetectorLogs(t, db)
 	end := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
 	seedDetectorRecoveryRollup(t, db, end)
-	d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{DB: db}, DefaultDetectorConfig())
 	for range 2 {
 		d.runCheck(t.Context())
 	}
@@ -318,7 +318,7 @@ func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -52,7 +52,7 @@ func TestUnknownToolsKeepJSONRPCFailures(t *testing.T) {
 
 type dashboardValidationFailure struct{ err error }
 
-func (v *dashboardValidationFailure) Validate(ctx context.Context, spec *panel.Dashboard) error {
+func (v *dashboardValidationFailure) Validate(ctx context.Context, spec *query.Dashboard) error {
 	if v.err != nil {
 		return v.err
 	}
@@ -70,7 +70,7 @@ func TestDashboardValidationProblemsUseInvalidSpecThroughMiddleware(t *testing.T
 	if _, err := s.dashboards.Replace(t.Context(), "owner", created.ID, spec, 1, agentAuthor("owner"), ""); err != nil {
 		t.Fatal(err)
 	}
-	problems := panel.Problems{{Path: "panels[0].query.sort", Message: "Binder Error: Unknown sort column missing", Hint: "Choose a known column"}, {Path: "name", Message: "Name required"}}
+	problems := query.Problems{{Path: "panels[0].query.sort", Message: "Binder Error: Unknown sort column missing", Hint: "Choose a known column"}, {Path: "name", Message: "Name required"}}
 	v.err = problems
 	session := connectTestClient(t, s, nil)
 	for _, tc := range []struct {
@@ -90,7 +90,7 @@ func TestDashboardValidationProblemsUseInvalidSpecThroughMiddleware(t *testing.T
 			for _, content := range []any{json.RawMessage(result.Content[0].(*mcp.TextContent).Text), result.StructuredContent} {
 				raw, err := json.Marshal(content)
 				var failure dashboardOutput
-				if err != nil || json.Unmarshal(raw, &failure) != nil || failure.Error == nil || failure.Error.Code != "invalid_spec" || failure.Error.Message != panel.PresentProblems(problems).Error() || !reflect.DeepEqual(failure.Problems, panel.PresentProblems(problems)) {
+				if err != nil || json.Unmarshal(raw, &failure) != nil || failure.Error == nil || failure.Error.Code != "invalid_spec" || failure.Error.Message != query.PresentProblems(problems).Error() || !reflect.DeepEqual(failure.Problems, query.PresentProblems(problems)) {
 					t.Fatalf("failure=%s err=%v", raw, err)
 				}
 			}
@@ -116,7 +116,7 @@ func TestOtherDashboardFailuresKeepTheirCodesThroughMiddleware(t *testing.T) {
 		{"replace_dashboard", "dashboard_version_conflict", "the dashboard changed since you read it; open it again and reapply the change", DashboardReplaceInput{ID: created.ID, Dashboard: spec, BaseVersion: 2}, nil},
 		{"edit_dashboard", "dashboard_version_conflict", "the dashboard changed since you read it; open it again and reapply the change", DashboardEditInput{ID: created.ID, BaseVersion: 2, Operations: []dashboard.Operation{{Op: "rename", Name: "Renamed"}}}, nil},
 		{"edit_dashboard", "tool_failed", "dashboard not found", DashboardEditInput{ID: "missing", Operations: []dashboard.Operation{{Op: "rename", Name: "Renamed"}}}, nil},
-		{"create_dashboard", "tool_failed", panel.ReadFailure, DashboardCreateInput{Dashboard: textDashboard("Unavailable")}, errors.New("open /srv/private/control.sqlite: failed")},
+		{"create_dashboard", "tool_failed", query.ReadFailure, DashboardCreateInput{Dashboard: textDashboard("Unavailable")}, errors.New("open /srv/private/control.sqlite: failed")},
 	} {
 		t.Run(tc.message, func(t *testing.T) {
 			v.err = tc.cause

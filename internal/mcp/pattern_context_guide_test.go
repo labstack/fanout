@@ -1,7 +1,7 @@
 package mcp
 
 import (
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,7 +24,7 @@ func TestPreviewPatternContextGuide(t *testing.T) {
 			t.Errorf("guide missing %q", term)
 		}
 	}
-	field, _ := reflect.TypeFor[panel.Panel]().FieldByName("Viz")
+	field, _ := reflect.TypeFor[query.Panel]().FieldByName("Viz")
 	if !strings.Contains(field.Tag.Get("jsonschema"), "dominant severity") {
 		t.Error("spec description omits log pattern context")
 	}

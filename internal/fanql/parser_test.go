@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func mustParse(t *testing.T, text string) *queryTree {
@@ -18,7 +18,7 @@ func mustParse(t *testing.T, text string) *queryTree {
 	return q
 }
 
-func wantProblem(t *testing.T, text, source, message, hint string) panel.Problems {
+func wantProblem(t *testing.T, text, source, message, hint string) query.Problems {
 	t.Helper()
 	q, ps := parse(text, source)
 	if q != nil || len(ps) == 0 {
@@ -85,7 +85,7 @@ func TestParseMixedAndOrIsRejectedWithFixIts(t *testing.T) {
 			ps := wantProblem(t, tc.text, "", "mixed and/or needs parentheses", "write "+tc.a+" or "+tc.b)
 			p := ps[0]
 			start := strings.Index(tc.text, tc.body)
-			span := panel.TextSpan{Start: start, End: start + len(tc.body)}
+			span := query.TextSpan{Start: start, End: start + len(tc.body)}
 			if *p.Span != span || len(p.FixIts) != 2 || p.FixIts[0].Span != span || p.FixIts[1].Span != span || p.FixIts[0].Text != tc.a || p.FixIts[1].Text != tc.b {
 				t.Fatal(p)
 			}
@@ -143,7 +143,7 @@ func TestParseValueClassification(t *testing.T) {
 
 func TestParseColonEndsWord(t *testing.T) {
 	ps := wantProblem(t, "spans where http.target:/a:b", "", "unexpected : after /a", `quote the value: http.target:"/a:b"`)
-	if *ps[0].Span != (panel.TextSpan{Start: 12, End: 28}) {
+	if *ps[0].Span != (query.TextSpan{Start: 12, End: 28}) {
 		t.Fatal(ps)
 	}
 	wantProblem(t, "logs where http://x:8080/y", "", "unexpected : after http", `quote the value: "http://x:8080/y"`)
@@ -232,35 +232,35 @@ func TestParseCalls(t *testing.T) {
 func TestParseStageMeasuresAndArithmetic(t *testing.T) {
 	q := mustParse(t, "spans | count_if(status:error) / count() * 100 as err_pct by http_route every 1m sort err_pct limit 10")
 	m := q.Stage.Measures[0]
-	mul, ok := m.Parsed.Expr.(panel.MeasureBinary)
+	mul, ok := m.Parsed.Expr.(query.MeasureBinary)
 	if !ok || mul.Op != '*' || m.Alias != "err_pct" {
 		t.Fatal(m)
 	}
-	div, ok := mul.L.(panel.MeasureBinary)
+	div, ok := mul.L.(query.MeasureBinary)
 	if !ok || div.Op != '/' {
 		t.Fatal(mul)
 	}
-	if _, ok := div.L.(*panel.MeasureCountIf); !ok {
+	if _, ok := div.L.(*query.MeasureCountIf); !ok {
 		t.Fatal(div)
 	}
-	if div.R.(panel.MeasureCall).Func != "count" || mul.R.(panel.MeasureConst).Value != 100 {
+	if div.R.(query.MeasureCall).Func != "count" || mul.R.(query.MeasureConst).Value != 100 {
 		t.Fatal(mul)
 	}
 	if q.Stage.By[0].Key != "http_route" || q.Stage.Bucket != "1m" || q.Sort.Key != "err_pct" || q.Sort.Ascending || q.Limit.N != 10 {
 		t.Fatal(q)
 	}
-	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Parsed.Expr.(panel.MeasureBinary)
-	if x.Op != '-' || x.L.(panel.MeasureCall).Func != "p95" || x.R.(panel.MeasureCall).Func != "p50" {
+	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Parsed.Expr.(query.MeasureBinary)
+	if x.Op != '-' || x.L.(query.MeasureCall).Func != "p95" || x.R.(query.MeasureCall).Func != "p50" {
 		t.Fatal(x)
 	}
-	x = mustParse(t, "spans | count() * -1 as neg").Stage.Measures[0].Parsed.Expr.(panel.MeasureBinary)
-	if x.R.(panel.MeasureNeg).X.(panel.MeasureConst).Value != 1 {
+	x = mustParse(t, "spans | count() * -1 as neg").Stage.Measures[0].Parsed.Expr.(query.MeasureBinary)
+	if x.R.(query.MeasureNeg).X.(query.MeasureConst).Value != 1 {
 		t.Fatal(x)
 	}
 	for _, s := range []string{"count()*100 as c100", "count()/count() as one", "count() * 1e3 as k", "count() * 1.5 as x", "(count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex"} {
 		mustParse(t, "spans | "+s)
 	}
-	c := mustParse(t, "spans | count() * 1e3 as k").Stage.Measures[0].Parsed.Expr.(panel.MeasureBinary).R.(panel.MeasureConst)
+	c := mustParse(t, "spans | count() * 1e3 as k").Stage.Measures[0].Parsed.Expr.(query.MeasureBinary).R.(query.MeasureConst)
 	if c.Value != 1000 || c.Text != "1e3" {
 		t.Fatal(c)
 	}
@@ -282,7 +282,7 @@ func TestParseExpressionRules(t *testing.T) {
 	if q.Stage.Histogram == nil || q.Stage.Histogram.Key != "duration" || len(q.Stage.By) != 1 {
 		t.Fatal(q)
 	}
-	x := mustParse(t, "spans | count(*)").Stage.Measures[0].Parsed.Expr.(panel.MeasureCall)
+	x := mustParse(t, "spans | count(*)").Stage.Measures[0].Parsed.Expr.(query.MeasureCall)
 	if x.Func != "count" {
 		t.Fatal(x)
 	}
@@ -371,7 +371,7 @@ func TestParseUnclosedAndUnmatched(t *testing.T) {
 		{"spans where duration>", "duration> needs a value; e.g. duration>500ms"},
 	} {
 		ps := wantProblem(t, tc.text, "", tc.message, "")
-		if strings.Contains(tc.text, "(a:1") && *ps[0].Span != (panel.TextSpan{Start: 12, End: 13}) {
+		if strings.Contains(tc.text, "(a:1") && *ps[0].Span != (query.TextSpan{Start: 12, End: 13}) {
 			t.Fatal(ps)
 		}
 	}
@@ -419,7 +419,7 @@ func TestParseBoundsAreEnforcedIndependently(t *testing.T) {
 func TestParseKeywordCaseFolding(t *testing.T) {
 	q := mustParse(t, "SPANS WHERE Service:API | COUNT() BY service EVERY 1M SORT COUNT LIMIT 5")
 	x := q.Where[0].(*comparison)
-	if q.Source != "spans" || x.Field.Key != "Service" || x.Value.Text != "API" || q.Stage.Measures[0].Parsed.Expr.(panel.MeasureCall).Func != "count" || q.Stage.Bucket != "1m" || q.Sort.Key != "count" {
+	if q.Source != "spans" || x.Field.Key != "Service" || x.Value.Text != "API" || q.Stage.Measures[0].Parsed.Expr.(query.MeasureCall).Func != "count" || q.Stage.Bucket != "1m" || q.Sort.Key != "count" {
 		t.Fatal(q, x)
 	}
 }
@@ -460,17 +460,17 @@ func TestParseGroupingFixItsRepairLongerChains(t *testing.T) {
 
 func TestParseApdexTree(t *testing.T) {
 	q := mustParse(t, "spans | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex")
-	var walk func(panel.MeasureExpr) (int, int)
-	walk = func(x panel.MeasureExpr) (int, int) {
+	var walk func(query.MeasureExpr) (int, int)
+	walk = func(x query.MeasureExpr) (int, int) {
 		switch x := x.(type) {
-		case panel.MeasureBinary:
+		case query.MeasureBinary:
 			ld, ln := walk(x.L)
 			rd, rn := walk(x.R)
 			return max(ld, rd) + 1, ln + rn
-		case panel.MeasureNeg:
+		case query.MeasureNeg:
 			d, n := walk(x.X)
 			return d + 1, n
-		case panel.MeasureCall, *panel.MeasureCountIf:
+		case query.MeasureCall, *query.MeasureCountIf:
 			return 1, 1
 		default:
 			return 1, 0

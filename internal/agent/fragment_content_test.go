@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"reflect"
 	"strings"
@@ -66,7 +66,7 @@ func TestFragmentActivityPersistsExactContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, panel.NewExecutor(nil, 30), nil, "test")
+	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, query.NewExecutor(nil, 30), nil, "test")
 	tools, err := NewToolRegistry(t.Context(), server.MCP())
 	if err != nil {
 		t.Fatal(err)

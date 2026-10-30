@@ -147,7 +147,7 @@
       "row": 1,
       "sources": [
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 240,
           "end_line": 244
         }
@@ -162,12 +162,12 @@
       "row": 2,
       "sources": [
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 627,
           "end_line": 653
         },
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 692,
           "end_line": 693
         },
@@ -187,17 +187,17 @@
       "row": 1,
       "sources": [
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 505,
           "end_line": 522
         },
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 1437,
           "end_line": 1437
         },
         {
-          "path": "internal/query/duck.go",
+          "path": "internal/engine/duck.go",
           "line": 1622,
           "end_line": 1622
         }

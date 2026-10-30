@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -16,7 +16,7 @@ import (
 
 type cancelValidator struct{}
 
-func (cancelValidator) Validate(ctx context.Context, _ *panel.Dashboard) error { return ctx.Err() }
+func (cancelValidator) Validate(ctx context.Context, _ *query.Dashboard) error { return ctx.Err() }
 
 func newToolServer(t *testing.T, validator dashboard.Validator, panels panelExecutor) *Server {
 	t.Helper()
@@ -39,8 +39,8 @@ func requestFor(owner string) *mcp.CallToolRequest {
 	return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{dashboard.OwnerMetaKey: owner}}}
 }
 
-func textDashboard(name string) panel.Dashboard {
-	return panel.Dashboard{Name: name, Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+func textDashboard(name string) query.Dashboard {
+	return query.Dashboard{Name: name, Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 }
 
 func TestCreateDashboardAcceptsTheDocumentedShape(t *testing.T) {
@@ -112,7 +112,7 @@ func TestStaleBaseVersionIsReportedAndMatchingOneSucceeds(t *testing.T) {
 func TestInvalidSpecsReturnProblemsWithPaths(t *testing.T) {
 	s := newPanelServer(t)
 	ctx := t.Context()
-	bad := panel.Dashboard{Name: "Bad", Panels: []panel.Panel{{ID: "typo", Title: "Typo", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"p95(duraton_ms)"}}}}}
+	bad := query.Dashboard{Name: "Bad", Panels: []query.Panel{{ID: "typo", Title: "Typo", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"p95(duraton_ms)"}}}}}
 	result, out, err := s.dashboardCreate(ctx, requestFor("owner"), DashboardCreateInput{Dashboard: bad})
 	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || !strings.Contains(out.Error.Message, "panels[0]") {
 		t.Fatalf("create = %+v %v", out, err)
@@ -163,7 +163,7 @@ func TestOtherOwnersDashboardIsNotFound(t *testing.T) {
 func TestSaveRejectsPanelsItCannotPreview(t *testing.T) {
 	panels := newPanelServer(t).panels
 	s := newToolServer(t, structural{}, panels)
-	spec := panel.Dashboard{Name: "Unchecked", Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Where: []string{"service = = 'x'"}, Measures: []string{"count()"}}}}}
+	spec := query.Dashboard{Name: "Unchecked", Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Where: []string{"service = = 'x'"}, Measures: []string{"count()"}}}}}
 	result, out, err := s.dashboardCreate(t.Context(), requestFor("owner"), DashboardCreateInput{Dashboard: spec})
 	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || out.Dashboard != nil || out.Receipt != nil {
 		t.Fatalf("save=%+v err=%v", out, err)

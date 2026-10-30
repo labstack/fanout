@@ -16,7 +16,7 @@ SELECT * FROM alerts WHERE rule_id = ? ORDER BY created_at DESC;
 -- name: UpsertAlert :one
 INSERT INTO alerts (
     id, rule_id, service, state, value, fired_at, resolved_at,
-    repeated_at, last_eval, last_delivery_status, last_delivery_at
+    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(rule_id, service) DO UPDATE SET
     state = excluded.state,
@@ -24,7 +24,7 @@ ON CONFLICT(rule_id, service) DO UPDATE SET
     fired_at = excluded.fired_at,
     resolved_at = excluded.resolved_at,
     repeated_at = excluded.repeated_at,
-    last_eval = excluded.last_eval,
+    last_evaluated_at = excluded.last_evaluated_at,
     last_delivery_status = excluded.last_delivery_status,
     last_delivery_at = excluded.last_delivery_at
 RETURNING *;

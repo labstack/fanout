@@ -4,8 +4,8 @@ import (
 	"context"
 	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/writegate"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"testing"
 	"time"
@@ -18,7 +18,7 @@ func TestDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestDetectorPublishesWhilePersistenceBlocked(t *testing.T) {
 }
 
 func TestDetectorCoalescesPendingPersistence(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	entered := make(chan time.Time, 3)
@@ -109,7 +109,7 @@ func TestDetectorAnnotationMapping(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestDetectorAnnotationMapping(t *testing.T) {
 }
 
 func TestDetectorWritesFailedFindingsWithTheNextBatch(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	calls := make(chan []annotations.Anomaly, 2)
@@ -173,7 +173,7 @@ func TestDetectorWritesFailedFindingsWithTheNextBatch(t *testing.T) {
 }
 
 func TestDetectorKeepsDisplacedPendingIncidentAndItsInterval(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	ctx, cancel := context.WithCancel(t.Context())
 	entered := make(chan annotationBatch, 3)
 	release := make(chan struct{})
@@ -215,7 +215,7 @@ func TestDetectorKeepsDisplacedPendingIncidentAndItsInterval(t *testing.T) {
 }
 
 func TestDetectorBoundsPendingFindings(t *testing.T) {
-	d := NewDetector(&query.Duck{}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{}, DefaultDetectorConfig())
 	now := time.Now().UTC()
 	for _, count := range []int{maxCarriedAnomalies + 1, 1} {
 		findings := make([]Anomaly, count)

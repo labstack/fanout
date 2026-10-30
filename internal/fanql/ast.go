@@ -1,6 +1,6 @@
 package fanql
 
-import "github.com/labstack/fanout/internal/panel"
+import "github.com/labstack/fanout/internal/query"
 
 type queryTree struct {
 	Source     string
@@ -116,7 +116,7 @@ type fieldName struct {
 type fieldRef struct {
 	Column    string
 	Key       string
-	Type      panel.FieldType
+	Type      query.FieldType
 	Unit      string
 	CompareAs string
 }
@@ -148,8 +148,8 @@ type aggregation struct {
 	At        span
 }
 type measureNode struct {
-	Parsed  panel.Measure
-	Info    map[panel.MeasureExpr]*measureSource
+	Parsed  query.Measure
+	Info    map[query.MeasureExpr]*measureSource
 	Alias   string
 	At      span
 	Filters map[string]filterExpr

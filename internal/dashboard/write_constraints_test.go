@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"strings"
 	"sync"
 	"testing"
@@ -16,7 +16,7 @@ type deadlineValidator struct {
 	seen bool
 }
 
-func (v *deadlineValidator) Validate(ctx context.Context, _ *panel.Dashboard) error {
+func (v *deadlineValidator) Validate(ctx context.Context, _ *query.Dashboard) error {
 	deadline, ok := ctx.Deadline()
 	v.seen = true
 	if !ok || time.Until(deadline) > 20*time.Second || time.Until(deadline) < 19*time.Second {
@@ -66,8 +66,8 @@ func TestRemoveAndReplacePreserveGrid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.Spec.Panels[0].Grid = &panel.Grid{X: 0, Y: 0, W: 8, H: 3}
-	r.Spec.Panels[1].Grid = &panel.Grid{X: 8, Y: 0, W: 4, H: 3}
+	r.Spec.Panels[0].Grid = &query.Grid{X: 0, Y: 0, W: 8, H: 3}
+	r.Spec.Panels[1].Grid = &query.Grid{X: 8, Y: 0, W: 4, H: 3}
 	r, err = s.Replace(t.Context(), "owner", r.ID, r.Spec, 1, Author{Kind: "user"}, "Widen A")
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestRemoveAndReplacePreserveGrid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *r.Spec.Panels[0].Grid != (panel.Grid{X: 0, Y: 0, W: 8, H: 3}) || *r.Spec.Panels[1].Grid != (panel.Grid{X: 0, Y: 3, W: 12, H: 3}) {
+	if *r.Spec.Panels[0].Grid != (query.Grid{X: 0, Y: 0, W: 8, H: 3}) || *r.Spec.Panels[1].Grid != (query.Grid{X: 0, Y: 3, W: 12, H: 3}) {
 		t.Fatalf("removed layout=%+v %+v", r.Spec.Panels[0].Grid, r.Spec.Panels[1].Grid)
 	}
 	for i := range r.Spec.Panels {
@@ -95,7 +95,7 @@ func TestDashboardOwnerLimit(t *testing.T) {
 		}
 	}
 	_, err := s.Create(t.Context(), "owner", textSpec("overflow"), agent)
-	var p panel.Problems
+	var p query.Problems
 	if !errors.As(err, &p) || !strings.Contains(p.Error(), "500") {
 		t.Fatalf("limit error=%v", err)
 	}
@@ -116,7 +116,7 @@ func TestConcurrentCreatesRespectOwnerLimit(t *testing.T) {
 	for i := range 16 {
 		wg.Go(func() {
 			_, err := s.Create(t.Context(), "owner", textSpec(fmt.Sprintf("last%d", i)), agent)
-			var p panel.Problems
+			var p query.Problems
 			if err != nil && !errors.As(err, &p) {
 				t.Errorf("create error=%v", err)
 			}
@@ -139,9 +139,9 @@ func TestConcurrentCreatesRespectOwnerLimit(t *testing.T) {
 func TestReplaceWithoutGridsKeepsExistingLayout(t *testing.T) {
 	s := newTestService(t)
 	spec := threePanels()
-	spec.Panels[0].Grid = &panel.Grid{X: 1, Y: 0, W: 8, H: 4}
-	spec.Panels[1].Grid = &panel.Grid{X: 9, Y: 0, W: 3, H: 3}
-	spec.Panels[2].Grid = &panel.Grid{X: 0, Y: 4, W: 12, H: 3}
+	spec.Panels[0].Grid = &query.Grid{X: 1, Y: 0, W: 8, H: 4}
+	spec.Panels[1].Grid = &query.Grid{X: 9, Y: 0, W: 3, H: 3}
+	spec.Panels[2].Grid = &query.Grid{X: 0, Y: 4, W: 12, H: 3}
 	r, err := s.Create(t.Context(), "owner", spec, agent)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestReplaceWithoutGridsKeepsExistingLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *r.Spec.Panels[0].Grid != (panel.Grid{X: 1, Y: 0, W: 8, H: 4}) {
+	if *r.Spec.Panels[0].Grid != (query.Grid{X: 1, Y: 0, W: 8, H: 4}) {
 		t.Fatalf("carryover grid=%+v", r.Spec.Panels[0].Grid)
 	}
 }

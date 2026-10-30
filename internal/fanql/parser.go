@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 const (
@@ -28,12 +28,12 @@ type parser struct {
 	clauseID        int
 	reported        map[int]bool
 	structural      map[int]int
-	measureInfo     map[panel.MeasureExpr]*measureSource
+	measureInfo     map[query.MeasureExpr]*measureSource
 	vocab           vocabulary
 	tokens          lexTokens
 	runes           []rune
 	i               int
-	problems        panel.Problems
+	problems        query.Problems
 	bounded         bool
 	nodes, depth    int
 	heights         map[any]int
@@ -67,7 +67,7 @@ func (p *parser) expectTerm(nested bool) {
 // allocation. Other panics remain visible to callers and tests.
 type parseBound struct{}
 
-func parseWith(text string, source string, vocab vocabulary) (q *queryTree, problems panel.Problems) {
+func parseWith(text string, source string, vocab vocabulary) (q *queryTree, problems query.Problems) {
 	p := &parser{vocab: vocab, runes: []rune(text), bounded: true, heights: make(map[any]int)}
 	defer func() {
 		if v := recover(); v != nil {
@@ -99,7 +99,7 @@ func parseWith(text string, source string, vocab vocabulary) (q *queryTree, prob
 }
 
 // parseEntry is the unbounded internal entry parser used by the lift gate.
-func parseEntry(text string) (filterExpr, panel.Problems) {
+func parseEntry(text string) (filterExpr, query.Problems) {
 	p := &parser{vocab: currentVocabulary(), runes: []rune(text), tokens: lex(text), heights: make(map[any]int)}
 	terms := p.filters(false)
 	for p.peek().Kind != eof {
@@ -162,7 +162,7 @@ func (p *parser) issue(at span, message, hint string) {
 		return
 	}
 	p.reported[p.clauseID] = true
-	p.problems = append(p.problems, panel.Problem{Path: "text", Message: message, Hint: hint, Span: &panel.TextSpan{Start: at.Start, End: at.End}})
+	p.problems = append(p.problems, query.Problem{Path: "text", Message: message, Hint: hint, Span: &query.TextSpan{Start: at.Start, End: at.End}})
 }
 func (p *parser) report(at span, code diagnosticCode, args ...any) {
 	p.issue(at, diagnostic(code, args...), hint(code))
@@ -196,12 +196,12 @@ func (p *parser) node(x any, children ...any) {
 		p.bound(x.(interface{ Span() span }).Span(), diagDepthBound)
 	}
 }
-func (p *parser) finish() panel.Problems {
+func (p *parser) finish() query.Problems {
 	sort.SliceStable(p.problems, func(i, j int) bool { return p.problems[i].Span.Start < p.problems[j].Span.Start })
 	if len(p.problems) > maxProblems {
 		at := *p.problems[maxProblems].Span
 		p.problems = p.problems[:maxProblems]
-		p.problems = append(p.problems, panel.Problem{Path: "text", Message: diagnostic(diagMore), Span: &at})
+		p.problems = append(p.problems, query.Problem{Path: "text", Message: diagnostic(diagMore), Span: &at})
 	}
 	return p.problems
 }
@@ -400,9 +400,9 @@ func (p *parser) filters(nested bool) []filterExpr {
 			p.structural = map[int]int{}
 		}
 		p.structural[p.clauseID]++
-		span := panel.TextSpan{Start: at.Start, End: at.End}
+		span := query.TextSpan{Start: at.Start, End: at.End}
 		if len(p.problems) > before {
-			p.problems[len(p.problems)-1].FixIts = []panel.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
+			p.problems[len(p.problems)-1].FixIts = []query.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
 		}
 	}
 	if mode == "or" && len(terms) > 1 {
@@ -1149,7 +1149,7 @@ func (p *parser) parseLimit() *limitClause {
 
 func (p *parser) stage(start int) *aggregation {
 	p.beginClause()
-	p.measureInfo = map[panel.MeasureExpr]*measureSource{}
+	p.measureInfo = map[query.MeasureExpr]*measureSource{}
 	s := &aggregation{At: span{Start: start}}
 	if p.completion {
 		p.completionQuery.Stage = s
@@ -1172,7 +1172,7 @@ func (p *parser) stage(start int) *aggregation {
 		}
 		expr := p.measureExpression(0)
 		if expr != nil {
-			m := measureNode{Parsed: panel.Measure{Expr: expr}, At: p.measureSpan(expr), Info: p.measureInfo, Filters: map[string]filterExpr{}}
+			m := measureNode{Parsed: query.Measure{Expr: expr}, At: p.measureSpan(expr), Info: p.measureInfo, Filters: map[string]filterExpr{}}
 			if modifiers[p.lower()] && p.eat("as") {
 				t := p.peek()
 				if t.Kind == tokenIdent {
@@ -1186,8 +1186,8 @@ func (p *parser) stage(start int) *aggregation {
 			if leaves == 0 {
 				p.report(p.measureSpan(expr), diagAggregate)
 			}
-			_, call := expr.(panel.MeasureCall)
-			_, countIf := expr.(*panel.MeasureCountIf)
+			_, call := expr.(query.MeasureCall)
+			_, countIf := expr.(*query.MeasureCountIf)
 			if distribution && !call {
 				p.report(p.measureSpan(expr), diagHistogram)
 			}
@@ -1199,7 +1199,7 @@ func (p *parser) stage(start int) *aggregation {
 					p.report(p.measureSpan(expr), diagShare)
 				}
 			}
-			if call, ok := expr.(panel.MeasureCall); ok && call.Func == "histogram" {
+			if call, ok := expr.(query.MeasureCall); ok && call.Func == "histogram" {
 				if s.Histogram != nil || len(s.Measures) > 0 {
 					p.report(p.measureSpan(call), diagHistogram)
 				}
@@ -1294,15 +1294,15 @@ func (p *parser) stage(start int) *aggregation {
 	return s
 }
 
-func (p *parser) measureSpan(e panel.MeasureExpr) span { return p.measureInfo[e].at }
-func (p *parser) measureExpression(minPrec int) panel.MeasureExpr {
-	g := panel.MeasureGrammar{
+func (p *parser) measureSpan(e query.MeasureExpr) span { return p.measureInfo[e].at }
+func (p *parser) measureExpression(minPrec int) query.MeasureExpr {
+	g := query.MeasureGrammar{
 		Peek: func() string { return grammarText(p.peek()) }, Take: func() { p.take() }, Position: func() int { return p.peek().Span.Start },
 		CanAtom: func() bool {
 			t := p.peek()
 			return t.Kind == tokenNumber || t.Kind == tokenBad || t.Kind == tokenIdent && t.Text != "as"
 		},
-		Atom: func() panel.MeasureExpr {
+		Atom: func() query.MeasureExpr {
 			p.expectNext(expect{Class: "measure"})
 			t := p.peek()
 			if t.Kind == tokenNumber {
@@ -1312,7 +1312,7 @@ func (p *parser) measureExpression(minPrec int) panel.MeasureExpr {
 					p.report(t.Span, diagMeasure)
 					return nil
 				}
-				x := panel.MeasureConst{Value: v, Text: t.Text}
+				x := query.MeasureConst{Value: v, Text: t.Text}
 				p.recordMeasure(x, t.Span)
 				return x
 			}
@@ -1329,19 +1329,19 @@ func (p *parser) measureExpression(minPrec int) panel.MeasureExpr {
 			}
 			return nil
 		},
-		Node: func(e panel.MeasureExpr, start int, children ...panel.MeasureExpr) panel.MeasureExpr {
+		Node: func(e query.MeasureExpr, start int, children ...query.MeasureExpr) query.MeasureExpr {
 			p.recordMeasure(e, span{start, p.previousEnd()}, children...)
 			return e
 		},
-		Group: func(e panel.MeasureExpr, start int) { info := p.measureInfo[e]; info.at = span{start, p.previousEnd()} },
+		Group: func(e query.MeasureExpr, start int) { info := p.measureInfo[e]; info.at = span{start, p.previousEnd()} },
 		Enter: func(start int) { p.enter(span{start, start + 1}) }, Leave: p.leave,
 		Depth: func(int) bool { return true }, OK: func() bool { return true },
-		Fail: func(code panel.MeasureSyntaxCode, op string, start int) {
+		Fail: func(code query.MeasureSyntaxCode, op string, start int) {
 			at := span{start, start + len(op)}
 			switch code {
-			case panel.MeasureMissingOperand:
+			case query.MeasureMissingOperand:
 				p.report(at, diagMeasureSides, op)
-			case panel.MeasureMissingClose:
+			case query.MeasureMissingClose:
 				p.report(span{start, start + 1}, diagUnclosedGroup)
 			default:
 				p.report(p.peek().Span, diagMeasure)
@@ -1351,12 +1351,12 @@ func (p *parser) measureExpression(minPrec int) panel.MeasureExpr {
 			}
 		},
 	}
-	e, _ := panel.ReadMeasureExpression(g, minPrec, 0)
+	e, _ := query.ReadMeasureExpression(g, minPrec, 0)
 	return e
 }
-func (p *parser) recordMeasure(e panel.MeasureExpr, at span, children ...panel.MeasureExpr) {
+func (p *parser) recordMeasure(e query.MeasureExpr, at span, children ...query.MeasureExpr) {
 	if p.measureInfo == nil {
-		p.measureInfo = map[panel.MeasureExpr]*measureSource{}
+		p.measureInfo = map[query.MeasureExpr]*measureSource{}
 	}
 	p.measureInfo[e] = &measureSource{at: at}
 	p.nodes++
@@ -1373,7 +1373,7 @@ func (p *parser) recordMeasure(e panel.MeasureExpr, at span, children ...panel.M
 	}
 }
 
-func (p *parser) measureCall() panel.MeasureExpr {
+func (p *parser) measureCall() query.MeasureExpr {
 	name := p.take()
 	open := p.take()
 	at := span{Start: name.Span.Start}
@@ -1388,7 +1388,7 @@ func (p *parser) measureCall() panel.MeasureExpr {
 		}
 		p.leave()
 		at.End = p.previousEnd()
-		x := &panel.MeasureCountIf{}
+		x := &query.MeasureCountIf{}
 		p.recordMeasure(x, at)
 		if filter != nil {
 			p.heights[x] = p.heights[filter] + 1
@@ -1399,7 +1399,7 @@ func (p *parser) measureCall() panel.MeasureExpr {
 		p.measureInfo[x].filter = filter
 		return x
 	}
-	x := panel.MeasureCall{Func: strings.ToLower(name.Text), Field: &panel.FieldRef{}}
+	x := query.MeasureCall{Func: strings.ToLower(name.Text), Field: &query.FieldRef{}}
 	var args []measureArgument
 	p.expectNext(expect{Class: "marg", Func: x.Func, Arg: 0})
 	for p.peek().Kind != eof && !p.is(")") && !p.is("|") {
@@ -1467,17 +1467,17 @@ func (p *parser) measureCall() panel.MeasureExpr {
 	return x
 }
 
-func measureLeaves(x panel.MeasureExpr) (int, bool, bool) {
+func measureLeaves(x query.MeasureExpr) (int, bool, bool) {
 	switch x := x.(type) {
-	case panel.MeasureCall:
+	case query.MeasureCall:
 		return 1, x.Func == "share", x.Func == "histogram"
-	case panel.MeasureCountIf, *panel.MeasureCountIf:
+	case query.MeasureCountIf, *query.MeasureCountIf:
 		return 1, false, false
-	case panel.MeasureBinary:
+	case query.MeasureBinary:
 		l, ls, lh := measureLeaves(x.L)
 		r, rs, rh := measureLeaves(x.R)
 		return l + r, ls || rs, lh || rh
-	case panel.MeasureNeg:
+	case query.MeasureNeg:
 		return measureLeaves(x.X)
 	}
 	return 0, false, false
@@ -1488,7 +1488,7 @@ func fieldExample(field fieldName, op string) string {
 		return "value"
 	}
 	name := strings.ToLower(field.Key)
-	if vocabulary := panel.FieldVocabularies()[name]; len(vocabulary.Order) > 0 {
+	if vocabulary := query.FieldVocabularies()[name]; len(vocabulary.Order) > 0 {
 		return vocabulary.Order[0]
 	}
 	switch name {
@@ -1506,18 +1506,18 @@ func fieldExample(field fieldName, op string) string {
 	case "enabled":
 		return "true"
 	}
-	var columns []panel.Field
-	for _, source := range panel.SignalNames() {
-		if cols, ok := panel.SignalColumns(source); ok {
+	var columns []query.Field
+	for _, source := range query.SignalNames() {
+		if cols, ok := query.SignalColumns(source); ok {
 			columns = append(columns, cols...)
 		}
 	}
 	for _, column := range columns {
 		if column.Name == name {
 			switch column.Type {
-			case panel.TypeNumber:
+			case query.TypeNumber:
 				return "1000"
-			case panel.TypeTime:
+			case query.TypeTime:
 				return `"2026-10-29T10:00:00Z"`
 			}
 		}
@@ -1528,7 +1528,7 @@ func fieldExample(field fieldName, op string) string {
 func listExamples(field fieldName) string {
 	if field.Scope == "" && !field.Bracket {
 		name := strings.ToLower(field.Key)
-		if vocabulary := panel.FieldVocabularies()[name]; len(vocabulary.Order) > 1 {
+		if vocabulary := query.FieldVocabularies()[name]; len(vocabulary.Order) > 1 {
 			return strings.Join(vocabulary.Order[:2], ", ")
 		}
 		switch name {

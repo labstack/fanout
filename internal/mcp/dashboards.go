@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -20,12 +20,12 @@ type DashboardIDInput struct {
 }
 
 type DashboardCreateInput struct {
-	Dashboard panel.Dashboard `json:"dashboard" jsonschema:"Complete v1 dashboard spec"`
+	Dashboard query.Dashboard `json:"dashboard" jsonschema:"Complete v1 dashboard spec"`
 }
 
 type DashboardReplaceInput struct {
 	ID          string          `json:"id" jsonschema:"Dashboard ID"`
-	Dashboard   panel.Dashboard `json:"dashboard" jsonschema:"Complete replacement spec; omitted panels are removed"`
+	Dashboard   query.Dashboard `json:"dashboard" jsonschema:"Complete replacement spec; omitted panels are removed"`
 	BaseVersion int             `json:"base_version,omitempty" jsonschema:"Version you read; the call fails if someone saved since"`
 	Message     string          `json:"message,omitempty" jsonschema:"One line describing the change, shown in history"`
 }
@@ -66,7 +66,7 @@ type dashboardOutput struct {
 	Warnings  []string          `json:"warnings,omitempty"`
 	Receipt   *dashboardReceipt `json:"receipt,omitempty"`
 	Error     *toolerror.Error  `json:"error,omitempty"`
-	Problems  panel.Problems    `json:"problems,omitempty"`
+	Problems  query.Problems    `json:"problems,omitempty"`
 }
 
 type savedPanelCheck struct {
@@ -254,7 +254,7 @@ func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, in
 	return s.saved(ctx, "Updated", record)
 }
 
-func (s *Server) checkDashboardPanels(ctx context.Context, spec panel.Dashboard) error {
+func (s *Server) checkDashboardPanels(ctx context.Context, spec query.Dashboard) error {
 	telemetry := false
 	for _, p := range spec.Panels {
 		telemetry = telemetry || p.Viz != "text"
@@ -265,15 +265,15 @@ func (s *Server) checkDashboardPanels(ctx context.Context, spec panel.Dashboard)
 	if s.panels == nil {
 		return errors.New("panels are unavailable")
 	}
-	results, err := s.panels.Run(ctx, panel.RunRequest{Dashboard: spec})
+	results, err := s.panels.Run(ctx, query.RunRequest{Dashboard: spec})
 	if err != nil {
 		return err
 	}
-	byID := make(map[string]panel.Result, len(results))
+	byID := make(map[string]query.Result, len(results))
 	for _, r := range results {
 		byID[r.ID] = r
 	}
-	var problems panel.Problems
+	var problems query.Problems
 	for i, p := range spec.Panels {
 		if p.Viz == "text" {
 			continue
@@ -281,17 +281,17 @@ func (s *Server) checkDashboardPanels(ctx context.Context, spec panel.Dashboard)
 		r, exists := byID[p.ID]
 		// Execution status records data presence before the shared batch budget
 		// truncates frames, which can remove every row from a populated panel.
-		if exists && r.Status == panel.StatusOK {
+		if exists && r.Status == query.StatusOK {
 			continue
 		}
-		diagnosis := panel.PresentDiagnosis(r.Diagnosis)
+		diagnosis := query.PresentDiagnosis(r.Diagnosis)
 		if diagnosis == "" {
-			diagnosis = panel.PresentMessage(r.Error)
+			diagnosis = query.PresentMessage(r.Error)
 		}
 		if diagnosis == "" {
 			diagnosis = "Preview returned no rows."
 		}
-		problems = append(problems, panel.DiagnosisProblem(fmt.Sprintf("panels[%d]", i), fmt.Sprintf("%s: %s", p.Title, diagnosis), "Replace or drop this panel; dashboards contain only panels that return data."))
+		problems = append(problems, query.DiagnosisProblem(fmt.Sprintf("panels[%d]", i), fmt.Sprintf("%s: %s", p.Title, diagnosis), "Replace or drop this panel; dashboards contain only panels that return data."))
 	}
 	if len(problems) > 0 {
 		return problems
@@ -348,18 +348,18 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 		check.Reason = "panels are unavailable"
 	} else {
 		checkCtx, cancel := context.WithTimeout(ctx, saveCheckBudget)
-		results, err := s.panels.Run(checkCtx, panel.RunRequest{Dashboard: record.Spec})
+		results, err := s.panels.Run(checkCtx, query.RunRequest{Dashboard: record.Spec})
 		if err == nil {
 			err = checkCtx.Err()
 		}
 		cancel()
 		if err != nil {
-			check.Reason = panel.PresentError(err, panel.ReadError)
+			check.Reason = query.PresentError(err, query.ReadError)
 			if errors.Is(err, context.DeadlineExceeded) {
 				check.Reason = fmt.Sprintf("the check took longer than %d seconds", int(saveCheckBudget/time.Second))
 			}
 		} else {
-			byID := map[string][]panel.Result{}
+			byID := map[string][]query.Result{}
 			expected := map[string]bool{}
 			for _, p := range record.Spec.Panels {
 				expected[p.ID] = true
@@ -378,24 +378,24 @@ func (s *Server) saved(ctx context.Context, verb string, mutation dashboard.Muta
 					continue
 				}
 				r := matches[0]
-				if r.Status != panel.StatusOK && r.Status != panel.StatusEmpty && r.Status != panel.StatusError {
+				if r.Status != query.StatusOK && r.Status != query.StatusEmpty && r.Status != query.StatusError {
 					complete = false
 					continue
 				}
-				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: panel.PresentDiagnosis(r.Diagnosis), ElapsedMS: &r.ElapsedMS}
+				c := savedPanelCheck{ID: r.ID, Status: r.Status, Diagnosis: query.PresentDiagnosis(r.Diagnosis), ElapsedMS: &r.ElapsedMS}
 				if r.Frame != nil {
 					c.Rows = r.Frame.Rows
-				} else if r.Status == panel.StatusOK && p.Viz == "text" && strings.TrimSpace(p.Content) != "" {
+				} else if r.Status == query.StatusOK && p.Viz == "text" && strings.TrimSpace(p.Content) != "" {
 					c.Rows = 1
 				}
 				if r.Error != "" {
-					c.Error = panel.PresentMessage(r.Error)
+					c.Error = query.PresentMessage(r.Error)
 				}
 				check.Panels[i] = c
 				switch r.Status {
-				case panel.StatusEmpty:
+				case query.StatusEmpty:
 					out.Warnings = append(out.Warnings, fmt.Sprintf("%s is empty: %s", r.ID, c.Diagnosis))
-				case panel.StatusError:
+				case query.StatusError:
 					out.Warnings = append(out.Warnings, fmt.Sprintf("%s failed: %s", r.ID, c.Error))
 				}
 			}
@@ -448,13 +448,13 @@ func dashboardOwner(req *mcp.CallToolRequest) (string, error) {
 }
 
 func dashboardToolError(err error) (*mcp.CallToolResult, dashboardOutput, error) {
-	var problems panel.Problems
+	var problems query.Problems
 	code, message := "", ""
 	switch {
 	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 		return nil, dashboardOutput{}, safePanelToolError(err)
 	case errors.As(err, &problems):
-		problems = panel.PresentProblems(problems)
+		problems = query.PresentProblems(problems)
 		code, message = "invalid_spec", problems.Error()
 	case errors.Is(err, dashboard.ErrVersionNotFound):
 		code, message = dashboard.VersionNotFoundCode, err.Error()

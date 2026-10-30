@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -64,7 +64,7 @@ func TestLimitCheckOnlyAppliesToRegisteredLimitInputs(t *testing.T) {
 func TestEscapedPayloadAndIntegerPrecision(t *testing.T) {
 	f := PanelFragment{Dashboard: fragmentPreset("trace", "", "", "", "", 50)}
 	for i := range 40 {
-		f.Results = append(f.Results, panel.Result{ID: fmt.Sprint(i), Status: panel.StatusError, SQL: strings.Repeat("\x00", 10000), Error: strings.Repeat("\x00", 10000), Diagnosis: strings.Repeat("\x00", 10000), Frame: &panel.Frame{Columns: []panel.Column{}, Values: [][]any{}, Note: strings.Repeat("\x00", 10000)}})
+		f.Results = append(f.Results, query.Result{ID: fmt.Sprint(i), Status: query.StatusError, SQL: strings.Repeat("\x00", 10000), Error: strings.Repeat("\x00", 10000), Diagnosis: strings.Repeat("\x00", 10000), Frame: &query.Frame{Columns: []query.Column{}, Values: [][]any{}, Note: strings.Repeat("\x00", 10000)}})
 	}
 	got := boundedTestFragment(t, f)
 	raw, err := json.Marshal(got)
@@ -72,7 +72,7 @@ func TestEscapedPayloadAndIntegerPrecision(t *testing.T) {
 		t.Fatalf("escaped payload=%d err=%v", len(raw), err)
 	}
 	n := int64(9007199254740993)
-	f.Results = []panel.Result{{ID: "traces", Status: panel.StatusOK, Frame: &panel.Frame{Columns: []panel.Column{{Name: "count", Type: "number", Role: "measure"}}, Values: [][]any{{n}}, Rows: 1}}}
+	f.Results = []query.Result{{ID: "traces", Status: query.StatusOK, Frame: &query.Frame{Columns: []query.Column{{Name: "count", Type: "number", Role: "measure"}}, Values: [][]any{{n}}, Rows: 1}}}
 	got = boundedTestFragment(t, f)
 	if fmt.Sprint(got.Results[0].Frame.Values[0][0]) != fmt.Sprint(n) {
 		t.Fatal("integer precision lost")
@@ -80,8 +80,8 @@ func TestEscapedPayloadAndIntegerPrecision(t *testing.T) {
 }
 
 func TestSummaryReadableCells(t *testing.T) {
-	result := panel.Result{ID: "latency", Status: panel.StatusOK, Frame: &panel.Frame{Rows: 7, Columns: []panel.Column{{Name: "time", Type: "time", Role: "time"}, {Name: "p95", Type: "number", Role: "measure", Unit: "ms"}, {Name: "absent", Type: "string"}}, Values: [][]any{{int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000)}, {42, 42, 42, 42, 42, 42, 42}, {nil, nil, nil, nil, nil, nil, nil}}}}
-	text := fragmentSummary(PanelFragment{Results: []panel.Result{result}})
+	result := query.Result{ID: "latency", Status: query.StatusOK, Frame: &query.Frame{Rows: 7, Columns: []query.Column{{Name: "time", Type: "time", Role: "time"}, {Name: "p95", Type: "number", Role: "measure", Unit: "ms"}, {Name: "absent", Type: "string"}}, Values: [][]any{{int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000), int64(1791486900000)}, {42, 42, 42, 42, 42, 42, 42}, {nil, nil, nil, nil, nil, nil, nil}}}}
+	text := fragmentSummary(PanelFragment{Results: []query.Result{result}})
 	if !strings.Contains(text, time.UnixMilli(1791486900000).UTC().Format(time.RFC3339)) || !strings.Contains(text, "42 ms") || strings.Contains(text, "absent=") {
 		t.Fatalf("unreadable summary: %s", text)
 	}
@@ -89,14 +89,14 @@ func TestSummaryReadableCells(t *testing.T) {
 		t.Fatalf("sample count: %s", text)
 	}
 	result.Frame.Truncated = true
-	if !strings.Contains(fragmentSummary(PanelFragment{Results: []panel.Result{result}}), "truncated=true") {
+	if !strings.Contains(fragmentSummary(PanelFragment{Results: []query.Result{result}}), "truncated=true") {
 		t.Fatal("missing true truncation")
 	}
 }
 
 func TestSummaryKeepsEverySupportedUnit(t *testing.T) {
 	for unit, want := range map[string]string{"ns": "42 ns", "per_minute": "42/min", "ratio": "42×"} {
-		if got := summaryCell(panel.Column{Type: "number", Unit: unit}, 42); got != want {
+		if got := summaryCell(query.Column{Type: "number", Unit: unit}, 42); got != want {
 			t.Fatalf("%s: %s, want %s", unit, got, want)
 		}
 	}
@@ -126,7 +126,7 @@ func TestPresetsHaveTitlesAndSearchLimit(t *testing.T) {
 }
 
 func TestEncodingFailureCancellationAndMetadata(t *testing.T) {
-	f := PanelFragment{Dashboard: fragmentPreset("overview", "", "", "", "", 50), Results: []panel.Result{{ID: "health", Status: panel.StatusOK, Frame: &panel.Frame{Columns: []panel.Column{}, Values: [][]any{}, Totals: []any{math.NaN()}}}}}
+	f := PanelFragment{Dashboard: fragmentPreset("overview", "", "", "", "", 50), Results: []query.Result{{ID: "health", Status: query.StatusOK, Frame: &query.Frame{Columns: []query.Column{}, Values: [][]any{}, Totals: []any{math.NaN()}}}}}
 	if _, err := boundFragment(t.Context(), f); err == nil {
 		t.Fatal("encoding error swallowed")
 	}
@@ -147,7 +147,7 @@ func TestEncodingFailureCancellationAndMetadata(t *testing.T) {
 }
 func TestTopologyEdgesAndOverviewTraceSummary(t *testing.T) {
 	f := PanelFragment{Dashboard: fragmentPreset("topology", "", "", "", "", 50)}
-	frame := &panel.Frame{Columns: []panel.Column{{Name: "kind"}, {Name: "caller"}, {Name: "callee"}, {Name: "error_rate", Type: "number", Unit: "percent"}, {Name: "calls", Type: "number", Unit: "count"}}, Values: make([][]any, 5)}
+	frame := &query.Frame{Columns: []query.Column{{Name: "kind"}, {Name: "caller"}, {Name: "callee"}, {Name: "error_rate", Type: "number", Unit: "percent"}, {Name: "calls", Type: "number", Unit: "count"}}, Values: make([][]any, 5)}
 	for i := range 20 {
 		for c, v := range []any{"node", fmt.Sprint(i), nil, nil, nil} {
 			frame.Values[c] = append(frame.Values[c], v)
@@ -160,12 +160,12 @@ func TestTopologyEdgesAndOverviewTraceSummary(t *testing.T) {
 		}
 		frame.Rows++
 	}
-	f.Results = []panel.Result{{ID: "services", Status: panel.StatusOK, Frame: frame}}
+	f.Results = []query.Result{{ID: "services", Status: query.StatusOK, Frame: frame}}
 	text := fragmentSummary(f)
 	if strings.Count(text, "caller=") != 10 || strings.Index(text, "edge_09") > strings.Index(text, "edge_10") {
 		t.Fatalf("edges not ranked/sample bounded: %s", text)
 	}
-	frame.Health = &panel.HealthFrame{Health: "unhealthy", Counts: observability.HealthCounts{Healthy: 2, Degraded: 3, Unhealthy: 4}}
+	frame.Health = &query.HealthFrame{Health: "unhealthy", Counts: observability.HealthCounts{Healthy: 2, Degraded: 3, Unhealthy: 4}}
 	f.Trace = &observability.Result[observability.TraceDetail]{Data: observability.TraceDetail{TraceID: "trace", DurationMS: 42, SpanCount: 7, HasError: true, Spans: []observability.TraceSpan{{Operation: "GET cart", DurationMS: 42, Status: "STATUS_CODE_ERROR", Start: time.Date(2026, 10, 7, 19, 0, 0, 0, time.UTC)}}}}
 	text = fragmentSummary(f)
 	for _, part := range []string{"healthy=2 degraded=3 unhealthy=4", "root=GET cart", "duration=42 ms", "status=Error spans=7", "slowest:", "erroring:"} {
@@ -259,7 +259,7 @@ func TestToolDocsDescribeFragmentInputs(t *testing.T) {
 
 func TestInputBudgetReportsActualBytes(t *testing.T) {
 	s := newPanelServer(t)
-	_, _, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: panel.Panel{ID: "text", Title: "Text", Viz: "text", Content: strings.Repeat("x", 140000)}})
+	_, _, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: query.Panel{ID: "text", Title: "Text", Viz: "text", Content: strings.Repeat("x", 140000)}})
 	if err == nil || !strings.Contains(err.Error(), "limit 131072 bytes, actual 140") {
 		t.Fatalf("input budget error=%v", err)
 	}
@@ -273,7 +273,7 @@ func BenchmarkBoundFragmentLarge(b *testing.B) {
 		for row := range values {
 			values[row] = body
 		}
-		fragment.Results = append(fragment.Results, panel.Result{ID: fmt.Sprintf("logs_%d", i), Status: panel.StatusOK, Frame: &panel.Frame{Columns: []panel.Column{{Name: "body", Type: "string", Role: "dimension"}}, Values: [][]any{values}, Rows: len(values)}})
+		fragment.Results = append(fragment.Results, query.Result{ID: fmt.Sprintf("logs_%d", i), Status: query.StatusOK, Frame: &query.Frame{Columns: []query.Column{{Name: "body", Type: "string", Role: "dimension"}}, Values: [][]any{values}, Rows: len(values)}})
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

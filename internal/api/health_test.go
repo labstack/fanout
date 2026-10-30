@@ -13,7 +13,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 func TestLiveness(t *testing.T) {
@@ -131,7 +131,7 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\),\\s+COUNT\\(\\*\\),\\s+COALESCE\\(date_diff\\('second', MAX\\(updated_at\\), now\\(\\)\\), 0\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
 
-	h := NewHealthHandler(&query.Duck{DB: db}, config.Config{
+	h := NewHealthHandler(&engine.Duck{DB: db}, config.Config{
 		DataDir:        os.TempDir(),
 		RollupInterval: time.Minute,
 		DuckDBMemory:   "3GB",
@@ -184,7 +184,7 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 }
 
 func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) {
-	duck := &query.Duck{}
+	duck := &engine.Duck{}
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan error, 1)
@@ -214,7 +214,7 @@ func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) 
 // period elapses — the wedged-first-rollup case the check exists to expose.
 func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
 	h := &HealthHandler{
-		duck:    &query.Duck{},
+		duck:    &engine.Duck{},
 		cfg:     config.Config{RollupInterval: time.Minute},
 		started: time.Now().Add(-10 * time.Minute),
 	}

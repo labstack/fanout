@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestHTTPProblemMessagesAndHintsUseAuthorPresentation(t *testing.T) {
@@ -24,7 +24,7 @@ func TestHTTPProblemMessagesAndHintsUseAuthorPresentation(t *testing.T) {
 		`Binder Error: query_count in telemetry.service_rollup cannot compare DOUBLE with INTEGER` + "\nCandidate bindings: \"telemetry.edge_rollup.query_count\", \"resource_inventory.service\"\nLINE 1: SELECT query_count FROM telemetry.service_rollup",
 	} {
 		t.Run(message, func(t *testing.T) {
-			rec := servePanels(t, &fakePanels{err: panel.Problems{{Path: "panels[0].sql", Message: message, Hint: message}}}, http.MethodPost, "/api/panels/query", `{"dashboard":{"name":"x","panels":[]}}`)
+			rec := servePanels(t, &fakePanels{err: query.Problems{{Path: "panels[0].sql", Message: message, Hint: message}}}, http.MethodPost, "/api/queries/run", `{"dashboard":{"name":"x","panels":[]}}`)
 			body := rec.Body.String()
 			if rec.Code != 400 || forbidden.MatchString(body) {
 				t.Fatalf("unsafe problems: %d %s", rec.Code, body)

@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -20,18 +20,18 @@ type fakeObservability struct {
 	scope observability.Scope
 }
 
-// structural validates without DuckDB; filter checks live in internal/panel.
+// structural validates without DuckDB; filter checks live in internal/query.
 type structural struct{}
 
-func (structural) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (structural) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil
 }
 
-func withName(d panel.Dashboard, name string) panel.Dashboard {
+func withName(d query.Dashboard, name string) query.Dashboard {
 	d.Name = name
 	return d
 }
@@ -56,7 +56,7 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	}
 	server := NewWithIntelligence(&fakeObservability{}, dashboard.New(database.DB, structural{}), nil, nil, "test")
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}, Extra: &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}}
-	spec := panel.Dashboard{Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+	spec := query.Dashboard{Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 	_, output, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Dashboard: withName(spec, "AI overview")})
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 		Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{dashboard.OwnerMetaKey: "attacker"}},
 		Extra:  &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}},
 	}
-	spec := panel.Dashboard{Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+	spec := query.Dashboard{Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
 	if _, _, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Dashboard: withName(spec, "Spoof check")}); err != nil {
 		t.Fatal(err)
 	}

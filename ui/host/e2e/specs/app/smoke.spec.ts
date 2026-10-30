@@ -18,7 +18,7 @@ const expectedElements: Record<string, string> = {
 };
 
 test("resolves dashboard variables through the panel route", async ({ request }) => {
-  const response = await request.post("/api/panels/variables/resolve", {
+  const response = await request.post("/api/queries/variables/resolve", {
     headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
   });
   expect(response.status()).toBe(200);
@@ -94,7 +94,7 @@ async function mapGeometry(card: Locator) {
 test("all fifteen dashboard panels settle with valid geometry", async ({ page }) => {
   const results = new Map<string, ObservedResult>();
   page.on("response", async response => {
-    if (new URL(response.url()).pathname !== "/api/panels/query") return;
+    if (new URL(response.url()).pathname !== "/api/queries/run") return;
     try {
       const body = await response.json();
       for (const result of body.results ?? []) results.set(result.id, result);

@@ -105,7 +105,7 @@ func genAlertToAlert(ga generated.Alert) Alert {
 		FiredAt:            ga.FiredAt.String,
 		ResolvedAt:         ga.ResolvedAt.String,
 		RepeatedAt:         ga.RepeatedAt.String,
-		LastEval:           ga.LastEval.String,
+		LastEvaluatedAt:    ga.LastEvaluatedAt.String,
 		LastDeliveryStatus: ga.LastDeliveryStatus.String,
 		LastDeliveryAt:     ga.LastDeliveryAt.String,
 		CreatedAt:          ga.CreatedAt,
@@ -126,7 +126,7 @@ func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
 		FiredAt:            nullString(a.FiredAt),
 		ResolvedAt:         nullString(a.ResolvedAt),
 		RepeatedAt:         nullString(a.RepeatedAt),
-		LastEval:           nullString(a.LastEval),
+		LastEvaluatedAt:    nullString(a.LastEvaluatedAt),
 		LastDeliveryStatus: nullString(a.LastDeliveryStatus),
 		LastDeliveryAt:     nullString(a.LastDeliveryAt),
 	}

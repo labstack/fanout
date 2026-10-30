@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 func TestLatencyAnomaliesRequireStatisticalAndPracticalSignificance(t *testing.T) {
@@ -47,7 +47,7 @@ func TestLatencyAnomaliesRequireStatisticalAndPracticalSignificance(t *testing.T
 			}
 		}
 	}
-	d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{DB: db}, DefaultDetectorConfig())
 	anomalies, err := d.detectLatencyAnomalies(t.Context(), start, end)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestVolumeAnomaliesRequireStatisticalAndPracticalSignificance(t *testing.T)
 			}
 		}
 	}
-	d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+	d := NewDetector(&engine.Duck{DB: db}, DefaultDetectorConfig())
 	anomalies, err := d.detectVolumeAnomalies(t.Context(), start, end)
 	if err != nil {
 		t.Fatal(err)

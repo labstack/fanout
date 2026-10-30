@@ -181,7 +181,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/api/dashboards/dashboard-1/versions/1", routePolicyCapability, ManageOwnDashboards},
 		{http.MethodPost, "/api/dashboards/dashboard-1/versions/1/restore", routePolicyCapability, ManageOwnDashboards},
 		{http.MethodPost, "/api/agent/runs", routePolicyCapability, RunAgent},
-		{http.MethodPost, "/api/panels/variables/resolve", routePolicyCapability, ReadTelemetry},
+		{http.MethodPost, "/api/queries/variables/resolve", routePolicyCapability, ReadTelemetry},
 		{http.MethodPost, "/api/fanql/parse", routePolicyCapability, ReadTelemetry},
 		{http.MethodPost, "/api/fanql/format", routePolicyCapability, ReadTelemetry},
 		{http.MethodPost, "/api/fanql/complete", routePolicyCapability, ReadTelemetry},

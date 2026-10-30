@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -57,7 +57,7 @@ func completionPrefix(text string, cursor int, source string) (token lexToken, p
 }
 
 type schemaSource interface {
-	Schema(context.Context, panel.SchemaRequest) (*panel.Schema, error)
+	Schema(context.Context, query.SchemaRequest) (*query.Schema, error)
 }
 
 type CompleteRequest struct {
@@ -86,7 +86,7 @@ type SchemaStatus struct {
 }
 
 type CompleteResponse struct {
-	Replace panel.TextSpan `json:"replace"`
+	Replace query.TextSpan `json:"replace"`
 	Items   []Item         `json:"items"`
 	Schema  SchemaStatus   `json:"schema"`
 }
@@ -95,7 +95,7 @@ const maxCompletionItems = 50
 
 type completionKey struct{ window, namespace string }
 type completionSchemaEntry struct {
-	schema  *panel.Schema
+	schema  *query.Schema
 	expires time.Time
 	failed  bool
 }
@@ -141,7 +141,7 @@ func completionWindow(window string) (string, bool) {
 	return "24h", false
 }
 
-func (c *Completer) schema(ctx context.Context, key completionKey) (*panel.Schema, bool, bool) {
+func (c *Completer) schema(ctx context.Context, key completionKey) (*query.Schema, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
@@ -168,7 +168,7 @@ func (c *Completer) fetch(parent context.Context, key completionKey, done chan s
 	defer func() { <-completionSchemaSlots }()
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
-	schema, err := c.source.Schema(ctx, panel.SchemaRequest{Window: key.window, Namespace: key.namespace})
+	schema, err := c.source.Schema(ctx, query.SchemaRequest{Window: key.window, Namespace: key.namespace})
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
@@ -202,7 +202,7 @@ type completionCandidates struct {
 	req            CompleteRequest
 	token          lexToken
 	p              *parser
-	signal         panel.SignalSchema
+	signal         query.SignalSchema
 	source, prefix string
 	items          []completionCandidate
 	class          int
@@ -215,7 +215,7 @@ func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteR
 	}
 	schema, warm, failed := c.schema(ctx, completionKey{window, req.Namespace})
 	token, p := completionPrefix(req.Text, req.Cursor, req.Source)
-	r := CompleteResponse{Replace: panel.TextSpan{Start: token.Span.Start, End: token.Span.End}, Items: []Item{}, Schema: SchemaStatus{Window: window, Sampled: true, Warm: warm, Recent: recent, Error: failed}}
+	r := CompleteResponse{Replace: query.TextSpan{Start: token.Span.Start, End: token.Span.End}, Items: []Item{}, Schema: SchemaStatus{Window: window, Sampled: true, Warm: warm, Recent: recent, Error: failed}}
 	if recent {
 		r.Schema.Notice = "keys seen in the last 24h (recent), not in the selected interval"
 	}
@@ -306,7 +306,7 @@ func (s *completionCandidates) words(kind string, words ...string) {
 func (s *completionCandidates) candidates(e expect) {
 	switch e.Class {
 	case "source":
-		s.words("keyword", panel.SignalNames()...)
+		s.words("keyword", query.SignalNames()...)
 	case "field":
 		s.fields(e, false, "")
 	case "bracket_key":
@@ -344,7 +344,7 @@ func (s *completionCandidates) candidates(e expect) {
 			s.fields(e, true, "")
 			return
 		}
-		for _, spec := range panel.MeasureSpecs() {
+		for _, spec := range query.MeasureSpecs() {
 			if spec.Name == e.Func && e.Arg < spec.Args {
 				s.fields(e, spec.Numeric, "")
 				return
@@ -355,7 +355,7 @@ func (s *completionCandidates) candidates(e expect) {
 			s.add("", "", "keyword", s.req.Viz+" panels have no bucket", 0, 0)
 			return
 		}
-		s.words("bucket", panel.BucketNames()...)
+		s.words("bucket", query.BucketNames()...)
 	case "sort_key":
 		s.sortKeys()
 	case "integer":
@@ -419,9 +419,9 @@ func (s *completionCandidates) fields(e expect, numeric bool, scope string) {
 		}
 	}
 	if scope == "" {
-		fields, _ := panel.SignalColumns(s.source)
+		fields, _ := query.SignalColumns(s.source)
 		for _, field := range fields {
-			if field.Type == panel.TypeMap || e.Func == "by" && field.Type != panel.TypeString {
+			if field.Type == query.TypeMap || e.Func == "by" && field.Type != query.TypeString {
 				continue
 			}
 			name := field.Name
@@ -429,7 +429,7 @@ func (s *completionCandidates) fields(e expect, numeric bool, scope string) {
 				name = "duration"
 			}
 			boost := 0
-			if numeric && field.Type == panel.TypeNumber {
+			if numeric && field.Type == query.TypeNumber {
 				boost = 2
 			}
 			s.add(name, name, "field", field.Description, 0, boost)
@@ -507,9 +507,9 @@ func (s *completionCandidates) operators(field *fieldName) {
 			s.words("operator", ">", ">=", "<", "<=", ":")
 			return
 		}
-		fields, _ := panel.SignalColumns(s.source)
+		fields, _ := query.SignalColumns(s.source)
 		for _, f := range fields {
-			if f.Name == field.Key && f.Type == panel.TypeTime {
+			if f.Name == field.Key && f.Type == query.TypeTime {
 				s.words("operator", "=", "!=", ">", ">=", "<", "<=")
 				return
 			}
@@ -549,7 +549,7 @@ func (s *completionCandidates) values(e expect) {
 				return
 			}
 		} else {
-			aliases := panel.FieldAliases(f.Key)
+			aliases := query.FieldAliases(f.Key)
 			for _, label := range sortedCompletionKeys(aliases) {
 				value(label, aliases[label], 0)
 			}
@@ -602,7 +602,7 @@ func sortedCompletionKeys(m map[string]string) []string {
 }
 
 func (s *completionCandidates) measures() {
-	for _, spec := range panel.MeasureSpecs() {
+	for _, spec := range query.MeasureSpecs() {
 		if len(spec.Signals) > 0 && !slices.Contains(spec.Signals, s.source) {
 			continue
 		}
@@ -628,7 +628,7 @@ func (s *completionCandidates) sortKeys() {
 		for i := range q.Stage.Measures {
 			m := &q.Stage.Measures[i]
 			m.Parsed.Expr = r.measure(m.Parsed.Expr, m.Info, m.Filters)
-			if c, ok := m.Parsed.Expr.(panel.MeasureCall); ok {
+			if c, ok := m.Parsed.Expr.(query.MeasureCall); ok {
 				m.Parsed.Func = c.Func
 				m.Parsed.Field = c.Field
 			}

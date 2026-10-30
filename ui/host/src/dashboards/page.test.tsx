@@ -87,9 +87,9 @@ beforeEach(() => {
     if (url.pathname === "/api/dashboards") return listResponse();
     if (url.pathname === "/api/dashboards/d1") return json(servedRecord);
     if (url.pathname === "/api/dashboards/missing") return json({ code: "not_found", message: "dashboard not found" }, 404);
-    if (url.pathname === "/api/panels/variables/resolve") return variableResponse();
+    if (url.pathname === "/api/queries/variables/resolve") return variableResponse();
     if (url.pathname === "/api/annotations") return annotationResponse();
-    if (url.pathname === "/api/panels/query") {
+    if (url.pathname === "/api/queries/run") {
       const body = JSON.parse(String(init?.body)) as { panels: string[]; dashboard: { panels: { id: string }[] } };
       queryBodies.push(body);
       if (body.panels.some((id) => !body.dashboard.panels.some((panel) => panel.id === id))) return json({ message: "no panel has id" }, 400);
@@ -235,13 +235,13 @@ describe("DashboardPage", () => {
       if (path === "/api/dashboards/d1/versions") return json({ versions: [{ version: 2, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z" }] });
       if (path === "/api/dashboards/d1/versions/2") return json({ dashboard: { ...restored, version: 2, name: "Historical" }, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z", changes: [], layout_changed: false, dashboard_fields: [], changes_available: true });
       if (path === "/api/dashboards/d1/versions/2/restore") { servedRecord = restored; return json(restored); }
-      if (path === "/api/panels/exemplars") return json({ traces: [] });
+      if (path === "/api/queries/exemplars") return json({ traces: [] });
       return existing(input, init);
     });
     const search: DashboardSearch = { from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", vars: { service: "cart" }, compare: "1", view: "latency", drill: JSON.stringify({ panel_id: "latency", kind: "traces", from: "2026-10-01T12:00:00Z", to: "2026-10-01T13:00:00Z", window_from: "2026-10-01T12:00:00Z", window_to: "2026-10-01T13:00:00Z", dimensions: {} }) };
     const { client, onSearch } = await render(search);
     const count = queryBodies.length;
-    const variableCount = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/panels/variables/resolve").length;
+    const variableCount = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/queries/variables/resolve").length;
     await act(async () => [...document.querySelectorAll("button")].find(button => button.textContent === "History")!.click());
     await settle(client);
     expect(queryBodies).toHaveLength(count);
@@ -253,7 +253,7 @@ describe("DashboardPage", () => {
     if (removed) expect(onSearch).toHaveBeenCalledWith({ ...search, view: undefined, drill: undefined }, true);
     else expect(onSearch).not.toHaveBeenCalled();
     expect(queryBodies.length).toBeGreaterThan(count);
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/panels/variables/resolve").length).toBeGreaterThan(variableCount);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/queries/variables/resolve").length).toBeGreaterThan(variableCount);
     const laterBatches = queryBodies.slice(count) as { dashboard: { panels: { id: string }[] } }[];
     if (removed) expect(laterBatches.every(body => body.dashboard.panels.every(panel => panel.id !== "latency"))).toBe(true);
   });
@@ -613,7 +613,7 @@ describe("dashboard batch regressions", () => {
     else variableResponse = async () => json({ message: "Invalid" }, 400);
     const { client } = await render();
     await settle(client);
-    const path = kind === "panels" ? "/api/panels/query" : "/api/panels/variables/resolve";
+    const path = kind === "panels" ? "/api/queries/run" : "/api/queries/variables/resolve";
     await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === path)).toHaveLength(1), { interval: 5, timeout: 3000 });
   });
 });
@@ -638,7 +638,7 @@ it.each(["panels", "variables"])("retries server errors at most twice for %s", a
   else variableResponse = async () => json({ message: "Server failed" }, 500);
   const { host, client } = await render();
   await settle(client);
-  const path = kind === "panels" ? "/api/panels/query" : "/api/panels/variables/resolve";
+  const path = kind === "panels" ? "/api/queries/run" : "/api/queries/variables/resolve";
   await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === path)).toHaveLength(3), { interval: 5, timeout: 3000 });
   await vi.waitFor(() => expect(host.textContent).toContain("Server failed"), { interval: 5, timeout: 3000 });
 });
@@ -728,9 +728,9 @@ it("pushes drill and click variables atomically while preserving the captured pa
   const target = JSON.parse(next.drill!);
   expect(target).toMatchObject({ panel_id: "latency", kind: "traces", from: new Date(1000).toISOString(), to: new Date(10000).toISOString(), window_from: new Date(0).toISOString(), window_to: new Date(10000).toISOString(), dimensions: { service: "cart" } });
   const implementation = fetchMock.getMockImplementation()!;
-  fetchMock.mockImplementation(async (input, init) => String(input) === "/api/panels/exemplars" ? json({ traces: [] }) : implementation(input, init));
+  fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/exemplars" ? json({ traces: [] }) : implementation(input, init));
   await rerender(next); await settle(client);
-  const request = fetchMock.mock.calls.find(([url]) => String(url) === "/api/panels/exemplars")!;
+  const request = fetchMock.mock.calls.find(([url]) => String(url) === "/api/queries/exemplars")!;
   expect(JSON.parse(String(request[1]?.body))).toMatchObject({ kind: "traces", from: target.from, to: target.to, time: { from: target.window_from, to: target.window_to, refresh: "off" }, vars: { service: "cart" } });
   await vi.waitFor(() => expect(document.body.textContent).toContain("No exemplar traces match this selection."), { interval: 5, timeout: 3000 });
 });

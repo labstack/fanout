@@ -130,9 +130,9 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 | `GET` | `/api/fanql/reference` | `telemetry:read` |
 | `GET` | `/api/intelligence` | `telemetry:read` |
 | `Any` | `/api/mcp` | `telemetry:read` |
-| `POST` | `/api/panels/exemplars` | `telemetry:read` |
-| `POST` | `/api/panels/query` | `telemetry:read` |
-| `POST` | `/api/panels/variables/resolve` | `telemetry:read` |
+| `POST` | `/api/queries/exemplars` | `telemetry:read` |
+| `POST` | `/api/queries/run` | `telemetry:read` |
+| `POST` | `/api/queries/variables/resolve` | `telemetry:read` |
 | `GET` | `/api/settings/ingest` | `ingest:read-metadata` |
 | `POST` | `/api/settings/ingest/token/rotate` | `ingest:manage` |
 | `GET` | `/api/telemetry/schema` | `telemetry:read` |

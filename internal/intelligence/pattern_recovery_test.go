@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -31,7 +31,7 @@ func TestLogPatternsIncludeObservedTimeAndExactEventBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestDetectorRefreshesPatternsAtStalledAndZeroWatermarks(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			if err := query.CreateCacheTables(db); err != nil {
+			if err := engine.CreateCacheTables(db); err != nil {
 				t.Fatal(err)
 			}
 			createDetectorLogs(t, db)
@@ -87,7 +87,7 @@ func TestDetectorRefreshesPatternsAtStalledAndZeroWatermarks(t *testing.T) {
 			if completed {
 				seedDetectorRecoveryRollup(t, db, end)
 			}
-			d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
+			d := NewDetector(&engine.Duck{DB: db}, DefaultDetectorConfig())
 			d.runCheck(t.Context())
 			previous := d.LatestSnapshot()
 			if previous == nil || len(previous.Patterns) != 0 {

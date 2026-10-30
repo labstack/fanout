@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/sqlscan"
 	"github.com/labstack/fanout/internal/telemetry"
 )
@@ -33,7 +33,7 @@ func operationalFormatError(err error) bool {
 	return !errors.As(err, &input) && !strings.HasPrefix(err.Error(), "SQL parsing failed:")
 }
 
-func liftEntry(ctx context.Context, p panel.Parser, signal, stored string) (filterExpr, tier, error) {
+func liftEntry(ctx context.Context, p query.Parser, signal, stored string) (filterExpr, tier, error) {
 	if e := recognizeOwnLowering(signal, stored); e != nil {
 		return e, tierExact, nil
 	}
@@ -41,7 +41,7 @@ func liftEntry(ctx context.Context, p panel.Parser, signal, stored string) (filt
 	if err != nil {
 		return nil, tierRaw, err
 	}
-	e := liftSQLNode(signal, panel.SQLExpression(node["where_clause"]))
+	e := liftSQLNode(signal, query.SQLExpression(node["where_clause"]))
 	e = reparseLiftedEntry(signal, e)
 	if e == nil {
 		return &rawEntry{Text: stored}, tierRaw, nil
@@ -115,7 +115,7 @@ func liftFieldText(signal, text string) (fieldName, bool) {
 	return liftSQLField(signal, node, false)
 }
 
-func liftSQLField(signal string, node *panel.SQLExpr, contains bool) (fieldName, bool) {
+func liftSQLField(signal string, node *query.SQLExpr, contains bool) (fieldName, bool) {
 	if node == nil {
 		return fieldName{}, false
 	}
@@ -141,9 +141,9 @@ func liftSQLField(signal string, node *panel.SQLExpr, contains bool) (fieldName,
 			return fieldName{}, false
 		}
 		name := names[0]
-		cols, _ := panel.SignalColumns(signal)
+		cols, _ := query.SignalColumns(signal)
 		for _, col := range cols {
-			if col.Name == name && col.Type != panel.TypeMap {
+			if col.Name == name && col.Type != query.TypeMap {
 				return fieldName{Key: name, Single: true, Ref: &fieldRef{Column: name, Type: col.Type, Unit: col.Unit}}, true
 			}
 		}
@@ -165,12 +165,12 @@ func liftSQLField(signal string, node *panel.SQLExpr, contains bool) (fieldName,
 			return fieldName{}, false
 		}
 		column := names[0]
-		return fieldName{Scope: column, Key: v.Text, Bracket: true, Ref: &fieldRef{Column: column, Key: v.Text, Type: panel.TypeString, Unit: "none"}}, true
+		return fieldName{Scope: column, Key: v.Text, Bracket: true, Ref: &fieldRef{Column: column, Key: v.Text, Type: query.TypeString, Unit: "none"}}, true
 	}
 	return fieldName{}, false
 }
 
-func liftSQLValue(node *panel.SQLExpr) (literalValue, bool) {
+func liftSQLValue(node *query.SQLExpr) (literalValue, bool) {
 	if node == nil {
 		return literalValue{}, false
 	}
@@ -213,9 +213,9 @@ func spellingValue(f fieldName, v literalValue, aliases bool) literalValue {
 		}
 		return v
 	}
-	if v.Kind == stringValue && f.Ref.Key == "" && f.Ref.Type == panel.TypeString {
+	if v.Kind == stringValue && f.Ref.Key == "" && f.Ref.Type == query.TypeString {
 		if aliases {
-			for alias, stored := range panel.FieldAliases(f.Ref.Column) {
+			for alias, stored := range query.FieldAliases(f.Ref.Column) {
 				if v.Text == stored {
 					v.Kind = wordValue
 					v.Text = alias
@@ -245,7 +245,7 @@ func spellingValue(f fieldName, v literalValue, aliases bool) literalValue {
 			return v
 		}
 		if f.Ref.Column == "type" {
-			if _, ok := panel.FieldAliases("type")[v.Text]; !ok {
+			if _, ok := query.FieldAliases("type")[v.Text]; !ok {
 				return v
 			}
 		}
@@ -273,7 +273,7 @@ func durationText(ms float64) string {
 	return strconv.FormatFloat(ms, 'f', -1, 64) + "ms"
 }
 
-func liftSQLNode(signal string, node *panel.SQLExpr) filterExpr {
+func liftSQLNode(signal string, node *query.SQLExpr) filterExpr {
 	if node == nil {
 		return nil
 	}
@@ -424,7 +424,7 @@ func liftSQLNode(signal string, node *panel.SQLExpr) filterExpr {
 	return nil
 }
 
-func liftSQLCall(signal string, node *panel.SQLExpr) *filterCall {
+func liftSQLCall(signal string, node *query.SQLExpr) *filterCall {
 	if node == nil || node.Class != "FUNCTION" {
 		return nil
 	}
@@ -447,7 +447,7 @@ func liftSQLCall(signal string, node *panel.SQLExpr) *filterCall {
 	}
 	return out
 }
-func unwrapFunction(node *panel.SQLExpr, name string) (*panel.SQLExpr, bool) {
+func unwrapFunction(node *query.SQLExpr, name string) (*query.SQLExpr, bool) {
 	if node == nil || node.Class != "FUNCTION" || node.Function != name || len(node.Arguments) != 1 {
 		return nil, false
 	}
@@ -567,16 +567,16 @@ func liftSeverityRange(in *inExpr) filterExpr {
 	return &betweenExpr{Field: in.Field, Lo: value(first), Hi: value(last), Bands: bands}
 }
 
-func liftMeasure(ctx context.Context, p panel.Parser, signal, stored string) (measureNode, tier, error) {
-	parsed, err := panel.ParseMeasure(signal, stored)
+func liftMeasure(ctx context.Context, p query.Parser, signal, stored string) (measureNode, tier, error) {
+	parsed, err := query.ParseMeasure(signal, stored)
 	if err != nil {
 		return measureNode{}, tierRaw, formatInput("%s", err)
 	}
 	m := measureNode{Parsed: parsed, Alias: parsed.Alias, Filters: map[string]filterExpr{}}
-	var lift func(panel.MeasureExpr) error
-	lift = func(e panel.MeasureExpr) error {
+	var lift func(query.MeasureExpr) error
+	lift = func(e query.MeasureExpr) error {
 		switch x := e.(type) {
-		case panel.MeasureCountIf:
+		case query.MeasureCountIf:
 			// The count_if conjunction is intentionally stored without outer brackets.
 			reader := &ownSQLReader{tokens: ownSQLTokens(x.Filter)}
 			node := reader.expression(0)
@@ -598,12 +598,12 @@ func liftMeasure(ctx context.Context, p panel.Parser, signal, stored string) (me
 				filter = &rawEntry{Text: x.Filter}
 			}
 			m.Filters[x.Filter] = filter
-		case panel.MeasureBinary:
+		case query.MeasureBinary:
 			if err := lift(x.L); err != nil {
 				return err
 			}
 			return lift(x.R)
-		case panel.MeasureNeg:
+		case query.MeasureNeg:
 			return lift(x.X)
 		}
 		return nil
@@ -615,7 +615,7 @@ func liftMeasure(ctx context.Context, p panel.Parser, signal, stored string) (me
 	if lowered == stored {
 		return m, tierExact, nil
 	}
-	again, err := panel.ParseMeasure(signal, lowered)
+	again, err := query.ParseMeasure(signal, lowered)
 	if err == nil && reflect.DeepEqual(parsed.Expr, again.Expr) && parsed.Alias == again.Alias {
 		return m, tierNormalized, nil
 	}
@@ -709,7 +709,7 @@ func (r *ownSQLReader) need(s string) {
 		r.failed = true
 	}
 }
-func (r *ownSQLReader) expression(min int) *panel.SQLExpr {
+func (r *ownSQLReader) expression(min int) *query.SQLExpr {
 	left := r.predicate()
 	for {
 		op := r.peek()
@@ -730,12 +730,12 @@ func (r *ownSQLReader) expression(min int) *panel.SQLExpr {
 			children := left.Children
 			left.Children = append(children, right)
 		} else {
-			left = &panel.SQLExpr{Class: "CONJUNCTION", Type: kind, Children: []*panel.SQLExpr{left, right}}
+			left = &query.SQLExpr{Class: "CONJUNCTION", Type: kind, Children: []*query.SQLExpr{left, right}}
 		}
 	}
 	return left
 }
-func (r *ownSQLReader) predicate() *panel.SQLExpr {
+func (r *ownSQLReader) predicate() *query.SQLExpr {
 	if r.eat("NOT") {
 		return ownOperator("OPERATOR_NOT", r.predicate())
 	}
@@ -743,7 +743,7 @@ func (r *ownSQLReader) predicate() *panel.SQLExpr {
 	op := r.peek()
 	if kind := map[string]string{"=": "COMPARE_EQUAL", "!=": "COMPARE_NOTEQUAL", "<>": "COMPARE_NOTEQUAL", "<": "COMPARE_LESSTHAN", ">": "COMPARE_GREATERTHAN", "<=": "COMPARE_LESSTHANOREQUALTO", ">=": "COMPARE_GREATERTHANOREQUALTO"}[op]; kind != "" {
 		r.pos++
-		return &panel.SQLExpr{Class: "COMPARISON", Type: kind, Left: left, Right: r.atom()}
+		return &query.SQLExpr{Class: "COMPARISON", Type: kind, Left: left, Right: r.atom()}
 	}
 	if r.eat("IS") {
 		neg := r.eat("NOT")
@@ -756,7 +756,7 @@ func (r *ownSQLReader) predicate() *panel.SQLExpr {
 	}
 	neg := r.eat("NOT")
 	if r.eat("IN") {
-		children := []*panel.SQLExpr{left}
+		children := []*query.SQLExpr{left}
 		if r.eat("(") {
 			for {
 				children = append(children, r.atom())
@@ -778,19 +778,19 @@ func (r *ownSQLReader) predicate() *panel.SQLExpr {
 		lo := r.atom()
 		r.need("AND")
 		hi := r.atom()
-		return &panel.SQLExpr{Class: "BETWEEN", Type: "COMPARE_BETWEEN", Input: left, Lower: lo, Upper: hi, Negated: neg}
+		return &query.SQLExpr{Class: "BETWEEN", Type: "COMPARE_BETWEEN", Input: left, Lower: lo, Upper: hi, Negated: neg}
 	}
 	op = r.peek()
 	if op == "~~" || op == "!~~" || op == "~~*" || op == "!~~*" {
 		r.pos++
-		return ownFunction(strings.ToLower(op), []*panel.SQLExpr{left, r.atom()})
+		return ownFunction(strings.ToLower(op), []*query.SQLExpr{left, r.atom()})
 	}
 	if neg {
 		r.failed = true
 	}
 	return left
 }
-func (r *ownSQLReader) atom() *panel.SQLExpr {
+func (r *ownSQLReader) atom() *query.SQLExpr {
 	if r.pos >= len(r.tokens) {
 		r.failed = true
 		return nil
@@ -805,18 +805,18 @@ func (r *ownSQLReader) atom() *panel.SQLExpr {
 	}
 	token := r.tokens[r.pos]
 	r.pos++
-	var node *panel.SQLExpr
+	var node *query.SQLExpr
 	switch {
 	case token.quote == '\'':
 		node = ownConstant("STRING", token.text)
 	case token.quote == '"':
-		node = &panel.SQLExpr{Class: "COLUMN_REF", Columns: []string{token.text}}
+		node = &query.SQLExpr{Class: "COLUMN_REF", Columns: []string{token.text}}
 	case strings.EqualFold(token.text, "true") || strings.EqualFold(token.text, "false"):
 		node = ownConstant("BOOLEAN", strings.ToLower(token.text))
 	case numberPattern.MatchString(token.text):
 		node = ownConstant("NUMERIC", token.text)
 	case strings.HasPrefix(token.text, "$"):
-		node = &panel.SQLExpr{Class: "PARAMETER", Identifier: strings.TrimPrefix(token.text, "$")}
+		node = &query.SQLExpr{Class: "PARAMETER", Identifier: strings.TrimPrefix(token.text, "$")}
 	case r.eat("("):
 		name := strings.ToLower(token.text)
 		if name == "cast" || name == "try_cast" {
@@ -829,9 +829,9 @@ func (r *ownSQLReader) atom() *panel.SQLExpr {
 			typ := strings.ToUpper(r.tokens[r.pos].text)
 			r.pos++
 			r.need(")")
-			node = &panel.SQLExpr{Class: "CAST", Type: "OPERATOR_CAST", Child: child, TryCast: name == "try_cast", CastType: typ}
+			node = &query.SQLExpr{Class: "CAST", Type: "OPERATOR_CAST", Child: child, TryCast: name == "try_cast", CastType: typ}
 		} else {
-			var args []*panel.SQLExpr
+			var args []*query.SQLExpr
 			if !r.eat(")") {
 				for {
 					args = append(args, r.expression(0))
@@ -848,7 +848,7 @@ func (r *ownSQLReader) atom() *panel.SQLExpr {
 			}
 		}
 	default:
-		node = &panel.SQLExpr{Class: "COLUMN_REF", Columns: []string{token.text}}
+		node = &query.SQLExpr{Class: "COLUMN_REF", Columns: []string{token.text}}
 	}
 	if r.eat("[") {
 		key := r.atom()
@@ -862,16 +862,16 @@ func (r *ownSQLReader) atom() *panel.SQLExpr {
 		}
 		typ := strings.ToUpper(r.tokens[r.pos].text)
 		r.pos++
-		node = &panel.SQLExpr{Class: "CAST", Child: node, CastType: typ}
+		node = &query.SQLExpr{Class: "CAST", Child: node, CastType: typ}
 	}
 	return node
 }
-func ownConstant(kind, text string) *panel.SQLExpr {
-	return &panel.SQLExpr{Class: "CONSTANT", LiteralKind: kind, LiteralText: text}
+func ownConstant(kind, text string) *query.SQLExpr {
+	return &query.SQLExpr{Class: "CONSTANT", LiteralKind: kind, LiteralText: text}
 }
-func ownOperator(kind string, children ...*panel.SQLExpr) *panel.SQLExpr {
-	return &panel.SQLExpr{Class: "OPERATOR", Type: kind, Children: children}
+func ownOperator(kind string, children ...*query.SQLExpr) *query.SQLExpr {
+	return &query.SQLExpr{Class: "OPERATOR", Type: kind, Children: children}
 }
-func ownFunction(name string, args []*panel.SQLExpr) *panel.SQLExpr {
-	return &panel.SQLExpr{Class: "FUNCTION", Function: name, Arguments: args}
+func ownFunction(name string, args []*query.SQLExpr) *query.SQLExpr {
+	return &query.SQLExpr{Class: "FUNCTION", Function: name, Arguments: args}
 }

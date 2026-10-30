@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 // Each JSON block is an independently pinned input/output fixture. There is no
@@ -15,8 +15,8 @@ import (
 type corpusFixture struct {
 	Text         string         `json:"text"`
 	Viz          string         `json:"viz,omitempty"`
-	Query        *panel.Query   `json:"query,omitempty"`
-	Problems     panel.Problems `json:"problems,omitempty"`
+	Query        *query.Spec    `json:"query,omitempty"`
+	Problems     query.Problems `json:"problems,omitempty"`
 	GateProblems bool           `json:"gate_problems,omitempty"`
 }
 

@@ -138,7 +138,7 @@ for (const view of ["chat", "dashboard"] as const) {
         expect(saved.ok()).toBe(true);
         const { spec } = await saved.json() as { spec: DashboardSpec };
         expect(spec.panels.length, "The created dashboard must contain at least six panels").toBeGreaterThanOrEqual(6);
-        const preview = await context.request.post("/api/panels/query", {
+        const preview = await context.request.post("/api/queries/run", {
           headers: { "Fanout-Request": "1" }, data: { dashboard: spec },
         });
         expect(preview.ok()).toBe(true);

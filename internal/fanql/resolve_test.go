@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
-func resolvedText(t *testing.T, text string, opts Options) (*resolved, panel.Problems) {
+func resolvedText(t *testing.T, text string, opts Options) (*resolved, query.Problems) {
 	t.Helper()
 	q, ps := parse(text, "")
 	if len(ps) != 0 {
@@ -20,14 +20,14 @@ func resolvedText(t *testing.T, text string, opts Options) (*resolved, panel.Pro
 func TestResolveSingleSegmentFieldIsColumnOrAttribute(t *testing.T) {
 	for _, tt := range []struct {
 		text, column, key string
-		typ               panel.FieldType
+		typ               query.FieldType
 		notice            string
 	}{
-		{"spans where value>-3", "attributes", "value", panel.TypeString, `"value" is not a spans column; reading attributes['value']`},
-		{"metrics where value>-3", "value", "", panel.TypeNumber, ""},
-		{"metrics where rate:x", "attributes", "rate", panel.TypeString, `"rate" is a measure, not a metrics column; reading attributes['rate']`},
-		{"spans where Service:api", "service", "", panel.TypeString, ""},
-		{"spans where servce:api", "attributes", "servce", panel.TypeString, "did you mean service?"},
+		{"spans where value>-3", "attributes", "value", query.TypeString, `"value" is not a spans column; reading attributes['value']`},
+		{"metrics where value>-3", "value", "", query.TypeNumber, ""},
+		{"metrics where rate:x", "attributes", "rate", query.TypeString, `"rate" is a measure, not a metrics column; reading attributes['rate']`},
+		{"spans where Service:api", "service", "", query.TypeString, ""},
+		{"spans where servce:api", "attributes", "servce", query.TypeString, "did you mean service?"},
 	} {
 		t.Run(tt.text, func(t *testing.T) {
 			r, ps := resolvedText(t, tt.text, Options{})
@@ -100,7 +100,7 @@ func TestResolveVocabularies(t *testing.T) {
 	if got := r.Query.Where[0].(*inExpr).Values; got[0].Stored != "STATUS_CODE_ERROR" || got[1].Stored != "STATUS_CODE_OK" {
 		t.Fatal(got)
 	}
-	schema := &panel.Schema{Signals: map[string]panel.SignalSchema{"logs": {Columns: []panel.ColumnSchema{{Field: panel.Field{Name: "severity"}, Values: []panel.Option{{Value: "ERROR"}, {Value: "INFO"}}}}}}}
+	schema := &query.Schema{Signals: map[string]query.SignalSchema{"logs": {Columns: []query.ColumnSchema{{Field: query.Field{Name: "severity"}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}}}}}}}
 	r, ps = resolvedText(t, "logs where severity:custom", Options{Schema: schema})
 	if len(ps) > 0 || r.Query.Where[0].(*comparison).Value.Stored != "CUSTOM" || len(r.Notices) != 1 || r.Notices[0].Message != "not a standard level; stored levels in this window: ERROR, INFO" {
 		t.Fatal(r, ps)
@@ -262,7 +262,7 @@ func TestResolveSortKeys(t *testing.T) {
 }
 
 func TestResolveVariables(t *testing.T) {
-	opts := Options{Variables: []panel.Variable{{Name: "service", Kind: "query"}, {Name: "svcs", Kind: "query", Multi: true}}}
+	opts := Options{Variables: []query.Variable{{Name: "service", Kind: "query"}, {Name: "svcs", Kind: "query", Multi: true}}}
 	for _, tt := range []struct{ text, want string }{{"service:$region", "service, svcs"}, {"service:$svcs", "$svcs holds several values; use service in $svcs"}} {
 		_, ps := resolvedText(t, "spans where "+tt.text, opts)
 		if len(ps) == 0 || !strings.Contains(ps[0].Message, tt.want) {

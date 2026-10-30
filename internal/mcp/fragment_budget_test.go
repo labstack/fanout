@@ -10,15 +10,15 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func nonuniformFragment(values []any) PanelFragment {
-	return PanelFragment{Dashboard: fragmentPreset("logs", "", "", "", "", 100), Results: []panel.Result{
-		{ID: "volume", Status: "ok", Frame: &panel.Frame{Columns: []panel.Column{{Name: "count", Type: "number", Role: "measure"}}, Values: [][]any{{1, 2, 3}}, Rows: 3}},
-		{ID: "events", Status: "ok", Frame: &panel.Frame{Columns: []panel.Column{{Name: "body", Type: "string", Role: "dimension"}}, Values: [][]any{values}, Rows: len(values)}},
+	return PanelFragment{Dashboard: fragmentPreset("logs", "", "", "", "", 100), Results: []query.Result{
+		{ID: "volume", Status: "ok", Frame: &query.Frame{Columns: []query.Column{{Name: "count", Type: "number", Role: "measure"}}, Values: [][]any{{1, 2, 3}}, Rows: 3}},
+		{ID: "events", Status: "ok", Frame: &query.Frame{Columns: []query.Column{{Name: "body", Type: "string", Role: "dimension"}}, Values: [][]any{values}, Rows: len(values)}},
 	}}
 }
 func TestHeadHeavyRowsKeepSmallPanelAndMaximalPrefix(t *testing.T) {

@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type structuralValidator struct{}
 
-func (structuralValidator) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (structuralValidator) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil
@@ -104,7 +104,7 @@ func TestDashboardLifecycleOverHTTP(t *testing.T) {
 
 type failingValidator struct{ err error }
 
-func (v failingValidator) Validate(context.Context, *panel.Dashboard) error { return v.err }
+func (v failingValidator) Validate(context.Context, *query.Dashboard) error { return v.err }
 
 func TestDashboardValidationTimeoutIs504(t *testing.T) {
 	s := newTestAuthServer(t)
@@ -139,7 +139,7 @@ func TestDashboardBrowserSummaryKeepsOwnerScopedBuildProvenance(t *testing.T) {
 	}
 	service := dashboard.New(s.db.DB, structuralValidator{})
 	origin := dashboard.BuildOrigin{ThreadID: "source", MessageID: "request", RequestExcerpt: "Private request"}
-	_, err = service.Create(dashboard.WithBuildOrigin(t.Context(), origin), owner.ID, panel.Dashboard{Name: "Origin", Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hi"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
+	_, err = service.Create(dashboard.WithBuildOrigin(t.Context(), origin), owner.ID, query.Dashboard{Name: "Origin", Panels: []query.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hi"}}}, dashboard.Author{Kind: "agent", ID: owner.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
