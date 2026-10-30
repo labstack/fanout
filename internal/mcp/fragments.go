@@ -21,23 +21,25 @@ import (
 )
 
 type QueryTelemetryInput struct {
-	Panel        panel.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
-	Text         string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
-	FanQLVersion int                    `json:"fanql_version,omitempty" jsonschema:"FanQL version of text; this server reads 1"`
-	Variables    []panel.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
-	Time         *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
-	Vars         map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
+	Panel panel.Panel `json:"panel" jsonschema:"One v1 panel to display in the answer"`
+	Text  string      `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
+	fanql.VersionRequest
+	Variables []panel.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
+	Time      *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
+	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 type FragmentView struct {
 	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
 	Key  string `json:"key" jsonschema:"Stable SHA-256 hash of the view specification, captured window and variables"`
 }
 type PanelFragment struct {
-	View      FragmentView                                     `json:"view"`
-	Dashboard panel.Dashboard                                  `json:"dashboard"`
-	Results   []panel.Result                                   `json:"results"`
-	Vars      map[string]panel.Value                           `json:"vars,omitempty"`
-	Trace     *observability.Result[observability.TraceDetail] `json:"trace,omitempty"`
+	FanQLVersion int                                              `json:"fanql_version,omitempty"`
+	Notices      []fanql.Notice                                   `json:"notices,omitempty"`
+	View         FragmentView                                     `json:"view"`
+	Dashboard    panel.Dashboard                                  `json:"dashboard"`
+	Results      []panel.Result                                   `json:"results"`
+	Vars         map[string]panel.Value                           `json:"vars,omitempty"`
+	Trace        *observability.Result[observability.TraceDetail] `json:"trace,omitempty"`
 }
 
 // The published schema deliberately has no subset selector. Raw input is
@@ -57,7 +59,8 @@ type variableOptions struct {
 // Supply the same override to input and output schema inference.
 func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
 	options := &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[panel.Value](): {AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "array", Items: &jsonschema.Schema{Type: "string"}}}},
+		reflect.TypeFor[json.RawMessage](): {Type: "integer"},
+		reflect.TypeFor[panel.Value]():     {AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "array", Items: &jsonschema.Schema{Type: "string"}}}},
 	}}
 	input, err := jsonschema.For[In](options)
 	if err != nil {
@@ -166,22 +169,31 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if input.Text != "" && (input.Panel.Query != nil || input.Panel.SQL != "") {
 		return nil, PanelFragment{}, guidanceError("invalid_input", "text cannot be combined with panel.query or panel.sql")
 	}
-	if input.FanQLVersion != 0 && input.FanQLVersion != fanql.Version {
-		return nil, PanelFragment{}, guidanceError("unsupported_fanql_version", "this server reads FanQL 1")
+	var notices []fanql.Notice
+	if input.Text != "" || len(input.FanQLVersion) > 0 {
+		notice, problem := input.VersionRequest.Validate()
+		if problem != nil {
+			return nil, PanelFragment{}, fanqlToolFailure(*problem, nil)
+		}
+		if notice != nil {
+			notices = append(notices, *notice)
+		}
 	}
 	if input.Text != "" {
 		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
 		if len(problems) != 0 {
-			messages := make([]string, len(problems))
-			for i, p := range problems {
-				messages[i] = p.Message
-			}
-			return nil, PanelFragment{}, guidanceError("invalid_fanql", strings.Join(messages, "; "))
+			return nil, PanelFragment{}, fanqlToolFailure(fanql.VersionProblem{Code: "invalid_fanql", Message: "The query has problems."}, panel.PresentProblems(problems))
 		}
 		input.Panel.Query = &compiled.Query
+		notices = append(notices, compiled.Notices...)
 	}
 	d := panel.Dashboard{Name: input.Panel.Title, Variables: input.Variables, Panels: []panel.Panel{input.Panel}}
-	return s.runFragment(ctx, panel.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
+	result, out, err := s.runFragment(ctx, panel.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
+	if err == nil && input.Text != "" {
+		out.FanQLVersion = fanql.Version
+		out.Notices = notices
+	}
+	return result, out, err
 }
 func (s *Server) queryPanelFragment(ctx context.Context, _ *mcp.CallToolRequest, input panel.RunRequest) (*mcp.CallToolResult, PanelFragment, error) {
 	if input.Panels != nil {
@@ -757,4 +769,12 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 		return PanelFragment{}, err
 	}
 	return out, nil
+}
+
+func fanqlToolFailure(problem fanql.VersionProblem, problems panel.Problems) error {
+	raw, _ := json.Marshal(struct {
+		Error    fanql.VersionProblem `json:"error"`
+		Problems panel.Problems       `json:"problems,omitempty"`
+	}{problem, problems})
+	return errors.New(string(raw))
 }

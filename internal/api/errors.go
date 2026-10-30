@@ -13,9 +13,7 @@ type apiError struct {
 	status   int
 	Code     string         `json:"code"`
 	Message  string         `json:"message"`
-	Hint     string         `json:"hint,omitempty"`
 	Problems panel.Problems `json:"problems,omitempty"`
-	Preview  *fanqlPreview  `json:"preview,omitempty"`
 }
 
 func (e *apiError) Error() string   { return e.Message }
@@ -85,7 +83,6 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 	var httpError *echo.HTTPError
 	if errors.As(err, &specific) {
 		body.Code, body.Message, body.Problems = specific.Code, specific.Message, specific.Problems
-		body.Hint, body.Preview = specific.Hint, specific.Preview
 	} else if errors.As(err, &httpError) && httpError.Message != "" {
 		body.Message = httpError.Message
 	} else if status < 500 {
@@ -99,7 +96,12 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 	if c.Request().Method == http.MethodHead {
 		writeErr = c.NoContent(status)
 	} else {
-		writeErr = c.JSON(status, body)
+		var domain interface{ ResponseBody() any }
+		if errors.As(err, &domain) {
+			writeErr = c.JSON(status, domain.ResponseBody())
+		} else {
+			writeErr = c.JSON(status, body)
+		}
 	}
 	if writeErr != nil {
 		slog.Error("HTTP error response failed", "route", c.Path(), "error", writeErr)

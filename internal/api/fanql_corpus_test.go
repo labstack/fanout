@@ -72,7 +72,7 @@ func TestNonExecution(t *testing.T) {
 				t.Fatalf("negative corpus text became executable: %+v %+v", compiled, problems)
 			}
 			for _, preview := range []bool{false, true} {
-				input, err := json.Marshal(map[string]any{"version": fanql.Version, "text": tc.Text, "viz": tc.Viz, "preview": preview})
+				input, err := json.Marshal(map[string]any{"fanql_version": fanql.Version, "text": tc.Text, "viz": tc.Viz, "preview": preview})
 				if err != nil {
 					t.Fatal(err)
 				}

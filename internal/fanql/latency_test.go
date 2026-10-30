@@ -79,7 +79,7 @@ func TestLatencyBudgets(t *testing.T) {
 		measure("Compile", 1500, &compileSamples, func() {
 			_, _ = Compile(fixture.Text, Options{Viz: fixture.Viz})
 		})
-		req := CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Viz: fixture.Viz}
+		req := CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Options: Options{Viz: fixture.Viz}}
 		measure("Complete warm", 200, &completeSamples, func() {
 			if response := warm.Complete(t.Context(), req); !response.Schema.Warm {
 				t.Fatal("warm-cache measurement lost its schema")
@@ -205,7 +205,7 @@ func BenchmarkComplete(b *testing.B) {
 	c.cache[completionKey{window: "1h"}] = completionSchemaEntry{schema: completionFixtureSchema(), expires: now.Add(time.Hour)}
 	complete := func(i int) {
 		fixture := fixtures[i%len(fixtures)]
-		_ = c.Complete(b.Context(), CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Viz: fixture.Viz})
+		_ = c.Complete(b.Context(), CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Options: Options{Viz: fixture.Viz}})
 	}
 	for i := range fixtures {
 		complete(i)
@@ -219,7 +219,7 @@ func BenchmarkParseRank(b *testing.B) {
 	c := NewCompleter(nil)
 	parseRank := func(i int) {
 		fixture := fixtures[i%len(fixtures)]
-		req := CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Viz: fixture.Viz}
+		req := CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Options: Options{Viz: fixture.Viz}}
 		_, _ = expectAt(req.Text, req.Cursor)
 		_ = c.Complete(b.Context(), req)
 	}

@@ -79,9 +79,9 @@ func fanqlResponse(t *testing.T, rec *httptest.ResponseRecorder, status int, tar
 
 func TestFanQLParseReturnsQueryCanonicalAndVizzes(t *testing.T) {
 	text := "spans where status:error | count() by service"
-	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"version":1,"text":"`+text+`"}`)
+	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"fanql_version":1,"text":"`+text+`"}`)
 	var body struct {
-		Version   int         `json:"version"`
+		Version   int         `json:"fanql_version"`
 		Query     panel.Query `json:"query"`
 		Canonical string      `json:"canonical"`
 		Viz       struct {
@@ -151,7 +151,7 @@ func TestFanQLParseProblemsHaveNoQuery(t *testing.T) {
 }
 
 func TestFanQLParseSearchBarAndViz(t *testing.T) {
-	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"version":1,"text":"service:api timeout","source":"logs"}`)
+	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"fanql_version":1,"text":"service:api timeout","source":"logs"}`)
 	var body struct {
 		Query panel.Query `json:"query"`
 		Viz   struct {
@@ -168,7 +168,7 @@ func TestFanQLParseSearchBarAndViz(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "the page supplies where") {
 		t.Fatalf("where: %d %s", rec.Code, rec.Body)
 	}
-	rec = serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"version":1,"text":"spans | count() every 1m sort count","viz":"timeseries"}`)
+	rec = serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"fanql_version":1,"text":"spans | count() every 1m sort count","viz":"timeseries"}`)
 	fanqlResponse(t, rec, http.StatusOK, &body)
 	if body.Viz.Requested != "timeseries" || len(body.Notices) != 1 || !strings.Contains(body.Notices[0].Message, "sort does not apply to bucketed series") {
 		t.Fatalf("bucketed sort: %s", rec.Body)
@@ -178,13 +178,13 @@ func TestFanQLParseSearchBarAndViz(t *testing.T) {
 func TestFanQLVersionHandling(t *testing.T) {
 	for _, path := range []string{"parse", "format", "complete"} {
 		for _, version := range []string{"2", "0", "-1", `"1"`, "null"} {
-			rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/"+path, `{"version":`+version+`}`)
+			rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/"+path, `{"fanql_version":`+version+`}`)
 			var body struct {
 				Code string `json:"code"`
 				Hint string `json:"hint"`
 			}
 			fanqlResponse(t, rec, http.StatusBadRequest, &body)
-			if body.Code != "unsupported_fanql_version" || body.Hint != "this server reads FanQL 1" {
+			if body.Code != "unsupported_fanql_version" || body.Hint != "send fanql_version: 1" {
 				t.Fatalf("%s version %s: %s", path, version, rec.Body)
 			}
 		}
@@ -199,27 +199,27 @@ func TestFanQLVersionHandling(t *testing.T) {
 			Notices []fanql.Notice `json:"notices"`
 		}
 		fanqlResponse(t, rec, http.StatusOK, &body)
-		if len(body.Notices) != 1 || body.Notices[0].Message != "version missing; assuming FanQL 1" {
+		if len(body.Notices) != 1 || body.Notices[0].Message != "fanql_version missing; assuming 1" {
 			t.Fatalf("missing version: %s", rec.Body)
 		}
 	}
 	for _, version := range []string{"2", "bogus", ""} {
-		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodGet, "/api/fanql/reference?version="+version, "")
+		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodGet, "/api/fanql/reference?fanql_version="+version, "")
 		var body struct {
 			Code string `json:"code"`
 			Hint string `json:"hint"`
 		}
 		fanqlResponse(t, rec, http.StatusBadRequest, &body)
-		if body.Code != "unsupported_fanql_version" || body.Hint != "this server reads FanQL 1" {
+		if body.Code != "unsupported_fanql_version" || body.Hint != "send fanql_version: 1" {
 			t.Fatalf("reference version: %s", rec.Body)
 		}
 	}
 }
 
 func TestFanQLFormat(t *testing.T) {
-	rec := serveFanQL(t, &fakeFanQLParser{}, &fakePanels{}, http.MethodPost, "/api/fanql/format", `{"version":1,"query":{"from":"spans","where":["service='api'"],"measures":["p95( duration_ms )"]},"panel":{"id":"a","title":"A","viz":"stat"}}`)
+	rec := serveFanQL(t, &fakeFanQLParser{}, &fakePanels{}, http.MethodPost, "/api/fanql/format", `{"fanql_version":1,"query":{"from":"spans","where":["service='api'"],"measures":["p95( duration_ms )"]},"panel":{"id":"a","title":"A","viz":"stat"}}`)
 	var body struct {
-		Version int `json:"version"`
+		Version int `json:"fanql_version"`
 		fanql.Formatted
 	}
 	fanqlResponse(t, rec, http.StatusOK, &body)
@@ -245,7 +245,7 @@ func TestFanQLFormat(t *testing.T) {
 	for i := range 16 {
 		q.Where = append(q.Where, "body = '"+strings.Repeat("x", 480)+fmt.Sprint(i)+"'")
 	}
-	input, err := json.Marshal(map[string]any{"version": 1, "query": q})
+	input, err := json.Marshal(map[string]any{"fanql_version": 1, "query": q})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestFanQLFormat(t *testing.T) {
 	for i := range 16 {
 		q.Where = append(q.Where, "coalesce(body, '"+strings.Repeat("𝔘", 110)+strings.Repeat("`", 30)+fmt.Sprint(i)+"') = ''")
 	}
-	input, err = json.Marshal(map[string]any{"version": 1, "query": q})
+	input, err = json.Marshal(map[string]any{"fanql_version": 1, "query": q})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,9 +280,9 @@ func TestFanQLFormat(t *testing.T) {
 }
 
 func TestFanQLComplete(t *testing.T) {
-	rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"version":1,"text":"logs where sev","cursor":14}`)
+	rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"fanql_version":1,"text":"logs where sev","cursor":14}`)
 	var body struct {
-		Version int            `json:"version"`
+		Version int            `json:"fanql_version"`
 		Replace panel.TextSpan `json:"replace"`
 		Items   []struct {
 			Label string `json:"label"`
@@ -295,18 +295,18 @@ func TestFanQLComplete(t *testing.T) {
 		Notices []fanql.Notice `json:"notices"`
 	}
 	fanqlResponse(t, rec, http.StatusOK, &body)
-	if body.Version != 1 || body.Replace != (panel.TextSpan{Start: 11, End: 14}) || len(body.Items) == 0 || body.Items[0].Label != "severity" || body.Schema.Window != "1h" || body.Schema.Warm || body.Schema.Recent {
+	if body.Version != 1 || body.Replace != (panel.TextSpan{Start: 11, End: 14}) || len(body.Items) == 0 || body.Items[0].Label != "severity" || body.Schema.Window != "24h" || body.Schema.Warm || !body.Schema.Recent {
 		t.Fatalf("complete: %s", rec.Body)
 	}
 	rec = serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14,"window":"","namespace":"prod"}`)
 	fanqlResponse(t, rec, http.StatusOK, &body)
-	if body.Schema.Window != "24h" || !body.Schema.Recent || len(body.Notices) != 1 || body.Notices[0].Message != "version missing; assuming FanQL 1" {
+	if body.Schema.Window != "24h" || !body.Schema.Recent || len(body.Notices) != 1 || body.Notices[0].Message != "fanql_version missing; assuming 1" {
 		t.Fatalf("absolute completion: %s", rec.Body)
 	}
 }
 
 func TestFanQLReference(t *testing.T) {
-	for _, path := range []string{"/api/fanql/reference", "/api/fanql/reference?version=1"} {
+	for _, path := range []string{"/api/fanql/reference", "/api/fanql/reference?fanql_version=1"} {
 		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodGet, path, "")
 		if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/markdown") || !strings.Contains(rec.Body.String(), "FanQL 1") || !strings.Contains(rec.Body.String(), "Preview") {
 			t.Fatalf("reference: %d %s", rec.Code, rec.Body)
@@ -357,5 +357,18 @@ func TestFanQLBodyLimitsAndUnknownFields(t *testing.T) {
 	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"`+strings.Repeat("a", 4001)+`"}`)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"invalid_fanql"`) || !strings.Contains(rec.Body.String(), "a query is at most 4000 characters (8192 bytes)") {
 		t.Fatalf("interactive bound: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestFanQLVersionUsesSharedFieldAndReferenceHeaders(t *testing.T) {
+	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"fanql_version":1,"text":"spans"}`)
+	var body map[string]json.RawMessage
+	fanqlResponse(t, rec, http.StatusOK, &body)
+	if string(body["fanql_version"]) != "1" || body["version"] != nil {
+		t.Fatalf("version contract: %s", rec.Body)
+	}
+	rec = serveFanQL(t, nil, &fakePanels{}, http.MethodGet, "/api/fanql/reference", "")
+	if rec.Code != http.StatusOK || rec.Body.String() != fanql.Reference() || rec.Header().Get("FanQL-Notice") == "" || rec.Header().Get("FanQL-Version") != "1" {
+		t.Fatalf("reference metadata: %d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
 }

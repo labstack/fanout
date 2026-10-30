@@ -427,23 +427,23 @@ type FixIt struct {
 
 ```
 POST /api/fanql/parse
-  {version: 1, text, source?, viz?, variables?, preview?: bool}
-  200 {version: 1, query, canonical, viz: {requested?, compatible: [{viz, requires: []}], edits: [{viz, text}]},
+  {fanql_version: 1, text, source?, viz?, variables?, preview?: bool}
+  200 {fanql_version: 1, query, canonical, viz: {requested?, compatible: [{viz, requires: []}], edits: [{viz, text}]},
        notices: [{path, message, span?}]}
   400 {code: "invalid_fanql", message: "The query has problems.", problems: [...], preview?: {text, note: "not executable"}}
 
 POST /api/fanql/format
-  {version: 1, query, viz?, variables?, panel?}
-  200 {version: 1, text, exactness: "exact" | "normalized", editable: bool, reason?: string, notices: [...]}
+  {fanql_version: 1, query, viz?, variables?, panel?}
+  200 {fanql_version: 1, text, exactness: "exact" | "normalized", editable: bool, reason?: string, notices: [...]}
   400 {code: "invalid_spec", ... problems}           (the query fails QueryShape under every viz)
   503 {code: "unavailable", message}                 (engine parse failed operationally)
 
 POST /api/fanql/complete
-  {version: 1, text, cursor, source?, viz?, window?, namespace?, variables?}
-  200 {version: 1, replace: {start, end}, items: [{label, insert, kind, detail}],
+  {fanql_version: 1, text, cursor, source?, viz?, window?, namespace?, variables?}
+  200 {fanql_version: 1, replace: {start, end}, items: [{label, insert, kind, detail}],
        schema: {window, sampled: true, warm: bool, recent: bool}}
 
-GET  /api/fanql/reference?version=1        text/markdown
+GET  /api/fanql/reference?fanql_version=1        text/markdown
 ```
 
 `format` needs in-memory shape validity under some viz, the supplied `variables` to judge `$x` references (without them, references are notices), and the engine only for `ParseSQL`/`RenderSQL` of stored entries; it never runs `Check`'s bind step or `Normalize`; `panel` is accepted so a builder round trip can report `requires` satisfied or not, and is otherwise ignored.
@@ -458,7 +458,7 @@ type FanQLHandler struct {
 func RegisterFanQLRoutes(e *echo.Echo, parser panel.Parser, engine PanelEngine)
 ```
 
-Routes use the 20-second panel deadline; operational errors (`panel.isOperational`) become `503 unavailable` and are logged through `PresentError`, never turned into problems; bodies are decoded with `decodeStrict` and the existing 512 KiB limit; all routes need the `telemetry:read` capability and are classified in `classifyRoute`. Unknown or unsupported `version`: `400 {code: "unsupported_fanql_version", message, hint: "this server reads FanQL 1"}`. A missing `version` means the current one and adds a notice.
+Routes use the 20-second panel deadline; operational errors (`panel.isOperational`) become `503 unavailable` and are logged through `PresentError`, never turned into problems; bodies are decoded with `decodeStrict` and the existing 512 KiB limit; all routes need the `telemetry:read` capability and are classified in `classifyRoute`. Unknown or unsupported `fanql_version`: `400 {code: "unsupported_fanql_version", message, hint: "this server reads FanQL 1"}`. A missing `fanql_version` means the current one and adds a notice.
 
 **Envelope.** Panels store `panel.Query` only; the text is derived. Everything else that carries text carries the version and the context the text needs:
 

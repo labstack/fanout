@@ -266,7 +266,7 @@ Read-only.
 
 ## query_telemetry
 
-**Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide. The authored spec plus vars must fit 128 KiB (131072 serialized JSON bytes); larger inputs are rejected with their actual size. Agents: write panel.query (structured JSON) first, or panel.sql for complex work; text accepts the human FanQL form (fanout://fanql/reference) and is never required. All-empty results return no_data guidance instead of a view. State no matching data findings in the answer and prefer signals the service actually has.
+**Telemetry panel** — Display one v1 panel in chat as an executable dashboard fragment. Use get_telemetry_schema to discover fields; see create_dashboard for the spec guide. The authored spec plus vars must fit 128 KiB (131072 serialized JSON bytes); larger inputs are rejected with their actual size. Agents: write panel.query (structured JSON) first, or panel.sql for complex work; text accepts FanQL with fanql_version: 1: source [where] filters | measures by fields every bucket sort key limit n. Examples: spans where status:error | count() by service; logs where severity>=warn | count() by service every 1m. See fanout://fanql/reference for fields, operators and variables. All-empty results return no_data guidance instead of a view. State no matching data findings in the answer and prefer signals the service actually has.
 
 Read-only.
 
@@ -275,7 +275,7 @@ Read-only.
 | Input | Type | Required | Means |
 |---|---|---|---|
 | `panel` | `object` | **yes** | One v1 panel to display in the answer |
-| `fanql_version` | `integer` | no | FanQL version of text; this server reads 1 |
+| `fanql_version` | `integer` | no | FanQL syntax version as an integer; omission uses the current syntax and returns a notice |
 | `text` | `string` | no | FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference |
 | `time` | `object` | no | Optional dashboard time override: exact from/to or a relative range |
 | `variables` | `array` | no | Optional v1 variable definitions used by this panel |

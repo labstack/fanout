@@ -61,13 +61,11 @@ type schemaSource interface {
 }
 
 type CompleteRequest struct {
+	Options
 	Text      string
 	Cursor    int
-	Source    string
-	Viz       string
 	Window    string
 	Namespace string
-	Variables []panel.Variable
 }
 
 type Item struct {

@@ -73,11 +73,11 @@ func TestQueryTelemetryRejectsTextWithQueryOrSQL(t *testing.T) {
 }
 
 func TestQueryTelemetryReportsFanQLProblems(t *testing.T) {
-	checkFanQLToolFailure(t, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"}, "invalid_fanql", "mixed and/or needs parentheses")
+	checkFanQLToolFailure(t, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"}, "invalid_fanql", "The query has problems.")
 }
 
 func TestQueryTelemetryRejectsUnsupportedFanQLVersion(t *testing.T) {
-	checkFanQLToolFailure(t, QueryTelemetryInput{Text: "spans", FanQLVersion: 2}, "unsupported_fanql_version", "this server reads FanQL 1")
+	checkFanQLToolFailure(t, QueryTelemetryInput{Text: "spans", VersionRequest: fanql.VersionRequest{FanQLVersion: json.RawMessage(`2`)}}, "unsupported_fanql_version", "This server cannot read the requested FanQL version.")
 }
 
 func TestFanQLReferenceResource(t *testing.T) {
@@ -134,4 +134,37 @@ func TestQueryTelemetryDescriptionPrefersStructuredInput(t *testing.T) {
 		return
 	}
 	t.Fatal("query_telemetry missing")
+}
+
+func TestQueryTelemetryFanQLMetadataAndStructuredProblems(t *testing.T) {
+	s := panelServerFixture(t, true)
+	_, out, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: panel.Panel{ID: "t", Title: "t", Viz: "table"}, Text: "spans where status:error | count() by service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.FanQLVersion != fanql.Version || len(out.Notices) != 1 || out.Notices[0].Path != "fanql_version" {
+		t.Fatalf("metadata: %+v", out)
+	}
+	_, _, err = s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"})
+	var failure struct {
+		Error    toolerror.Error `json:"error"`
+		Problems panel.Problems  `json:"problems"`
+	}
+	if err == nil || json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error.Code != "invalid_fanql" || len(failure.Problems) != 1 || failure.Problems[0].Span == nil || len(failure.Problems[0].FixIts) != 2 {
+		t.Fatalf("structured failure: %v", err)
+	}
+	client := connectTestClient(t, s, nil)
+	listed, err := client.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Name == "query_telemetry" {
+			for _, syntax := range []string{"source [where] filters | measures", "spans where status:error | count() by service", "logs where severity>=warn | count() by service every 1m"} {
+				if !strings.Contains(tool.Description, syntax) {
+					t.Errorf("missing inline syntax %q", syntax)
+				}
+			}
+		}
+	}
 }

@@ -70,8 +70,8 @@ Canonical text brackets single-segment attribute keys, so new columns cannot rei
 | `namespace` | `string` | `none` |  | OpenTelemetry service namespace |
 | `service` | `string` | `none` | yes | Service name |
 | `operation` | `string` | `none` |  | Span name |
-| `kind` | `string` | `none` | yes | SPAN_KIND_SERVER, SPAN_KIND_CLIENT, SPAN_KIND_INTERNAL, SPAN_KIND_PRODUCER or SPAN_KIND_CONSUMER |
-| `status` | `string` | `none` | yes | STATUS_CODE_OK, STATUS_CODE_ERROR or STATUS_CODE_UNSET |
+| `kind` | `string` | `none` | yes | SPAN_KIND_CLIENT, SPAN_KIND_CONSUMER, SPAN_KIND_INTERNAL, SPAN_KIND_PRODUCER, SPAN_KIND_SERVER, SPAN_KIND_UNSPECIFIED |
+| `status` | `string` | `none` | yes | STATUS_CODE_ERROR, STATUS_CODE_OK, STATUS_CODE_UNSET |
 | `status_message` | `string` | `none` |  | Status description |
 | `trace_id` | `string` | `none` |  | Trace identifier |
 | `span_id` | `string` | `none` |  | Span identifier |
@@ -122,7 +122,7 @@ Canonical text brackets single-segment attribute keys, so new columns cannot rei
 | `time` | `time` | `none` |  | Data point time |
 | `name` | `string` | `none` |  | Metric name |
 | `unit` | `string` | `none` |  | Metric unit as reported |
-| `type` | `string` | `none` | yes | gauge, counter, updown, histogram or summary |
+| `type` | `string` | `none` | yes | counter, gauge, histogram, summary, updown |
 | `temporality` | `string` | `none` | yes | cumulative or delta; empty for gauge and summary |
 | `start_time` | `time` | `none` |  | Data point start time; NULL when absent |
 | `value` | `number` | `none` |  | Gauge or sum value |
@@ -329,4 +329,4 @@ The language version is separate from product CalVer and the panel contract. Mac
 
 A version bump is required when accepted text changes meaning or stops parsing, including columns that reinterpret bare identifiers and severity aliases that reinterpret accepted literals. New status/kind aliases that were errors, stage words and filter functions are additive. Canonical spelling is frozen per version; preview changes can rewrite through the shared structured query.
 
-HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference?version=1`, requiring telemetry:read. MCP query_telemetry accepts text with fanql_version beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.
+HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference?fanql_version=1`, requiring telemetry:read. MCP query_telemetry accepts text with fanql_version beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.
