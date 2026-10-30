@@ -191,7 +191,7 @@ describe("Rail", () => {
   });
 
   it("links Explore with or without chat and marks it current on /explore", async () => {
-    fetchMock.mockImplementation(async () => json({ dashboards: [] }));
+    fetchMock.mockImplementation(async (input) => new URL(String(input), "http://localhost").pathname === "/api/agent/threads" ? json({ items: [], next_cursor: null }) : json({ dashboards: [] }));
     for (const agentAvailable of [true, false]) {
       const { root, render, handlers } = mount({ agentAvailable, exploreActive: true });
       await act(async () => render());
