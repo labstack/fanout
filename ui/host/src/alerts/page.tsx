@@ -1,7 +1,7 @@
 import { ActionIcon, Alert, Badge, Button, Group, Loader, Menu, Modal, Stack, Switch, Table, Text, Title } from "@mantine/core";
 import { DotsThree, Plus } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { exactTimestamp } from "../../../format";
 import { useViewer } from "../auth";
 import { alertsKey, createRule, deleteRule, listAlerts, listRules, replaceRule, rulesKey, testRule, type Rule, type RuleDraft, type RuleTest } from "./api";
@@ -22,17 +22,23 @@ export function AlertsPage() {
   const [tested, setTested] = useState<{ rule: Rule; result?: RuleTest; error?: string }>();
   const refresh = () => { void client.invalidateQueries({ queryKey: rulesKey }); void client.invalidateQueries({ queryKey: alertsKey }); };
   const toggle = useMutation({ mutationFn: (rule: Rule) => replaceRule(rule.id, { ...draftFields(rule), enabled: !rule.enabled }), onSuccess: refresh });
-  const remove = useMutation({ mutationFn: (rule: Rule) => deleteRule(rule.id), onSuccess: () => { setDeleting(undefined); refresh(); } });
+  const remove = useMutation({ mutationFn: (rule: Rule) => deleteRule(rule.id), onSuccess: () => { setDeleting(undefined); closeTest(); refresh(); } });
 
   const save = async (draft: RuleDraft) => {
     if (editing?.rule) await replaceRule(editing.rule.id, draft); else await createRule(draft);
     setEditing(undefined); refresh();
   };
+  // Only the latest test may answer, and only while its window is open.
+  const testRun = useRef(0);
+  const closeTest = () => { testRun.current++; setTested(undefined); };
   const runTest = (rule: Rule) => {
+    const run = ++testRun.current;
     setTested({ rule });
-    testRule(rule.id).then(result => setTested({ rule, result }), (failure: unknown) => setTested({ rule, error: failure instanceof Error ? failure.message : "The test failed" }));
+    const answer = (next: { result?: RuleTest; error?: string }) => { if (testRun.current === run) setTested({ rule, ...next }); };
+    testRule(rule.id).then(result => answer({ result }), (failure: unknown) => answer({ error: failure instanceof Error ? failure.message : "The test failed" }));
   };
   const names = new Map((rules.data ?? []).map(rule => [rule.id, rule.name]));
+  const lastFired = (rule: Rule) => (alerts.data ?? []).filter(a => a.rule_id === rule.id && a.fired_at).map(a => a.fired_at!).sort().at(-1);
   const active = (rule: Rule) => (alerts.data ?? []).filter(a => a.rule_id === rule.id && (a.state === "firing" || a.state === "pending"));
   const history = [...(alerts.data ?? [])].sort((a, b) => (b.fired_at ?? b.created_at).localeCompare(a.fired_at ?? a.created_at));
 
@@ -50,14 +56,16 @@ export function AlertsPage() {
       {rules.isLoading ? <Loader size="sm" /> : rules.error ? <Alert color="bad">Rules could not be loaded: {rules.error.message}</Alert>
         : rules.data?.length === 0 ? <Text size="sm" c="dimmed" data-alerts-empty>No rules yet.{canManage ? " Create one to get notified when a service misbehaves." : ""}</Text>
         : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm" highlightOnHover>
-          <Table.Thead><Table.Tr><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Expression</Table.Th><Table.Th>State</Table.Th><Table.Th>Enabled</Table.Th><Table.Th w={48} /></Table.Tr></Table.Thead>
+          <Table.Thead><Table.Tr><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Expression</Table.Th><Table.Th>State</Table.Th><Table.Th>Last fired</Table.Th><Table.Th>Enabled</Table.Th><Table.Th w={48} /></Table.Tr></Table.Thead>
           <Table.Tbody>{rules.data?.map(rule => {
             const now = active(rule);
             return <Table.Tr key={rule.id}>
               <Table.Td><Text size="sm" fw={500}>{rule.name}</Text>{rule.description && <Text size="xs" c="dimmed">{rule.description}</Text>}</Table.Td>
               <Table.Td><Text size="sm">{rule.service || "All services"}</Text></Table.Td>
               <Table.Td><Text size="xs" ff="monospace">{rule.expression}</Text></Table.Td>
-              <Table.Td>{now.length > 0 ? <Group gap={4}>{now.map(a => <Badge key={a.id} color={stateColor[a.state]} variant="light">{a.state} · {a.service}</Badge>)}</Group> : <Text size="xs" c="dimmed">OK</Text>}</Table.Td>
+              <Table.Td>{!alerts.isSuccess ? <Text size="xs" c="dimmed">Unknown</Text>
+                : now.length > 0 ? <Group gap={4}>{now.map(a => <Badge key={a.id} color={stateColor[a.state]} variant="light">{a.state} · {a.service}</Badge>)}</Group> : <Text size="xs" c="dimmed">OK</Text>}</Table.Td>
+              <Table.Td><Text size="sm">{alerts.isSuccess ? when(lastFired(rule)) : "—"}</Text></Table.Td>
               <Table.Td><Switch aria-label={`Enable ${rule.name}`} checked={rule.enabled} disabled={!canManage || toggle.isPending} onChange={() => toggle.mutate(rule)} /></Table.Td>
               <Table.Td>{canManage && <Menu position="bottom-end"><Menu.Target><ActionIcon variant="subtle" color="gray" aria-label={`${rule.name} actions`}><DotsThree size={18} /></ActionIcon></Menu.Target>
                 <Menu.Dropdown>
@@ -97,7 +105,7 @@ export function AlertsPage() {
         <Group justify="flex-end" gap="xs"><Button variant="default" disabled={remove.isPending} onClick={() => setDeleting(undefined)}>Cancel</Button><Button color="bad" loading={remove.isPending} onClick={() => remove.mutate(deleting)}>Delete rule</Button></Group>
       </Stack>
     </Modal>}
-    {tested && <Modal opened onClose={() => setTested(undefined)} title={`Test · ${tested.rule.name}`}>
+    {tested && <Modal opened onClose={closeTest} closeButtonProps={{ "aria-label": "Close test" }} title={`Test · ${tested.rule.name}`}>
       {tested.error ? <Alert color="bad">{tested.error}</Alert>
         : !tested.result ? <Loader size="sm" aria-label="Testing the rule" />
         : !tested.result.results?.length ? <Text size="sm" c="dimmed">No services have data in the current window.</Text>

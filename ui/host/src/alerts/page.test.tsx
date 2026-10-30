@@ -106,6 +106,31 @@ describe("AlertsPage", () => {
     await wait(() => expect(calls("DELETE", "/api/alerting/rules/r1")).toHaveLength(1));
   });
 
+  it("shows the last fired time and an unknown state when history cannot load", async () => {
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getAllByText(/Oct 30/).length).toBeGreaterThan(1));
+    fetchMock.mockImplementation(async (input) => String(input) === "/api/alerting/alerts" ? json({ message: "down" }, 500) : json([rule]));
+    cleanups.splice(0).forEach(cleanup => cleanup()); document.body.innerHTML = "";
+    const again = await render();
+    await again.wait(() => expect(again.ui.getByText("Unknown")).toBeTruthy());
+    expect(again.ui.queryByText("OK")).toBeNull();
+  });
+
+  it("ignores a test answer that arrives after its window closed", async () => {
+    let answer: (response: Response) => void = () => {};
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/alerting/rules/r1/test" ? new Promise<Response>(resolve => { answer = resolve; }) : base(input, init));
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getByRole("button", { name: "Checkout errors actions" })).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
+    await act(async () => ui.getByRole("menuitem", { name: "Test against current data", hidden: true }).click());
+    await wait(() => expect(ui.getByLabelText("Testing the rule")).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "Close test" }).click());
+    await act(async () => answer(json({ rule, results: [{ service: "checkout", triggered: true, env: {} }] })));
+    await act(async () => {});
+    expect(ui.queryByText("Would fire")).toBeNull();
+  });
+
   it("is read-only for viewers", async () => {
     viewer.role = "viewer";
     const { ui, wait } = await render();
