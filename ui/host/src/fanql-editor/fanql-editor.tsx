@@ -66,7 +66,7 @@ export function FanqlEditor(props: FanqlEditorProps) {
       } catch { return null; }
     };
     const instance = new EditorView({ parent: host.current!, state: EditorState.create({ doc: latest.current.value, extensions: [
-      history(), drawSelection(), sqlTheme, oneLine,
+      history(), drawSelection(), sqlTheme, Prec.highest(oneLine),
       // One line: newlines from typing or pasting become spaces.
       EditorState.transactionFilter.of(tr => {
         if (!tr.docChanged || !/[\r\n]/.test(tr.newDoc.toString())) return tr;

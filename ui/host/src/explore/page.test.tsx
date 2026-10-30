@@ -102,7 +102,7 @@ describe("ExplorePage", () => {
     await wait(() => expect(ui.getByRole("radiogroup", { name: "Visualization" })).toBeTruthy());
     const options = within(ui.getByRole("radiogroup", { name: "Visualization" })).getAllByRole<HTMLInputElement>("radio");
     expect(options.map(option => [option.value, option.disabled])).toEqual([["table", false], ["bar", false], ["state_timeline", true]]);
-    await click(/Time series/);
+    await click("Time series…");
     await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto", viz: "timeseries" }));
   });
 

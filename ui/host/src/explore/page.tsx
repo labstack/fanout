@@ -135,9 +135,9 @@ export function ExplorePage({ search, onSearch, onSaved }: {
           data={compatible.map(c => ({ value: c.viz, disabled: c.requires.length > 0, label: c.requires.length > 0
             ? <Tooltip label={`Needs ${c.requires.map(r => requirementLabel[r]).join(" and ")}; set them after saving`}><span>{vizLabel[c.viz]}</span></Tooltip>
             : vizLabel[c.viz] }))} />}
-        {search.tab === "query" && parsed?.viz.edits.map(edit => <Button key={edit.viz} size="compact-sm" variant="subtle" onClick={() => { setText(edit.text); void execute("query", edit.text, edit.viz); }}>
-          {vizLabel[edit.viz]} (runs <code>{edit.text}</code>)
-        </Button>)}
+        {search.tab === "query" && parsed?.viz.edits.map(edit => <Tooltip key={edit.viz} label={<>Rewrites the query as <code>{edit.text}</code></>} multiline maw={420}>
+          <Button size="compact-sm" variant="subtle" onClick={() => { setText(edit.text); void execute("query", edit.text, edit.viz); }}>{vizLabel[edit.viz]}…</Button>
+        </Tooltip>)}
       </Group>
       <Tooltip label="Run a query that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => run && setSaving(run.panel)}>Save to dashboard</Button></span></Tooltip>
     </Group>
