@@ -17,6 +17,7 @@ import type { TurnOptions } from "../app-context";
 import { rowHeight, margin, pixels, defaultRows } from "./layout";
 
 const PanelSqlEditor = lazy(() => import("./panel-sql-editor"));
+const PanelEditor = lazy(() => import("./panel-editor"));
 
 export type GridProps = {
   dashboardId: string; version: number; spec: DashboardSpec; vars: Record<string, VarValue>; results: Map<string, PanelResult>; fetching: boolean; editing: boolean; view?: string;
@@ -43,6 +44,8 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   // Capture the authored spec and base version when editing starts, so a
   // background refresh cannot silently rebase a draft over another edit.
   const [sqlEdit, setSqlEdit] = useState<{ panel: Panel; spec: DashboardSpec; version: number }>();
+  // An undefined panel adds one.
+  const [panelEdit, setPanelEdit] = useState<{ panel?: Panel; spec: DashboardSpec; version: number }>();
   const [layout, setLayout] = useState(() => spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) })));
   useEffect(() => { setLayout(spec.panels.map((p) => ({ i: p.id, x: p.grid?.x ?? 0, y: p.grid?.y ?? 0, w: p.grid?.w ?? 6, h: p.grid?.h ?? defaultRows(p) }))); }, [spec]);
   const [windowHeight, setWindowHeight] = useState(() => window.innerHeight);
@@ -56,6 +59,11 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const fullscreenMenu = useRef<HTMLButtonElement>(null);
   const sqlReturnFocus = useRef<HTMLButtonElement | null>(null);
+  const closePanelEdit = () => {
+    const id = panelEdit?.panel?.id;
+    setPanelEdit(undefined);
+    requestAnimationFrame(() => (sqlReturnFocus.current?.isConnected ? sqlReturnFocus.current : menus.current.get(id ?? ""))?.focus());
+  };
   const closeSql = () => {
     const id = sqlEdit?.panel.id;
     setSqlEdit(undefined);
@@ -161,6 +169,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     onView={() => onView(panel.id)}
     onCopyLink={() => { void copyLink(panel.id); }}
     onEditSQL={canManage && typeof panel.sql === "string" ? () => { sqlReturnFocus.current = fullscreen ? fullscreenMenu.current : menus.current.get(panel.id) ?? null; setSqlEdit({ panel, spec, version }); } : undefined}
+    onEdit={canManage && dashboardId && panel.query ? () => { sqlReturnFocus.current = fullscreen ? fullscreenMenu.current : menus.current.get(panel.id) ?? null; setPanelEdit({ panel, spec, version }); } : undefined}
     onExplain={agentAvailable && dashboardId ? () => onOpenChat(explainPrompt(context(panel)), { answer_only: true, context: panelContext(context(panel)) }) : undefined}
     onFix={agentAvailable && dashboardId && canManage ? () => onOpenChat(fixPrompt(context(panel)), { context: panelContext(context(panel)) }) : undefined}
     staleAt={staleAt.get(panel.id)} onDuplicate={canEdit && !fullscreen ? () => duplicate.mutate(panel) : undefined}
@@ -177,7 +186,10 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   return <div ref={container} style={{ minWidth: 0 }}>
     {editing && <Group justify="space-between" mb="sm" p="xs" style={{ border: "1px dashed var(--mantine-color-default-border)", borderRadius: 8 }}>
       <Text size="sm" c="dimmed">{canEdit ? "Drag a panel by its title and resize it from the corner. Changes are saved as a new version." : "The layout can be edited only on a wider screen."}</Text>
-      <Button size="compact-sm" disabled={!dirty || !canEdit} loading={save.isPending} onClick={() => save.mutate()}>Save layout</Button>
+      <Group gap="xs">
+        {canManage && dashboardId && <Button size="compact-sm" variant="default" onClick={() => { sqlReturnFocus.current = null; setPanelEdit({ spec, version }); }}>Add panel</Button>}
+        <Button size="compact-sm" disabled={!dirty || !canEdit} loading={save.isPending} onClick={() => save.mutate()}>Save layout</Button>
+      </Group>
     </Group>}
     {conflict && <Alert color="warn" mb="sm">Someone saved this dashboard since you opened it. Load the latest version, then redo your change. <Button size="compact-sm" onClick={loadLatest}>Load latest</Button></Alert>}
     {mutationError && !conflict && <Alert color="bad" mb="sm">{mutationError.message}</Alert>}
@@ -188,9 +200,12 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
       onDragStop={changeLayout} onResizeStop={changeLayout}>
       {spec.panels.map((panel) => { const g = layout.find((l) => l.i === panel.id); return <div key={panel.id} data-panel={panel.id}>{card(panel, pixels(g?.h ?? 6))}</div>; })}
     </Responsive>}
-    <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen && !sqlEdit} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
+    <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen && !sqlEdit && !panelEdit} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
       {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
     </PanelFullscreen>
+    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Loader size="sm" aria-label="Loading the panel editor" /></Modal>}>
+      <PanelEditor dashboardId={dashboardId} version={panelEdit.version} spec={panelEdit.spec} panel={panelEdit.panel} time={time} vars={vars} onClose={closePanelEdit} />
+    </Suspense>}
     {sqlEdit && <Suspense fallback={<Modal opened onClose={closeSql} title="Loading SQL editor"><Loader size="sm" aria-label="Loading SQL editor" /></Modal>}>
       <PanelSqlEditor dashboardId={dashboardId} version={sqlEdit.version} spec={sqlEdit.spec} panel={sqlEdit.panel} time={time} vars={vars} onClose={closeSql} />
     </Suspense>}

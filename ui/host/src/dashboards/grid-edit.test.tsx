@@ -97,6 +97,15 @@ describe("dashboard layout editing", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Structured menu"]')!.click());
     expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit SQL")).toBe(false);
   });
+  it.each([true, false])("offers Edit panel for structured panels only to dashboard editors (%s)", async canManage => {
+    const { host } = await render(false, { ...spec, panels: [{ id: "structured", title: "Structured", viz: "stat", query: { from: "spans", measures: ["count()"] } }] }, canManage);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Structured menu"]')!.click());
+    expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit panel")).toBe(canManage);
+  });
+  it.each([true, false])("offers Add panel while editing the layout only to dashboard editors (%s)", async canManage => {
+    const { host } = await render(true, spec, canManage);
+    expect([...host.querySelectorAll("button")].some(button => button.textContent === "Add panel")).toBe(canManage);
+  });
   it("defaults service maps without a saved grid to large rows, preserving explicit sizes",async()=>{
     await render(false,{...spec,panels:[{id:"map",title:"Map",viz:"service_map"}]});
     expect(grid.current!.layouts.lg[0].h).toBe(10);

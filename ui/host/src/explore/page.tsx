@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Group, SegmentedControl, Stack, Tabs, Text, Title, Tooltip } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
-import type { DashboardSpec, Panel, Query, Viz } from "../../../panels/types";
+import type { DashboardSpec, Panel, Query, VarValue, Viz } from "../../../panels/types";
 import { ApiError, type Problem } from "../api-error";
 import { getTelemetrySchema, queryPanels } from "../dashboards/api";
 import { DrillDrawer } from "../dashboards/drill";
@@ -39,17 +39,31 @@ function hasRows(run?: ExploreRun): boolean {
   return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
 }
 
-export function ExplorePage({ search, onSearch, onSaved }: {
+/** Explore inside a dashboard: its variables resolve, and saving writes the panel there. */
+export type DashboardContext = {
+  spec: DashboardSpec; vars: Record<string, VarValue>;
+  /** Saves the last run's panel; a rejection's message is shown. */
+  save: { label: string; run(panel: Panel): Promise<void> };
+  /** Seeds the Builder when the panel's query cannot be edited as text. */
+  initial?: { query: Query; formatted: Formatted };
+};
+
+export function ExplorePage({ search, onSearch, onSaved, context }: {
   search: ExploreSearch; onSearch(next: ExploreSearch, replace?: boolean): void;
   /** Opens the dashboard the result was saved to. */
-  onSaved(dashboardId: string): void;
+  onSaved?(dashboardId: string): void;
+  context?: DashboardContext;
 }) {
+  const variables = context?.spec.variables;
+  const vars = context?.vars ?? {};
+  const [savingError, setSavingError] = useState<string>();
+  const [savingPanel, setSavingPanel] = useState(false);
   const [saving, setSaving] = useState<Panel>();
   const [text, setText] = useState(search.q);
   const [sql, setSql] = useState(search.sql ?? "");
   const [parsed, setParsed] = useState<Parsed & { text: string }>();
-  const [built, setBuilt] = useState<Query>();
-  const [formatted, setFormatted] = useState<Formatted>();
+  const [built, setBuilt] = useState<Query | undefined>(context?.initial?.query);
+  const [formatted, setFormatted] = useState<Formatted | undefined>(context?.initial?.formatted);
   const [formatProblems, setFormatProblems] = useState<Problem[]>([]);
   const formatter = useRef<{ abort?: AbortController; timer?: ReturnType<typeof setTimeout> }>({});
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -85,7 +99,7 @@ export function ExplorePage({ search, onSearch, onSaved }: {
         onSearch({ ...searchNow.current, q: source, viz: panel.viz }, true);
       } else if (kind === "query") {
         // Parse without the previous viz: a new query shape may not fit it.
-        const next = await parseFanql({ text: source }, abort.signal);
+        const next = await parseFanql({ text: source, variables }, abort.signal);
         if (abort.signal.aborted) return;
         setParsed({ ...next, text: source }); setNotices(next.notices);
         // An accepted viz edit changes the query; the Builder follows it.
@@ -99,9 +113,9 @@ export function ExplorePage({ search, onSearch, onSaved }: {
         setNotices([]);
         onSearch({ ...searchNow.current, sql: source }, true);
       }
-      const dashboard: DashboardSpec = { version: 1, name: "Explore", time, panels: [panel] };
+      const dashboard: DashboardSpec = { version: 1, name: context?.spec.name ?? "Explore", time, variables, panels: [panel] };
       const width = resultBox.current?.clientWidth || 960;
-      const results = await queryPanels({ dashboard, panels: [explorePanelID], time, widths: { [explorePanelID]: width } }, abort.signal);
+      const results = await queryPanels({ dashboard, panels: [explorePanelID], time, vars, widths: { [explorePanelID]: width } }, abort.signal);
       if (abort.signal.aborted) return;
       const result = results.find(r => r.id === explorePanelID);
       if (!result) throw new Error("The query returned no result.");
@@ -164,7 +178,7 @@ export function ExplorePage({ search, onSearch, onSaved }: {
     if (parsed && parsed.text === text) { setBuilt(parsed.query); onSearch({ ...search, tab }); return; }
     if (!text.trim()) { setBuilt(starter); onSearch({ ...search, tab }); void format(starter); return; }
     try {
-      const next = await parseFanql({ text });
+      const next = await parseFanql({ text, variables });
       setParsed({ ...next, text }); setBuilt(next.query); onSearch({ ...search, tab });
     } catch (failure) {
       if (failure instanceof ApiError && failure.problems.length > 0) setProblems(failure.problems);
@@ -189,11 +203,11 @@ export function ExplorePage({ search, onSearch, onSaved }: {
   const canSave = !stale && !running && hasRows(run);
 
   return <Stack gap="md" p="lg" maw={1400} data-explore>
-    <Group justify="space-between" align="flex-end">
-      <Stack gap={2}>
+    <Group justify={context ? "flex-end" : "space-between"} align="flex-end">
+      {!context && <Stack gap={2}>
         <Title order={2}>Explore</Title>
         <Text size="sm" c="dimmed">Ask a question of your telemetry. Runs the same query path as dashboards.</Text>
-      </Stack>
+      </Stack>}
       <RangeMenu time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
     </Group>
     <Tabs value={search.tab} onChange={value => void openTab(value === "sql" || value === "builder" ? value : "query")} keepMounted={false}>
@@ -237,21 +251,30 @@ export function ExplorePage({ search, onSearch, onSaved }: {
           <Button size="compact-sm" variant="subtle" onClick={() => { setText(edit.text); void execute("query", edit.text, edit.viz); }}>{vizLabel[edit.viz]}…</Button>
         </Tooltip>)}
       </Group>
-      <Tooltip label="Run a query that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => run && setSaving(run.panel)}>Save to dashboard</Button></span></Tooltip>
+      <Tooltip label="Run a query that returns rows first" disabled={canSave}><span>
+        {context
+          ? <Button disabled={!canSave} loading={savingPanel} onClick={() => {
+            if (!run) return;
+            setSavingPanel(true); setSavingError(undefined);
+            context.save.run(run.panel).catch((failure: unknown) => setSavingError(failure instanceof Error ? failure.message : "Save failed")).finally(() => setSavingPanel(false));
+          }}>{context.save.label}</Button>
+          : <Button variant="default" disabled={!canSave} onClick={() => run && setSaving(run.panel)}>Save to dashboard</Button>}
+      </span></Tooltip>
     </Group>
     {error && <Alert color="bad" title="The query could not run">{error}</Alert>}
+    {savingError && <Alert color="bad" title="Not saved">{savingError}</Alert>}
     <Box ref={resultBox}>
       {run ? <Stack gap="xs">
         <Text size="sm" fw={600} role="status">{stale ? "Result of the last run · query has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>
         <Box h={resultHeight}>
           <PanelCard panel={run.panel} title={run.panel.title} result={run.result} loading={running} height={resultHeight} group="explore" editing={false} agentAvailable={false}
             range={time.range} onRetry={() => void execute(run.kind, run.source, run.panel.viz, readOnlyText ? built : undefined)} traceLinks="button"
-            onPoint={selection => { const selected = drillSelection(run.panel, run.result, selection, {}); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); }} />
+            onPoint={selection => { const selected = drillSelection(run.panel, run.result, selection, vars); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); }} />
         </Box>
       </Stack> : <Text c="dimmed" size="sm" data-explore-empty>Type a query, for example <code>spans | count() by service</code>, and press Enter.</Text>}
     </Box>
-    {run && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: "Explore", time, panels: [run.panel] }} time={time} vars={{}} target={parseDrill(search.drill)}
+    {run && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: context?.spec.name ?? "Explore", time, variables, panels: [run.panel] }} time={time} vars={vars} target={parseDrill(search.drill)}
       onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}
-    {saving && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
+    {saving && onSaved && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
   </Stack>;
 }
