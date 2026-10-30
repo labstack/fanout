@@ -1,0 +1,135 @@
+---
+title: Install
+description: Install Fanout as a container, as a native binary from the release page, or with the install script.
+summary: The three ways to get the binary onto a machine, and the ports and paths each one opens.
+read_when:
+  - You are putting Fanout on a machine for the first time.
+  - You need to know which ports and paths an instance uses.
+status: shipped
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Fanout ships as a single binary and as a multi-architecture container image.
+The release packages include the browser assets and embedded databases.
+
+<Tabs>
+  <TabItem label="Docker">
+
+```sh
+docker run -d --name fanout \
+  -p 7520:7520 \
+  -v fanout-data:/var/lib/fanout/data \
+  -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
+  labstack/fanout:latest
+```
+
+Images are published to Docker Hub as `labstack/fanout` and mirrored to GitHub
+Container Registry as `ghcr.io/labstack/fanout`. The two carry the same digests;
+pick whichever registry your hosts already pull from.
+
+`FANOUT_AUTH_CODE_SECRET` is required for local sign-in. After setup,
+[enable the built-in agent](/docs/reference/configuration/ai) or
+[connect an external agent over MCP](/docs/guides/mcp).
+
+:::caution[Volume ownership]
+The image is distroless and runs unprivileged as UID/GID 65532. A **named
+volume**, as above, is set up correctly for you. A bind-mounted host directory
+is not: `-v "$PWD/data:/var/lib/fanout/data"` fails to open its data directory
+unless that directory is already writable by 65532.
+:::
+
+The image sets `FANOUT_ADDR=:7520` and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
+Native installs default to `127.0.0.1:7520`; set `FANOUT_ADDR=:7520` to accept
+connections from other hosts.
+
+  </TabItem>
+  <TabItem label="Install script">
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
+```
+
+It resolves the latest release, downloads `SHA256SUMS`, **verifies the archive
+against it before extracting**, and installs to `/usr/local/bin` when that is
+writable or `~/.local/bin` otherwise. Set `FANOUT_PREFIX` to choose the
+directory, or `FANOUT_VERSION` to pin a tag instead of taking the latest.
+
+Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each
+month across all maturity suffixes. Fanout is alpha, so
+`v2026.10.1-alpha` is the second release of October 2026. GA has no suffix.
+Container tags omit the leading `v`, and every release moves `latest`.
+
+  </TabItem>
+  <TabItem label="Native binary">
+
+Download and extract the archive for your platform from [GitHub
+Releases](https://github.com/labstack/fanout/releases). For example, with the
+Linux amd64 archive:
+
+```sh
+tar -xzf fanout_v2026.10.1-alpha_linux_amd64.tar.gz
+chmod +x fanout
+export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
+./fanout
+```
+
+  </TabItem>
+</Tabs>
+
+## Verify what you downloaded
+
+The install script checks the archive for you. If you took one from the releases
+page by hand, check it yourself — both the checksum and the build provenance:
+
+```sh
+sha256sum -c SHA256SUMS
+gh attestation verify fanout_v2026.10.1-alpha_linux_amd64.tar.gz \
+  --repo labstack/fanout
+```
+
+For containers, record or pin the digest the registry returns rather than
+trusting a moving tag:
+
+```sh
+docker buildx imagetools inspect labstack/fanout:2026.10.1-alpha
+```
+
+Release images are multi-architecture for `linux/amd64` and `linux/arm64`, and
+archives cover Linux and macOS on both. Every artifact is built on a native
+runner, because DuckDB needs cgo.
+
+| Image tag | Points at |
+|---|---|
+| `labstack/fanout:latest` | the newest release |
+| `labstack/fanout:2026.10.1-alpha` | that exact release |
+| `ghcr.io/labstack/fanout:main` | the tip of `main` |
+| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
+
+Release and `latest` tags also exist under `ghcr.io/labstack/fanout`.
+Development tags are GHCR-only.
+
+See the [release contract](https://github.com/labstack/fanout/blob/main/docs/release.md)
+for the artifact inventory and verification workflow.
+
+## What an instance opens
+
+| Port or path | Purpose | Native default |
+|---|---|---|
+| `7520` | Browser, API, chat, MCP, OTLP/gRPC and OTLP/HTTP | `127.0.0.1:7520`, loopback |
+| `./data` | Telemetry, query state, users, sessions, dashboards, alerts and agent history | `./data` |
+
+Complete [first boot](/docs/get-started/first-boot) to create the administrator and ingest
+token, then [configure exporters](/docs/get-started/send-telemetry). **Connect telemetry**
+can generate configuration for a private Collector hostname.
+
+If the dashboard is public but ingest must remain LAN-only, keep Fanout's
+backend port private and deny
+`/v1`, `/v1/*`, and `/opentelemetry.proto.collector.*` on the public proxy.
+Allow collectors through the private network or a restricted proxy route,
+and verify that neither OTLP transport is reachable through the public origin.
+
+## Next
+
+[First boot](/docs/get-started/first-boot) covers configuration validation, administrator
+setup and sign-in.

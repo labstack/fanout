@@ -134,7 +134,7 @@ func TestRenderProducesOnePageWithFrontmatterPerGroup(t *testing.T) {
 
 	for name, body := range pages {
 		text := string(body)
-		if strings.Contains(text, "Fanout also recognizes") != (name == "settings/ai.mdx") {
+		if strings.Contains(text, "Fanout also recognizes") != (name == "configuration/ai.mdx") {
 			t.Errorf("%s: vendor-variable paragraph belongs only on the AI settings page", name)
 		}
 		if !strings.HasPrefix(text, "---\n") {
@@ -175,7 +175,7 @@ func TestSecretSettingsCarryTheirWarning(t *testing.T) {
 	}
 
 	for group := range secretGroups {
-		body := string(pages["settings/"+group+".mdx"])
+		body := string(pages["configuration/"+group+".mdx"])
 		if !strings.Contains(body, "· secret") {
 			t.Errorf("%s.mdx: holds a secret setting but does not mark it in the table", group)
 		}
@@ -199,7 +199,7 @@ func TestFlowDropsTheGodocFieldNamePrefix(t *testing.T) {
 
 func TestOrphanedFindsGeneratedPagesOnly(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "settings"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "configuration"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -207,9 +207,9 @@ func TestOrphanedFindsGeneratedPagesOnly(t *testing.T) {
 	authored := "---\ntitle: x\n---\n"
 
 	files := map[string]string{
-		"settings/server.mdx": generated, // still generated, keep
-		"settings/gone.mdx":   generated, // no longer generated, remove
-		"roles.mdx":           authored,  // hand-written, never touch
+		"configuration/server.mdx": generated, // still generated, keep
+		"configuration/gone.mdx":   generated, // no longer generated, remove
+		"roles.mdx":                authored,  // hand-written, never touch
 	}
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
@@ -217,12 +217,12 @@ func TestOrphanedFindsGeneratedPagesOnly(t *testing.T) {
 		}
 	}
 
-	got, err := orphaned(dir, map[string][]byte{"settings/server.mdx": nil})
+	got, err := orphaned(dir, map[string][]byte{"configuration/server.mdx": nil})
 	if err != nil {
 		t.Fatalf("orphaned: %v", err)
 	}
 
-	want := filepath.Join(dir, "settings/gone.mdx")
+	want := filepath.Join(dir, "configuration/gone.mdx")
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("orphaned = %v, want just %q", got, want)
 	}

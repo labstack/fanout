@@ -1,0 +1,109 @@
+---
+title: Configuration
+description: How Fanout is configured, where settings come from, and how the reference stays true to the binary.
+summary: The rules that govern every setting — precedence, naming, secret files, and validation.
+read_when:
+  - You are configuring an instance and want the rules before the list.
+  - A setting you set appears to have been ignored.
+status: preview
+---
+
+Fanout resolves built-in defaults followed by nonempty process environment
+values. Every setting is listed under [Settings](/docs/reference/configuration/server),
+grouped by the part of the product it belongs to.
+
+Those pages and `.env.example` are generated from `internal/config` by
+`cmd/fanout-docgen`. `just docs-generate-check` verifies that they match the
+schema the binary uses.
+
+## Where a value comes from
+
+All settings are read once at startup and require a restart. An empty
+environment value means unset and preserves the built-in default. Native
+installs listen on `127.0.0.1:7520`; the image supplies `FANOUT_ADDR=:7520`
+and `FANOUT_DATA_DIR=/var/lib/fanout/data`.
+
+The binary reads only process environment. `.env.example` comments out every
+empty entry and documents types, defaults, and secret file forms in comments.
+Copying the template sets nothing and preserves image ENV. For a source
+checkout, copy it to ignored `.env` and uncomment personal settings and
+development credentials as needed. Build the binary, then use `just run`:
+Node's native `parseEnv` loads optional `./.env`, and inherited environment values win, including empty
+values. Values are never executed as shell code or interpolated. The binary
+validates unknown names and types. Production deployments supply their own
+environment values or managed secret mounts.
+
+## Naming
+
+Custom names use `FANOUT_` plus a clear name, adding the area only when it
+clarifies. Vendor credentials and endpoints keep `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
+
+`FANOUT_AI_PROVIDER` defaults to empty, disabling chat. Exactly `anthropic`
+or `openai` enables chat and requires that provider's key. Only the selected
+provider's endpoint is validated and used. Inherited credentials never select
+a provider. `FANOUT_AI_MODEL` selects the model; unrelated vendor/tool settings
+such as `ANTHROPIC_MODEL` and `OPENAI_MODEL` are ignored. See
+[AI settings](/docs/reference/configuration/ai) for base URL meanings.
+Both provider base URLs accept a trailing slash.
+
+## Unknown names
+
+Unknown `FANOUT_` names fail startup. Platform-injected service-discovery names
+are tolerated, and unrelated names in shared vendor namespaces are ignored.
+Errors name the relevant environment variable. Boolean, integer, and Go
+duration values must parse as their declared types.
+
+## Secrets
+
+Every secret accepts either its value or its file path:
+
+| Value variable | File path variable |
+|---|---|
+| `FANOUT_AUTH_CODE_SECRET` | `FANOUT_AUTH_CODE_SECRET_FILE` |
+| `FANOUT_OIDC_CLIENT_SECRET` | `FANOUT_OIDC_CLIENT_SECRET_FILE` |
+| `FANOUT_SMTP_PASSWORD` | `FANOUT_SMTP_PASSWORD_FILE` |
+| `FANOUT_METRICS_TOKEN` | `FANOUT_METRICS_TOKEN_FILE` |
+| `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY_FILE` |
+| `OPENAI_API_KEY` | `OPENAI_API_KEY_FILE` |
+
+Setting both forms nonempty fails startup. File contents lose exactly one
+trailing LF or CRLF; an empty result fails. Errors name variables and paths,
+never contents. The deployment controls file access; Fanout performs no
+file-mode check. Secrets are redacted from startup logs.
+Unselected AI providers' value and file forms are ignored.
+
+Use deployment environment injection, Docker/Compose secrets, Kubernetes
+Secrets, or a private selected SOPS profile. This public repository ships no
+operator profiles or recipients. See
+[runtime secret delivery](https://github.com/labstack/fanout/blob/main/docs/operations.md#runtime-secret-delivery)
+for examples.
+
+## Validation
+
+The whole configuration is validated before data files or listeners open. A value the
+binary cannot accept stops startup. The generated settings pages list individual
+constraints; [first boot](/docs/get-started/first-boot) covers administrator setup. The healthcheck command derives its probe from the listener and
+TLS environment settings without validating unrelated settings or secrets.
+
+## DuckDB sizing
+
+Most deployments should not set DuckDB variables. Give the process or
+container the CPU and memory limits it may use; at startup Fanout reserves
+headroom for Go and sizes the DuckDB connection pool from available CPUs. The
+resolved values and whether Fanout chose them are available in the
+`runtime_sizing` block returned by `/readyz`.
+
+Override these values when measurements justify different resource limits:
+
+| Variable | Automatic behavior | When to override |
+|---|---|---|
+| `FANOUT_DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
+| `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
+| `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
+
+An explicit value always wins. Startup logs and `/readyz` report the detected
+host and cgroup limits, the selected source, and whether detection was
+incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
+set `FANOUT_DUCKDB_MEMORY` for a guaranteed bound. See
+[storage settings](/docs/reference/configuration/storage) for types and defaults.

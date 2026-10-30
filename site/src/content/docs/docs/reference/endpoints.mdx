@@ -1,0 +1,78 @@
+---
+title: Endpoints
+description: The operational HTTP endpoints a Fanout instance exposes, and what each one requires.
+summary: Health, readiness, metrics, profiling and the protocol endpoints — with the credential each expects.
+read_when:
+  - You are configuring a load balancer, a probe or a Prometheus scrape.
+  - You need to know which endpoints are reachable without authentication.
+status: preview
+---
+
+Everything below is served by the same HTTP listener as the browser client, on
+`FANOUT_ADDR` (`127.0.0.1:7520` by default; the image sets `:7520`).
+
+This page covers the operational endpoints and what they are for. For the
+complete surface — every route with the exact credential it requires, taken from
+the middleware that enforces it — see [HTTP routes](/docs/reference/api).
+
+## Health
+
+| Path | Requires | Reports |
+|---|---|---|
+| `/healthz` | nothing | Liveness — the process is up |
+| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing |
+
+Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
+
+## Operations
+
+| Path | Requires |
+|---|---|
+| `/metrics` | `operations:read`, or a service credential |
+| `/debug/pprof/*` | `operations:read` |
+
+`/metrics` is Prometheus exposition. It accepts a service credential as well
+as an admin session, which is how a scraper reaches it without a browser login —
+set `FANOUT_METRICS_TOKEN`. `FANOUT_METRICS_PUBLIC=true` permits unauthenticated
+scrapes and emits a startup warning.
+
+Metrics reveal traffic volumes, query activity and resource use. Keep `/metrics`
+private or authenticate scrapes with `FANOUT_METRICS_TOKEN`.
+
+`/debug/pprof/*` is off unless `FANOUT_PPROF_ENABLED=true`, and is admin-only
+even then. Profiling output can contain memory contents, which is why it sits
+behind `operations:read` rather than `telemetry:read`.
+
+## Protocol
+
+| Path | Purpose |
+|---|---|
+| `/mcp` | The MCP endpoint external agents connect to |
+| `/.well-known/*` | OAuth discovery for MCP clients |
+| `/oauth/register`, `/oauth/token` | OAuth client registration and token issue |
+
+## Ingest
+
+Both OTLP transports share `FANOUT_ADDR` with the application and require
+`Authorization: Bearer <ingest-token>`. Browser sessions and MCP OAuth tokens
+cannot authorize ingest, and an ingest token cannot authorize browser API calls.
+
+| Transport | Endpoint |
+|---|---|
+| OTLP/gRPC | Same host and port, using HTTP/2 |
+| OTLP/HTTP | `POST /v1/traces`, `POST /v1/metrics`, `POST /v1/logs` |
+
+For OTLP/HTTP, give a general exporter endpoint the base URL
+`http://host:7520`. Signal-specific endpoint settings include the full signal
+path. Unknown `/v1/*` paths return 404 and unsupported methods return 405,
+without falling through to the browser application. The HTTP handler accepts
+protobuf and gzip, with a 64 MiB decompressed body limit.
+
+See [send your first telemetry](/docs/get-started/send-telemetry).
+
+## What to alert on
+
+The endpoints tell you the instance is up; the metrics tell you whether it is
+coping. Watch repeated restarts, readiness failures, ingest authentication
+failures, telemetry drops, sustained query latency, and free disk space.
+[Troubleshooting](/docs/guides/troubleshooting) covers what each one usually means.

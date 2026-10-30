@@ -247,7 +247,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("Every route below is served on `FANOUT_ADDR` (`127.0.0.1:7520` by default;\n")
 	b.WriteString("the image sets `:7520`).\n")
 	b.WriteString("OTLP shares this listener but uses its own handlers and ingest credential; see\n")
-	b.WriteString("[send your first telemetry](/start/send-telemetry).\n\n")
+	b.WriteString("[send your first telemetry](/docs/get-started/send-telemetry).\n\n")
 
 	b.WriteString("## Conditional routes\n\nThe table includes every route the binary can register. These routes depend on\nconfiguration:\n\n")
 
@@ -263,11 +263,11 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("pattern Echo matches on, not a literal URL.\n")
 	b.WriteString("\n")
 
-	b.WriteString("## Interface stability\n\nThe `/api/*` routes serve the browser client and can change without migration\npaths. [MCP](/guides/connect-over-mcp) is the agent interface. OTLP ingest and\n[operational endpoints](/reference/endpoints) have their own contracts.\n\nManage alert rules through the [HTTP API](/guides/set-up-alerts). Administrators\nrotate ingest tokens on **Connect telemetry** or with\n`POST /api/settings/ingest/token/rotate`.\n\n")
+	b.WriteString("## Interface stability\n\nThe `/api/*` routes serve the browser client and can change without migration\npaths. [MCP](/docs/guides/mcp) is the agent interface. OTLP ingest and\n[operational endpoints](/docs/reference/endpoints) have their own contracts.\n\nManage alert rules through the [HTTP API](/docs/guides/alerts). Administrators\nrotate ingest tokens on **Connect telemetry** or with\n`POST /api/settings/ingest/token/rotate`.\n\n")
 
 	b.WriteString("## Errors\n\nApplication API errors, including unknown routes and wrong methods, return objects shaped like\n`{\"code\":\"bad_request\",\"message\":\"Safe explanation\"}`. Codes are stable\nsnake_case identifiers; clients branch on `code` rather than message text.\nInvalid dashboard or panel specs also include `problems` with field paths,\nmessages and optional hints. Every error response uses `Cache-Control: no-store`;\nHEAD errors have no body. Server failures return a short, safe message; the\nunderlying error is logged and never returned.\n\nDefault codes by HTTP status:\n\n| Status | Code |\n|---|---|\n| 400 | `bad_request` |\n| 401 | `unauthorized` |\n| 403 | `forbidden` |\n| 404 | `not_found` |\n| 405 | `method_not_allowed` |\n| 409 | `conflict` |\n| 413 | `payload_too_large` |\n| 415 | `unsupported_media_type` |\n| 422 | `unprocessable` |\n| 429 | `rate_limited` |\n| 500 | `internal` |\n| 502 | `bad_gateway` |\n| 503 | `unavailable` |\n| 504 | `timeout` |\n\nOther 4xx statuses use `bad_request`; other 5xx statuses use `internal`.\nSpecific conditions use `already_current`, `dashboard_version_not_found`,\n`dashboard_version_conflict`, `invalid_spec` and `last_active_administrator`.\nTool failures carry `error: {code, message}` inside the tool result.\nPanel execution results keep their own status and error fields.\nOAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.\nOperational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.\n\n")
 
-	b.WriteString("The **Requires** column comes from the authorization middleware for each method\nand path. [Roles](/reference/roles) maps capabilities to roles.\n\n")
+	b.WriteString("The **Requires** column comes from the authorization middleware for each method\nand path. [Roles](/docs/reference/roles) maps capabilities to roles.\n\n")
 
 	b.WriteString("| Method | Path | Requires |\n")
 	b.WriteString("|---|---|---|\n")

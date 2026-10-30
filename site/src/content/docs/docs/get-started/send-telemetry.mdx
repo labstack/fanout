@@ -1,0 +1,220 @@
+---
+title: Send your first telemetry
+description: Authenticate an exporter and point an OpenTelemetry SDK or Collector at a Fanout instance.
+summary: The ingest token, one shared OTLP address, and a working SDK and Collector configuration.
+read_when:
+  - You have a running instance and nothing in it yet.
+  - An exporter is being rejected and you need to know which credential it wants.
+status: preview
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Fanout accepts traces, logs and metrics over OTLP/gRPC and OTLP/HTTP on the
+same port as the application: `7520` by default. Both require the ingest token.
+
+## The ingest token
+
+The raw ingest token is shown once, immediately after you create the first
+administrator. It is `fo_`-prefixed, and Fanout stores only its hash.
+
+Send it as a bearer token; this is the only accepted ingest credential form:
+
+```text
+Authorization: Bearer fo_<token>
+```
+
+Ingest is available after administrator setup. Exporters require the ingest
+token; browser sessions and MCP OAuth tokens cannot authorize exports.
+
+## Configure an SDK
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:7520
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20fo_<token>"
+export OTEL_SERVICE_NAME=checkout
+export OTEL_RESOURCE_ATTRIBUTES=service.namespace=storefront
+```
+
+For OTLP/HTTP, keep the same endpoint and set
+`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. Use `https://` when Fanout or a
+proxy terminates TLS. A general OTLP endpoint is a base URL; signal-specific
+variables such as `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must include their path
+(`/v1/traces`, `/v1/metrics` or `/v1/logs`).
+
+## Configure a Collector
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  otlp/fanout:
+    endpoint: "https://fanout.example.com:443"
+    headers:
+      Authorization: "Bearer ${env:INGEST_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [otlp/fanout]
+    logs:
+      receivers: [otlp]
+      exporters: [otlp/fanout]
+    metrics:
+      receivers: [otlp]
+      exporters: [otlp/fanout]
+```
+
+The gRPC exporter requires an explicit port. Use `https://` for TLS and `:443`
+for a proxy serving standard HTTPS.
+
+If nothing in front of Fanout terminates TLS — a local instance, or one on a
+private network — the endpoint is `http://fanout.example.com:7520` and the
+exporter needs `tls: { insecure: true }` under `otlp/fanout`, or it will fail
+to connect. **Connect telemetry** in the application generates this block with
+your own endpoint already in it, and includes that line when it applies.
+
+SDKs can export directly to Fanout. Use a Collector for sampling, enrichment
+or forwarding to several backends.
+
+## Watch hosts, containers and endpoints
+
+The default **System overview** dashboard combines application traces with
+Collector metrics. Use the Collector contrib distribution for `hostmetrics`,
+`docker_stats` and `httpcheck`. Run one Collector on each observed host, with
+access to the host filesystem and Docker socket:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu: {}
+      memory: {}
+      filesystem: {}
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 30s
+  httpcheck:
+    collection_interval: 30s
+    targets:
+      - endpoint: https://app.example.com/health
+        method: GET
+
+processors:
+  resourcedetection:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+  resource:
+    attributes:
+      - key: service.namespace
+        value: storefront
+        action: upsert
+  batch: {}
+
+exporters:
+  otlp/fanout:
+    endpoint: https://fanout.example.com:443
+    headers:
+      Authorization: "Bearer ${env:INGEST_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/fanout]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/fanout]
+    metrics:
+      receivers: [otlp, hostmetrics, docker_stats, httpcheck]
+      processors: [resourcedetection, resource, batch]
+      exporters: [otlp/fanout]
+```
+
+Set `INGEST_TOKEN` in the Collector environment. Use your Fanout address and
+namespace, and the plaintext exporter settings above when TLS is absent.
+If the Collector runs in a container, mount the host filesystem read-only and
+set `hostmetrics.root_path` to that mount; give the Collector the observed
+host's `host.name`, rather than its own container hostname. Mount the Docker
+socket only where container metrics are needed.
+
+**Run `httpcheck` from a second machine outside the observed stack.** On that
+Collector, reuse the exporter and resource processors, but use a metrics
+pipeline with `receivers: [httpcheck]`. Its `host.name` identifies where the
+check ran. A check on the application host cannot see every DNS, CDN or proxy
+failure that outside visitors encounter; the dashboard warns when all checks
+run on hosts that also run observed services.
+
+- **Is it reachable?** uses `httpcheck.status` and `httpcheck.duration`, with
+  the target's `http.url` and the reporting Collector's `host.name`.
+- **Is anything failing or slow?** uses application spans. Client spans with
+  `peer.service` or `server.address` identify uninstrumented dependencies;
+  error status makes their failures visible.
+- **Is anything running out?** uses host CPU counters, memory and filesystem
+  usage by state and mountpoint, plus container CPU and memory usage and limits.
+  Capacity warns at 80% and is bad at 90%.
+- **What changed?** uses `service.version` on application resources, along with
+  runtime and SDK attributes. Send a new version when deploying a service.
+
+Silence is not health. After two reporting intervals, an endpoint with no
+result shows **no recent result**, and a host or container shows **not reporting**,
+both in the bad state. A receiver that has never sent data shows an empty panel.
+If the machine running Fanout fails, Fanout cannot report that failure on its
+own page: monitor Fanout itself from outside that machine.
+
+Each user owns a saved copy of **System overview**. Changes to the default
+specification apply when a copy is created; saved dashboards retain their spec.
+See [dashboard defaults](/docs/guides/dashboards#system-overview-defaults) for edits.
+
+## Namespaces
+
+Fanout reads `service.namespace` from each OTLP resource, falling back to
+`FANOUT_DEFAULT_NAMESPACE` (`default`) when it is absent. Namespaces let one
+instance hold several services' telemetry without them running together.
+
+A query with no namespace filter spans all namespaces. Add a namespace filter
+to narrow the result.
+
+They are not an authorisation boundary. A namespace is not a user, an
+organisation or a tenant, and anyone who can query the instance can query every
+namespace in it. An instance is the trust domain.
+
+## One listener
+
+`FANOUT_ADDR` controls the shared listener. The native default is
+`127.0.0.1:7520`; the image sets `:7520`. Set `FANOUT_ADDR=:7520` for remote
+clients, or publish `7520:7520` in Docker. There are no separate ingest address
+settings.
+
+When using a reverse proxy, enable HTTP/2 to the backend for gRPC. Plaintext
+Fanout accepts prior-knowledge HTTP/2 (h2c); a TLS listener negotiates HTTP/2
+through ALPN. HTTP/1.1 forwarding works for OTLP/HTTP, but cannot carry gRPC.
+See [terminate TLS](/docs/guides/tls).
+
+## Investigate the data
+
+With an [AI provider configured](/docs/reference/configuration/ai), open chat and ask a
+question such as “Why is checkout slower in the last hour?” The agent queries
+telemetry and displays its evidence in interactive views. Ask it to
+[build a dashboard](/docs/guides/dashboards) to save a view for repeated use.
+
+To use your own agent, [connect over MCP](/docs/guides/mcp). MCP does not
+require Fanout’s built-in AI provider.

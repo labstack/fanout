@@ -1,0 +1,43 @@
+---
+title: Why one binary
+description: The reasoning behind packaging ingest, storage, query, alerts and the UI in a single process.
+summary: What collapsing an observability stack into one process buys, and what it costs.
+read_when:
+  - You are evaluating Fanout against an assembled stack.
+  - You want to know where the single-process design stops being an advantage.
+status: shipped
+---
+
+Fanout packages telemetry ingest, storage, queries, alerting and the browser
+client in one process. The built-in agent and external MCP clients use the
+same typed tools to investigate that telemetry and build dashboards.
+
+## Operation
+
+One binary pins the runtime version, and one data directory holds telemetry and
+application state. [Back up the complete directory](/docs/guides/backup-and-restore)
+and restore it with the matching binary version.
+
+Queries read local storage. The browser, agent and alert engine share query
+implementations and analytical rollups. Configuration comes from environment
+variables, documented in the generated [reference](/docs/reference/configuration).
+
+## Resource sharing
+
+Ingest, queries and maintenance share CPU, memory bandwidth and disk. They have
+separate coordination paths, but cannot scale onto separate machines.
+Compaction prepares merges while reads continue, then briefly gates readers
+while swapping files. [Tune retention](/docs/guides/retention) explains the
+maintenance controls.
+
+One process is one failure domain. Stopping it stops ingest, queries, alerts and
+the UI. Monitor the instance from outside its host.
+
+## Deployment scope
+
+Fanout serves one trust domain on one machine. Namespaces filter telemetry
+queries; every telemetry reader can access all namespaces. Use separate
+instances for mutually untrusted teams.
+
+Workloads requiring horizontal ingest, replication or an object-storage tier
+require a backend that provides those capabilities.

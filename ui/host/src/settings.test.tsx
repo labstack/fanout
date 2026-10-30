@@ -263,7 +263,7 @@ describe("connected agents", () => {
     agentsFetchMock.mockImplementation(async () => json({ connections: [] }));
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("No agents connected"));
-    expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/guides/connect-over-mcp"]')?.textContent).toBe("Connect an agent over MCP");
+    expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/docs/guides/mcp"]')?.textContent).toBe("Connect an agent over MCP");
     await act(async () => root.unmount());
   });
 
