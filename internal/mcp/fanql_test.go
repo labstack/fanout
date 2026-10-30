@@ -53,12 +53,17 @@ func checkFanQLToolFailure(t *testing.T, input QueryTelemetryInput, code, messag
 	s := newPanelServer(t)
 	counter := &fanqlRunCounter{panelExecutor: s.panels}
 	s.panels = counter
-	_, _, err := s.queryTelemetry(t.Context(), nil, input)
-	if err == nil {
+	result, out, err := s.queryTelemetry(t.Context(), nil, input)
+	var raw []byte
+	if err != nil {
+		raw = []byte(err.Error())
+	} else if result != nil && result.IsError {
+		raw, _ = json.Marshal(out)
+	} else {
 		t.Fatal("invalid input accepted")
 	}
 	var failure toolerror.Result
-	if json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error == nil || failure.Error.Code != code || !strings.Contains(failure.Error.Message, message) {
+	if json.Unmarshal(raw, &failure) != nil || failure.Error == nil || failure.Error.Code != code || !strings.Contains(failure.Error.Message, message) {
 		t.Fatalf("error: %v", err)
 	}
 	if counter.calls != 0 {
@@ -145,12 +150,13 @@ func TestQueryTelemetryFanQLMetadataAndStructuredProblems(t *testing.T) {
 	if out.FanQLVersion != fanql.Version || len(out.Notices) != 1 || out.Notices[0].Path != "fanql_version" {
 		t.Fatalf("metadata: %+v", out)
 	}
-	_, _, err = s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"})
+	result, failed, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"})
+	raw, _ := json.Marshal(failed)
 	var failure struct {
 		Error    toolerror.Error `json:"error"`
 		Problems panel.Problems  `json:"problems"`
 	}
-	if err == nil || json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error.Code != "invalid_fanql" || len(failure.Problems) != 1 || failure.Problems[0].Span == nil || len(failure.Problems[0].FixIts) != 2 {
+	if err != nil || result == nil || !result.IsError || json.Unmarshal(raw, &failure) != nil || failure.Error.Code != "invalid_fanql" || len(failure.Problems) != 1 || failure.Problems[0].Span == nil || len(failure.Problems[0].FixIts) != 2 {
 		t.Fatalf("structured failure: %v", err)
 	}
 	client := connectTestClient(t, s, nil)
@@ -165,6 +171,27 @@ func TestQueryTelemetryFanQLMetadataAndStructuredProblems(t *testing.T) {
 					t.Errorf("missing inline syntax %q", syntax)
 				}
 			}
+		}
+	}
+}
+
+func TestQueryTelemetryFanQLProblemsStayStructuredThroughMiddleware(t *testing.T) {
+	client := connectTestClient(t, newPanelServer(t), nil)
+	result, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: "query_telemetry", Arguments: map[string]any{
+		"panel": map[string]any{"id": "errors", "title": "Errors", "viz": "table"},
+		"text":  "spans where a:1 b:2 or c:3", "fanql_version": 1,
+	}})
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("failure: %+v %v", result, err)
+	}
+	for _, content := range []any{result.StructuredContent, json.RawMessage(result.Content[0].(*mcp.TextContent).Text)} {
+		raw, _ := json.Marshal(content)
+		var body struct {
+			Error    toolerror.Error `json:"error"`
+			Problems panel.Problems  `json:"problems"`
+		}
+		if json.Unmarshal(raw, &body) != nil || body.Error.Code != "invalid_fanql" || len(body.Problems) != 1 || body.Problems[0].Span == nil || len(body.Problems[0].FixIts) != 2 {
+			t.Fatalf("structured failure: %s", raw)
 		}
 	}
 }

@@ -53,10 +53,6 @@ type resolver struct {
 	path     string
 }
 
-// Resolve annotates fields and values in place, retaining entry boundaries.
-func resolve(q *queryTree, opts Options) (*resolved, panel.Problems) {
-	return resolveWith(q, opts, currentVocabulary())
-}
 func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel.Problems) {
 	r := &resolver{opts: opts, vocab: vocab, out: &resolved{Query: q, Notices: []Notice{}, Compatible: []panel.VizCompat{}, Edits: []VizEdit{}}}
 	if q == nil {
@@ -81,7 +77,7 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 			r.path = fmt.Sprintf("measures[%d]", i)
 			expr := r.measure(m.Parsed.Expr, m.Info, m.Filters)
 			if len(r.problems) == 0 {
-				parsed, message, hint := panel.MeasureFromExpr(q.Source, expr, m.Alias)
+				parsed, message, hint := panel.MeasureFromExpr(q.Source, expr, m.Alias, r.vocab.measures())
 				if message != "" {
 					r.problems = append(r.problems, panel.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
 				} else {
@@ -502,7 +498,11 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 	}
 	at := info.at
 	args := info.args
-	switch x := e.(type) {
+	value := e
+	if conditional, ok := e.(*panel.MeasureCountIf); ok {
+		value = *conditional
+	}
+	switch x := value.(type) {
 	case panel.MeasureCall:
 		var spec *panel.MeasureSpec
 		for _, s := range r.vocab.measures() {
@@ -588,7 +588,7 @@ func measureAlias(m measureNode, all []measureNode) string {
 	if c, ok := m.Parsed.Expr.(panel.MeasureCall); ok {
 		name = c.Func
 	}
-	if _, ok := m.Parsed.Expr.(panel.MeasureCountIf); ok {
+	if _, ok := m.Parsed.Expr.(*panel.MeasureCountIf); ok {
 		name = "count_if"
 	}
 	n := 0

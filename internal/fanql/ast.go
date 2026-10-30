@@ -155,8 +155,6 @@ type measureNode struct {
 	Filters map[string]filterExpr
 }
 
-func (m measureNode) Span() span { return m.At }
-
 type sortClause struct {
 	Key       string
 	Ascending bool

@@ -486,7 +486,7 @@ func renderMeasure(e panel.MeasureExpr, parent int, field func(*panel.FieldRef) 
 					}
 				}
 				return x.Func + "(" + strings.Join(args, ", ") + ")"
-			case panel.MeasureCountIf:
+			case *panel.MeasureCountIf:
 				body := printEntry(info.filter, false)
 				if _, ok := info.filter.(*andExpr); ok {
 					body = strings.TrimSuffix(strings.TrimPrefix(body, "("), ")")

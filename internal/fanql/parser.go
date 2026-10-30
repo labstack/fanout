@@ -66,11 +66,6 @@ func (p *parser) expectTerm(nested bool) {
 // allocation. Other panics remain visible to callers and tests.
 type parseBound struct{}
 
-// Parse returns no query whenever a problem is present. source is empty for a
-// whole query, or the page-supplied source for a search-bar filter.
-func parse(text string, source string) (*queryTree, panel.Problems) {
-	return parseWith(text, source, currentVocabulary())
-}
 func parseWith(text string, source string, vocab vocabulary) (q *queryTree, problems panel.Problems) {
 	p := &parser{vocab: vocab, runes: []rune(text), bounded: true, heights: make(map[any]int)}
 	defer func() {
@@ -385,9 +380,10 @@ func (p *parser) filters(nested bool) []filterExpr {
 		at := span{terms[0].Span().Start, terms[len(terms)-1].Span().End}
 		first := p.groupingEdit(terms, ops, ops[mixed])
 		second := p.groupingEdit(terms, ops, ops[0])
+		before := len(p.problems)
 		p.issue(at, diagnostic(diagMixed), groupingHint(first, second))
 		span := panel.TextSpan{Start: at.Start, End: at.End}
-		if len(p.problems) > 0 && p.problems[len(p.problems)-1].Message == diagnostic(diagMixed) {
+		if len(p.problems) > before {
 			p.problems[len(p.problems)-1].FixIts = []panel.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
 		}
 	}
@@ -1161,7 +1157,7 @@ func (p *parser) stage(start int) *aggregation {
 				p.report(p.measureSpan(expr), diagAggregate)
 			}
 			_, call := expr.(panel.MeasureCall)
-			_, countIf := expr.(panel.MeasureCountIf)
+			_, countIf := expr.(*panel.MeasureCountIf)
 			if distribution && !call {
 				p.report(p.measureSpan(expr), diagHistogram)
 			}
@@ -1361,8 +1357,14 @@ func (p *parser) measureCall() panel.MeasureExpr {
 		}
 		p.leave()
 		at.End = p.previousEnd()
-		x := panel.MeasureCountIf{Filter: p.text(at)}
+		x := &panel.MeasureCountIf{}
 		p.recordMeasure(x, at)
+		if filter != nil {
+			p.heights[x] = p.heights[filter] + 1
+			if p.bounded && p.heights[x]+p.depth > maxDepth {
+				p.bound(at, diagDepthBound)
+			}
+		}
 		p.measureInfo[x].filter = filter
 		return x
 	}
@@ -1438,7 +1440,7 @@ func measureLeaves(x panel.MeasureExpr) (int, bool, bool) {
 	switch x := x.(type) {
 	case panel.MeasureCall:
 		return 1, x.Func == "share", x.Func == "histogram"
-	case panel.MeasureCountIf:
+	case panel.MeasureCountIf, *panel.MeasureCountIf:
 		return 1, false, false
 	case panel.MeasureBinary:
 		l, ls, lh := measureLeaves(x.L)

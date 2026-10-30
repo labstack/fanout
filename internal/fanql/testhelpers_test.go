@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -22,4 +23,15 @@ func newTestEngine(t testing.TB) (*query.Duck, *telemetrystore.Repository) {
 	}
 	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
 	return d, repo
+}
+
+// Parse returns no query whenever a problem is present. source is empty for a
+// whole query, or the page-supplied source for a search-bar filter.
+func parse(text string, source string) (*queryTree, panel.Problems) {
+	return parseWith(text, source, currentVocabulary())
+}
+
+// Resolve annotates fields and values in place, retaining entry boundaries.
+func resolve(q *queryTree, opts Options) (*resolved, panel.Problems) {
+	return resolveWith(q, opts, currentVocabulary())
 }

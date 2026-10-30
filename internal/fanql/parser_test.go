@@ -240,7 +240,7 @@ func TestParseStageMeasuresAndArithmetic(t *testing.T) {
 	if !ok || div.Op != '/' {
 		t.Fatal(mul)
 	}
-	if _, ok := div.L.(panel.MeasureCountIf); !ok {
+	if _, ok := div.L.(*panel.MeasureCountIf); !ok {
 		t.Fatal(div)
 	}
 	if div.R.(panel.MeasureCall).Func != "count" || mul.R.(panel.MeasureConst).Value != 100 {
@@ -470,7 +470,7 @@ func TestParseApdexTree(t *testing.T) {
 		case panel.MeasureNeg:
 			d, n := walk(x.X)
 			return d + 1, n
-		case panel.MeasureCall, panel.MeasureCountIf:
+		case panel.MeasureCall, *panel.MeasureCountIf:
 			return 1, 1
 		default:
 			return 1, 0

@@ -591,10 +591,23 @@ func ParseMeasure(signal, text string) (Measure, error) {
 
 // MeasureFromExpr validates an already parsed frontend expression. The structured
 // parser and text frontends share this AST and its budgets and metadata.
-func MeasureFromExpr(signal string, e MeasureExpr, alias string) (Measure, string, string) {
+func MeasureFromExpr(signal string, e MeasureExpr, alias string, specs []MeasureSpec) (Measure, string, string) {
 	sig, ok := lookupSignal(signal)
 	if !ok {
 		return Measure{}, fmt.Sprintf("unknown signal %q", signal), ""
+	}
+	if message := validateMeasureExpr(e, signal, specs); message != "" {
+		return Measure{}, message, ""
+	}
+	tokens, message := measureTokenCount(e, 0)
+	if message != "" {
+		return Measure{}, message, ""
+	}
+	if alias != "" {
+		tokens += 2
+	}
+	if tokens > maxMeasureTokens {
+		return Measure{}, fmt.Sprintf("has %d tokens; a measure is at most %d", maxMeasureTokens+1, maxMeasureTokens), ""
 	}
 	nodes, leaves, depth := measureCounts(e)
 	if nodes > maxMeasureNodes {
@@ -621,4 +634,98 @@ func measureCounts(e MeasureExpr) (nodes, leaves, depth int) {
 		return 1 + n, l, 1 + d
 	}
 	return 1, 0, 0
+}
+
+func validateMeasureExpr(e MeasureExpr, signal string, specs []MeasureSpec) string {
+	switch x := e.(type) {
+	case MeasureCall:
+		var spec *MeasureSpec
+		for _, s := range specs {
+			if s.Name == x.Func {
+				copy := s
+				spec = &copy
+				break
+			}
+		}
+		if spec == nil {
+			return "unknown function " + x.Func
+		}
+		if len(spec.Signals) > 0 && !slices.Contains(spec.Signals, signal) {
+			return x.Func + " is not available for " + signal
+		}
+		if spec.Args > 0 && x.Field == nil {
+			return x.Func + " needs a field"
+		}
+		if spec.Numeric && x.Field != nil && x.Field.Key == "" && x.Field.Type != TypeNumber {
+			return fmt.Sprintf("%s needs a numeric field; %s is %s", x.Func, x.Field.Text, x.Field.Type)
+		}
+		if x.Func == "quantile" && (x.Q <= 0 || x.Q >= 1 || math.IsNaN(x.Q)) {
+			return "quantile q must be a number between 0 and 1"
+		}
+	case MeasureCountIf:
+		if strings.TrimSpace(x.Filter) == "" {
+			return "count_if needs a filter"
+		}
+		if len(x.Filter) > 500 {
+			return "filters are 1 to 500 characters"
+		}
+	case MeasureBinary:
+		if message := validateMeasureExpr(x.L, signal, specs); message != "" {
+			return message
+		}
+		return validateMeasureExpr(x.R, signal, specs)
+	case MeasureNeg:
+		return validateMeasureExpr(x.X, signal, specs)
+	}
+	return ""
+}
+
+// Count the serialized grammar without rendering and reparsing an expression.
+// SQL inside a conditional is tokenized solely for its existing token budget.
+func measureTokenCount(e MeasureExpr, parent int) (int, string) {
+	switch x := e.(type) {
+	case MeasureCall:
+		n := 3
+		if x.Field != nil {
+			tokens, message := measureTokens(x.Field.Text)
+			if message != "" {
+				return 0, message
+			}
+			n += len(tokens)
+		}
+		if x.Func == "quantile" {
+			n += 2
+		}
+		return n, ""
+	case MeasureCountIf:
+		tokens, message := measureTokens(x.Filter)
+		return 3 + len(tokens), message
+	case MeasureConst:
+		return 1, ""
+	case MeasureNeg:
+		prec := 3
+		extra := 1
+		if _, nested := x.X.(MeasureNeg); nested {
+			prec = 0
+			extra += 2
+		}
+		n, message := measureTokenCount(x.X, prec)
+		return n + extra, message
+	case MeasureBinary:
+		prec := 1
+		if x.Op == '*' || x.Op == '/' {
+			prec = 2
+		}
+		l, message := measureTokenCount(x.L, prec)
+		if message != "" {
+			return 0, message
+		}
+		r, message := measureTokenCount(x.R, prec+1)
+		n := l + r + 1
+		if prec < parent {
+			n += 2
+		}
+		return n, message
+	}
+	return 0, ""
 }

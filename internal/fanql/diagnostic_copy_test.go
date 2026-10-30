@@ -132,3 +132,15 @@ func TestMetricFreeTextDiagnosticUsesSchemaExample(t *testing.T) {
 		t.Fatalf("metric example: %+v", ps)
 	}
 }
+
+func TestCompileKeepsTheFirstGroupingRepairSpan(t *testing.T) {
+	_, ps := Compile("spans where (a:1 b:2 or c:3) and d:4 or e:5", Options{})
+	if len(ps) != 1 || ps[0].Span == nil || len(ps[0].FixIts) != 2 {
+		t.Fatalf("grouping diagnostic: %+v", ps)
+	}
+	for _, fix := range ps[0].FixIts {
+		if fix.Span != *ps[0].Span {
+			t.Errorf("fix span %+v differs from diagnostic %+v", fix.Span, ps[0].Span)
+		}
+	}
+}
