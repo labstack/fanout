@@ -75,17 +75,17 @@ describe("Builder", () => {
   });
 
   it("keeps entries it cannot show as removable chips", async () => {
-    const { ui, last } = await render({ ...base, where: ["service = $service", "service = 'a' OR service = 'b'"], measures: ["count_if(status = 'error') / count()"] });
-    expect(ui.getByText("service = $service")).toBeTruthy();
+    const { ui, last } = await render({ ...base, where: ["service IN ('a', 'b')", "service = 'a' OR service = 'b'"], measures: ["count_if(status = 'error') / count()"] });
+    expect(ui.getByText("service IN ('a', 'b')")).toBeTruthy();
     expect(ui.getByText("count_if(status = 'error') / count()")).toBeTruthy();
-    await act(async () => ui.getByRole("button", { name: "Remove service = $service" }).click());
+    await act(async () => ui.getByRole("button", { name: "Remove service IN ('a', 'b')" }).click());
     expect(last().where).toEqual(["service = 'a' OR service = 'b'"]);
   });
 
   it("drops fields the new source lacks and keeps the rest", async () => {
-    const { choose, last } = await render({ from: "spans", measures: ["p95(duration_ms)", "count()"], where: ["service = 'checkout'", "duration_ms > 5", "service = $service"], by: ["service", "operation", "attributes['http.route']"] });
+    const { choose, last } = await render({ from: "spans", measures: ["p95(duration_ms)", "count()"], where: ["service = 'checkout'", "duration_ms > 5", "service IN ('a')"], by: ["service", "operation", "attributes['http.route']"] });
     await choose("Source", "logs");
-    expect(last()).toEqual({ from: "logs", measures: ["count()"], where: ["service = 'checkout'", "service = $service"], by: ["service", "attributes['http.route']"] });
+    expect(last()).toEqual({ from: "logs", measures: ["count()"], where: ["service = 'checkout'", "service IN ('a')"], by: ["service", "attributes['http.route']"] });
   });
 
   it("keeps conditional measures as chips across a source switch", async () => {

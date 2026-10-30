@@ -13,7 +13,7 @@ import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/pane
 import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { SqlEditor } from "../sql-editor/sql-editor";
-import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice, type Parsed } from "./api";
+import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice, type Parsed, type VizCompat } from "./api";
 import { Builder } from "./builder";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, type ExploreSearch } from "./search";
@@ -44,6 +44,10 @@ export type DashboardContext = {
   spec: DashboardSpec; vars: Record<string, VarValue>;
   /** Saves the last run's panel; a rejection's message is shown. */
   save: { label: string; run(panel: Panel): Promise<void> };
+  /** The panel being edited: its min, max and thresholds satisfy viz requirements. */
+  panel?: Panel;
+  /** Turns a run's draft into the panel to preview and save, carrying the edited panel's settings. */
+  compose?(draft: Panel): Panel;
   /** Seeds the Builder when the panel's query cannot be edited as text. */
   initial?: { query: Query; formatted: Formatted };
 };
@@ -55,6 +59,9 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   context?: DashboardContext;
 }) {
   const variables = context?.spec.variables;
+  const base = context?.panel;
+  const satisfied = (c: VizCompat) => c.requires.every(r => r === "min_max" ? base?.min !== undefined && base?.max !== undefined : (base?.thresholds?.length ?? 0) > 0);
+  const compose = (draft: Panel) => context?.compose ? context.compose(draft) : draft;
   const vars = context?.vars ?? {};
   const [savingError, setSavingError] = useState<string>();
   const [savingPanel, setSavingPanel] = useState(false);
@@ -94,7 +101,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       let canonical: string | undefined;
       if (kind === "query" && direct) {
         setParsed(undefined);
-        panel = { id: explorePanelID, title: defaultTitle(source), viz: viz ?? "table", query: direct };
+        panel = compose({ id: explorePanelID, title: defaultTitle(source), viz: viz ?? "table", query: direct });
         canonical = source;
         onSearch({ ...searchNow.current, q: source, viz: panel.viz }, true);
       } else if (kind === "query") {
@@ -104,12 +111,12 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         setParsed({ ...next, text: source }); setNotices(next.notices);
         // An accepted viz edit changes the query; the Builder follows it.
         if (searchNow.current.tab === "builder") setBuilt(next.query);
-        const chosen = viz && next.viz.compatible.some(c => c.viz === viz && c.requires.length === 0) ? viz : next.viz.compatible.find(c => c.requires.length === 0)?.viz ?? "table";
-        panel = { id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query };
+        const chosen = viz && next.viz.compatible.some(c => c.viz === viz && satisfied(c)) ? viz : next.viz.compatible.find(satisfied)?.viz ?? "table";
+        panel = compose({ id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query });
         canonical = next.canonical;
         onSearch({ ...searchNow.current, q: source, viz: chosen, ...(source !== searchNow.current.q ? { drill: undefined } : {}) }, true);
       } else {
-        panel = { id: explorePanelID, title: "SQL", viz: "table", sql: source };
+        panel = compose({ id: explorePanelID, title: "SQL", viz: "table", sql: source });
         setNotices([]);
         onSearch({ ...searchNow.current, sql: source }, true);
       }
@@ -229,7 +236,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       <Tabs.Panel value="builder" pt="sm">
         <Stack gap="xs">
           {schema.error ? <Alert color="warn" title="Fields could not be loaded">{schema.error.message} <Button size="compact-xs" variant="default" ml="xs" onClick={() => void schema.refetch()}>Retry</Button></Alert>
-            : built && schema.data ? <Builder query={built} schema={schema.data} onChange={edit} /> : <Text size="sm" c="dimmed">Loading fields…</Text>}
+            : built && schema.data ? <Builder query={built} schema={schema.data} variables={(variables ?? []).map(v => v.name)} onChange={edit} /> : <Text size="sm" c="dimmed">Loading fields…</Text>}
           {formatProblems.length > 0 && <Stack gap={2} role="alert" data-builder-problems>{formatProblems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
           {formatted && formatProblems.length === 0 && <Text size="xs" c="dimmed" data-builder-text>As FanQL: <code>{formatted.text}</code></Text>}
         </Stack>
@@ -244,7 +251,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
           onClick={() => void (search.tab === "builder" ? runBuilder(search.viz) : execute(kind, source, search.viz, readOnlyText ? built : undefined))}>Run</Button>
         {kind === "query" && compatible.length > 0 && <SegmentedControl size="xs" aria-label="Visualization" value={run?.panel.viz ?? search.viz ?? ""}
           onChange={value => void (search.tab === "builder" ? runBuilder(value as Viz) : execute("query", text, value as Viz, readOnlyText ? built : undefined))}
-          data={compatible.map(c => ({ value: c.viz, disabled: c.requires.length > 0, label: c.requires.length > 0
+          data={compatible.map(c => ({ value: c.viz, disabled: !satisfied(c), label: !satisfied(c)
             ? <Tooltip label={`Needs ${c.requires.map(r => requirementLabel[r]).join(" and ")}; set them after saving`}><span>{vizLabel[c.viz]}</span></Tooltip>
             : vizLabel[c.viz] }))} />}
         {kind === "query" && !stale && !readOnlyText && parsed?.viz.edits.map(edit => <Tooltip key={edit.viz} label={<>Rewrites the query as <code>{edit.text}</code></>} multiline maw={420}>

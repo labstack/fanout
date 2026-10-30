@@ -35,7 +35,8 @@ function Chip({ text, onRemove }: { text: string; onRemove(): void }) {
   return <Badge variant="light" color="gray" size="lg" tt="none" rightSection={<ActionIcon size="xs" variant="subtle" color="gray" aria-label={`Remove ${text}`} onClick={onRemove}><X size={10} /></ActionIcon>}><code>{text}</code></Badge>;
 }
 
-export function Builder({ query, schema, onChange }: { query: Query; schema: TelemetrySchema; onChange(next: Query): void }) {
+/** `variables` are the dashboard's variable names; filters may compare with `$name`. */
+export function Builder({ query, schema, variables = [], onChange }: { query: Query; schema: TelemetrySchema; variables?: readonly string[]; onChange(next: Query): void }) {
   const fields = fieldsOf(schema, query.from);
   const names = new Set(fields.map(f => f.name));
   const numeric = new Set(fields.filter(f => f.type === "number" || f.type === "int" || f.type === "float").map(f => f.name));
@@ -84,12 +85,12 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Tel
       {where.map((entry, index) => {
         const c = parseWhere(entry);
         if (!c) return <Group key={index}><Chip text={entry} onRemove={() => set({ where: remove(where, index) })} /></Group>;
-        const update = (patch: Partial<Condition>) => set({ where: replace(where, index, printWhere({ ...c, ...patch })) });
+        const update = (patch: Partial<Condition>) => set({ where: replace(where, index, printWhere({ ...c, ...patch }, variables)) });
         return <Group key={index} gap="xs" wrap="nowrap">
           <Select aria-label={`Filter ${index + 1} field`} w={260} searchable allowDeselect={false} value={c.field} data={rowField(c.field)} onChange={field => field && update({ field, quoted: names.has(field) ? !numeric.has(field) : c.quoted })} />
           <Select aria-label={`Filter ${index + 1} operator`} w={90} allowDeselect={false} value={c.op} data={[...operators]} onChange={op => op && update({ op: op as Condition["op"] })} />
           {c.field === "service" && schema.services?.length
-            ? <Select aria-label={`Filter ${index + 1} value`} w={220} searchable value={c.value || null} data={schema.services.map(s => s.value)} onChange={value => update({ value: value ?? "" })} />
+            ? <Select aria-label={`Filter ${index + 1} value`} w={220} searchable value={c.value || null} data={[...variables.map(name => `$${name}`), ...schema.services.map(s => s.value)]} onChange={value => update({ value: value ?? "" })} />
             : <TextInput aria-label={`Filter ${index + 1} value`} w={220} value={c.value} onChange={event => update({ value: event.currentTarget.value })} />}
           <ActionIcon variant="subtle" color="gray" aria-label={`Remove filter ${index + 1}`} onClick={() => set({ where: remove(where, index) })}><X size={14} /></ActionIcon>
         </Group>;

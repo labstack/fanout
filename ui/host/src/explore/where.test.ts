@@ -25,8 +25,13 @@ describe("where entries", () => {
     expect(parseWhere("attributes['http.route'] = '/cart'")).toEqual({ field: "attributes['http.route']", op: "=", value: "/cart", quoted: true });
   });
 
-  it("leaves variables, boolean logic and functions alone", () => {
-    expect(parseWhere("service = $service")).toBeUndefined();
+  it("keeps a dashboard variable unquoted", () => {
+    expect(parseWhere("service = $service")).toEqual({ field: "service", op: "=", value: "$service", quoted: false });
+    expect(printWhere({ field: "service", op: "=", value: "$service", quoted: true }, ["service"])).toBe("service = $service");
+    expect(printWhere({ field: "service", op: "=", value: "$other", quoted: true }, ["service"])).toBe("service = '$other'");
+  });
+
+  it("leaves boolean logic and functions alone", () => {
     expect(parseWhere("service = 'a' OR service = 'b'")).toBeUndefined();
     expect(parseWhere("contains(body, 'timeout')")).toBeUndefined();
     expect(parseWhere("service IN ('a', 'b')")).toBeUndefined();

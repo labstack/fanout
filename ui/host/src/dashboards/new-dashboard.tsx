@@ -27,7 +27,9 @@ export function NewDashboard({ onClose, onCreated }: { onClose(): void; onCreate
     }
   };
 
-  return <Modal opened onClose={onClose} title="New dashboard" size="min(1280px, 100vw - 32px)">
+  // Escape first reaches the editor, which closes its completion list; only an unhandled Escape closes the dialog.
+  return <Modal opened onClose={onClose} closeOnEscape={false} title="New dashboard" size="min(1280px, 100vw - 32px)"
+    onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) onClose(); }}>
     <Stack gap={0}>
       <TextInput label="Dashboard name" px="lg" value={name} onChange={event => setName(event.currentTarget.value)} data-autofocus required />
       <ExplorePage search={search} onSearch={setSearch}

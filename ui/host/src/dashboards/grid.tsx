@@ -204,7 +204,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
       {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
     </PanelFullscreen>
     {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Loader size="sm" aria-label="Loading the panel editor" /></Modal>}>
-      <PanelEditor dashboardId={dashboardId} version={panelEdit.version} spec={panelEdit.spec} panel={panelEdit.panel} time={time} vars={vars} onClose={closePanelEdit} />
+      <PanelEditor dashboardId={dashboardId} version={panelEdit.version} spec={withLayout(panelEdit.spec.panels)} layoutChanged={dirty} panel={panelEdit.panel} time={time} vars={vars} onClose={closePanelEdit} />
     </Suspense>}
     {sqlEdit && <Suspense fallback={<Modal opened onClose={closeSql} title="Loading SQL editor"><Loader size="sm" aria-label="Loading SQL editor" /></Modal>}>
       <PanelSqlEditor dashboardId={dashboardId} version={sqlEdit.version} spec={sqlEdit.spec} panel={sqlEdit.panel} time={time} vars={vars} onClose={closeSql} />

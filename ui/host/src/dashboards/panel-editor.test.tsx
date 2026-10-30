@@ -17,6 +17,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const bodies = (url: string, method = "POST") => fetchMock.mock.calls.filter(([input, init]) => String(input) === url && (init?.method ?? "GET") === method).map(([, init]) => JSON.parse(String(init?.body)));
 let patch: () => Promise<Response>;
+let compatible: { viz: string; requires: string[] }[];
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -24,23 +25,24 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   fetchMock.mockReset();
   patch = async () => json({ id: "d1", version: 8, spec });
+  compatible = [{ viz: "table", requires: [] }];
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/fanql/format") return json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] });
-    if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible: [{ viz: "table", requires: [] }], edits: [] }, notices: [] });
+    if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible, edits: [] }, notices: [] });
     if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: "ok", elapsed_ms: 2, frame }] });
-    if (url === "/api/dashboards/d1" && init?.method === "PATCH") return patch();
+    if (url === "/api/dashboards/d1" && (init?.method === "PATCH" || init?.method === "PUT")) return patch();
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });
 });
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup => cleanup())); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-async function render({ add = false } = {}) {
-  const panel = add ? undefined : spec.panels[0];
+async function render({ add = false, panel: edited = spec.panels[0], layoutChanged = false } = {}) {
+  const panel = add ? undefined : edited;
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onClose = vi.fn();
-  await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><PanelEditor dashboardId="d1" version={7} spec={spec} time={{ range: "3h" }} vars={{ service: "checkout" }} panel={panel} onClose={onClose} /></QueryClientProvider></MantineProvider>));
+  await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><PanelEditor dashboardId="d1" version={7} spec={spec} time={{ range: "3h" }} vars={{ service: "checkout" }} panel={panel} layoutChanged={layoutChanged} onClose={onClose} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
   const ui = within(document.body);
   const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
@@ -58,7 +60,7 @@ describe("PanelEditor", () => {
     await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(onClose).toHaveBeenCalled());
-    expect(bodies("/api/dashboards/d1", "PATCH")[0]).toEqual({ operations: [{ op: "update_panel", id: "panel", set: { query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, sql: null, viz: "table" } }], base_version: 7, message: "Edited Requests" });
+    expect(bodies("/api/dashboards/d1", "PATCH")[0]).toEqual({ operations: [{ op: "update_panel", id: "panel", set: { query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] } } }], base_version: 7, message: "Edited Requests" });
   });
 
   it("adds a new panel with a free id", async () => {
@@ -71,6 +73,35 @@ describe("PanelEditor", () => {
     await act(async () => ui.getByRole("button", { name: "Add panel" }).click());
     await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
     expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0]).toMatchObject({ op: "add_panel", panel: { id: "panel_2", viz: "table" } });
+  });
+
+  it("drops settings tied to the old viz or columns when the query changes them", async () => {
+    const stat = { id: "panel", title: "Requests", viz: "stat" as const, reduce: "last" as const, unit: "count" as const, options: { columns: [{ field: "count", format: "bar" as const }] }, click: { set_variable: "service" }, query: { from: "spans" as const, measures: ["count()"] } };
+    const { ui, wait } = await render({ panel: stat });
+    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    const ran = bodies("/api/queries/run")[0].dashboard.panels[0];
+    expect(ran).toMatchObject({ viz: "table", unit: "count" });
+    expect(ran.reduce).toBeUndefined();
+    expect(ran.options).toBeUndefined();
+    await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
+    await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
+    expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0].set).toEqual({ viz: "table", reduce: null, options: null, click: null, query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] } });
+  });
+
+  it("keeps a gauge a gauge when the panel has its minimum and maximum", async () => {
+    compatible = [{ viz: "stat", requires: [] }, { viz: "gauge", requires: ["min_max"] }];
+    const gauge = { id: "panel", title: "Errors", viz: "gauge" as const, min: 0, max: 100, query: { from: "spans" as const, measures: ["error_rate()"] } };
+    const { wait } = await render({ panel: gauge });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ viz: "gauge", min: 0, max: 100 });
+  });
+
+  it("saves unsaved layout changes with the panel", async () => {
+    const { ui, wait } = await render({ layoutChanged: true });
+    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
+    await wait(() => expect(bodies("/api/dashboards/d1", "PUT")).toHaveLength(1));
+    expect(bodies("/api/dashboards/d1", "PUT")[0]).toMatchObject({ base_version: 7, message: "Edited Requests and saved layout", spec: { panels: [{ id: "panel", title: "Requests", query: { where: ["service = $service"] } }] } });
   });
 
   it("explains a version conflict and stays open", async () => {
