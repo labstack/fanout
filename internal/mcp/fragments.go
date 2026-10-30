@@ -30,28 +30,28 @@ type QueryTelemetryInput struct {
 }
 
 type fanqlToolFailureOutput struct {
-	Error    fanql.VersionProblem `json:"error"`
-	Problems panel.Problems       `json:"problems,omitempty"`
+	Error    fanql.Failure  `json:"error"`
+	Problems panel.Problems `json:"problems,omitempty"`
 }
 
 // QueryTelemetryOutput includes FanQL failures without changing preset fragments.
 type QueryTelemetryOutput struct {
 	*PanelFragment
-	Error    *fanql.VersionProblem `json:"error,omitempty"`
-	Problems panel.Problems        `json:"problems,omitempty"`
+	FanQLVersion int            `json:"fanql_version,omitempty"`
+	Notices      []fanql.Notice `json:"notices,omitempty"`
+	Error        *fanql.Failure `json:"error,omitempty"`
+	Problems     panel.Problems `json:"problems,omitempty"`
 }
 type FragmentView struct {
 	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
 	Key  string `json:"key" jsonschema:"Stable SHA-256 hash of the view specification, captured window and variables"`
 }
 type PanelFragment struct {
-	FanQLVersion int                                              `json:"fanql_version,omitempty"`
-	Notices      []fanql.Notice                                   `json:"notices,omitempty"`
-	View         FragmentView                                     `json:"view"`
-	Dashboard    panel.Dashboard                                  `json:"dashboard"`
-	Results      []panel.Result                                   `json:"results"`
-	Vars         map[string]panel.Value                           `json:"vars,omitempty"`
-	Trace        *observability.Result[observability.TraceDetail] `json:"trace,omitempty"`
+	View      FragmentView                                     `json:"view"`
+	Dashboard panel.Dashboard                                  `json:"dashboard"`
+	Results   []panel.Result                                   `json:"results"`
+	Vars      map[string]panel.Value                           `json:"vars,omitempty"`
+	Trace     *observability.Result[observability.TraceDetail] `json:"trace,omitempty"`
 }
 
 // The published schema deliberately has no subset selector. Raw input is
@@ -71,12 +71,14 @@ type variableOptions struct {
 // Supply the same override to input and output schema inference.
 func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
 	options := &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[json.RawMessage](): {Type: "integer"},
-		reflect.TypeFor[panel.Value]():     {AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "array", Items: &jsonschema.Schema{Type: "string"}}}},
+		reflect.TypeFor[panel.Value](): {AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "array", Items: &jsonschema.Schema{Type: "string"}}}},
 	}}
 	input, err := jsonschema.For[In](options)
 	if err != nil {
 		panic(err)
+	}
+	if reflect.TypeFor[In]() == reflect.TypeFor[QueryTelemetryInput]() {
+		input.Properties["fanql_version"] = &jsonschema.Schema{Type: "integer", Description: input.Properties["fanql_version"].Description}
 	}
 	output, err := jsonschema.For[Out](options)
 	if err != nil {
@@ -87,6 +89,8 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 		if err != nil {
 			panic(err)
 		}
+		success.Properties["fanql_version"] = output.Properties["fanql_version"]
+		success.Properties["notices"] = output.Properties["notices"]
 		failure, err := jsonschema.For[fanqlToolFailureOutput](options)
 		if err != nil {
 			panic(err)
@@ -205,18 +209,19 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if input.Text != "" {
 		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
 		if len(problems) != 0 {
-			return fanqlToolFailure(fanql.VersionProblem{Code: "invalid_fanql", Message: "The query has problems."}, panel.PresentProblems(problems))
+			return fanqlToolFailure(fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}, panel.PresentProblems(problems))
 		}
 		input.Panel.Query = &compiled.Query
 		notices = append(notices, compiled.Notices...)
 	}
 	d := panel.Dashboard{Name: input.Panel.Title, Variables: input.Variables, Panels: []panel.Panel{input.Panel}}
 	result, out, err := s.runFragment(ctx, panel.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
+	response := QueryTelemetryOutput{PanelFragment: &out}
 	if err == nil && input.Text != "" {
-		out.FanQLVersion = fanql.Version
-		out.Notices = notices
+		response.FanQLVersion = fanql.Version
+		response.Notices = notices
 	}
-	return result, QueryTelemetryOutput{PanelFragment: &out}, err
+	return result, response, err
 }
 func (s *Server) queryPanelFragment(ctx context.Context, _ *mcp.CallToolRequest, input panel.RunRequest) (*mcp.CallToolResult, PanelFragment, error) {
 	if input.Panels != nil {
@@ -794,7 +799,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 	return out, nil
 }
 
-func fanqlToolFailure(problem fanql.VersionProblem, problems panel.Problems) (*mcp.CallToolResult, QueryTelemetryOutput, error) {
+func fanqlToolFailure(problem fanql.Failure, problems panel.Problems) (*mcp.CallToolResult, QueryTelemetryOutput, error) {
 	result := summary(problem.Message)
 	result.IsError = true
 	return result, QueryTelemetryOutput{Error: &problem, Problems: problems}, nil

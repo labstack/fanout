@@ -27,6 +27,7 @@ var durationPattern = regexp.MustCompile(`(?i)^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+
 type parser struct {
 	clauseID        int
 	reported        map[int]bool
+	structural      map[int]bool
 	measureInfo     map[panel.MeasureExpr]*measureSource
 	vocab           vocabulary
 	tokens          lexTokens
@@ -207,6 +208,14 @@ func (p *parser) finish() panel.Problems {
 
 func (p *parser) beginClause() { p.clauseID++ }
 
+// Local recovery suppresses cascades only until the next independent term.
+// A structural grouping error keeps its clause suppressed instead.
+func (p *parser) beginIndependentTerm() {
+	if !p.structural[p.clauseID] {
+		delete(p.reported, p.clauseID)
+	}
+}
+
 func (p *parser) query(source string) *queryTree {
 	p.beginClause()
 	q := &queryTree{Span: span{0, len(p.runes)}}
@@ -345,6 +354,7 @@ func (p *parser) filters(nested bool) []filterExpr {
 			op := "and"
 			if p.is("and") || p.is("or") {
 				tok := p.take()
+				p.beginIndependentTerm()
 				op = strings.ToLower(tok.Text)
 				if p.filterStop(nested) {
 					p.expectTerm(nested)
@@ -361,6 +371,10 @@ func (p *parser) filters(nested bool) []filterExpr {
 		} else if p.is("and") || p.is("or") {
 			p.report(p.take().Span, diagSides, p.tokens[p.i-1].Text)
 			continue
+		}
+
+		if p.peek().Span.Start > p.previousEnd() && (p.peek().Kind == tokenWord || p.peek().Kind == tokenString || p.peek().Kind == tokenRaw) {
+			p.beginIndependentTerm()
 		}
 		x := p.term(nested)
 		if x != nil {
@@ -382,6 +396,10 @@ func (p *parser) filters(nested bool) []filterExpr {
 		second := p.groupingEdit(terms, ops, ops[0])
 		before := len(p.problems)
 		p.issue(at, diagnostic(diagMixed), groupingHint(first, second))
+		if p.structural == nil {
+			p.structural = map[int]bool{}
+		}
+		p.structural[p.clauseID] = true
 		span := panel.TextSpan{Start: at.Start, End: at.End}
 		if len(p.problems) > before {
 			p.problems[len(p.problems)-1].FixIts = []panel.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
@@ -606,7 +624,9 @@ func (p *parser) primary(nested bool) filterExpr {
 			}
 			example := fieldExample(field, op)
 			p.report(span{field.At.Start, oper.Span.End}, diagValue, field.Key, op, field.Key, op, example)
-			p.skipRun()
+			if !p.filterStop(nested) {
+				p.skipRun()
+			}
 			return nil
 		}
 		at := span{field.At.Start, v.At.End}
@@ -1189,6 +1209,7 @@ func (p *parser) stage(start int) *aggregation {
 			}
 		}
 		if p.eat(",") {
+			p.beginIndependentTerm()
 			p.expectNext(expect{Class: "measure"})
 			if p.peek().Kind == eof || clauses[p.lower()] {
 				p.report(p.peek().Span, diagMeasure)

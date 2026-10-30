@@ -52,8 +52,8 @@ func fanqlNotices(notices []fanql.Notice, missing bool) []fanql.Notice {
 		notices = []fanql.Notice{}
 	}
 	if missing {
-		notice, _ := (fanql.VersionRequest{}).Validate()
-		notices = append(notices, *notice)
+		notice := fanql.MissingVersionNotice()
+		notices = append(notices, notice)
 	}
 	return notices
 }
@@ -200,7 +200,7 @@ func (h *FanQLHandler) reference(c *echo.Context) error {
 	text := fanql.Reference()
 	c.Response().Header().Set("FanQL-Version", strconv.Itoa(fanql.Version))
 	if missing {
-		notice, _ := (fanql.VersionRequest{}).Validate()
+		notice := fanql.MissingVersionNotice()
 		c.Response().Header().Set("FanQL-Notice", notice.Message)
 	}
 	return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(text))

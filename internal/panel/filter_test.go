@@ -215,3 +215,25 @@ func TestCheckedFiltersRunWithListBinds(t *testing.T) {
 		}
 	}
 }
+
+func TestTypedFilterFieldsPreserveDisplay(t *testing.T) {
+	d, _ := newTestEngine(t)
+	for _, tc := range []struct{ text, field, literal string }{
+		{"service = 'api'", "service", "api"},
+		{"'api' = service", "service", ""},
+		{"attributes['http.route']::VARCHAR = '/cart'", "attributes['http.route']", "/cart"},
+		{"duration_ms > 5", "", ""},
+	} {
+		node, err := d.ParseSQL(t.Context(), "SELECT 1 FROM spans WHERE "+tc.text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expr := SQLExpression(node["where_clause"])
+		if got := equalityField(expr); got != tc.field {
+			t.Errorf("%s field = %q, want %q", tc.text, got, tc.field)
+		}
+		if got := constantText(expr.Right); got != tc.literal {
+			t.Errorf("%s literal = %q, want %q", tc.text, got, tc.literal)
+		}
+	}
+}

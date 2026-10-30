@@ -55,3 +55,29 @@ func TestCompileHintsUseTheActualOperatorAndSortKey(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileReportsIndependentProblemsInSourceOrder(t *testing.T) {
+	for _, tc := range []struct {
+		text     string
+		messages []string
+	}{
+		{"spans where foo~~x and bar~~y", []string{"~~ is SQL LIKE", "~~ is SQL LIKE"}},
+		{"spans where service: | avg(user.)", []string{"service: needs a value", "unexpected . after user"}},
+		{"spans where foo~~x bar~~y", []string{"~~ is SQL LIKE", "~~ is SQL LIKE"}},
+		{"spans where duration>5 and duration<10", []string{"duration needs a unit", "duration needs a unit"}},
+	} {
+		_, ps := Compile(tc.text, Options{})
+		if len(ps) != len(tc.messages) {
+			t.Errorf("%q: want two independent problems, got %+v", tc.text, ps)
+			continue
+		}
+		for i, want := range tc.messages {
+			if !strings.HasPrefix(ps[i].Message, want) || ps[i].Span == nil {
+				t.Errorf("%q problem %d: %+v", tc.text, i, ps[i])
+			}
+		}
+		if ps[0].Span != nil && ps[1].Span != nil && ps[0].Span.Start >= ps[1].Span.Start {
+			t.Errorf("problems out of source order: %+v", ps)
+		}
+	}
+}

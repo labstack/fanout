@@ -178,6 +178,10 @@ test *ARGS='./...':
 test-race:
     bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 ./...
 
+# Opt-in wall-clock acceptance; deterministic work bounds remain in test.
+fanql-perf:
+    FANOUT_TEST_LATENCY=1 bash scripts/with-duckdb.sh go test ./internal/fanql -run TestLatencyBudgets -count=1
+
 # ── Browser quality ──────────────────────────────────────────────────────────
 
 # `ui` and `ui-check` already run ui-lint once, so the gate does

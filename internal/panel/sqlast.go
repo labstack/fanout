@@ -20,8 +20,9 @@ type SQLExpr struct {
 	Grouped                                 bool // explicit parentheses in a byte-checked local lowering
 }
 
-// SQLExpression decodes the engine boundary once; expression consumers never
-// interpret untyped JSON themselves. Unknown fields stay in the engine tree.
+// SQLExpression builds a typed expression view for validation and inspection.
+// Statement checks and lossless tree rewrites still use the engine JSON maps;
+// unknown fields remain in that original tree for rendering.
 func SQLExpression(raw any) *SQLExpr {
 	v, ok := raw.(map[string]any)
 	if !ok || v == nil {

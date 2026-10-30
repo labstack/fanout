@@ -62,7 +62,8 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 	}
 	f := Filter{Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
 	uses := map[string]int{}
-	if err := walkFilter(node["where_clause"], sig, vars, &f, uses); err != nil {
+	typed := SQLExpression(node["where_clause"])
+	if err := walkFilterExpr(typed, sig, vars, &f, uses); err != nil {
 		return Filter{}, err
 	}
 	for _, name := range f.Params {
@@ -73,10 +74,10 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 			return Filter{}, fmt.Errorf("use $%s either with IN or with a comparison, not both", name)
 		}
 	}
-	f.EqField = equalityField(node["where_clause"])
-	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(node["where_clause"])
-	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(node["where_clause"])
-	f.NameInAnd = nameEqualityInAnd(node["where_clause"])
+	f.EqField = equalityField(typed)
+	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(typed)
+	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(typed)
+	f.NameInAnd = nameEqualityInAnd(typed)
 	if f.EqValue {
 		f.EqField = "name"
 	}
@@ -276,42 +277,34 @@ func checkAttributeExpr(v *SQLExpr) error {
 	return nil
 }
 
-func equalityField(n any) string {
-	v, _ := n.(map[string]any)
-	if v == nil || v["class"] != "COMPARISON" || v["type"] != "COMPARE_EQUAL" {
+func equalityField(v *SQLExpr) string {
+	if v == nil || v.Class != "COMPARISON" || v.Type != "COMPARE_EQUAL" {
 		return ""
 	}
-	for _, side := range []string{"left", "right"} {
-		if field := fieldText(v[side]); field != "" {
+	for _, side := range []*SQLExpr{v.Left, v.Right} {
+		if field := fieldText(side); field != "" {
 			return field
 		}
 	}
 	return ""
 }
 
-func fieldText(n any) string {
-	v, _ := n.(map[string]any)
+func fieldText(v *SQLExpr) string {
 	if v == nil {
 		return ""
 	}
-	switch v["class"] {
+	switch v.Class {
 	case "CAST":
-		return fieldText(v["child"])
+		return fieldText(v.Child)
 	case "COLUMN_REF":
-		names, _ := v["column_names"].([]any)
-		if len(names) == 1 {
-			name, _ := names[0].(string)
-			return name
+		if len(v.Columns) == 1 {
+			return v.Columns[0]
 		}
 	case "OPERATOR":
-		if v["type"] == "ARRAY_EXTRACT" {
-			children, _ := v["children"].([]any)
-			column, _ := children[0].(map[string]any)
-			names, _ := column["column_names"].([]any)
-			key, _ := children[1].(map[string]any)
-			text := constantText(key)
-			if len(names) == 1 {
-				return fmt.Sprintf("%s[%s]", names[0], sqlString(text))
+		if v.Type == "ARRAY_EXTRACT" && len(v.Children) == 2 {
+			column, key := v.Children[0], v.Children[1]
+			if column != nil && len(column.Columns) == 1 {
+				return fmt.Sprintf("%s[%s]", column.Columns[0], sqlString(constantText(key)))
 			}
 		}
 	}
@@ -346,10 +339,11 @@ func stripQuoted(text string) string {
 }
 
 // constantText returns the text of a string constant node.
-func constantText(n map[string]any) string {
-	literal, _ := n["literal"].(map[string]any)
-	text, _ := literal["text"].(string)
-	return text
+func constantText(n *SQLExpr) string {
+	if n == nil || n.LiteralKind != "STRING" {
+		return ""
+	}
+	return n.LiteralText
 }
 
 // functionArguments returns the argument expressions of a FUNCTION node.
@@ -531,52 +525,43 @@ func castNode(param map[string]any, typeName string) map[string]any {
 	}
 }
 
-func equalityValue(n any) (literal, parameter string, ok bool) {
-	v, _ := n.(map[string]any)
-	if v["class"] != "COMPARISON" || v["type"] != "COMPARE_EQUAL" {
+func equalityValue(v *SQLExpr) (literal, parameter string, ok bool) {
+	if v == nil || v.Class != "COMPARISON" || v.Type != "COMPARE_EQUAL" {
 		return "", "", false
 	}
-	var other any
-	directName := func(n any) bool {
-		field, _ := n.(map[string]any)
-		names, _ := field["column_names"].([]any)
-		return field["class"] == "COLUMN_REF" && len(names) == 1 && names[0] == "name"
+	var other *SQLExpr
+	directName := func(field *SQLExpr) bool {
+		return field != nil && field.Class == "COLUMN_REF" && len(field.Columns) == 1 && field.Columns[0] == "name"
 	}
-	if directName(v["left"]) {
-		other = v["right"]
-	} else if directName(v["right"]) {
-		other = v["left"]
+	if directName(v.Left) {
+		other = v.Right
+	} else if directName(v.Right) {
+		other = v.Left
 	} else {
 		return "", "", false
 	}
-	for {
-		node, _ := other.(map[string]any)
-		if node["class"] == "CAST" {
-			other = node["child"]
+	for other != nil {
+		switch other.Class {
+		case "CAST":
+			other = other.Child
 			continue
-		}
-		if node["class"] == "PARAMETER" {
-			id, _ := node["identifier"].(string)
-			return "", id, id != ""
-		}
-		if node["class"] == "CONSTANT" {
-			value, _ := node["literal"].(map[string]any)
-			if value["kind"] == "STRING" {
-				text, _ := value["text"].(string)
-				return text, "", true
+		case "PARAMETER":
+			return "", other.Identifier, other.Identifier != ""
+		case "CONSTANT":
+			if other.LiteralKind == "STRING" {
+				return constantText(other), "", true
 			}
 		}
-		return "", "", false
+		break
 	}
+	return "", "", false
 }
 
-func nameEqualityInAnd(n any) bool {
-	v, _ := n.(map[string]any)
-	if v["class"] != "CONJUNCTION" || v["type"] != "CONJUNCTION_AND" {
+func nameEqualityInAnd(v *SQLExpr) bool {
+	if v == nil || v.Class != "CONJUNCTION" || v.Type != "CONJUNCTION_AND" {
 		return false
 	}
-	children, _ := v["children"].([]any)
-	for _, child := range children {
+	for _, child := range v.Children {
 		if _, _, ok := equalityValue(child); ok || nameEqualityInAnd(child) {
 			return true
 		}
@@ -585,15 +570,14 @@ func nameEqualityInAnd(n any) bool {
 }
 
 // filterDisplay derives product wording from the checked AST, never SQL text.
-func filterDisplay(n any) (field, literal, parameter string) {
-	node, _ := n.(map[string]any)
-	if node["class"] != "COMPARISON" {
+func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
+	if node == nil || node.Class != "COMPARISON" {
 		return "", "", ""
 	}
-	other := node["right"]
-	field = fieldText(node["left"])
+	other := node.Right
+	field = fieldText(node.Left)
 	if field == "" {
-		field, other = fieldText(node["right"]), node["left"]
+		field, other = fieldText(node.Right), node.Left
 	}
 	if field == "" {
 		return "", "", ""
@@ -610,21 +594,20 @@ func filterDisplay(n any) (field, literal, parameter string) {
 	default:
 		field = strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
 	}
-	if node["type"] != "COMPARE_EQUAL" {
+	if node.Type != "COMPARE_EQUAL" {
 		return field, "", ""
 	}
-	for {
-		value, _ := other.(map[string]any)
-		switch value["class"] {
+	for other != nil {
+		switch other.Class {
 		case "CAST":
-			other = value["child"]
+			other = other.Child
 		case "CONSTANT":
-			return field, constantText(value), ""
+			return field, constantText(other), ""
 		case "PARAMETER":
-			parameter, _ = value["identifier"].(string)
-			return field, "", parameter
+			return field, "", other.Identifier
 		default:
 			return field, "", ""
 		}
 	}
+	return field, "", ""
 }

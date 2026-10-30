@@ -37,13 +37,13 @@ func rollupNodeValue(node map[string]any, scope Scope) (string, string, error) {
 	if left["class"] != "COLUMN_REF" {
 		left, right = right, left
 	}
-	field := fieldText(left)
+	field := fieldText(SQLExpression(left))
 	if left["class"] != "COLUMN_REF" || (field != "service" && field != "namespace") {
 		return "", "", fmt.Errorf("rollup panels support equality filters on namespace or service")
 	}
 	switch right["class"] {
 	case "CONSTANT":
-		value := constantText(right)
+		value := constantText(SQLExpression(right))
 		if value == "" {
 			return "", "", fmt.Errorf("scope equality requires a nonempty string")
 		}

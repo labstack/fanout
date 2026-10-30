@@ -20,7 +20,7 @@ func annotationOnly(n any) bool {
 	switch v := n.(type) {
 	case map[string]any:
 		if v["class"] == "COLUMN_REF" {
-			name := fieldText(v)
+			name := fieldText(SQLExpression(v))
 			return name == "service" || name == "namespace"
 		}
 		for _, child := range v {
@@ -40,7 +40,7 @@ func annotationOnly(n any) bool {
 func annotationNamespace(n any) bool {
 	switch v := n.(type) {
 	case map[string]any:
-		if v["class"] == "COLUMN_REF" && fieldText(v) == "namespace" {
+		if v["class"] == "COLUMN_REF" && fieldText(SQLExpression(v)) == "namespace" {
 			return true
 		}
 		for _, child := range v {

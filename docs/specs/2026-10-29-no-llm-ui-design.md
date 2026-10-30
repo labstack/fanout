@@ -434,7 +434,7 @@ POST /api/fanql/parse
 
 POST /api/fanql/format
   {fanql_version: 1, query, viz?, variables?, panel?}
-  200 {fanql_version: 1, text, exactness: "exact" | "normalized", editable: bool, reason?: string, notices: [...]}
+  200 {fanql_version: 1, text, exactness: "exact" | "normalized", editable: bool, reason?: string, requires: [{name, satisfied}], notices: [...]}
   400 {code: "invalid_spec", ... problems}           (the query fails QueryShape under every viz)
   503 {code: "unavailable", message}                 (engine parse failed operationally)
 

@@ -51,7 +51,6 @@ func TestCorpusDiagnosticCopy(t *testing.T) {
 			continue
 		}
 		_, problems := Compile(fixture.Text, Options{Viz: fixture.Viz})
-		seen := map[int]bool{}
 		for _, p := range problems {
 			copy := p.Message + " " + p.Hint
 			for _, internal := range []string{"FanQL 1", "log_patterns", "state_timeline", "service_map"} {
@@ -69,44 +68,9 @@ func TestCorpusDiagnosticCopy(t *testing.T) {
 					t.Errorf("%q has a service-only list example: %s", fixture.Text, example)
 				}
 			}
-			if p.Span != nil {
-				clause := fixtureClauseAt(fixture.Text, p.Span.Start)
-				if seen[clause] {
-					t.Errorf("%q has more than one diagnostic in clause at %d: %+v", fixture.Text, clause, problems)
-				}
-				seen[clause] = true
-			}
-		}
-	}
-}
 
-// This test independently partitions clauses by lexical depth; quoted and
-// nested clause words and words following an operator remain values.
-func fixtureClauseAt(text string, position int) int {
-	ts := lex(text)
-	clause, depth := 0, 0
-	for i, t := range ts {
-		if t.Span.Start > position {
-			break
-		}
-		word := grammarText(t)
-		if depth == 0 && (word == "|" || clauses[word]) {
-			previous := ""
-			if i > 0 {
-				previous = grammarText(ts[i-1])
-			}
-			if !isComparison(previous) && previous != ":" && previous != "~" && previous != "!~" && previous != "between" {
-				clause = t.Span.Start
-			}
-		}
-		if word == "(" {
-			depth++
-		}
-		if word == ")" {
-			depth--
 		}
 	}
-	return clause
 }
 
 func TestCompileKeepsProblemsFromIndependentClauses(t *testing.T) {

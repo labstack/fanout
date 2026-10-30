@@ -136,7 +136,11 @@ func queryShapeAggregate(p *Panel, spec vizSpec, path string, problems *Problems
 		problems.add(path+".by", fmt.Sprintf("%s panels group by at least %d field", p.Viz, spec.minBy))
 	}
 	if len(q.By) > spec.maxBy {
-		problems.add(path+".by", fmt.Sprintf("%s panels group by at most %d field(s)", p.Viz, spec.maxBy))
+		if spec.maxBy == 0 {
+			problems.add(path+".by", p.Viz+" panels take no group by")
+		} else {
+			problems.add(path+".by", fmt.Sprintf("%s panels group by at most %d field(s)", p.Viz, spec.maxBy))
+		}
 	}
 	byAliases := map[string]bool{}
 	for i, by := range q.By {

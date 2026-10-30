@@ -170,7 +170,7 @@ func checkDeployScope(ctx context.Context, parser Parser, p *Panel, f Filter) er
 	walk = func(n any) {
 		switch v := n.(type) {
 		case map[string]any:
-			if v["class"] == "COLUMN_REF" && (fieldText(v) == "service" || fieldText(v) == "namespace") {
+			if v["class"] == "COLUMN_REF" && (fieldText(SQLExpression(v)) == "service" || fieldText(SQLExpression(v)) == "namespace") {
 				scoped = true
 			}
 			for _, child := range v {

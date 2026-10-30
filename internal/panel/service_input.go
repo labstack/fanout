@@ -249,7 +249,7 @@ SELECT
 func guidanceReferencesNamespace(node any) bool {
 	switch v := node.(type) {
 	case map[string]any:
-		if v["class"] == "COLUMN_REF" && fieldText(v) == "namespace" {
+		if v["class"] == "COLUMN_REF" && fieldText(SQLExpression(v)) == "namespace" {
 			return true
 		}
 		for _, child := range v {

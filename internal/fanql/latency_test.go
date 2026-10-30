@@ -3,6 +3,7 @@ package fanql
 import (
 	"context"
 	"math"
+	"os"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -37,9 +38,6 @@ func latencyPercentile(samples []time.Duration, percentile float64) time.Duratio
 // section 0 (especially 0.14 and 0.16). Tests bound work deterministically;
 // benchmarks report the strict spec percentiles on an uninstrumented build.
 func TestLatencyBudgets(t *testing.T) {
-	if testing.Short() {
-		t.Skip("latency acceptance is excluded by -short")
-	}
 	fixtures := readCorpus(t)
 	if len(fixtures) == 0 {
 		t.Fatal("latency needs the acceptance corpus")
@@ -65,7 +63,7 @@ func TestLatencyBudgets(t *testing.T) {
 		if allocs > allocationLimit {
 			t.Errorf("%s allocations/request = %.0f, want <= %.0f", name, allocs, allocationLimit)
 		}
-		if !raceInstrumentation {
+		if latencyAcceptanceEnabled() && !raceInstrumentation {
 			for range 3 {
 				started := time.Now()
 				run()
@@ -76,7 +74,7 @@ func TestLatencyBudgets(t *testing.T) {
 	// Rounded ceilings leave headroom above corpus maxima (~1050, 120, 215,
 	// and 2300 allocations for Compile, completion, parse/rank, and Format).
 	for _, fixture := range fixtures {
-		measure("Compile", 1500, &compileSamples, func() {
+		measure("Compile "+fixture.Text, 1500, &compileSamples, func() {
 			_, _ = Compile(fixture.Text, Options{Viz: fixture.Viz})
 		})
 		req := CompleteRequest{Text: fixture.Text, Cursor: utf8.RuneCountInString(fixture.Text), Window: "1h", Options: Options{Viz: fixture.Viz}}
@@ -107,6 +105,9 @@ func TestLatencyBudgets(t *testing.T) {
 		t.Errorf("warm completion schema fetches = %d, want exactly 1 including warmup", got)
 	}
 	t.Run("smoke", func(t *testing.T) {
+		if !latencyAcceptanceEnabled() {
+			t.Skip("set FANOUT_TEST_LATENCY=1 in the perf job to assert wall-clock budgets")
+		}
 		if raceInstrumentation {
 			t.Skip("wall-clock smoke budgets exclude race instrumentation; deterministic work bounds still run")
 		}
@@ -228,3 +229,14 @@ func BenchmarkParseRank(b *testing.B) {
 	}
 	benchmarkLatency(b, .95, "p95-ns/op", parseRank)
 }
+
+func TestLatencyAcceptanceRequiresOptIn(t *testing.T) {
+	for _, value := range []string{"", "0", "true", "1"} {
+		t.Setenv("FANOUT_TEST_LATENCY", value)
+		if got := latencyAcceptanceEnabled(); got != (value == "1") {
+			t.Errorf("opt-in %q: got %v", value, got)
+		}
+	}
+}
+
+func latencyAcceptanceEnabled() bool { return os.Getenv("FANOUT_TEST_LATENCY") == "1" }

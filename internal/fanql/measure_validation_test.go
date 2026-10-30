@@ -23,7 +23,7 @@ func TestCompilePreservesNativeMeasureValidation(t *testing.T) {
 func TestCompileRepeatedConditionalMeasuresKeepTheirOwnSpans(t *testing.T) {
 	text := "spans | count_if(service:$x) + count_if(service:$x) as total"
 	_, ps := Compile(text, Options{Viz: "table"})
-	if len(ps) != 1 || ps[0].Span == nil || ps[0].Span.Start != strings.Index(text, "$x") {
-		t.Fatalf("first conditional span: %+v", ps)
+	if len(ps) != 2 || ps[0].Span == nil || ps[1].Span == nil || ps[0].Span.Start != strings.Index(text, "$x") || ps[1].Span.Start != strings.LastIndex(text, "$x") {
+		t.Fatalf("independent conditional spans: %+v", ps)
 	}
 }

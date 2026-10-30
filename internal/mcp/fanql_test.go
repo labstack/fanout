@@ -195,3 +195,67 @@ func TestQueryTelemetryFanQLProblemsStayStructuredThroughMiddleware(t *testing.T
 		}
 	}
 }
+
+func TestQueryTelemetryUsesNeutralFailure(t *testing.T) {
+	out := QueryTelemetryOutput{Error: &fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}}
+	raw, err := json.Marshal(out)
+	if err != nil || string(raw) != `{"error":{"code":"invalid_fanql","message":"The query has problems."}}` {
+		t.Fatalf("failure: %s %v", raw, err)
+	}
+}
+
+func TestPresetSchemasExcludeFanQLMetadata(t *testing.T) {
+	client := connectTestClient(t, newPanelServer(t), nil)
+	listed, err := client.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		raw, _ := json.Marshal(tool.OutputSchema)
+		for _, field := range []string{`"fanql_version"`, `"notices"`} {
+			has := strings.Contains(string(raw), field)
+			if tool.Name == "query_telemetry" && !has || tool.Name != "query_telemetry" && has {
+				t.Errorf("%s metadata %s: %s", tool.Name, field, raw)
+			}
+		}
+	}
+}
+
+func TestFragmentRawJSONIsNotAnInteger(t *testing.T) {
+	type input struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	s := newPanelServer(t)
+	tool := &mcp.Tool{Name: "test_raw_json", Description: "Test raw JSON"}
+	fragmentTool(s, tool, func(context.Context, *mcp.CallToolRequest, input) (*mcp.CallToolResult, variableOptions, error) {
+		return nil, variableOptions{}, nil
+	})
+	raw, _ := json.Marshal(tool.InputSchema)
+	var schema struct {
+		Properties map[string]struct {
+			Type any `json:"type"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if reflect.DeepEqual(schema.Properties["payload"].Type, "integer") {
+		t.Fatalf("arbitrary JSON restricted to integer: %s", raw)
+	}
+	client := connectTestClient(t, s, nil)
+	listed, err := client.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Name == "query_telemetry" {
+			raw, _ = json.Marshal(tool.InputSchema)
+			if err := json.Unmarshal(raw, &schema); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(schema.Properties["fanql_version"].Type, "integer") {
+				t.Fatalf("version must be integer: %s", raw)
+			}
+		}
+	}
+}

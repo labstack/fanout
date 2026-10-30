@@ -75,8 +75,9 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 		for i := range s.Measures {
 			m := &s.Measures[i]
 			r.path = fmt.Sprintf("measures[%d]", i)
+			before := len(r.problems)
 			expr := r.measure(m.Parsed.Expr, m.Info, m.Filters)
-			if len(r.problems) == 0 {
+			if len(r.problems) == before {
 				parsed, message, hint := panel.MeasureFromExpr(q.Source, expr, m.Alias, r.vocab.measures())
 				if message != "" {
 					r.problems = append(r.problems, panel.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
@@ -127,7 +128,7 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 	sort.SliceStable(r.problems, func(i, j int) bool {
 		return r.problems[i].Span != nil && r.problems[j].Span != nil && r.problems[i].Span.Start < r.problems[j].Span.Start
 	})
-	r.problems = oneProblemPerPathClause(r.problems)
+	r.problems = presentProblems(r.problems)
 	if len(r.problems) > maxProblems {
 		r.problems = append(r.problems[:maxProblems], panel.Problem{Path: "text", Message: message(diagMore), Span: r.problems[maxProblems].Span})
 	}
@@ -743,28 +744,16 @@ func ignoredClauseNotices(q panel.Query, viz string) []Notice {
 	return notices
 }
 
-func oneProblemPerPathClause(problems panel.Problems) panel.Problems {
-	seen := map[string]bool{}
-	out := make(panel.Problems, 0, len(problems))
-	for _, p := range problems {
-		root := strings.FieldsFunc(p.Path, func(r rune) bool { return r == '[' || r == '.' })
-		clause := p.Path
-		if len(root) > 0 {
-			clause = root[0]
-		}
-		if clause == "histogram" {
-			clause = "measures"
-		}
-		if seen[clause] {
-			continue
-		}
-		seen[clause] = true
-		p.Message = diagnosticVizNames(p.Message)
-		p.Hint = diagnosticVizNames(p.Hint)
-		out = append(out, p)
+func presentProblems(problems panel.Problems) panel.Problems {
+	for i := range problems {
+		problems[i].Message = diagnosticVizNames(problems[i].Message)
+		problems[i].Hint = diagnosticVizNames(problems[i].Hint)
 	}
-	return out
+	return problems
 }
+
+var diagnosticVizReplacer = strings.NewReplacer("log_patterns", "pattern lists", "state_timeline", "state timelines", "service_map", "service maps")
+
 func diagnosticVizNames(text string) string {
-	return strings.NewReplacer("log_patterns", "pattern lists", "state_timeline", "state timelines", "service_map", "service maps").Replace(text)
+	return diagnosticVizReplacer.Replace(text)
 }
