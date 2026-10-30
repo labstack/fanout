@@ -1,6 +1,8 @@
 # Agent-built dashboards
 
-Status: draft for review · 2026-10-04 · branch `feat/agent-dashboards`
+Status: Implemented
+Date: 2026-10-04
+Pull requests: #285, #286, #287, #295 (milestones 1 to 4)
 
 ## Goal
 
