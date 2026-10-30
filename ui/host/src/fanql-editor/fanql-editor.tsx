@@ -10,6 +10,12 @@ import { sqlTheme } from "../sql-editor/theme";
 import { pointOffset, unitSpan } from "./spans";
 
 const noProblems: readonly Problem[] = [];
+// The shared SQL theme sizes a multi-line editor; FanQL is one line.
+const oneLine = EditorView.theme({
+  ".cm-scroller": { minHeight: "0", maxHeight: "none", overflowX: "auto", overflowY: "hidden", fontSize: "14px" },
+  ".cm-content": { padding: "8px 4px" },
+  ".cm-line": { whiteSpace: "pre" },
+});
 
 export type FanqlEditorProps = {
   value: string; onChange(value: string): void; onRun(): void;
@@ -60,7 +66,7 @@ export function FanqlEditor(props: FanqlEditorProps) {
       } catch { return null; }
     };
     const instance = new EditorView({ parent: host.current!, state: EditorState.create({ doc: latest.current.value, extensions: [
-      history(), drawSelection(), sqlTheme,
+      history(), drawSelection(), sqlTheme, oneLine,
       // One line: newlines from typing or pasting become spaces.
       EditorState.transactionFilter.of(tr => {
         if (!tr.docChanged || !/[\r\n]/.test(tr.newDoc.toString())) return tr;

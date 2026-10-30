@@ -10,6 +10,7 @@ import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { SqlEditor } from "../sql-editor/sql-editor";
 import { completeFanql, parseFanql, type Notice, type Parsed } from "./api";
+import { SaveDialog } from "./save-dialog";
 import { exploreTime, type ExploreSearch } from "./search";
 
 export const explorePanelID = "explore";
@@ -28,11 +29,12 @@ export function hasRows(run?: ExploreRun): boolean {
   return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
 }
 
-export function ExplorePage({ search, onSearch, onSave }: {
+export function ExplorePage({ search, onSearch, onSaved }: {
   search: ExploreSearch; onSearch(next: ExploreSearch, replace?: boolean): void;
-  /** Called with the panel of the last successful run; omitted hides Save. */
-  onSave?(run: ExploreRun): void;
+  /** Opens the dashboard the result was saved to. */
+  onSaved(dashboardId: string): void;
 }) {
+  const [saving, setSaving] = useState<Panel>();
   const [text, setText] = useState(search.q);
   const [sql, setSql] = useState(search.sql ?? "");
   const [parsed, setParsed] = useState<Parsed>();
@@ -97,7 +99,7 @@ export function ExplorePage({ search, onSearch, onSave }: {
   const source = search.tab === "query" ? text : sql;
   const stale = run !== undefined && (run.tab !== search.tab || run.source !== source);
   const compatible = parsed?.viz.compatible ?? [];
-  const canSave = onSave !== undefined && !stale && !running && hasRows(run);
+  const canSave = !stale && !running && hasRows(run);
 
   return <Stack gap="md" p="lg" maw={1400} data-explore>
     <Group justify="space-between" align="flex-end">
@@ -137,7 +139,7 @@ export function ExplorePage({ search, onSearch, onSave }: {
           {vizLabel[edit.viz]} (runs <code>{edit.text}</code>)
         </Button>)}
       </Group>
-      {onSave && <Tooltip label="Run a query that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => run && onSave(run)}>Save to dashboard</Button></span></Tooltip>}
+      <Tooltip label="Run a query that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => run && setSaving(run.panel)}>Save to dashboard</Button></span></Tooltip>
     </Group>
     {error && <Alert color="bad" title="The query could not run">{error}</Alert>}
     <Box ref={resultBox}>
@@ -149,5 +151,6 @@ export function ExplorePage({ search, onSearch, onSave }: {
         </Box>
       </Stack> : <Text c="dimmed" size="sm" data-explore-empty>Type a query, for example <code>spans | count() by service</code>, and press Enter.</Text>}
     </Box>
+    {saving && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
   </Stack>;
 }

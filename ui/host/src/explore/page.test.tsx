@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ExplorePage, type ExploreRun } from "./page";
+import { ExplorePage } from "./page";
 import type { ExploreSearch } from "./search";
 
 const frame = { columns: [{ name: "service", type: "string" as const, role: "dimension" as const }, { name: "count", type: "number" as const, role: "measure" as const }], values: [["checkout"], [42]], rows: 1 };
@@ -44,8 +44,8 @@ async function render(initial: Partial<ExploreSearch> = {}) {
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let search: ExploreSearch = { q: "", range: "1h", tab: "query", ...initial };
   const onSearch = vi.fn((next: ExploreSearch) => { search = next; void draw(); });
-  const onSave = vi.fn<(run: ExploreRun) => void>();
-  const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><ExplorePage search={search} onSearch={onSearch} onSave={onSave} /></QueryClientProvider></MantineProvider>));
+  const onSaved = vi.fn<(id: string) => void>();
+  const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><ExplorePage search={search} onSearch={onSearch} onSaved={onSaved} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
   await draw();
   const ui = within(host);
@@ -53,7 +53,7 @@ async function render(initial: Partial<ExploreSearch> = {}) {
   const type = async (text: string) => act(async () => { const view = editor(); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); });
   const click = async (name: string | RegExp) => act(async () => ui.getByRole("button", { name }).click());
   const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
-  return { ui, onSearch, onSave, type, click, wait, search: () => search };
+  return { ui, onSearch, onSaved, type, click, wait, search: () => search };
 }
 
 describe("ExplorePage", () => {
@@ -107,14 +107,12 @@ describe("ExplorePage", () => {
   });
 
   it("marks the result stale after an edit and only saves a fresh run with rows", async () => {
-    const { ui, type, click, wait, onSave } = await render();
+    const { ui, type, click, wait } = await render();
     const save = () => ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" });
     expect(save().disabled).toBe(true);
     await type("spans | count() by service");
     await click("Run");
     await wait(() => expect(save().disabled).toBe(false));
-    await click("Save to dashboard");
-    expect(onSave.mock.calls[0][0].panel).toMatchObject({ id: "explore", viz: "table" });
     await type("spans | count() by operation");
     expect(ui.getByRole("status").textContent).toBe("Result of the last run · query has changed");
     expect(save().disabled).toBe(true);

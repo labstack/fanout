@@ -10,5 +10,6 @@ export const Route = createFileRoute("/explore")({
 function Explore() {
   const search = parseExploreSearch(Route.useSearch() as Record<string, unknown>);
   const navigate = useNavigate();
-  return <ExplorePage search={search} onSearch={(next, replace) => void navigate({ to: "/explore", search: toExploreParams(next), replace })} />;
+  return <ExplorePage search={search} onSearch={(next, replace) => void navigate({ to: "/explore", search: toExploreParams(next), replace })}
+    onSaved={dashboardId => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId } })} />;
 }

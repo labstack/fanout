@@ -1,6 +1,6 @@
 import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
+import { Compass, DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
@@ -13,6 +13,7 @@ export type RailProps = {
   agentAvailable: boolean;
   activeThreadID?: string;
   activeDashboardID?: string;
+  exploreActive?: boolean;
   /** The mobile drawer mounts a second rail; it focuses search on open. */
   autoFocusSearch?: boolean;
   onNewChat: () => void;
@@ -20,6 +21,7 @@ export type RailProps = {
   onDeletedThread: (threadID: string) => void;
   onSelectDashboard: (dashboardID: string) => void;
   onCreateDashboard: () => void;
+  onExplore: () => void;
   onInvestigateService?: (service: string) => void;
   ref?: Ref<RailHandle>;
 };
@@ -36,7 +38,7 @@ async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> 
   return response.json();
 }
 
-export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onInvestigateService, ref }: RailProps) {
+export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, exploreActive = false, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onExplore, onInvestigateService, ref }: RailProps) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query] = useDebouncedValue(search.trim(), 250);
@@ -135,6 +137,14 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
             <Text size="sm" fw={500} truncate>{service}</Text>
           </UnstyledButton>)}
         </Stack>}
+        {/* Explore works without chat: it is the direct path to an ad-hoc query. */}
+        <UnstyledButton component="a" href="/explore" className="rail-row" data-active={exploreActive || undefined} aria-current={exploreActive ? "page" : undefined} p="sm" onClick={(event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          onExplore();
+        }}>
+          <Group gap="xs" wrap="nowrap"><Compass size={16} /><Text size="sm" fw={exploreActive ? 600 : 500}>Explore</Text></Group>
+        </UnstyledButton>
         <Stack gap={4}>
           <SectionLabel>Dashboards</SectionLabel>
           {dashboards.isLoading && <Center py="md"><Loader size="xs" /></Center>}

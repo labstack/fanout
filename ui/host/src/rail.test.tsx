@@ -43,7 +43,7 @@ function mount(props: Partial<Parameters<typeof Rail>[0]> = {}) {
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const handlers = {
-    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onInvestigateService: vi.fn(),
+    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onExplore: vi.fn(), onInvestigateService: vi.fn(),
   };
   const ref = createRef<RailHandle>();
   const render = () => root.render(
@@ -188,6 +188,21 @@ describe("Rail", () => {
     expect(handlers.onCreateDashboard).toHaveBeenCalledOnce();
     expect(document.body.textContent).not.toContain("Create with AI");
     await act(async () => root.unmount());
+  });
+
+  it("links Explore with or without chat and marks it current on /explore", async () => {
+    fetchMock.mockImplementation(async () => json({ dashboards: [] }));
+    for (const agentAvailable of [true, false]) {
+      const { root, render, handlers } = mount({ agentAvailable, exploreActive: true });
+      await act(async () => render());
+      const link = [...document.querySelectorAll<HTMLAnchorElement>('a[href="/explore"]')].at(-1)!;
+      expect(link.textContent).toBe("Explore");
+      expect(link.getAttribute("aria-current")).toBe("page");
+      await act(async () => link.click());
+      expect(handlers.onExplore).toHaveBeenCalledOnce();
+      await act(async () => root.unmount());
+      document.body.innerHTML = "";
+    }
   });
 
   it("hides New dashboard for an empty list when the agent is unavailable", async () => {
