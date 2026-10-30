@@ -42,7 +42,7 @@ jobs:
           cache: true
 
       # Go 1.27 needs CodeQL 2.26.4 or later, which v4.37.9 and newer select.
-      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -55,6 +55,6 @@ jobs:
       - if: matrix.build-mode == 'manual'
         run: bash scripts/with-duckdb.sh go build ./...
 
-      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: /language:${{ matrix.language }}
