@@ -22,6 +22,7 @@ export type RailProps = {
   onDeletedThread: (threadID: string) => void;
   onSelectDashboard: (dashboardID: string) => void;
   onCreateDashboard: () => void;
+  onNewDashboard: () => void;
   onNavigate: (path: PagePath) => void;
   onInvestigateService?: (service: string) => void;
   ref?: Ref<RailHandle>;
@@ -46,7 +47,7 @@ async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> 
   return response.json();
 }
 
-export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
+export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, activePath, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onNewDashboard, onNavigate, onInvestigateService, ref }: RailProps) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query] = useDebouncedValue(search.trim(), 250);
@@ -186,7 +187,8 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
               </UnstyledButton>}
             </Stack>;
           })}
-          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>{dashboards.data?.length === 0 ? "New dashboard" : "Create with AI"}</Button>}
+          <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Plus size={14} />} onClick={onNewDashboard}>New dashboard</Button>
+          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
         </Stack>
       </Stack>
     </ScrollArea>

@@ -1,5 +1,5 @@
-import { Alert, Box, Button, Center, Group, Loader, Stack, Text, Title } from "@mantine/core";
-import { WarningCircle } from "@phosphor-icons/react";
+import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
+import { Copy, WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
@@ -7,6 +7,7 @@ import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-co
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
 import { PanelGrid } from "./grid";
 import { DrillDrawer } from "./drill";
+import { DuplicateDialog } from "./duplicate-dialog";
 import { parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
@@ -54,12 +55,13 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
     </Stack></Center>;
   }
   if (record.error || !record.data) return <Center mih="50vh"><Text c="dimmed" size="sm">Your dashboard is unavailable. Try refreshing.</Text></Center>;
-  return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} agentAvailable={agentAvailable} openChat={openChat} />;
+  return <Loaded key={record.data.id} id={record.data.id} version={record.data.version} spec={record.data.spec} search={search} onSearch={onSearch} onOpen={onOpen} agentAvailable={agentAvailable} openChat={openChat} />;
 }
 
-function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
+function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; onOpen(id: string): void; agentAvailable: boolean; openChat(prompt?: string, options?: TurnOptions): void }) {
   // Loading this owner-scoped record proves manage-own capability on the server.
   const canManage = true;
+  const [duplicating, setDuplicating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const region = useRef<HTMLElement>(null);
@@ -126,7 +128,10 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
     <Stack gap="sm" mb="md">
       <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
         <Box miw={0}>
-          <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
+          <Group gap="xs" wrap="nowrap">
+            <Title order={1} fz={28} lts="-0.02em">{spec.name}</Title>
+            {canManage && <Tooltip label="Duplicate dashboard"><ActionIcon variant="subtle" color="gray" aria-label="Duplicate dashboard" onClick={() => setDuplicating(true)}><Copy size={16} /></ActionIcon></Tooltip>}
+          </Group>
           {spec.description && <Text c="dimmed" size="sm" mt={2}>{spec.description}</Text>}
         </Box>
         <Toolbar selecting={ranges.size > 0} time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
@@ -163,6 +168,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         if (selected) onSearch({ ...search, vars: selected.vars, drill: JSON.stringify(selected.target) }, false);
       }} />
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
+    {duplicating && <DuplicateDialog spec={spec} onClose={() => setDuplicating(false)} onCreated={next => { setDuplicating(false); onOpen(next); }} />}
     <HistoryDrawer id={id} currentVersion={version} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
       setRestoreRefresh(record.version);
       const ids = new Set(record.spec.panels.map(panel => panel.id));

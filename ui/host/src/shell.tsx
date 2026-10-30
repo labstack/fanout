@@ -3,12 +3,16 @@ import { ActionIcon, Alert, AppShell, Avatar, Burger, Drawer, Group, Menu, Toolt
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { BookOpen, PlugsConnected, SignOut } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { logout, useViewer } from "./auth";
 import { BrandLockup } from "./brand";
 import { docs } from "../../links";
+
 import Rail, { type RailHandle, type RailProps } from "./rail";
+
+// The editor and its CodeMirror load only when a dashboard is being created.
+const NewDashboard = lazy(() => import("./dashboards/new-dashboard").then(module => ({ default: module.NewDashboard })));
 
 export default function Shell({ children }: { children: ReactNode }) {
   const { agentAvailable, threadID, threadMissing, newThread, selectThread, openChat } = useFanoutApp();
@@ -22,6 +26,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   // keyboard over them. Only ⌘K is asking to search.
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [signOutError, setSignOutError] = useState("");
+  const [creating, setCreating] = useState(false);
   const railRef = useRef<RailHandle>(null);
   // The navbar stays mounted below `md`, only collapsed, so its ref is never
   // null and cannot say which rail the viewer can see. The breakpoint can.
@@ -53,6 +58,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     onDeletedThread: (deletedID) => { if (deletedID === threadID) newThread(); },
     onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }),
     onCreateDashboard: () => openChat(createDashboardPrompt),
+    onNewDashboard: () => setCreating(true),
     onNavigate: (path) => void navigate({ to: path }),
     onInvestigateService: (service) => openChat(`Investigate the ${service} service. Explain its errors and latency.`),
   };
@@ -86,6 +92,7 @@ export default function Shell({ children }: { children: ReactNode }) {
       {signOutError && <Alert color="bad" m="md" withCloseButton onClose={() => setSignOutError("")}>{signOutError}</Alert>}
       {children}
     </AppShell.Main>
+    {creating && <Suspense fallback={null}><NewDashboard onClose={() => setCreating(false)} onCreated={id => { setCreating(false); void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }); }} /></Suspense>}
   </AppShell>;
 }
 

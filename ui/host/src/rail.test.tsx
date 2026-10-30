@@ -43,7 +43,7 @@ function mount(props: Partial<Parameters<typeof Rail>[0]> = {}) {
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const handlers = {
-    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onNavigate: vi.fn(), onInvestigateService: vi.fn(),
+    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onNewDashboard: vi.fn(), onNavigate: vi.fn(), onInvestigateService: vi.fn(),
   };
   const ref = createRef<RailHandle>();
   const render = () => root.render(
@@ -178,15 +178,16 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
-  it("offers New dashboard when the dashboard list is empty and the agent is available", async () => {
+  it("offers New dashboard and, with chat, Create with AI", async () => {
     fetchMock.mockImplementation(async (input, init) => String(input) === "/api/dashboards" ? json({ dashboards: [] }) : respond(input, init));
     const { root, handlers, render } = mount();
     await act(async () => render());
     await vi.waitFor(() => expect(document.body.textContent).toContain("New dashboard"));
-    const create = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === "New dashboard");
-    await act(async () => create!.click());
+    const button = (name: string) => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === name)!;
+    await act(async () => button("New dashboard").click());
+    expect(handlers.onNewDashboard).toHaveBeenCalledOnce();
+    await act(async () => button("Create with AI").click());
     expect(handlers.onCreateDashboard).toHaveBeenCalledOnce();
-    expect(document.body.textContent).not.toContain("Create with AI");
     await act(async () => root.unmount());
   });
 
@@ -206,12 +207,12 @@ describe("Rail", () => {
     }
   });
 
-  it("hides New dashboard for an empty list when the agent is unavailable", async () => {
+  it("offers New dashboard without chat", async () => {
     fetchMock.mockImplementation(async () => json({ dashboards: [] }));
     const { root, render } = mount({ agentAvailable: false });
     await act(async () => render());
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
-    expect(document.body.textContent).not.toContain("New dashboard");
+    expect(document.body.textContent).toContain("New dashboard");
     expect(document.body.textContent).not.toContain("Create with AI");
     await act(async () => root.unmount());
   });
@@ -250,7 +251,6 @@ describe("Rail", () => {
     expect(document.body.textContent).not.toContain("New chat");
     expect(document.body.textContent).not.toContain("Chats");
     expect(document.body.textContent).not.toContain("Create with AI");
-    expect(document.body.textContent).not.toContain("New dashboard");
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/agent/threads"))).toBe(false);
     await act(async () => root.unmount());
   });
