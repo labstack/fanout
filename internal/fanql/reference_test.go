@@ -96,3 +96,11 @@ func TestReferenceStatesTheNullRule(t *testing.T) {
 		}
 	}
 }
+
+func TestReferenceDescribesIndependentDiagnostics(t *testing.T) {
+	ref := Reference()
+	if !strings.Contains(ref, "all independent problems in one pass, in source order") ||
+		strings.Contains(ref, "at most one problem per clause") || strings.Contains(ref, "syntax-version") {
+		t.Fatal("reference must describe independent diagnostics without syntax versions")
+	}
+}

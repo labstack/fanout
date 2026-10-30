@@ -420,3 +420,14 @@ func TestIgnoredLimitNoticesDescribeTheSelectedViz(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileAndFormatReturnNonNilEmptyNotices(t *testing.T) {
+	c, ps := Compile("spans where service:api", Options{})
+	if len(ps) != 0 || c == nil || c.Notices == nil || len(c.Notices) != 0 {
+		t.Fatalf("compile notices: %+v, %+v", c, ps)
+	}
+	f, ps, err := Format(t.Context(), &countingParser{fail: true}, c.Query, Options{})
+	if err != nil || len(ps) != 0 || f == nil || f.Notices == nil || len(f.Notices) != 0 {
+		t.Fatalf("format notices: %+v, %+v, %v", f, ps, err)
+	}
+}

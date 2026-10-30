@@ -75,8 +75,8 @@ func TestLatencyBudgets(t *testing.T) {
 			}
 		}
 	}
-	// Rounded ceilings leave headroom above corpus maxima (~1050, 125, 250,
-	// and 1050 allocations for Compile, completion, parse/rank, and Format).
+	// Rounded ceilings leave headroom above corpus maxima (~798, 125, 250,
+	// and 1010 allocations for Compile, completion, parse/rank, and Format).
 	for _, fixture := range fixtures {
 		measure("Compile "+fixture.Text, 1500, &compileSamples, func() {
 			_, _ = Compile(fixture.Text, Options{Viz: fixture.Viz})
@@ -93,7 +93,7 @@ func TestLatencyBudgets(t *testing.T) {
 		})
 	}
 	for _, fixture := range latencyFormatFixtures(t) {
-		measure("Format "+fixture.Name, 3500, &formatSamples, func() {
+		measure("Format "+fixture.Name, 1500, &formatSamples, func() {
 			parser.parseCalls, parser.renderCalls = 0, 0
 			formatted, ps, err := Format(t.Context(), parser, *fixture.Panel.Query, Options{Viz: fixture.Panel.Viz, Variables: fixture.Variables})
 			if err != nil || len(ps) != 0 || formatted == nil {
@@ -111,7 +111,7 @@ func TestLatencyBudgets(t *testing.T) {
 	}
 	t.Run("smoke", func(t *testing.T) {
 		if !latencyAcceptanceEnabled() {
-			t.Skip("set FANOUT_TEST_LATENCY=1 in the perf job to assert wall-clock budgets")
+			t.Skip("set FANOUT_TEST_LATENCY=1 or run just fanql-perf to assert wall-clock budgets")
 		}
 		if raceInstrumentation {
 			t.Skip("wall-clock smoke budgets exclude race instrumentation; deterministic work bounds still run")

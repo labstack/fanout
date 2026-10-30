@@ -10,7 +10,7 @@ generated: true
 
 Preview: the syntax may change before GA
 
-FanQL is the text form of a structured telemetry query. It produces the same `panel.Query` that dashboards store and the panel engine executes. Panels store the query; text is derived. Problems prevent execution; notices never block it. Each diagnostic says what happened and what to write instead, using a valid example from that field. Diagnostics use display names without internal visualization identifiers or syntax-version labels, and report at most one problem per clause.
+FanQL is the text form of a structured telemetry query. It produces the same `panel.Query` that dashboards store and the panel engine executes. Panels store the query; text is derived. Problems prevent execution; notices never block it. Each diagnostic says what happened and what to write instead, using a valid example from that field. Diagnostics use display names without internal visualization identifiers and report all independent problems in one pass, in source order. Only follow-on cascades are suppressed.
 
 ## Shape and entry points
 

@@ -27,7 +27,7 @@ var durationPattern = regexp.MustCompile(`(?i)^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+
 type parser struct {
 	clauseID        int
 	reported        map[int]bool
-	structural      map[int]bool
+	structural      map[int]int
 	measureInfo     map[panel.MeasureExpr]*measureSource
 	vocab           vocabulary
 	tokens          lexTokens
@@ -209,11 +209,9 @@ func (p *parser) finish() panel.Problems {
 func (p *parser) beginClause() { p.clauseID++ }
 
 // Local recovery suppresses cascades only until the next independent term.
-// A structural grouping error keeps its clause suppressed instead.
+// Enclosing grouping repairs are suppressed separately to preserve the first repair.
 func (p *parser) beginIndependentTerm() {
-	if !p.structural[p.clauseID] {
-		delete(p.reported, p.clauseID)
-	}
+	delete(p.reported, p.clauseID)
 }
 
 func (p *parser) query(source string) *queryTree {
@@ -343,6 +341,7 @@ func (p *parser) filterStop(nested bool) bool {
 // filters keeps conjunction entries separate. Only an explicit group or an OR
 // chain creates a single entry around multiple terms.
 func (p *parser) filters(nested bool) []filterExpr {
+	groupingReports := p.structural[p.clauseID]
 	var terms []filterExpr
 	var ops []string
 	mode := ""
@@ -390,16 +389,17 @@ func (p *parser) filters(nested bool) []filterExpr {
 		p.completionQuery.Where = terms
 	}
 	p.expectTerm(nested)
-	if !p.completion && mixed >= 0 && len(terms) >= 3 && len(ops) == len(terms)-1 {
+	if !p.completion && p.structural[p.clauseID] == groupingReports && mixed >= 0 && len(terms) >= 3 && len(ops) == len(terms)-1 {
 		at := span{terms[0].Span().Start, terms[len(terms)-1].Span().End}
 		first := p.groupingEdit(terms, ops, ops[mixed])
 		second := p.groupingEdit(terms, ops, ops[0])
 		before := len(p.problems)
+		p.beginIndependentTerm()
 		p.issue(at, diagnostic(diagMixed), groupingHint(first, second))
 		if p.structural == nil {
-			p.structural = map[int]bool{}
+			p.structural = map[int]int{}
 		}
-		p.structural[p.clauseID] = true
+		p.structural[p.clauseID]++
 		span := panel.TextSpan{Start: at.Start, End: at.End}
 		if len(p.problems) > before {
 			p.problems[len(p.problems)-1].FixIts = []panel.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
@@ -614,7 +614,17 @@ func (p *parser) primary(nested bool) filterExpr {
 			op = p.take().Text
 		}
 		p.expectNext(expect{Class: "value", Field: &field, Scope: op})
-		v, valid := p.value()
+		// Boolean operators and a whitespace-separated next filter belong
+		// to recovery, not to this filter's value.
+		next := grammarText(p.ahead(1))
+		nextFilter := p.peek().Kind == tokenWord && !numberPattern.MatchString(p.peek().Text) && !durationPattern.MatchString(p.peek().Text) && p.peek().Span.Start > p.previousEnd() &&
+			(next == ":" || isComparison(next) || next == "~" || next == "!~" || next == "is" || isFieldWordOperator(next))
+		boundary := p.is("and") || p.is("or") || p.is("not") || nextFilter
+		var v literalValue
+		valid := false
+		if !boundary {
+			v, valid = p.value()
+		}
 		if !valid {
 			if bad := p.peek(); bad.Kind == tokenBad && bad.Text == "$" {
 				p.issue(bad.Span, bad.Message, bad.Hint)
@@ -624,7 +634,7 @@ func (p *parser) primary(nested bool) filterExpr {
 			}
 			example := fieldExample(field, op)
 			p.report(span{field.At.Start, oper.Span.End}, diagValue, field.Key, op, field.Key, op, example)
-			if !p.filterStop(nested) {
+			if !boundary && !p.filterStop(nested) {
 				p.skipRun()
 			}
 			return nil

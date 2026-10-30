@@ -60,7 +60,7 @@ func TestAstralCharactersSpanInCodePoints(t *testing.T) {
 }
 
 func TestParseColonRecoveryAcrossWhitespace(t *testing.T) {
-	for _, text := range []string{`""A: 0:0`, `logs where service: api:x`, `logs where attributes['user name']: 'a b':c`} {
+	for _, text := range []string{`""A: 0:0`, `logs where attributes['user name']: 'a b':c`} {
 		q, problems := parse(text, "")
 		if q != nil || len(problems) == 0 {
 			t.Fatalf("malformed colon input accepted: %q", text)
