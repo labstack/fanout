@@ -96,7 +96,12 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 	if c.Request().Method == http.MethodHead {
 		writeErr = c.NoContent(status)
 	} else {
-		writeErr = c.JSON(status, body)
+		var domain interface{ ResponseBody() any }
+		if errors.As(err, &domain) {
+			writeErr = c.JSON(status, domain.ResponseBody())
+		} else {
+			writeErr = c.JSON(status, body)
+		}
 	}
 	if writeErr != nil {
 		slog.Error("HTTP error response failed", "route", c.Path(), "error", writeErr)

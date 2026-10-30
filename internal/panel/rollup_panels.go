@@ -15,10 +15,6 @@ type RollupReader interface {
 }
 
 func (e *Executor) SetRollupReader(reader RollupReader) { e.rollups = reader }
-func rollupFilterNode(n any) map[string]any {
-	v, _ := n.(map[string]any)
-	return v
-}
 func rollupFilterValue(ctx context.Context, parser Parser, f Filter, scope Scope) (string, string, error) {
 	tree, err := parser.ParseSQL(ctx, "SELECT 1 FROM spans WHERE ("+f.Source+")")
 	if err != nil {
@@ -26,22 +22,25 @@ func rollupFilterValue(ctx context.Context, parser Parser, f Filter, scope Scope
 	}
 	// Parse the author's source, not the canonical filter with its injected
 	// parameter casts. Explicit casts cannot be represented by a string scope.
-	return rollupNodeValue(rollupFilterNode(tree["where_clause"]), scope)
+	return rollupNodeValue(SQLExpression(tree["where_clause"]), scope)
 }
 
-func rollupNodeValue(node map[string]any, scope Scope) (string, string, error) {
-	if node == nil || node["class"] != "COMPARISON" || node["type"] != "COMPARE_EQUAL" {
+func rollupNodeValue(node *SQLExpr, scope Scope) (string, string, error) {
+	if node == nil || node.Class != "COMPARISON" || node.Type != "COMPARE_EQUAL" {
 		return "", "", fmt.Errorf("rollup panels support equality filters on namespace or service")
 	}
-	left, right := rollupFilterNode(node["left"]), rollupFilterNode(node["right"])
-	if left["class"] != "COLUMN_REF" {
+	left, right := node.Left, node.Right
+	if left == nil || left.Class != "COLUMN_REF" {
 		left, right = right, left
 	}
 	field := fieldText(left)
-	if left["class"] != "COLUMN_REF" || (field != "service" && field != "namespace") {
+	if (left == nil || left.Class != "COLUMN_REF") || (field != "service" && field != "namespace") {
 		return "", "", fmt.Errorf("rollup panels support equality filters on namespace or service")
 	}
-	switch right["class"] {
+	if right == nil {
+		return "", "", fmt.Errorf("rollup equality needs a literal or variable")
+	}
+	switch right.Class {
 	case "CONSTANT":
 		value := constantText(right)
 		if value == "" {
@@ -52,7 +51,7 @@ func rollupNodeValue(node map[string]any, scope Scope) (string, string, error) {
 		}
 		return field, value, nil
 	case "PARAMETER":
-		name, _ := right["identifier"].(string)
+		name := right.Identifier
 		v, ok := scope.Vars[name]
 		if !ok || v.All || len(v.Values) != 1 || v.Values[0] == "" {
 			return "", "", fmt.Errorf("rollup equality needs one selected value")

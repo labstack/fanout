@@ -384,18 +384,9 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 			}
 		}
 	}
-	for _, ref := range varRefs(strings.Join(queryWhere(p), " ")) {
-		if _, ok := vars[ref]; !ok {
-			problems.addHint(path+".query.where", fmt.Sprintf("$%s is not a dashboard variable", ref), suggest(ref, mapKeys(vars)))
-		}
+	if p.Query != nil {
+		queryShapeVariables(p.Query, vars, path+".query", problems)
 	}
-}
-
-func queryWhere(p *Panel) []string {
-	if p.Query == nil {
-		return nil
-	}
-	return p.Query.Where
 }
 
 func mapKeys(vars map[string]Variable) []string {
@@ -407,106 +398,14 @@ func mapKeys(vars map[string]Variable) []string {
 }
 
 func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
-	q := p.Query
-	if p.Viz == "logs" || p.Viz == "traces" || p.Viz == "log_patterns" {
-		// Fixed projections are checked field by field in validateRows; avoid
-		// duplicate aggregate-query Problems for the same rejected field.
-		if len(q.Where) > 16 {
-			problems.addHint(path+".where", "at most 16 filters per query", "remove filters until at most 16 remain")
-		}
-		for i, w := range q.Where {
-			if strings.TrimSpace(w) == "" || len(w) > 500 {
-				problems.addHint(fmt.Sprintf("%s.where[%d]", path, i), "filters are 1 to 500 characters", "use a nonempty filter of at most 500 characters")
-			}
-		}
-		return
-	}
-	if len(q.Where) > 16 {
-		problems.add(path+".where", "at most 16 filters per query")
-	}
-	sig, ok := lookupSignal(q.From)
+	measures, ok := queryShapeAggregate(p, spec, path, problems, false)
 	if !ok {
-		problems.addHint(path+".from", fmt.Sprintf("unknown signal %q", q.From), "use spans, logs or metrics")
 		return
 	}
-	for i, w := range q.Where {
-		if strings.TrimSpace(w) == "" || len(w) > 500 {
-			problems.add(fmt.Sprintf("%s.where[%d]", path, i), "filters are 1 to 500 characters")
-		}
+	if (p.Viz == "heatmap" || p.Viz == "histogram") && p.SQL != "" {
+		problems.add(path+".sql", "distribution panels use a structured histogram")
 	}
-	if (len(q.Measures) == 0 && p.Viz != "logs" && p.Viz != "traces" && p.Viz != "health" && p.Viz != "service_map") || len(q.Measures) > 6 {
-		problems.add(path+".measures", "a query has 1 to 6 measures; fixed logs and traces take none")
-	}
-	if len(q.Measures) > 1 && ((p.Viz == "timeseries" && len(q.By) > 0) || (p.Viz == "bar" && len(q.By) == 2)) {
-		problems.addHint(path+".measures", "grouped panels show one measure", "use one panel per measure, or remove by")
-	}
-	measures := parseMeasures(sig, q.Measures, path+".measures", problems)
-	if len(q.By) < spec.minBy {
-		problems.add(path+".by", fmt.Sprintf("%s panels group by at least %d field", p.Viz, spec.minBy))
-	}
-	if len(q.By) > spec.maxBy {
-		problems.add(path+".by", fmt.Sprintf("%s panels group by at most %d field(s)", p.Viz, spec.maxBy))
-	}
-	byAliases := map[string]bool{}
-	for i, by := range q.By {
-		ref, err := sig.field(by)
-		if err != nil {
-			problems.add(fmt.Sprintf("%s.by[%d]", path, i), err.Error())
-			continue
-		}
-		if byAliases[ref.alias()] {
-			problems.addHint(fmt.Sprintf("%s.by[%d]", path, i), fmt.Sprintf("two grouping fields produce the column %s", ref.alias()), "group by one of them")
-		}
-		byAliases[ref.alias()] = true
-	}
-	for _, m := range measures {
-		if byAliases[m.Alias] {
-			problems.addHint(path+".measures", fmt.Sprintf("measure %s has the same column name as a grouping field", m.Alias), "rename with as")
-		}
-	}
-	switch {
-	case spec.bucket && q.Bucket == "":
-		problems.add(path+".bucket", "timeseries panels need a bucket; use auto")
-	case !spec.bucket && q.Bucket != "":
-		problems.add(path+".bucket", fmt.Sprintf("%s panels do not take a bucket", p.Viz))
-	case q.Bucket != "" && q.Bucket != "auto":
-		if _, ok := buckets[q.Bucket]; !ok {
-			problems.add(path+".bucket", "bucket must be auto or one of 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d")
-		}
-	}
-	if p.Viz == "heatmap" || p.Viz == "histogram" {
-		if q.Histogram == nil {
-			problems.addHint(path+".histogram", "distribution panels require a histogram", "spans: duration_ms/log2; metrics: value/explicit")
-		} else if (q.From != "spans" || q.Histogram.Field != "duration_ms" || q.Histogram.Buckets != "log2") &&
-			(q.From != "metrics" || q.Histogram.Field != "value" || q.Histogram.Buckets != "explicit") {
-			problems.add(path+".histogram", "use spans duration_ms/log2 or metrics value/explicit")
-		}
-		if len(q.Measures) != 1 || q.Measures[0] != "count()" {
-			problems.addHint(path+".measures", "distribution counts require count()", "use count() as the observation weight")
-		}
-		if p.SQL != "" {
-			problems.add(path+".sql", "distribution panels use a structured histogram")
-		}
-	} else if q.Histogram != nil {
-		problems.add(path+".histogram", "histogram applies only to heatmap and histogram")
-	}
-	if q.Limit < 0 || q.Limit > 1000 {
-		problems.add(path+".limit", "limit must be 0 to 1000")
-	}
-	if q.Sort != "" && p.Viz != "logs" && p.Viz != "traces" {
-		alias := strings.TrimPrefix(q.Sort, "+")
-		if !slices.ContainsFunc(measures, func(m Measure) bool { return m.Alias == alias }) {
-			problems.add(path+".sort", fmt.Sprintf("sort %q must name a measure alias", q.Sort))
-		}
-	}
-	families := map[string]bool{}
-	for _, m := range measures {
-		families[unitFamilies[m.Unit]] = true
-	}
-	delete(families, "none")
-	if len(families) > 1 && p.Viz != "table" && p.Viz != "scatter" {
-		problems.add(path+".measures", "these measures have different units and would share one axis; split them into separate panels")
-	}
+	queryShapeAggregateTail(p.Query, p.Viz, path, measures, problems)
 	if p.Options != nil && p.Options.Style == "stacked" {
 		for _, m := range measures {
 			if !m.Additive {
@@ -515,9 +414,7 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 			}
 		}
 	}
-	if spec.reduces && len(q.Measures) != 1 {
-		problems.add(path+".measures", fmt.Sprintf("%s panels show one measure", p.Viz))
-	}
+	queryShapeReduce(p.Query, spec, p.Viz, path, problems)
 }
 
 // Infer only recognizable semantics; ambiguous measures remain neutral.
@@ -533,9 +430,50 @@ func inferBetter(p *Panel) string {
 	if message != "" {
 		return ""
 	}
+	return inferBetterExpr(m.Expr, p, sig)
+}
+
+func inferBetterExpr(e MeasureExpr, p *Panel, sig *signal) string {
+	base, a, _, ok := affineBase(e)
+	if ok && a != 0 {
+		if _, call := base.(MeasureCall); !call {
+			if leaf, binomial := binomial(base); binomial {
+				better := ""
+				if errorCountFilter.MatchString(leaf.Filter) {
+					better = "lower"
+				}
+				if a < 0 {
+					better = flipBetter(better)
+				}
+				return better
+			}
+			if leaf, conditional := base.(MeasureCountIf); conditional {
+				better := ""
+				if errorCountFilter.MatchString(leaf.Filter) {
+					better = "lower"
+				}
+				if a < 0 {
+					better = flipBetter(better)
+				}
+				return better
+			}
+			return ""
+		}
+		call := base.(MeasureCall)
+		better := inferBetterCall(call, p, sig)
+		if a < 0 {
+			better = flipBetter(better)
+		}
+		return better
+	}
+	return ""
+}
+
+func inferBetterCall(m MeasureCall, p *Panel, sig *signal) string {
 	if unitFamilies[p.Unit] == "duration" || m.Func == "error_rate" || (m.Field != nil && unitFamilies[m.Field.Unit] == "duration") {
 		return "lower"
 	}
+
 	errorFiltered := false
 	for _, filter := range p.Query.Where {
 		if errorCountFilter.MatchString(filter) {

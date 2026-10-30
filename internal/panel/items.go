@@ -59,7 +59,7 @@ func compileItems(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		if p.Unit != "" && (p.Viz != "scatter" || i == 1) {
 			unit = p.Unit
 		}
-		selects = append(selects, measureSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
+		selects = append(selects, measureExprSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
 		columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: unit})
 	}
 	text := "WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")"
@@ -114,19 +114,9 @@ func validateItems(p *Panel, path string, problems *Problems) {
 		problems.add(path+".query", "item panels require structured queries")
 		return
 	}
-	if p.Viz == "scatter" && len(p.Query.Measures) != 2 {
-		problems.addHint(path+".query.measures", "scatter requires exactly two measures", "select x and y measures in that order")
-	}
-	if p.Viz == "state_timeline" {
-		if p.Query != nil && p.Query.Sort != "" {
-			problems.add(path+".query.sort", "state_timeline has fixed chronological ordering")
-		}
-		if p.Query != nil && len(p.Query.Measures) != 1 {
-			problems.add(path+".query.measures", "state_timeline requires one measure")
-		}
-		if len(p.Thresholds) == 0 {
-			problems.addHint(path+".thresholds", "state_timeline requires thresholds", "set a warn or bad boundary for the selected measure")
-		}
+	queryShapeItems(p.Query, p.Viz, path+".query", problems)
+	if p.Viz == "state_timeline" && len(p.Thresholds) == 0 {
+		problems.addHint(path+".thresholds", "state_timeline requires thresholds", "set a warn or bad boundary for the selected measure")
 	}
 	if p.Options != nil && p.Options.Style != "" {
 		problems.add(path+".options.style", "item panels cannot stack or set line styles")

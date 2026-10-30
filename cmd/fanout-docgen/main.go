@@ -40,6 +40,7 @@ import (
 
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/fanql"
 )
 
 func main() {
@@ -116,6 +117,7 @@ func run(source, alertSource, routeDirs, outDir, envExample string, check bool) 
 		return err
 	}
 	pages["mcp.mdx"] = toolsPage
+	pages["fanql.md"] = []byte("---\ntitle: \"FanQL\"\ndescription: \"The preview text syntax for structured telemetry queries.\"\nsummary: \"FanQL syntax, fields, functions, variables, null semantics and examples, generated from query registries.\"\nread_when:\n  - \"You are writing a FanQL query and need syntax or field names.\"\nstatus: preview\ngenerated: true\n---\n\n" + fanql.Reference())
 
 	outputs := map[string][]byte{envExample: renderEnvironment(fields)}
 	for name, body := range pages {

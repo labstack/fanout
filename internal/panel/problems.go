@@ -5,12 +5,27 @@ import (
 	"strings"
 )
 
+// TextSpan uses code-point offsets, with an exclusive end.
+type TextSpan struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// FixIt is an alternative text replacement the author may choose to apply.
+type FixIt struct {
+	Label string   `json:"label"`
+	Span  TextSpan `json:"span"`
+	Text  string   `json:"text"`
+}
+
 // Problem is one reason a spec cannot be saved or run, addressed by a JSON
 // path so the author can fix exactly that field.
 type Problem struct {
-	Path    string `json:"path"`
-	Message string `json:"message"`
-	Hint    string `json:"hint,omitempty"`
+	Path    string    `json:"path"`
+	Message string    `json:"message"`
+	Hint    string    `json:"hint,omitempty"`
+	Span    *TextSpan `json:"span,omitempty"`
+	FixIts  []FixIt   `json:"fix_its,omitempty"`
 
 	productDiagnosis bool
 }

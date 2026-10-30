@@ -71,6 +71,9 @@ type Column struct {
 
 // Compiled is one statement ready to run.
 type Compiled struct {
+	ranking       *Ranking
+	rankingFloor  bool
+	rankOffset    int
 	SQL           string
 	Args          []any
 	Columns       []Column
@@ -210,7 +213,7 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		partition = "PARTITION BY " + bucket
 	}
 	for _, m := range measures {
-		selects = append(selects, measureSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
+		selects = append(selects, measureExprSQL(m, sig, seconds, partition)+" AS "+quoteIdent(m.Alias))
 		unit := m.Unit
 		if unit == "none" {
 			unit = "" // The catalog cannot infer a physical unit for this field.
@@ -218,44 +221,36 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: unit})
 	}
 	var b strings.Builder
+	var ranking *Ranking
+	rankingFloor := false
 	b.WriteString("WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")")
 	if top > 0 {
-		// Rank over the complete panel window, before bucket aggregation. Volume
-		// measures retain largest-first semantics even when higher is better.
-		direction := "DESC"
 		first := measures[0]
-		rankPanel, rankQuery := *p, *p.Query
-		rankQuery.Measures = []string{first.Text}
-		rankPanel.Query = &rankQuery
 		better := p.Better
 		if better == "" {
-			better = inferBetter(&rankPanel)
+			better = inferBetterExpr(first.Expr, p, sig)
 		}
-		if !first.Additive && first.Func != "share" && better == "higher" {
-			direction = "ASC"
+		value, samples, extra, order := rankingOrder(first, sig, better)
+		base, _, _, _ := affineBase(first.Expr)
+		if call, ok := base.(MeasureCall); ok && call.Func == "rate" {
+			value = measureSQL(Measure{Func: call.Func}, sig, scope.End.Sub(scope.Start).Seconds(), "")
 		}
-		value := measureSQL(first, sig, scope.End.Sub(scope.Start).Seconds(), "")
-		samples, extra := "count(*)", ""
-		order := "value " + direction + " NULLS LAST, n DESC, d"
-		switch first.Func {
-		case "error_rate":
-			// The common 20-sample floor prevents tiny request series from
-			// displacing supported failures (even 1/2 has a 9.45% bound).
-			extra = ", sum(" + errorCase(sig) + ") AS errors, " + wilsonLowerSQL() + " AS confidence"
-			order = "(n >= 20) DESC, CASE WHEN n >= 20 THEN confidence END DESC NULLS LAST, n DESC, d"
-		case "p50", "p75", "p90", "p95", "p99", "quantile", "avg", "max", "min":
-			// Count actual numeric samples, not rows with missing values.
-			samples = "count(" + first.Field.numberSQL() + ")"
-			order = "(n >= 20) DESC, CASE WHEN n >= 20 THEN value END " + direction + " NULLS LAST, n DESC, d"
+		rankingFloor = strings.HasPrefix(order, "(n >= 20)")
+		rule := rankRule(first, sig, better)
+		if rule.Rule == "value_floor" {
+			value = measureExprSQL(first, sig, scope.End.Sub(scope.Start).Seconds(), "")
 		}
+		ranking = &Ranking{Rule: rule.Rule, Better: rule.Better, Floor: rule.Floor, SupportColumn: samples, TieBreakers: []string{"n desc", "dimension asc"}}
+
 		fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
 	}
+	rankOffset := b.Len() + len(" SELECT ") + len(strings.Join(selects, ", "))
 	b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM base")
 	if len(groups) > 0 {
 		b.WriteString(" GROUP BY " + strings.Join(groups, ", "))
 	}
 	b.WriteString(orderAndLimit(p, measures, bucket != "", len(dims)))
-	return Compiled{SQL: b.String(), Args: args, Columns: columns}, nil
+	return Compiled{SQL: b.String(), Args: args, Columns: columns, ranking: ranking, rankOffset: rankOffset, rankingFloor: rankingFloor}, nil
 }
 
 func measureSQL(m Measure, sig *signal, seconds float64, partition string) string {

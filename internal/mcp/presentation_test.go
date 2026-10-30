@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -276,7 +277,7 @@ func TestDashboardRejectionsPreserveRouteDiagnosesThroughMiddleware(t *testing.T
 			if err != nil || json.Unmarshal(raw, &structured) != nil || structured.Error == nil || *structured.Error != *failure.Error {
 				t.Fatalf("structured=%s err=%v", raw, err)
 			}
-			if len(structured.Problems) != 1 || structured.Problems[0] != failure.Problems[0] {
+			if len(structured.Problems) != 1 || !reflect.DeepEqual(structured.Problems[0], failure.Problems[0]) {
 				t.Fatalf("structured problems=%+v", structured.Problems)
 			}
 		})

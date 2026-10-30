@@ -66,7 +66,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
   const schema = useQuery({
     queryKey: ["telemetry-schema", "1h"],
     queryFn: () => getJSON<{ services: Array<{ value: string; count?: number }> }>("/api/telemetry/schema?window=1h"),
-    enabled: Boolean(query) && Boolean(onInvestigateService),
+    enabled: agentAvailable && Boolean(query) && Boolean(onInvestigateService),
     staleTime: 60_000,
   });
   const matchingServices = useMemo(() => {
@@ -126,8 +126,8 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
-        {query && onInvestigateService && schema.isLoading && <Center py="md"><Loader size="xs" /></Center>}
-        {query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
+        {agentAvailable && query && onInvestigateService && schema.isLoading && <Center py="md"><Loader size="xs" /></Center>}
+        {agentAvailable && query && onInvestigateService && (schema.isSuccess || schema.isError) && <Stack gap={4}>
           <SectionLabel>Services</SectionLabel>
           {schema.isError && <Text c="dimmed" size="sm" px="sm">Services could not be searched</Text>}
           {schema.isSuccess && matchingServices.length === 0 && <Text c="dimmed" size="sm" px="sm">No matching services</Text>}
@@ -155,7 +155,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
                 {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
               </Group>
             </UnstyledButton>
-              {dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
+              {agentAvailable && dashboard.origin && <UnstyledButton component="a" href={`/chat/${encodeURIComponent(dashboard.origin.thread_id)}`} data-request-provenance px="sm" pb="xs" onClick={(event) => {
                 if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 event.preventDefault(); onSelectThread(dashboard.origin!.thread_id);
               }}>

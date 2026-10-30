@@ -14,6 +14,7 @@ import (
 
 // Frame is a columnar query result: one array of values per column.
 type Frame struct {
+	ranking   *Ranking
 	Periods   map[string]Time    `json:"periods,omitempty"`
 	Trends    map[string][][]any `json:"trends,omitempty"`
 	Note      string             `json:"note,omitempty"`

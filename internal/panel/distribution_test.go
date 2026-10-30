@@ -178,7 +178,7 @@ func TestDistributionValidation(t *testing.T) {
 	}{
 		{Panel{ID: "h", Title: "H", Viz: "heatmap", Query: &Query{From: "spans", Measures: []string{"count()"}}}, Problem{Path: "panels[0].query.histogram", Message: "distribution panels require a histogram", Hint: "spans: duration_ms/log2; metrics: value/explicit"}},
 		{Panel{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: "spans", Measures: []string{"p95(duration_ms)"}, Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}}, Problem{Path: "panels[0].query.measures", Message: "distribution counts require count()", Hint: "use count() as the observation weight"}},
-		{Panel{ID: "h", Title: "H", Viz: "heatmap", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Bucket: "auto", Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}}, Problem{Path: "panels[0].query.by", Message: "heatmap panels group by at most 0 field(s)", Hint: ""}},
+		{Panel{ID: "h", Title: "H", Viz: "heatmap", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Bucket: "auto", Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}}, Problem{Path: "panels[0].query.by", Message: "heatmap panels take no group by", Hint: ""}},
 		{Panel{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: "spans", Measures: []string{"count()"}, By: []string{"service", "name"}, Histogram: &Histogram{Field: "duration_ms", Buckets: "log2"}}}, Problem{Path: "panels[0].query.by", Message: "histogram panels group by at most 1 field(s)", Hint: ""}},
 		{Panel{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: "spans", Measures: []string{"count()"}, Histogram: &Histogram{Field: "duration_ms", Buckets: "explicit"}}}, Problem{Path: "panels[0].query.histogram", Message: "use spans duration_ms/log2 or metrics value/explicit", Hint: ""}},
 		{Panel{ID: "h", Title: "H", Viz: "histogram", Query: &Query{From: "spans", Measures: []string{"count()"}, Histogram: &Histogram{Field: "value", Buckets: "log2"}}}, Problem{Path: "panels[0].query.histogram", Message: "use spans duration_ms/log2 or metrics value/explicit", Hint: ""}},
@@ -189,7 +189,7 @@ func TestDistributionValidation(t *testing.T) {
 		d := Dashboard{Name: "Rule", Panels: []Panel{tc.p}}
 		Normalize(&d)
 		got := Validate(&d)
-		if !slices.Contains(got, tc.want) {
+		if !containsProblem(got, tc.want) {
 			t.Fatalf("got %+v want %+v", got, tc.want)
 		}
 	}

@@ -3,7 +3,6 @@ package panel
 import (
 	"encoding/json"
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +79,7 @@ func TestDeploySplitAllFallsBackAndRequiresEquality(t *testing.T) {
 	err = e.Validate(t.Context(), &d)
 	var problems Problems
 	want := Problem{Path: "panels[0].options.split", Message: "deploy split requires a service equality filter", Hint: "add service = 'name' or service = $service"}
-	if !errors.As(err, &problems) || !slices.Contains(problems, want) {
+	if !errors.As(err, &problems) || !containsProblem(problems, want) {
 		t.Fatalf("got %v want %+v", err, want)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"github.com/labstack/fanout/internal/telemetry"
 	"math"
-	"slices"
 	"testing"
 	"time"
 )
@@ -39,7 +38,7 @@ func TestExemplarsRejectForgedDimensions(t *testing.T) {
 	_, err := e.Exemplars(t.Context(), req)
 	var problems Problems
 	want := Problem{Path: "dimensions", Message: "dimensions must name query.by fields and values at most 500 characters", Hint: "select one of the panel grouping fields"}
-	if !errors.As(err, &problems) || !slices.Contains(problems, want) {
+	if !errors.As(err, &problems) || !containsProblem(problems, want) {
 		t.Fatalf("got %v want %+v", err, want)
 	}
 	req.Dimensions = map[string]string{"http_route": "x'); DROP TABLE spans; --"}
@@ -67,7 +66,7 @@ func TestExemplarBucketValidation(t *testing.T) {
 	for _, tc := range cases {
 		_, _, err := selectionWhere(p, nil, scope, nil, tc.bucket)
 		var got Problems
-		if !errors.As(err, &got) || !slices.Contains(got, tc.want) {
+		if !errors.As(err, &got) || !containsProblem(got, tc.want) {
 			t.Fatalf("got %v want %+v", err, tc.want)
 		}
 	}

@@ -3,6 +3,7 @@ import { ArrowsClockwise, Check, Copy, WarningCircle } from "@phosphor-icons/rea
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { getJSON } from "./api";
+import { useFanoutApp } from "./app-context";
 import { authorizedFetch, useViewer } from "./auth";
 import { docs } from "../../links";
 
@@ -153,6 +154,7 @@ function Field({ label, value, hint }: { label: string; value: string; hint?: st
 }
 
 export default function Settings() {
+  const { agentAvailable } = useFanoutApp();
   const viewer = useViewer();
   const queryClient = useQueryClient();
   const settings = useQuery({ queryKey: ingestQueryKey, queryFn: () => getJSON<IngestSettings>("/api/settings/ingest") });
@@ -295,6 +297,15 @@ export default function Settings() {
       <Text c="dimmed" size="xs">
         <Anchor href={docs.ingest} target="_blank" rel="noopener noreferrer" inherit>Sending telemetry</Anchor> covers SDK setup, the collector, and the OTLP/HTTP endpoint.
       </Text>
+      {!agentAvailable && <Stack gap="sm">
+        <Title order={2} fz={22} lts="-0.02em">Chat is disabled</Title>
+        <Paper withBorder radius="lg" p="lg">
+          <Stack gap="sm">
+            <Text size="sm">To enable chat on a self-hosted instance, set <Code>FANOUT_AI_PROVIDER</Code> to <Code>anthropic</Code> with <Code>ANTHROPIC_API_KEY</Code>, or <Code>openai</Code> with <Code>OPENAI_API_KEY</Code>, then restart Fanout.</Text>
+            <Text size="sm">You can also <Anchor href={docs.connect} target="_blank" rel="noopener noreferrer" inherit>connect an MCP client</Anchor> such as Claude, Codex, or ChatGPT to use your own AI.</Text>
+          </Stack>
+        </Paper>
+      </Stack>}
       <ConnectedAgents />
     </Stack>
 

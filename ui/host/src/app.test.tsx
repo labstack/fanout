@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import type { AgentSubscriber, Message } from "@ag-ui/client";
 import { QueryClient } from "@tanstack/react-query";
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider, useNavigate } from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import { ChatPage } from "./chat";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { parseSearch, toSearchParams } from "./dashboards/search";
 import { Route as indexRoute } from "./routes/index";
+import { DashboardPage } from "./dashboards/page";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -90,19 +91,35 @@ describe("Session", () => {
     runtimeMock.agentAvailable = true;
   });
 
-  it.each([true, false])("opens dashboards from / with agent_available=%s and replaces the root history entry", async (available) => {
+  it.each([true, false])("opens the default dashboard from / with agent_available=%s and replaces the root history entry", async (available) => {
     runtimeMock.agentAvailable = available;
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/dashboards") return json({ dashboards: [
+        { id: "other", name: "Other dashboard", is_default: false },
+        { id: "default", name: "System overview", is_default: true },
+      ] });
+      if (url.pathname === "/api/agent/threads") return json({ items: [], next_cursor: null });
+      throw new Error(`unexpected request: ${url.pathname}`);
+    });
+    function Dashboards() {
+      const navigate = useNavigate();
+      return <DashboardPage search={{}} onSearch={() => undefined} onOpen={(dashboardId, replace) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId }, search: {}, replace })} />;
+    }
     const rootRoute = createRootRoute({ component: App });
     const index = createRoute({ getParentRoute: () => rootRoute, path: "/", component: indexRoute.options.component });
-    const dashboards = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: () => <div>System overview</div> });
+    const dashboards = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards", component: Dashboards });
+    const detail = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards/$dashboardId", component: () => <div>Default dashboard content</div> });
     const chat = createRoute({ getParentRoute: () => rootRoute, path: "/chat", component: () => <div>Chat</div> });
     const history = createMemoryHistory({ initialEntries: ["/chat", "/"] });
-    const router = createRouter({ routeTree: rootRoute.addChildren([index, dashboards, chat]), history });
+    const router = createRouter({ routeTree: rootRoute.addChildren([index, dashboards, detail, chat]), history });
     const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
     try {
       await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
-      await vi.waitFor(() => expect(router.state.location.pathname).toBe("/dashboards"));
-      expect(host.textContent).toContain("System overview");
+      await vi.waitFor(() => expect(router.state.location.pathname).toBe("/dashboards/default"));
+      expect(host.textContent).toContain("Default dashboard content");
+      expect(Boolean(button("New chat"))).toBe(available);
+      expect(Boolean(button("Create with AI"))).toBe(available);
       await act(async () => history.back());
       await vi.waitFor(() => expect(router.state.location.pathname).toBe("/chat"));
     } finally { await act(async () => root.unmount()); }

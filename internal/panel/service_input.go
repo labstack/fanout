@@ -179,12 +179,12 @@ func (e *Executor) EmptyGuidance(ctx context.Context, req RunRequest) (string, s
 			if err != nil {
 				return "", "", err
 			}
-			var visit func(map[string]any)
-			visit = func(node map[string]any) {
-				if node["class"] == "CONJUNCTION" && node["type"] == "CONJUNCTION_AND" {
-					children, _ := node["children"].([]any)
+			var visit func(*SQLExpr)
+			visit = func(node *SQLExpr) {
+				if node != nil && node.Class == "CONJUNCTION" && node.Type == "CONJUNCTION_AND" {
+					children := node.Children
 					for _, child := range children {
-						visit(rollupFilterNode(child))
+						visit(child)
 					}
 					return
 				}
@@ -204,7 +204,7 @@ func (e *Executor) EmptyGuidance(ctx context.Context, req RunRequest) (string, s
 					namespace = value
 				}
 			}
-			visit(rollupFilterNode(tree["where_clause"]))
+			visit(SQLExpression(tree["where_clause"]))
 		}
 		key := [2]string{namespace, service}
 		if unsafeScope || service == "" || seen[key] {
@@ -246,23 +246,6 @@ SELECT
 	return "no_data", strings.Join(notes, " "), nil
 }
 
-func guidanceReferencesNamespace(node any) bool {
-	switch v := node.(type) {
-	case map[string]any:
-		if v["class"] == "COLUMN_REF" && fieldText(v) == "namespace" {
-			return true
-		}
-		for _, child := range v {
-			if guidanceReferencesNamespace(child) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range v {
-			if guidanceReferencesNamespace(child) {
-				return true
-			}
-		}
-	}
-	return false
+func guidanceReferencesNamespace(node *SQLExpr) bool {
+	return annotationNamespace(node)
 }

@@ -16,80 +16,53 @@ type AnnotationMatch struct {
 	Limited         bool                `json:"limited,omitempty"`
 }
 
-func annotationOnly(n any) bool {
-	switch v := n.(type) {
-	case map[string]any:
-		if v["class"] == "COLUMN_REF" {
-			name := fieldText(v)
-			return name == "service" || name == "namespace"
-		}
-		for _, child := range v {
-			if !annotationOnly(child) {
-				return false
-			}
-		}
-	case []any:
-		for _, child := range v {
-			if !annotationOnly(child) {
-				return false
-			}
-		}
-	}
-	return true
+func annotationOnly(n *SQLExpr) bool {
+	return everySQLExpression(n, func(v *SQLExpr) bool {
+		return v.Class != "COLUMN_REF" || fieldText(v) == "service" || fieldText(v) == "namespace"
+	})
 }
-func annotationNamespace(n any) bool {
-	switch v := n.(type) {
-	case map[string]any:
-		if v["class"] == "COLUMN_REF" && fieldText(v) == "namespace" {
-			return true
-		}
-		for _, child := range v {
-			if annotationNamespace(child) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range v {
-			if annotationNamespace(child) {
-				return true
-			}
-		}
-	}
-	return false
+func annotationNamespace(n *SQLExpr) bool {
+	return !everySQLExpression(n, func(v *SQLExpr) bool {
+		return v.Class != "COLUMN_REF" || fieldText(v) != "namespace"
+	})
 }
 
 // exact=false means another signal field was omitted. AND can retain known
 // necessary restrictions; OR and NOT containing unknown fields cannot.
-func annotationPredicate(n any) (any, bool) {
-	if annotationOnly(n) {
-		return n, true
+func annotationPredicate(n any, expr *SQLExpr) (any, *SQLExpr, bool) {
+	if annotationOnly(expr) {
+		return n, expr, true
 	}
 	v, ok := n.(map[string]any)
 	if !ok || v["class"] != "CONJUNCTION" || v["type"] != "CONJUNCTION_AND" {
-		return nil, false
+		return nil, nil, false
 	}
 	children, _ := v["children"].([]any)
 	kept := []any{}
+	typed := []*SQLExpr{}
 	exact := true
-	for _, child := range children {
-		projected, complete := annotationPredicate(child)
+	for i, child := range children {
+		projected, projectedExpr, complete := annotationPredicate(child, expr.Children[i])
 		exact = exact && complete
 		if projected != nil {
 			kept = append(kept, projected)
+			typed = append(typed, projectedExpr)
 		}
 	}
 	if len(kept) == 0 {
-		return nil, false
+		return nil, nil, false
 	}
 	if len(kept) == 1 {
-		return kept[0], exact
+		return kept[0], typed[0], exact
 	}
 	clone := map[string]any{}
 	for key, value := range v {
 		clone[key] = value
 	}
 	clone["children"] = kept
-	return clone, exact
+	projectedExpr := *expr
+	projectedExpr.Children = typed
+	return clone, &projectedExpr, exact
 }
 
 type AnnotationFilter struct {
@@ -102,11 +75,11 @@ func projectAnnotationFilter(ctx context.Context, parser Parser, sig *signal, va
 	if err != nil {
 		return nil, err
 	}
-	projected, _ := annotationPredicate(tree["where_clause"])
+	projected, expr, _ := annotationPredicate(tree["where_clause"], SQLExpression(tree["where_clause"]))
 	if projected == nil {
 		return nil, nil
 	}
-	namespaceScoped := annotationNamespace(projected)
+	namespaceScoped := annotationNamespace(expr)
 	tree["where_clause"] = projected
 	rendered, err := parser.RenderSQL(ctx, tree)
 	if err != nil {

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"testing"
 
+	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -515,10 +517,36 @@ func TestNormalizeSeverityCanonicalizesEmitterSpellings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeSeverity(tt.text, tt.number); got != tt.want {
+			if got := telemetry.NormalizeSeverity(tt.text, tt.number); got != tt.want {
 				t.Errorf("normalizeSeverity(%q, %d) = %q, want %q", tt.text, tt.number, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExportedLogsCarryNormalizedBands(t *testing.T) {
+	spans := make(chan telemetry.Span, 1)
+	logs := make(chan telemetry.Log, 6)
+	metrics := make(chan telemetry.Metric, 1)
+	srv := NewServer(config.Config{}, newTestSubmitter(spans, logs, metrics))
+	pairs := []struct {
+		text   string
+		number int32
+		want   string
+	}{{"ERROR", 9, "INFO"}, {"FATAL", 0, "FATAL"}, {"WARN2", 14, "WARN"}, {"info", 0, "INFO"}, {"custom", 0, "CUSTOM"}, {"", 0, "UNSPECIFIED"}}
+	var records []*logspb.LogRecord
+	for _, p := range pairs {
+		records = append(records, &logspb.LogRecord{SeverityText: p.text, SeverityNumber: logspb.SeverityNumber(p.number), TimeUnixNano: 1})
+	}
+	_, err := srv.exportLogs(context.Background(), &collectorlogs.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{{ScopeLogs: []*logspb.ScopeLogs{{LogRecords: records}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pairs {
+		got := <-logs
+		if got.Severity != p.want || got.Severity != telemetry.NormalizeSeverity(p.text, p.number) {
+			t.Errorf("stored severity = %q, want %q", got.Severity, p.want)
+		}
 	}
 }
 

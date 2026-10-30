@@ -7,9 +7,30 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/fanql"
 )
 
 const configSource = "../../internal/config/config.go"
+
+func TestDocgenWritesFanQLReference(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "reference")
+	if err := run(configSource, "../../internal/alert/types.go", strings.Join(routeDirs, ","), out, filepath.Join(dir, ".env.example"), false); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "fanql.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(raw)
+	if !strings.HasPrefix(page, "---\n") || !strings.Contains(page, "generated: true\n") || !strings.Contains(page, "summary: ") {
+		t.Fatal("missing site front matter")
+	}
+	_, content, ok := strings.Cut(page, "\n---\n\n")
+	if !ok || content != fanql.Reference() {
+		t.Fatalf("page content differs from the API/MCP reference: %q", page)
+	}
+}
 
 // The generator's value is that a page cannot describe a setting the binary
 // does not accept. That holds only while reflection and the source parse agree,

@@ -62,7 +62,8 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 	}
 	f := Filter{Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
 	uses := map[string]int{}
-	if err := walkFilter(node["where_clause"], sig, vars, &f, uses); err != nil {
+	typed := SQLExpression(node["where_clause"])
+	if err := walkFilterExpr(typed, sig, vars, &f, uses); err != nil {
 		return Filter{}, err
 	}
 	for _, name := range f.Params {
@@ -73,10 +74,10 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 			return Filter{}, fmt.Errorf("use $%s either with IN or with a comparison, not both", name)
 		}
 	}
-	f.EqField = equalityField(node["where_clause"])
-	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(node["where_clause"])
-	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(node["where_clause"])
-	f.NameInAnd = nameEqualityInAnd(node["where_clause"])
+	f.EqField = equalityField(typed)
+	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(typed)
+	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(typed)
+	f.NameInAnd = nameEqualityInAnd(typed)
 	if f.EqValue {
 		f.EqField = "name"
 	}
@@ -178,170 +179,132 @@ func onlyWhereClause(node map[string]any, table string) bool {
 	return from != nil && from["type"] == "BASE_TABLE" && from["table_name"] == table && from["schema_name"] == "" && from["catalog_name"] == ""
 }
 
-func walkFilter(n any, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
-	switch v := n.(type) {
-	case nil:
-		return nil
-	case []any:
-		for _, child := range v {
-			if err := walkFilter(child, sig, vars, f, uses); err != nil {
-				return err
-			}
-		}
-		return nil
-	case map[string]any:
-		class, _ := v["class"].(string)
-		kind, _ := v["type"].(string)
-		walk := func(keys ...string) error {
-			for _, key := range keys {
-				if err := walkFilter(v[key], sig, vars, f, uses); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		switch class {
-		case "CONJUNCTION":
-			return walk("children")
-		case "COMPARISON":
-			return walk("left", "right")
-		case "BETWEEN":
-			return walk("input", "lower", "upper")
-		case "OPERATOR":
-			if kind == "ARRAY_EXTRACT" {
-				return checkAttributeLookup(v)
-			}
-			if !filterOperators[kind] {
-				return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(kind))
-			}
-			if kind == "COMPARE_IN" || kind == "COMPARE_NOT_IN" {
-				if children, _ := v["children"].([]any); len(children) > 1 {
-					for _, c := range children[1:] {
-						if param, _ := c.(map[string]any); param != nil && param["class"] == "PARAMETER" {
-							id, _ := param["identifier"].(string)
-							f.InParams[id] = true
-						}
-					}
-				}
-			}
-			return walk("children")
-		case "CAST":
-			castType, _ := v["type_expr"].(map[string]any)
-			id, _ := castType["type_name"].(string)
-			if !filterCasts[id] {
-				return fmt.Errorf("casting to %s is not allowed in a filter", id)
-			}
-			return walk("child")
-		case "COLUMN_REF":
-			names, _ := v["column_names"].([]any)
-			if len(names) != 1 {
-				return errors.New("qualified column names are not allowed in a filter")
-			}
-			name, _ := names[0].(string)
-			if _, err := sig.field(name); err != nil {
-				return err
-			}
-			return nil
-		case "CONSTANT":
-			return nil
-		case "PARAMETER":
-			name, _ := v["identifier"].(string)
-			if name == "" || (name[0] >= '0' && name[0] <= '9') {
-				return errors.New("use $name variables, not positional parameters")
-			}
-			if _, ok := vars[name]; !ok {
-				return fmt.Errorf("$%s is not a declared variable", name)
-			}
-			uses[name]++
-			if !slices.Contains(f.Params, name) {
-				f.Params = append(f.Params, name)
-			}
-			return nil
-		case "FUNCTION":
-			name, _ := v["function_name"].(string)
-			if !filterFunctions[name] {
-				return fmt.Errorf("function %s is not allowed in a filter", name)
-			}
-			if distinct, _ := v["distinct"].(bool); distinct {
-				return errors.New("DISTINCT is not allowed in a filter")
-			}
-			if orders, _ := v["order_bys"].(map[string]any); orders != nil {
-				if list, _ := orders["orders"].([]any); len(list) > 0 {
-					return errors.New("ORDER BY is not allowed in a filter")
-				}
-			}
-			if v["filter"] != nil {
-				return errors.New("FILTER is not allowed in a filter")
-			}
-			args := functionArguments(v)
-			if name == "contains" && len(args) == 2 {
-				if param, _ := args[0].(map[string]any); param != nil && param["class"] == "PARAMETER" {
-					id, _ := param["identifier"].(string)
-					f.InParams[id] = true
-				}
-			}
-			return walkFilter(args, sig, vars, f, uses)
-		default:
-			return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(kind, "VALUE_")))
-		}
-	}
-	return nil
+func walkFilter(raw any, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
+	return walkFilterExpr(SQLExpression(raw), sig, vars, f, uses)
 }
-
-func checkAttributeLookup(v map[string]any) error {
-	children, _ := v["children"].([]any)
-	if len(children) != 2 {
+func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
+	if v == nil {
+		return nil
+	}
+	walk := func(nodes ...*SQLExpr) error {
+		for _, child := range nodes {
+			if err := walkFilterExpr(child, sig, vars, f, uses); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	switch v.Class {
+	case "CONJUNCTION":
+		return walk(v.Children...)
+	case "COMPARISON":
+		return walk(v.Left, v.Right)
+	case "BETWEEN":
+		return walk(v.Input, v.Lower, v.Upper)
+	case "OPERATOR":
+		if v.Type == "ARRAY_EXTRACT" {
+			return checkAttributeExpr(v)
+		}
+		if !filterOperators[v.Type] {
+			return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(v.Type))
+		}
+		if v.Type == "COMPARE_IN" || v.Type == "COMPARE_NOT_IN" {
+			for _, c := range v.Children[min(1, len(v.Children)):] {
+				if c != nil && c.Class == "PARAMETER" {
+					f.InParams[c.Identifier] = true
+				}
+			}
+		}
+		return walk(v.Children...)
+	case "CAST":
+		if !filterCasts[v.CastType] {
+			return fmt.Errorf("casting to %s is not allowed in a filter", v.CastType)
+		}
+		return walk(v.Child)
+	case "COLUMN_REF":
+		if len(v.Columns) != 1 {
+			return errors.New("qualified column names are not allowed in a filter")
+		}
+		_, err := sig.field(v.Columns[0])
+		return err
+	case "CONSTANT":
+		return nil
+	case "PARAMETER":
+		name := v.Identifier
+		if name == "" || name[0] >= '0' && name[0] <= '9' {
+			return errors.New("use $name variables, not positional parameters")
+		}
+		if _, ok := vars[name]; !ok {
+			return fmt.Errorf("$%s is not a declared variable", name)
+		}
+		uses[name]++
+		if !slices.Contains(f.Params, name) {
+			f.Params = append(f.Params, name)
+		}
+		return nil
+	case "FUNCTION":
+		if !filterFunctions[v.Function] {
+			return fmt.Errorf("function %s is not allowed in a filter", v.Function)
+		}
+		if v.Distinct {
+			return errors.New("DISTINCT is not allowed in a filter")
+		}
+		if v.HasOrder {
+			return errors.New("ORDER BY is not allowed in a filter")
+		}
+		if v.HasFilter {
+			return errors.New("FILTER is not allowed in a filter")
+		}
+		if v.Function == "contains" && len(v.Arguments) == 2 && v.Arguments[0] != nil && v.Arguments[0].Class == "PARAMETER" {
+			f.InParams[v.Arguments[0].Identifier] = true
+		}
+		return walk(v.Arguments...)
+	default:
+		return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(v.Type, "VALUE_")))
+	}
+}
+func checkAttributeExpr(v *SQLExpr) error {
+	if len(v.Children) != 2 {
 		return errors.New("attribute lookups take one key")
 	}
-	column, _ := children[0].(map[string]any)
-	names, _ := column["column_names"].([]any)
-	if column["class"] != "COLUMN_REF" || len(names) != 1 || (names[0] != "attributes" && names[0] != "resource") {
+	column, key := v.Children[0], v.Children[1]
+	if column == nil || column.Class != "COLUMN_REF" || len(column.Columns) != 1 || column.Columns[0] != "attributes" && column.Columns[0] != "resource" {
 		return errors.New("only attributes['key'] and resource['key'] lookups are allowed")
 	}
-	key, _ := children[1].(map[string]any)
-	text := constantText(key)
-	if key["class"] != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s['%s']", names[0], text)) {
+	if key == nil || key.Class != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s[%s]", column.Columns[0], sqlString(key.LiteralText))) {
 		return errors.New("attribute keys must be literal strings such as attributes['http.route']")
 	}
 	return nil
 }
 
-func equalityField(n any) string {
-	v, _ := n.(map[string]any)
-	if v == nil || v["class"] != "COMPARISON" || v["type"] != "COMPARE_EQUAL" {
+func equalityField(v *SQLExpr) string {
+	if v == nil || v.Class != "COMPARISON" || v.Type != "COMPARE_EQUAL" {
 		return ""
 	}
-	for _, side := range []string{"left", "right"} {
-		if field := fieldText(v[side]); field != "" {
+	for _, side := range []*SQLExpr{v.Left, v.Right} {
+		if field := fieldText(side); field != "" {
 			return field
 		}
 	}
 	return ""
 }
 
-func fieldText(n any) string {
-	v, _ := n.(map[string]any)
+func fieldText(v *SQLExpr) string {
 	if v == nil {
 		return ""
 	}
-	switch v["class"] {
+	switch v.Class {
 	case "CAST":
-		return fieldText(v["child"])
+		return fieldText(v.Child)
 	case "COLUMN_REF":
-		names, _ := v["column_names"].([]any)
-		if len(names) == 1 {
-			name, _ := names[0].(string)
-			return name
+		if len(v.Columns) == 1 {
+			return v.Columns[0]
 		}
 	case "OPERATOR":
-		if v["type"] == "ARRAY_EXTRACT" {
-			children, _ := v["children"].([]any)
-			column, _ := children[0].(map[string]any)
-			names, _ := column["column_names"].([]any)
-			key, _ := children[1].(map[string]any)
-			text := constantText(key)
-			if len(names) == 1 {
-				return fmt.Sprintf("%s['%s']", names[0], text)
+		if v.Type == "ARRAY_EXTRACT" && len(v.Children) == 2 {
+			column, key := v.Children[0], v.Children[1]
+			if column != nil && len(column.Columns) == 1 {
+				return fmt.Sprintf("%s[%s]", column.Columns[0], sqlString(constantText(key)))
 			}
 		}
 	}
@@ -376,10 +339,11 @@ func stripQuoted(text string) string {
 }
 
 // constantText returns the text of a string constant node.
-func constantText(n map[string]any) string {
-	literal, _ := n["literal"].(map[string]any)
-	text, _ := literal["text"].(string)
-	return text
+func constantText(n *SQLExpr) string {
+	if n == nil || n.LiteralKind != "STRING" {
+		return ""
+	}
+	return n.LiteralText
 }
 
 // functionArguments returns the argument expressions of a FUNCTION node.
@@ -561,52 +525,43 @@ func castNode(param map[string]any, typeName string) map[string]any {
 	}
 }
 
-func equalityValue(n any) (literal, parameter string, ok bool) {
-	v, _ := n.(map[string]any)
-	if v["class"] != "COMPARISON" || v["type"] != "COMPARE_EQUAL" {
+func equalityValue(v *SQLExpr) (literal, parameter string, ok bool) {
+	if v == nil || v.Class != "COMPARISON" || v.Type != "COMPARE_EQUAL" {
 		return "", "", false
 	}
-	var other any
-	directName := func(n any) bool {
-		field, _ := n.(map[string]any)
-		names, _ := field["column_names"].([]any)
-		return field["class"] == "COLUMN_REF" && len(names) == 1 && names[0] == "name"
+	var other *SQLExpr
+	directName := func(field *SQLExpr) bool {
+		return field != nil && field.Class == "COLUMN_REF" && len(field.Columns) == 1 && field.Columns[0] == "name"
 	}
-	if directName(v["left"]) {
-		other = v["right"]
-	} else if directName(v["right"]) {
-		other = v["left"]
+	if directName(v.Left) {
+		other = v.Right
+	} else if directName(v.Right) {
+		other = v.Left
 	} else {
 		return "", "", false
 	}
-	for {
-		node, _ := other.(map[string]any)
-		if node["class"] == "CAST" {
-			other = node["child"]
+	for other != nil {
+		switch other.Class {
+		case "CAST":
+			other = other.Child
 			continue
-		}
-		if node["class"] == "PARAMETER" {
-			id, _ := node["identifier"].(string)
-			return "", id, id != ""
-		}
-		if node["class"] == "CONSTANT" {
-			value, _ := node["literal"].(map[string]any)
-			if value["kind"] == "STRING" {
-				text, _ := value["text"].(string)
-				return text, "", true
+		case "PARAMETER":
+			return "", other.Identifier, other.Identifier != ""
+		case "CONSTANT":
+			if other.LiteralKind == "STRING" {
+				return constantText(other), "", true
 			}
 		}
-		return "", "", false
+		break
 	}
+	return "", "", false
 }
 
-func nameEqualityInAnd(n any) bool {
-	v, _ := n.(map[string]any)
-	if v["class"] != "CONJUNCTION" || v["type"] != "CONJUNCTION_AND" {
+func nameEqualityInAnd(v *SQLExpr) bool {
+	if v == nil || v.Class != "CONJUNCTION" || v.Type != "CONJUNCTION_AND" {
 		return false
 	}
-	children, _ := v["children"].([]any)
-	for _, child := range children {
+	for _, child := range v.Children {
 		if _, _, ok := equalityValue(child); ok || nameEqualityInAnd(child) {
 			return true
 		}
@@ -615,15 +570,14 @@ func nameEqualityInAnd(n any) bool {
 }
 
 // filterDisplay derives product wording from the checked AST, never SQL text.
-func filterDisplay(n any) (field, literal, parameter string) {
-	node, _ := n.(map[string]any)
-	if node["class"] != "COMPARISON" {
+func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
+	if node == nil || node.Class != "COMPARISON" {
 		return "", "", ""
 	}
-	other := node["right"]
-	field = fieldText(node["left"])
+	other := node.Right
+	field = fieldText(node.Left)
 	if field == "" {
-		field, other = fieldText(node["right"]), node["left"]
+		field, other = fieldText(node.Right), node.Left
 	}
 	if field == "" {
 		return "", "", ""
@@ -640,21 +594,20 @@ func filterDisplay(n any) (field, literal, parameter string) {
 	default:
 		field = strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
 	}
-	if node["type"] != "COMPARE_EQUAL" {
+	if node.Type != "COMPARE_EQUAL" {
 		return field, "", ""
 	}
-	for {
-		value, _ := other.(map[string]any)
-		switch value["class"] {
+	for other != nil {
+		switch other.Class {
 		case "CAST":
-			other = value["child"]
+			other = other.Child
 		case "CONSTANT":
-			return field, constantText(value), ""
+			return field, constantText(other), ""
 		case "PARAMETER":
-			parameter, _ = value["identifier"].(string)
-			return field, "", parameter
+			return field, "", other.Identifier
 		default:
 			return field, "", ""
 		}
 	}
+	return field, "", ""
 }

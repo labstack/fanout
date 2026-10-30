@@ -234,8 +234,36 @@ describe("Rail", () => {
     expect(document.body.textContent).not.toContain("New chat");
     expect(document.body.textContent).not.toContain("Chats");
     expect(document.body.textContent).not.toContain("Create with AI");
+    expect(document.body.textContent).not.toContain("New dashboard");
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/agent/threads"))).toBe(false);
     await act(async () => root.unmount());
+  });
+
+  it("hides dashboard chat origins when chat is disabled", async () => {
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/dashboards"
+      ? json({ dashboards: [{ id: "board", name: "Checkout", origin: { thread_id: "source", message_id: "request", request_excerpt: "Build checkout" } }] })
+      : respond(input, init));
+    const { root, render } = mount({ agentAvailable: false });
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout"));
+      expect(document.querySelector('a[href^="/chat/"]')).toBeNull();
+      expect(document.body.textContent).not.toContain("Built from:");
+    } finally { await act(async () => root.unmount()); }
+  });
+
+  it("searches dashboards without offering service investigations when chat is disabled", async () => {
+    const { root, render } = mount({ agentAvailable: false });
+    try {
+      await act(async () => render());
+      await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+      await act(async () => setValue(document.querySelector('input[aria-label="Search chats, dashboards and services"]')!, "payments"));
+      await vi.waitFor(() => expect(document.body.textContent).toContain("No matching dashboards"));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+      expect(document.body.textContent).not.toContain("Services");
+      expect(document.querySelector('a[href^="/chat/"]')).toBeNull();
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/telemetry/schema"))).toBe(false);
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("searches chats on the server and filters dashboards locally", async () => {

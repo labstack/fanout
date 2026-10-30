@@ -134,53 +134,5 @@ func validateRows(p *Panel, path string, problems *Problems) {
 		}
 		return
 	}
-	q := p.Query
-	if q.Limit < 0 || q.Limit > 1000 {
-		problems.addHint(path+".query.limit", "limit must be 0 to 1000", "use a limit from 1 to 1000 or omit it for the default")
-	}
-	if q.Histogram != nil {
-		problems.addHint(path+".query.histogram", "histogram applies only to heatmap and histogram", "remove histogram or use a heatmap or histogram panel")
-	}
-	if p.Viz == "traces" {
-		if q.From != "spans" {
-			problems.addHint(path+".query.from", "traces reads spans", "use query {from: spans}")
-		}
-		if q.Sort != "" && q.Sort != "duration_ms" && q.Sort != "errors" && q.Sort != "+start" {
-			problems.addHint(path+".query.sort", "traces sort is duration_ms, errors or +start", "use sort duration_ms, errors, +start or omit sort")
-		}
-	} else {
-		if q.From != "logs" {
-			problems.addHint(path+".query.from", "logs and log_patterns read logs", "use query {from: logs}")
-		}
-	}
-	if p.Viz == "logs" && q.Sort != "" && q.Sort != "time" && q.Sort != "+time" {
-		problems.addHint(path+".query.sort", "logs sort is time or +time", "use sort time, +time or omit sort")
-	}
-	if p.Viz == "log_patterns" {
-		if len(q.By) != 1 || q.By[0] != "body_template" {
-			problems.addHint(path+".query.by", "log_patterns groups by body_template", "use by [body_template]")
-		}
-		if len(q.Measures) != 1 || q.Measures[0] != "count()" {
-			problems.addHint(path+".query.measures", "log_patterns requires count()", "use measures [count()]")
-		}
-		if q.Sort != "" && q.Sort != "count" {
-			problems.addHint(path+".query.sort", "log_patterns sort is count", "use sort count or omit sort")
-		}
-		if q.Bucket != "" && q.Bucket != "auto" {
-			if _, ok := buckets[q.Bucket]; !ok {
-				problems.addHint(path+".query.bucket", "bucket must be auto or a supported interval", "use auto, 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h or 1d")
-			}
-		}
-	}
-	if p.Viz == "logs" || p.Viz == "traces" {
-		if len(q.Measures) > 0 {
-			problems.addHint(path+".query.measures", "fixed row projections do not take aggregate measures", "remove measures; use log_patterns for counts or a table for aggregates")
-		}
-		if len(q.By) > 0 {
-			problems.addHint(path+".query.by", "logs and traces panels do not group; use log_patterns or a table", "remove by or use log_patterns or a table")
-		}
-		if q.Bucket != "" {
-			problems.addHint(path+".query.bucket", "logs and traces panels do not take a bucket", "remove bucket")
-		}
-	}
+	queryShapeRows(p.Query, p.Viz, path+".query", problems)
 }

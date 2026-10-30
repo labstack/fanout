@@ -3,7 +3,9 @@ package panel
 import (
 	"errors"
 	"fmt"
+	"github.com/labstack/fanout/internal/suggest"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -60,8 +62,8 @@ var signals = map[string]*signal{
 		str("namespace", "OpenTelemetry service namespace"),
 		str("service", "Service name"),
 		str("operation", "Span name"),
-		str("kind", "SPAN_KIND_SERVER, SPAN_KIND_CLIENT, SPAN_KIND_INTERNAL, SPAN_KIND_PRODUCER or SPAN_KIND_CONSUMER"),
-		str("status", "STATUS_CODE_OK, STATUS_CODE_ERROR or STATUS_CODE_UNSET"),
+		str("kind", vocabularyDescription("kind")),
+		str("status", vocabularyDescription("status")),
 		str("status_message", "Status description"),
 		str("trace_id", "Trace identifier"),
 		str("span_id", "Span identifier"),
@@ -108,7 +110,7 @@ var signals = map[string]*signal{
 		ts("time", "Data point time"),
 		str("name", "Metric name"),
 		str("unit", "Metric unit as reported"),
-		str("type", "gauge, counter, updown, histogram or summary"),
+		str("type", vocabularyDescription("type")),
 		str("temporality", "cumulative or delta; empty for gauge and summary"),
 		ts("start_time", "Data point start time; NULL when absent"),
 		num("value", "none", "Gauge or sum value"),
@@ -147,17 +149,17 @@ type FieldRef struct {
 	Unit   string
 }
 
-var attributePattern = regexp.MustCompile(`^(attributes|resource)\['([A-Za-z0-9_.\-/:@]{1,128})'\]$`)
+var attributePattern = regexp.MustCompile(`(?s)^(attributes|resource)\['((?:[^']|'')+)'\]$`)
 
 func (s *signal) field(text string) (FieldRef, error) {
 	text = strings.TrimSpace(text)
 	if m := attributePattern.FindStringSubmatch(text); m != nil {
-		return FieldRef{Text: text, Column: m[1], Key: m[2], Type: TypeString, Unit: "none"}, nil
+		return FieldRef{Text: text, Column: m[1], Key: strings.ReplaceAll(m[2], "''", "'"), Type: TypeString, Unit: "none"}, nil
 	}
 	f, ok := s.index[text]
 	if !ok {
 		message := fmt.Sprintf("%q is not a %s field", text, s.name)
-		if hint := suggest(text, s.names()); hint != "" {
+		if hint := suggest.Spelling(text, s.names()); hint != "" {
 			return FieldRef{}, errors.New(message + "; " + hint)
 		}
 		return FieldRef{}, errors.New(message + "; use a column or attributes['key']")
@@ -219,4 +221,13 @@ func unitNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func vocabularyDescription(field string) string {
+	var values []string
+	for _, stored := range fieldVocabularies[field].Aliases {
+		values = append(values, stored)
+	}
+	slices.Sort(values)
+	return strings.Join(values, ", ")
 }

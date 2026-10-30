@@ -165,24 +165,10 @@ func checkDeployScope(ctx context.Context, parser Parser, p *Panel, f Filter) er
 	if err != nil {
 		return err
 	}
-	scoped := false
-	var walk func(any)
-	walk = func(n any) {
-		switch v := n.(type) {
-		case map[string]any:
-			if v["class"] == "COLUMN_REF" && (fieldText(v) == "service" || fieldText(v) == "namespace") {
-				scoped = true
-			}
-			for _, child := range v {
-				walk(child)
-			}
-		case []any:
-			for _, child := range v {
-				walk(child)
-			}
-		}
-	}
-	walk(tree["where_clause"])
+	expr := SQLExpression(tree["where_clause"])
+	scoped := !everySQLExpression(expr, func(v *SQLExpr) bool {
+		return v.Class != "COLUMN_REF" || (fieldText(v) != "service" && fieldText(v) != "namespace")
+	})
 	if !scoped {
 		return nil
 	}
@@ -193,6 +179,6 @@ func checkDeployScope(ctx context.Context, parser Parser, p *Panel, f Filter) er
 	for _, name := range f.Params {
 		sample.Vars[name] = Value{Values: []string{"check"}}
 	}
-	_, _, err = rollupFilterValue(ctx, parser, f, sample)
+	_, _, err = rollupNodeValue(expr, sample)
 	return err
 }

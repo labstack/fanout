@@ -124,6 +124,10 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 | `GET` | `/api/dashboards/:id/versions` | `dashboards:manage-own` |
 | `GET` | `/api/dashboards/:id/versions/:version` | `dashboards:manage-own` |
 | `POST` | `/api/dashboards/:id/versions/:version/restore` | `dashboards:manage-own` |
+| `POST` | `/api/fanql/complete` | `telemetry:read` |
+| `POST` | `/api/fanql/format` | `telemetry:read` |
+| `POST` | `/api/fanql/parse` | `telemetry:read` |
+| `GET` | `/api/fanql/reference` | `telemetry:read` |
 | `GET` | `/api/intelligence` | `telemetry:read` |
 | `Any` | `/api/mcp` | `telemetry:read` |
 | `POST` | `/api/panels/exemplars` | `telemetry:read` |

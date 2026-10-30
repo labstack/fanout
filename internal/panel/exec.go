@@ -39,6 +39,7 @@ type RunRequest struct {
 }
 
 type Result struct {
+	Ranking         *Ranking         `json:"ranking,omitempty"`
 	AnnotationScope *AnnotationMatch `json:"annotation_scope,omitempty"`
 	AnnotationError string           `json:"annotation_error,omitempty"`
 	ID              string           `json:"id"`
@@ -364,6 +365,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		return failed(res, err, parent.Err())
 	}
 	res.Frame, res.SQL = frame, sqlText
+	res.Ranking = frame.ranking
 	// Trend failures are recorded on the frame and preserve the main table.
 	_ = e.attachTableTrends(ctx, p, checked, scope, frame)
 	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" || p.Viz == "health") {
@@ -398,7 +400,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			res.ShiftMS = shift.Milliseconds()
 		}
 	}
-	if frame.Rows == 0 || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !metricFrameHasValue(frame)) {
+	if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !metricFrameHasValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
 	}
@@ -447,7 +449,15 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		if err != nil {
 			return nil, "", err
 		}
-		rows, err := e.engine.QueryContext(ctx, compiled.SQL, compiled.Args...)
+		// The disclosure is a scalar read of the same candidates CTE, so it
+		// shares the ranking request and its pinned file snapshot.
+		executionSQL := compiled.SQL
+		scanColumns := compiled.Columns
+		if compiled.ranking != nil {
+			executionSQL = executionSQL[:compiled.rankOffset] + `, (SELECT count(*) FROM candidates WHERE n < 20)::DOUBLE AS "_fanql_below_floor"` + executionSQL[compiled.rankOffset:]
+			scanColumns = append(append([]Column(nil), scanColumns...), Column{Name: "_fanql_below_floor", Type: "number"})
+		}
+		rows, err := e.engine.QueryContext(ctx, executionSQL, compiled.Args...)
 		if err != nil {
 			return nil, compiled.SQL, err
 		}
@@ -467,7 +477,23 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		if p.Viz == "log_patterns" {
 			rowLimit = patternLimit(p)
 		}
-		frame, err := scanFrame(rows, compiled.Columns, rowLimit)
+		frame, err := scanFrame(rows, scanColumns, rowLimit)
+		if frame != nil && compiled.ranking != nil {
+			frame.ranking = compiled.ranking
+			if frame.Rows > 0 {
+				if n, ok := frame.Values[len(frame.Values)-1][0].(float64); ok {
+					frame.ranking.BelowFloor = int(n)
+				}
+			}
+			frame.Columns, frame.Values = frame.Columns[:len(frame.Columns)-1], frame.Values[:len(frame.Values)-1]
+			if frame.ranking.BelowFloor > 0 {
+				note := fmt.Sprintf("%d series had fewer than 20 samples", frame.ranking.BelowFloor)
+				if compiled.rankingFloor {
+					note += " and were ranked last"
+				}
+				frame.addNote(note)
+			}
+		}
 		if frame != nil {
 			frame.bucketed = scope.Interval > 0 && len(compiled.Columns) > 0 && compiled.Columns[0].Role == "time"
 			if compiled.TrendInterval > 0 {
@@ -569,4 +595,16 @@ func metricFrameHasValue(f *Frame) bool {
 		}
 	}
 	return false
+}
+
+func emptyExpressionTotal(p *Panel, measures []Measure, frame *Frame) bool {
+	if p.Query == nil || (p.Viz != "stat" && p.Viz != "gauge") || len(measures) != 1 || !measures[0].IsExpression() {
+		return false
+	}
+	for i, column := range frame.Columns {
+		if column.Role == "measure" && i < len(frame.Totals) && frame.Totals[i] != nil {
+			return false
+		}
+	}
+	return true
 }
