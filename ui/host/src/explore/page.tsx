@@ -57,6 +57,8 @@ export function ExplorePage({ search, onSearch, onSaved }: {
   const resultBox = useRef<HTMLDivElement>(null);
   const help = useId();
   const time = exploreTime(search);
+  // Async continuations read the navigation as it is when they finish.
+  const searchNow = useRef(search); searchNow.current = search;
   const windowKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
   // Responses compare against what is in the editors now, not when they were sent.
   const current = useRef({ text, sql }); current.current = { text, sql };
@@ -76,20 +78,22 @@ export function ExplorePage({ search, onSearch, onSaved }: {
         setParsed(undefined);
         panel = { id: explorePanelID, title: defaultTitle(source), viz: viz ?? "table", query: direct };
         canonical = source;
-        onSearch({ ...search, q: source, viz: panel.viz }, true);
+        onSearch({ ...searchNow.current, q: source, viz: panel.viz }, true);
       } else if (kind === "query") {
         // Parse without the previous viz: a new query shape may not fit it.
         const next = await parseFanql({ text: source }, abort.signal);
         if (abort.signal.aborted) return;
         setParsed({ ...next, text: source }); setNotices(next.notices);
+        // An accepted viz edit changes the query; the Builder follows it.
+        if (searchNow.current.tab === "builder") setBuilt(next.query);
         const chosen = viz && next.viz.compatible.some(c => c.viz === viz && c.requires.length === 0) ? viz : next.viz.compatible.find(c => c.requires.length === 0)?.viz ?? "table";
         panel = { id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query };
         canonical = next.canonical;
-        onSearch({ ...search, q: source, viz: chosen }, true);
+        onSearch({ ...searchNow.current, q: source, viz: chosen }, true);
       } else {
         panel = { id: explorePanelID, title: "SQL", viz: "table", sql: source };
         setNotices([]);
-        onSearch({ ...search, sql: source }, true);
+        onSearch({ ...searchNow.current, sql: source }, true);
       }
       const dashboard: DashboardSpec = { version: 1, name: "Explore", time, panels: [panel] };
       const width = resultBox.current?.clientWidth || 960;
@@ -113,14 +117,13 @@ export function ExplorePage({ search, onSearch, onSaved }: {
   // A shared link runs on open; a new time window reruns what is in the editor.
   const latest = useRef({ kind: kindOf(search.tab), viz: run?.panel.viz ?? search.viz, direct: undefined as Query | undefined });
   latest.current = { kind: kindOf(search.tab), viz: run?.panel.viz ?? search.viz, direct: formatted?.editable === false ? built : undefined };
-  useEffect(() => {
-    const { kind, viz, direct } = latest.current;
-    void execute(kind, current.current[kind === "query" ? "text" : "sql"], viz, direct);
-  }, [windowKey]);
+  const rerun = useRef<() => void>(() => undefined);
+  useEffect(() => { rerun.current(); }, [windowKey]);
 
   // Builder edits print through the server so the text stays the one query.
+  const cancelFormat = () => { clearTimeout(formatter.current.timer); formatter.current.timer = undefined; formatter.current.abort?.abort(); };
   const format = async (query: Query): Promise<Formatted | undefined> => {
-    formatter.current.abort?.abort();
+    cancelFormat();
     const abort = new AbortController(); formatter.current.abort = abort;
     try {
       const next = await formatFanql({ query }, abort.signal);
@@ -137,16 +140,23 @@ export function ExplorePage({ search, onSearch, onSaved }: {
   const edit = (query: Query) => {
     setBuilt(query);
     clearTimeout(formatter.current.timer);
-    formatter.current.timer = setTimeout(() => void format(query), 250);
+    formatter.current.timer = setTimeout(() => { formatter.current.timer = undefined; void format(query); }, 250);
   };
-  const runBuilder = async () => {
+  /** Every Builder run prints the current builder query first, so no path runs text a pending edit has replaced. */
+  const runBuilder = async (viz?: Viz) => {
     if (!built) return;
-    clearTimeout(formatter.current.timer);
     const next = await format(built);
-    if (next) void execute("query", next.text, run?.panel.viz ?? search.viz, next.editable ? undefined : built);
+    // The user may have left the Builder while the query was printing.
+    if (next && searchNow.current.tab === "builder") void execute("query", next.text, viz ?? run?.panel.viz ?? search.viz, next.editable ? undefined : built);
   };
   const openTab = async (tab: ExploreSearch["tab"]) => {
-    if (tab !== "builder") { onSearch({ ...search, tab }); return; }
+    if (tab !== "builder") {
+      // Leaving the Builder prints any pending edit before the text is shown.
+      if (search.tab === "builder" && built && formatter.current.timer) void format(built);
+      onSearch({ ...search, tab }); return;
+    }
+    // Text the server would not print as editable is never reparsed (section 0.11).
+    if (formatted?.editable === false && built) { onSearch({ ...search, tab }); return; }
     if (parsed && parsed.text === text) { setBuilt(parsed.query); onSearch({ ...search, tab }); return; }
     if (!text.trim()) { setBuilt(starter); onSearch({ ...search, tab }); void format(starter); return; }
     try {
@@ -156,6 +166,12 @@ export function ExplorePage({ search, onSearch, onSaved }: {
       if (failure instanceof ApiError && failure.problems.length > 0) setProblems(failure.problems);
       else setError(failure instanceof Error ? failure.message : "Request failed");
     }
+  };
+
+  rerun.current = () => {
+    const { kind, viz, direct } = latest.current;
+    if (searchNow.current.tab === "builder" && built) void runBuilder(viz);
+    else void execute(kind, current.current[kind === "query" ? "text" : "sql"], viz, direct);
   };
 
   // A link that opens on the Builder seeds it like a tab switch would.
@@ -186,7 +202,7 @@ export function ExplorePage({ search, onSearch, onSaved }: {
         <Stack gap="xs">
           <Text id={help} size="xs" c="dimmed">Press Enter to run. For example <code>spans | p95(duration) by service every 5m</code>.</Text>
           {readOnlyText && <Text size="xs" c="dimmed" data-fanql-readonly>This query is edited in the Builder: {formatted?.reason ?? "it is too large for the text editor"}.</Text>}
-          <FanqlEditor value={text} readOnly={readOnlyText} onChange={value => { setText(value); setProblems([]); setFormatted(undefined); }} onRun={() => void execute("query", text, search.viz, readOnlyText ? built : undefined)} problems={problems} describedBy={help}
+          <FanqlEditor value={text} readOnly={readOnlyText} onChange={value => { cancelFormat(); setText(value); setProblems([]); setFormatted(undefined); }} onRun={() => void execute("query", text, search.viz, readOnlyText ? built : undefined)} problems={problems} describedBy={help}
             complete={(value, cursor, signal) => completeFanql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
           {problems.length > 0 && <Stack gap={2} role="alert" data-fanql-problems>{problems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
           {notices.length > 0 && <Stack gap={2} data-fanql-notices>{notices.map((notice, index) => <Text key={index} size="xs" c="dimmed">{notice.message}</Text>)}</Stack>}
@@ -207,9 +223,9 @@ export function ExplorePage({ search, onSearch, onSaved }: {
     <Group justify="space-between">
       <Group gap="xs">
         <Button loading={running} disabled={search.tab === "builder" ? !built || formatProblems.length > 0 : !source.trim()}
-          onClick={() => void (search.tab === "builder" ? runBuilder() : execute(kind, source, search.viz, readOnlyText ? built : undefined))}>Run</Button>
+          onClick={() => void (search.tab === "builder" ? runBuilder(search.viz) : execute(kind, source, search.viz, readOnlyText ? built : undefined))}>Run</Button>
         {kind === "query" && compatible.length > 0 && <SegmentedControl size="xs" aria-label="Visualization" value={run?.panel.viz ?? search.viz ?? ""}
-          onChange={value => void execute("query", text, value as Viz, readOnlyText ? built : undefined)}
+          onChange={value => void (search.tab === "builder" ? runBuilder(value as Viz) : execute("query", text, value as Viz, readOnlyText ? built : undefined))}
           data={compatible.map(c => ({ value: c.viz, disabled: c.requires.length > 0, label: c.requires.length > 0
             ? <Tooltip label={`Needs ${c.requires.map(r => requirementLabel[r]).join(" and ")}; set them after saving`}><span>{vizLabel[c.viz]}</span></Tooltip>
             : vizLabel[c.viz] }))} />}

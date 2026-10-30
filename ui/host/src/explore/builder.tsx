@@ -2,20 +2,24 @@ import { ActionIcon, Badge, Button, Group, NumberInput, Select, Stack, Text, Tex
 import { Plus, X } from "@phosphor-icons/react";
 import type { Query } from "../../../panels/types";
 import type { TelemetrySchema } from "../sql-editor/schema";
-import { operators, parseWhere, printWhere, type Condition, type Operator } from "./where";
+import { fieldPattern, operators, parseWhere, printWhere, type Condition } from "./where";
 
 
 const sources = ["spans", "logs", "metrics"] as const;
 const buckets = ["auto", "1m", "5m", "15m", "1h"];
 // Measures without a field argument; every other builder measure takes one field.
-const fieldless = new Set(["count", "rate", "error_rate"]);
+const fieldless = new Set(["count", "rate", "error_rate", "share"]);
 // Measures with extra arguments stay in the query text, not the builder.
-const textOnly = new Set(["quantile", "share"]);
+const textOnly = new Set(["quantile"]);
+const measurePattern = new RegExp(String.raw`^([a-z_][a-z0-9_]*)\((|${fieldPattern})\)$`);
 
 type Measure = { fn: string; field: string };
-function parseMeasure(entry: string): Measure | undefined {
-  const match = /^([a-z_][a-z0-9_]*)\(([^(),]*)\)$/.exec(entry.trim());
-  return match && !textOnly.has(match[1]) ? { fn: match[1], field: match[2].trim() } : undefined;
+/** A known measure of at most one field; predicates such as count_if stay chips. */
+function parseMeasure(entry: string, known: readonly string[]): Measure | undefined {
+  const match = measurePattern.exec(entry.trim());
+  if (!match || textOnly.has(match[1]) || !known.includes(match[1])) return undefined;
+  if (fieldless.has(match[1]) !== (match[2] === "")) return undefined;
+  return { fn: match[1], field: match[2] };
 }
 const printMeasure = (m: Measure) => `${m.fn}(${fieldless.has(m.fn) ? "" : m.field})`;
 
@@ -37,6 +41,7 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Tel
   const numeric = new Set(fields.filter(f => f.type === "number" || f.type === "int" || f.type === "float").map(f => f.name));
   const fieldData = fields.map(f => f.name);
   const set = (patch: Partial<Query>) => onChange({ ...query, ...patch });
+  const known = schema.measures ?? [];
   const where = query.where ?? [];
   const measures = query.measures ?? [];
   const by = query.by ?? [];
@@ -47,7 +52,7 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Tel
     onChange({
       ...query, from,
       where: where.filter(entry => { const c = parseWhere(entry); return !c || keep(c.field); }),
-      measures: measures.filter(entry => { const m = parseMeasure(entry); return !m || !m.field || keep(m.field); }),
+      measures: measures.filter(entry => { const m = parseMeasure(entry, known); return !m || !m.field || keep(m.field); }),
       by: by.filter(keep),
     });
   };
@@ -61,7 +66,7 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Tel
     <Stack gap={6}>
       <Text size="sm" fw={500}>Measures</Text>
       {measures.map((entry, index) => {
-        const m = parseMeasure(entry);
+        const m = parseMeasure(entry, known);
         if (!m) return <Group key={index}><Chip text={entry} onRemove={() => set({ measures: remove(measures, index) })} /></Group>;
         return <Group key={index} gap="xs" wrap="nowrap">
           <Select aria-label={`Measure ${index + 1} function`} w={160} allowDeselect={false} searchable value={m.fn} data={(schema.measures ?? []).filter(fn => !textOnly.has(fn))}
@@ -79,17 +84,17 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Tel
       {where.map((entry, index) => {
         const c = parseWhere(entry);
         if (!c) return <Group key={index}><Chip text={entry} onRemove={() => set({ where: remove(where, index) })} /></Group>;
-        const update = (patch: Partial<Condition>) => { const next = { ...c, ...patch }; set({ where: replace(where, index, printWhere(next, numeric.has(next.field))) }); };
+        const update = (patch: Partial<Condition>) => set({ where: replace(where, index, printWhere({ ...c, ...patch })) });
         return <Group key={index} gap="xs" wrap="nowrap">
-          <Select aria-label={`Filter ${index + 1} field`} w={260} searchable allowDeselect={false} value={c.field} data={rowField(c.field)} onChange={field => field && update({ field })} />
-          <Select aria-label={`Filter ${index + 1} operator`} w={90} allowDeselect={false} value={c.op} data={[...operators]} onChange={op => op && update({ op: op as Operator })} />
+          <Select aria-label={`Filter ${index + 1} field`} w={260} searchable allowDeselect={false} value={c.field} data={rowField(c.field)} onChange={field => field && update({ field, quoted: names.has(field) ? !numeric.has(field) : c.quoted })} />
+          <Select aria-label={`Filter ${index + 1} operator`} w={90} allowDeselect={false} value={c.op} data={[...operators]} onChange={op => op && update({ op: op as Condition["op"] })} />
           {c.field === "service" && schema.services?.length
             ? <Select aria-label={`Filter ${index + 1} value`} w={220} searchable value={c.value || null} data={schema.services.map(s => s.value)} onChange={value => update({ value: value ?? "" })} />
             : <TextInput aria-label={`Filter ${index + 1} value`} w={220} value={c.value} onChange={event => update({ value: event.currentTarget.value })} />}
           <ActionIcon variant="subtle" color="gray" aria-label={`Remove filter ${index + 1}`} onClick={() => set({ where: remove(where, index) })}><X size={14} /></ActionIcon>
         </Group>;
       })}
-      <Group><Button size="compact-sm" variant="subtle" leftSection={<Plus size={12} />} onClick={() => set({ where: [...where, printWhere({ field: "service", op: "=", value: schema.services?.[0]?.value ?? "" }, false)] })}>Add filter</Button></Group>
+      <Group><Button size="compact-sm" variant="subtle" leftSection={<Plus size={12} />} onClick={() => set({ where: [...where, printWhere({ field: "service", op: "=", value: "", quoted: true })] })}>Add filter</Button></Group>
     </Stack>
 
     <Group gap="md" align="flex-end">
@@ -106,8 +111,8 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Tel
   </Stack>;
 }
 
-// Statistics need numbers; count_distinct and last accept any field.
+// Statistics need numbers; only count_distinct accepts any field.
 function measureFields(fn: string, all: string[], numeric: Set<string>, withCurrent: string[]): string[] {
-  const options = fn === "count_distinct" || fn === "last" ? all : all.filter(name => numeric.has(name));
+  const options = fn === "count_distinct" ? all : all.filter(name => numeric.has(name));
   return [...new Set([...withCurrent.filter(name => !all.includes(name)), ...options])];
 }

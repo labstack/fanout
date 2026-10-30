@@ -14,7 +14,7 @@ const schema: TelemetrySchema = {
     logs: { columns: [{ name: "service", type: "string" }, { name: "body", type: "string" }, { name: "severity", type: "string" }] },
   },
   services: [{ value: "checkout" }, { value: "frontend" }],
-  measures: ["count", "p95", "avg", "count_distinct", "quantile"],
+  measures: ["count", "p95", "avg", "count_distinct", "count_if", "quantile", "share", "last"],
 };
 const cleanups: (() => void)[] = [];
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
@@ -62,7 +62,7 @@ describe("Builder", () => {
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "O'Brien" } }); });
     expect(last().where).toEqual(["operation = 'O''Brien'"]);
     await act(async () => ui.getByRole("button", { name: "Add filter" }).click());
-    expect(last().where).toEqual(["operation = 'GET'", "service = 'checkout'"]);
+    expect(last().where).toEqual(["operation = 'GET'", "service = ''"]);
     await act(async () => ui.getByRole("button", { name: "Remove filter 1" }).click());
     expect(last().where).toEqual([]);
     expect(onChange).toHaveBeenCalledTimes(3);
@@ -86,6 +86,23 @@ describe("Builder", () => {
     const { choose, last } = await render({ from: "spans", measures: ["p95(duration_ms)", "count()"], where: ["service = 'checkout'", "duration_ms > 5", "service = $service"], by: ["service", "operation", "attributes['http.route']"] });
     await choose("Source", "logs");
     expect(last()).toEqual({ from: "logs", measures: ["count()"], where: ["service = 'checkout'", "service = $service"], by: ["service", "attributes['http.route']"] });
+  });
+
+  it("keeps conditional measures as chips across a source switch", async () => {
+    const { ui, choose, last } = await render({ from: "spans", measures: ["count_if(service = 'checkout')", "share()"] });
+    expect(ui.getByText("count_if(service = 'checkout')")).toBeTruthy();
+    expect(ui.getByLabelText("Measure 2 function", { selector: "input" })).toBeTruthy();
+    expect(ui.queryByLabelText("Measure 2 field", { selector: "input" })).toBeNull();
+    await choose("Source", "logs");
+    expect(last().measures).toEqual(["count_if(service = 'checkout')", "share()"]);
+  });
+
+  it("keeps a quoted number quoted and an unquoted number numeric when editing", async () => {
+    const { ui, last } = await render({ ...base, where: ["attributes['code'] = 200", "duration_ms > '7'"] });
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "404" } }); });
+    expect(last().where?.[0]).toBe("attributes['code'] = 404");
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 2 value" }), { target: { value: "9" } }); });
+    expect(last().where?.[1]).toBe("duration_ms > '9'");
   });
 
   it("groups by attribute keys, sets the bucket and the limit", async () => {

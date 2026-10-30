@@ -274,6 +274,43 @@ describe("ExplorePage", () => {
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true);
   });
 
+  it("does not let a pending builder print overwrite typed text", async () => {
+    let answer: (response: Response) => void = () => {};
+    const { ui, wait, type } = await render({ tab: "builder" });
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    format = () => new Promise(resolve => { answer = resolve; });
+    await act(async () => ui.getByRole("button", { name: "Add filter" }).click());
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(2));
+    await act(async () => ui.getByRole("tab", { name: "Query" }).click());
+    await type("logs | count()");
+    await act(async () => answer(json({ text: "spans where service:'' | count() by service", exactness: "exact", editable: true, requires: [], notices: [] })));
+    await act(async () => {});
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("logs | count()");
+  });
+
+  it("reopens the Builder for an oversized query without reparsing it", async () => {
+    format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "too long", requires: [], notices: [] });
+    const { ui, wait, search } = await render({ tab: "builder" });
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await act(async () => ui.getByRole("tab", { name: "Query" }).click());
+    await act(async () => ui.getByRole("tab", { name: "Builder" }).click());
+    await wait(() => expect(search().tab).toBe("builder"));
+    expect(bodies("/api/fanql/parse")).toHaveLength(0);
+  });
+
+  it("does not pull the user back to the Builder after they leave during a run", async () => {
+    const { ui, wait, click, search } = await render({ tab: "builder" });
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    let answer: (response: Response) => void = () => {};
+    format = () => new Promise(resolve => { answer = resolve; });
+    await click("Run");
+    await act(async () => ui.getByRole("tab", { name: "SQL" }).click());
+    await act(async () => answer(json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] })));
+    await act(async () => {});
+    expect(search().tab).toBe("sql");
+    expect(bodies("/api/queries/run")).toHaveLength(0);
+  });
+
   it("runs SQL as a table", async () => {
     const { ui, type, wait } = await render({ tab: "sql", sql: "SELECT 1" });
     await wait(() => expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toEqual({ id: "explore", title: "SQL", viz: "table", sql: "SELECT 1" }));
