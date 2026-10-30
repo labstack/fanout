@@ -308,7 +308,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		}
 	case strings.HasPrefix(path, "/api/alerting/rules/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
-	case path == "/api/panels/query" || path == "/api/panels/exemplars" || path == "/api/panels/variables/resolve" || path == "/api/annotations":
+	case path == "/api/queries/run" || path == "/api/queries/exemplars" || path == "/api/queries/variables/resolve" || path == "/api/annotations":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
 	case path == "/api/fanql/parse" || path == "/api/fanql/format" || path == "/api/fanql/complete":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost

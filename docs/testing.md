@@ -181,7 +181,7 @@ The native tests exercise whole-window totals, bounded newest buckets
 and width-aware 24-hour bucket selection:
 
 ```sh
-just test ./internal/panel -run 'TestGaugeTotalsMatchStat|TestBudgetKeepsCompleteNewestBuckets|TestWidthAwareCellBuckets'
+just test ./internal/query -run 'TestGaugeTotalsMatchStat|TestBudgetKeepsCompleteNewestBuckets|TestWidthAwareCellBuckets'
 ```
 
 Use the pinned engine wrapper through `just test`, with the workspace's offline

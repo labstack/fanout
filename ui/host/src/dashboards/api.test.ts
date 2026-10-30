@@ -56,7 +56,7 @@ describe("dashboard api", () => {
   });
 
   it("posts panel batches using the shared JSON request path",async()=>{
-    fetchMock.mockResolvedValue(json(200,{results:[]}));await expect(queryPanels({dashboard:spec})).resolves.toEqual([]);expect(lastCall()[0]).toBe("/api/panels/query");expect(lastCall()[1].method).toBe("POST");expect(JSON.parse(String(lastCall()[1].body))).toEqual({dashboard:spec});
+    fetchMock.mockResolvedValue(json(200,{results:[]}));await expect(queryPanels({dashboard:spec})).resolves.toEqual([]);expect(lastCall()[0]).toBe("/api/queries/run");expect(lastCall()[1].method).toBe("POST");expect(JSON.parse(String(lastCall()[1].body))).toEqual({dashboard:spec});
   });
   it("posts annotation windows as JSON and forwards the abort signal", async () => {
     const annotations = { deploys: [], anomalies: [], truncated: true };
@@ -83,7 +83,7 @@ it("uses the captured full window for trace lookups and passes cancellation to b
   expect(lastCall()[1].signal).toBe(signal);
   const body = { dashboard: spec, panel_id: target.panel_id, kind: "traces" as const, from: target.from, to: target.to, time: { from: target.window_from, to: target.window_to, refresh: "off" }, dimensions: target.dimensions, bucket: target.bucket };
   await queryExemplars(body, signal);
-  expect(lastCall()[0]).toBe("/api/panels/exemplars");
+  expect(lastCall()[0]).toBe("/api/queries/exemplars");
   expect(lastCall()[1].method).toBe("POST");
   expect(lastCall()[1].signal).toBe(signal);
   expect(JSON.parse(String(lastCall()[1].body))).toEqual(body);

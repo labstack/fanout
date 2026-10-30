@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -14,7 +14,7 @@ import (
 func Reference() string {
 	var b strings.Builder
 	b.WriteString("# FanQL\n\nPreview: the syntax may change before GA\n\n")
-	b.WriteString("FanQL is the text form of a structured telemetry query. It produces the same `panel.Query` that dashboards store and the panel engine executes. Panels store the query; text is derived. Problems prevent execution; notices never block it. Each diagnostic says what happened and what to write instead, using a valid example from that field. Diagnostics use display names without internal visualization identifiers and report all independent problems in one pass, in source order. Only follow-on cascades are suppressed.\n\n")
+	b.WriteString("FanQL is the text form of a structured telemetry query. It produces the same `query.Spec` that dashboards store and the engine executes. Panels store the query; text is derived. Problems prevent execution; notices never block it. Each diagnostic says what happened and what to write instead, using a valid example from that field. Diagnostics use display names without internal visualization identifiers and report all independent problems in one pass, in source order. Only follow-on cascades are suppressed.\n\n")
 	b.WriteString("## Shape and entry points\n\n`source [where] filters | measures by fields every bucket sort key limit n`\n\nExplore accepts a whole query. Logs and Traces search bars accept filters only; the page supplies source, `where` and visualization. The visualization picker accepts the query as written. Adding `| count() every auto` to make a timeseries is a visible edit. One aggregation stage is allowed; another pipe may introduce only `sort` or `limit`, and canonical text drops that pipe.\n\n")
 	b.WriteString("## Sources and words\n\n")
 	fmt.Fprintf(&b, "Sources: %s, recognized only as the first token. A bare source selects all rows in the chosen time range. `where` is optional; canonical text supplies it when filters exist.\n\n", referenceWords(referenceKeys(sources)))
@@ -36,10 +36,10 @@ func Reference() string {
 	}
 	b.WriteString("\nPrefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. TRY_CAST failures are NULL, so `-http_status_code between 400 and 599` includes uncastable codes.\n\nWhitespace and `and` join filters. An `or` chain must occupy its whole filter list or be parenthesized: `a:1 (b:2 or c:3)` and `(a:1 b:2) or c:3` differ. This rule also applies inside groups and `count_if`. Mixing conjunction and `or` without parentheses is a problem with suggested repairs.\n\n")
 	b.WriteString("## Fields\n\nA single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `http.target` means `attributes['http.target']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.\n\nCanonical text brackets single-segment attribute keys, so new columns cannot reinterpret canonical or stored text. Map columns require a key. `duration` denotes `duration_ms` in filters, measure arguments and trace sorts. `duration_ms>500` takes a number; `duration>500ms` requires a unit. A measure alias named duration or duration_ms stays that alias in sort. Time columns accept range comparisons against quoted timestamps, not equality shorthand.\n\n")
-	for _, signal := range panel.SignalNames() {
+	for _, signal := range query.SignalNames() {
 		fmt.Fprintf(&b, "### %s\n\n| Name | Type | Unit | Low cardinality | Description |\n|---|---|---|---|---|\n", signal)
-		columns, _ := panel.SignalColumns(signal)
-		lowCard := panel.LowCardinalityColumns(signal)
+		columns, _ := query.SignalColumns(signal)
+		lowCard := query.LowCardinalityColumns(signal)
 		for _, column := range columns {
 			unit, low := column.Unit, ""
 			if unit == "" {
@@ -57,7 +57,7 @@ func Reference() string {
 	for _, vocabulary := range []struct {
 		name    string
 		aliases map[string]string
-	}{{"status (spans)", panel.FieldAliases("status")}, {"kind (spans)", panel.FieldAliases("kind")}, {"type (metrics)", panel.FieldAliases("type")}, {"severity (logs)", telemetry.SeverityAliases()}} {
+	}{{"status (spans)", query.FieldAliases("status")}, {"kind (spans)", query.FieldAliases("kind")}, {"type (metrics)", query.FieldAliases("type")}, {"severity (logs)", telemetry.SeverityAliases()}} {
 		fmt.Fprintf(&b, "### %s\n\n| Input | Stored |\n|---|---|\n", vocabulary.name)
 		for _, alias := range referenceKeys(vocabulary.aliases) {
 			fmt.Fprintf(&b, "| `%s` | `%s` |\n", alias, vocabulary.aliases[alias])
@@ -68,9 +68,9 @@ func Reference() string {
 	b.WriteString("Every stored log severity is normalized once: a positive severity number has authority (21+ FATAL, 17+ ERROR, 13+ WARN, 9+ INFO, 5+ DEBUG, 1+ TRACE); absent/nonpositive numbers fall back to text. Invariant: no stored log row bypasses normalization. Severity ranges expand to contiguous band membership, never CASE. `severity>=warn` means WARN, ERROR, FATAL; `severity<error` means TRACE, DEBUG, INFO, WARN; `between info and error` is inclusive. Unknown and UNSPECIFIED levels have no rank and never satisfy a range. Use `severity_number>=14` for sublevels. Empty or reversed ranges are problems.\n\nOn normalized log rows, `error_rate()` counts exactly `severity>=error`. Its backend test is `upper(severity) IN ('ERROR', 'FATAL', 'CRITICAL') OR severity_number >= 17`; normalization makes legacy CRITICAL redundant. Span `error_rate()` counts `status:error`.\n\n")
 	b.WriteString("## Literals and durations\n\n| Literal | Rule |\n|---|---|\n| String | Bare words or single/double quotes; double a quote to escape it. Quoted values are strings and bypass aliases. |\n| Number | Integers, decimals and exponents (`500`, `1.5`, `2e3`, `-3`); non-finite values are rejected. Numbers stay numeric on number columns and attributes, and stay text as typed on string columns. |\n| Boolean | Bare `true`/`false`, case-insensitive; attributes retain boolean type, string columns compare text, number columns reject them. |\n| Duration | `us`, `ms`, `s`, `m`, `h`, only on `duration`; converted to milliseconds. Examples: `500ms`, `1.5s`, `250us`, `2m`, `1h`. Negative, compound and overflowing durations are rejected. |\n| Timestamp | Quoted RFC 3339 or `YYYY-MM-DD HH:MM:SS`, optional fraction/offset; no offset means UTC. Time comparisons retain nanoseconds through TIMESTAMPTZ_NS. |\n| Existence | `k:*` is IS NOT NULL; `-k:*` is IS NULL. |\n| Free text | Case-insensitive substring of log body or span operation; explicit field required on metrics. |\n\nContains emits `contains(lower(field), lower(value))`; map values first cast to VARCHAR. SQL LIKE/ILIKE require quoted patterns; ESCAPE is not expressible, so use `~` when `%` should be literal.\n\n")
 	b.WriteString("## Buckets\n\n")
-	fmt.Fprintf(&b, "%s. `auto` lets the engine choose an interval. A bucket follows `every` and belongs to an aggregate query.\n\n", referenceWords(panel.BucketNames()))
+	fmt.Fprintf(&b, "%s. `auto` lets the engine choose an interval. A bucket follows `every` and belongs to an aggregate query.\n\n", referenceWords(query.BucketNames()))
 	b.WriteString("## Measures\n\nThe registry defines accepted functions and signal availability. Fields follow the filter/grouping resolution rules. Numeric attribute measures use TRY_CAST AS DOUBLE; nonnumeric values become NULL. `count(*)` canonicalizes to `count()`.\n\n| Name | Form | Signals | Unit | Semantics |\n|---|---|---|---|---|\n")
-	for _, m := range panel.MeasureSpecs() {
+	for _, m := range query.MeasureSpecs() {
 		form := m.Name + "()"
 		if m.Args == 1 {
 			form = m.Name + "(f)"
@@ -79,7 +79,7 @@ func Reference() string {
 		}
 		signals := m.Signals
 		if len(signals) == 0 {
-			signals = panel.SignalNames()
+			signals = query.SignalNames()
 		}
 		unit := m.Unit
 		if unit == "" {
@@ -90,7 +90,7 @@ func Reference() string {
 	b.WriteString("\nMetric aggregates require a standalone `name:<metric>` equality entry. Counters use per-series increases and reset handling; gauge/updown use point values; histograms use observation counts, sums and buckets; summaries use available stored aggregates. Unsupported kind/function combinations report a diagnosis instead of treating counters as gauges.\n\n`histogram(duration)` on spans uses count with log2 duration buckets; `histogram(value)` on metrics uses explicit histogram buckets. Distributions stand alone, with at most one `by` field for a histogram; `every` selects a heatmap.\n\n")
 	b.WriteString("## Expressions and ranking\n\n`count_if(filters)` takes a FanQL filter list as one entry and compiles to checked `count(*) FILTER (WHERE ...)::DOUBLE`. Raw entries are allowed; variables are forbidden. Spans and logs support `+ - * /`, constants, unary minus and parentheses on aggregate vizzes. Metrics, distributions and log_patterns do not support arithmetic. Every expression needs at least one aggregate. Other than a single call, an expression requires `as alias`; aliases are 1–40 lowercase letters/digits/underscores and start with a letter. `share()` stands alone. Division emits `a / nullif(b, 0)`, so zero denominators yield NULL.\n\nCount-family ratios use ratio units, `* 100` makes percent, addition/subtraction retains equal units, scaling retains the measure unit, other combinations use none. Expressions are not additive. Affine transformations inherit the underlying ranking and flip direction for a negative scale. Binomial count_if/count ratios use Wilson ranking with a 20-sample floor; other expressions use value ranking with leaf/denominator support. Ineligible series follow eligible ones by support, then dimension; result metadata discloses them.\n\nApdex uses disjoint predicates: `(count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex`. Exactly 500 ms counts once; NULL duration counts in the population and neither numerator.\n\nEach measure allows 256 tokens, 64 nodes, depth 8 and 8 aggregates. A query allows 256 expression nodes and 24 aggregates across at most 6 measures. A count_if filter is at most 500 bytes. Whitespace is not a token. Budgets apply to structured inputs too.\n\n")
 	b.WriteString("## Filter functions and raw entries\n\n| Function | Signature |\n|---|---|\n")
-	for _, name := range panel.FilterFunctionNames() {
+	for _, name := range query.FilterFunctionNames() {
 		args := "field"
 		if name == "starts_with" || name == "contains" || name == "regexp_matches" {
 			args = "field, quoted_string"

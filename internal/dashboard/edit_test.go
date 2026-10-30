@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
-func editBase() panel.Dashboard {
-	return panel.Dashboard{Name: "Ops", Time: panel.Time{Range: "1h"}, Panels: []panel.Panel{
-		{ID: "a", Title: "A", Viz: "text", Content: "a", Grid: &panel.Grid{W: 4, H: 3}},
-		{ID: "b", Title: "B", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}, Grid: &panel.Grid{X: 4, W: 3, H: 3}},
+func editBase() query.Dashboard {
+	return query.Dashboard{Name: "Ops", Time: query.Time{Range: "1h"}, Panels: []query.Panel{
+		{ID: "a", Title: "A", Viz: "text", Content: "a", Grid: &query.Grid{W: 4, H: 3}},
+		{ID: "b", Title: "B", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}, Grid: &query.Grid{X: 4, W: 3, H: 3}},
 	}}
 }
 
@@ -21,9 +21,9 @@ func TestApplyOperations(t *testing.T) {
 	description := "New purpose"
 	out, repack, err := Apply(editBase(), []Operation{
 		{Op: "update_panel", ID: "b", Set: map[string]any{"title": "Requests", "thresholds": []any{map[string]any{"value": 10.0, "status": "warn"}}}},
-		{Op: "add_panel", After: "a", Panel: &panel.Panel{ID: "c", Title: "C", Viz: "text", Content: "c"}},
+		{Op: "add_panel", After: "a", Panel: &query.Panel{ID: "c", Title: "C", Viz: "text", Content: "c"}},
 		{Op: "move_panel", ID: "a"},
-		{Op: "set_variable", Variable: &panel.Variable{Name: "service", Kind: "constant", Value: "checkout"}},
+		{Op: "set_variable", Variable: &query.Variable{Name: "service", Kind: "constant", Value: "checkout"}},
 		{Op: "rename", Name: "Operations", Description: &description},
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestApplyRejectsBadOperations(t *testing.T) {
 		{{Op: "update_panel", ID: "missing", Set: map[string]any{"title": "x"}}},
 		{{Op: "update_panel", ID: "b", Set: map[string]any{"id": "c"}}},
 		{{Op: "update_panel", ID: "b", Set: map[string]any{"colour": "red"}}},
-		{{Op: "add_panel", Panel: &panel.Panel{ID: "a", Title: "dup", Viz: "text", Content: "x"}}},
+		{{Op: "add_panel", Panel: &query.Panel{ID: "a", Title: "dup", Viz: "text", Content: "x"}}},
 		{{Op: "remove_variable", Name: "nope"}},
 		{{Op: "explode"}},
 		{{Op: "update_panel", ID: "b", Set: map[string]any{"Title": "X"}}},
@@ -68,7 +68,7 @@ func TestApplyRejectsBadOperations(t *testing.T) {
 	}
 	for _, ops := range cases {
 		_, _, err := Apply(editBase(), ops)
-		var problems panel.Problems
+		var problems query.Problems
 		if !errors.As(err, &problems) || problems[0].Path != "operations[0]" {
 			t.Errorf("%+v: err = %v", ops, err)
 		}
@@ -86,7 +86,7 @@ func TestApplyBoundsWorkBeforeValidation(t *testing.T) {
 	}
 	adds := make([]Operation, 0, maxPanels)
 	for i := range maxPanels {
-		adds = append(adds, Operation{Op: "add_panel", Panel: &panel.Panel{ID: fmt.Sprintf("extra%d", i), Title: "x", Viz: "text", Content: "x"}})
+		adds = append(adds, Operation{Op: "add_panel", Panel: &query.Panel{ID: fmt.Sprintf("extra%d", i), Title: "x", Viz: "text", Content: "x"}})
 	}
 	adds = append(adds, Operation{Op: "remove_panel", ID: "extra0"})
 	start := time.Now()

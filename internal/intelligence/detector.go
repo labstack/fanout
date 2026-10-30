@@ -1,6 +1,6 @@
 // Package intelligence derives anomalies and log patterns from telemetry.
 //
-// Public log-pattern SQL goes through internal/query's validator, which
+// Public log-pattern SQL goes through internal/engine's validator, which
 // rejects "--" outright. A SQL comment in one of these statements therefore
 // fails the query at runtime, on a background goroutine, as a logged error
 // nobody is watching -- that is how latency detection stopped reporting for
@@ -20,12 +20,12 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // Detector runs intelligence detection on observability data
 type Detector struct {
-	duck                *query.Duck
+	duck                *engine.Duck
 	config              DetectorConfig
 	mu                  sync.RWMutex
 	snapshot            *Snapshot
@@ -47,7 +47,7 @@ type annotationBatch struct {
 }
 
 // NewDetector creates a new intelligence detector
-func NewDetector(duck *query.Duck, config DetectorConfig) *Detector {
+func NewDetector(duck *engine.Duck, config DetectorConfig) *Detector {
 	return &Detector{
 		duck:              duck,
 		config:            config,
@@ -666,7 +666,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		LIMIT 50
 	`, startNano, endNano, scope)
 
-	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
+	resp := d.duck.ExecuteSQL(ctx, engine.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		return nil, fmt.Errorf("pattern detection: %s", resp.Error)
 	}

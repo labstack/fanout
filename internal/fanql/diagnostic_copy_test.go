@@ -1,7 +1,7 @@
 package fanql
 
 import (
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"regexp"
 	"strings"
 	"testing"
@@ -90,7 +90,7 @@ func TestCompileKeepsProblemsFromIndependentClauses(t *testing.T) {
 }
 
 func TestMetricFreeTextDiagnosticUsesSchemaExample(t *testing.T) {
-	schema := &panel.Schema{Signals: map[string]panel.SignalSchema{"metrics": {Metrics: []panel.MetricSchema{{Name: "cpu.utilization", Count: 1}, {Name: "http.server.requests", Count: 12}}}}}
+	schema := &query.Schema{Signals: map[string]query.SignalSchema{"metrics": {Metrics: []query.MetricSchema{{Name: "cpu.utilization", Count: 1}, {Name: "http.server.requests", Count: 12}}}}}
 	c, ps := Compile("metrics where timeout", Options{Schema: schema})
 	if c != nil || len(ps) != 1 || ps[0].Message != "free text needs a field on metrics; use name:http.server.requests" {
 		t.Fatalf("metric example: %+v", ps)

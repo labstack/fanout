@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -16,24 +16,24 @@ func TestReferenceCoversEveryRegistryEntry(t *testing.T) {
 			t.Errorf("reference omits %q", entry)
 		}
 	}
-	for _, m := range panel.MeasureSpecs() {
+	for _, m := range query.MeasureSpecs() {
 		check(m.Name)
 	}
-	for _, bucket := range panel.BucketNames() {
+	for _, bucket := range query.BucketNames() {
 		check(bucket)
 	}
-	for _, name := range panel.FilterFunctionNames() {
+	for _, name := range query.FilterFunctionNames() {
 		check(name)
 	}
-	for _, signal := range panel.SignalNames() {
-		columns, _ := panel.SignalColumns(signal)
+	for _, signal := range query.SignalNames() {
+		columns, _ := query.SignalColumns(signal)
 		for _, column := range columns {
 			if !strings.Contains(ref, "| `"+column.Name+"` | `"+string(column.Type)+"` |") {
 				t.Errorf("missing %s column %s with type", signal, column.Name)
 			}
 		}
 	}
-	for _, table := range []map[string]string{panel.FieldAliases("status"), panel.FieldAliases("kind"), panel.FieldAliases("type"), telemetry.SeverityAliases()} {
+	for _, table := range []map[string]string{query.FieldAliases("status"), query.FieldAliases("kind"), query.FieldAliases("type"), telemetry.SeverityAliases()} {
 		for alias, stored := range table {
 			check(alias)
 			check(stored)

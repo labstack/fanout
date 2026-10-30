@@ -7,16 +7,16 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type FanQLHandler struct {
-	parser    panel.Parser
-	engine    PanelEngine
+	parser    query.Parser
+	engine    QueryEngine
 	completer *fanql.Completer
 }
 
-func RegisterFanQLRoutes(e *echo.Echo, parser panel.Parser, engine PanelEngine) {
+func RegisterFanQLRoutes(e *echo.Echo, parser query.Parser, engine QueryEngine) {
 	h := &FanQLHandler{parser: parser, engine: engine, completer: fanql.NewCompleter(engine)}
 	read := RequireCapability(ReadTelemetry)
 	e.POST("/api/fanql/parse", h.parse, read)
@@ -56,18 +56,18 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 	compiled, problems := fanql.Compile(req.Text, req.Options)
 	if len(problems) != 0 {
 		failure := &fanqlFailure{apiError: newAPIError(http.StatusBadRequest, "invalid_fanql", "The query has problems.")}
-		failure.Problems = panel.PresentProblems(problems)
+		failure.Problems = query.PresentProblems(problems)
 		if req.Preview {
 			failure.Preview = &fanqlPreview{Text: req.Text, Note: "not executable"}
 		}
 		return failure
 	}
 	return c.JSON(http.StatusOK, struct {
-		Query     panel.Query `json:"query"`
-		Canonical string      `json:"canonical"`
+		Query     query.Spec `json:"query"`
+		Canonical string     `json:"canonical"`
 		Viz       struct {
 			Requested  string            `json:"requested,omitempty"`
-			Compatible []panel.VizCompat `json:"compatible"`
+			Compatible []query.VizCompat `json:"compatible"`
 			Edits      []fanql.VizEdit   `json:"edits"`
 		} `json:"viz"`
 		Notices []fanql.Notice `json:"notices"`
@@ -75,7 +75,7 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 		Query: compiled.Query, Canonical: compiled.Canonical,
 		Viz: struct {
 			Requested  string            `json:"requested,omitempty"`
-			Compatible []panel.VizCompat `json:"compatible"`
+			Compatible []query.VizCompat `json:"compatible"`
 			Edits      []fanql.VizEdit   `json:"edits"`
 		}{Requested: req.Viz, Compatible: compiled.Compatible, Edits: compiled.Edits},
 		Notices: fanqlNotices(compiled.Notices),
@@ -85,7 +85,7 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 func (h *FanQLHandler) format(c *echo.Context) error {
 	var req struct {
 		fanql.Options
-		Query panel.Query `json:"query"`
+		Query query.Spec `json:"query"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
@@ -98,7 +98,7 @@ func (h *FanQLHandler) format(c *echo.Context) error {
 	}
 	if len(problems) != 0 {
 		failure := newAPIError(http.StatusBadRequest, "invalid_spec", "The query spec is invalid.")
-		failure.Problems = panel.PresentProblems(problems)
+		failure.Problems = query.PresentProblems(problems)
 		return failure
 	}
 	formatted.Notices = fanqlNotices(formatted.Notices)
@@ -106,7 +106,7 @@ func (h *FanQLHandler) format(c *echo.Context) error {
 }
 
 func fanqlError(err error) error {
-	return newAPIError(http.StatusServiceUnavailable, "unavailable", panel.PresentError(err, panel.ReadError))
+	return newAPIError(http.StatusServiceUnavailable, "unavailable", query.PresentError(err, query.ReadError))
 }
 
 func (h *FanQLHandler) complete(c *echo.Context) error {

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/ingest"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -33,27 +33,27 @@ func semanticSpan(namespace string, index int, attributes map[string]any) teleme
 	}
 }
 
-func semanticRun(t *testing.T, executor *panel.Executor, q panel.Query, variables []panel.Variable, vars map[string]panel.Value) panel.Result {
+func semanticRun(t *testing.T, executor *query.Executor, q query.Spec, variables []query.Variable, vars map[string]query.Value) query.Result {
 	return semanticRunViz(t, executor, q, "table", variables, vars)
 }
 
-func semanticRunViz(t *testing.T, executor *panel.Executor, q panel.Query, viz string, variables []panel.Variable, vars map[string]panel.Value) panel.Result {
+func semanticRunViz(t *testing.T, executor *query.Executor, q query.Spec, viz string, variables []query.Variable, vars map[string]query.Value) query.Result {
 	t.Helper()
 	end := semanticStart.Add(time.Hour)
-	results, err := executor.Run(t.Context(), panel.RunRequest{
-		Dashboard: panel.Dashboard{Name: "Semantics", Time: panel.Time{From: &semanticStart, To: &end}, Variables: variables,
-			Panels: []panel.Panel{{ID: "semantic", Title: "Semantics", Viz: viz, Query: &q}}}, Vars: vars,
+	results, err := executor.Run(t.Context(), query.RunRequest{
+		Dashboard: query.Dashboard{Name: "Semantics", Time: query.Time{From: &semanticStart, To: &end}, Variables: variables,
+			Panels: []query.Panel{{ID: "semantic", Title: "Semantics", Viz: viz, Query: &q}}}, Vars: vars,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Status == panel.StatusError || results[0].Frame == nil {
+	if len(results) != 1 || results[0].Status == query.StatusError || results[0].Frame == nil {
 		t.Fatalf("query %+v: %+v", q, results)
 	}
 	return results[0]
 }
 
-func semanticValue(t *testing.T, result panel.Result, name string) float64 {
+func semanticValue(t *testing.T, result query.Result, name string) float64 {
 	t.Helper()
 	for i, column := range result.Frame.Columns {
 		if column.Name == name {
@@ -74,7 +74,7 @@ func semanticValue(t *testing.T, result panel.Result, name string) float64 {
 	return 0
 }
 
-func semanticCompile(t *testing.T, text string, variables []panel.Variable) panel.Query {
+func semanticCompile(t *testing.T, text string, variables []query.Variable) query.Spec {
 	t.Helper()
 	c, problems := Compile(text, Options{Viz: "table", Variables: variables})
 	if len(problems) != 0 {
@@ -103,7 +103,7 @@ func TestTruthTable(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "truth-table", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(d, 30)
+	executor := query.NewExecutor(d, 30)
 	cases := []struct {
 		namespace, filter string
 		want              int
@@ -129,7 +129,7 @@ func TestTruthTable(t *testing.T) {
 		})
 	}
 	t.Run("stored SQL negative stays SQL", func(t *testing.T) {
-		q := panel.Query{From: "spans", Where: []string{"namespace = 'values'", "NOT (attributes['k'] = 'v')"}, Measures: []string{"count()"}}
+		q := query.Spec{From: "spans", Where: []string{"namespace = 'values'", "NOT (attributes['k'] = 'v')"}, Measures: []string{"count()"}}
 		f, problems, err := Format(t.Context(), d, q, Options{Viz: "table"})
 		if err != nil || len(problems) != 0 {
 			t.Fatalf("format: %+v %v", problems, err)
@@ -143,9 +143,9 @@ func TestTruthTable(t *testing.T) {
 		}
 	})
 	t.Run("numeric variable uses literal ordering", func(t *testing.T) {
-		variables := []panel.Variable{{Name: "code", Kind: "text"}}
+		variables := []query.Variable{{Name: "code", Kind: "text"}}
 		q := semanticCompile(t, "spans where namespace:http http_status_code>=$code | count()", variables)
-		result := semanticRun(t, executor, q, variables, map[string]panel.Value{"code": {Values: []string{"500"}}})
+		result := semanticRun(t, executor, q, variables, map[string]query.Value{"code": {Values: []string{"500"}}})
 		if got := semanticValue(t, result, "count"); got != 0 {
 			t.Fatalf("string variable matched %v, want 0", got)
 		}
@@ -195,8 +195,8 @@ func TestVariablesUnderAllPerConstruct(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "all-constructs", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(d, 30)
-	variables := []panel.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", IncludeAll: true}}
+	executor := query.NewExecutor(d, 30)
+	variables := []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", IncludeAll: true}}
 	for _, tc := range []struct {
 		filter                   string
 		entries, remaining, rows int
@@ -213,7 +213,7 @@ func TestVariablesUnderAllPerConstruct(t *testing.T) {
 			if len(q.Where) != tc.entries {
 				t.Fatalf("authored entries %d, want %d", len(q.Where), tc.entries)
 			}
-			result := semanticRun(t, executor, q, variables, map[string]panel.Value{"service": {All: true}})
+			result := semanticRun(t, executor, q, variables, map[string]query.Value{"service": {All: true}})
 			if got := semanticValue(t, result, "count"); got != float64(tc.rows) {
 				t.Fatalf("got %v, want %d", got, tc.rows)
 			}
@@ -276,7 +276,7 @@ func TestSeverityBandsEndToEnd(t *testing.T) {
 	if !reflect.DeepEqual(submitter.bands, wantBands) {
 		t.Fatalf("ingress bands %v, want %v", submitter.bands, wantBands)
 	}
-	executor := panel.NewExecutor(d, 30)
+	executor := query.NewExecutor(d, 30)
 	for _, tc := range []struct {
 		filter string
 		want   int
@@ -300,20 +300,20 @@ func TestSeverityBandsEndToEnd(t *testing.T) {
 
 var semanticVariables = regexp.MustCompile(`\$([A-Za-z_][A-Za-z_0-9]*)`)
 
-func semanticCheckQuery(t *testing.T, d *query.Duck, q panel.Query) {
+func semanticCheckQuery(t *testing.T, d *engine.Duck, q query.Spec) {
 	t.Helper()
-	var variables []panel.Variable
+	var variables []query.Variable
 	seen := map[string]bool{}
 	for _, match := range semanticVariables.FindAllStringSubmatch(strings.Join(q.Where, " "), -1) {
 		name := match[1]
 		if !seen[name] {
-			variables = append(variables, panel.Variable{Name: name, Kind: "text"})
+			variables = append(variables, query.Variable{Name: name, Kind: "text"})
 			seen[name] = true
 		}
 	}
-	dashboard := panel.Dashboard{Name: "Binding", Variables: variables, Panels: []panel.Panel{{ID: "binding", Title: "Binding", Viz: "table", Query: &q}}}
-	panel.Normalize(&dashboard)
-	if _, problems, err := panel.Check(t.Context(), d, &dashboard); err != nil || len(problems) != 0 {
+	dashboard := query.Dashboard{Name: "Binding", Variables: variables, Panels: []query.Panel{{ID: "binding", Title: "Binding", Viz: "table", Query: &q}}}
+	query.Normalize(&dashboard)
+	if _, problems, err := query.Check(t.Context(), d, &dashboard); err != nil || len(problems) != 0 {
 		t.Fatalf("query %+v: %+v %v", q, problems, err)
 	}
 }
@@ -332,7 +332,7 @@ func TestEngineBindingOfEveryLoweredShape(t *testing.T) {
 			}
 			seen[key] = true
 			t.Run(fixture.Query.From+"/"+entry, func(t *testing.T) {
-				semanticCheckQuery(t, d, panel.Query{From: fixture.Query.From, Where: []string{entry}, Measures: []string{"count()"}})
+				semanticCheckQuery(t, d, query.Spec{From: fixture.Query.From, Where: []string{entry}, Measures: []string{"count()"}})
 			})
 		}
 		for _, measure := range fixture.Query.Measures {
@@ -345,7 +345,7 @@ func TestEngineBindingOfEveryLoweredShape(t *testing.T) {
 			}
 			seen[key] = true
 			t.Run(fixture.Query.From+"/"+measure, func(t *testing.T) {
-				semanticCheckQuery(t, d, panel.Query{From: fixture.Query.From, Measures: []string{measure}})
+				semanticCheckQuery(t, d, query.Spec{From: fixture.Query.From, Measures: []string{measure}})
 			})
 		}
 	}
@@ -423,9 +423,9 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(d, 30)
-	variables := []panel.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", IncludeAll: true}}
-	vars := map[string]panel.Value{"service": {Values: []string{"checkout"}}}
+	executor := query.NewExecutor(d, 30)
+	variables := []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", IncludeAll: true}}
+	vars := map[string]query.Value{"service": {Values: []string{"checkout"}}}
 	vizzes := []string{"timeseries", "traces", "table", "table", "stat", "histogram", "table", "table", "logs", "log_patterns", "timeseries", "table"}
 	cases := make([]struct{ text, viz string }, 0, len(glanceExamples)+10)
 	for i, text := range glanceExamples {
@@ -449,13 +449,13 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 			if len(problems) != 0 {
 				t.Fatalf("compile: %+v", problems)
 			}
-			dashboard := panel.Dashboard{Name: "V1 workload", Variables: variables, Panels: []panel.Panel{{ID: "workload", Title: "Workload", Viz: tc.viz, Query: &c.Query}}}
-			panel.Normalize(&dashboard)
-			if _, problems, err := panel.Check(t.Context(), d, &dashboard); len(problems) != 0 || err != nil {
+			dashboard := query.Dashboard{Name: "V1 workload", Variables: variables, Panels: []query.Panel{{ID: "workload", Title: "Workload", Viz: tc.viz, Query: &c.Query}}}
+			query.Normalize(&dashboard)
+			if _, problems, err := query.Check(t.Context(), d, &dashboard); len(problems) != 0 || err != nil {
 				t.Fatalf("check: %+v %v", problems, err)
 			}
 			result := semanticRunViz(t, executor, c.Query, tc.viz, variables, vars)
-			if result.Status != panel.StatusOK || result.Frame.Rows == 0 {
+			if result.Status != query.StatusOK || result.Frame.Rows == 0 {
 				t.Fatalf("workload returned no matching data: %+v", result)
 			}
 			if strings.Contains(tc.text, "name:queue.lag") && semanticValue(t, result, "last") != 2 {

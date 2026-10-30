@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type countingParser struct {
-	panel.Parser
+	query.Parser
 	calls   int
 	fail    bool
 	failErr error
@@ -114,7 +114,7 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 		{"spans", `service = $service AND status = 'STATUS_CODE_ERROR'`, `(service:$service status:error)`, "normalized"},
 	} {
 		t.Run(tt.sql, func(t *testing.T) {
-			q := panel.Query{From: tt.signal, Where: []string{tt.sql}}
+			q := query.Spec{From: tt.signal, Where: []string{tt.sql}}
 			f, problems, err := Format(t.Context(), d, q, Options{})
 			if err != nil || len(problems) != 0 {
 				t.Fatalf("format: %+v %v", problems, err)
@@ -144,7 +144,7 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 			}
 		})
 	}
-	q := panel.Query{From: "spans", Where: []string{`attributes['a'] = 1 OR attributes['b'] = 2`, `service = 'api'`}}
+	q := query.Spec{From: "spans", Where: []string{`attributes['a'] = 1 OR attributes['b'] = 2`, `service = 'api'`}}
 	f, ps, err := Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) > 0 || f.Text != `spans where (attributes['a']:1 or attributes['b']:2) service:api` {
 		t.Fatalf("entry grouping: %+v %+v %v", f, ps, err)
@@ -159,12 +159,12 @@ func TestLiftMeasures(t *testing.T) {
 		{`count_distinct(attributes['user.id'])`, `count_distinct(user.id)`, "exact"},
 		{`quantile(duration_ms, 0.999) as q`, `quantile(duration, 0.999) as q`, "exact"},
 	} {
-		f, ps, err := Format(t.Context(), d, panel.Query{From: "spans", Measures: []string{tt.stored}}, Options{})
+		f, ps, err := Format(t.Context(), d, query.Spec{From: "spans", Measures: []string{tt.stored}}, Options{})
 		if err != nil || len(ps) > 0 || f.Text != "spans | "+tt.want || f.Exactness != Exactness(tt.tier) {
 			t.Fatalf("%s: %+v %+v %v", tt.stored, f, ps, err)
 		}
 	}
-	q := panel.Query{From: "spans", Measures: []string{"count()"}, Histogram: &panel.Histogram{Field: "duration_ms", Buckets: "log2"}}
+	q := query.Spec{From: "spans", Measures: []string{"count()"}, Histogram: &query.Histogram{Field: "duration_ms", Buckets: "log2"}}
 	f, ps, err := Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) > 0 || f.Text != "spans | histogram(duration)" {
 		t.Fatalf("histogram: %+v %+v %v", f, ps, err)
@@ -175,7 +175,7 @@ func TestLiftMeasures(t *testing.T) {
 		t.Fatalf("invalid histogram: %+v %+v %v", f, ps, err)
 	}
 	for _, sort := range []string{"errors", "duration_ms", "+start"} {
-		f, ps, err = Format(t.Context(), d, panel.Query{From: "spans", Sort: sort}, Options{Viz: "traces"})
+		f, ps, err = Format(t.Context(), d, query.Spec{From: "spans", Sort: sort}, Options{Viz: "traces"})
 		want := sort
 		if sort == "duration_ms" {
 			want = "duration"
@@ -191,7 +191,7 @@ func TestLiftMeasures(t *testing.T) {
 
 func TestFormatEditableFalseIsCompleteAndReasoned(t *testing.T) {
 	d, _ := newTestEngine(t)
-	q := panel.Query{From: "logs"}
+	q := query.Spec{From: "logs"}
 	for i := range 16 {
 		q.Where = append(q.Where, "body = '"+strings.Repeat("x", 480)+fmt.Sprint(i)+"'")
 	}
@@ -207,7 +207,7 @@ func TestFormatEditableFalseIsCompleteAndReasoned(t *testing.T) {
 			t.Fatalf("lost literal %d", i)
 		}
 	}
-	rawQuery := panel.Query{From: "logs"}
+	rawQuery := query.Spec{From: "logs"}
 	for i := range 16 {
 		rawQuery.Where = append(rawQuery.Where, "coalesce(body, '"+strings.Repeat("𝔘", 110)+strings.Repeat("`", 30)+fmt.Sprint(i)+"') = ''")
 	}
@@ -238,7 +238,7 @@ func TestFormatEditableFalseIsCompleteAndReasoned(t *testing.T) {
 
 func TestFormatOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 	for _, wantErr := range []error{context.DeadlineExceeded, errors.New("disk failure")} {
-		f, ps, err := Format(t.Context(), &countingParser{failErr: wantErr}, panel.Query{From: "logs", Where: []string{`coalesce(body, '') = ''`}}, Options{})
+		f, ps, err := Format(t.Context(), &countingParser{failErr: wantErr}, query.Spec{From: "logs", Where: []string{`coalesce(body, '') = ''`}}, Options{})
 		if f != nil || len(ps) > 0 || !errors.Is(err, wantErr) {
 			t.Fatalf("got %+v %+v %v", f, ps, err)
 		}
@@ -246,7 +246,7 @@ func TestFormatOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 }
 
 type failingRenderParser struct {
-	panel.Parser
+	query.Parser
 	err error
 }
 
@@ -257,7 +257,7 @@ func (p failingRenderParser) RenderSQL(context.Context, map[string]any) (string,
 func TestFormatRenderOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 	d, _ := newTestEngine(t)
 	wantErr := errors.New("engine serialization failed")
-	f, ps, err := Format(t.Context(), failingRenderParser{Parser: d, err: wantErr}, panel.Query{From: "spans", Where: []string{`service='api'`}}, Options{})
+	f, ps, err := Format(t.Context(), failingRenderParser{Parser: d, err: wantErr}, query.Spec{From: "spans", Where: []string{`service='api'`}}, Options{})
 	if f != nil || len(ps) > 0 || !errors.Is(err, wantErr) {
 		t.Fatalf("got %+v %+v %v", f, ps, err)
 	}
@@ -265,7 +265,7 @@ func TestFormatRenderOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 
 func TestFormatRejectsQueryInvalidUnderEveryViz(t *testing.T) {
 	p := &countingParser{fail: true}
-	f, ps, err := Format(t.Context(), p, panel.Query{From: "spans", Measures: []string{"count()"}, By: []string{"a", "b", "c", "d"}}, Options{})
+	f, ps, err := Format(t.Context(), p, query.Spec{From: "spans", Measures: []string{"count()"}, By: []string{"a", "b", "c", "d"}}, Options{})
 	if f != nil || len(ps) == 0 || err != nil || p.calls != 0 {
 		t.Fatalf("got %+v %+v %v calls %d", f, ps, err, p.calls)
 	}
@@ -304,11 +304,11 @@ func TestFormatOwnLoweringFilterFixturesNeedNoEngine(t *testing.T) {
 func TestFormatReportsIgnoredSortAndLimit(t *testing.T) {
 	for _, tt := range []struct {
 		viz string
-		q   panel.Query
+		q   query.Spec
 	}{
-		{"timeseries", panel.Query{From: "spans", Measures: []string{"count()"}, Bucket: "auto", Sort: "count", Limit: 10}},
-		{"stat", panel.Query{From: "spans", Measures: []string{"count()"}, Limit: 10}},
-		{"gauge", panel.Query{From: "spans", Measures: []string{"count()"}, Limit: 10}},
+		{"timeseries", query.Spec{From: "spans", Measures: []string{"count()"}, Bucket: "auto", Sort: "count", Limit: 10}},
+		{"stat", query.Spec{From: "spans", Measures: []string{"count()"}, Limit: 10}},
+		{"gauge", query.Spec{From: "spans", Measures: []string{"count()"}, Limit: 10}},
 	} {
 		f, ps, err := Format(t.Context(), &countingParser{fail: true}, tt.q, Options{Viz: tt.viz})
 		want := []Notice{{Path: "limit", Message: "limit does not apply to " + tt.viz + " panels; the whole window produces one value"}}
@@ -389,7 +389,7 @@ func TestFormatOwnLiteralSpellingsAreFixedPoints(t *testing.T) {
 }
 
 func TestFormatUndeclaredContextReportsVariableNotices(t *testing.T) {
-	q := panel.Query{From: "spans", Where: []string{"service = $x"}}
+	q := query.Spec{From: "spans", Where: []string{"service = $x"}}
 	f, ps, err := Format(t.Context(), &countingParser{fail: true}, q, Options{})
 	if err != nil || len(ps) != 0 || f == nil || len(f.Notices) != 1 || f.Notices[0].Path != "where[0]" || f.Notices[0].Message != "declared variables are needed to check $x" {
 		t.Fatalf("variable context: %+v %+v %v", f, ps, err)
@@ -397,7 +397,7 @@ func TestFormatUndeclaredContextReportsVariableNotices(t *testing.T) {
 }
 
 func TestFormatPreservesQueriesValidUnderAnotherViz(t *testing.T) {
-	q := panel.Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}
+	q := query.Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}
 	f, ps, err := Format(t.Context(), &countingParser{fail: true}, q, Options{Viz: "timeseries"})
 	if err != nil || len(ps) != 0 || f == nil || f.Text != "spans | count() by service" {
 		t.Fatalf("valid table query: %+v %+v %v", f, ps, err)

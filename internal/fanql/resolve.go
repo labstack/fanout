@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/sqlscan"
 	"github.com/labstack/fanout/internal/suggest"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -17,12 +17,12 @@ import (
 type Notice struct {
 	Path    string          `json:"path"`
 	Message string          `json:"message"`
-	Span    *panel.TextSpan `json:"span,omitempty"`
+	Span    *query.TextSpan `json:"span,omitempty"`
 }
 
 type resolved struct {
 	Query      *queryTree
-	Compatible []panel.VizCompat
+	Compatible []query.VizCompat
 	Edits      []VizEdit
 	Notices    []Notice
 }
@@ -34,29 +34,29 @@ type VizEdit struct {
 // Vocabulary dependencies are snapshots supplied per compilation, so prospective
 // catalog changes can be tested without mutating process-wide state.
 type vocabulary struct {
-	columns   func(string) ([]panel.Field, bool)
-	measures  func() []panel.MeasureSpec
+	columns   func(string) ([]query.Field, bool)
+	measures  func() []query.MeasureSpec
 	functions func() []string
 	buckets   func() []string
 }
 
 func currentVocabulary() vocabulary {
-	return vocabulary{panel.SignalColumns, panel.MeasureSpecs, panel.FilterFunctionNames, panel.BucketNames}
+	return vocabulary{query.SignalColumns, query.MeasureSpecs, query.FilterFunctionNames, query.BucketNames}
 }
 
 type resolver struct {
 	opts     Options
 	vocab    vocabulary
 	out      *resolved
-	problems panel.Problems
+	problems query.Problems
 	countIf  bool
 	path     string
 }
 
-func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel.Problems) {
-	r := &resolver{opts: opts, vocab: vocab, out: &resolved{Query: q, Notices: []Notice{}, Compatible: []panel.VizCompat{}, Edits: []VizEdit{}}}
+func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, query.Problems) {
+	r := &resolver{opts: opts, vocab: vocab, out: &resolved{Query: q, Notices: []Notice{}, Compatible: []query.VizCompat{}, Edits: []VizEdit{}}}
 	if q == nil {
-		return nil, panel.Problems{{Path: "text", Message: "a query is required"}}
+		return nil, query.Problems{{Path: "text", Message: "a query is required"}}
 	}
 	for i, e := range q.Where {
 		r.path = fmt.Sprintf("where[%d]", i)
@@ -78,9 +78,9 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 			before := len(r.problems)
 			expr := r.measure(m.Parsed.Expr, m.Info, m.Filters)
 			if len(r.problems) == before {
-				parsed, message, hint := panel.MeasureFromExpr(q.Source, expr, m.Alias, r.vocab.measures())
+				parsed, message, hint := query.MeasureFromExpr(q.Source, expr, m.Alias, r.vocab.measures())
 				if message != "" {
-					r.problems = append(r.problems, panel.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
+					r.problems = append(r.problems, query.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
 				} else {
 					m.Parsed = parsed
 				}
@@ -99,24 +99,24 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 	if len(r.problems) == 0 {
 		pq, ps := lower(r.out)
 		r.problems = append(r.problems, ps...)
-		vars := map[string]panel.Variable(nil)
+		vars := map[string]query.Variable(nil)
 		if opts.Variables != nil {
-			vars = map[string]panel.Variable{}
+			vars = map[string]query.Variable{}
 			for _, v := range opts.Variables {
 				vars[v.Name] = v
 			}
 		}
 		if opts.Viz != "" && len(ps) == 0 {
-			ps, _ = panel.QueryShape(&pq, opts.Viz, vars, preparedMeasures(q))
+			ps, _ = query.Shape(&pq, opts.Viz, vars, preparedMeasures(q))
 			for _, p := range ps {
 				p.Span = textSpan(queryPathSpan(q, p.Path))
 				r.problems = append(r.problems, p)
 			}
 		}
-		r.out.Compatible = panel.CompatibleVizzes(&pq, vars, preparedMeasures(q))
+		r.out.Compatible = query.CompatibleVizzes(&pq, vars, preparedMeasures(q))
 		if pq.Bucket == "" && q.Stage != nil && q.Stage.Histogram == nil {
 			pq.Bucket = "auto"
-			if ps, _ := panel.QueryShape(&pq, "timeseries", vars, preparedMeasures(q)); len(ps) == 0 {
+			if ps, _ := query.Shape(&pq, "timeseries", vars, preparedMeasures(q)); len(ps) == 0 {
 				edit := *q
 				stage := *q.Stage
 				stage.Bucket = "auto"
@@ -130,7 +130,7 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 	})
 	r.problems = presentProblems(r.problems)
 	if len(r.problems) > maxProblems {
-		r.problems = append(r.problems[:maxProblems], panel.Problem{Path: "text", Message: message(diagMore), Span: r.problems[maxProblems].Span})
+		r.problems = append(r.problems[:maxProblems], query.Problem{Path: "text", Message: message(diagMore), Span: r.problems[maxProblems].Span})
 	}
 	if len(r.problems) > 0 {
 		return nil, r.problems
@@ -138,9 +138,9 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 	return r.out, nil
 }
 
-func textSpan(s span) *panel.TextSpan { return &panel.TextSpan{Start: s.Start, End: s.End} }
+func textSpan(s span) *query.TextSpan { return &query.TextSpan{Start: s.Start, End: s.End} }
 func (r *resolver) issue(at span, message string) {
-	r.problems = append(r.problems, panel.Problem{Path: r.path, Message: message, Span: textSpan(at)})
+	r.problems = append(r.problems, query.Problem{Path: r.path, Message: message, Span: textSpan(at)})
 }
 func (r *resolver) notice(at span, message string) {
 	r.out.Notices = append(r.out.Notices, Notice{Path: r.path, Message: message, Span: textSpan(at)})
@@ -165,7 +165,7 @@ func (r *resolver) field(f *fieldName) {
 	if scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		for _, c := range columns {
 			if strings.EqualFold(key, c.Name) {
-				if c.Type == panel.TypeMap {
+				if c.Type == query.TypeMap {
 					r.issue(f.At, c.Name+" is a map; use "+c.Name+"['key']")
 				}
 				f.Ref = &fieldRef{Column: c.Name, Type: c.Type, Unit: c.Unit}
@@ -179,7 +179,7 @@ func (r *resolver) field(f *fieldName) {
 	if !f.Bracket && !identifierPath.MatchString(key) {
 		r.issue(f.At, fmt.Sprintf("%q needs brackets", key))
 	}
-	f.Ref = &fieldRef{Column: scope, Key: key, Type: panel.TypeString, Unit: "none"}
+	f.Ref = &fieldRef{Column: scope, Key: key, Type: query.TypeString, Unit: "none"}
 	if f.Scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		message := fmt.Sprintf("%q is not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
 		for _, m := range r.vocab.measures() {
@@ -250,7 +250,7 @@ func (r *resolver) expr(e filterExpr) {
 		if r.out.Query.Source == "metrics" {
 			name := "http.server.duration"
 			if r.opts.Schema != nil {
-				var selected *panel.MetricSchema
+				var selected *query.MetricSchema
 				for _, metric := range r.opts.Schema.Signals["metrics"].Metrics {
 					if metric.Name != "" && (selected == nil || metric.Count > selected.Count || metric.Count == selected.Count && metric.Name < selected.Name) {
 						copy := metric
@@ -318,7 +318,7 @@ func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 		r.issue(v.At, "duration needs a unit; e.g. duration>500ms")
 		return
 	}
-	if ref.Type == panel.TypeTime && ref.Key == "" {
+	if ref.Type == query.TypeTime && ref.Key == "" {
 		if !isRange(op) {
 			r.issue(f.At, fmt.Sprintf("%q is a time column; compare it with > or <", ref.Column))
 		} else if v.Kind != stringValue || !timestamp(v.Text) {
@@ -326,7 +326,7 @@ func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 		}
 		return
 	}
-	if ref.Type == panel.TypeNumber && ref.Key == "" && v.Kind != numberValue {
+	if ref.Type == query.TypeNumber && ref.Key == "" && v.Kind != numberValue {
 		r.issue(v.At, ref.Column+" needs a number")
 		return
 	}
@@ -336,7 +336,7 @@ func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 	if v.Kind != wordValue || !(op == ":" || op == "=" || op == "!=" || op == "<>" || op == "in") || ref.Key != "" {
 		return
 	}
-	vocabulary := panel.FieldVocabularies()[ref.Column]
+	vocabulary := query.FieldVocabularies()[ref.Column]
 	table := vocabulary.Aliases
 	if vocabulary.Signal != r.out.Query.Source {
 		table = nil
@@ -492,7 +492,7 @@ func (r *resolver) call(c *filterCall) {
 	}
 }
 
-func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*measureSource, filters map[string]filterExpr) panel.MeasureExpr {
+func (r *resolver) measure(e query.MeasureExpr, infos map[query.MeasureExpr]*measureSource, filters map[string]filterExpr) query.MeasureExpr {
 	info := infos[e]
 	if info == nil {
 		return e
@@ -500,12 +500,12 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 	at := info.at
 	args := info.args
 	value := e
-	if conditional, ok := e.(*panel.MeasureCountIf); ok {
+	if conditional, ok := e.(*query.MeasureCountIf); ok {
 		value = *conditional
 	}
 	switch x := value.(type) {
-	case panel.MeasureCall:
-		var spec *panel.MeasureSpec
+	case query.MeasureCall:
+		var spec *query.MeasureSpec
 		for _, s := range r.vocab.measures() {
 			if s.Name == x.Func {
 				s := s
@@ -533,7 +533,7 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 			a := &args[i]
 			if a.Field != nil {
 				r.field(a.Field)
-				if spec.Numeric && a.Field.Ref.Key == "" && a.Field.Ref.Type != panel.TypeNumber {
+				if spec.Numeric && a.Field.Ref.Key == "" && a.Field.Ref.Type != query.TypeNumber {
 					r.issue(a.At, fmt.Sprintf("%s needs a numeric field; %s is %s", x.Func, a.Field.Key, a.Field.Ref.Type))
 				}
 			}
@@ -541,7 +541,7 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 		x.Field = nil
 		if len(args) > 0 && args[0].Field != nil {
 			f := args[0].Field
-			x.Field = &panel.FieldRef{Text: lowerField(*f), Column: f.Ref.Column, Key: f.Ref.Key, Type: f.Ref.Type, Unit: f.Ref.Unit}
+			x.Field = &query.FieldRef{Text: lowerField(*f), Column: f.Ref.Column, Key: f.Ref.Key, Type: f.Ref.Type, Unit: f.Ref.Unit}
 		}
 		x.Q = spec.Quantile
 		if x.Func == "quantile" && len(args) > 1 && args[1].Number != nil {
@@ -551,7 +551,7 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 			r.issue(at, "quantile q must be a number between 0 and 1")
 		}
 		return x
-	case panel.MeasureCountIf:
+	case query.MeasureCountIf:
 		if r.out.Query.Source == "metrics" {
 			r.issue(at, "measure arithmetic is not available for metrics")
 			return e
@@ -562,7 +562,7 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 		x.Filter = lowerCountFilter(info.filter)
 		filters[x.Filter] = info.filter
 		return x
-	case panel.MeasureBinary:
+	case query.MeasureBinary:
 		if r.out.Query.Source == "metrics" {
 			r.issue(at, "measure arithmetic is not available for metrics")
 			return e
@@ -570,7 +570,7 @@ func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*mea
 		x.L = r.measure(x.L, infos, filters)
 		x.R = r.measure(x.R, infos, filters)
 		return x
-	case panel.MeasureNeg:
+	case query.MeasureNeg:
 		if r.out.Query.Source == "metrics" {
 			r.issue(at, "measure arithmetic is not available for metrics")
 			return e
@@ -586,15 +586,15 @@ func measureAlias(m measureNode, all []measureNode) string {
 		return m.Alias
 	}
 	name := m.Parsed.Func
-	if c, ok := m.Parsed.Expr.(panel.MeasureCall); ok {
+	if c, ok := m.Parsed.Expr.(query.MeasureCall); ok {
 		name = c.Func
 	}
-	if _, ok := m.Parsed.Expr.(*panel.MeasureCountIf); ok {
+	if _, ok := m.Parsed.Expr.(*query.MeasureCountIf); ok {
 		name = "count_if"
 	}
 	n := 0
 	for _, v := range all {
-		if c, ok := v.Parsed.Expr.(panel.MeasureCall); ok && c.Func == name && v.Alias == "" {
+		if c, ok := v.Parsed.Expr.(query.MeasureCall); ok && c.Func == name && v.Alias == "" {
 			n++
 		}
 	}
@@ -615,8 +615,8 @@ func measureAlias(m measureNode, all []measureNode) string {
 	}
 	return name
 }
-func preparedMeasures(q *queryTree) []panel.Measure {
-	out := []panel.Measure{}
+func preparedMeasures(q *queryTree) []query.Measure {
+	out := []query.Measure{}
 	if q.Stage != nil && q.Stage.Histogram == nil {
 		for _, m := range q.Stage.Measures {
 			out = append(out, m.Parsed)
@@ -668,7 +668,7 @@ func (r *resolver) sort() {
 			r.notice(s.At, "sort errors also filters to error spans; new queries: write status:error … sort duration")
 		}
 	}
-	stored := panel.Query{}
+	stored := query.Spec{}
 	if q.Stage != nil {
 		stored.Bucket = q.Stage.Bucket
 	}
@@ -716,7 +716,7 @@ func queryPathSpan(q *queryTree, path string) span {
 func aliasChoices(field string, aliases map[string]string) string {
 	keys := sortedCompletionKeys(aliases)
 	// Preserve the documented order for diagnostic suggestions.
-	if order := panel.FieldVocabularies()[field].Order; len(order) == len(keys) {
+	if order := query.FieldVocabularies()[field].Order; len(order) == len(keys) {
 		keys = order
 	}
 	var choices []string
@@ -729,7 +729,7 @@ func aliasChoices(field string, aliases map[string]string) string {
 	return strings.Join(choices[:len(choices)-1], ", ") + " or " + choices[len(choices)-1]
 }
 
-func ignoredClauseNotices(q panel.Query, viz string) []Notice {
+func ignoredClauseNotices(q query.Spec, viz string) []Notice {
 	notices := []Notice{}
 	bucketed := q.Bucket != "" && slices.Contains([]string{"timeseries", "heatmap", "state_timeline"}, viz)
 	if bucketed && q.Sort != "" {
@@ -744,7 +744,7 @@ func ignoredClauseNotices(q panel.Query, viz string) []Notice {
 	return notices
 }
 
-func presentProblems(problems panel.Problems) panel.Problems {
+func presentProblems(problems query.Problems) query.Problems {
 	for i := range problems {
 		problems[i].Message = diagnosticVizNames(problems[i].Message)
 		problems[i].Hint = diagnosticVizNames(problems[i].Hint)

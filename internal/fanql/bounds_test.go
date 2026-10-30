@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestEachInteractiveBoundIndependently(t *testing.T) {
@@ -23,7 +23,7 @@ func TestEachInteractiveBoundIndependently(t *testing.T) {
 		{"list", "logs where k in (" + strings.Repeat("0,", 100) + "0)", "an in list is at most 100 values", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var problems panel.Problems
+			var problems query.Problems
 			if tc.compile {
 				compiled, ps := Compile(tc.text, Options{})
 				if compiled != nil {
@@ -54,7 +54,7 @@ func TestAstralCharactersSpanInCodePoints(t *testing.T) {
 		t.Fatalf("second term span = %+v", got)
 	}
 	_, ps = parse(text+" +", "")
-	if len(ps) != 1 || ps[0].Message != "unexpected +" || ps[0].Span == nil || *ps[0].Span != (panel.TextSpan{Start: 26, End: 27}) {
+	if len(ps) != 1 || ps[0].Message != "unexpected +" || ps[0].Span == nil || *ps[0].Span != (query.TextSpan{Start: 26, End: 27}) {
 		t.Fatalf("diagnostic after astral text = %+v", ps)
 	}
 }

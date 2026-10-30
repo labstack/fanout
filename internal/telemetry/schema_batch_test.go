@@ -9,7 +9,7 @@ import (
 )
 
 // _schema.batch is an empty Parquet batch whose only job is to carry this
-// binary's column list: internal/query derives every view's explicit
+// binary's column list: internal/engine derives every view's explicit
 // read_parquet(schema=MAP{...}) from it, so a column missing there is a column
 // missing from the view.
 //

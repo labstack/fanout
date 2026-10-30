@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -250,7 +250,7 @@ func quoteSearchBeforeGroup(e filterExpr, text string) string {
 		neg, e = true, n.X
 	}
 	if x, ok := e.(*textExpr); ok {
-		for _, name := range panel.FilterFunctionNames() {
+		for _, name := range query.FilterFunctionNames() {
 			if strings.EqualFold(x.Value.Text, name) {
 				text = quoteText(x.Value.Text)
 				if neg {
@@ -337,7 +337,7 @@ func printValue(v literalValue, f fieldName, aliases bool) string {
 				column = ""
 			}
 		}
-		for alias, value := range panel.FieldAliases(column) {
+		for alias, value := range query.FieldAliases(column) {
 			if stored == value {
 				return alias
 			}
@@ -449,7 +449,7 @@ func printCall(x *filterCall) string {
 }
 
 func printMeasure(m measureNode) string {
-	text := renderMeasure(m.Parsed.Expr, 0, func(f *panel.FieldRef) string {
+	text := renderMeasure(m.Parsed.Expr, 0, func(f *query.FieldRef) string {
 		return printField(fieldName{Key: f.Text, Ref: &fieldRef{Column: f.Column, Key: f.Key, Type: f.Type, Unit: f.Unit}})
 	}, func(sql string) string {
 		e := m.Filters[sql]
@@ -467,11 +467,11 @@ func printMeasure(m measureNode) string {
 	}
 	return text
 }
-func renderMeasure(e panel.MeasureExpr, parent int, field func(*panel.FieldRef) string, filter func(string) string, syntax ...map[panel.MeasureExpr]*measureSource) string {
+func renderMeasure(e query.MeasureExpr, parent int, field func(*query.FieldRef) string, filter func(string) string, syntax ...map[query.MeasureExpr]*measureSource) string {
 	if len(syntax) > 0 {
 		if info := syntax[0][e]; info != nil {
 			switch x := e.(type) {
-			case panel.MeasureCall:
+			case query.MeasureCall:
 				var args []string
 				for _, a := range info.args {
 					switch {
@@ -486,7 +486,7 @@ func renderMeasure(e panel.MeasureExpr, parent int, field func(*panel.FieldRef) 
 					}
 				}
 				return x.Func + "(" + strings.Join(args, ", ") + ")"
-			case *panel.MeasureCountIf:
+			case *query.MeasureCountIf:
 				body := printEntry(info.filter, false)
 				if _, ok := info.filter.(*andExpr); ok {
 					body = strings.TrimSuffix(strings.TrimPrefix(body, "("), ")")
@@ -496,7 +496,7 @@ func renderMeasure(e panel.MeasureExpr, parent int, field func(*panel.FieldRef) 
 		}
 	}
 	switch x := e.(type) {
-	case panel.MeasureCall:
+	case query.MeasureCall:
 		var args []string
 		if x.Field != nil {
 			args = append(args, field(x.Field))
@@ -505,16 +505,16 @@ func renderMeasure(e panel.MeasureExpr, parent int, field func(*panel.FieldRef) 
 			args = append(args, strconv.FormatFloat(x.Q, 'f', -1, 64))
 		}
 		return x.Func + "(" + strings.Join(args, ", ") + ")"
-	case panel.MeasureCountIf:
+	case query.MeasureCountIf:
 		return "count_if(" + filter(x.Filter) + ")"
-	case panel.MeasureConst:
+	case query.MeasureConst:
 		return strconv.FormatFloat(x.Value, 'f', -1, 64)
-	case panel.MeasureNeg:
-		if _, nested := x.X.(panel.MeasureNeg); nested {
+	case query.MeasureNeg:
+		if _, nested := x.X.(query.MeasureNeg); nested {
 			return "-(" + renderMeasure(x.X, 0, field, filter, syntax...) + ")"
 		}
 		return "-" + renderMeasure(x.X, 3, field, filter, syntax...)
-	case panel.MeasureBinary:
+	case query.MeasureBinary:
 		prec := 1
 		if x.Op == '*' || x.Op == '/' {
 			prec = 2

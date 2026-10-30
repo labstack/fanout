@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type PanelChange struct {
@@ -48,12 +48,12 @@ type ChangeSet struct {
 // Changes compares normalized committed snapshots. Physical packing is reported
 // once; authored fields and only panels outside the longest common surviving
 // order get panel chips. Normalization applies to copies for diffing only.
-func Changes(before, after panel.Dashboard) ChangeSet {
+func Changes(before, after query.Dashboard) ChangeSet {
 	// The zero base is a create: only added panel chips apply, for every consumer.
 	created := before.Version == 0 && before.Name == "" && len(before.Panels) == 0
 	before = normalizedForDiff(before)
 	after = normalizedForDiff(after)
-	old := map[string]panel.Panel{}
+	old := map[string]query.Panel{}
 	for _, p := range before.Panels {
 		old[p.ID] = p
 	}
@@ -124,12 +124,12 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-func normalizedForDiff(spec panel.Dashboard) panel.Dashboard {
+func normalizedForDiff(spec query.Dashboard) query.Dashboard {
 	copy, err := clone(spec)
 	if err != nil {
 		panic(err)
 	}
-	panel.Normalize(&copy)
+	query.Normalize(&copy)
 	return copy
 }
 
@@ -137,7 +137,7 @@ func normalizedForDiff(spec panel.Dashboard) panel.Dashboard {
 // same minimal moved set deterministically, including an ambiguous two-panel swap.
 func retainedOrder(before, after []string) map[string]bool {
 	// Saved specs hold at most panel.MaxPanels panels, which bounds the table.
-	if len(before) > panel.MaxPanels || len(after) > panel.MaxPanels {
+	if len(before) > query.MaxPanels || len(after) > query.MaxPanels {
 		return map[string]bool{}
 	}
 	lengths := make([][]int, len(before)+1)

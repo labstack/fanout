@@ -32,7 +32,7 @@ beforeEach(() => {
   save = async () => json({ id: "d1", version: 8, spec: { ...spec, panels: spec.panels.map(p => p.id === "count" ? { ...p, sql: edited } : p) } });
   fetchMock.mockImplementation(async (input, init) => {
     if (String(input) === "/api/telemetry/schema") return json({ signals: { spans: { columns: [{ name: "start_time", type: "time" }] } }, sql_relations: {} });
-    if (String(input) === "/api/panels/query") return preview();
+    if (String(input) === "/api/queries/run") return preview();
     if (String(input) === "/api/dashboards/d1" && init?.method === "PATCH") return save();
     throw new Error(`Unexpected request: ${input}`);
   });
@@ -61,7 +61,7 @@ it("edits, runs through the existing query API, renders the result and saves onl
   expect((ui.getByRole("button", { name: "Save SQL" }) as HTMLButtonElement).disabled).toBe(true);
   await change(edited); await click("Run");
   await wait(() => expect(ui.getByText("42")).toBeDefined());
-  const query = fetchMock.mock.calls.find(([url]) => String(url) === "/api/panels/query")!;
+  const query = fetchMock.mock.calls.find(([url]) => String(url) === "/api/queries/run")!;
   expect(JSON.parse(String(query[1]?.body))).toEqual({ dashboard: { ...spec, panels: [spec.panels[0], { ...spec.panels[1], sql: edited }] }, panels: ["count"], time, vars, compare: true, widths: { count: 800 } });
   await click("Save SQL");
   await wait(() => expect(onClose).toHaveBeenCalledOnce());
@@ -171,7 +171,7 @@ it("aborts an in-flight preview on unmount", async () => {
   const pending = new Promise<Response>(() => {});
   fetchMock.mockImplementation(async (input, init) => {
     if (String(input) === "/api/telemetry/schema") return json({ signals: {}, sql_relations: {} });
-    if (String(input) === "/api/panels/query") { signal = init?.signal ?? undefined; return pending; }
+    if (String(input) === "/api/queries/run") { signal = init?.signal ?? undefined; return pending; }
     return pending;
   });
   const { click } = await render();

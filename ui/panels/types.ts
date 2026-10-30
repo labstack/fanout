@@ -1,4 +1,4 @@
-/* The v1 dashboard spec and panel results, mirroring internal/panel. Pure
+/* The v1 dashboard spec and panel results, mirroring internal/query. Pure
  * types: this directory has no node_modules and imports only siblings. */
 export const ALL = "$__all";
 

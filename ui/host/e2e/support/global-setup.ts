@@ -134,7 +134,7 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     ] };
     const deadline = Date.now() + 90_000;
     await waitUntilReady(deadline, async () => {
-      const { body } = await requestJSON("/api/panels/query", { dashboard }, Math.max(1, Math.min(20_000, deadline - Date.now())));
+      const { body } = await requestJSON("/api/queries/run", { dashboard }, Math.max(1, Math.min(20_000, deadline - Date.now())));
       // Counts can precede log flushes and edge publication; inspect kind, not total rows.
       return readinessCause(body);
     });
@@ -154,7 +154,7 @@ export default async function globalSetup({ signalCleanup = true, onSignal = () 
     performanceSpec.time = { from: seedWindow[1], to: seedWindow[2], refresh: "off" };
     const performanceDeadline = Date.now() + 90_000;
     await waitUntilReady(performanceDeadline, async () => {
-      const { body } = await requestJSON("/api/panels/query", { dashboard: performanceSpec }, Math.max(1, Math.min(20_000, performanceDeadline - Date.now())));
+      const { body } = await requestJSON("/api/queries/run", { dashboard: performanceSpec }, Math.max(1, Math.min(20_000, performanceDeadline - Date.now())));
       return performanceReadinessCause(body, performanceSpec.panels.map((panel: { id: string }) => panel.id));
     });
     const { response: performanceCreated, body: performanceRecord } = await requestJSON("/api/dashboards", { spec: performanceSpec });

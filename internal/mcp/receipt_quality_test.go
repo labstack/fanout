@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func parallelTimingExecutor() receiptExecutor {
-	return receiptExecutor{run: func(_ context.Context, req panel.RunRequest) ([]panel.Result, error) {
-		results := make([]panel.Result, len(req.Dashboard.Panels))
+	return receiptExecutor{run: func(_ context.Context, req query.RunRequest) ([]query.Result, error) {
+		results := make([]query.Result, len(req.Dashboard.Panels))
 		var wg sync.WaitGroup
 		for i, p := range req.Dashboard.Panels {
 			wg.Add(1)
@@ -24,7 +24,7 @@ func parallelTimingExecutor() receiptExecutor {
 				defer wg.Done()
 				start := time.Now()
 				time.Sleep(30 * time.Millisecond)
-				results[i] = panel.Result{ID: p.ID, Status: panel.StatusOK, ElapsedMS: time.Since(start).Milliseconds()}
+				results[i] = query.Result{ID: p.ID, Status: query.StatusOK, ElapsedMS: time.Since(start).Milliseconds()}
 			}()
 		}
 		wg.Wait()
@@ -36,7 +36,7 @@ func TestSaveAndPreviewTotalsMeasureParallelWallTime(t *testing.T) {
 	s := newToolServer(t, structural{}, parallelTimingExecutor())
 	spec := textDashboard("Parallel timings")
 	for _, id := range []string{"b", "c", "d"} {
-		spec.Panels = append(spec.Panels, panel.Panel{ID: id, Title: id, Viz: "text", Content: id})
+		spec.Panels = append(spec.Panels, query.Panel{ID: id, Title: id, Viz: "text", Content: id})
 	}
 	_, saved, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 	if err != nil {
@@ -76,7 +76,7 @@ func TestSaveAndPreviewTotalsMeasureParallelWallTime(t *testing.T) {
 
 func TestUnexecutedPanelRowsOmitTimingMeasurements(t *testing.T) {
 	s := newPanelServer(t)
-	_, preview, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{
+	_, preview, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{
 		{ID: "valid", Title: "Valid", Viz: "text", Content: "hello"},
 		{ID: "invalid", Title: "Invalid", Viz: "unknown"},
 	}})
@@ -105,8 +105,8 @@ func TestUnexecutedPanelRowsOmitTimingMeasurements(t *testing.T) {
 }
 
 func TestSavedPanelErrorsAreRedactedWithoutLoggingAgain(t *testing.T) {
-	s := newToolServer(t, structural{}, receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
-		return []panel.Result{{ID: "notes", Status: panel.StatusError, Error: "cannot read /private/telemetry/file.parquet"}}, nil
+	s := newToolServer(t, structural{}, receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+		return []query.Result{{ID: "notes", Status: query.StatusError, Error: "cannot read /private/telemetry/file.parquet"}}, nil
 	}})
 	var logs bytes.Buffer
 	original := slog.Default()

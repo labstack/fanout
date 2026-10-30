@@ -39,7 +39,7 @@ type Alert struct {
 	FiredAt            sql.NullString  `json:"fired_at"`
 	ResolvedAt         sql.NullString  `json:"resolved_at"`
 	RepeatedAt         sql.NullString  `json:"repeated_at"`
-	LastEval           sql.NullString  `json:"last_eval"`
+	LastEvaluatedAt    sql.NullString  `json:"last_evaluated_at"`
 	LastDeliveryStatus sql.NullString  `json:"last_delivery_status"`
 	LastDeliveryAt     sql.NullString  `json:"last_delivery_at"`
 	CreatedAt          string          `json:"created_at"`

@@ -3,7 +3,7 @@ package fanql
 import (
 	"context"
 	"fmt"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/sqlscan"
 	"strconv"
 	"strings"
@@ -18,7 +18,7 @@ const (
 )
 
 type Requirement struct {
-	Name      panel.VizRequirement `json:"name"`
+	Name      query.VizRequirement `json:"name"`
 	Satisfied bool                 `json:"satisfied"`
 }
 type Formatted struct {
@@ -39,40 +39,40 @@ const (
 
 // Format preserves each stored filter as one entry. Candidates are kept only
 // after a byte or engine-AST exactness check; all other filters remain raw.
-func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Options) (*Formatted, panel.Problems, error) {
+func Format(ctx context.Context, p query.Parser, stored query.Spec, opts Options) (*Formatted, query.Problems, error) {
 	if opts.Panel != nil {
 		opts.Viz = opts.Panel.Viz
 	}
-	vars := map[string]panel.Variable(nil)
+	vars := map[string]query.Variable(nil)
 	if opts.Variables != nil {
-		vars = make(map[string]panel.Variable, len(opts.Variables))
+		vars = make(map[string]query.Variable, len(opts.Variables))
 		for _, v := range opts.Variables {
 			vars[v.Name] = v
 		}
 	}
 	// Most stored queries are valid tables. Prove shape validity there first
 	// instead of reparsing every measure for every possible visualization.
-	problems, _ := panel.QueryShape(&stored, "table", vars)
-	if len(problems) > 0 && len(panel.CompatibleVizzes(&stored, vars)) == 0 {
+	problems, _ := query.Shape(&stored, "table", vars)
+	if len(problems) > 0 && len(query.CompatibleVizzes(&stored, vars)) == 0 {
 		viz := opts.Viz
 		if viz == "" {
 			viz = "table"
 		}
-		problems, _ = panel.QueryShape(&stored, viz, vars)
+		problems, _ = query.Shape(&stored, viz, vars)
 		if len(problems) > 0 {
 			return nil, presentProblems(problems), nil
 		}
 	}
 	q := &queryTree{Source: stored.From}
 	f := &Formatted{Exactness: Exact, Notices: []Notice{}, Requires: []Requirement{}}
-	_, requirements := panel.QueryShape(&stored, opts.Viz, vars)
+	_, requirements := query.Shape(&stored, opts.Viz, vars)
 	for _, name := range requirements {
 		satisfied := false
 		if p := opts.Panel; p != nil {
 			switch name {
-			case panel.RequiresMinMax:
+			case query.RequiresMinMax:
 				satisfied = p.Min != nil && p.Max != nil && *p.Min < *p.Max
-			case panel.RequiresThresholds:
+			case query.RequiresThresholds:
 				satisfied = len(p.Thresholds) > 0
 			}
 		}
@@ -89,7 +89,7 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 			if operationalFormatError(err) {
 				return nil, nil, fmt.Errorf("format where[%d]: %w", i, err)
 			}
-			return nil, panel.Problems{{Path: fmt.Sprintf("where[%d]", i), Message: err.Error()}}, nil
+			return nil, query.Problems{{Path: fmt.Sprintf("where[%d]", i), Message: err.Error()}}, nil
 		}
 		q.Where = append(q.Where, e)
 		if t == tierNormalized {
@@ -102,7 +102,7 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 		if stored.Histogram != nil {
 			field, ok := liftFieldText(stored.From, stored.Histogram.Field)
 			if !ok {
-				return nil, panel.Problems{{Path: "histogram.field", Message: "histogram field cannot be expressed in FanQL"}}, nil
+				return nil, query.Problems{{Path: "histogram.field", Message: "histogram field cannot be expressed in FanQL"}}, nil
 			}
 			q.Stage.Histogram = &field
 		} else {
@@ -112,7 +112,7 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 					if operationalFormatError(err) {
 						return nil, nil, fmt.Errorf("format measures[%d]: %w", i, err)
 					}
-					return nil, panel.Problems{{Path: fmt.Sprintf("measures[%d]", i), Message: err.Error()}}, nil
+					return nil, query.Problems{{Path: fmt.Sprintf("measures[%d]", i), Message: err.Error()}}, nil
 				}
 				q.Stage.Measures = append(q.Stage.Measures, m)
 				if t == tierNormalized {
@@ -124,7 +124,7 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 		for _, text := range stored.By {
 			field, ok := liftFieldText(stored.From, text)
 			if !ok {
-				return nil, panel.Problems{{Path: "by", Message: "grouping field cannot be expressed in FanQL"}}, nil
+				return nil, query.Problems{{Path: "by", Message: "grouping field cannot be expressed in FanQL"}}, nil
 			}
 			q.Stage.By = append(q.Stage.By, field)
 		}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func FuzzCompileFormatCompile(f *testing.F) {
@@ -29,13 +29,13 @@ func FuzzCompileFormatCompile(f *testing.F) {
 		f.Add(text, "")
 	}
 	engine, _ := newTestEngine(f)
-	vars := []panel.Variable{{Name: "svc", Kind: "text"}, {Name: "svcs", Kind: "custom", Options: []string{"api", "worker"}, Multi: true}}
+	vars := []query.Variable{{Name: "svc", Kind: "text"}, {Name: "svcs", Kind: "custom", Options: []string{"api", "worker"}, Multi: true}}
 	f.Fuzz(func(t *testing.T, text, viz string) {
 		c, ps := Compile(text, Options{Viz: viz, Variables: vars})
 		if len(ps) != 0 {
 			return
 		}
-		compatible := panel.CompatibleVizzes(&c.Query, nil)
+		compatible := query.CompatibleVizzes(&c.Query, nil)
 		if len(compatible) == 0 {
 			// Filter-only metrics have no valid panel visualization.
 			return
@@ -44,10 +44,10 @@ func FuzzCompileFormatCompile(f *testing.F) {
 		if checkViz == "" {
 			checkViz = compatible[0].Viz
 		}
-		d := panel.Dashboard{Name: "Round trip", Variables: vars, Panels: []panel.Panel{{ID: "p", Title: "p", Viz: checkViz, Query: &c.Query}}}
+		d := query.Dashboard{Name: "Round trip", Variables: vars, Panels: []query.Panel{{ID: "p", Title: "p", Viz: checkViz, Query: &c.Query}}}
 		// Compile leaves raw SQL validation to the panel gate. The property
 		// applies to executable panel queries, including raw SQL and comments.
-		if _, problems, err := panel.Check(t.Context(), engine, &d); err != nil {
+		if _, problems, err := query.Check(t.Context(), engine, &d); err != nil {
 			t.Fatal(err)
 		} else if len(problems) != 0 {
 			return
@@ -136,16 +136,16 @@ func TestStructuredGeneratorCoversConditionalMeasuresAndArithmetic(t *testing.T)
 		for choice := range 16 {
 			// Fixed bytes keep the generated filters short while varying measures.
 			q := generatedStructuredQuery([]byte{byte(source), byte(choice), 1, 1, 1, 1, 1, 1})
-			m, err := panel.ParseMeasure(q.From, q.Measures[0])
+			m, err := query.ParseMeasure(q.From, q.Measures[0])
 			if err != nil {
 				t.Fatal(err)
 			}
 			switch x := m.Expr.(type) {
-			case panel.MeasureCountIf:
+			case query.MeasureCountIf:
 				conditional = true
-			case panel.MeasureBinary:
+			case query.MeasureBinary:
 				arithmetic = true
-				if _, ok := x.L.(panel.MeasureCountIf); ok {
+				if _, ok := x.L.(query.MeasureCountIf); ok {
 					conditional = true
 				}
 			}
@@ -167,7 +167,7 @@ func TestStructuredGeneratorCoversConditionalMeasuresAndArithmetic(t *testing.T)
 
 // generatedStructuredQuery is generator B: a bounded grammar of SQL accepted
 // by the existing gate, independent of FanQL's own lowerer and printer.
-func generatedStructuredQuery(data []byte) panel.Query {
+func generatedStructuredQuery(data []byte) query.Spec {
 	byteAt := func(i int) byte {
 		if len(data) == 0 {
 			return 0
@@ -188,7 +188,7 @@ func generatedStructuredQuery(data []byte) panel.Query {
 			"count() / 2 as half",
 		)
 	}
-	q := panel.Query{From: source, Measures: []string{measures[int(byteAt(1))%len(measures)]}}
+	q := query.Spec{From: source, Measures: []string{measures[int(byteAt(1))%len(measures)]}}
 	if byteAt(2)%5 == 0 {
 		// Every entry remains under 500 bytes; their complete text exceeds the
 		// interactive character bound without invalidating the structured Query.
@@ -240,8 +240,8 @@ func generatedStructuredQuery(data []byte) panel.Query {
 
 func FuzzFormatRoundTrip(f *testing.F) {
 	type seed struct {
-		Query     panel.Query      `json:"query"`
-		Variables []panel.Variable `json:"variables,omitempty"`
+		Query     query.Spec       `json:"query"`
+		Variables []query.Variable `json:"variables,omitempty"`
 		Viz       string           `json:"viz,omitempty"`
 	}
 	for _, fixture := range storedQueryFixtures(f) {
@@ -278,19 +278,19 @@ func FuzzFormatRoundTrip(f *testing.F) {
 			input = seed{Query: generatedStructuredQuery(data)}
 		}
 		stored := input.Query
-		if len(panel.CompatibleVizzes(&stored, nil)) == 0 {
+		if len(query.CompatibleVizzes(&stored, nil)) == 0 {
 			return
 		}
 		viz := input.Viz
 		if viz == "" {
-			viz = panel.CompatibleVizzes(&stored, nil)[0].Viz
+			viz = query.CompatibleVizzes(&stored, nil)[0].Viz
 		}
 		checkedQuery := stored
-		dashboard := panel.Dashboard{Name: "Fuzz", Variables: input.Variables, Panels: []panel.Panel{{ID: "fuzz", Title: "Fuzz", Viz: viz, Query: &checkedQuery}}}
-		panel.Normalize(&dashboard)
+		dashboard := query.Dashboard{Name: "Fuzz", Variables: input.Variables, Panels: []query.Panel{{ID: "fuzz", Title: "Fuzz", Viz: viz, Query: &checkedQuery}}}
+		query.Normalize(&dashboard)
 		// JSON mutation can produce syntactically invalid SQL in a shape-valid
 		// Query. The round-trip promise applies only to the gate's accepted input.
-		if _, problems, err := panel.Check(t.Context(), engine, &dashboard); err != nil {
+		if _, problems, err := query.Check(t.Context(), engine, &dashboard); err != nil {
 			t.Fatal(err)
 		} else if len(problems) != 0 {
 			return
@@ -303,15 +303,15 @@ func FuzzFormatRoundTrip(f *testing.F) {
 			// Complete, noneditable text is never sent through public Parse.
 			before, _ := json.Marshal(stored)
 			raw, err := json.Marshal(struct {
-				Text     string      `json:"text"`
-				Editable bool        `json:"editable"`
-				Query    panel.Query `json:"query"`
+				Text     string     `json:"text"`
+				Editable bool       `json:"editable"`
+				Query    query.Spec `json:"query"`
 			}{formatted.Text, false, stored})
 			if err != nil {
 				t.Fatal(err)
 			}
 			var envelope struct {
-				Query panel.Query `json:"query"`
+				Query query.Spec `json:"query"`
 			}
 			if err := json.Unmarshal(raw, &envelope); err != nil {
 				t.Fatal(err)

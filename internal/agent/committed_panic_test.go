@@ -11,7 +11,7 @@ import (
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/fanout/internal/dashboard"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -27,14 +27,14 @@ func TestRuntimePanicDistinguishesCommittedSave(t *testing.T) {
 			if _, err := db.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test')`); err != nil {
 				t.Fatal(err)
 			}
-			service := dashboard.New(db.DB, panel.NewExecutor(nil, 30))
-			server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, panel.NewExecutor(nil, 30), nil, "test")
+			service := dashboard.New(db.DB, query.NewExecutor(nil, 30))
+			server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, query.NewExecutor(nil, 30), nil, "test")
 			registry, err := NewToolRegistry(t.Context(), server.MCP())
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer registry.Close()
-			spec := panel.Dashboard{Name: "Committed", Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}}
+			spec := query.Dashboard{Name: "Committed", Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}}
 			input, err := json.Marshal(map[string]any{"dashboard": spec})
 			if err != nil {
 				t.Fatal(err)

@@ -142,7 +142,7 @@ export function mutationEvidence(state:StreamState,messages:ObjectValue[]|undefi
 }
 export async function executePanels(request:(path:string,init?:RequestInit)=>Promise<any>,spec:Spec,signal:AbortSignal):Promise<{valid:boolean;checked:boolean;checks:Check[]}> {
   try {
-    const data=await request('/api/panels/query',{method:'POST',body:JSON.stringify({dashboard:spec}),signal});
+    const data=await request('/api/queries/run',{method:'POST',body:JSON.stringify({dashboard:spec}),signal});
     if(!Array.isArray(data.results))throw new Error('missing_checks');
     const checks=data.results.map((r:any)=>({id:r.id,status:r.status,rows:r.frame?.rows??0,...(typeof r.diagnosis==='string'?{diagnosis:r.diagnosis}:{}),...(typeof r.error==='string'?{error:r.error}:{})}));
     if(checks.some((c:Check)=>typeof c.id!=='string'||typeof c.status!=='string'||!Number.isFinite(c.rows)||c.rows<0))throw new Error('invalid_checks');

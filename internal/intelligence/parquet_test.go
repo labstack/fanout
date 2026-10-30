@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -23,7 +23,7 @@ func TestDetectorsReadNativeParquetTimestamps(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	duck, err := query.NewDuck(ctx, cfg, repository)
+	duck, err := engine.NewDuck(ctx, cfg, repository)
 	if err != nil {
 		t.Fatal(err)
 	}

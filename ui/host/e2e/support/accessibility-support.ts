@@ -57,7 +57,7 @@ function alter(result: PanelResult, scenario?: Scenario): PanelResult {
 export async function openSurface(page: Page, request: APIRequestContext, info: TestInfo, surface: Surface, panel?: Panel, scenario?: Scenario): Promise<Page | Frame> {
   const theme = themeFor(info);
   if (surface === "dashboard") {
-    if (scenario && scenario !== "stale") await page.route("**/api/panels/query", async route => {
+    if (scenario && scenario !== "stale") await page.route("**/api/queries/run", async route => {
       const response = await route.fetch();
       const body = await response.json() as { results: PanelResult[] };
       body.results = body.results.map(result => result.id === panel!.id ? alter(result, scenario) : result);
@@ -73,7 +73,7 @@ export async function openSurface(page: Page, request: APIRequestContext, info: 
   // State mutations below are explicitly synthetic, not telemetry.
   const panels = panel ? [panel] : spec.panels;
   const dashboard: DashboardSpec = { ...spec, variables: [{ name: "service", kind: "custom", options: ["checkout"], multi: true, include_all: true, default: "$__all" }], panels };
-  const response = await request.post("/api/panels/query", { headers: { "Fanout-Request": "1" }, data: { dashboard, vars: { service: "$__all" } } });
+  const response = await request.post("/api/queries/run", { headers: { "Fanout-Request": "1" }, data: { dashboard, vars: { service: "$__all" } } });
   expect(response.status()).toBe(200);
   const body = await response.json() as { results: PanelResult[] };
   expect(body.results).toHaveLength(panels.length);
@@ -115,7 +115,7 @@ export async function chooseView(surface: Page | Frame, card: Locator, mode: "Da
 }
 export async function staleSurface(page: Page, surface: Page | Frame, kind: Surface, card: Locator) {
   if (kind === "dashboard") {
-    await page.route("**/api/panels/query", route => route.fulfill({ status: 503, json: { code: "query_unavailable", message: "Synthetic fixture: refresh unavailable." } }));
+    await page.route("**/api/queries/run", route => route.fulfill({ status: 503, json: { code: "query_unavailable", message: "Synthetic fixture: refresh unavailable." } }));
     await page.getByRole("button", { name: "Refresh now", exact: true }).click();
     // Only panels in view refresh; clicking the toolbar scrolled the card away.
     await card.scrollIntoViewIfNeeded();

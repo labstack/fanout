@@ -14,7 +14,7 @@ export function p95(values: number[]): number {
 
 export function assertRefreshRequests(paths: string[]) {
   const count = (path: string) => paths.filter(value => value === path).length;
-  if (count("/api/panels/query") !== 1 || count("/api/annotations") !== 1 || count("/api/panels/variables/resolve") !== 0) {
+  if (count("/api/queries/run") !== 1 || count("/api/annotations") !== 1 || count("/api/queries/variables/resolve") !== 0) {
     throw new Error("Refresh request budget exceeded");
   }
 }

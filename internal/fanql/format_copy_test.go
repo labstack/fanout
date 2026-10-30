@@ -3,11 +3,11 @@ package fanql
 import (
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestFormatGaugeExplainsNoGrouping(t *testing.T) {
-	query := panel.Query{From: "spans", Measures: []string{"count()"}, By: []string{"service", "operation"}, Bucket: "1m"}
+	query := query.Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service", "operation"}, Bucket: "1m"}
 	_, ps, err := Format(t.Context(), nil, query, Options{Viz: "gauge"})
 	if err != nil {
 		t.Fatal(err)

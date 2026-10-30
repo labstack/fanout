@@ -16,7 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/auth"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 
 	"github.com/labstack/fanout/internal/dashboard"
 	controlstore "github.com/labstack/fanout/internal/store"
@@ -346,9 +346,9 @@ func TestBuildOriginSkipsMissingMessageIdentity(t *testing.T) {
 
 type originValidator struct{}
 
-func (originValidator) Validate(_ context.Context, d *panel.Dashboard) error {
-	panel.Normalize(d)
-	if problems := panel.Validate(d); len(problems) > 0 {
+func (originValidator) Validate(_ context.Context, d *query.Dashboard) error {
+	query.Normalize(d)
+	if problems := query.Validate(d); len(problems) > 0 {
 		return problems
 	}
 	return nil

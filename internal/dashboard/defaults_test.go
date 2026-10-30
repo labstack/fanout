@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -24,34 +24,34 @@ func TestDefaultSpecPassesTheFullCheck(t *testing.T) {
 	}
 }
 
-func defaultFixture(t *testing.T) (*panel.Executor, *telemetrystore.Repository) {
+func defaultFixture(t *testing.T) (*query.Executor, *telemetrystore.Repository) {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
-	e := panel.NewExecutor(d, 30)
+	e := query.NewExecutor(d, 30)
 	e.SetRollupReader(observability.New(d, d, 30))
 	return e, repo
 }
 
-func runDefault(t *testing.T, e *panel.Executor, start, end time.Time) map[string]panel.Result {
+func runDefault(t *testing.T, e *query.Executor, start, end time.Time) map[string]query.Result {
 	t.Helper()
 	spec := DefaultSpec()
-	spec.Time = panel.Time{From: &start, To: &end}
-	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: spec})
+	spec.Time = query.Time{From: &start, To: &end}
+	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := make(map[string]panel.Result)
+	out := make(map[string]query.Result)
 	for _, r := range results {
-		if r.Status == panel.StatusError {
+		if r.Status == query.StatusError {
 			t.Fatalf("%s: %s", r.ID, r.Error)
 		}
 		out[r.ID] = r
@@ -59,7 +59,7 @@ func runDefault(t *testing.T, e *panel.Executor, start, end time.Time) map[strin
 	return out
 }
 
-func defaultValues(t *testing.T, r panel.Result, column string) []any {
+func defaultValues(t *testing.T, r query.Result, column string) []any {
 	t.Helper()
 	if r.Frame != nil {
 		for i, c := range r.Frame.Columns {
@@ -92,7 +92,7 @@ func TestDefaultSystemPanelsUseExistingEmptyState(t *testing.T) {
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	results := runDefault(t, e, start, start.Add(time.Hour))
 	for _, id := range []string{"check_states", "check_latency", "hosts", "containers", "versions"} {
-		if results[id].Status != panel.StatusEmpty {
+		if results[id].Status != query.StatusEmpty {
 			t.Fatalf("%s: %+v", id, results[id])
 		}
 	}
@@ -278,8 +278,8 @@ func TestDefaultVersionsPreserveFirstSeenAndRuntimeSDKTuples(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := DefaultSpec()
-	spec.Time = panel.Time{From: &start, To: &end}
-	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: spec, Panels: []string{"versions"}})
+	spec.Time = query.Time{From: &start, To: &end}
+	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec, Panels: []string{"versions"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,8 +371,8 @@ func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testin
 	for _, offset := range []time.Duration{2 * time.Minute, 3*time.Minute - time.Nanosecond, 3 * time.Minute, 6 * time.Minute, 6*time.Minute + time.Nanosecond} {
 		end := start.Add(offset)
 		spec := DefaultSpec()
-		spec.Time = panel.Time{From: &start, To: &end}
-		results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: spec, Panels: []string{"hosts", "containers"}})
+		spec.Time = query.Time{From: &start, To: &end}
+		results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec, Panels: []string{"hosts", "containers"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -481,8 +481,8 @@ func TestDefaultContainersUseScopeCPUUnitsAndReportedLimitsForStatus(t *testing.
 			t.Fatal("container CPU percentage must explain its denominator")
 		}
 	}
-	spec.Time = panel.Time{From: &start, To: &end}
-	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: spec, Panels: []string{"containers"}})
+	spec.Time = query.Time{From: &start, To: &end}
+	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec, Panels: []string{"containers"}})
 	if err != nil {
 		t.Fatal(err)
 	}

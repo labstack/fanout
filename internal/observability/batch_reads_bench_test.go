@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -58,7 +58,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -22,11 +22,11 @@ func TestAllEmptyFragmentsReturnGuidanceWithoutViews(t *testing.T) {
 	}{
 		{"get_service_performance", map[string]any{"service": "collector"}, []string{"collector", "spans=0, logs=0, metrics=1"}},
 		{"search_logs", map[string]any{"service": "logger", "severity": "ERROR"}, []string{"INFO (1)", "spans=0, logs=1, metrics=0"}},
-		{"query_telemetry", map[string]any{"panel": panel.Panel{ID: "p", Title: "Collector latency", Viz: "stat", Query: &panel.Query{From: "spans", Where: []string{"namespace = 'shop' AND service = 'collector'"}, Measures: []string{"p95(duration_ms)"}}}}, []string{"Collector latency", "metrics=1"}},
+		{"query_telemetry", map[string]any{"panel": query.Panel{ID: "p", Title: "Collector latency", Viz: "stat", Query: &query.Spec{From: "spans", Where: []string{"namespace = 'shop' AND service = 'collector'"}, Measures: []string{"p95(duration_ms)"}}}}, []string{"Collector latency", "metrics=1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.name == "query_telemetry" {
-				tc.args["time"] = panel.Time{From: &from, To: &to}
+				tc.args["time"] = query.Time{From: &from, To: &to}
 			} else {
 				tc.args["from"], tc.args["to"], tc.args["namespace"] = from, to, "shop"
 			}
@@ -47,9 +47,9 @@ func TestAllEmptyFragmentsReturnGuidanceWithoutViews(t *testing.T) {
 	}
 	// A mixed fragment remains a view, retaining its empty panel's diagnosis.
 	d := fragmentPreset("performance", "checkout", "shop", "", "", 0)
-	d.Time = panel.Time{From: &from, To: &to}
+	d.Time = query.Time{From: &from, To: &to}
 	d.Panels[3].Query.Where = append(d.Panels[3].Query.Where, "operation = 'absent'")
-	result, out, err := s.runFragment(t.Context(), panel.RunRequest{Dashboard: d})
+	result, out, err := s.runFragment(t.Context(), query.RunRequest{Dashboard: d})
 	if err != nil || result.IsError || len(out.Results) != 4 || out.Results[0].Status != "ok" || out.Results[3].Status != "empty" {
 		t.Fatalf("partial=%+v err=%v", out, err)
 	}
@@ -73,9 +73,9 @@ func TestEmptyStorePresetsReturnNoData(t *testing.T) {
 func TestDashboardMutationsRejectEmptyPanelsBeforeWriting(t *testing.T) {
 	s, _, _, from, to := serviceInputFixture(t)
 	s = newToolServer(t, structural{}, s.panels)
-	spec := panel.Dashboard{Name: "Checked", Time: panel.Time{From: &from, To: &to}, Panels: []panel.Panel{
+	spec := query.Dashboard{Name: "Checked", Time: query.Time{From: &from, To: &to}, Panels: []query.Panel{
 		{ID: "note", Title: "Notes", Viz: "text", Content: "Context"},
-		{ID: "requests", Title: "Collector requests", Viz: "stat", Query: &panel.Query{From: "spans", Where: []string{"service = 'collector'"}, Measures: []string{"count()"}}},
+		{ID: "requests", Title: "Collector requests", Viz: "stat", Query: &query.Spec{From: "spans", Where: []string{"service = 'collector'"}, Measures: []string{"count()"}}},
 	}}
 	result, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 	if err != nil || !result.IsError || out.Error == nil || out.Error.Code != "invalid_spec" || out.Dashboard != nil || !strings.Contains(out.Error.Message, "panels[1]") || !strings.Contains(out.Error.Message, "Collector requests") || !strings.Contains(out.Error.Message, "Values seen") {
@@ -153,8 +153,8 @@ func TestEmptyGuidanceOmitsUnrepresentableNamespaceScopes(t *testing.T) {
 					{predicate, "service = '" + service + "'"},
 					{"(" + predicate + ") AND service = '" + service + "'"},
 				} {
-					d := panel.Dashboard{Name: "Scoped", Time: panel.Time{From: &from, To: &to}, Panels: []panel.Panel{{ID: "logs", Title: "Logs", Viz: "logs", Query: &panel.Query{From: "logs", Where: where}}}}
-					code, note, err := s.panels.EmptyGuidance(t.Context(), panel.RunRequest{Dashboard: d})
+					d := query.Dashboard{Name: "Scoped", Time: query.Time{From: &from, To: &to}, Panels: []query.Panel{{ID: "logs", Title: "Logs", Viz: "logs", Query: &query.Spec{From: "logs", Where: where}}}}
+					code, note, err := s.panels.EmptyGuidance(t.Context(), query.RunRequest{Dashboard: d})
 					if err != nil || code != "no_data" || note != "" {
 						t.Fatalf("unsafe scope produced service guidance: code=%q note=%q err=%v", code, note, err)
 					}
@@ -166,20 +166,20 @@ func TestEmptyGuidanceOmitsUnrepresentableNamespaceScopes(t *testing.T) {
 
 func TestDashboardSaveAcceptsBatchCellBudgetTruncation(t *testing.T) {
 	s := panelServerFixture(t, true)
-	d := panel.Dashboard{Name: "Budget"}
+	d := query.Dashboard{Name: "Budget"}
 	// TestBatchCellBudget's forty six-column tables exhaust the shared
 	// 200,000-cell budget. A third span input brings this fixture to the
 	// same 1,000-row per-frame cap before batch truncation.
 	for i := range 40 {
-		d.Panels = append(d.Panels, panel.Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.http_route, a.status, a.duration_ms FROM spans a, spans b, spans c WHERE $__window(a.start_time)"})
+		d.Panels = append(d.Panels, query.Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.http_route, a.status, a.duration_ms FROM spans a, spans b, spans c WHERE $__window(a.start_time)"})
 	}
-	results, err := s.panels.Run(t.Context(), panel.RunRequest{Dashboard: d})
+	results, err := s.panels.Run(t.Context(), query.RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
 	}
 	truncatedToZero := false
 	for _, r := range results {
-		if r.Status != panel.StatusOK || r.Frame == nil {
+		if r.Status != query.StatusOK || r.Frame == nil {
 			t.Fatalf("populated fixture failed: %+v", r)
 		}
 		truncatedToZero = truncatedToZero || (r.Frame.Truncated && r.Frame.Rows == 0)
