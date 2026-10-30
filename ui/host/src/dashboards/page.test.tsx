@@ -519,8 +519,8 @@ describe("DashboardPage", () => {
     variableResponse = () => new Promise(() => {});
     panelResponse = () => new Promise(() => {});
     const { rerender } = await render({}, "d1", false);
-    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => /\/api\/(panels\/(query|variables\/resolve))$/.test(String(input)))).toHaveLength(2), { interval: 5, timeout: 3000 });
-    const signals = fetchMock.mock.calls.filter(([input]) => /\/api\/(panels\/(query|variables\/resolve))$/.test(String(input)))
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([input]) => /\/api\/queries\/(run|variables\/resolve)$/.test(String(input)))).toHaveLength(2), { interval: 5, timeout: 3000 });
+    const signals = fetchMock.mock.calls.filter(([input]) => /\/api\/queries\/(run|variables\/resolve)$/.test(String(input)))
       .map(([, init]) => init?.signal);
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
