@@ -35,9 +35,7 @@ the UI. Monitor the instance from outside its host.
 
 ## Deployment scope
 
-Fanout serves one trust domain on one machine. Namespaces filter telemetry
-queries; every telemetry reader can access all namespaces. Use separate
-instances for mutually untrusted teams.
+Fanout runs on one machine; see [trust domains and namespace access](/docs/reference/capabilities#operating-limits).
 
 Workloads requiring horizontal ingest, replication or an object-storage tier
 require a backend that provides those capabilities.

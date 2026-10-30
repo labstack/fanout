@@ -11,8 +11,8 @@ status: preview
 Fanout retains telemetry as ordinary Parquet files in self-contained atomic
 batch directories. Persistent sidecars index traces, and DuckDB handles SQL,
 broad scans, and rebuildable analytical rollups in the same process.
-Application state—users, sessions, dashboards, alert rules, and agent
-history—lives in SQLite.
+Application state (users, sessions, dashboards, alert rules, and agent
+history) lives in SQLite.
 
 | Component | Purpose |
 |---|---|
@@ -103,13 +103,14 @@ compiled into the binary. It downloads no extensions at runtime. Native source
 builds use `scripts/with-duckdb.sh`, which checks the platform archive and uses
 the matching engine headers; the ordinary `just` build and test recipes invoke
 it automatically. DuckDB 2's asynchronous I/O uses its default memory-governed
-read-ahead rather than an unlimited queue. Rooted service traversal uses keyed
+read-ahead, which bounds the I/O queue. Rooted service traversal uses keyed
 recursion with explicit hop, accumulated-node, and execution-time limits.
 
 Offline verification decodes every Parquet column with the native engine and
 separately checks physical schemas, span ordering, row counts, and trace-index
 ranges. It reuses one bounded in-memory engine and creates no spill files.
-Discarded hashes force decoding; they do not establish a stored checksum.
+Verification computes and discards hashes to force decoding, without storing
+a checksum.
 Verification failures such as memory exhaustion or cancellation never authorize
 quarantine.
 
@@ -158,9 +159,9 @@ active ID even before cleanup; they cannot invalidate unrelated traces.
 Compaction derives the output trace contributions from complete cached inputs. If an input
 is not yet cached, the output remains directly queryable until its own backfill.
 
-The private cache stores per-batch trace parts and one
-incremental candidate per trace. It does not copy every span or log timestamp
-or maintain global scope indexes. Complete cached compaction replacements
+Trace data in the private cache consists of per-batch trace parts and one
+incremental candidate per trace. Timestamps are aggregated by batch and trace;
+scope lookups use those parts and candidates. Complete cached compaction replacements
 preserve candidate bounds without recomputation. Retention and incomplete
 replacements recompute only affected trace IDs from active contributions.
 A semantic version covers the cache schema and aggregation rules; a version
@@ -172,9 +173,9 @@ Service-version observations populate their analytical rollup on a separate
 worker, so an analytical-gate wait cannot delay the completed-batch worker.
 Completed-batch and analytical writers use separate gates and two connections
 outside the read pool. They modify disjoint tables; maintenance holds both gates
-for checkpointing. Trace reads avoid materializing every retained candidate into
-a temporary relation for each request. A snapshot-local ambiguity probe keeps
-unused batch-parts aggregation out of single-scope read plans.
+for checkpointing. Trace reads query retained candidates directly. A
+snapshot-local ambiguity probe includes batch-parts aggregation only when
+the requested scope needs it.
 
 Narrow file selections use explicit lists from footer bounds. Broad selections
 use a glob with a captured-batch-ID filter, which excludes files published after

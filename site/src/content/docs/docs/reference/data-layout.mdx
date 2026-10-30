@@ -39,11 +39,11 @@ accounts that own them.
 [Back up and restore](/docs/guides/backup-and-restore) covers cold backups of the
 complete directory.
 
-## Two engines, on purpose
+## Why two engines
 
 Telemetry is append-heavy, queried analytically over wide ranges, and never
 updated. Application state is small, transactional and updated constantly.
-Parquet with DuckDB serves the former; SQLite serves the latter — [how storage
+Parquet with DuckDB serves the former; SQLite serves the latter. [How storage
 works](/docs/concepts/storage) covers the reasoning and the write path.
 
 ## `query/tmp/`
@@ -55,7 +55,7 @@ disk causes the query to fail.
 
 ## Sizing
 
-Retention is the main lever — `FANOUT_RETENTION_DAYS`, with expiry applied on
+`FANOUT_RETENTION_DAYS` controls retention, with expiry applied on
 the maintenance cycle rather than the moment you change it. File count matters
 as much as byte count for query latency, which is what the compaction pass exists to
 bound. [Tune retention](/docs/guides/retention) covers both.

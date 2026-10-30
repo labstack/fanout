@@ -52,7 +52,7 @@ certificate, use an h2c upstream (plaintext HTTP/2 with prior knowledge).
 Forwarding HTTP/1.1 supports the UI, API and OTLP/HTTP, but breaks gRPC.
 Preserve the original Host header for MCP, and allow long-lived SSE responses.
 
-For example, [Caddy’s h2c upstream](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
+For example, [Caddy's h2c upstream](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 can serve all surfaces with:
 
 ```text
@@ -70,11 +70,7 @@ the server listener configuration.
 
 ## External MCP clients
 
-`FANOUT_PUBLIC_URL` above does double duty: Fanout derives the MCP resource URI
-from it, and that derived resource is what tokens are bound to as their
-audience. So it must be HTTPS and stable across restarts — changing it
-invalidates every token already issued. `FANOUT_PUBLIC_URL` is the only
-public-origin setting.
+For `FANOUT_PUBLIC_URL` requirements, see [MCP setup](/docs/guides/mcp#set-the-public-url-first).
 
 MCP also validates `Origin` before authentication; see
 [Connect an agent over MCP](/docs/guides/mcp#protocol).

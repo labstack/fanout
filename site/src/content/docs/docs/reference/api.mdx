@@ -1,7 +1,7 @@
 ---
 title: "HTTP routes"
 description: "Every HTTP route the server registers and what guards each one. Mostly the browser client's backend rather than a public API."
-summary: "Every route the server registers — application, operational, protocol and the SPA catch-all — with the authorization requirement for each, taken from the middleware that enforces them."
+summary: "Application, operational and protocol routes and the SPA catch-all, with the authorization requirement for each."
 read_when:
   - "You are auditing what an instance exposes and what guards each route."
   - "A request came back 401 or 403 and you want to know which capability it wanted."
@@ -21,13 +21,13 @@ OTLP shares this listener but uses its own handlers and ingest credential; see
 The table includes every route the binary can register. These routes depend on
 configuration:
 
-- `/debug/pprof/*` — only when `FANOUT_PPROF_ENABLED` is true, which is
+- `/debug/pprof/*`: only when `FANOUT_PPROF_ENABLED` is true, which is
   **not** the default. Enabling it also turns on mutex and block sampling.
-- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*` — only when
+- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*`: only when
   `FANOUT_MCP_ENABLED` is true, which **is** the default.
-- `/api/agent/*` — only when `FANOUT_AI_PROVIDER` selects `anthropic` or
+- `/api/agent/*`: only when `FANOUT_AI_PROVIDER` selects `anthropic` or
   `openai`, with that provider's required key. An empty provider disables chat.
-- `/api/auth/oidc/start` and `/api/auth/oidc/callback` — only in
+- `/api/auth/oidc/start` and `/api/auth/oidc/callback`: only in
   `FANOUT_AUTH_MODE=oidc`.
 
 Everything else is always registered. A path shown with `:name` or `*` is the
@@ -80,8 +80,7 @@ Panel execution results keep their own status and error fields.
 OAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.
 Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 
-The **Requires** column comes from the authorization middleware for each method
-and path. [Roles](/docs/reference/roles) maps capabilities to roles.
+[Roles](/docs/reference/roles) maps capabilities to roles.
 
 | Method | Path | Requires |
 |---|---|---|
@@ -156,12 +155,12 @@ and path. [Roles](/docs/reference/roles) maps capabilities to roles.
 
 ## What the requirements mean
 
-- **none** — reachable without a credential.
-- **any signed-in user** — a session, but no particular capability.
-- **protocol handshake** — the OAuth and MCP endpoints, which authenticate
+- **none**: reachable without a credential.
+- **any signed-in user**: a session, but no particular capability.
+- **protocol handshake**: the OAuth and MCP endpoints, which authenticate
   as part of their own protocol rather than through the middleware.
-- **a named capability** — the caller's role must carry it.
-- **or a service credential** — additionally reachable without a browser
+- **a named capability**: the caller's role must carry it.
+- **or a service credential**: additionally reachable without a browser
   session, which is how a scraper reaches the metrics endpoint.
 
 `Any` registers every HTTP method with the same authorization requirement.

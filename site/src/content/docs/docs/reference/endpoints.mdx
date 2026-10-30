@@ -1,7 +1,7 @@
 ---
 title: Endpoints
 description: The operational HTTP endpoints a Fanout instance exposes, and what each one requires.
-summary: Health, readiness, metrics, profiling and the protocol endpoints — with the credential each expects.
+summary: Health, readiness, metrics, profiling and the protocol endpoints, with the credential each expects.
 read_when:
   - You are configuring a load balancer, a probe or a Prometheus scrape.
   - You need to know which endpoints are reachable without authentication.
@@ -11,9 +11,7 @@ status: preview
 Everything below is served by the same HTTP listener as the browser client, on
 `FANOUT_ADDR` (`127.0.0.1:7520` by default; the image sets `:7520`).
 
-This page covers the operational endpoints and what they are for. For the
-complete surface — every route with the exact credential it requires, taken from
-the middleware that enforces it — see [HTTP routes](/docs/reference/api).
+[HTTP routes](/docs/reference/api) lists every route and the credential it requires.
 
 ## Health
 
@@ -32,7 +30,7 @@ Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
 | `/debug/pprof/*` | `operations:read` |
 
 `/metrics` is Prometheus exposition. It accepts a service credential as well
-as an admin session, which is how a scraper reaches it without a browser login —
+as an admin session, which is how a scraper reaches it without a browser login;
 set `FANOUT_METRICS_TOKEN`. `FANOUT_METRICS_PUBLIC=true` permits unauthenticated
 scrapes and emits a startup warning.
 

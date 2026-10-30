@@ -43,7 +43,7 @@ capabilities uses `preview` if any of its contracts remain unsettled.
 
 ## Operating limits
 
-- **Namespaces are not tenants.** Namespaces scope queries, not access. Anyone who can query an instance can query every namespace in it. Each instance is one trust domain.
+- Namespaces filter queries. Anyone who can query an instance can query every namespace in it. Each instance is one trust domain; use separate instances for mutually untrusted teams. A namespace does not represent a user, organisation or tenant.
 - **No horizontal scale.** Ingest, query and maintenance share one process and one machine.
 - **Capacity depends on your workload.** Payload cardinality, query mix and disk determine capacity. The published benchmark measures one release, host and workload. [Measure your own hardware](/docs/concepts/performance).
 - **No migration paths.** Fanout is pre-release. Storage-format changes may require a fresh data directory. Preserve backups before upgrading.

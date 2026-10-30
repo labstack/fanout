@@ -234,7 +234,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("---\n")
 	b.WriteString("title: \"HTTP routes\"\n")
 	b.WriteString("description: \"Every HTTP route the server registers and what guards each one. Mostly the browser client's backend rather than a public API.\"\n")
-	b.WriteString("summary: \"Every route the server registers — application, operational, protocol and the SPA catch-all — with the authorization requirement for each, taken from the middleware that enforces them.\"\n")
+	b.WriteString("summary: \"Application, operational and protocol routes and the SPA catch-all, with the authorization requirement for each.\"\n")
 	b.WriteString("read_when:\n")
 	b.WriteString("  - \"You are auditing what an instance exposes and what guards each route.\"\n")
 	b.WriteString("  - \"A request came back 401 or 403 and you want to know which capability it wanted.\"\n")
@@ -251,13 +251,13 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 
 	b.WriteString("## Conditional routes\n\nThe table includes every route the binary can register. These routes depend on\nconfiguration:\n\n")
 
-	b.WriteString("- `/debug/pprof/*` — only when `FANOUT_PPROF_ENABLED` is true, which is\n")
+	b.WriteString("- `/debug/pprof/*`: only when `FANOUT_PPROF_ENABLED` is true, which is\n")
 	b.WriteString("  **not** the default. Enabling it also turns on mutex and block sampling.\n")
-	b.WriteString("- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*` — only when\n")
+	b.WriteString("- `/mcp`, `/api/mcp`, `/api/auth/oauth/*`, `/oauth/*` and `/.well-known/*`: only when\n")
 	b.WriteString("  `FANOUT_MCP_ENABLED` is true, which **is** the default.\n")
-	b.WriteString("- `/api/agent/*` — only when `FANOUT_AI_PROVIDER` selects `anthropic` or\n")
+	b.WriteString("- `/api/agent/*`: only when `FANOUT_AI_PROVIDER` selects `anthropic` or\n")
 	b.WriteString("  `openai`, with that provider's required key. An empty provider disables chat.\n")
-	b.WriteString("- `/api/auth/oidc/start` and `/api/auth/oidc/callback` — only in\n")
+	b.WriteString("- `/api/auth/oidc/start` and `/api/auth/oidc/callback`: only in\n")
 	b.WriteString("  `FANOUT_AUTH_MODE=oidc`.\n\n")
 	b.WriteString("Everything else is always registered. A path shown with `:name` or `*` is the\n")
 	b.WriteString("pattern Echo matches on, not a literal URL.\n")
@@ -267,7 +267,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 
 	b.WriteString("## Errors\n\nApplication API errors, including unknown routes and wrong methods, return objects shaped like\n`{\"code\":\"bad_request\",\"message\":\"Safe explanation\"}`. Codes are stable\nsnake_case identifiers; clients branch on `code` rather than message text.\nInvalid dashboard or panel specs also include `problems` with field paths,\nmessages and optional hints. Every error response uses `Cache-Control: no-store`;\nHEAD errors have no body. Server failures return a short, safe message; the\nunderlying error is logged and never returned.\n\nDefault codes by HTTP status:\n\n| Status | Code |\n|---|---|\n| 400 | `bad_request` |\n| 401 | `unauthorized` |\n| 403 | `forbidden` |\n| 404 | `not_found` |\n| 405 | `method_not_allowed` |\n| 409 | `conflict` |\n| 413 | `payload_too_large` |\n| 415 | `unsupported_media_type` |\n| 422 | `unprocessable` |\n| 429 | `rate_limited` |\n| 500 | `internal` |\n| 502 | `bad_gateway` |\n| 503 | `unavailable` |\n| 504 | `timeout` |\n\nOther 4xx statuses use `bad_request`; other 5xx statuses use `internal`.\nSpecific conditions use `already_current`, `dashboard_version_not_found`,\n`dashboard_version_conflict`, `invalid_spec` and `last_active_administrator`.\nTool failures carry `error: {code, message}` inside the tool result.\nPanel execution results keep their own status and error fields.\nOAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.\nOperational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.\n\n")
 
-	b.WriteString("The **Requires** column comes from the authorization middleware for each method\nand path. [Roles](/docs/reference/roles) maps capabilities to roles.\n\n")
+	b.WriteString("[Roles](/docs/reference/roles) maps capabilities to roles.\n\n")
 
 	b.WriteString("| Method | Path | Requires |\n")
 	b.WriteString("|---|---|---|\n")
@@ -276,13 +276,13 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	}
 
 	b.WriteString("\n## What the requirements mean\n\n")
-	b.WriteString("- **none** — reachable without a credential.\n")
+	b.WriteString("- **none**: reachable without a credential.\n")
 
-	b.WriteString("- **any signed-in user** — a session, but no particular capability.\n")
-	b.WriteString("- **protocol handshake** — the OAuth and MCP endpoints, which authenticate\n")
+	b.WriteString("- **any signed-in user**: a session, but no particular capability.\n")
+	b.WriteString("- **protocol handshake**: the OAuth and MCP endpoints, which authenticate\n")
 	b.WriteString("  as part of their own protocol rather than through the middleware.\n")
-	b.WriteString("- **a named capability** — the caller's role must carry it.\n")
-	b.WriteString("- **or a service credential** — additionally reachable without a browser\n")
+	b.WriteString("- **a named capability**: the caller's role must carry it.\n")
+	b.WriteString("- **or a service credential**: additionally reachable without a browser\n")
 	b.WriteString("  session, which is how a scraper reaches the metrics endpoint.\n\n")
 	b.WriteString("`Any` registers every HTTP method with the same authorization requirement.\n`GET /*` serves the single-page application for browser paths. Unknown `/api/*`\nand OTLP paths return errors.\n")
 
