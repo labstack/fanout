@@ -10,7 +10,7 @@ export type CompletionItem = { label: string; insert: string; kind: string; deta
 export type Completion = { replace: TextSpan; items: CompletionItem[]; schema: { notice?: string; window: string; sampled: boolean; warm: boolean; recent: boolean } };
 
 export type ParseBody = { text: string; source?: string; viz?: string; variables?: Variable[] };
-export type CompleteBody = { text: string; cursor: number; window?: string; from?: string; to?: string };
+export type CompleteBody = { text: string; cursor: number; source?: string; viz?: string; window?: string; from?: string; to?: string };
 
 // Problems arrive as an ApiError with code invalid_fanql; spans index the text.
 export const parseFanql = (body: ParseBody, signal?: AbortSignal) => request<Parsed>("/api/fanql/parse", { method: "POST", json: body, signal });

@@ -43,7 +43,7 @@ function mount(props: Partial<Parameters<typeof Rail>[0]> = {}) {
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const handlers = {
-    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onExplore: vi.fn(), onInvestigateService: vi.fn(),
+    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onNavigate: vi.fn(), onInvestigateService: vi.fn(),
   };
   const ref = createRef<RailHandle>();
   const render = () => root.render(
@@ -190,16 +190,17 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
-  it("links Explore with or without chat and marks it current on /explore", async () => {
+  it("links Explore, Logs and Traces with or without chat and marks the current page", async () => {
     fetchMock.mockImplementation(async (input) => new URL(String(input), "http://localhost").pathname === "/api/agent/threads" ? json({ items: [], next_cursor: null }) : json({ dashboards: [] }));
     for (const agentAvailable of [true, false]) {
-      const { root, render, handlers } = mount({ agentAvailable, exploreActive: true });
+      const { root, render, handlers } = mount({ agentAvailable, activePath: "/logs" });
       await act(async () => render());
-      const link = [...document.querySelectorAll<HTMLAnchorElement>('a[href="/explore"]')].at(-1)!;
-      expect(link.textContent).toBe("Explore");
-      expect(link.getAttribute("aria-current")).toBe("page");
-      await act(async () => link.click());
-      expect(handlers.onExplore).toHaveBeenCalledOnce();
+      const link = (path: string) => [...document.querySelectorAll<HTMLAnchorElement>(`a[href="${path}"]`)].at(-1)!;
+      expect(["/explore", "/logs", "/traces"].map(path => link(path).textContent)).toEqual(["Explore", "Logs", "Traces"]);
+      expect(link("/logs").getAttribute("aria-current")).toBe("page");
+      expect(link("/explore").getAttribute("aria-current")).toBeNull();
+      await act(async () => link("/traces").click());
+      expect(handlers.onNavigate).toHaveBeenCalledWith("/traces");
       await act(async () => root.unmount());
       document.body.innerHTML = "";
     }

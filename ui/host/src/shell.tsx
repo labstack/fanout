@@ -47,13 +47,13 @@ export default function Shell({ children }: { children: ReactNode }) {
     agentAvailable,
     activeThreadID: isChat && !threadMissing && pathname !== "/chat" ? threadID : undefined,
     activeDashboardID: dashboardId,
-    exploreActive: pathname === "/explore",
+    activePath: pathname,
     onNewChat: newThread,
     onSelectThread: selectThread,
     onDeletedThread: (deletedID) => { if (deletedID === threadID) newThread(); },
     onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }),
     onCreateDashboard: () => openChat(createDashboardPrompt),
-    onExplore: () => void navigate({ to: "/explore" }),
+    onNavigate: (path) => void navigate({ to: path }),
     onInvestigateService: (service) => openChat(`Investigate the ${service} service. Explain its errors and latency.`),
   };
 

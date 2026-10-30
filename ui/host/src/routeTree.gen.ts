@@ -11,7 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ExploreRouteImport } from './routes/explore'
+import { Route as LogsRouteImport } from './routes/logs'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as TracesRouteImport } from './routes/traces'
 import { Route as ChatIndexRouteImport } from './routes/chat.index'
 import { Route as ChatThreadIdRouteImport } from './routes/chat.$threadId'
 import { Route as DashboardsIndexRouteImport } from './routes/dashboards.index'
@@ -27,9 +29,19 @@ const ExploreRoute = ExploreRouteImport.update({
   path: '/explore',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LogsRoute = LogsRouteImport.update({
+  id: '/logs',
+  path: '/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TracesRoute = TracesRouteImport.update({
+  id: '/traces',
+  path: '/traces',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatIndexRoute = ChatIndexRouteImport.update({
@@ -56,7 +68,9 @@ const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/explore': typeof ExploreRoute
+  '/logs': typeof LogsRoute
   '/settings': typeof SettingsRoute
+  '/traces': typeof TracesRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/chat/': typeof ChatIndexRoute
@@ -65,7 +79,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/explore': typeof ExploreRoute
+  '/logs': typeof LogsRoute
   '/settings': typeof SettingsRoute
+  '/traces': typeof TracesRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/chat': typeof ChatIndexRoute
@@ -75,7 +91,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/explore': typeof ExploreRoute
+  '/logs': typeof LogsRoute
   '/settings': typeof SettingsRoute
+  '/traces': typeof TracesRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/chat/': typeof ChatIndexRoute
@@ -86,7 +104,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/explore'
+    | '/logs'
     | '/settings'
+    | '/traces'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
     | '/chat/'
@@ -95,7 +115,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/explore'
+    | '/logs'
     | '/settings'
+    | '/traces'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
     | '/chat'
@@ -104,7 +126,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/explore'
+    | '/logs'
     | '/settings'
+    | '/traces'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
     | '/chat/'
@@ -114,7 +138,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ExploreRoute: typeof ExploreRoute
+  LogsRoute: typeof LogsRoute
   SettingsRoute: typeof SettingsRoute
+  TracesRoute: typeof TracesRoute
   ChatThreadIdRoute: typeof ChatThreadIdRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
   ChatIndexRoute: typeof ChatIndexRoute
@@ -137,11 +163,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExploreRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/logs': {
+      id: '/logs'
+      path: '/logs'
+      fullPath: '/logs'
+      preLoaderRoute: typeof LogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/traces': {
+      id: '/traces'
+      path: '/traces'
+      fullPath: '/traces'
+      preLoaderRoute: typeof TracesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat/': {
@@ -178,7 +218,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ExploreRoute: ExploreRoute,
+  LogsRoute: LogsRoute,
   SettingsRoute: SettingsRoute,
+  TracesRoute: TracesRoute,
   ChatThreadIdRoute: ChatThreadIdRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
   ChatIndexRoute: ChatIndexRoute,
