@@ -232,35 +232,35 @@ func TestParseCalls(t *testing.T) {
 func TestParseStageMeasuresAndArithmetic(t *testing.T) {
 	q := mustParse(t, "spans | count_if(status:error) / count() * 100 as err_pct by http_route every 1m sort err_pct limit 10")
 	m := q.Stage.Measures[0]
-	mul, ok := m.Expr.(*mBinary)
+	mul, ok := m.Parsed.Expr.(panel.MeasureBinary)
 	if !ok || mul.Op != '*' || m.Alias != "err_pct" {
 		t.Fatal(m)
 	}
-	div, ok := mul.L.(*mBinary)
+	div, ok := mul.L.(panel.MeasureBinary)
 	if !ok || div.Op != '/' {
 		t.Fatal(mul)
 	}
-	if _, ok := div.L.(*mCountIf); !ok {
+	if _, ok := div.L.(panel.MeasureCountIf); !ok {
 		t.Fatal(div)
 	}
-	if div.R.(*mCall).Name != "count" || mul.R.(*mConst).Value != 100 {
+	if div.R.(panel.MeasureCall).Func != "count" || mul.R.(panel.MeasureConst).Value != 100 {
 		t.Fatal(mul)
 	}
 	if q.Stage.By[0].Key != "http_route" || q.Stage.Bucket != "1m" || q.Sort.Key != "err_pct" || q.Sort.Ascending || q.Limit.N != 10 {
 		t.Fatal(q)
 	}
-	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Expr.(*mBinary)
-	if x.Op != '-' || x.L.(*mCall).Name != "p95" || x.R.(*mCall).Name != "p50" {
+	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Parsed.Expr.(panel.MeasureBinary)
+	if x.Op != '-' || x.L.(panel.MeasureCall).Func != "p95" || x.R.(panel.MeasureCall).Func != "p50" {
 		t.Fatal(x)
 	}
-	x = mustParse(t, "spans | count() * -1 as neg").Stage.Measures[0].Expr.(*mBinary)
-	if x.R.(*mNeg).X.(*mConst).Value != 1 {
+	x = mustParse(t, "spans | count() * -1 as neg").Stage.Measures[0].Parsed.Expr.(panel.MeasureBinary)
+	if x.R.(panel.MeasureNeg).X.(panel.MeasureConst).Value != 1 {
 		t.Fatal(x)
 	}
 	for _, s := range []string{"count()*100 as c100", "count()/count() as one", "count() * 1e3 as k", "count() * 1.5 as x", "(count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex"} {
 		mustParse(t, "spans | "+s)
 	}
-	c := mustParse(t, "spans | count() * 1e3 as k").Stage.Measures[0].Expr.(*mBinary).R.(*mConst)
+	c := mustParse(t, "spans | count() * 1e3 as k").Stage.Measures[0].Parsed.Expr.(panel.MeasureBinary).R.(panel.MeasureConst)
 	if c.Value != 1000 || c.Text != "1e3" {
 		t.Fatal(c)
 	}
@@ -282,8 +282,8 @@ func TestParseExpressionRules(t *testing.T) {
 	if q.Stage.Histogram == nil || q.Stage.Histogram.Key != "duration" || len(q.Stage.By) != 1 {
 		t.Fatal(q)
 	}
-	x := mustParse(t, "spans | count(*)").Stage.Measures[0].Expr.(*mCall)
-	if x.Name != "count" || len(x.Args) != 1 || !x.Args[0].Star {
+	x := mustParse(t, "spans | count(*)").Stage.Measures[0].Parsed.Expr.(panel.MeasureCall)
+	if x.Func != "count" {
 		t.Fatal(x)
 	}
 }
@@ -419,7 +419,7 @@ func TestParseBoundsAreEnforcedIndependently(t *testing.T) {
 func TestParseKeywordCaseFolding(t *testing.T) {
 	q := mustParse(t, "SPANS WHERE Service:API | COUNT() BY service EVERY 1M SORT COUNT LIMIT 5")
 	x := q.Where[0].(*comparison)
-	if q.Source != "spans" || x.Field.Key != "Service" || x.Value.Text != "API" || q.Stage.Measures[0].Expr.(*mCall).Name != "count" || q.Stage.Bucket != "1m" || q.Sort.Key != "count" {
+	if q.Source != "spans" || x.Field.Key != "Service" || x.Value.Text != "API" || q.Stage.Measures[0].Parsed.Expr.(panel.MeasureCall).Func != "count" || q.Stage.Bucket != "1m" || q.Sort.Key != "count" {
 		t.Fatal(q, x)
 	}
 }
@@ -460,23 +460,23 @@ func TestParseGroupingFixItsRepairLongerChains(t *testing.T) {
 
 func TestParseApdexTree(t *testing.T) {
 	q := mustParse(t, "spans | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex")
-	var walk func(mExpr) (int, int)
-	walk = func(x mExpr) (int, int) {
+	var walk func(panel.MeasureExpr) (int, int)
+	walk = func(x panel.MeasureExpr) (int, int) {
 		switch x := x.(type) {
-		case *mBinary:
+		case panel.MeasureBinary:
 			ld, ln := walk(x.L)
 			rd, rn := walk(x.R)
 			return max(ld, rd) + 1, ln + rn
-		case *mNeg:
+		case panel.MeasureNeg:
 			d, n := walk(x.X)
 			return d + 1, n
-		case *mCall, *mCountIf:
+		case panel.MeasureCall, panel.MeasureCountIf:
 			return 1, 1
 		default:
 			return 1, 0
 		}
 	}
-	depth, leaves := walk(q.Stage.Measures[0].Expr)
+	depth, leaves := walk(q.Stage.Measures[0].Parsed.Expr)
 	if depth != 4 || leaves != 3 {
 		t.Fatalf("depth %d, aggregates %d", depth, leaves)
 	}

@@ -67,7 +67,7 @@ func TestResolveDottedAndPrefixedKeys(t *testing.T) {
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
-	if r.Query.Stage.Measures[0].Expr.(*mCall).Args[0].Field.Ref.Key != "user.id" || r.Query.Stage.Measures[1].Expr.(*mCall).Args[0].Field.Ref.Column != "resource" {
+	if r.Query.Stage.Measures[0].Parsed.Field.Key != "user.id" || r.Query.Stage.Measures[1].Parsed.Field.Column != "resource" {
 		t.Fatal(r.Query.Stage)
 	}
 	r, ps = resolvedText(t, "metrics | last(value) by resource.k8s.pod.name", Options{})
@@ -172,7 +172,7 @@ func TestResolveFilterFunctions(t *testing.T) {
 
 func TestResolveMeasures(t *testing.T) {
 	r, ps := resolvedText(t, `spans | count_distinct(flag)`, Options{})
-	if len(ps) != 0 || len(r.Notices) != 1 || r.Query.Stage.Measures[0].Expr.(*mCall).Args[0].Field.Ref.Key != "flag" {
+	if len(ps) != 0 || len(r.Notices) != 1 || r.Query.Stage.Measures[0].Parsed.Field.Key != "flag" {
 		t.Fatal(r, ps)
 	}
 	for _, text := range []string{`spans | count(*)`, `spans | quantile(duration, 0.999) as q`, `spans | count_if(status:error)`} {

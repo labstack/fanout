@@ -449,54 +449,81 @@ func printCall(x *filterCall) string {
 }
 
 func printMeasure(m measureNode) string {
-	text := printMExpr(m.Expr, 0)
+	text := renderMeasure(m.Parsed.Expr, 0, func(f *panel.FieldRef) string {
+		return printField(fieldName{Key: f.Text, Ref: &fieldRef{Column: f.Column, Key: f.Key, Type: f.Type, Unit: f.Unit}})
+	}, func(sql string) string {
+		e := m.Filters[sql]
+		if e == nil {
+			return "`" + strings.ReplaceAll(sql, "`", "``") + "`"
+		}
+		body := printEntry(e, false)
+		if _, ok := e.(*andExpr); ok {
+			body = strings.TrimSuffix(strings.TrimPrefix(body, "("), ")")
+		}
+		return body
+	}, m.Info)
 	if m.Alias != "" {
 		text += " as " + m.Alias
 	}
 	return text
 }
-
-func printMExpr(e mExpr, parent int) string {
-	switch x := e.(type) {
-	case *mCall:
-		if x.Name == "count" && len(x.Args) == 1 && x.Args[0].Star {
-			return "count()"
-		}
-		args := make([]string, len(x.Args))
-		for i, a := range x.Args {
-			switch {
-			case a.Field != nil:
-				args[i] = printField(*a.Field)
-			case a.Number != nil:
-				args[i] = strconv.FormatFloat(*a.Number, 'f', -1, 64)
-			case a.Star:
-				args[i] = "*"
+func renderMeasure(e panel.MeasureExpr, parent int, field func(*panel.FieldRef) string, filter func(string) string, syntax ...map[panel.MeasureExpr]*measureSource) string {
+	if len(syntax) > 0 {
+		if info := syntax[0][e]; info != nil {
+			switch x := e.(type) {
+			case panel.MeasureCall:
+				var args []string
+				for _, a := range info.args {
+					switch {
+					case a.Field != nil:
+						args = append(args, printField(*a.Field))
+					case a.Number != nil:
+						args = append(args, decimal(*a.Number))
+					case a.Star:
+						if x.Func != "count" {
+							args = append(args, "*")
+						}
+					}
+				}
+				return x.Func + "(" + strings.Join(args, ", ") + ")"
+			case panel.MeasureCountIf:
+				body := printEntry(info.filter, false)
+				if _, ok := info.filter.(*andExpr); ok {
+					body = strings.TrimSuffix(strings.TrimPrefix(body, "("), ")")
+				}
+				return "count_if(" + body + ")"
 			}
 		}
-		return x.Name + "(" + strings.Join(args, ", ") + ")"
-	case *mCountIf:
-		body := printEntry(x.Filter, false)
-		if _, ok := x.Filter.(*andExpr); ok {
-			body = strings.TrimSuffix(strings.TrimPrefix(body, "("), ")")
+	}
+	switch x := e.(type) {
+	case panel.MeasureCall:
+		var args []string
+		if x.Field != nil {
+			args = append(args, field(x.Field))
 		}
-		return "count_if(" + body + ")"
-	case *mBinary:
+		if x.Func == "quantile" {
+			args = append(args, strconv.FormatFloat(x.Q, 'f', -1, 64))
+		}
+		return x.Func + "(" + strings.Join(args, ", ") + ")"
+	case panel.MeasureCountIf:
+		return "count_if(" + filter(x.Filter) + ")"
+	case panel.MeasureConst:
+		return strconv.FormatFloat(x.Value, 'f', -1, 64)
+	case panel.MeasureNeg:
+		if _, nested := x.X.(panel.MeasureNeg); nested {
+			return "-(" + renderMeasure(x.X, 0, field, filter, syntax...) + ")"
+		}
+		return "-" + renderMeasure(x.X, 3, field, filter, syntax...)
+	case panel.MeasureBinary:
 		prec := 1
 		if x.Op == '*' || x.Op == '/' {
 			prec = 2
 		}
-		text := printMExpr(x.L, prec) + " " + string(x.Op) + " " + printMExpr(x.R, prec+1)
+		text := renderMeasure(x.L, prec, field, filter, syntax...) + " " + string(x.Op) + " " + renderMeasure(x.R, prec+1, field, filter, syntax...)
 		if prec < parent {
-			text = "(" + text + ")"
+			return "(" + text + ")"
 		}
 		return text
-	case *mNeg:
-		if _, nested := x.X.(*mNeg); nested {
-			return "-(" + printMExpr(x.X, 0) + ")"
-		}
-		return "-" + printMExpr(x.X, 3)
-	case *mConst:
-		return strconv.FormatFloat(x.Value, 'f', -1, 64)
 	}
 	return ""
 }

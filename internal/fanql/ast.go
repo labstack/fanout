@@ -148,46 +148,14 @@ type aggregation struct {
 	At        span
 }
 type measureNode struct {
-	Expr  mExpr
-	Alias string
-	At    span
-}
-type mExpr interface{ Span() span }
-type mCall struct {
-	Name string
-	Args []mArg
-	At   span
-}
-type mArg struct {
-	Field  *fieldName
-	Number *float64
-	Star   bool
-	At     span
-}
-type mCountIf struct {
-	Filter filterExpr
-	At     span
-}
-type mBinary struct {
-	Op   byte
-	L, R mExpr
-	At   span
-}
-type mNeg struct {
-	X  mExpr
-	At span
-}
-type mConst struct {
-	Value float64
-	Text  string
-	At    span
+	Parsed  panel.Measure
+	Info    map[panel.MeasureExpr]*measureSource
+	Alias   string
+	At      span
+	Filters map[string]filterExpr
 }
 
-func (x mCall) Span() span    { return x.At }
-func (x mCountIf) Span() span { return x.At }
-func (x mBinary) Span() span  { return x.At }
-func (x mNeg) Span() span     { return x.At }
-func (x mConst) Span() span   { return x.At }
+func (m measureNode) Span() span { return m.At }
 
 type sortClause struct {
 	Key       string
@@ -197,4 +165,16 @@ type sortClause struct {
 type limitClause struct {
 	N  int
 	At span
+}
+
+type measureSource struct {
+	at     span
+	args   []measureArgument
+	filter filterExpr
+}
+type measureArgument struct {
+	Field  *fieldName
+	Number *float64
+	Star   bool
+	At     span
 }

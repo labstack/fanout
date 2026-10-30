@@ -329,47 +329,16 @@ func lowerCall(c *filterCall) string {
 }
 
 func lowerMeasure(m measureNode) string {
-	text := lowerMExpr(m.Expr, 0)
+	text := renderMeasure(m.Parsed.Expr, 0, func(f *panel.FieldRef) string { return f.Text }, func(sql string) string { return sql })
 	if m.Alias != "" {
 		text += " as " + m.Alias
 	}
 	return text
 }
-func lowerMExpr(e mExpr, parent int) string {
-	switch x := e.(type) {
-	case *mCall:
-		var args []string
-		for _, a := range x.Args {
-			if a.Field != nil {
-				args = append(args, lowerField(*a.Field))
-			} else if a.Number != nil {
-				args = append(args, decimal(*a.Number))
-			}
-		}
-		return x.Name + "(" + strings.Join(args, ", ") + ")"
-	case *mCountIf:
-		sql := lowerEntry(x.Filter)
-		if _, ok := x.Filter.(*andExpr); ok {
-			sql = strings.TrimSuffix(strings.TrimPrefix(sql, "("), ")")
-		}
-		return "count_if(" + sql + ")"
-	case *mConst:
-		return decimal(x.Value)
-	case *mNeg:
-		if _, nested := x.X.(*mNeg); nested {
-			return "-(" + lowerMExpr(x.X, 0) + ")"
-		}
-		return "-" + lowerMExpr(x.X, 3)
-	case *mBinary:
-		prec := 1
-		if x.Op == '*' || x.Op == '/' {
-			prec = 2
-		}
-		text := lowerMExpr(x.L, prec) + " " + string(x.Op) + " " + lowerMExpr(x.R, prec+1)
-		if prec < parent {
-			return "(" + text + ")"
-		}
-		return text
+func lowerCountFilter(e filterExpr) string {
+	sql := lowerEntry(e)
+	if _, ok := e.(*andExpr); ok {
+		sql = strings.TrimSuffix(strings.TrimPrefix(sql, "("), ")")
 	}
-	return ""
+	return sql
 }

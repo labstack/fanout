@@ -568,91 +568,58 @@ func liftSeverityRange(in *inExpr) filterExpr {
 }
 
 func liftMeasure(ctx context.Context, p panel.Parser, signal, stored string) (measureNode, tier, error) {
-	// Count-if bodies are stored SQL, while the surrounding expression already
-	// uses FanQL's measure grammar. Lift the bodies before invoking that parser.
-	converted, err := liftCountIfBodies(ctx, p, signal, stored)
+	parsed, err := panel.ParseMeasure(signal, stored)
 	if err != nil {
+		return measureNode{}, tierRaw, formatInput("%s", err)
+	}
+	m := measureNode{Parsed: parsed, Alias: parsed.Alias, Filters: map[string]filterExpr{}}
+	var lift func(panel.MeasureExpr) error
+	lift = func(e panel.MeasureExpr) error {
+		switch x := e.(type) {
+		case panel.MeasureCountIf:
+			// The count_if conjunction is intentionally stored without outer brackets.
+			reader := &ownSQLReader{tokens: ownSQLTokens(x.Filter)}
+			node := reader.expression(0)
+			var filter filterExpr
+			if !reader.failed && reader.pos == len(reader.tokens) {
+				candidate := liftSQLNode(signal, node)
+				if candidate != nil && lowerCountFilter(candidate) == x.Filter {
+					filter = candidate
+				}
+			}
+			if filter == nil {
+				var err error
+				filter, _, err = liftEntry(ctx, p, signal, x.Filter)
+				if err != nil {
+					return err
+				}
+			}
+			if lowerCountFilter(filter) != x.Filter {
+				filter = &rawEntry{Text: x.Filter}
+			}
+			m.Filters[x.Filter] = filter
+		case panel.MeasureBinary:
+			if err := lift(x.L); err != nil {
+				return err
+			}
+			return lift(x.R)
+		case panel.MeasureNeg:
+			return lift(x.X)
+		}
+		return nil
+	}
+	if err := lift(parsed.Expr); err != nil {
 		return measureNode{}, tierRaw, err
 	}
-	text := signal + " | " + converted
-	parser := &parser{vocab: currentVocabulary(), runes: []rune(text), tokens: lex(text), heights: make(map[any]int)}
-	q := parser.query("")
-	if ps := parser.finish(); len(ps) > 0 || q.Stage == nil || len(q.Stage.Measures) != 1 {
-		return measureNode{}, tierRaw, formatInput("measure %q cannot be expressed in FanQL", stored)
-	}
-	if _, ps := resolve(q, Options{}); len(ps) > 0 {
-		return measureNode{}, tierRaw, formatInput("measure %q cannot be expressed in FanQL: %s", stored, ps[0].Message)
-	}
-	m := q.Stage.Measures[0]
 	lowered := lowerMeasure(m)
 	if lowered == stored {
 		return m, tierExact, nil
 	}
-	a, errA := panel.ParseMeasure(signal, lowered)
-	b, errB := panel.ParseMeasure(signal, stored)
-	if errA == nil && errB == nil && a.Func == b.Func && reflect.DeepEqual(a.Field, b.Field) && a.Q == b.Q && a.Alias == b.Alias {
+	again, err := panel.ParseMeasure(signal, lowered)
+	if err == nil && reflect.DeepEqual(parsed.Expr, again.Expr) && parsed.Alias == again.Alias {
 		return m, tierNormalized, nil
 	}
 	return measureNode{}, tierRaw, formatInput("measure %q cannot be formatted without changing its parsed meaning", stored)
-}
-func liftCountIfBodies(ctx context.Context, p panel.Parser, signal, text string) (string, error) {
-	tokens := ownSQLTokens(text)
-	var b strings.Builder
-	end := 0
-	for i := 0; i+1 < len(tokens); i++ {
-		if tokens[i].quote != 0 || !strings.EqualFold(tokens[i].text, "count_if") || tokens[i+1].quote != 0 || tokens[i+1].text != "(" {
-			continue
-		}
-		depth := 1
-		j := i + 2
-		for ; j < len(tokens); j++ {
-			if tokens[j].quote != 0 {
-				continue
-			}
-			if tokens[j].text == "(" {
-				depth++
-			}
-			if tokens[j].text == ")" {
-				depth--
-				if depth == 0 {
-					break
-				}
-			}
-		}
-		if j == len(tokens) {
-			return "", formatInput("unclosed count_if")
-		}
-		body := text[tokens[i+1].end:tokens[j].start]
-		// A count_if conjunction has no entry-level outer parentheses.
-		// Recognize that exact emitted production without consulting the engine.
-		reader := &ownSQLReader{tokens: ownSQLTokens(body)}
-		node := reader.expression(0)
-		var e filterExpr
-		if !reader.failed && reader.pos == len(reader.tokens) {
-			candidate := liftSQLNode(signal, node)
-			if candidate != nil && lowerMExpr(&mCountIf{Filter: candidate}, 0) == "count_if("+body+")" {
-				e = candidate
-			}
-		}
-		if e == nil {
-			var err error
-			e, _, err = liftEntry(ctx, p, signal, body)
-			if err != nil {
-				return "", err
-			}
-		}
-		// Keep the stored SQL when lifting would discard comments or otherwise
-		// change the conditional body. Raw FanQL preserves it byte for byte.
-		if lowerMExpr(&mCountIf{Filter: e}, 0) != "count_if("+body+")" {
-			e = &rawEntry{Text: body}
-		}
-		b.WriteString(text[end:tokens[i+1].end])
-		b.WriteString(printEntry(e, false))
-		end = tokens[j].start
-		i = j
-	}
-	b.WriteString(text[end:])
-	return b.String(), nil
 }
 
 // ownSQLReader recognizes only the expression productions emitted by lowerEntry.

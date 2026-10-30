@@ -127,7 +127,6 @@ type measureParser struct {
 	text              string
 	tokens            []measureToken
 	at, nodes, leaves int
-	parsedDepth       int
 	message, hint     string
 }
 
@@ -217,61 +216,46 @@ func (p *measureParser) node(e MeasureExpr) MeasureExpr {
 	return e
 }
 func (p *measureParser) expr(minPrecedence, depth int) MeasureExpr {
-	if depth > maxMeasureDepth {
-		p.fail(fmt.Sprintf("nests %d deep; a measure nests at most %d", depth, maxMeasureDepth))
-		return nil
+	grammar := MeasureGrammar{
+		Peek: p.peek,
+		Take: func() { p.at++ },
+		Position: func() int {
+			if p.at < len(p.tokens) {
+				return p.tokens[p.at].start
+			}
+			return len(p.text)
+		},
+		CanAtom: func() bool { return p.peek() != "" },
+		Atom: func() MeasureExpr {
+			tok := p.tokens[p.at]
+			p.at++
+			if n, err := strconv.ParseFloat(tok.text, 64); err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
+				return p.node(MeasureConst{n, tok.text})
+			}
+			return p.call(tok)
+		},
+		Node:  func(e MeasureExpr, start int, children ...MeasureExpr) MeasureExpr { return p.node(e) },
+		Group: func(e MeasureExpr, start int) {},
+		Enter: func(start int) {}, Leave: func() {},
+		Depth: func(d int) bool {
+			if d > maxMeasureDepth {
+				p.fail(fmt.Sprintf("nests %d deep; a measure nests at most %d", d, maxMeasureDepth))
+				return false
+			}
+			return true
+		},
+		OK: func() bool { return p.message == "" },
+		Fail: func(code MeasureSyntaxCode, op string, start int) {
+			switch code {
+			case MeasureMissingClose:
+				p.fail("expected )")
+			default:
+				p.fail("expected a measure or number")
+			}
+		},
 	}
-	if p.message != "" {
-		return nil
-	}
-	var left MeasureExpr
-	leftDepth := 0
-	switch {
-	case p.take("-"):
-		x := p.expr(3, depth+1)
-		leftDepth = p.parsedDepth + 1
-		left = p.node(MeasureNeg{x})
-	case p.take("("):
-		left = p.expr(0, depth+1)
-		leftDepth = p.parsedDepth + 1
-		if !p.take(")") {
-			p.fail("expected )")
-		}
-	case p.peek() == "":
-		p.fail("expected a measure or number")
-		return nil
-	default:
-		tok := p.tokens[p.at]
-		p.at++
-		if n, err := strconv.ParseFloat(tok.text, 64); err == nil && !math.IsNaN(n) && !math.IsInf(n, 0) {
-			left = p.node(MeasureConst{n, tok.text})
-		} else {
-			left = p.call(tok)
-		}
-	}
-	for p.message == "" {
-		op := p.peek()
-		precedence := 0
-		if op == "+" || op == "-" {
-			precedence = 1
-		}
-		if op == "*" || op == "/" {
-			precedence = 2
-		}
-		if precedence == 0 || precedence < minPrecedence {
-			break
-		}
-		p.at++
-		right := p.expr(precedence+1, depth+1)
-		leftDepth = 1 + max(leftDepth, p.parsedDepth)
-		if d := leftDepth + depth; d > maxMeasureDepth {
-			p.fail(fmt.Sprintf("nests %d deep; a measure nests at most %d", d, maxMeasureDepth))
-			break
-		}
-		left = p.node(MeasureBinary{op[0], left, right})
-	}
-	p.parsedDepth = leftDepth
-	return left
+	e, _ := ReadMeasureExpression(grammar, minPrecedence, depth)
+	return e
 }
 func (p *measureParser) call(tok measureToken) MeasureExpr {
 	name := strings.ToLower(tok.text)
@@ -408,10 +392,13 @@ func parseMeasure(sig *signal, text string) (Measure, string, string) {
 	if p.message != "" {
 		return Measure{}, p.message, p.hint
 	}
-	if p.leaves == 0 {
+	return measureFromExpr(sig, e, alias, text, p.nodes, p.leaves)
+}
+func measureFromExpr(sig *signal, e MeasureExpr, alias, text string, nodes, leaves int) (Measure, string, string) {
+	if leaves == 0 {
 		return Measure{}, "a measure needs an aggregate; constants can only scale one, e.g. count() * 100", ""
 	}
-	m := Measure{Text: strings.TrimSpace(text), Func: "expr", Alias: alias, Expr: e, Leaves: p.leaves, nodes: p.nodes, Unit: measureUnit(e)}
+	m := Measure{Text: strings.TrimSpace(text), Func: "expr", Alias: alias, Expr: e, Leaves: leaves, nodes: nodes, Unit: measureUnit(e)}
 	switch call := e.(type) {
 	case MeasureCall:
 		m.Func = call.Func
@@ -530,7 +517,6 @@ func suggestOr(word string, candidates []string, fallback string) string {
 // function name, or function_field when two measures share a function.
 func parseMeasures(sig *signal, texts []string, path string, problems *Problems) []Measure {
 	out := make([]Measure, 0, len(texts))
-	nodes, leaves := 0, 0
 	for i, text := range texts {
 		m, message, hint := parseMeasure(sig, text)
 		if message != "" {
@@ -538,6 +524,12 @@ func parseMeasures(sig *signal, texts []string, path string, problems *Problems)
 			continue
 		}
 		out = append(out, m)
+	}
+	return finishMeasures(out, path, problems)
+}
+func finishMeasures(out []Measure, path string, problems *Problems) []Measure {
+	nodes, leaves := 0, 0
+	for _, m := range out {
 		nodes += m.nodes
 		leaves += m.Leaves
 	}
@@ -595,4 +587,38 @@ func ParseMeasure(signal, text string) (Measure, error) {
 		return Measure{}, fmt.Errorf("%s", message)
 	}
 	return m, nil
+}
+
+// MeasureFromExpr validates an already parsed frontend expression. The structured
+// parser and text frontends share this AST and its budgets and metadata.
+func MeasureFromExpr(signal string, e MeasureExpr, alias string) (Measure, string, string) {
+	sig, ok := lookupSignal(signal)
+	if !ok {
+		return Measure{}, fmt.Sprintf("unknown signal %q", signal), ""
+	}
+	nodes, leaves, depth := measureCounts(e)
+	if nodes > maxMeasureNodes {
+		return Measure{}, fmt.Sprintf("has %d nodes; a measure is at most %d", nodes, maxMeasureNodes), ""
+	}
+	if leaves > maxMeasureLeaves {
+		return Measure{}, fmt.Sprintf("has %d aggregates; a measure has 1 to %d", leaves, maxMeasureLeaves), ""
+	}
+	if depth > maxMeasureDepth {
+		return Measure{}, fmt.Sprintf("nests %d deep; a measure nests at most %d", depth, maxMeasureDepth), ""
+	}
+	return measureFromExpr(sig, e, alias, "", nodes, leaves)
+}
+func measureCounts(e MeasureExpr) (nodes, leaves, depth int) {
+	switch x := e.(type) {
+	case MeasureCall, MeasureCountIf:
+		return 1, 1, 0
+	case MeasureBinary:
+		ln, ll, ld := measureCounts(x.L)
+		rn, rl, rd := measureCounts(x.R)
+		return 1 + ln + rn, ll + rl, 1 + max(ld, rd)
+	case MeasureNeg:
+		n, l, d := measureCounts(x.X)
+		return 1 + n, l, 1 + d
+	}
+	return 1, 0, 0
 }

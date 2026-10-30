@@ -25,6 +25,7 @@ var numberPattern = regexp.MustCompile(`^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[e
 var durationPattern = regexp.MustCompile(`(?i)^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:us|ms|s|m|h)$`)
 
 type parser struct {
+	measureInfo     map[panel.MeasureExpr]*measureSource
 	vocab           vocabulary
 	tokens          lexTokens
 	runes           []rune
@@ -425,21 +426,6 @@ func setExprSpan(x filterExpr, at span) {
 	case *textExpr:
 		x.At = at
 	case *rawEntry:
-		x.At = at
-	}
-}
-
-func setMeasureSpan(x mExpr, at span) {
-	switch x := x.(type) {
-	case *mCall:
-		x.At = at
-	case *mCountIf:
-		x.At = at
-	case *mBinary:
-		x.At = at
-	case *mNeg:
-		x.At = at
-	case *mConst:
 		x.At = at
 	}
 }
@@ -1085,6 +1071,7 @@ func (p *parser) parseLimit() *limitClause {
 }
 
 func (p *parser) stage(start int) *aggregation {
+	p.measureInfo = map[panel.MeasureExpr]*measureSource{}
 	s := &aggregation{At: span{Start: start}}
 	if p.completion {
 		p.completionQuery.Stage = s
@@ -1107,7 +1094,7 @@ func (p *parser) stage(start int) *aggregation {
 		}
 		expr := p.mexpr(0)
 		if expr != nil {
-			m := measureNode{Expr: expr, At: expr.Span()}
+			m := measureNode{Parsed: panel.Measure{Expr: expr}, At: p.measureSpan(expr), Info: p.measureInfo, Filters: map[string]filterExpr{}}
 			if modifiers[p.lower()] && p.eat("as") {
 				t := p.peek()
 				if t.Kind == tokenIdent {
@@ -1119,32 +1106,32 @@ func (p *parser) stage(start int) *aggregation {
 			}
 			leaves, share, distribution := measureLeaves(expr)
 			if leaves == 0 {
-				p.report(expr.Span(), diagAggregate)
+				p.report(p.measureSpan(expr), diagAggregate)
 			}
-			_, call := expr.(*mCall)
-			_, countIf := expr.(*mCountIf)
+			_, call := expr.(panel.MeasureCall)
+			_, countIf := expr.(panel.MeasureCountIf)
 			if distribution && !call {
-				p.report(expr.Span(), diagHistogram)
+				p.report(p.measureSpan(expr), diagHistogram)
 			}
 			if !call && !countIf {
 				if m.Alias == "" {
-					p.report(expr.Span(), diagMeasureName)
+					p.report(p.measureSpan(expr), diagMeasureName)
 				}
 				if share {
-					p.report(expr.Span(), diagShare)
+					p.report(p.measureSpan(expr), diagShare)
 				}
 			}
-			if call, ok := expr.(*mCall); ok && call.Name == "histogram" {
+			if call, ok := expr.(panel.MeasureCall); ok && call.Func == "histogram" {
 				if s.Histogram != nil || len(s.Measures) > 0 {
-					p.report(call.At, diagHistogram)
+					p.report(p.measureSpan(call), diagHistogram)
 				}
 				if m.Alias != "" {
 					p.report(m.At, diagHistogramAlias)
 				}
-				if len(call.Args) != 1 || call.Args[0].Field == nil {
-					p.report(call.At, diagHistogramField)
+				if len(p.measureInfo[call].args) != 1 || p.measureInfo[call].args[0].Field == nil {
+					p.report(p.measureSpan(call), diagHistogramField)
 				} else {
-					s.Histogram = call.Args[0].Field
+					s.Histogram = p.measureInfo[call].args[0].Field
 				}
 			} else {
 				if s.Histogram != nil {
@@ -1226,97 +1213,86 @@ func (p *parser) stage(start int) *aggregation {
 	return s
 }
 
-func measurePrecedence(t lexToken) int {
-	if t.Kind != tokenPunct {
-		return -1
-	}
-	switch t.Text {
-	case "+", "-":
-		return 1
-	case "*", "/":
-		return 2
-	}
-	return -1
-}
-
-func (p *parser) canMFactor() bool {
-	t := p.peek()
-	return t.Kind == tokenNumber || t.Kind == tokenIdent && t.Text != "as" || p.is("(") || p.is("-")
-}
-
-func (p *parser) mexpr(minPrec int) mExpr {
-	left := p.mfactor()
-	if left == nil {
-		return nil
-	}
-	for prec := measurePrecedence(p.peek()); prec >= minPrec; prec = measurePrecedence(p.peek()) {
-		op := p.take()
-		if !p.canMFactor() {
-			p.report(op.Span, diagMeasureSides, op.Text)
-			return left
-		}
-		right := p.mexpr(prec + 1)
-		if right == nil {
-			return left
-		}
-		x := &mBinary{Op: op.Text[0], L: left, R: right, At: span{left.Span().Start, right.Span().End}}
-		p.node(x, left, right)
-		left = x
-	}
-	return left
-}
-
-func (p *parser) mfactor() mExpr {
-	p.expectNext(expect{Class: "measure"})
-	t := p.peek()
-	if p.eat("-") {
-		p.enter(t.Span)
-		x := p.mfactor()
-		p.leave()
-		if x == nil {
-			return nil
-		}
-		n := &mNeg{X: x, At: span{t.Span.Start, x.Span().End}}
-		p.node(n, x)
-		return n
-	}
-	if p.eat("(") {
-		p.enter(t.Span)
-		x := p.mexpr(0)
-		p.leave()
-		if !p.eat(")") {
-			p.report(t.Span, diagUnclosedGroup)
-		} else if x != nil {
-			setMeasureSpan(x, span{t.Span.Start, p.previousEnd()})
-		}
-		return x
-	}
-	if t.Kind == tokenNumber {
-		p.take()
-		v, err := strconv.ParseFloat(t.Text, 64)
-		if err != nil {
+func (p *parser) measureSpan(e panel.MeasureExpr) span { return p.measureInfo[e].at }
+func (p *parser) mexpr(minPrec int) panel.MeasureExpr {
+	g := panel.MeasureGrammar{
+		Peek: func() string { return grammarText(p.peek()) }, Take: func() { p.take() }, Position: func() int { return p.peek().Span.Start },
+		CanAtom: func() bool {
+			t := p.peek()
+			return t.Kind == tokenNumber || t.Kind == tokenBad || t.Kind == tokenIdent && t.Text != "as"
+		},
+		Atom: func() panel.MeasureExpr {
+			p.expectNext(expect{Class: "measure"})
+			t := p.peek()
+			if t.Kind == tokenNumber {
+				p.take()
+				v, err := strconv.ParseFloat(t.Text, 64)
+				if err != nil {
+					p.report(t.Span, diagMeasure)
+					return nil
+				}
+				x := panel.MeasureConst{Value: v, Text: t.Text}
+				p.recordMeasure(x, t.Span)
+				return x
+			}
+			if t.Kind == tokenIdent && grammarText(p.ahead(1)) == "(" {
+				return p.mcall()
+			}
+			if t.Kind == tokenBad {
+				p.badTerm()
+				return nil
+			}
 			p.report(t.Span, diagMeasure)
+			if t.Kind != eof {
+				p.take()
+			}
 			return nil
-		}
-		x := &mConst{Value: v, Text: t.Text, At: t.Span}
-		p.node(x)
-		return x
+		},
+		Node: func(e panel.MeasureExpr, start int, children ...panel.MeasureExpr) panel.MeasureExpr {
+			p.recordMeasure(e, span{start, p.previousEnd()}, children...)
+			return e
+		},
+		Group: func(e panel.MeasureExpr, start int) { info := p.measureInfo[e]; info.at = span{start, p.previousEnd()} },
+		Enter: func(start int) { p.enter(span{start, start + 1}) }, Leave: p.leave,
+		Depth: func(int) bool { return true }, OK: func() bool { return true },
+		Fail: func(code panel.MeasureSyntaxCode, op string, start int) {
+			at := span{start, start + len(op)}
+			switch code {
+			case panel.MeasureMissingOperand:
+				p.report(at, diagMeasureSides, op)
+			case panel.MeasureMissingClose:
+				p.report(span{start, start + 1}, diagUnclosedGroup)
+			default:
+				p.report(p.peek().Span, diagMeasure)
+				if p.peek().Kind != eof {
+					p.take()
+				}
+			}
+		},
 	}
-	if t.Kind == tokenIdent && grammarText(p.ahead(1)) == "(" {
-		return p.mcall()
+	e, _ := panel.ReadMeasureExpression(g, minPrec, 0)
+	return e
+}
+func (p *parser) recordMeasure(e panel.MeasureExpr, at span, children ...panel.MeasureExpr) {
+	if p.measureInfo == nil {
+		p.measureInfo = map[panel.MeasureExpr]*measureSource{}
 	}
-	if t.Kind == tokenBad {
-		p.badTerm()
-		return nil
+	p.measureInfo[e] = &measureSource{at: at}
+	p.nodes++
+	height := 0
+	for _, child := range children {
+		height = max(height, p.heights[child]+1)
 	}
-	p.report(t.Span, diagMeasure)
-	if t.Kind != eof {
-		p.take()
+	p.heights[e] = height
+	if p.bounded && p.nodes > maxNodes {
+		p.bound(at, diagNodesBound)
 	}
-	return nil
+	if p.bounded && height+p.depth > maxDepth {
+		p.bound(at, diagDepthBound)
+	}
 }
 
-func (p *parser) mcall() mExpr {
+func (p *parser) mcall() panel.MeasureExpr {
 	name := p.take()
 	open := p.take()
 	at := span{Start: name.Span.Start}
@@ -1331,15 +1307,17 @@ func (p *parser) mcall() mExpr {
 		}
 		p.leave()
 		at.End = p.previousEnd()
-		x := &mCountIf{Filter: filter, At: at}
-		p.node(x, filter)
+		x := panel.MeasureCountIf{Filter: p.text(at)}
+		p.recordMeasure(x, at)
+		p.measureInfo[x].filter = filter
 		return x
 	}
-	x := &mCall{Name: strings.ToLower(name.Text), At: at}
-	p.expectNext(expect{Class: "marg", Func: x.Name, Arg: 0})
+	x := panel.MeasureCall{Func: strings.ToLower(name.Text), Field: &panel.FieldRef{}}
+	var args []measureArgument
+	p.expectNext(expect{Class: "marg", Func: x.Func, Arg: 0})
 	for p.peek().Kind != eof && !p.is(")") && !p.is("|") {
 		t := p.peek()
-		arg := mArg{At: t.Span}
+		arg := measureArgument{At: t.Span}
 		switch {
 		case p.eat("*"):
 			arg.Star = true
@@ -1367,37 +1345,38 @@ func (p *parser) mcall() mExpr {
 			p.report(t.Span, diagMeasureArg)
 			p.take()
 		}
-		x.Args = append(x.Args, arg)
+		args = append(args, arg)
 		if !p.eat(",") {
 			break
 		}
-		p.expectNext(expect{Class: "marg", Func: x.Name, Arg: len(x.Args)})
+		p.expectNext(expect{Class: "marg", Func: x.Func, Arg: len(args)})
 	}
 	if !p.eat(")") {
 		p.report(open.Span, diagCallClose)
 	}
 	p.leave()
-	x.At.End = p.previousEnd()
-	for _, arg := range x.Args {
-		if arg.Star && (x.Name != "count" || len(x.Args) != 1) {
+	at.End = p.previousEnd()
+	for _, arg := range args {
+		if arg.Star && (x.Func != "count" || len(args) != 1) {
 			p.report(arg.At, diagStarArg)
 		}
 	}
-	p.node(x)
+	p.recordMeasure(x, at)
+	p.measureInfo[x].args = args
 	return x
 }
 
-func measureLeaves(x mExpr) (int, bool, bool) {
+func measureLeaves(x panel.MeasureExpr) (int, bool, bool) {
 	switch x := x.(type) {
-	case *mCall:
-		return 1, x.Name == "share", x.Name == "histogram"
-	case *mCountIf:
+	case panel.MeasureCall:
+		return 1, x.Func == "share", x.Func == "histogram"
+	case panel.MeasureCountIf:
 		return 1, false, false
-	case *mBinary:
+	case panel.MeasureBinary:
 		l, ls, lh := measureLeaves(x.L)
 		r, rs, rh := measureLeaves(x.R)
 		return l + r, ls || rs, lh || rh
-	case *mNeg:
+	case panel.MeasureNeg:
 		return measureLeaves(x.X)
 	}
 	return 0, false, false

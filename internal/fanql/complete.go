@@ -374,7 +374,7 @@ func (s *completionCandidates) candidates(e expect) {
 			}
 			s.words("keyword", "sort", "limit")
 			if stage := s.p.completionQuery.Stage; stage != nil && len(stage.Measures) > 0 {
-				_, share, _ := measureLeaves(stage.Measures[len(stage.Measures)-1].Expr)
+				_, share, _ := measureLeaves(stage.Measures[len(stage.Measures)-1].Parsed.Expr)
 				if !share {
 					s.words("operator", "+", "-", "*", "/")
 				}
@@ -619,8 +619,13 @@ func (s *completionCandidates) sortKeys() {
 		// The resolver owns aliases, including repeated calls whose argument's
 		// resolved spelling forms part of the alias (duration -> duration_ms).
 		r := resolver{vocab: currentVocabulary(), out: &resolved{Query: q}}
-		for _, measure := range q.Stage.Measures {
-			r.measure(measure.Expr)
+		for i := range q.Stage.Measures {
+			m := &q.Stage.Measures[i]
+			m.Parsed.Expr = r.measure(m.Parsed.Expr, m.Info, m.Filters)
+			if c, ok := m.Parsed.Expr.(panel.MeasureCall); ok {
+				m.Parsed.Func = c.Func
+				m.Parsed.Field = c.Field
+			}
 		}
 		for _, measure := range q.Stage.Measures {
 			alias := measureAlias(measure, q.Stage.Measures)

@@ -23,7 +23,7 @@ type VizCompat struct {
 
 // QueryShape checks query-only structure without normalizing or using an engine.
 // A nil vars map omits declaration checks. All problem paths are query-relative.
-func QueryShape(q *Query, viz string, vars map[string]Variable) (Problems, []VizRequirement) {
+func QueryShape(q *Query, viz string, vars map[string]Variable, prepared ...[]Measure) (Problems, []VizRequirement) {
 	requirements := []VizRequirement{}
 	if viz == "gauge" {
 		requirements = append(requirements, RequiresMinMax)
@@ -48,7 +48,7 @@ func QueryShape(q *Query, viz string, vars map[string]Variable) (Problems, []Viz
 	p := &Panel{Viz: viz, Query: q}
 	queryShapeRows(q, viz, "", &problems)
 	queryShapeItems(q, viz, "", &problems)
-	if measures, ok := queryShapeAggregate(p, spec, "", &problems, true); ok {
+	if measures, ok := queryShapeAggregate(p, spec, "", &problems, true, prepared...); ok {
 		queryShapeAggregateTail(q, viz, "", measures, &problems)
 		queryShapeReduce(q, spec, viz, "", &problems)
 	}
@@ -62,14 +62,14 @@ func QueryShape(q *Query, viz string, vars map[string]Variable) (Problems, []Viz
 }
 
 // CompatibleVizzes lists the query visualizations accepting the query unchanged.
-func CompatibleVizzes(q *Query, vars map[string]Variable) []VizCompat {
+func CompatibleVizzes(q *Query, vars map[string]Variable, prepared ...[]Measure) []VizCompat {
 	out := []VizCompat{}
 	for _, viz := range vizOrder {
 		// Text and fixed rollup scopes are not FanQL query visualization targets.
 		if viz == "text" || viz == "health" || viz == "service_map" {
 			continue
 		}
-		problems, requires := QueryShape(q, viz, vars)
+		problems, requires := QueryShape(q, viz, vars, prepared...)
 		if len(problems) == 0 {
 			out = append(out, VizCompat{Viz: viz, Requires: requires})
 		}
@@ -90,7 +90,7 @@ func shapeMeasures(sig *signal, texts []string, path string, problems *Problems)
 	return parseMeasures(sig, texts, path, problems)
 }
 
-func queryShapeAggregate(p *Panel, spec vizSpec, path string, problems *Problems, shapeOnly bool) ([]Measure, bool) {
+func queryShapeAggregate(p *Panel, spec vizSpec, path string, problems *Problems, shapeOnly bool, prepared ...[]Measure) ([]Measure, bool) {
 	q := p.Query
 	if p.Viz == "logs" || p.Viz == "traces" || p.Viz == "log_patterns" {
 		// Fixed projections are checked field by field in validateRows; avoid
@@ -125,7 +125,9 @@ func queryShapeAggregate(p *Panel, spec vizSpec, path string, problems *Problems
 		problems.addHint(path+".measures", "grouped panels show one measure", "use one panel per measure, or remove by")
 	}
 	var measures []Measure
-	if shapeOnly {
+	if len(prepared) > 0 {
+		measures = finishMeasures(slices.Clone(prepared[0]), path+".measures", problems)
+	} else if shapeOnly {
 		measures = shapeMeasures(sig, q.Measures, path+".measures", problems)
 	} else {
 		measures = parseMeasures(sig, q.Measures, path+".measures", problems)

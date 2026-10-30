@@ -78,7 +78,15 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 		for i := range s.Measures {
 			m := &s.Measures[i]
 			r.path = fmt.Sprintf("measures[%d]", i)
-			r.measure(m.Expr)
+			expr := r.measure(m.Parsed.Expr, m.Info, m.Filters)
+			if len(r.problems) == 0 {
+				parsed, message, hint := panel.MeasureFromExpr(q.Source, expr, m.Alias)
+				if message != "" {
+					r.problems = append(r.problems, panel.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
+				} else {
+					m.Parsed = parsed
+				}
+			}
 			if m.Alias != "" && !aliasName.MatchString(m.Alias) {
 				r.issue(m.At, fmt.Sprintf("alias %q must be lowercase letters, digits and underscores", m.Alias))
 			}
@@ -101,16 +109,16 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 			}
 		}
 		if opts.Viz != "" && len(ps) == 0 {
-			ps, _ = panel.QueryShape(&pq, opts.Viz, vars)
+			ps, _ = panel.QueryShape(&pq, opts.Viz, vars, preparedMeasures(q))
 			for _, p := range ps {
 				p.Span = textSpan(queryPathSpan(q, p.Path))
 				r.problems = append(r.problems, p)
 			}
 		}
-		r.out.Compatible = panel.CompatibleVizzes(&pq, vars)
+		r.out.Compatible = panel.CompatibleVizzes(&pq, vars, preparedMeasures(q))
 		if pq.Bucket == "" && q.Stage != nil && q.Stage.Histogram == nil {
 			pq.Bucket = "auto"
-			if ps, _ := panel.QueryShape(&pq, "timeseries", vars); len(ps) == 0 {
+			if ps, _ := panel.QueryShape(&pq, "timeseries", vars, preparedMeasures(q)); len(ps) == 0 {
 				edit := *q
 				stage := *q.Stage
 				stage.Bucket = "auto"
@@ -474,94 +482,112 @@ func (r *resolver) call(c *filterCall) {
 	}
 }
 
-func (r *resolver) measure(e mExpr) {
+func (r *resolver) measure(e panel.MeasureExpr, infos map[panel.MeasureExpr]*measureSource, filters map[string]filterExpr) panel.MeasureExpr {
+	info := infos[e]
+	if info == nil {
+		return e
+	}
+	at := info.at
+	args := info.args
 	switch x := e.(type) {
-	case *mCall:
+	case panel.MeasureCall:
 		var spec *panel.MeasureSpec
 		for _, s := range r.vocab.measures() {
-			if s.Name == x.Name {
+			if s.Name == x.Func {
 				s := s
 				spec = &s
 				break
 			}
 		}
 		if spec == nil {
-			r.issue(x.At, "unknown function "+x.Name)
-			return
+			r.issue(at, "unknown function "+x.Func)
+			return e
 		}
 		if len(spec.Signals) > 0 && !slices.Contains(spec.Signals, r.out.Query.Source) {
-			r.issue(x.At, x.Name+" is not available for "+r.out.Query.Source)
-			return
+			r.issue(at, x.Func+" is not available for "+r.out.Query.Source)
+			return e
 		}
-		args := len(x.Args)
-		if x.Name == "count" && args == 1 && x.Args[0].Star {
-			args = 0
+		argc := len(args)
+		if x.Func == "count" && argc == 1 && args[0].Star {
+			argc = 0
 		}
-		if args != spec.Args {
-			r.issue(x.At, fmt.Sprintf("%s takes %d argument(s), got %d; e.g. %s(duration)", x.Name, spec.Args, args, x.Name))
-			return
+		if argc != spec.Args {
+			r.issue(at, fmt.Sprintf("%s takes %d argument(s), got %d; e.g. %s(duration)", x.Func, spec.Args, argc, x.Func))
+			return e
 		}
-		for i := range x.Args {
-			a := &x.Args[i]
+		for i := range args {
+			a := &args[i]
 			if a.Field != nil {
 				r.field(a.Field)
 				if spec.Numeric && a.Field.Ref.Key == "" && a.Field.Ref.Type != panel.TypeNumber {
-					r.issue(a.At, fmt.Sprintf("%s needs a numeric field; %s is %s", x.Name, a.Field.Key, a.Field.Ref.Type))
+					r.issue(a.At, fmt.Sprintf("%s needs a numeric field; %s is %s", x.Func, a.Field.Key, a.Field.Ref.Type))
 				}
 			}
 		}
-		if x.Name == "quantile" && (len(x.Args) < 2 || x.Args[1].Number == nil || *x.Args[1].Number <= 0 || *x.Args[1].Number >= 1) {
-			r.issue(x.At, "quantile q must be a number between 0 and 1")
+		x.Field = nil
+		if len(args) > 0 && args[0].Field != nil {
+			f := args[0].Field
+			x.Field = &panel.FieldRef{Text: lowerField(*f), Column: f.Ref.Column, Key: f.Ref.Key, Type: f.Ref.Type, Unit: f.Ref.Unit}
 		}
-	case *mCountIf:
+		x.Q = spec.Quantile
+		if x.Func == "quantile" && len(args) > 1 && args[1].Number != nil {
+			x.Q = *args[1].Number
+		}
+		if x.Func == "quantile" && (len(args) < 2 || args[1].Number == nil || *args[1].Number <= 0 || *args[1].Number >= 1) {
+			r.issue(at, "quantile q must be a number between 0 and 1")
+		}
+		return x
+	case panel.MeasureCountIf:
 		if r.out.Query.Source == "metrics" {
-			r.issue(x.At, "measure arithmetic is not available for metrics")
-			return
+			r.issue(at, "measure arithmetic is not available for metrics")
+			return e
 		}
 		r.countIf = true
-		r.expr(x.Filter)
+		r.expr(info.filter)
 		r.countIf = false
-	case *mBinary:
+		x.Filter = lowerCountFilter(info.filter)
+		filters[x.Filter] = info.filter
+		return x
+	case panel.MeasureBinary:
 		if r.out.Query.Source == "metrics" {
-			r.issue(x.At, "measure arithmetic is not available for metrics")
-			return
+			r.issue(at, "measure arithmetic is not available for metrics")
+			return e
 		}
-		r.measure(x.L)
-		r.measure(x.R)
-	case *mNeg:
+		x.L = r.measure(x.L, infos, filters)
+		x.R = r.measure(x.R, infos, filters)
+		return x
+	case panel.MeasureNeg:
 		if r.out.Query.Source == "metrics" {
-			r.issue(x.At, "measure arithmetic is not available for metrics")
-			return
+			r.issue(at, "measure arithmetic is not available for metrics")
+			return e
 		}
-		r.measure(x.X)
+		x.X = r.measure(x.X, infos, filters)
+		return x
 	}
+	return e
 }
 
 func measureAlias(m measureNode, all []measureNode) string {
 	if m.Alias != "" {
 		return m.Alias
 	}
-	if _, ok := m.Expr.(*mCountIf); ok {
-		return "count_if"
+	name := m.Parsed.Func
+	if c, ok := m.Parsed.Expr.(panel.MeasureCall); ok {
+		name = c.Func
 	}
-	c, ok := m.Expr.(*mCall)
-	if !ok {
-		return ""
+	if _, ok := m.Parsed.Expr.(panel.MeasureCountIf); ok {
+		name = "count_if"
 	}
 	n := 0
 	for _, v := range all {
-		if x, ok := v.Expr.(*mCall); ok && x.Name == c.Name && v.Alias == "" {
+		if c, ok := v.Parsed.Expr.(panel.MeasureCall); ok && c.Func == name && v.Alias == "" {
 			n++
 		}
 	}
-	if n > 1 && len(c.Args) > 0 && c.Args[0].Field != nil {
-		f := c.Args[0].Field
-		key := f.Key
-		if f.Ref != nil {
-			key = f.Ref.Column
-			if f.Ref.Key != "" {
-				key = f.Ref.Key
-			}
+	if n > 1 && m.Parsed.Field != nil {
+		key := m.Parsed.Field.Column
+		if m.Parsed.Field.Key != "" {
+			key = m.Parsed.Field.Key
 		}
 		var b strings.Builder
 		for _, ch := range strings.ToLower(key) {
@@ -571,11 +597,19 @@ func measureAlias(m measureNode, all []measureNode) string {
 				b.WriteByte('_')
 			}
 		}
-		return c.Name + "_" + strings.Trim(b.String(), "_")
+		return name + "_" + strings.Trim(b.String(), "_")
 	}
-	return c.Name
+	return name
 }
-
+func preparedMeasures(q *queryTree) []panel.Measure {
+	out := []panel.Measure{}
+	if q.Stage != nil && q.Stage.Histogram == nil {
+		for _, m := range q.Stage.Measures {
+			out = append(out, m.Parsed)
+		}
+	}
+	return out
+}
 func sortIsMeasureAlias(q *queryTree) bool {
 	if q.Sort != nil && q.Stage != nil {
 		for _, m := range q.Stage.Measures {
