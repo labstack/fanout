@@ -103,7 +103,7 @@ describe("ExplorePage", () => {
     const options = within(ui.getByRole("radiogroup", { name: "Visualization" })).getAllByRole<HTMLInputElement>("radio");
     expect(options.map(option => [option.value, option.disabled])).toEqual([["table", false], ["bar", false], ["state_timeline", true]]);
     await click("Time series…");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto", viz: "timeseries" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto" }));
   });
 
   it("marks the result stale after an edit and only saves a fresh run with rows", async () => {
@@ -148,8 +148,71 @@ describe("ExplorePage", () => {
 
   it("runs a shared link on open", async () => {
     const { wait } = await render({ q: "spans | count() by service", viz: "table" });
-    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "spans | count() by service", viz: "table" }]));
+    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "spans | count() by service" }]));
     await wait(() => expect(bodies("/api/queries/run")[0].dashboard.panels[0].viz).toBe("table"));
+  });
+
+  it("keeps long queries runnable by shortening the panel title", async () => {
+    const long = "spans where " + Array.from({ length: 12 }, (_, i) => `service:s${i}`).join(" or ") + " | count()";
+    parse = async body => json(parsed(body.text, long));
+    const { type, click, wait } = await render();
+    await type(long);
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(Array.from(bodies("/api/queries/run")[0].dashboard.panels[0].title as string)).toHaveLength(80);
+  });
+
+  it("does not pin a new query to the previous viz", async () => {
+    const { type, click, wait } = await render({ q: "logs", viz: "logs" });
+    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "logs" }]));
+    await type("logs | count() by service");
+    await click("Run");
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "logs | count() by service" }));
+  });
+
+  it("reruns the edited text, not the last result, when the window changes", async () => {
+    const { type, click, wait, onSearch, search } = await render();
+    await type("spans | count()");
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await type("spans | count() by service");
+    await act(async () => onSearch({ ...search(), range: "24h" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service" }));
+    await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "24h", refresh: "off" }));
+  });
+
+  it("marks a result stale when the window changes and the rerun fails", async () => {
+    const { ui, type, click, wait, onSearch, search } = await render();
+    await type("spans | count() by service");
+    await click("Run");
+    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" }).disabled).toBe(false));
+    runQuery = async () => json({ code: "unavailable", message: "engine busy" }, 503);
+    await act(async () => onSearch({ ...search(), range: "24h" }));
+    await wait(() => expect(ui.getByText("engine busy")).toBeTruthy());
+    expect(ui.getByRole("status").textContent).toBe("Result of the last run · query has changed");
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" }).disabled).toBe(true);
+  });
+
+  it("drops problems that arrive after the text was edited", async () => {
+    let answer: (response: Response) => void = () => {};
+    parse = () => new Promise(resolve => { answer = resolve; });
+    const { ui, type, click, wait } = await render();
+    await type("spans where servce:a");
+    await click("Run");
+    await wait(() => expect(bodies("/api/fanql/parse")).toHaveLength(1));
+    await type("spans where service:a");
+    await act(async () => answer(json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field servce", span: { start: 12, end: 18 } }] }, 400)));
+    await act(async () => {});
+    expect(ui.queryByRole("alert")).toBeNull();
+  });
+
+  it("hides viz edits once the query has changed", async () => {
+    const { ui, type, click, wait } = await render();
+    await type("spans | count() by service");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("button", { name: "Time series…" })).toBeTruthy());
+    await type("spans where service:a | count() by service");
+    expect(ui.queryByRole("button", { name: "Time series…" })).toBeNull();
   });
 
   it("runs SQL as a table", async () => {

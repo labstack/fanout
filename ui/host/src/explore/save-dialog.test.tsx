@@ -35,11 +35,11 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup => cleanup())); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-async function render() {
+async function render(time: { range?: string; from?: string; to?: string } = { range: "24h" }) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onSaved = vi.fn(), onClose = vi.fn();
-  await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><SaveDialog panel={panel} time={{ range: "24h" }} onClose={onClose} onSaved={onSaved} /></QueryClientProvider></MantineProvider>));
+  await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><SaveDialog panel={panel} time={time} onClose={onClose} onSaved={onSaved} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
   const ui = within(document.body);
   const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
@@ -61,6 +61,7 @@ describe("save helpers", () => {
     expect(uniquePanelID("explore", ["explore", "explore_2"])).toBe("explore_3");
     expect(defaultTitle("x".repeat(100))).toHaveLength(80);
     expect(defaultTitle("short")).toBe("short");
+    expect(Array.from(defaultTitle("😀".repeat(100)))).toHaveLength(80);
   });
 });
 
@@ -84,6 +85,16 @@ describe("SaveDialog", () => {
     await click("Save");
     await wait(() => expect(onSaved).toHaveBeenCalledWith("d9"));
     expect(body("/api/dashboards", "POST")).toEqual({ spec: { version: 1, name: "Latency", time: { range: "24h" }, panels: [{ ...panel, title: "Requests by service" }] } });
+  });
+
+  it("keeps an absolute window on a new dashboard", async () => {
+    dashboards = [];
+    const { ui, onSaved, wait, click, input } = await render({ from: "2026-10-01T00:00:00Z", to: "2026-10-01T06:00:00Z" });
+    await wait(() => expect(ui.getByRole("textbox", { name: "Dashboard name" })).toBeTruthy());
+    await input("Dashboard name", "Incident");
+    await click("Save");
+    await wait(() => expect(onSaved).toHaveBeenCalledWith("d9"));
+    expect(body("/api/dashboards", "POST").spec.time).toEqual({ from: "2026-10-01T00:00:00Z", to: "2026-10-01T06:00:00Z" });
   });
 
   it("asks for a name when there are no dashboards yet", async () => {

@@ -7,8 +7,10 @@ import { createDashboard, dashboardsKey, getDashboard, listDashboards, patchDash
 
 const titleLimit = 80;
 
+/** Panel titles are limited to 80 code points. */
 export function defaultTitle(text: string): string {
-  return text.length <= titleLimit ? text : `${text.slice(0, titleLimit - 1)}…`;
+  const points = Array.from(text);
+  return points.length <= titleLimit ? text : `${points.slice(0, titleLimit - 1).join("")}…`;
 }
 
 /** The first id of `base`, `base_2`, `base_3`… not already on the dashboard. */
@@ -38,7 +40,7 @@ export function SaveDialog({ panel, time, onClose, onSaved }: {
       let id: string;
       if (mode === "new") {
         // A dashboard holds at least one panel, so it is created with this one.
-        const record = await createDashboard({ version: 1, name: name.trim(), time: { range: time.range ?? "1h" }, panels: [{ ...panel, id: "explore", title: title.trim() }] });
+        const record = await createDashboard({ version: 1, name: name.trim(), time: time.from && time.to ? { from: time.from, to: time.to } : { range: time.range ?? "1h" }, panels: [{ ...panel, id: "explore", title: title.trim() }] });
         id = record.id;
       } else {
         const record = await getDashboard(dashboardId!);

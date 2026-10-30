@@ -10,7 +10,7 @@ import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { SqlEditor } from "../sql-editor/sql-editor";
 import { completeFanql, parseFanql, type Notice, type Parsed } from "./api";
-import { SaveDialog } from "./save-dialog";
+import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, type ExploreSearch } from "./search";
 
 export const explorePanelID = "explore";
@@ -23,7 +23,7 @@ const vizLabel: Record<Viz, string> = {
 const requirementLabel = { min_max: "a minimum and maximum", thresholds: "thresholds" } as const;
 
 /** What the last run sent, so later edits can be shown as stale and not saved. */
-export type ExploreRun = { tab: ExploreSearch["tab"]; source: string; panel: Panel; result: PanelDisplayResult; canonical?: string };
+export type ExploreRun = { tab: ExploreSearch["tab"]; source: string; window: string; panel: Panel; result: PanelDisplayResult; canonical?: string };
 
 export function hasRows(run?: ExploreRun): boolean {
   return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
@@ -47,6 +47,9 @@ export function ExplorePage({ search, onSearch, onSaved }: {
   const resultBox = useRef<HTMLDivElement>(null);
   const help = useId();
   const time = exploreTime(search);
+  const windowKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
+  // Responses compare against what is in the editors now, not when they were sent.
+  const current = useRef({ text, sql }); current.current = { text, sql };
   const schema = useQuery({ queryKey: ["telemetry-schema"], queryFn: ({ signal }) => getTelemetrySchema(signal), staleTime: 60_000, retry: false, enabled: search.tab === "sql" });
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -59,11 +62,12 @@ export function ExplorePage({ search, onSearch, onSaved }: {
       let panel: Panel;
       let canonical: string | undefined;
       if (tab === "query") {
-        const next = await parseFanql({ text: source, viz }, abort.signal);
+        // Parse without the previous viz: a new query shape may not fit it.
+        const next = await parseFanql({ text: source }, abort.signal);
         if (abort.signal.aborted) return;
         setParsed(next); setNotices(next.notices);
         const chosen = viz && next.viz.compatible.some(c => c.viz === viz && c.requires.length === 0) ? viz : next.viz.compatible.find(c => c.requires.length === 0)?.viz ?? "table";
-        panel = { id: explorePanelID, title: next.canonical, viz: chosen, query: next.query };
+        panel = { id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query };
         canonical = next.canonical;
         onSearch({ ...search, tab, q: source, viz: chosen }, true);
       } else {
@@ -77,27 +81,28 @@ export function ExplorePage({ search, onSearch, onSaved }: {
       if (abort.signal.aborted) return;
       const result = results.find(r => r.id === explorePanelID);
       if (!result) throw new Error("The query returned no result.");
-      setRun({ tab, source, panel, result: classifyPanelResult(result, [explorePanelID]), canonical });
+      setRun({ tab, source, window: windowKey, panel, result: classifyPanelResult(result, [explorePanelID]), canonical });
     } catch (failure) {
       if (abort.signal.aborted) return;
-      if (failure instanceof ApiError && failure.problems.length > 0) setProblems(failure.problems);
+      if (failure instanceof ApiError && failure.problems.length > 0) {
+        // Spans index the text that was sent; drop them once it has been edited.
+        if (current.current[tab === "query" ? "text" : "sql"] === source) setProblems(failure.problems);
+      }
       else setError(failure instanceof Error ? failure.message : "Request failed");
     } finally {
       if (controller.current === abort) setRunning(false);
     }
   };
 
-  // A shared link runs on open; a new time window reruns what is on screen.
-  const timeKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
-  const lastRun = useRef(run); lastRun.current = run;
+  // A shared link runs on open; a new time window reruns what is in the editor.
+  const latest = useRef({ tab: search.tab, viz: run?.panel.viz ?? search.viz }); latest.current = { tab: search.tab, viz: run?.panel.viz ?? search.viz };
   useEffect(() => {
-    const previous = lastRun.current;
-    if (previous) void execute(previous.tab, previous.source, previous.panel.viz);
-    else if (search.tab === "query" ? search.q.trim() : search.sql?.trim()) void execute(search.tab, search.tab === "query" ? search.q : search.sql ?? "", search.viz);
-  }, [timeKey]);
+    const { tab, viz } = latest.current;
+    void execute(tab, current.current[tab === "query" ? "text" : "sql"], viz);
+  }, [windowKey]);
 
   const source = search.tab === "query" ? text : sql;
-  const stale = run !== undefined && (run.tab !== search.tab || run.source !== source);
+  const stale = run !== undefined && (run.tab !== search.tab || run.source !== source || run.window !== windowKey);
   const compatible = parsed?.viz.compatible ?? [];
   const canSave = !stale && !running && hasRows(run);
 
@@ -135,7 +140,7 @@ export function ExplorePage({ search, onSearch, onSaved }: {
           data={compatible.map(c => ({ value: c.viz, disabled: c.requires.length > 0, label: c.requires.length > 0
             ? <Tooltip label={`Needs ${c.requires.map(r => requirementLabel[r]).join(" and ")}; set them after saving`}><span>{vizLabel[c.viz]}</span></Tooltip>
             : vizLabel[c.viz] }))} />}
-        {search.tab === "query" && parsed?.viz.edits.map(edit => <Tooltip key={edit.viz} label={<>Rewrites the query as <code>{edit.text}</code></>} multiline maw={420}>
+        {search.tab === "query" && !stale && parsed?.viz.edits.map(edit => <Tooltip key={edit.viz} label={<>Rewrites the query as <code>{edit.text}</code></>} multiline maw={420}>
           <Button size="compact-sm" variant="subtle" onClick={() => { setText(edit.text); void execute("query", edit.text, edit.viz); }}>{vizLabel[edit.viz]}…</Button>
         </Tooltip>)}
       </Group>
