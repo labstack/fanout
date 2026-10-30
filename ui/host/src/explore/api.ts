@@ -15,3 +15,7 @@ export type CompleteBody = { text: string; cursor: number; window?: string; from
 // Problems arrive as an ApiError with code invalid_fanql; spans index the text.
 export const parseFanql = (body: ParseBody, signal?: AbortSignal) => request<Parsed>("/api/fanql/parse", { method: "POST", json: body, signal });
 export const completeFanql = (body: CompleteBody, signal?: AbortSignal) => request<Completion>("/api/fanql/complete", { method: "POST", json: body, signal });
+
+export type Formatted = { text: string; exactness: string; editable: boolean; reason?: string; requires: string[]; notices: Notice[] };
+// Prints a structured query as FanQL; problems arrive as an ApiError with code invalid_spec.
+export const formatFanql = (body: { query: Query; viz?: string }, signal?: AbortSignal) => request<Formatted>("/api/fanql/format", { method: "POST", json: body, signal });
