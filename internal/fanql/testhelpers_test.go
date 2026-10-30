@@ -9,7 +9,7 @@ import (
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func newTestEngine(t *testing.T) (*query.Duck, *telemetrystore.Repository) {
+func newTestEngine(t testing.TB) (*query.Duck, *telemetrystore.Repository) {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())

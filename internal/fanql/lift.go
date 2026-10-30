@@ -364,36 +364,38 @@ func liftSQLValue(n any) (Value, bool) {
 	return Value{}, false
 }
 
-func spellingValue(f Field, v Value) Value {
+func spellingValue(f Field, v Value, aliases bool) Value {
 	if v.Kind == VariableValue {
 		return v
 	}
 	if f.Ref.Column == "duration_ms" && f.Ref.Key == "" && v.Kind == NumberValue {
-		if n, err := strconv.ParseFloat(v.Text, 64); err == nil {
+		if n, err := strconv.ParseFloat(v.Text, 64); err == nil && n >= 0 {
 			v.Kind = DurationValue
 			v.Text = durationText(n)
 		}
 		return v
 	}
 	if v.Kind == StringValue && f.Ref.Key == "" && f.Ref.Type == panel.TypeString {
-		switch f.Ref.Column {
-		case "status":
-			if strings.HasPrefix(v.Text, "STATUS_CODE_") {
-				v.Kind = WordValue
-				v.Text = strings.ToLower(strings.TrimPrefix(v.Text, "STATUS_CODE_"))
-				return v
-			}
-		case "kind":
-			if strings.HasPrefix(v.Text, "SPAN_KIND_") {
-				v.Kind = WordValue
-				v.Text = strings.ToLower(strings.TrimPrefix(v.Text, "SPAN_KIND_"))
-				return v
-			}
-		case "severity":
-			if v.Text == strings.ToUpper(v.Text) && classify(Token{Kind: Word, Text: strings.ToLower(v.Text)}).Kind == WordValue {
-				v.Kind = WordValue
-				v.Text = strings.ToLower(v.Text)
-				return v
+		if aliases {
+			switch f.Ref.Column {
+			case "status":
+				if strings.HasPrefix(v.Text, "STATUS_CODE_") {
+					v.Kind = WordValue
+					v.Text = strings.ToLower(strings.TrimPrefix(v.Text, "STATUS_CODE_"))
+					return v
+				}
+			case "kind":
+				if strings.HasPrefix(v.Text, "SPAN_KIND_") {
+					v.Kind = WordValue
+					v.Text = strings.ToLower(strings.TrimPrefix(v.Text, "SPAN_KIND_"))
+					return v
+				}
+			case "severity":
+				if v.Text == strings.ToUpper(v.Text) && classify(Token{Kind: Word, Text: strings.ToLower(v.Text)}).Kind == WordValue {
+					v.Kind = WordValue
+					v.Text = strings.ToLower(v.Text)
+					return v
+				}
 			}
 		}
 		if f.Ref.Column != "status" && f.Ref.Column != "kind" && f.Ref.Column != "severity" && f.Ref.Column != "type" && f.Ref.CompareAs == "" {
@@ -427,7 +429,12 @@ func durationText(ms float64) string {
 	}{{3600000, "h"}, {60000, "m"}, {1000, "s"}, {1, "ms"}, {0.001, "us"}}
 	for _, u := range units {
 		if ms >= u.value {
-			return strconv.FormatFloat(ms/u.value, 'f', -1, 64) + u.name
+			text := strconv.FormatFloat(ms/u.value, 'f', -1, 64) + u.name
+			// A shorter unit is safe only when parsing it recreates the exact
+			// threshold; 1.001s, for example, is not exactly 1001 milliseconds.
+			if restored, ok := durationMS(text); ok && restored == ms {
+				return text
+			}
 		}
 	}
 	return strconv.FormatFloat(ms, 'f', -1, 64) + "ms"
@@ -466,7 +473,7 @@ func liftSQLNode(signal string, n any) Expr {
 		if ok && valid {
 			op := map[string]string{"COMPARE_EQUAL": ":", "COMPARE_NOTEQUAL": "!=", "COMPARE_LESSTHAN": "<", "COMPARE_GREATERTHAN": ">", "COMPARE_LESSTHANOREQUALTO": "<=", "COMPARE_GREATERTHANOREQUALTO": ">="}[fmt.Sprint(node["type"])]
 			if op != "" {
-				return &Compare{Field: f, Op: op, Value: spellingValue(f, v)}
+				return &Compare{Field: f, Op: op, Value: spellingValue(f, v, !isRange(op))}
 			}
 		}
 		if call := liftSQLCall(signal, node["left"]); call != nil && valid {
@@ -482,7 +489,7 @@ func liftSQLNode(signal string, n any) Expr {
 		hi, b := liftSQLValue(node["upper"])
 		if ok && a && b {
 			neg, _ := node["negated"].(bool)
-			return &Between{Field: f, Lo: spellingValue(f, lo), Hi: spellingValue(f, hi), Negated: neg}
+			return &Between{Field: f, Lo: spellingValue(f, lo, false), Hi: spellingValue(f, hi, false), Negated: neg}
 		}
 	case "OPERATOR":
 		switch node["type"] {
@@ -506,7 +513,7 @@ func liftSQLNode(signal string, n any) Expr {
 				if !ok {
 					return nil
 				}
-				in.Values = append(in.Values, spellingValue(f, v))
+				in.Values = append(in.Values, spellingValue(f, v, true))
 			}
 			if len(in.Values) == 1 && in.Values[0].Kind == VariableValue {
 				in.Variable = strings.TrimPrefix(in.Values[0].Text, "$")

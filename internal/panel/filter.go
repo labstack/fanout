@@ -341,7 +341,7 @@ func fieldText(n any) string {
 			key, _ := children[1].(map[string]any)
 			text := constantText(key)
 			if len(names) == 1 {
-				return fmt.Sprintf("%s['%s']", names[0], text)
+				return fmt.Sprintf("%s[%s]", names[0], sqlString(text))
 			}
 		}
 	}

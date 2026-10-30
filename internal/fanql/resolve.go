@@ -37,6 +37,12 @@ type VizEdit struct {
 var resolveLower func(*Resolved) (panel.Query, panel.Problems)
 var resolvePrint func(*Query) string
 
+// Catalog reads remain private and return snapshots. Tests can substitute a
+// prospective registry to detect accepted text that would need a version bump.
+var resolveColumns = panel.SignalColumns
+var resolveMeasures = panel.MeasureSpecs
+var resolveFilterFunctions = panel.FilterFunctionNames
+
 type resolver struct {
 	opts     ResolveOptions
 	out      *Resolved
@@ -144,7 +150,7 @@ func (r *resolver) field(f *Field) {
 	if scope == "" && !f.Bracket && strings.EqualFold(key, "duration") {
 		key = "duration_ms"
 	}
-	columns, _ := panel.SignalColumns(r.out.Query.Source)
+	columns, _ := resolveColumns(r.out.Query.Source)
 	if scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		for _, c := range columns {
 			if strings.EqualFold(key, c.Name) {
@@ -165,7 +171,7 @@ func (r *resolver) field(f *Field) {
 	f.Ref = &FieldRef{Column: scope, Key: key, Type: panel.TypeString, Unit: "none"}
 	if f.Scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		message := fmt.Sprintf("%q is not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
-		for _, m := range panel.MeasureSpecs() {
+		for _, m := range resolveMeasures() {
 			if strings.EqualFold(m.Name, key) {
 				message = fmt.Sprintf("%q is a measure, not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
 				break
@@ -233,7 +239,7 @@ func (r *resolver) expr(e Expr) {
 		if r.out.Query.Source == "metrics" {
 			r.issue(x.At, "free text needs a field on metrics; use name:http.server.duration")
 		}
-		cols, _ := panel.SignalColumns(r.out.Query.Source)
+		cols, _ := resolveColumns(r.out.Query.Source)
 		for _, c := range cols {
 			if strings.EqualFold(c.Name, x.Value.Text) {
 				r.notice(x.At, fmt.Sprintf("%q is a field; did you mean %s:<value>?", x.Value.Text, c.Name))
@@ -432,7 +438,7 @@ func (r *resolver) variable(name, field string, at Span, multi bool) {
 }
 
 func (r *resolver) call(c *Call) {
-	if !slices.Contains(panel.FilterFunctionNames(), c.Name) {
+	if !slices.Contains(resolveFilterFunctions(), c.Name) {
 		r.issue(c.At, "function "+c.Name+" is not allowed in a filter")
 		return
 	}
@@ -479,7 +485,7 @@ func (r *resolver) measure(e MExpr) {
 	switch x := e.(type) {
 	case *MCall:
 		var spec *panel.MeasureSpec
-		for _, s := range panel.MeasureSpecs() {
+		for _, s := range resolveMeasures() {
 			if s.Name == x.Name {
 				s := s
 				spec = &s

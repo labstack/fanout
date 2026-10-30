@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"query\":{\"from\":\"spans\",\"measures\":[\"count()\"],\"by\":[\"attributes['user name']\"]},\"viz\":\"table\"}")

@@ -112,7 +112,17 @@ func (p *parser) take() Token {
 	}
 	return t
 }
-func (p *parser) lower() string { return strings.ToLower(p.peek().Text) }
+
+// Quoted and raw tokens carry decoded text that can spell an operator or
+// delimiter. Only unquoted grammar tokens may participate in syntax matching.
+func grammarText(t Token) string {
+	if t.Kind == Word || t.Kind == Ident || t.Kind == Punct {
+		return strings.ToLower(t.Text)
+	}
+	return ""
+}
+
+func (p *parser) lower() string { return grammarText(p.peek()) }
 func (p *parser) is(s string) bool {
 	t := p.peek()
 	return (t.Kind == Word || t.Kind == Ident || t.Kind == Punct) && strings.EqualFold(t.Text, s)
@@ -233,7 +243,7 @@ func (p *parser) query(source string) *Query {
 				p.skipRun()
 				continue
 			}
-			if p.is("sort") && strings.EqualFold(p.ahead(1).Text, "by") {
+			if p.is("sort") && grammarText(p.ahead(1)) == "by" {
 				p.report(p.take().Span, "foreignStage", "sort")
 				p.skipStage()
 				continue
@@ -437,6 +447,29 @@ func isFieldWordOperator(op string) bool {
 	return false
 }
 
+func (p *parser) filterCallStart() bool {
+	name, open := p.peek(), p.ahead(1)
+	if name.Kind != Word || grammarText(open) != "(" || name.Text == "" {
+		return false
+	}
+	for i, r := range name.Text {
+		if i == 0 && !identStart(r) || i > 0 && !identContinue(r) {
+			return false
+		}
+	}
+	if open.Span.Start == name.Span.End {
+		return true
+	}
+	// Preserve the useful typo diagnostic for registered functions, while an
+	// ordinary search word followed by whitespace and a group stays two terms.
+	for _, function := range resolveFilterFunctions() {
+		if strings.EqualFold(name.Text, function) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *parser) term(nested bool) Expr {
 	p.expectTerm(nested)
 	if p.is("-") || p.is("not") {
@@ -501,14 +534,14 @@ func (p *parser) primary(nested bool) Expr {
 	if p.foreignTerm() {
 		return nil
 	}
-	next := strings.ToLower(p.ahead(1).Text)
-	fieldOperator := isComparison(next) || next == ":" || next == "~" || next == "!~" || next == "is" || isFieldWordOperator(next) || next == "not" && isFieldWordOperator(strings.ToLower(p.ahead(2).Text))
+	next := grammarText(p.ahead(1))
+	fieldOperator := isComparison(next) || next == ":" || next == "~" || next == "!~" || next == "is" || isFieldWordOperator(next) || next == "not" && isFieldWordOperator(grammarText(p.ahead(2)))
 	if reserved[word] && !fieldOperator {
 		p.report(t.Span, "reserved", word)
 		p.take()
 		return nil
 	}
-	if p.ahead(1).Text == "(" {
+	if p.filterCallStart() {
 		return p.call()
 	}
 	field, ok := p.field()
@@ -557,7 +590,7 @@ func (p *parser) primary(nested bool) Expr {
 			p.colonProblem(field, v, at)
 			return nil
 		}
-		if p.peek().Text == "*" && p.peek().Span.Start == v.At.End {
+		if p.is("*") && p.peek().Span.Start == v.At.End {
 			p.wildcard(v)
 			return nil
 		}
@@ -575,7 +608,7 @@ func (p *parser) primary(nested bool) Expr {
 		return x
 	}
 	neg := false
-	if expressionWords[op] && op == "not" && isFieldWordOperator(strings.ToLower(p.ahead(1).Text)) {
+	if expressionWords[op] && op == "not" && isFieldWordOperator(grammarText(p.ahead(1))) {
 		neg = true
 		p.take()
 		op = p.lower()
@@ -630,7 +663,7 @@ func (p *parser) primary(nested bool) Expr {
 		p.report(t.Span, "unexpected", t.Text)
 		return nil
 	}
-	if p.peek().Text == "*" && p.peek().Span.Start == field.At.End {
+	if p.is("*") && p.peek().Span.Start == field.At.End {
 		p.wildcard(Value{Text: t.Text, At: t.Span})
 		return nil
 	}
@@ -796,7 +829,7 @@ func (p *parser) call() *Call {
 		before := p.i
 		arg := CallArg{}
 		switch t := p.peek(); {
-		case t.Kind == Word && p.ahead(1).Text == "(":
+		case p.filterCallStart():
 			arg.Call = p.call()
 		case t.Kind == String || t.Kind == Number || t.Kind == Word && numberPattern.MatchString(t.Text) || p.is("-"):
 			v, ok := p.value()
@@ -859,7 +892,10 @@ func (p *parser) checkQuoted(t Token) {
 }
 
 func (p *parser) colonProblem(f Field, v Value, at Span) {
-	run := p.runSpan(at.Start)
+	// The field, operator and value may be separated by whitespace, or the
+	// quoted field/value may contain it. Recover through the offending colon's
+	// run rather than stopping before the value whose diagnostic we render.
+	run := Span{at.Start, p.runSpan(p.peek().Span.Start).End}
 	value := p.text(Span{v.At.Start, run.End})
 	prefix := p.text(Span{f.At.Start, v.At.Start})
 	after := v.Text
@@ -943,17 +979,17 @@ func (p *parser) foreignTerm() bool {
 		}
 		return true
 	}
-	if (word == "ago" || word == "now") && p.ahead(1).Text == "(" {
+	if (word == "ago" || word == "now") && grammarText(p.ahead(1)) == "(" {
 		p.report(t.Span, "timeCall", word)
 		p.skipRun()
 		return true
 	}
-	if word == "earliest" && p.ahead(1).Text == "=" || word == "_time" && p.ahead(1).Text == ":" {
+	if word == "earliest" && grammarText(p.ahead(1)) == "=" || word == "_time" && grammarText(p.ahead(1)) == ":" {
 		p.report(t.Span, "time", word)
 		p.skipRun()
 		return true
 	}
-	if word == "facet" || (word == "order" || word == "group") && strings.EqualFold(p.ahead(1).Text, "by") {
+	if word == "facet" || (word == "order" || word == "group") && grammarText(p.ahead(1)) == "by" {
 		p.report(t.Span, "foreignClause", word)
 		p.skipRun()
 		if p.is("by") {
@@ -1054,12 +1090,12 @@ func (p *parser) stage(start int) *Stage {
 		if p.peek().Kind == Ident && foreignStages[p.lower()] {
 			t := p.take()
 			p.report(t.Span, "foreignStage", strings.ToLower(t.Text))
-			for p.peek().Kind != EOF && !p.is("|") && !p.is(",") && !clauses[p.lower()] && !foreignStages[p.lower()] && p.ahead(1).Text != "(" {
+			for p.peek().Kind != EOF && !p.is("|") && !p.is(",") && !clauses[p.lower()] && !foreignStages[p.lower()] && grammarText(p.ahead(1)) != "(" {
 				p.take()
 			}
 			continue
 		}
-		if p.peek().Kind == Ident && foreignCalls[p.lower()] && p.ahead(1).Text == "(" {
+		if p.peek().Kind == Ident && foreignCalls[p.lower()] && grammarText(p.ahead(1)) == "(" {
 			p.report(p.peek().Span, "foreignCall", p.lower())
 			p.skipRun()
 			continue
@@ -1261,7 +1297,7 @@ func (p *parser) mfactor() MExpr {
 		p.node(x)
 		return x
 	}
-	if t.Kind == Ident && p.ahead(1).Text == "(" {
+	if t.Kind == Ident && grammarText(p.ahead(1)) == "(" {
 		return p.mcall()
 	}
 	if t.Kind == Bad {

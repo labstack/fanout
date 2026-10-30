@@ -1,0 +1,2 @@
+go test fuzz v1
+string("logs 0 And in")

@@ -22,6 +22,11 @@ func Print(q *Query) string {
 		for i, e := range q.Where {
 			entries[i] = printEntry(e, len(q.Where) > 1)
 		}
+		for i := 0; i+1 < len(entries); i++ {
+			if strings.HasPrefix(entries[i+1], "(") {
+				entries[i] = quoteSearchBeforeGroup(q.Where[i], entries[i])
+			}
+		}
 		text += " where " + strings.Join(entries, " ")
 	}
 	if s := q.Stage; s != nil {
@@ -99,6 +104,8 @@ func canonicalExpr(e Expr, neg bool) Expr {
 		if x.Negated && len(x.Bands) > 0 {
 			return canonicalExpr(bandMembership(x.Field, x.Bands, true), neg)
 		}
+	case *IsNull:
+		return canonicalExpr(&Exists{Field: x.Field, At: x.At}, neg != !x.Negated)
 	case *Compare:
 		if x.Op == "~" && x.Value.Kind != VariableValue && x.Field.Ref != nil && x.Field.Ref.Key == "" && (x.Field.Ref.Column == "body" || x.Field.Ref.Column == "operation") {
 			v := x.Value
@@ -126,6 +133,11 @@ func printExpr(e Expr, grouped bool) string {
 		terms := make([]string, len(x.Terms))
 		for i, t := range x.Terms {
 			terms[i] = printExpr(t, true)
+		}
+		for i := 0; i+1 < len(terms); i++ {
+			if strings.HasPrefix(terms[i+1], "(") {
+				terms[i] = quoteSearchBeforeGroup(x.Terms[i], terms[i])
+			}
 		}
 		return "(" + strings.Join(terms, " ") + ")"
 	case *Or:
@@ -165,9 +177,19 @@ func printExpr(e Expr, grouped bool) string {
 			op = "!="
 		}
 		if op == "~" || op == "!~" {
-			return printField(x.Field) + " " + op + " " + printValue(x.Value, x.Field, false)
+			value := x.Value
+			if value.Kind != VariableValue {
+				// Contains interprets every literal as text, including its exact
+				// exponent spelling; numeric normalization would change the search.
+				value.Kind = StringValue
+				if value.Stored != "" {
+					value.Text = value.Stored
+				}
+			}
+			return printField(x.Field) + " " + op + " " + printValue(value, x.Field, false)
 		}
-		return printField(x.Field) + op + printValue(x.Value, x.Field, op == ":" || op == "=" || op == "!=" || op == "<>")
+		field, native := printFilterField(x.Field, x.Value)
+		return field + op + printFilterValue(x.Value, x.Field, op == ":" || op == "=" || op == "!=" || op == "<>", native)
 	case *In:
 		op := " in "
 		if x.Negated {
@@ -177,10 +199,11 @@ func printExpr(e Expr, grouped bool) string {
 			return printField(x.Field) + op + "$" + x.Variable
 		}
 		vs := make([]string, len(x.Values))
+		field, native := printFilterField(x.Field, x.Values...)
 		for i, v := range x.Values {
-			vs[i] = printValue(v, x.Field, true)
+			vs[i] = printFilterValue(v, x.Field, true, native)
 		}
-		return printField(x.Field) + op + "(" + strings.Join(vs, ", ") + ")"
+		return field + op + "(" + strings.Join(vs, ", ") + ")"
 	case *Between:
 		if len(x.Bands) > 0 && !x.Negated {
 			return printBandRange(x.Field, x.Bands)
@@ -189,7 +212,8 @@ func printExpr(e Expr, grouped bool) string {
 		if x.Negated {
 			op = " not between "
 		}
-		return printField(x.Field) + op + printValue(x.Lo, x.Field, false) + " and " + printValue(x.Hi, x.Field, false)
+		field, native := printFilterField(x.Field, x.Lo, x.Hi)
+		return field + op + printFilterValue(x.Lo, x.Field, false, native) + " and " + printFilterValue(x.Hi, x.Field, false, native)
 	case *Like:
 		op := "like"
 		if x.Insensitive {
@@ -214,6 +238,28 @@ func printExpr(e Expr, grouped bool) string {
 		return "`" + strings.ReplaceAll(x.Text, "`", "``") + "`"
 	}
 	return ""
+}
+
+// Canonical negation can introduce a following group. A function-shaped search
+// word needs quotes only in that context, where it would become a spaced call.
+func quoteSearchBeforeGroup(e Expr, text string) string {
+	e = canonicalExpr(e, false)
+	neg := false
+	if n, ok := e.(*Not); ok {
+		neg, e = true, n.X
+	}
+	if x, ok := e.(*FreeText); ok {
+		for _, name := range resolveFilterFunctions() {
+			if strings.EqualFold(x.Value.Text, name) {
+				text = quoteText(x.Value.Text)
+				if neg {
+					text = "-" + text
+				}
+				return text
+			}
+		}
+	}
+	return text
 }
 
 func printField(f Field) string {
@@ -244,7 +290,34 @@ func validPath(s string) bool { return identifierPath.MatchString(s) }
 
 func quoteText(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
+// The explicit numeric column accepts negative numbers; the duration shorthand
+// forbids negative units. Keep the numeric field for a whole mixed list/range.
+func printFilterField(f Field, values ...Value) (string, bool) {
+	if f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
+		for _, v := range values {
+			if v.Kind == NumberValue {
+				if n, err := strconv.ParseFloat(v.Text, 64); err == nil && n < 0 {
+					return "duration_ms", true
+				}
+			}
+		}
+	}
+	return printField(f), false
+}
+
+func printFilterValue(v Value, f Field, aliases, nativeDuration bool) string {
+	if nativeDuration && v.Kind == NumberValue {
+		return printLiteral(v, false)
+	}
+	return printValue(v, f, aliases)
+}
+
 func printValue(v Value, f Field, aliases bool) string {
+	// In alias-bearing positions, unresolved fields cannot prove that removing
+	// the user's quotes preserves the value. Keep them until that proof exists.
+	if aliases && v.Kind == StringValue && f.Ref == nil {
+		return quoteText(v.Text)
+	}
 	if v.Kind == NumberValue && f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
 		if n, err := strconv.ParseFloat(v.Text, 64); err == nil {
 			return durationText(n)

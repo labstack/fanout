@@ -1,0 +1,7534 @@
+{
+  "text": "",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unknown source \"\"",
+      "hint": "use spans, logs or metrics",
+      "span": {
+        "start": 0,
+        "end": 0
+      }
+    }
+  ]
+}
+
+{
+  "text": "from spans",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"from\" is not FanQL; start with the source: spans where ...",
+      "span": {
+        "start": 0,
+        "end": 4
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs",
+  "query": {
+    "from": "logs"
+  }
+}
+
+{
+  "text": "logs limit ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "limit needs a whole number from 1 to 1000; e.g. limit 50",
+      "span": {
+        "start": 11,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs sort +time",
+  "query": {
+    "from": "logs",
+    "sort": "+time"
+  }
+}
+
+{
+  "text": "logs sort +time",
+  "viz": "logs",
+  "query": {
+    "from": "logs",
+    "sort": "+time"
+  }
+}
+
+{
+  "text": "logs sort duration",
+  "query": {
+    "from": "logs",
+    "sort": "duration_ms"
+  },
+  "gate_problems": true
+}
+
+{
+  "text": "logs sort duration",
+  "viz": "logs",
+  "problems": [
+    {
+      "path": "sort",
+      "message": "logs sort by time or +time only",
+      "span": {
+        "start": 5,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs sort time",
+  "query": {
+    "from": "logs",
+    "sort": "time"
+  }
+}
+
+{
+  "text": "logs where ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "where needs a filter",
+      "span": {
+        "start": 5,
+        "end": 10
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where \"",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 11,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where \"api$svc\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('api$svc'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where \"api*\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('api*'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where \"http://x:8080/y\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('http://x:8080/y'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where \"limit\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('limit'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where \"unclosed ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 11,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where (`body = 'a' OR body = 'b'` service:api)",
+  "query": {
+    "from": "logs",
+    "where": [
+      "((body = 'a' OR body = 'b') AND service = 'api')"
+    ]
+  }
+}
+
+{
+  "text": "logs where --severity is null",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IS NULL"
+    ]
+  }
+}
+
+{
+  "text": "logs where --severity:error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where -`coalesce(body, '') = ''`",
+  "query": {
+    "from": "logs",
+    "where": [
+      "NOT coalesce((coalesce(body, '') = ''), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "logs where -body like \"GET %\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "(body IS NULL OR body !~~ 'GET %')"
+    ]
+  }
+}
+
+{
+  "text": "logs where -body not like \"GET %\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "(body IS NULL OR body ~~ 'GET %')"
+    ]
+  }
+}
+
+{
+  "text": "logs where -body ~ \"100%\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "(body IS NULL OR NOT contains(lower(body), lower('100%')))"
+    ]
+  }
+}
+
+{
+  "text": "logs where -length(body) > 1000",
+  "query": {
+    "from": "logs",
+    "where": [
+      "NOT coalesce((length(body) > 1000), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "logs where -not a:1",
+  "query": {
+    "from": "logs",
+    "where": [
+      "attributes['a'] = 1"
+    ]
+  }
+}
+
+{
+  "text": "logs where -severity not between info and error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "(severity IS NULL OR severity IN ('INFO', 'WARN', 'ERROR'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where -severity not in (warn, error, fatal)",
+  "query": {
+    "from": "logs",
+    "where": [
+      "(severity IS NULL OR severity IN ('WARN', 'ERROR', 'FATAL'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where -severity>=warn",
+  "query": {
+    "from": "logs",
+    "where": [
+      "(severity IS NULL OR severity NOT IN ('WARN', 'ERROR', 'FATAL'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where 2e3",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('2e3'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where _time:now",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (_time is reserved)",
+      "span": {
+        "start": 11,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where `",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed raw filter; close it with `",
+      "span": {
+        "start": 11,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where `coalesce(body, '``') = ''`",
+  "query": {
+    "from": "logs",
+    "where": [
+      "coalesce(body, '`') = ''"
+    ]
+  }
+}
+
+{
+  "text": "logs where `coalesce(body,'|') ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed raw filter; close it with `",
+      "span": {
+        "start": 11,
+        "end": 31
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where `coalesce(body,'|')=''` | count()",
+  "query": {
+    "from": "logs",
+    "where": [
+      "coalesce(body,'|')=''"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "logs where ago(1h)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "ago(...) is not FanQL; use the time picker",
+      "span": {
+        "start": 11,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where attributes['']:x",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "attribute keys must not be empty",
+      "span": {
+        "start": 11,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where attributes['long']:\"",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 30,
+        "end": 31
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where attributes['top']:x",
+  "query": {
+    "from": "logs",
+    "where": [
+      "attributes['top'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "logs where attributes['𝔘.key']:\"✓\" resource.k8s.pod.name:x a.b:y",
+  "query": {
+    "from": "logs",
+    "where": [
+      "attributes['𝔘.key'] = '✓'",
+      "resource['k8s.pod.name'] = 'x'",
+      "attributes['a.b'] = 'y'"
+    ]
+  }
+}
+
+{
+  "text": "logs where body == x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "== is not FanQL; use key:value or =",
+      "span": {
+        "start": 16,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where body =~ x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "=~ is not FanQL; ~ is contains; use regexp_matches(field, 're') for a regular expression",
+      "span": {
+        "start": 16,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where body ilike \"%a_b%\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "body ~~* '%a_b%'"
+    ]
+  }
+}
+
+{
+  "text": "logs where body not like \"GET %\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "body !~~ 'GET %'"
+    ]
+  }
+}
+
+{
+  "text": "logs where body |= x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "|= is not FanQL; use body ~ \"text\" for contains",
+      "span": {
+        "start": 16,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where body |~ x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "|~ is not FanQL; use body ~ \"text\" for contains",
+      "span": {
+        "start": 16,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where body ~ \"a_b\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('a_b'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where body ~ $term",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower($term))"
+    ]
+  }
+}
+
+{
+  "text": "logs where body ~ 2e3",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('2e3'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where body:\"a | b sort c\" attributes['x.by']:y",
+  "query": {
+    "from": "logs",
+    "where": [
+      "body = 'a | b sort c'",
+      "attributes['x.by'] = 'y'"
+    ]
+  }
+}
+
+{
+  "text": "logs where body:\"héllo ✓\" x",
+  "query": {
+    "from": "logs",
+    "where": [
+      "body = 'héllo ✓'",
+      "contains(lower(body), lower('x'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where body::VARCHAR:x",
+  "problems": [
+    {
+      "path": "text",
+      "message": ":: is not FanQL; use field comparisons or a backtick raw filter",
+      "span": {
+        "start": 15,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where earliest=1h",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (earliest is reserved)",
+      "span": {
+        "start": 11,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where http://x:8080/y",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unexpected : after http",
+      "hint": "quote the value: \"http://x:8080/y\"",
+      "span": {
+        "start": 11,
+        "end": 26
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where length(body)",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "length(...) needs a comparison",
+      "span": {
+        "start": 11,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where length(body) > 1000",
+  "query": {
+    "from": "logs",
+    "where": [
+      "length(body) > 1000"
+    ]
+  }
+}
+
+{
+  "text": "logs where length(body)>1000",
+  "query": {
+    "from": "logs",
+    "where": [
+      "length(body) > 1000"
+    ]
+  }
+}
+
+{
+  "text": "logs where length(body)>1e3",
+  "query": {
+    "from": "logs",
+    "where": [
+      "length(body) > 1000"
+    ]
+  }
+}
+
+{
+  "text": "logs where limit 10",
+  "problems": [
+    {
+      "path": "text",
+      "message": "where needs a filter",
+      "hint": "quote \"limit\" to search for the word, or drop where",
+      "span": {
+        "start": 5,
+        "end": 10
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where lower(service)=$svc",
+  "query": {
+    "from": "logs",
+    "where": [
+      "lower(service) = $svc"
+    ]
+  }
+}
+
+{
+  "text": "logs where not not a:1",
+  "query": {
+    "from": "logs",
+    "where": [
+      "attributes['a'] = 1"
+    ]
+  }
+}
+
+{
+  "text": "logs where now()",
+  "problems": [
+    {
+      "path": "text",
+      "message": "now(...) is not FanQL; use the time picker",
+      "span": {
+        "start": 11,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where regexp_matches(body, \"error.*\")",
+  "query": {
+    "from": "logs",
+    "where": [
+      "regexp_matches(body, 'error.*')"
+    ]
+  }
+}
+
+{
+  "text": "logs where ser",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('ser'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where service",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('service'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where service in (api, ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "in needs a list or variable, e.g. in (api, web)",
+      "span": {
+        "start": 28,
+        "end": 28
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where service in (sort, limit)",
+  "query": {
+    "from": "logs",
+    "where": [
+      "service IN ('sort', 'limit')"
+    ]
+  }
+}
+
+{
+  "text": "logs where service:",
+  "problems": [
+    {
+      "path": "text",
+      "message": "service: needs a value; e.g. service:api",
+      "span": {
+        "start": 11,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where service:\"TRUE\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "service = 'TRUE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where service:\"api$svc\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "service = 'api$svc'"
+    ]
+  }
+}
+
+{
+  "text": "logs where service:\"api*\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "service = 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "logs where service:api and severity:error or body:timeout | count() by ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write service:api and (severity:error or body:timeout) or (service:api and severity:error) or body:timeout",
+      "span": {
+        "start": 11,
+        "end": 57
+      },
+      "fix_its": [
+        {
+          "label": "service:api and (severity:error or body:timeout)",
+          "span": {
+            "start": 11,
+            "end": 57
+          },
+          "text": "service:api and (severity:error or body:timeout)"
+        },
+        {
+          "label": "(service:api and severity:error) or body:timeout",
+          "span": {
+            "start": 11,
+            "end": 57
+          },
+          "text": "(service:api and severity:error) or body:timeout"
+        }
+      ]
+    },
+    {
+      "path": "text",
+      "message": "a field needs a name, e.g. service or attributes['key']",
+      "span": {
+        "start": 71,
+        "end": 71
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where service:api severity:error timeout sort time limit 200",
+  "query": {
+    "from": "logs",
+    "where": [
+      "service = 'api'",
+      "severity = 'ERROR'",
+      "contains(lower(body), lower('timeout'))"
+    ],
+    "sort": "time",
+    "limit": 200
+  }
+}
+
+{
+  "text": "logs where service:where",
+  "query": {
+    "from": "logs",
+    "where": [
+      "service = 'where'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity ",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(body), lower('severity'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity between error and info",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "between needs the lower level first: severity between info and error",
+      "span": {
+        "start": 28,
+        "end": 33
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity between info and error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('INFO', 'WARN', 'ERROR')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity in (info, warn, error)",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('INFO', 'WARN', 'ERROR')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity not between info and error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity NOT IN ('INFO', 'WARN', 'ERROR')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity ~ \"ERROR\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(severity), lower('ERROR'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity ~ ERROR",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(severity), lower('ERROR'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity ~ error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "contains(lower(severity), lower('error'))"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:",
+  "problems": [
+    {
+      "path": "text",
+      "message": "severity: needs a value; e.g. severity:api",
+      "span": {
+        "start": 11,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity:\"1H\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = '1H'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:\"ERROR\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:\"TRUE\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'TRUE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:\"error\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'error'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:14",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = '14'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:DEBUG",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'DEBUG'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:ERROR",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:Error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:FATAL",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:INFO",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'INFO'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:TRACE",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'TRACE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:WARN",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'WARN'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:alert",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:crit",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:critical",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:custom",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'CUSTOM'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:dbg",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'DEBUG'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:debug",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'DEBUG'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:emerg",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:emergency",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:err",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:exception",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:fatal",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:fine",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'DEBUG'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:finest",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'TRACE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:info",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'INFO'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:information",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'INFO'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:informational",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'INFO'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:notice",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'INFO'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:panic",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'FATAL'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:severe",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:trace",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'TRACE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:true",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'true'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:verbose",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'TRACE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:warn",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'WARN'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:warning",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'WARN'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity:where",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity = 'WHERE'"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity<debug",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('TRACE')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity<error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('TRACE', 'DEBUG', 'INFO', 'WARN')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity<trace",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "severity<trace matches no level; use severity:trace",
+      "span": {
+        "start": 20,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity>=",
+  "problems": [
+    {
+      "path": "text",
+      "message": "severity>= needs a value; e.g. severity>=api",
+      "span": {
+        "start": 11,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity>=custom",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "\"custom\" has no severity rank; use trace, debug, info, warn, error or fatal",
+      "span": {
+        "start": 21,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity>=unspecified",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "\"unspecified\" has no severity rank; use trace, debug, info, warn, error or fatal",
+      "span": {
+        "start": 21,
+        "end": 32
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity>=warn",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('WARN', 'ERROR', 'FATAL')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity>=warn | count() by body_template sort count limit 10",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('WARN', 'ERROR', 'FATAL')"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "body_template"
+    ],
+    "sort": "count",
+    "limit": 10
+  }
+}
+
+{
+  "text": "logs where severity>error",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity IN ('FATAL')"
+    ]
+  }
+}
+
+{
+  "text": "logs where severity>fatal",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "severity>fatal matches no level; use severity:fatal",
+      "span": {
+        "start": 20,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where severity_number>=14",
+  "query": {
+    "from": "logs",
+    "where": [
+      "severity_number >= 14"
+    ]
+  }
+}
+
+{
+  "text": "logs where starts_with (x, \"y\")",
+  "problems": [
+    {
+      "path": "text",
+      "message": "write starts_with(...) without a space",
+      "span": {
+        "start": 11,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where time:x",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "\"time\" is a time column; compare it with > or <",
+      "span": {
+        "start": 11,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs where time>\"2026-10-29T10:00:00Z\" time<\"2026-10-29T10:01:00Z\"",
+  "query": {
+    "from": "logs",
+    "where": [
+      "time > '2026-10-29T10:00:00Z'::TIMESTAMPTZ_NS",
+      "time < '2026-10-29T10:01:00Z'::TIMESTAMPTZ_NS"
+    ]
+  }
+}
+
+{
+  "text": "logs where top:x",
+  "query": {
+    "from": "logs",
+    "where": [
+      "attributes['top'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "logs where trace_id:trace1",
+  "query": {
+    "from": "logs",
+    "where": [
+      "trace_id = 'trace1'"
+    ]
+  }
+}
+
+{
+  "text": "logs | count() by body_template sort count",
+  "query": {
+    "from": "logs",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "body_template"
+    ],
+    "sort": "count"
+  }
+}
+
+{
+  "text": "logs | count() by body_template sort rate",
+  "problems": [
+    {
+      "path": "sort",
+      "message": "sort \"rate\" must name a measure alias; aliases here: count",
+      "span": {
+        "start": 32,
+        "end": 41
+      }
+    }
+  ]
+}
+
+{
+  "text": "logs | count() by body_template sort rate",
+  "viz": "log_patterns",
+  "problems": [
+    {
+      "path": "sort",
+      "message": "log_patterns sort by count only",
+      "span": {
+        "start": 32,
+        "end": 41
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics",
+  "query": {
+    "from": "metrics"
+  }
+}
+
+{
+  "text": "metrics ",
+  "query": {
+    "from": "metrics"
+  }
+}
+
+{
+  "text": "metrics where name:",
+  "problems": [
+    {
+      "path": "text",
+      "message": "name: needs a value; e.g. name:api",
+      "span": {
+        "start": 14,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics where name:http.server.duration",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "name = 'http.server.duration'"
+    ]
+  }
+}
+
+{
+  "text": "metrics where name:http.server.duration | histogram(value)",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "name = 'http.server.duration'"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "histogram": {
+      "field": "value",
+      "buckets": "explicit"
+    }
+  }
+}
+
+{
+  "text": "metrics where name:http.server.requests | rate() by service every 1m",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "name = 'http.server.requests'"
+    ],
+    "measures": [
+      "rate()"
+    ],
+    "by": [
+      "service"
+    ],
+    "bucket": "1m"
+  }
+}
+
+{
+  "text": "metrics where name:k8s.container.restarts | last(value) by resource.k8s.pod.name",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "name = 'k8s.container.restarts'"
+    ],
+    "measures": [
+      "last(value)"
+    ],
+    "by": [
+      "resource['k8s.pod.name']"
+    ]
+  }
+}
+
+{
+  "text": "metrics where name:queue.lag | last(value) by service",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "name = 'queue.lag'"
+    ],
+    "measures": [
+      "last(value)"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "metrics where name:x | histogram(value) every 1m",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "name = 'x'"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "bucket": "1m",
+    "histogram": {
+      "field": "value",
+      "buckets": "explicit"
+    }
+  }
+}
+
+{
+  "text": "metrics where rate:x",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "attributes['rate'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "metrics where timeout",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "free text needs a field on metrics; use name:http.server.duration",
+      "span": {
+        "start": 14,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics where type:\"counter\" | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'counter'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:COUNTER | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'counter'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:counter",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'counter'"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:counter | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'counter'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:false",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'false'"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:false | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'false'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:gauge | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'gauge'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:histogram | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'histogram'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:summary | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'summary'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where type:updown | count()",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "type = 'updown'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "metrics where value>-3",
+  "query": {
+    "from": "metrics",
+    "where": [
+      "value > -3"
+    ]
+  }
+}
+
+{
+  "text": "metrics | ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a measure needs a call, number or parenthesised expression",
+      "span": {
+        "start": 10,
+        "end": 10
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics | -avg(value) as neg",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "measure arithmetic is not available for metrics",
+      "span": {
+        "start": 10,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics | avg(value)",
+  "query": {
+    "from": "metrics",
+    "measures": [
+      "avg(value)"
+    ]
+  },
+  "gate_problems": true
+}
+
+{
+  "text": "metrics | count_if(name:x) as n",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "measure arithmetic is not available for metrics",
+      "span": {
+        "start": 10,
+        "end": 26
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics | error_rate()",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "error_rate is not available for metrics",
+      "span": {
+        "start": 10,
+        "end": 22
+      }
+    }
+  ]
+}
+
+{
+  "text": "metrics | last(value) by resource.k8s.pod.name",
+  "query": {
+    "from": "metrics",
+    "measures": [
+      "last(value)"
+    ],
+    "by": [
+      "resource['k8s.pod.name']"
+    ]
+  },
+  "gate_problems": true
+}
+
+{
+  "text": "spans",
+  "query": {
+    "from": "spans"
+  }
+}
+
+{
+  "text": "spans ",
+  "query": {
+    "from": "spans"
+  }
+}
+
+{
+  "text": "spans facet service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "facet is not FanQL; use by after measures, e.g. | count() by service",
+      "span": {
+        "start": 6,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans group by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "group is not FanQL; use by after measures, e.g. | count() by service",
+      "span": {
+        "start": 6,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans limit 10 sort duration",
+  "problems": [
+    {
+      "path": "text",
+      "message": "limit comes before sort here; write ... sort duration limit 10",
+      "span": {
+        "start": 15,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans service in (",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a list needs a value after each comma",
+      "span": {
+        "start": 18,
+        "end": 18
+      }
+    },
+    {
+      "path": "text",
+      "message": "in needs a list or variable, e.g. in (api, web)",
+      "span": {
+        "start": 18,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans since 1h",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (since is reserved)",
+      "span": {
+        "start": 6,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans sort ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "sort needs a key, e.g. sort duration",
+      "span": {
+        "start": 11,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans sort +duration",
+  "query": {
+    "from": "spans",
+    "sort": "+duration_ms"
+  },
+  "gate_problems": true
+}
+
+{
+  "text": "spans sort +duration",
+  "viz": "traces",
+  "problems": [
+    {
+      "path": "sort",
+      "message": "traces sort descending by duration, by errors, or ascending by start only",
+      "span": {
+        "start": 6,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans sort +start",
+  "query": {
+    "from": "spans",
+    "sort": "+start"
+  }
+}
+
+{
+  "text": "spans sort -p95 asc",
+  "problems": [
+    {
+      "path": "text",
+      "message": "sort takes one direction",
+      "span": {
+        "start": 16,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans sort duration",
+  "query": {
+    "from": "spans",
+    "sort": "duration_ms"
+  }
+}
+
+{
+  "text": "spans sort duration",
+  "viz": "traces",
+  "query": {
+    "from": "spans",
+    "sort": "duration_ms"
+  }
+}
+
+{
+  "text": "spans sort errors",
+  "query": {
+    "from": "spans",
+    "sort": "errors"
+  }
+}
+
+{
+  "text": "spans sort errors limit 50",
+  "query": {
+    "from": "spans",
+    "sort": "errors",
+    "limit": 50
+  }
+}
+
+{
+  "text": "spans status:error",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans status:error | count()",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ],
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "spans status:error | count() by service",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "spans until 1h",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (until is reserved)",
+      "span": {
+        "start": 6,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "where needs a filter",
+      "span": {
+        "start": 6,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where !service:api",
+  "problems": [
+    {
+      "path": "text",
+      "message": "! negation is not FanQL; write -service:api",
+      "span": {
+        "start": 12,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where \"abc",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 12,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where $__window:x",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "$__ names are reserved; use a dashboard variable name",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    },
+    {
+      "path": "where[0]",
+      "message": "\"$__window\" needs brackets",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where (a:1",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed (; add ) before |, sort, limit or the end",
+      "span": {
+        "start": 12,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where (a:1 b:2 or c:3)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write a:1 (b:2 or c:3) or (a:1 b:2) or c:3",
+      "span": {
+        "start": 13,
+        "end": 27
+      },
+      "fix_its": [
+        {
+          "label": "a:1 (b:2 or c:3)",
+          "span": {
+            "start": 13,
+            "end": 27
+          },
+          "text": "a:1 (b:2 or c:3)"
+        },
+        {
+          "label": "(a:1 b:2) or c:3",
+          "span": {
+            "start": 13,
+            "end": 27
+          },
+          "text": "(a:1 b:2) or c:3"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans where (a:1 b:2)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] = 1 AND attributes['b'] = 2)"
+    ]
+  }
+}
+
+{
+  "text": "spans where (a:1 b:2) or c:3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "((attributes['a'] = 1 AND attributes['b'] = 2) OR attributes['c'] = 3)"
+    ]
+  }
+}
+
+{
+  "text": "spans where (a:1)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['a'] = 1"
+    ]
+  }
+}
+
+{
+  "text": "spans where (attributes['a']:1 attributes['b']:2)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] = 1 AND attributes['b'] = 2)"
+    ]
+  }
+}
+
+{
+  "text": "spans where (attributes['a']:1 or attributes['b']:2) service:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] = 1 OR attributes['b'] = 2)",
+      "service = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where (service:$service status:error)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(service = $service AND status = 'STATUS_CODE_ERROR')"
+    ]
+  }
+}
+
+{
+  "text": "spans where *foo",
+  "problems": [
+    {
+      "path": "text",
+      "message": "* wildcards are not in FanQL 1",
+      "hint": "use ~ for contains, or quote \"*foo\"",
+      "span": {
+        "start": 12,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where -(a:1 or b:2)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "((attributes['a'] IS NULL OR attributes['a'] != 1) AND (attributes['b'] IS NULL OR attributes['b'] != 2))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -(status:error kind:server)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "((status IS NULL OR status != 'STATUS_CODE_ERROR') OR (kind IS NULL OR kind != 'SPAN_KIND_SERVER'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] between 1 and 5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "NOT coalesce((attributes['k'] BETWEEN 1 AND 5), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] ilike \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] !~~* 'GET %')"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] in (1, true, api, \"api*\")",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] NOT IN (1, true, 'api', 'api*'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] is not null",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] IS NULL"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] is null",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] IS NOT NULL"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] like \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] !~~ 'GET %')"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] not between 1 and 5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "NOT coalesce((attributes['k'] NOT BETWEEN 1 AND 5), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] not ilike \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] ~~* 'GET %')"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] not in (1, true, api, \"api*\")",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] IN (1, true, 'api', 'api*'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -attributes['k'] not like \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] ~~ 'GET %')"
+    ]
+  }
+}
+
+{
+  "text": "spans where -duration not between 1s and 2s",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(duration_ms IS NULL OR duration_ms BETWEEN 1000 AND 2000)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -duration>1s",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(duration_ms IS NULL OR duration_ms <= 1000)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -http_status_code between 400 and 599",
+  "query": {
+    "from": "spans",
+    "where": [
+      "NOT coalesce((TRY_CAST(http_status_code AS INTEGER) BETWEEN 400 AND 599), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -http_status_code not between 400 and 599",
+  "query": {
+    "from": "spans",
+    "where": [
+      "NOT coalesce((TRY_CAST(http_status_code AS INTEGER) NOT BETWEEN 400 AND 599), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -http_status_code:500",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(http_status_code IS NULL OR http_status_code != '500')"
+    ]
+  }
+}
+
+{
+  "text": "spans where -http_status_code>=500",
+  "query": {
+    "from": "spans",
+    "where": [
+      "NOT coalesce((TRY_CAST(http_status_code AS INTEGER) >= 500), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -k ~ v",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('v')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -k:$v",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR attributes['k'] != $v)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -service in (a, b)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(service IS NULL OR service NOT IN ('a', 'b'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -service not in (a, b)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(service IS NULL OR service IN ('a', 'b'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where -service!=api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(service IS NULL OR service = 'api')"
+    ]
+  }
+}
+
+{
+  "text": "spans where -starts_with(http_route, \"/api\")",
+  "query": {
+    "from": "spans",
+    "where": [
+      "NOT coalesce((starts_with(http_route, '/api')), FALSE)"
+    ]
+  }
+}
+
+{
+  "text": "spans where -user.id:*",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['user.id'] IS NULL"
+    ]
+  }
+}
+
+{
+  "text": "spans where 500>3",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a filter needs a field before >",
+      "span": {
+        "start": 12,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where >500ms",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a filter needs a field before >",
+      "span": {
+        "start": 12,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where @http.target:x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"@http.target\" is not a field name; write the attribute without @: http.target",
+      "span": {
+        "start": 12,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where HTTP.Target:x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['HTTP.Target'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "spans where P95(Duration)",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "function p95 is not allowed in a filter",
+      "span": {
+        "start": 12,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where Service:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where _time:x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (_time is reserved)",
+      "span": {
+        "start": 12,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where `coalesce(a",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed raw filter; close it with `",
+      "span": {
+        "start": 12,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 (b:2 or c:3)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['a'] = 1",
+      "(attributes['b'] = 2 OR attributes['c'] = 3)"
+    ]
+  }
+}
+
+{
+  "text": "spans where a:1 and b:2 or c:3",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write a:1 and (b:2 or c:3) or (a:1 and b:2) or c:3",
+      "span": {
+        "start": 12,
+        "end": 30
+      },
+      "fix_its": [
+        {
+          "label": "a:1 and (b:2 or c:3)",
+          "span": {
+            "start": 12,
+            "end": 30
+          },
+          "text": "a:1 and (b:2 or c:3)"
+        },
+        {
+          "label": "(a:1 and b:2) or c:3",
+          "span": {
+            "start": 12,
+            "end": 30
+          },
+          "text": "(a:1 and b:2) or c:3"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 b:2 (c:3 or d:4) (e:5 f:6)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['a'] = 1",
+      "attributes['b'] = 2",
+      "(attributes['c'] = 3 OR attributes['d'] = 4)",
+      "(attributes['e'] = 5 AND attributes['f'] = 6)"
+    ]
+  }
+}
+
+{
+  "text": "spans where a:1 b:2 or c:3",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write a:1 (b:2 or c:3) or (a:1 b:2) or c:3",
+      "span": {
+        "start": 12,
+        "end": 26
+      },
+      "fix_its": [
+        {
+          "label": "a:1 (b:2 or c:3)",
+          "span": {
+            "start": 12,
+            "end": 26
+          },
+          "text": "a:1 (b:2 or c:3)"
+        },
+        {
+          "label": "(a:1 b:2) or c:3",
+          "span": {
+            "start": 12,
+            "end": 26
+          },
+          "text": "(a:1 b:2) or c:3"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 b:2 or c:3 | p99(duration) by http_route every 1m",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write a:1 (b:2 or c:3) or (a:1 b:2) or c:3",
+      "span": {
+        "start": 12,
+        "end": 26
+      },
+      "fix_its": [
+        {
+          "label": "a:1 (b:2 or c:3)",
+          "span": {
+            "start": 12,
+            "end": 26
+          },
+          "text": "a:1 (b:2 or c:3)"
+        },
+        {
+          "label": "(a:1 b:2) or c:3",
+          "span": {
+            "start": 12,
+            "end": 26
+          },
+          "text": "(a:1 b:2) or c:3"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 or",
+  "problems": [
+    {
+      "path": "text",
+      "message": "or needs a filter on both sides",
+      "span": {
+        "start": 16,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 or b:2",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] = 1 OR attributes['b'] = 2)"
+    ]
+  }
+}
+
+{
+  "text": "spans where a:1 or b:2 c:3",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write a:1 or (b:2 c:3) or (a:1 or b:2) c:3",
+      "span": {
+        "start": 12,
+        "end": 26
+      },
+      "fix_its": [
+        {
+          "label": "a:1 or (b:2 c:3)",
+          "span": {
+            "start": 12,
+            "end": 26
+          },
+          "text": "a:1 or (b:2 c:3)"
+        },
+        {
+          "label": "(a:1 or b:2) c:3",
+          "span": {
+            "start": 12,
+            "end": 26
+          },
+          "text": "(a:1 or b:2) c:3"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 or c:3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] = 1 OR attributes['c'] = 3)"
+    ]
+  }
+}
+
+{
+  "text": "spans where a:1 where b:2",
+  "problems": [
+    {
+      "path": "text",
+      "message": "where appears twice; combine the filters into one where",
+      "span": {
+        "start": 16,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where a:1 | count_if(status:error -http.target:/healthz) / count() * 1.5 as x by resource.k8s.pod.name every 1m",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['a'] = 1"
+    ],
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR' AND (attributes['http.target'] IS NULL OR attributes['http.target'] != '/healthz')) / count() * 1.5 as x"
+    ],
+    "by": [
+      "resource['k8s.pod.name']"
+    ],
+    "bucket": "1m"
+  }
+}
+
+{
+  "text": "spans where a:1)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unmatched ); remove it or add the opening (",
+      "span": {
+        "start": 15,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where ago(1h)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "ago(...) is not FanQL; use the time picker",
+      "span": {
+        "start": 12,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where attr",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('attr'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes.http.target:/h",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['http.target'] = '/h'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['Resource.k']:x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['Resource.k'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['a']:1 or attributes['b']:2",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] = 1 OR attributes['b'] = 2)"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['attributes.k']:x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['attributes.k'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['flag']:true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['flag'] = true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['ht",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with '",
+      "span": {
+        "start": 23,
+        "end": 26
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 23,
+        "end": 26
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where attributes['htt",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with '",
+      "span": {
+        "start": 23,
+        "end": 27
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 23,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where attributes['k'] between 1 and 5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] BETWEEN 1 AND 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] ilike \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] ~~* 'GET %'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] in (1, true, api, \"api*\")",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] IN (1, true, 'api', 'api*')"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] is not null",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] IS NOT NULL"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] is null",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] IS NULL"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] like \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] ~~ 'GET %'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] not between 1 and 5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] NOT BETWEEN 1 AND 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] not ilike \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] !~~* 'GET %'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] not in (1, true, api, \"api*\")",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] NOT IN (1, true, 'api', 'api*')"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k'] not like \"GET %\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] !~~ 'GET %'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!=true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('a$svc')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('api*')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('-3')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('1.5')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('2e3')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('5')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('api')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('false')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']!~true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['k'] IS NULL OR NOT contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('true')))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']:true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<=true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] <= true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<>true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] != true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']<true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] < true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']=true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] = true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= 'a$svc'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= 'api*'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= 1.5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= 2000"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>=true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] >= true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > false"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']>true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > true"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~\"a$svc\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('a$svc'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~\"api*\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('api*'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('-3'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~1.5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('1.5'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('2e3'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('5'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('api'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~false",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('false'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['k']~true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('true'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['own",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with '",
+      "span": {
+        "start": 23,
+        "end": 27
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 23,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where attributes['own']:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['own'] = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['owner''",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with '",
+      "span": {
+        "start": 23,
+        "end": 31
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 23,
+        "end": 31
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where attributes['resource.k']:x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['resource.k'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['é.x']:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['é.x'] = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where attributes['😀",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with '",
+      "span": {
+        "start": 23,
+        "end": 25
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 23,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where body =~ \"re\"",
+  "problems": [
+    {
+      "path": "text",
+      "message": "=~ is not FanQL; ~ is contains; use regexp_matches(field, 're') for a regular expression",
+      "span": {
+        "start": 17,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where body::text",
+  "problems": [
+    {
+      "path": "text",
+      "message": ":: is not FanQL; use field comparisons or a backtick raw filter",
+      "span": {
+        "start": 16,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where compare",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"compare\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where correlate",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"correlate\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where db_system:postgresql db.statement ~ \"SELECT\" duration>500ms sort duration limit 10",
+  "query": {
+    "from": "spans",
+    "where": [
+      "db_system = 'postgresql'",
+      "contains(lower(CAST(attributes['db.statement'] AS VARCHAR)), lower('SELECT'))",
+      "duration_ms > 500"
+    ],
+    "sort": "duration_ms",
+    "limit": 10
+  }
+}
+
+{
+  "text": "spans where duration ",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('duration'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where duration > 500ms",
+  "query": {
+    "from": "spans",
+    "where": [
+      "duration_ms > 500"
+    ]
+  }
+}
+
+{
+  "text": "spans where duration between 1s",
+  "problems": [
+    {
+      "path": "text",
+      "message": "between needs two values",
+      "span": {
+        "start": 12,
+        "end": 31
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration between 1s and 2s status:error",
+  "query": {
+    "from": "spans",
+    "where": [
+      "duration_ms BETWEEN 1000 AND 2000",
+      "status = 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans where duration:",
+  "problems": [
+    {
+      "path": "text",
+      "message": "duration: needs a value; e.g. duration:500ms",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration>",
+  "problems": [
+    {
+      "path": "text",
+      "message": "duration> needs a value; e.g. duration>500ms",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration>-1ms",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "durations are not negative",
+      "span": {
+        "start": 21,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration>1e308h",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "number must be finite",
+      "span": {
+        "start": 21,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration>1h30m",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "duration needs a unit; e.g. duration>500ms",
+      "span": {
+        "start": 21,
+        "end": 26
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration>500",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "duration needs a unit; e.g. duration>500ms",
+      "span": {
+        "start": 21,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration>500ms",
+  "query": {
+    "from": "spans",
+    "where": [
+      "duration_ms > 500"
+    ]
+  }
+}
+
+{
+  "text": "spans where duration_ms:true",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "duration_ms needs a number",
+      "span": {
+        "start": 24,
+        "end": 28
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration_ms>1e309",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "number must be finite",
+      "span": {
+        "start": 24,
+        "end": 29
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration_ms>500",
+  "query": {
+    "from": "spans",
+    "where": [
+      "duration_ms > 500"
+    ]
+  }
+}
+
+{
+  "text": "spans where earliest=1h",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (earliest is reserved)",
+      "span": {
+        "start": 12,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where enabled:",
+  "problems": [
+    {
+      "path": "text",
+      "message": "enabled: needs a value; e.g. enabled:api",
+      "span": {
+        "start": 12,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where eval",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"eval\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where extend",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"extend\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where fields",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"fields\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where flag:\"true\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['flag'] = 'true'"
+    ]
+  }
+}
+
+{
+  "text": "spans where flag:true",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['flag'] = true"
+    ]
+  }
+}
+
+{
+  "text": "spans where having",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"having\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where htt",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('htt'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where http.",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('http.'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where http.target:\"/a:b\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['http.target'] = '/a:b'"
+    ]
+  }
+}
+
+{
+  "text": "spans where http.target:/a:b",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unexpected : after /a",
+      "hint": "quote the value: http.target:\"/a:b\"",
+      "span": {
+        "start": 12,
+        "end": 28
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where http.target:/a:b duration>=500ms -k:v us-east-1 $svc",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unexpected : after /a",
+      "hint": "quote the value: http.target:\"/a:b\"",
+      "span": {
+        "start": 12,
+        "end": 28
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where http.target:/h",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['http.target'] = '/h'"
+    ]
+  }
+}
+
+{
+  "text": "spans where http_status_code not between 400 and 599",
+  "query": {
+    "from": "spans",
+    "where": [
+      "TRY_CAST(http_status_code AS INTEGER) NOT BETWEEN 400 AND 599"
+    ]
+  }
+}
+
+{
+  "text": "spans where http_status_code:2e3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "http_status_code = '2e3'"
+    ]
+  }
+}
+
+{
+  "text": "spans where http_status_code:500",
+  "query": {
+    "from": "spans",
+    "where": [
+      "http_status_code = '500'"
+    ]
+  }
+}
+
+{
+  "text": "spans where http_status_code>500ms",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "units apply to duration only; write http_status_code>500",
+      "span": {
+        "start": 29,
+        "end": 34
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where http_status_code>=$code",
+  "query": {
+    "from": "spans",
+    "where": [
+      "TRY_CAST(http_status_code AS INTEGER) >= $code"
+    ]
+  }
+}
+
+{
+  "text": "spans where http_status_code>=500",
+  "query": {
+    "from": "spans",
+    "where": [
+      "TRY_CAST(http_status_code AS INTEGER) >= 500"
+    ]
+  }
+}
+
+{
+  "text": "spans where http_status_code>=warn",
+  "query": {
+    "from": "spans",
+    "where": [
+      "TRY_CAST(http_status_code AS INTEGER) >= 'warn'"
+    ]
+  }
+}
+
+{
+  "text": "spans where join",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"join\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where k in (",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a list needs a value after each comma",
+      "span": {
+        "start": 18,
+        "end": 18
+      }
+    },
+    {
+      "path": "text",
+      "message": "in needs a list or variable, e.g. in (api, web)",
+      "span": {
+        "start": 18,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where k like a%",
+  "problems": [
+    {
+      "path": "text",
+      "message": "like needs a quoted pattern",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where k not a:1",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('k'))",
+      "(attributes['a'] IS NULL OR attributes['a'] != 1)"
+    ]
+  }
+}
+
+{
+  "text": "spans where k ~ v",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(CAST(attributes['k'] AS VARCHAR)), lower('v'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where k:*",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] IS NOT NULL"
+    ]
+  }
+}
+
+{
+  "text": "spans where k:+3",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unexpected +",
+      "span": {
+        "start": 14,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where k:-foo",
+  "problems": [
+    {
+      "path": "text",
+      "message": "k: needs a value; e.g. k:api",
+      "span": {
+        "start": 12,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where k:>5",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['k'] > 5"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:\"SPAN_KIND_SERVER\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:SPAN_KIND_CLIENT",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_CLIENT'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:SPAN_KIND_CONSUMER",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_CONSUMER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:SPAN_KIND_INTERNAL",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_INTERNAL'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:SPAN_KIND_PRODUCER",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_PRODUCER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:SPAN_KIND_SERVER",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:SPAN_KIND_UNSPECIFIED",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_UNSPECIFIED'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:client",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_CLIENT'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:consumer",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_CONSUMER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:http",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "unknown kind \"http\"; use kind:server, kind:client, kind:internal, kind:producer, kind:consumer or kind:unspecified",
+      "span": {
+        "start": 17,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where kind:internal",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_INTERNAL'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:producer",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_PRODUCER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:server",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:server | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ],
+    "measures": [
+      "(count_if(duration_ms <= 500) + count_if(duration_ms > 500 AND duration_ms <= 2000) / 2) / count() as apdex"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ],
+    "measures": [
+      "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) / count() * 100 as pct_5xx"
+    ],
+    "by": [
+      "http_route"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ],
+    "measures": [
+      "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) / count() * 100 as pct_5xx"
+    ],
+    "by": [
+      "http_route"
+    ],
+    "bucket": "auto"
+  }
+}
+
+{
+  "text": "spans where kind:server | count_if(status:error -http.target:/healthz) / count() * 100 as e",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ],
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR' AND (attributes['http.target'] IS NULL OR attributes['http.target'] != '/healthz')) / count() * 100 as e"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:server | count_if(status:error) / count() * 100 as err_pct",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ],
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR') / count() * 100 as err_pct"
+    ]
+  }
+}
+
+{
+  "text": "spans where kind:server | error_rate() by service every 1m",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_SERVER'"
+    ],
+    "measures": [
+      "error_rate()"
+    ],
+    "by": [
+      "service"
+    ],
+    "bucket": "1m"
+  }
+}
+
+{
+  "text": "spans where kind:unspecified",
+  "query": {
+    "from": "spans",
+    "where": [
+      "kind = 'SPAN_KIND_UNSPECIFIED'"
+    ]
+  }
+}
+
+{
+  "text": "spans where let",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"let\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where lower(k)",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "lower(...) needs a comparison",
+      "span": {
+        "start": 12,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where lower(service) = \"api\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "lower(service) = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where not a:1 b:2",
+  "query": {
+    "from": "spans",
+    "where": [
+      "(attributes['a'] IS NULL OR attributes['a'] != 1)",
+      "attributes['b'] = 2"
+    ]
+  }
+}
+
+{
+  "text": "spans where now()",
+  "problems": [
+    {
+      "path": "text",
+      "message": "now(...) is not FanQL; use the time picker",
+      "span": {
+        "start": 12,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where over",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"over\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 16
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where rename",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"rename\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where res",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('res'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where resource.k8s.pod.name:x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "resource['k8s.pod.name'] = 'x'"
+    ]
+  }
+}
+
+{
+  "text": "spans where resource.serv",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('resource.serv'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where resource.wh",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('resource.wh'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where resource[\"k8s.",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 21,
+        "end": 26
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 21,
+        "end": 26
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where resource[\"own",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 21,
+        "end": 25
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 21,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where resource[\"own\"]:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "resource['own'] = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where resource[\"owner\"\"",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed quote; close the value with \"",
+      "span": {
+        "start": 21,
+        "end": 29
+      }
+    },
+    {
+      "path": "text",
+      "message": "a bracket field needs a quoted key and ]",
+      "span": {
+        "start": 21,
+        "end": 29
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where servce:api",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['servce'] = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where service",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('service'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where service == \"api\"",
+  "problems": [
+    {
+      "path": "text",
+      "message": "== is not FanQL; use key:value or =",
+      "span": {
+        "start": 20,
+        "end": 22
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where service in $svcs",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service IN $svcs"
+    ]
+  }
+}
+
+{
+  "text": "spans where service in (*)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "* wildcards are not in FanQL 1",
+      "hint": "use ~ for contains, or quote \"*\"",
+      "span": {
+        "start": 24,
+        "end": 25
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where service in (a, b)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service IN ('a', 'b')"
+    ]
+  }
+}
+
+{
+  "text": "spans where service not in (a, b)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service NOT IN ('a', 'b')"
+    ]
+  }
+}
+
+{
+  "text": "spans where service-",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('service-'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:",
+  "problems": [
+    {
+      "path": "text",
+      "message": "service: needs a value; e.g. service:api",
+      "span": {
+        "start": 12,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where service:$ser",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = $ser"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:$service (status:error or status:unset)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = $service",
+      "(status = 'STATUS_CODE_ERROR' OR status = 'STATUS_CODE_UNSET')"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:$service (status:error or status:unset) | count() by http_route",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = $service",
+      "(status = 'STATUS_CODE_ERROR' OR status = 'STATUS_CODE_UNSET')"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "http_route"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:$service status:error",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = $service",
+      "status = 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:$x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = $x"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:API | count() every 1m",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = 'API'"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "bucket": "1m"
+  }
+}
+
+{
+  "text": "spans where service:api ",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = 'api'"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:api order by duration",
+  "problems": [
+    {
+      "path": "text",
+      "message": "order is not FanQL; use by after measures, e.g. | count() by service",
+      "span": {
+        "start": 24,
+        "end": 29
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where service:api*",
+  "problems": [
+    {
+      "path": "text",
+      "message": "* wildcards are not in FanQL 1",
+      "hint": "use ~ for contains, or quote \"api*\"",
+      "span": {
+        "start": 20,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where service:checkout duration>500ms sort duration limit 50",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = 'checkout'",
+      "duration_ms > 500"
+    ],
+    "sort": "duration_ms",
+    "limit": 50
+  }
+}
+
+{
+  "text": "spans where service:checkout http.",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = 'checkout'",
+      "contains(lower(operation), lower('http.'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where service:checkout status:error -http.target:/healthz | count() by http_route",
+  "query": {
+    "from": "spans",
+    "where": [
+      "service = 'checkout'",
+      "status = 'STATUS_CODE_ERROR'",
+      "(attributes['http.target'] IS NULL OR attributes['http.target'] != '/healthz')"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "http_route"
+    ]
+  }
+}
+
+{
+  "text": "spans where since",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (since is reserved)",
+      "span": {
+        "start": 12,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where start_time ",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('start_time'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where start_time>\"2026-10-29 10:00:00\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "start_time > '2026-10-29 10:00:00'::TIMESTAMPTZ_NS"
+    ]
+  }
+}
+
+{
+  "text": "spans where start_time>\"2026-10-29T10:00:00Z\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "start_time > '2026-10-29T10:00:00Z'::TIMESTAMPTZ_NS"
+    ]
+  }
+}
+
+{
+  "text": "spans where start_time>\"yesterday\"",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "time needs a quoted timestamp in RFC 3339 or YYYY-MM-DD HH:MM:SS form (optional fraction and offset)",
+      "span": {
+        "start": 23,
+        "end": 34
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where starts_with(http_route, \"/api\")",
+  "query": {
+    "from": "spans",
+    "where": [
+      "starts_with(http_route, '/api')"
+    ]
+  }
+}
+
+{
+  "text": "spans where starts_with(http_route, \"/api\") > 1",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "predicates are not compared; use starts_with(...) alone",
+      "span": {
+        "start": 12,
+        "end": 47
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where starts_with(http_route, /api)",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "starts_with needs a quoted string",
+      "span": {
+        "start": 12,
+        "end": 41
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where stats",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('stats'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where status in (error, ok)",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status IN ('STATUS_CODE_ERROR', 'STATUS_CODE_OK')"
+    ]
+  }
+}
+
+{
+  "text": "spans where status ~ STATUS_CODE_ERROR",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(status), lower('STATUS_CODE_ERROR'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:\"STATUS_CODE_ERROR\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:\"error\"",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'error'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:500",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = '500'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:STATUS_CODE_ERROR",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:STATUS_CODE_OK",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_OK'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:STATUS_CODE_UNSET",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_UNSET'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:error",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:error | count() by service",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:error | count() by service",
+  "viz": "table",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_ERROR'"
+    ],
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:fail",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "unknown status \"fail\"; use status:error, status:ok or status:unset",
+      "span": {
+        "start": 19,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where status:ok",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_OK'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status:unset",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status = 'STATUS_CODE_UNSET'"
+    ]
+  }
+}
+
+{
+  "text": "spans where status>STATUS_CODE_ERROR",
+  "query": {
+    "from": "spans",
+    "where": [
+      "status > 'STATUS_CODE_ERROR'"
+    ]
+  }
+}
+
+{
+  "text": "spans where tar",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower('tar'))"
+    ]
+  }
+}
+
+{
+  "text": "spans where top",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"top\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where until",
+  "problems": [
+    {
+      "path": "text",
+      "message": "the time range is not part of FanQL 1; use the time picker (until is reserved)",
+      "span": {
+        "start": 12,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where user.id:* | count_distinct(user.id) by service",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['user.id'] IS NOT NULL"
+    ],
+    "measures": [
+      "count_distinct(attributes['user.id'])"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "spans where value>-3",
+  "query": {
+    "from": "spans",
+    "where": [
+      "attributes['value'] > -3"
+    ]
+  }
+}
+
+{
+  "text": "spans where window",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"window\" is reserved for a future FanQL feature",
+      "hint": "quote it to search for the word",
+      "span": {
+        "start": 12,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where x-y.z:1",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "\"x-y.z\" needs brackets",
+      "span": {
+        "start": 12,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where {service=\"api\"}",
+  "problems": [
+    {
+      "path": "text",
+      "message": "{ selectors are not FanQL; write labels as key:value, e.g. service:api",
+      "span": {
+        "start": 12,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where {service=api}",
+  "problems": [
+    {
+      "path": "text",
+      "message": "{ selectors are not FanQL; write labels as key:value, e.g. service:api",
+      "span": {
+        "start": 12,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a measure needs a call, number or parenthesised expression",
+      "span": {
+        "start": 8,
+        "end": 8
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "(count_if(duration_ms <= 500) + count_if(duration_ms > 500 AND duration_ms <= 2000) / 2) / count() as apdex"
+    ]
+  }
+}
+
+{
+  "text": "spans | P95(Duration)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "p95(duration_ms)"
+    ]
+  }
+}
+
+{
+  "text": "spans | avg(*)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "* is only allowed as the sole argument of count(*)",
+      "span": {
+        "start": 12,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | avg(attributes.http.response_size) as sz",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "avg(attributes['http.response_size']) as sz"
+    ]
+  }
+}
+
+{
+  "text": "spans | avg(duration), avg(user.score) sort ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "sort needs a key, e.g. sort duration",
+      "span": {
+        "start": 44,
+        "end": 44
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | avg(http.response_size) as sz",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "avg(attributes['http.response_size']) as sz"
+    ]
+  }
+}
+
+{
+  "text": "spans | avg(user.)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 11,
+        "end": 12
+      }
+    },
+    {
+      "path": "text",
+      "message": "separate measures with a comma",
+      "span": {
+        "start": 16,
+        "end": 17
+      }
+    },
+    {
+      "path": "text",
+      "message": "unexpected . after user; write the full key, e.g. user.id",
+      "span": {
+        "start": 16,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | bin(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "bin(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | cardinality(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "cardinality(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count(",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 13,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count()",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() ",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() * -1 as neg",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count() * -1 as neg"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() * 0 as zero",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count() * 0 as zero"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() * 1e3 as k",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count() * 1000 as k"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() +",
+  "problems": [
+    {
+      "path": "text",
+      "message": "+ needs a measure or number on both sides",
+      "span": {
+        "start": 16,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() + histogram(duration) as x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "distribution counts require count(); histogram(...) stands alone",
+      "span": {
+        "start": 8,
+        "end": 37
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() / 2",
+  "problems": [
+    {
+      "path": "text",
+      "message": "name this expression with as, e.g. count() / 2 as half",
+      "span": {
+        "start": 8,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() as ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "as needs a measure alias",
+      "span": {
+        "start": 19,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() as P95",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "alias \"P95\" must be lowercase letters, digits and underscores",
+      "span": {
+        "start": 8,
+        "end": 22
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() as duration sort duration",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count() as duration"
+    ],
+    "sort": "duration"
+  }
+}
+
+{
+  "text": "spans | count() by a, b, c, d",
+  "problems": [
+    {
+      "path": "text",
+      "message": "at most 3 grouping fields",
+      "span": {
+        "start": 28,
+        "end": 29
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() by attributes['user name']",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "attributes['user name']"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() by attributes['user''s name']",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "attributes['user''s name']"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() by resource['𝔘 [name]']",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "resource['𝔘 [name]']"
+    ]
+  }
+}
+
+{
+  "text": "spans | count() by service every 1m",
+  "viz": "timeseries",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "bucket": "1m"
+  }
+}
+
+{
+  "text": "spans | count() by service every auto sort count limit 10",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "bucket": "auto",
+    "sort": "count",
+    "limit": 10
+  }
+}
+
+{
+  "text": "spans | count() by service sort ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "sort needs a key, e.g. sort duration",
+      "span": {
+        "start": 32,
+        "end": 32
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() by service sort -count",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "sort": "count"
+  }
+}
+
+{
+  "text": "spans | count() by service sort count",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "sort": "count"
+  }
+}
+
+{
+  "text": "spans | count() by service sort count limit 10",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "sort": "count",
+    "limit": 10
+  }
+}
+
+{
+  "text": "spans | count() by service sort p95",
+  "problems": [
+    {
+      "path": "sort",
+      "message": "sort \"p95\" must name a measure alias; aliases here: count",
+      "span": {
+        "start": 27,
+        "end": 35
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() by service | sort count | limit 10",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "sort": "count",
+    "limit": 10
+  }
+}
+
+{
+  "text": "spans | count() by service | top 3 by count",
+  "problems": [
+    {
+      "path": "text",
+      "message": "FanQL 1 runs one aggregation stage",
+      "hint": "remove the second |; more stages come in a later version",
+      "span": {
+        "start": 27,
+        "end": 28
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() by service, ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a field needs a name, e.g. service or attributes['key']",
+      "span": {
+        "start": 28,
+        "end": 28
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() every ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unknown bucket \"\"; use auto or one of 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d",
+      "span": {
+        "start": 22,
+        "end": 22
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() every 1m sort count",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "bucket": "1m",
+    "sort": "count"
+  }
+}
+
+{
+  "text": "spans | count() every 2m",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unknown bucket \"2m\"; use auto or one of 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d",
+      "span": {
+        "start": 22,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() limit ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "limit needs a whole number from 1 to 1000; e.g. limit 50",
+      "span": {
+        "start": 22,
+        "end": 22
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() limit 0",
+  "problems": [
+    {
+      "path": "text",
+      "message": "limit needs a whole number from 1 to 1000; e.g. limit 50",
+      "span": {
+        "start": 22,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count() rate()",
+  "problems": [
+    {
+      "path": "text",
+      "message": "separate measures with a comma",
+      "span": {
+        "start": 16,
+        "end": 20
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count()*100 as c100",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count() * 100 as c100"
+    ]
+  }
+}
+
+{
+  "text": "spans | count(), count()",
+  "problems": [
+    {
+      "path": "measures[1]",
+      "message": "two measures are named count; add distinct aliases with as",
+      "span": {
+        "start": 17,
+        "end": 24
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count()/count() as one",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count() / count() as one"
+    ]
+  }
+}
+
+{
+  "text": "spans | count(*)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 22,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count_distinct(attributes['flag'])",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['flag'])"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(attributes['user.id'])",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['user.id'])"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(flag)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['flag'])"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(user.id)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['user.id'])"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(user.id) + avg(attributes.http.response_size) - p95(resource.k) * 1e3 as spread",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['user.id']) + avg(attributes['http.response_size']) - p95(resource['k']) * 1000 as spread"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(user.id) by service",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['user.id'])"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(user.id), p95(resource.k)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_distinct(attributes['user.id'])",
+      "p95(resource['k'])"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_distinct(x-y)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 22,
+        "end": 23
+      }
+    },
+    {
+      "path": "text",
+      "message": "a measure needs a call, number or parenthesised expression",
+      "span": {
+        "start": 25,
+        "end": 26
+      }
+    },
+    {
+      "path": "text",
+      "message": "separate measures with a comma",
+      "span": {
+        "start": 26,
+        "end": 27
+      }
+    },
+    {
+      "path": "text",
+      "message": "a measure needs a call, number or parenthesised expression",
+      "span": {
+        "start": 26,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count_if(a:1 b:2 or c:3) as x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write a:1 (b:2 or c:3) or (a:1 b:2) or c:3",
+      "span": {
+        "start": 17,
+        "end": 31
+      },
+      "fix_its": [
+        {
+          "label": "a:1 (b:2 or c:3)",
+          "span": {
+            "start": 17,
+            "end": 31
+          },
+          "text": "a:1 (b:2 or c:3)"
+        },
+        {
+          "label": "(a:1 b:2) or c:3",
+          "span": {
+            "start": 17,
+            "end": 31
+          },
+          "text": "(a:1 b:2) or c:3"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans | count_if(a:1 or b:2) / count() as r",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if((attributes['a'] = 1 OR attributes['b'] = 2)) / count() as r"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_if(body:\"a)b\" `x = ')'`) / count() as r",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(attributes['body'] = 'a)b' AND (x = ')')) / count() as r"
+    ]
+  },
+  "gate_problems": true
+}
+
+{
+  "text": "spans | count_if(http_status_code between 400 and 499) as client_errors, count_if(http_status_code>=500) as server_errors",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(TRY_CAST(http_status_code AS INTEGER) BETWEEN 400 AND 499) as client_errors",
+      "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) as server_errors"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_if(length(operation)>$x)",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "variables are not allowed inside count_if",
+      "span": {
+        "start": 35,
+        "end": 37
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count_if(service:$s) as n",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "variables are not allowed inside count_if",
+      "span": {
+        "start": 25,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | count_if(status:error -http.target:/healthz) as errs",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR' AND (attributes['http.target'] IS NULL OR attributes['http.target'] != '/healthz')) as errs"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_if(status:error)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR')"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_if(status:error) / count() * 100 as err_pct by http_route every 1m sort err_pct limit 10",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR') / count() * 100 as err_pct"
+    ],
+    "by": [
+      "http_route"
+    ],
+    "bucket": "1m",
+    "sort": "err_pct",
+    "limit": 10
+  }
+}
+
+{
+  "text": "spans | count_if(status:error) / count() as r by http_route",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR') / count() as r"
+    ],
+    "by": [
+      "http_route"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_if(status:error) as errors, count() as total, count_if(status:error) / count() as ratio by service",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count_if(status = 'STATUS_CODE_ERROR') as errors",
+      "count() as total",
+      "count_if(status = 'STATUS_CODE_ERROR') / count() as ratio"
+    ],
+    "by": [
+      "service"
+    ]
+  }
+}
+
+{
+  "text": "spans | count_over_time(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "count_over_time(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | dc(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "dc(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 10
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | distinct_count(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "distinct_count(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 22
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | eval count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"eval\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | every 1m",
+  "problems": [
+    {
+      "path": "text",
+      "message": "every needs measures first; write | count() every 1m",
+      "span": {
+        "start": 8,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | extend count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"extend\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | fields count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"fields\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | head count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"head\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | histogram(duration)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "histogram": {
+      "field": "duration_ms",
+      "buckets": "log2"
+    }
+  }
+}
+
+{
+  "text": "spans | histogram(duration) + count() as x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "distribution counts require count(); histogram(...) stands alone",
+      "span": {
+        "start": 8,
+        "end": 37
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | histogram(duration) as x",
+  "problems": [
+    {
+      "path": "text",
+      "message": "histogram(...) does not take an alias",
+      "span": {
+        "start": 8,
+        "end": 32
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | histogram(duration) by service",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "histogram": {
+      "field": "duration_ms",
+      "buckets": "log2"
+    }
+  }
+}
+
+{
+  "text": "spans | histogram(duration) by service",
+  "viz": "histogram",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "count()"
+    ],
+    "by": [
+      "service"
+    ],
+    "histogram": {
+      "field": "duration_ms",
+      "buckets": "log2"
+    }
+  }
+}
+
+{
+  "text": "spans | histogram(duration), count()",
+  "problems": [
+    {
+      "path": "text",
+      "message": "distribution counts require count(); histogram(...) stands alone",
+      "span": {
+        "start": 29,
+        "end": 36
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | histogram(duration), histogram(value)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "distribution counts require count(); histogram(...) stands alone",
+      "span": {
+        "start": 29,
+        "end": 45
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | last(value)",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "last is not available for spans",
+      "span": {
+        "start": 8,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | mean(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mean(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | median(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "median(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | order count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"order\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | p9",
+  "problems": [
+    {
+      "path": "text",
+      "message": "a measure needs a call, number or parenthesised expression",
+      "span": {
+        "start": 8,
+        "end": 10
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | p95()",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "p95 takes 1 argument(s), got 0; e.g. p95(duration)",
+      "span": {
+        "start": 8,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | p95(duration)",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "p95(duration_ms)"
+    ]
+  }
+}
+
+{
+  "text": "spans | p95(duration) by operation sort p95 limit 10",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "p95(duration_ms)"
+    ],
+    "by": [
+      "operation"
+    ],
+    "sort": "p95",
+    "limit": 10
+  }
+}
+
+{
+  "text": "spans | p95(duration)-p50(duration) as spread",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "p95(duration_ms) - p50(duration_ms) as spread"
+    ]
+  }
+}
+
+{
+  "text": "spans | p95(resource.k) as x",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "p95(resource['k']) as x"
+    ]
+  }
+}
+
+{
+  "text": "spans | p95(service)",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "p95 needs a numeric field; service is string",
+      "span": {
+        "start": 12,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | p99(duration) by http_route every 1m",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "p99(duration_ms)"
+    ],
+    "by": [
+      "http_route"
+    ],
+    "bucket": "1m"
+  }
+}
+
+{
+  "text": "spans | pct(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "pct(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | perc95(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "perc95(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | percentile(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "percentile(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 18
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | project count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"project\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 15
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | quantile(duration, ",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 16,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | quantile(duration, 0.999) as q",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "quantile(duration_ms, 0.999) as q"
+    ]
+  }
+}
+
+{
+  "text": "spans | quantile(duration, 2)",
+  "problems": [
+    {
+      "path": "measures[0]",
+      "message": "quantile q must be a number between 0 and 1",
+      "span": {
+        "start": 8,
+        "end": 29
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | quantile_over_time(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "quantile_over_time(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 26
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | rate(",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 12,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | rename count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"rename\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | select count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"select\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 14
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | share() ",
+  "query": {
+    "from": "spans",
+    "measures": [
+      "share()"
+    ]
+  }
+}
+
+{
+  "text": "spans | share() / 2 as half",
+  "problems": [
+    {
+      "path": "text",
+      "message": "share() cannot be combined; it is already a percentage of the scope",
+      "hint": "use share() alone, or count_if(...) / count() * 100 for a custom ratio",
+      "span": {
+        "start": 8,
+        "end": 19
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | sort by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"sort\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | sort count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unexpected (",
+      "span": {
+        "start": 18,
+        "end": 19
+      }
+    },
+    {
+      "path": "text",
+      "message": "unmatched ); remove it or add the opening (",
+      "span": {
+        "start": 19,
+        "end": 20
+      }
+    },
+    {
+      "path": "text",
+      "message": "by needs measures first; write | count() by service",
+      "span": {
+        "start": 21,
+        "end": 23
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | span(duration)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "span(...) is not FanQL; use the FanQL measure functions",
+      "span": {
+        "start": 8,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | stats count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"stats\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 13
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | sum(",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unclosed call; add )",
+      "span": {
+        "start": 11,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | summarize count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"summarize\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 17
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | take count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"take\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 12
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | top count() by service",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"top\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 8,
+        "end": 11
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans |= err",
+  "problems": [
+    {
+      "path": "text",
+      "message": "|= is not FanQL; use body ~ \"text\" for contains",
+      "span": {
+        "start": 6,
+        "end": 8
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans |~ err",
+  "problems": [
+    {
+      "path": "text",
+      "message": "|~ is not FanQL; use body ~ \"text\" for contains",
+      "span": {
+        "start": 6,
+        "end": 8
+      }
+    }
+  ]
+}
+
+{
+  "text": "traces where a:1",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unknown source \"traces\"",
+      "hint": "use spans; traces is a viz of spans",
+      "span": {
+        "start": 0,
+        "end": 6
+      }
+    }
+  ]
+}
+
+{
+  "text": "traces | stats x take 5",
+  "problems": [
+    {
+      "path": "text",
+      "message": "unknown source \"traces\"",
+      "hint": "use spans; traces is a viz of spans",
+      "span": {
+        "start": 0,
+        "end": 6
+      }
+    },
+    {
+      "path": "text",
+      "message": "\"stats\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 9,
+        "end": 14
+      }
+    },
+    {
+      "path": "text",
+      "message": "\"take\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "span": {
+        "start": 17,
+        "end": 21
+      }
+    }
+  ]
+}

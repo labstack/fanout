@@ -1,0 +1,2 @@
+go test fuzz v1
+string("logs where (`body = 'a' OR body = 'b'` service:api)")

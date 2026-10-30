@@ -3,6 +3,7 @@ package fanql
 import (
 	"database/sql"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/labstack/fanout/internal/panel"
@@ -60,6 +61,40 @@ func TestPrintParsePrintFixtureCorpus(t *testing.T) {
 	}
 }
 
+func TestPrintFunctionSearchWordsBeforeGroups(t *testing.T) {
+	for _, name := range resolveFilterFunctions() {
+		standalone, ps := Compile("logs "+name, Options{})
+		if len(ps) != 0 || standalone.Canonical != "logs where "+name {
+			t.Fatalf("standalone search spelling: %+v %+v", standalone, ps)
+		}
+		text := "logs " + name + " -(a b)"
+		a, ps := Compile(text, Options{})
+		if len(ps) != 0 {
+			t.Fatal(text, ps)
+		}
+		b, ps := Compile(a.Canonical, Options{})
+		if len(ps) != 0 || b == nil {
+			t.Fatalf("%q -> %q: %+v", text, a.Canonical, ps)
+		}
+		if b.Canonical != a.Canonical || !reflect.DeepEqual(a.Query, b.Query) {
+			t.Fatalf("not fixed: %+v -> %+v", a, b)
+		}
+	}
+}
+
+func TestPrintContainsKeepsStoredLiteralText(t *testing.T) {
+	for _, text := range []string{`spans where k ~ TRUE`, `spans where k !~ FALSE`, `logs where severity ~ TRUE`, `logs where service ~ FALSE`, `spans where k ~ 2E3`} {
+		a, ps := Compile(text, Options{})
+		if len(ps) != 0 {
+			t.Fatal(text, ps)
+		}
+		b, ps := Compile(a.Canonical, Options{})
+		if len(ps) != 0 || b == nil || !reflect.DeepEqual(a.Query, b.Query) {
+			t.Fatalf("%q -> %q: %+v %+v", text, a.Canonical, b, ps)
+		}
+	}
+}
+
 func TestPrintDurationMSKeepsUnit(t *testing.T) {
 	a, ps := Compile(`spans where duration_ms>500`, Options{})
 	if len(ps) != 0 {
@@ -71,6 +106,36 @@ func TestPrintDurationMSKeepsUnit(t *testing.T) {
 	b, ps := Compile(a.Canonical, Options{})
 	if len(ps) != 0 || !reflect.DeepEqual(a.Query, b.Query) {
 		t.Fatalf("round trip: %+v %+v", b, ps)
+	}
+}
+
+func TestDurationSpellingPreservesMillisecondThresholds(t *testing.T) {
+	for _, ms := range []float64{1001, 1002, 1003, 60001, 3600001, .1, .001, .0001, 1.3, 1e100, 1e308} {
+		text := "spans where duration_ms>" + strconv.FormatFloat(ms, 'g', -1, 64)
+		a, ps := Compile(text, Options{})
+		if len(ps) != 0 {
+			t.Fatal(text, ps)
+		}
+		b, ps := Compile(a.Canonical, Options{})
+		if len(ps) != 0 || b == nil || !reflect.DeepEqual(a.Query, b.Query) {
+			t.Fatalf("%q -> %q: %+v %+v", text, a.Canonical, b, ps)
+		}
+	}
+}
+
+func TestPrintNativeNegativeDurationRemainsNumeric(t *testing.T) {
+	for _, text := range []string{`spans where duration_ms>-3`, `spans where duration_ms between -3 and 5`, `spans where duration_ms in (-3, 5)`} {
+		a, ps := Compile(text, Options{})
+		if len(ps) != 0 {
+			t.Fatal(ps)
+		}
+		b, ps := Compile(a.Canonical, Options{})
+		if len(ps) != 0 || b == nil {
+			t.Fatalf("%q -> %q: %+v", text, a.Canonical, ps)
+		}
+		if !reflect.DeepEqual(a.Query, b.Query) {
+			t.Fatalf("query changed: %+v -> %+v", a.Query, b.Query)
+		}
 	}
 }
 
@@ -166,5 +231,22 @@ func TestGroupByAcceptsLiteralKeys(t *testing.T) {
 		if _, ps, err := panel.Check(t.Context(), engine, &dashboard); len(ps) != 0 || err != nil {
 			t.Fatalf("engine check for %q: %+v %v", text, ps, err)
 		}
+	}
+}
+
+func TestLiteralKeyQuotesSurviveCheckedMetadata(t *testing.T) {
+	c, ps := Compile(`spans where attributes['user''s name']:api | count()`, Options{Viz: "table"})
+	if len(ps) != 0 {
+		t.Fatal(ps)
+	}
+	engine, _ := newTestEngine(t)
+	d := panel.Dashboard{Name: "Keys", Panels: []panel.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
+	panel.Normalize(&d)
+	checked, ps, err := panel.Check(t.Context(), engine, &d)
+	if err != nil || len(ps) != 0 {
+		t.Fatal(ps, err)
+	}
+	if field := checked.Filters["keys"][0].EqField; field != `attributes['user''s name']` {
+		t.Fatalf("unsafe metadata field: %q", field)
 	}
 }
