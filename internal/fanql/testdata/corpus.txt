@@ -1991,11 +1991,12 @@
   "problems": [
     {
       "path": "text",
-      "message": "limit comes before sort here; write ... sort duration limit 10",
+      "message": "sort comes before limit: … sort duration limit 10",
       "span": {
         "start": 15,
         "end": 19
-      }
+      },
+      "hint": "write spans sort duration limit 10"
     }
   ]
 }
@@ -2229,16 +2230,8 @@
   "text": "spans where $__window:x",
   "problems": [
     {
-      "path": "where[0]",
+      "path": "text",
       "message": "$__ names are reserved; use a dashboard variable name",
-      "span": {
-        "start": 12,
-        "end": 21
-      }
-    },
-    {
-      "path": "where[0]",
-      "message": "\"$__window\" needs brackets",
       "span": {
         "start": 12,
         "end": 21
@@ -5976,22 +5969,6 @@
   "problems": [
     {
       "path": "text",
-      "message": "unclosed call; add )",
-      "span": {
-        "start": 11,
-        "end": 12
-      }
-    },
-    {
-      "path": "text",
-      "message": "separate measures with a comma",
-      "span": {
-        "start": 16,
-        "end": 17
-      }
-    },
-    {
-      "path": "text",
       "message": "unexpected . after user; write the full key, e.g. user.id",
       "span": {
         "start": 16,
@@ -6592,34 +6569,10 @@
   "problems": [
     {
       "path": "text",
-      "message": "unclosed call; add )",
+      "message": "unexpected - in count_distinct; write attributes['x-y']",
       "span": {
-        "start": 22,
-        "end": 23
-      }
-    },
-    {
-      "path": "text",
-      "message": "a measure needs a call, number or parenthesised expression",
-      "span": {
-        "start": 25,
-        "end": 26
-      }
-    },
-    {
-      "path": "text",
-      "message": "separate measures with a comma",
-      "span": {
-        "start": 26,
-        "end": 27
-      }
-    },
-    {
-      "path": "text",
-      "message": "a measure needs a call, number or parenthesised expression",
-      "span": {
-        "start": 26,
-        "end": 27
+        "start": 24,
+        "end": 25
       }
     }
   ]

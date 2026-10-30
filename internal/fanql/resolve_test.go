@@ -215,7 +215,6 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"metrics | -avg(value) as neg", "measure arithmetic is not available for metrics"},
 		{"spans | quantile(duration, 2)", "quantile q must be a number between 0 and 1"},
 		{"spans | count() by service sort p95", `sort "p95" must name a measure alias; aliases here: count`},
-		{"spans where $__window:x", "$__ names are reserved"},
 	} {
 		t.Run(tt.text, func(t *testing.T) {
 			_, ps := resolvedText(t, tt.text, Options{})

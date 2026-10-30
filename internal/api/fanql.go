@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/fanql"
@@ -105,8 +106,7 @@ func (h *FanQLHandler) format(c *echo.Context) error {
 	var req struct {
 		fanql.VersionRequest
 		fanql.Options
-		Query panel.Query  `json:"query"`
-		Panel *panel.Panel `json:"panel,omitempty"`
+		Query panel.Query `json:"query"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
@@ -141,10 +141,12 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 	var req struct {
 		fanql.VersionRequest
 		fanql.Options
-		Text      string  `json:"text"`
-		Cursor    int     `json:"cursor"`
-		Window    *string `json:"window,omitempty"`
-		Namespace string  `json:"namespace,omitempty"`
+		Text      string     `json:"text"`
+		Cursor    int        `json:"cursor"`
+		Window    *string    `json:"window,omitempty"`
+		From      *time.Time `json:"from,omitempty"`
+		To        *time.Time `json:"to,omitempty"`
+		Namespace string     `json:"namespace,omitempty"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
@@ -152,6 +154,11 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 	missing, err := checkFanQLVersion(req.VersionRequest)
 	if err != nil {
 		return err
+	}
+	if req.From != nil || req.To != nil {
+		if req.From == nil || req.To == nil || !req.From.Before(*req.To) || req.Window != nil {
+			return newAPIError(http.StatusBadRequest, "invalid_input", "use from and to with the start before the end, or a window duration")
+		}
 	}
 	window := ""
 	if req.Window != nil {
@@ -161,7 +168,7 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 	defer cancel()
 	out := h.completer.Complete(ctx, fanql.CompleteRequest{
 		Text: req.Text, Cursor: req.Cursor, Options: req.Options,
-		Window: window, Namespace: req.Namespace,
+		Window: window, From: req.From, To: req.To, Namespace: req.Namespace,
 	})
 	var notices []fanql.Notice
 	if missing {

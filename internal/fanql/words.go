@@ -26,7 +26,8 @@ func wordSet(s string) map[string]bool {
 type diagnosticCode uint8
 
 const (
-	diagTraces diagnosticCode = iota
+	diagMeasureHyphen diagnosticCode = iota
+	diagTraces
 	diagTextBound
 	diagTokensBound
 	diagNodesBound
@@ -103,6 +104,8 @@ const (
 
 func message(code diagnosticCode) string {
 	switch code {
+	case diagMeasureHyphen:
+		return "unexpected - in %s; write attributes[%s]"
 	case diagTextBound:
 		return "a query is at most 4000 characters (8192 bytes)"
 	case diagTokensBound:
@@ -240,7 +243,7 @@ func message(code diagnosticCode) string {
 	case diagSortKey:
 		return "sort needs a key, e.g. sort duration"
 	case diagLimitBeforeSort:
-		return "limit comes before sort here; write ... sort duration limit 10"
+		return "sort comes before limit: … sort %s limit %d"
 	case diagLimit:
 		return "limit needs a whole number from 1 to 1000; e.g. limit 50"
 	case diagDuplicate:

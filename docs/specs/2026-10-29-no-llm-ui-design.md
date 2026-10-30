@@ -401,7 +401,7 @@ The parse response reports shape problems with spans mapped from the lowered fie
 
 **`sort errors` stays.** It is valid stored state (appends `status = 'STATUS_CODE_ERROR'` and orders by duration). FanQL accepts and prints it with the notice `sort errors also filters to error spans; new queries: write status:error … sort duration`; completion after `sort` under traces offers `duration`, `+start` and `errors` (detail "filters to errors, orders by duration"); the reference teaches `status:error … sort duration` and lists `errors` as the legacy combined key.
 
-**Bucketed sort and limit.** For bucketed aggregates the compiler orders by time and selects series by `options.top`, ignoring `Sort`/`Limit`; the panel accepts them, so FanQL must too. With `viz` in a bucketed family, a `sort` or `limit` yields the notice `sort does not apply to bucketed series; series are chosen by top (options)`; the same for `limit` on `stat`/`gauge`. Without a viz, no notice.
+**Bucketed sort and limit.** For bucketed aggregates the compiler orders by time and selects series by `options.top`, ignoring `Sort`/`Limit`; the panel accepts them, so FanQL must too. With `viz` in a bucketed family, a `sort` or `limit` yields the notice `sort does not apply to bucketed series; series are chosen by top (options)`; a `limit` on `stat`/`gauge` instead reports `limit does not apply to stat panels; the whole window produces one value` (using the selected visualization name), at path `limit`. Without a viz, no notice.
 
 **Error model.** (1) A text with any problem has no executable form: the parse response carries no `query`, Run and Save stay disabled, the user's text is never replaced. (2) All problems in one pass, in source order, capped at 20 (`more problems follow; fix these first` as the 21st); recovery exists to find more problems and to drive completion, never to produce a runnable remainder. (3) A repaired preview is returned only when requested (`preview: true`) and is labelled `not executable`. (4) Notices are a separate list and never block. (5) Fix-its are suggestions attached to a problem; applying one is a user action.
 
@@ -439,14 +439,14 @@ POST /api/fanql/format
   503 {code: "unavailable", message}                 (engine parse failed operationally)
 
 POST /api/fanql/complete
-  {fanql_version: 1, text, cursor, source?, viz?, window?, namespace?, variables?}
+  {fanql_version: 1, text, cursor, source?, viz?, window?, from?, to?, namespace?, variables?}
   200 {fanql_version: 1, replace: {start, end}, items: [{label, insert, kind, detail}],
        schema: {window, sampled: true, warm: bool, recent: bool}}
 
 GET  /api/fanql/reference?fanql_version=1        text/markdown
 ```
 
-`format` needs in-memory shape validity under some viz, the supplied `variables` to judge `$x` references (without them, references are notices), and the engine only for `ParseSQL`/`RenderSQL` of stored entries; it never runs `Check`'s bind step or `Normalize`; `panel` is accepted so a builder round trip can report `requires` satisfied or not, and is otherwise ignored.
+`format` needs in-memory shape validity under some viz, the supplied `variables` to judge `$x` references (without them, references are notices), and the engine only for `ParseSQL`/`RenderSQL` of stored entries; it never runs `Check`'s bind step or `Normalize`; `panel` is accepted so a builder round trip reports `requires: [{name, satisfied}]`; gauge needs `min_max`, and a state timeline needs `thresholds`. Other panel configuration is ignored.
 
 **Handler.** `PanelHandler` holds a `PanelEngine` (`Exemplars`, `Run`, `ResolveVariables`, `Schema`) and no parser, so FanQL gets its own handler with an injected `panel.Parser` (`*query.Duck` implements it):
 

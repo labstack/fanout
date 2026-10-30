@@ -329,4 +329,6 @@ The language version is separate from product CalVer and the panel contract. Mac
 
 A version bump is required when accepted text changes meaning or stops parsing, including columns that reinterpret bare identifiers and severity aliases that reinterpret accepted literals. New status/kind aliases that were errors, stage words and filter functions are additive. Canonical spelling is frozen per version; preview changes can rewrite through the shared structured query.
 
+Completion accepts a relative `window` duration or absolute `from` and `to` timestamps. Absolute windows and durations over 24h use recent 24h schema, disclosed by `schema.recent` and `schema.notice`. With no selected window, the same recent fallback applies.
+
 HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference?fanql_version=1`, requiring telemetry:read. MCP query_telemetry accepts text with fanql_version beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.

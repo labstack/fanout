@@ -65,6 +65,7 @@ type CompleteRequest struct {
 	Text      string
 	Cursor    int
 	Window    string
+	From, To  *time.Time
 	Namespace string
 }
 
@@ -76,6 +77,7 @@ type Item struct {
 }
 
 type SchemaStatus struct {
+	Notice  string `json:"notice,omitempty"`
 	Window  string `json:"window"`
 	Sampled bool   `json:"sampled"`
 	Warm    bool   `json:"warm"`
@@ -208,9 +210,15 @@ type completionCandidates struct {
 
 func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteResponse {
 	window, recent := completionWindow(req.Window)
+	if req.From != nil || req.To != nil {
+		window, recent = "24h", true
+	}
 	schema, warm, failed := c.schema(ctx, completionKey{window, req.Namespace})
 	token, p := completionPrefix(req.Text, req.Cursor, req.Source)
 	r := CompleteResponse{Replace: panel.TextSpan{Start: token.Span.Start, End: token.Span.End}, Items: []Item{}, Schema: SchemaStatus{Window: window, Sampled: true, Warm: warm, Recent: recent, Error: failed}}
+	if recent {
+		r.Schema.Notice = "keys seen in the last 24h (recent), not in the selected interval"
+	}
 	if token.Kind == tokenString || token.Kind == tokenRaw {
 		return r
 	}

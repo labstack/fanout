@@ -49,7 +49,7 @@ func TestLexLongestMatchOperators(t *testing.T) {
 func TestLexBadTokens(t *testing.T) {
 	for _, tc := range []struct{ text, bad, message, hint string }{
 		{"!service:api", "!", "! negation is not FanQL", ""},
-		{"body ~~ x", "~~", "", "~~ is SQL LIKE; use like, ilike or ~"},
+		{"body ~~ x", "~~", "~~ is SQL LIKE; use like, ilike or ~", "use like or ilike for SQL patterns; use ~ for a literal substring"},
 		{"#tag", "#", "", ""}, {"$ x", "$", "unexpected $", ""},
 	} {
 		t.Run(tc.text, func(t *testing.T) {

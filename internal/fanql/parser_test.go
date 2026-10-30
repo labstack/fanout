@@ -305,7 +305,7 @@ func TestParseSortLimitAndSecondPipe(t *testing.T) {
 	}
 	for _, tc := range []struct{ text, message, hint string }{
 		{"spans | count() by service | top 3 by count", "FanQL 1 runs one aggregation stage", "remove the second |; more stages come in a later version"},
-		{"spans limit 10 sort duration", "limit comes before sort here; write ... sort duration limit 10", ""},
+		{"spans limit 10 sort duration", "sort comes before limit: … sort duration limit 10", "write spans sort duration limit 10"},
 		{"spans | count() limit 0", "limit needs a whole number from 1 to 1000; e.g. limit 50", ""},
 		{"spans where a:1 where b:2", "where appears twice; combine the filters into one where", ""},
 		{"spans | every 1m", "every needs measures first; write | count() every 1m", ""},

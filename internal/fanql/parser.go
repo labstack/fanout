@@ -87,6 +87,12 @@ func parseWith(text string, source string, vocab vocabulary) (q *queryTree, prob
 		p.bound(span{0, len(p.runes)}, diagTextBound)
 	}
 	p.tokens = lex(text)
+	for _, token := range p.tokens {
+		if token.Kind == tokenBad && strings.HasPrefix(token.Text, "$__") {
+			p.report(token.Span, diagVariable)
+			return nil, nil
+		}
+	}
 	if len(p.tokens)-1 > maxTokens {
 		p.bound(p.tokens[maxTokens].Span, diagTokensBound)
 	}
@@ -268,13 +274,19 @@ func (p *parser) query(source string) *queryTree {
 			p.report(p.take().Span, diagWhereTwice)
 			q.Where = append(q.Where, p.filters(false)...)
 		case p.is("sort"):
-			if q.Limit != nil {
-				p.report(p.peek().Span, diagLimitBeforeSort)
-			}
+			orderAt := p.peek().Span
+			outOfOrder := q.Limit != nil
 			if q.Sort != nil {
 				p.report(p.peek().Span, diagDuplicate, "sort")
 			}
 			q.Sort = p.parseSort()
+			if outOfOrder {
+				key := q.Sort.Key
+				if q.Sort.Ascending {
+					key = "+" + key
+				}
+				p.issue(orderAt, diagnostic(diagLimitBeforeSort, key, q.Limit.N), "write "+print(q))
+			}
 		case p.is("limit"):
 			if q.Limit != nil {
 				p.report(p.peek().Span, diagDuplicate, "limit")
@@ -568,6 +580,12 @@ func (p *parser) primary(nested bool) filterExpr {
 		p.expectNext(expect{Class: "value", Field: &field, Scope: op})
 		v, valid := p.value()
 		if !valid {
+			if bad := p.peek(); bad.Kind == tokenBad && bad.Text == "$" {
+				p.issue(bad.Span, bad.Message, bad.Hint)
+				p.take()
+				p.skipRun()
+				return nil
+			}
 			example := "api"
 			if field.Key == "duration" {
 				example = "500ms"
@@ -943,6 +961,13 @@ func (p *parser) skipRun() {
 func (p *parser) badTerm() {
 	t := p.take()
 	switch t.Text {
+	case "~~":
+		suggestion := t.Hint
+		if p.i >= 2 && p.tokens[p.i-2].Kind == tokenWord && (p.peek().Kind == tokenWord || p.peek().Kind == tokenString) {
+			field, value := p.tokens[p.i-2].Text, p.peek().Text
+			suggestion = "write " + field + " like " + quoteText(value+"%") + " for a pattern, or " + field + " ~ " + quoteText(value) + " for contains"
+		}
+		p.issue(t.Span, t.Message, suggestion)
 	case "{":
 		p.report(t.Span, diagSelector)
 	case "@":
@@ -1041,11 +1066,18 @@ func (p *parser) parseSort() *sortClause {
 		return x
 	}
 	x.Key = strings.ToLower(p.take().Text)
-	if p.is("asc") || p.is("desc") {
-		if signed {
+	directions := 0
+	if signed {
+		directions = 1
+	}
+	reported := false
+	for p.is("asc") || p.is("desc") {
+		if directions > 0 && !reported {
 			p.report(p.peek().Span, diagDirection)
+			reported = true
 		}
 		x.Ascending = !strings.EqualFold(p.take().Text, "desc")
+		directions++
 	}
 	x.At.End = p.previousEnd()
 	return x
@@ -1340,6 +1372,20 @@ func (p *parser) mcall() panel.MeasureExpr {
 			if ok {
 				arg.Field = &f
 				arg.At = f.At
+				if p.is("-") {
+					op := p.take()
+					key := f.Key + "-"
+					if p.peek().Kind == tokenIdent || p.peek().Kind == tokenPath {
+						key += p.take().Text
+					}
+					p.report(op.Span, diagMeasureHyphen, x.Func, sqlString(key))
+					for p.peek().Kind != eof && !p.is(")") && !p.is("|") {
+						p.take()
+					}
+				} else if p.peek().Kind == tokenBad && p.peek().Text == "." {
+					bad := p.take()
+					p.issue(bad.Span, bad.Message, bad.Hint)
+				}
 			}
 		default:
 			p.report(t.Span, diagMeasureArg)

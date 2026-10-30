@@ -311,7 +311,11 @@ func TestFormatReportsIgnoredSortAndLimit(t *testing.T) {
 		{"gauge", panel.Query{From: "spans", Measures: []string{"count()"}, Limit: 10}},
 	} {
 		f, ps, err := Format(t.Context(), &countingParser{fail: true}, tt.q, Options{Viz: tt.viz})
-		if err != nil || len(ps) > 0 || len(f.Notices) != 1 || f.Notices[0].Message != "sort does not apply to bucketed series; series are chosen by top (options)" {
+		want := []Notice{{Path: "limit", Message: "limit does not apply to " + tt.viz + " panels; the whole window produces one value"}}
+		if tt.viz == "timeseries" {
+			want = []Notice{{Path: "sort", Message: "sort does not apply to bucketed series; series are chosen by top (options)"}, {Path: "limit", Message: "limit does not apply to bucketed series; series are chosen by top (options)"}}
+		}
+		if err != nil || len(ps) > 0 || f == nil || !reflect.DeepEqual(f.Notices, want) {
 			t.Fatalf("%s: %+v %+v %v", tt.viz, f, ps, err)
 		}
 	}
@@ -381,5 +385,38 @@ func TestFormatOwnLiteralSpellingsAreFixedPoints(t *testing.T) {
 				t.Fatalf("fixed point: %+v %+v", again, ps)
 			}
 		})
+	}
+}
+
+func TestFormatUndeclaredContextReportsVariableNotices(t *testing.T) {
+	q := panel.Query{From: "spans", Where: []string{"service = $x"}}
+	f, ps, err := Format(t.Context(), &countingParser{fail: true}, q, Options{})
+	if err != nil || len(ps) != 0 || f == nil || len(f.Notices) != 1 || f.Notices[0].Path != "where[0]" || f.Notices[0].Message != "declared variables are needed to check $x" {
+		t.Fatalf("variable context: %+v %+v %v", f, ps, err)
+	}
+}
+
+func TestFormatPreservesQueriesValidUnderAnotherViz(t *testing.T) {
+	q := panel.Query{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}
+	f, ps, err := Format(t.Context(), &countingParser{fail: true}, q, Options{Viz: "timeseries"})
+	if err != nil || len(ps) != 0 || f == nil || f.Text != "spans | count() by service" {
+		t.Fatalf("valid table query: %+v %+v %v", f, ps, err)
+	}
+}
+
+func TestIgnoredLimitNoticesDescribeTheSelectedViz(t *testing.T) {
+	for _, viz := range []string{"stat", "gauge"} {
+		compiled, ps := Compile("spans | count() limit 10", Options{Viz: viz})
+		if len(ps) != 0 || compiled == nil {
+			t.Fatal(ps)
+		}
+		want := "limit does not apply to " + viz + " panels; the whole window produces one value"
+		if len(compiled.Notices) != 1 || compiled.Notices[0].Path != "limit" || compiled.Notices[0].Message != want {
+			t.Fatalf("compile: %+v", compiled.Notices)
+		}
+		f, ps, err := Format(t.Context(), &countingParser{fail: true}, compiled.Query, Options{Viz: viz})
+		if err != nil || len(ps) != 0 || f == nil || len(f.Notices) != 1 || f.Notices[0].Path != "limit" || f.Notices[0].Message != want {
+			t.Fatalf("format: %+v %v %v", f, ps, err)
+		}
 	}
 }

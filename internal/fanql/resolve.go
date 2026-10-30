@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/sqlscan"
 	"github.com/labstack/fanout/internal/suggest"
 	"github.com/labstack/fanout/internal/telemetry"
 )
@@ -259,11 +260,8 @@ func (r *resolver) expr(e filterExpr) {
 			}
 		}
 	case *rawEntry:
-		// SQL is retained verbatim; the panel gate checks its syntax at execution.
-		for _, tok := range lex(x.Text) {
-			if tok.Kind == tokenWord && strings.HasPrefix(tok.Text, "$") {
-				r.variable(tok.Text, "", x.At, false)
-			}
+		for _, name := range sqlscan.Parameters(x.Text) {
+			r.variable("$"+name, "", x.At, false)
 		}
 	}
 }
@@ -413,12 +411,12 @@ func (r *resolver) bands(f fieldName, op string, lo literalValue, hi *literalVal
 }
 
 func (r *resolver) variable(name, field string, at span, multi bool) {
-	if r.countIf {
-		r.issue(at, "variables are not allowed inside count_if")
-		return
-	}
 	if strings.HasPrefix(name, "$__") {
 		r.issue(at, message(diagVariable))
+		return
+	}
+	if r.countIf {
+		r.issue(at, "variables are not allowed inside count_if")
 		return
 	}
 	if r.opts.Variables == nil {
@@ -654,15 +652,21 @@ func (r *resolver) sort() {
 			r.notice(s.At, "sort errors also filters to error spans; new queries: write status:error … sort duration")
 		}
 	}
-	if (q.Sort != nil || q.Limit != nil) && slices.Contains([]string{"timeseries", "heatmap", "state_timeline"}, r.opts.Viz) || q.Limit != nil && slices.Contains([]string{"stat", "gauge"}, r.opts.Viz) {
-		at := q.Span
-		if q.Sort != nil {
-			at = q.Sort.At
-		} else if q.Limit != nil {
-			at = q.Limit.At
-		}
-		r.notice(at, "sort does not apply to bucketed series; series are chosen by top (options)")
+	stored := panel.Query{}
+	if q.Stage != nil {
+		stored.Bucket = q.Stage.Bucket
 	}
+	if q.Sort != nil {
+		stored.Sort = q.Sort.Key
+	}
+	if q.Limit != nil {
+		stored.Limit = q.Limit.N
+	}
+	for _, notice := range ignoredClauseNotices(stored, r.opts.Viz) {
+		r.path = notice.Path
+		r.notice(queryPathSpan(q, notice.Path), notice.Message)
+	}
+
 }
 
 func queryPathSpan(q *queryTree, path string) span {
@@ -707,4 +711,19 @@ func aliasChoices(field string, aliases map[string]string) string {
 		return strings.Join(choices, "")
 	}
 	return strings.Join(choices[:len(choices)-1], ", ") + " or " + choices[len(choices)-1]
+}
+
+func ignoredClauseNotices(q panel.Query, viz string) []Notice {
+	notices := []Notice{}
+	bucketed := q.Bucket != "" && slices.Contains([]string{"timeseries", "heatmap", "state_timeline"}, viz)
+	if bucketed && q.Sort != "" {
+		notices = append(notices, Notice{Path: "sort", Message: "sort does not apply to bucketed series; series are chosen by top (options)"})
+	}
+	if bucketed && q.Limit != 0 {
+		notices = append(notices, Notice{Path: "limit", Message: "limit does not apply to bucketed series; series are chosen by top (options)"})
+	}
+	if q.Limit != 0 && (viz == "stat" || viz == "gauge") {
+		notices = append(notices, Notice{Path: "limit", Message: "limit does not apply to " + viz + " panels; the whole window produces one value"})
+	}
+	return notices
 }

@@ -118,6 +118,15 @@ func lex(text string) lexTokens {
 			i = scanNumber(r, i)
 		case c == '$':
 			i++
+			if i+1 < len(r) && r[i] == '_' && r[i+1] == '_' {
+				for i < len(r) && identContinue(r[i]) {
+					i++
+				}
+				tok.Kind = tokenBad
+				tok.Text = string(r[start:i])
+				tok.Message = message(diagVariable)
+				break
+			}
 			if ctx == filterContext && i < len(r) && identStart(r[i]) {
 				tok.Kind = tokenWord
 				for i < len(r) && identContinue(r[i]) {
@@ -138,8 +147,8 @@ func lex(text string) lexTokens {
 				case "~~":
 					i++
 					tok.Kind = tokenBad
-					tok.Hint = "~~ is SQL LIKE; use like, ilike or ~"
-					tok.Message = tok.Hint
+					tok.Message = "~~ is SQL LIKE; use like, ilike or ~"
+					tok.Hint = "use like or ilike for SQL patterns; use ~ for a literal substring"
 				}
 			}
 			if c == '!' && i == start+1 {

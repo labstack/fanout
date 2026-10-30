@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/sqlscan"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -16,12 +17,17 @@ const (
 	Normalized Exactness = "normalized"
 )
 
+type Requirement struct {
+	Name      panel.VizRequirement `json:"name"`
+	Satisfied bool                 `json:"satisfied"`
+}
 type Formatted struct {
-	Text      string    `json:"text"`
-	Exactness Exactness `json:"exactness"`
-	Editable  bool      `json:"editable"`
-	Reason    string    `json:"reason,omitempty"`
-	Notices   []Notice  `json:"notices"`
+	Requires  []Requirement `json:"requires"`
+	Text      string        `json:"text"`
+	Exactness Exactness     `json:"exactness"`
+	Editable  bool          `json:"editable"`
+	Reason    string        `json:"reason,omitempty"`
+	Notices   []Notice      `json:"notices"`
 }
 type tier uint8
 
@@ -34,6 +40,9 @@ const (
 // Format preserves each stored filter as one entry. Candidates are kept only
 // after a byte or engine-AST exactness check; all other filters remain raw.
 func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Options) (*Formatted, panel.Problems, error) {
+	if opts.Panel != nil {
+		opts.Viz = opts.Panel.Viz
+	}
 	vars := map[string]panel.Variable(nil)
 	if opts.Variables != nil {
 		vars = make(map[string]panel.Variable, len(opts.Variables))
@@ -42,17 +51,37 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 		}
 	}
 	var problems panel.Problems
-	if opts.Viz != "" {
-		problems, _ = panel.QueryShape(&stored, opts.Viz, vars)
-	} else if len(panel.CompatibleVizzes(&stored, vars)) == 0 {
-		problems, _ = panel.QueryShape(&stored, "table", vars)
+	if len(panel.CompatibleVizzes(&stored, vars)) == 0 {
+		viz := opts.Viz
+		if viz == "" {
+			viz = "table"
+		}
+		problems, _ = panel.QueryShape(&stored, viz, vars)
 	}
 	if len(problems) > 0 {
 		return nil, problems, nil
 	}
 	q := &queryTree{Source: stored.From}
-	f := &Formatted{Exactness: Exact, Notices: []Notice{}}
+	f := &Formatted{Exactness: Exact, Notices: []Notice{}, Requires: []Requirement{}}
+	_, requirements := panel.QueryShape(&stored, opts.Viz, vars)
+	for _, name := range requirements {
+		satisfied := false
+		if p := opts.Panel; p != nil {
+			switch name {
+			case panel.RequiresMinMax:
+				satisfied = p.Min != nil && p.Max != nil && *p.Min < *p.Max
+			case panel.RequiresThresholds:
+				satisfied = len(p.Thresholds) > 0
+			}
+		}
+		f.Requires = append(f.Requires, Requirement{Name: name, Satisfied: satisfied})
+	}
 	for i, text := range stored.Where {
+		if opts.Variables == nil {
+			for _, name := range sqlscan.Parameters(text) {
+				f.Notices = append(f.Notices, Notice{Path: fmt.Sprintf("where[%d]", i), Message: "declared variables are needed to check $" + name})
+			}
+		}
 		e, t, err := liftEntry(ctx, p, stored.From, text)
 		if err != nil {
 			if operationalFormatError(err) {
@@ -107,9 +136,7 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 	if opts.Viz == "traces" && stored.Sort == "errors" {
 		f.Notices = append(f.Notices, Notice{Path: "sort", Message: "sort errors also filters to error spans; new queries: write status:error … sort duration"})
 	}
-	if opts.Viz != "" && (stored.Sort != "" || stored.Limit != 0) && stored.Bucket != "" || stored.Limit != 0 && (opts.Viz == "stat" || opts.Viz == "gauge") {
-		f.Notices = append(f.Notices, Notice{Path: "sort", Message: "sort does not apply to bucketed series; series are chosen by top (options)"})
-	}
+	f.Notices = append(f.Notices, ignoredClauseNotices(stored, opts.Viz)...)
 	f.Text = print(q)
 	f.Reason = editableReason(f.Text)
 	f.Editable = f.Reason == ""

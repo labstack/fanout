@@ -7,6 +7,7 @@ import "github.com/labstack/fanout/internal/panel"
 const Version = 1
 
 type Options struct {
+	Panel     *panel.Panel     `json:"panel,omitempty"`
 	Source    string           `json:"source,omitempty"`
 	Viz       string           `json:"viz,omitempty"`
 	Variables []panel.Variable `json:"variables,omitempty"`

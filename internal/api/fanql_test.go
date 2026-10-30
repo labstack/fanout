@@ -372,3 +372,48 @@ func TestFanQLVersionUsesSharedFieldAndReferenceHeaders(t *testing.T) {
 		t.Fatalf("reference metadata: %d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
 }
+
+func TestFanQLCompletionAbsoluteAndLongWindowsDiscloseRecentSchema(t *testing.T) {
+	for _, window := range []string{
+		`"from":"2026-10-20T10:00:00Z","to":"2026-10-20T11:00:00Z"`,
+		`"window":"7d"`,
+	} {
+		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"fanql_version":1,"text":"logs where sev","cursor":14,`+window+`}`)
+		var body struct {
+			Schema struct {
+				Window string `json:"window"`
+				Recent bool   `json:"recent"`
+				Notice string `json:"notice"`
+			} `json:"schema"`
+		}
+		fanqlResponse(t, rec, http.StatusOK, &body)
+		if body.Schema.Window != "24h" || !body.Schema.Recent || body.Schema.Notice != "keys seen in the last 24h (recent), not in the selected interval" {
+			t.Fatalf("disclosure: %s", rec.Body)
+		}
+	}
+}
+
+func TestFanQLFormatReportsPanelRequirements(t *testing.T) {
+	for _, tt := range []struct {
+		panel, query, name string
+		satisfied          bool
+	}{
+		{`{"viz":"gauge"}`, `{"from":"spans","measures":["count()"]}`, "min_max", false},
+		{`{"viz":"gauge","min":0,"max":100}`, `{"from":"spans","measures":["count()"]}`, "min_max", true},
+		{`{"viz":"state_timeline"}`, `{"from":"spans","measures":["count()"],"by":["service"],"bucket":"1m"}`, "thresholds", false},
+		{`{"viz":"state_timeline","thresholds":[{"value":10,"status":"warn"}]}`, `{"from":"spans","measures":["count()"],"by":["service"],"bucket":"1m"}`, "thresholds", true},
+	} {
+		input := `{"fanql_version":1,"query":` + tt.query + `,"panel":` + tt.panel + `}`
+		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/format", input)
+		var body struct {
+			Requires []struct {
+				Name      string `json:"name"`
+				Satisfied bool   `json:"satisfied"`
+			} `json:"requires"`
+		}
+		fanqlResponse(t, rec, http.StatusOK, &body)
+		if len(body.Requires) != 1 || body.Requires[0].Name != tt.name || body.Requires[0].Satisfied != tt.satisfied {
+			t.Fatalf("requirements: %s", rec.Body)
+		}
+	}
+}
