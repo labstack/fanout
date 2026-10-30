@@ -29,11 +29,12 @@ type QueryTelemetryInput struct {
 	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 
-// QueryTelemetryOutput includes FanQL failures without changing preset fragments.
 type fanqlToolFailureOutput struct {
 	Error    fanql.VersionProblem `json:"error"`
 	Problems panel.Problems       `json:"problems,omitempty"`
 }
+
+// QueryTelemetryOutput includes FanQL failures without changing preset fragments.
 type QueryTelemetryOutput struct {
 	*PanelFragment
 	Error    *fanql.VersionProblem `json:"error,omitempty"`
