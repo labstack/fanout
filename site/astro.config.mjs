@@ -13,7 +13,7 @@ const SITE = process.env.SITE_URL ?? "https://fanout.run";
 export default defineConfig({
   site: SITE,
   trailingSlash: "never",
-  build: { format: "file" },
+  build: { format: "preserve" },
   // Reserved local-development port, beside the runtime's own 7520; no reverse
   // proxy is used.
   server: { port: 7521 },
@@ -67,8 +67,8 @@ export default defineConfig({
         PageFrame: "./src/components/PageFrame.astro",
       },
       // Starlight derives the canonical URL from the on-disk file name, which
-      // under `build.format: "file"` carries a `.html` no link, sitemap entry
-      // or agent-facing URL on this site uses. See the middleware for why the
+      // carries a `.html` no link, sitemap entry or agent-facing URL on this
+      // site uses. See the middleware for why the
       // tags are rewritten rather than re-declared.
       routeMiddleware: "./src/starlight-route-data.ts",
       lastUpdated: true,

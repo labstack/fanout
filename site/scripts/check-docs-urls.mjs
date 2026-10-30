@@ -26,6 +26,8 @@ async function checkPages(dir, prefix = "") {
       const markdown = await readFile(new URL(`${path.slice(0, -5)}.md`, dist), "utf8");
       assert(markdown.trim(), `${url}: empty Markdown export`);
       const html = await readFile(new URL(entry.name, dir), "utf8");
+      const fileLink = html.match(/href="(\/[^"#?]*\.html)"/)?.[1];
+      assert(!fileLink, `${url}: links to ${fileLink}; links must use the extensionless path`);
       const alternate = html.match(/<link[^>]+type="text\/markdown"[^>]+href="([^"]+)"/)?.[1];
       assert(alternate, `${url}: missing Markdown alternate`);
       assert.equal(new URL(alternate, "https://fanout.run").pathname, `${url}.md`,
