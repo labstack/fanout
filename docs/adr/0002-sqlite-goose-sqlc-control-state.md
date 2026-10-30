@@ -19,7 +19,7 @@ not used for control state.
 
 ## Consequences
 
-- No external database to deploy; backups are one file plus telemetry.
+- No external database to deploy.
 - Schema changes always add a new migration and run `just db-gen`.
 - A database with application tables must have a positive applied Goose
   version before initialization; there is no schema fallback.

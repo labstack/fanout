@@ -28,7 +28,7 @@ Date: YYYY-MM-DD
 | 0001 | [Environment-only configuration](0001-environment-only-configuration.md) | Accepted |
 | 0002 | [SQLite with Goose and sqlc for control state](0002-sqlite-goose-sqlc-control-state.md) | Accepted |
 | 0003 | [Pinned DuckDB engine and batch format 4](0003-pinned-duckdb-and-batch-format-4.md) | Accepted |
-| 0004 | [No legacy paths before release](0004-no-legacy-paths-before-release.md) | Accepted |
+| 0004 | [No legacy paths](0004-no-legacy-paths.md) | Accepted |
 | 0005 | [CalVer releases](0005-calver-releases.md) | Accepted |
 | 0006 | [One structured query path](0006-one-structured-query-path.md) | Accepted |
 | 0007 | [A hand-written FanQL parser](0007-hand-written-fanql-parser.md) | Accepted |

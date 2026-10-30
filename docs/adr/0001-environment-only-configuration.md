@@ -5,9 +5,9 @@ Date: 2026-10-30
 
 ## Context
 
-Fanout runs as one binary on laptops, containers and hosted platforms. Mixing
-configuration files, flags and environment variables made precedence hard to
-explain and secrets easy to leak into files.
+Fanout runs as one binary on laptops, containers and hosted platforms. It
+needs one configuration source that works the same way in each, and a way to
+deliver secrets without writing them into configuration.
 
 ## Decision
 

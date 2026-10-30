@@ -1,7 +1,8 @@
 # Full UI without an LLM key
 
-Status: Accepted (section 0, FanQL, implemented in #410; sections 1 to 5 pending)
+Status: Accepted
 Date: 2026-10-29
+Pull request: #410 (section 0, FanQL); sections 1 to 5 are not yet built
 
 ## Intent
 
