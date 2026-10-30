@@ -5,15 +5,14 @@ import { forEachDiagnostic, type Diagnostic } from "@codemirror/lint";
 import { startCompletion, currentCompletions, acceptCompletion } from "@codemirror/autocomplete";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FanqlEditor, type FanqlEditorProps } from "./fanql-editor";
-import { pointOffset, unitOffset } from "./spans";
+import { pointOffset, unitSpan } from "./spans";
 
 describe("spans", () => {
   it("converts code points to UTF-16 units and back", () => {
     const text = "logs where body:\"😀x\"";
-    expect(unitOffset(text, 17)).toBe(17);
-    expect(unitOffset(text, 18)).toBe(19);
+    expect(unitSpan(text, { start: 17, end: 18 })).toEqual({ from: 17, to: 19 });
     expect(pointOffset(text, 19)).toBe(18);
-    expect(unitOffset("ab", 9)).toBe(2);
+    expect(unitSpan("ab", { start: 1, end: 9 })).toEqual({ from: 1, to: 2 });
   });
 });
 

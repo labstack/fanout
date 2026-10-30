@@ -13,7 +13,7 @@ import { completeFanql, parseFanql, type Notice, type Parsed } from "./api";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, type ExploreSearch } from "./search";
 
-export const explorePanelID = "explore";
+const explorePanelID = "explore";
 const resultHeight = 420;
 
 const vizLabel: Record<Viz, string> = {
@@ -25,7 +25,7 @@ const requirementLabel = { min_max: "a minimum and maximum", thresholds: "thresh
 /** What the last run sent, so later edits can be shown as stale and not saved. */
 export type ExploreRun = { tab: ExploreSearch["tab"]; source: string; window: string; panel: Panel; result: PanelDisplayResult; canonical?: string };
 
-export function hasRows(run?: ExploreRun): boolean {
+function hasRows(run?: ExploreRun): boolean {
   return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
 }
 

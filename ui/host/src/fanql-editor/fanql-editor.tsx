@@ -24,7 +24,7 @@ export type FanqlEditorProps = {
   readOnly?: boolean; label?: string; describedBy?: string; placeholder?: string;
 };
 
-export function fanqlDiagnostics(text: string, problems: readonly Problem[]): Diagnostic[] {
+function fanqlDiagnostics(text: string, problems: readonly Problem[]): Diagnostic[] {
   return problems.map(problem => {
     const { from, to } = problem.span ? unitSpan(text, problem.span) : { from: 0, to: text.length };
     return {

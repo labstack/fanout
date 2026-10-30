@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Panel } from "../../../panels/types";
-import { SaveDialog, defaultTitle, uniquePanelID } from "./save-dialog";
+import { SaveDialog, defaultTitle } from "./save-dialog";
 
 const panel: Panel = { id: "explore", title: "spans | count() by service", viz: "table", query: { from: "spans", measures: ["count()"], by: ["service"] } };
 const summary = { id: "d1", name: "Checkout", description: "", is_default: false, version: 3, panel_count: 2, updated_at: "" };
@@ -56,9 +56,7 @@ async function choose(ui: ReturnType<typeof within>, name: string) {
 }
 
 describe("save helpers", () => {
-  it("picks a free panel id and shortens long titles", () => {
-    expect(uniquePanelID("explore", [])).toBe("explore");
-    expect(uniquePanelID("explore", ["explore", "explore_2"])).toBe("explore_3");
+  it("shortens long titles", () => {
     expect(defaultTitle("x".repeat(100))).toHaveLength(80);
     expect(defaultTitle("short")).toBe("short");
     expect(Array.from(defaultTitle("😀".repeat(100)))).toHaveLength(80);

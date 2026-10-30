@@ -6,7 +6,7 @@ const vizzes: readonly Viz[] = ["stat", "gauge", "timeseries", "bar", "table", "
 /** The FanQL envelope (proposal 0004, section 0.13) plus the page's own tab and SQL. */
 export type ExploreSearch = { q: string; viz?: Viz; range: string; from?: string; to?: string; tab: "query" | "sql"; sql?: string };
 
-export const defaultRange = "1h";
+const defaultRange = "1h";
 
 export function parseExploreSearch(raw: Record<string, unknown>): ExploreSearch {
   const out: ExploreSearch = { q: "", range: defaultRange, tab: "query" };

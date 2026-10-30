@@ -14,7 +14,7 @@ export function defaultTitle(text: string): string {
 }
 
 /** The first id of `base`, `base_2`, `base_3`… not already on the dashboard. */
-export function uniquePanelID(base: string, taken: readonly string[]): string {
+function uniquePanelID(base: string, taken: readonly string[]): string {
   if (!taken.includes(base)) return base;
   for (let n = 2; ; n++) if (!taken.includes(`${base}_${n}`)) return `${base}_${n}`;
 }

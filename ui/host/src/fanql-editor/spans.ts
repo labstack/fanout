@@ -1,7 +1,7 @@
 import type { TextSpan } from "../api-error";
 
 // FanQL spans and cursors count Unicode code points; the editor counts UTF-16 units.
-export function unitOffset(text: string, points: number): number {
+function unitOffset(text: string, points: number): number {
   let units = 0;
   for (const char of text) {
     if (points-- <= 0) break;
