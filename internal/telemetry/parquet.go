@@ -939,7 +939,7 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 }
 
 // ensureSchemaBatch writes _schema.batch: an empty Parquet batch whose only
-// purpose is to carry this binary's column list. internal/query derives every
+// purpose is to carry this binary's column list. internal/engine derives every
 // view's explicit read_parquet(schema=MAP{...}) from it, so a column absent
 // here is a column absent from the view.
 //

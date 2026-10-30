@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func assertResourceFrame(t *testing.T, name string, frame *panel.Frame) {
+func assertResourceFrame(t *testing.T, name string, frame *query.Frame) {
 	t.Helper()
 	got, err := json.MarshalIndent(frame, "", "  ")
 	if err != nil {
@@ -41,8 +41,8 @@ func assertResourceFrame(t *testing.T, name string, frame *panel.Frame) {
 	}
 }
 
-func resourcePanels() []panel.Panel {
-	var panels []panel.Panel
+func resourcePanels() []query.Panel {
+	var panels []query.Panel
 	for _, p := range DefaultSpec().Panels {
 		if p.ID == "versions" || p.ID == "check_states" {
 			panels = append(panels, p)
@@ -51,13 +51,13 @@ func resourcePanels() []panel.Panel {
 	return panels
 }
 
-func executeResourcePanel(t *testing.T, e *panel.Executor, p panel.Panel, start, end time.Time) panel.Result {
+func executeResourcePanel(t *testing.T, e *query.Executor, p query.Panel, start, end time.Time) query.Result {
 	t.Helper()
-	results, err := e.Run(t.Context(), panel.RunRequest{Dashboard: panel.Dashboard{Name: "Resource inventory", Time: panel.Time{From: &start, To: &end}, Panels: []panel.Panel{p}}})
+	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: query.Dashboard{Name: "Resource inventory", Time: query.Time{From: &start, To: &end}, Panels: []query.Panel{p}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Status != panel.StatusOK || results[0].Frame == nil {
+	if len(results) != 1 || results[0].Status != query.StatusOK || results[0].Frame == nil {
 		t.Fatalf("%s result: %+v", p.ID, results)
 	}
 	return results[0]
@@ -70,12 +70,12 @@ func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	e := panel.NewExecutor(d, 30)
+	e := query.NewExecutor(d, 30)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 1, time.UTC)
 	end := start.Add(2 * time.Minute)
 	for i := range 2 {
@@ -106,7 +106,7 @@ func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 				if _, err := d.DB.Exec(`DELETE FROM read_cache_version`); err != nil {
 					t.Fatal(err)
 				}
-				if err := query.CreateCacheTables(d.DB); err != nil {
+				if err := engine.CreateCacheTables(d.DB); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -120,7 +120,7 @@ func TestDefaultResourcePanelsAcrossCacheStates(t *testing.T) {
 				assertResourceFrame(t, p.ID, got.Frame)
 				// A shifted SQL execution carries its own logical inventory window.
 				shifted := p
-				shifted.Time = &panel.PanelTime{Shift: "1m"}
+				shifted.Time = &query.TimeOverride{Shift: "1m"}
 				got = executeResourcePanel(t, e, shifted, start, end)
 				assertResourceFrame(t, p.ID+"-shifted", got.Frame)
 			}
@@ -135,12 +135,12 @@ func TestDefaultResourceInventoryKeepsVantageNamespacesSeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	e := panel.NewExecutor(d, 30)
+	e := query.NewExecutor(d, 30)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(time.Minute)
 	b := telemetrystore.Batch{ID: "namespaces", Spans: []telemetry.Span{{Namespace: "other", ServiceName: "api", StartUnixNanos: start.UnixNano(), Resource: map[string]any{"host.name": "same-host"}}}}
@@ -190,12 +190,12 @@ func TestResourceInventoryFrozenSnapshotFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	e := panel.NewExecutor(d, 30)
+	e := query.NewExecutor(d, 30)
 	var engine string
 	if err := d.DB.QueryRow(`SELECT version()`).Scan(&engine); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestResourceInventoryFrozenSnapshotFrames(t *testing.T) {
 	stats["inventory_rows_by_signal"] = bySignal
 	for _, p := range resourcePanels() {
 		var elapsed []int64
-		var want *panel.Frame
+		var want *query.Frame
 		for i := range 4 {
 			r := executeResourcePanel(t, e, p, start, end)
 			elapsed = append(elapsed, r.ElapsedMS)

@@ -32,7 +32,7 @@ type Alert struct {
 	FiredAt            string  `json:"fired_at,omitempty"`
 	ResolvedAt         string  `json:"resolved_at,omitempty"`
 	RepeatedAt         string  `json:"repeated_at,omitempty"`
-	LastEval           string  `json:"last_eval,omitempty"`
+	LastEvaluatedAt    string  `json:"last_evaluated_at,omitempty"`
 	LastDeliveryStatus string  `json:"last_delivery_status,omitempty"`
 	LastDeliveryAt     string  `json:"last_delivery_at,omitempty"`
 	CreatedAt          string  `json:"created_at"`

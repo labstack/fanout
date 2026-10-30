@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 // toolCount is set by renderMCPTools so the summary line can report it.
@@ -156,7 +156,7 @@ func renderMCPTools() ([]byte, error) {
 	}
 
 	b.WriteString("## Panel SQL relations\n\n")
-	relations := panel.SQLRelations()
+	relations := query.SQLRelations()
 	names := make([]string, 0, len(relations))
 	for name := range relations {
 		names = append(names, name)

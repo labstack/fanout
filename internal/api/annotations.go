@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 type AnnotationReader interface {
@@ -34,7 +34,7 @@ func annotationError(err error) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error()).Wrap(err)
 	case errors.Is(err, context.DeadlineExceeded):
 		return echo.NewHTTPError(http.StatusGatewayTimeout, "Annotations took longer than 10 seconds").Wrap(err)
-	case errors.Is(err, query.ErrParquetReadWait):
+	case errors.Is(err, engine.ErrParquetReadWait):
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "annotations unavailable").Wrap(err)
 	case errors.Is(err, context.Canceled):
 		return nil

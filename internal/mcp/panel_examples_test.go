@@ -10,15 +10,15 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 func TestSQLTimestampRuleAppearsOnceInAgentGuidance(t *testing.T) {
-	field, ok := reflect.TypeOf(panel.Panel{}).FieldByName("SQL")
-	if !ok || strings.Count(field.Tag.Get("jsonschema"), panel.SQLTimestampGuide) != 1 {
+	field, ok := reflect.TypeOf(query.Panel{}).FieldByName("SQL")
+	if !ok || strings.Count(field.Tag.Get("jsonschema"), query.SQLTimestampGuide) != 1 {
 		t.Fatalf("SQL field guidance=%s", field.Tag.Get("jsonschema"))
 	}
 	docs, err := DescribeTools(t.Context())
@@ -30,7 +30,7 @@ func TestSQLTimestampRuleAppearsOnceInAgentGuidance(t *testing.T) {
 		for _, doc := range docs {
 			if doc.Name == name {
 				found = true
-				if strings.Count(doc.Description, panel.SQLTimestampGuide) != 1 {
+				if strings.Count(doc.Description, query.SQLTimestampGuide) != 1 {
 					t.Fatalf("%s must state the timestamp rule once", name)
 				}
 			}
@@ -45,7 +45,7 @@ func TestExamplesAndPreviewCoverNewTypes(t *testing.T) {
 	s := newPanelServer(t)
 	coverage := map[string]int{}
 	for example, text := range []string{investigationExample, paymentExample, metricExample} {
-		var d panel.Dashboard
+		var d query.Dashboard
 		if err := json.Unmarshal([]byte(text), &d); err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestMetricGuidanceIsConciseAndExamplesValidate(t *testing.T) {
 		}
 	}
 	s := newPanelServer(t)
-	var d panel.Dashboard
+	var d query.Dashboard
 	if err := json.Unmarshal([]byte(metricExample), &d); err != nil {
 		t.Fatal(err)
 	}
@@ -289,19 +289,19 @@ func TestMetricExamplesExecuteWithObservations(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "metric-examples", Metrics: metrics}); err != nil {
 		t.Fatal(err)
 	}
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = duck.Close() })
-	executor := panel.NewExecutor(duck, 30)
-	var d panel.Dashboard
+	executor := query.NewExecutor(duck, 30)
+	var d query.Dashboard
 	if err := json.Unmarshal([]byte(metricExample), &d); err != nil {
 		t.Fatal(err)
 	}
 	end := at.Add(time.Minute)
-	d.Time = panel.Time{From: &at, To: &end}
-	results, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: d})
+	d.Time = query.Time{From: &at, To: &end}
+	results, err := executor.Run(t.Context(), query.RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestMetricExamplesExecuteWithObservations(t *testing.T) {
 	}
 	for i, want := range []float64{1, 0.95} {
 		r := results[i]
-		if r.Status != panel.StatusOK || r.Frame == nil || r.Frame.Rows != 1 {
+		if r.Status != query.StatusOK || r.Frame == nil || r.Frame.Rows != 1 {
 			t.Fatalf("%s: %+v", r.ID, r)
 		}
 		found := false
@@ -332,7 +332,7 @@ func TestMetricExamplesExecuteWithObservations(t *testing.T) {
 func TestResourceInventoryExampleExecutesThroughPanelTools(t *testing.T) {
 	now := time.Now().UTC()
 	s := panelServerFixtureAt(t, true, now)
-	var d panel.Dashboard
+	var d query.Dashboard
 	if err := json.Unmarshal([]byte(resourceInventoryExample), &d); err != nil {
 		t.Fatal(err)
 	}

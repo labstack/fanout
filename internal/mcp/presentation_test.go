@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -20,7 +20,7 @@ func TestTimestampLiteralHintSurvivesMCPPreviewAndDashboardRejection(t *testing.
 	now := time.Date(2026, 10, 20, 18, 6, 0, 0, time.UTC)
 	s := panelServerFixtureAt(t, true, now)
 	from := now.Add(-time.Hour)
-	window := panel.Time{From: &from, To: &now}
+	window := query.Time{From: &from, To: &now}
 	for _, tc := range []struct {
 		name, predicate string
 		invalid         bool
@@ -32,8 +32,8 @@ func TestTimestampLiteralHintSurvivesMCPPreviewAndDashboardRejection(t *testing.
 		{"explicit_cast", "start_time < TIMESTAMPTZ '2026-10-20 17:36:15+00'::TIMESTAMPTZ_NS", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := panel.Panel{ID: "calls", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND " + tc.predicate}
-			_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{p}, Time: &window})
+			p := query.Panel{ID: "calls", Title: "Calls", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND " + tc.predicate}
+			_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{p}, Time: &window})
 			if err != nil || len(out.Panels) != 1 {
 				t.Fatalf("preview=%+v err=%v", out, err)
 			}
@@ -44,12 +44,12 @@ func TestTimestampLiteralHintSurvivesMCPPreviewAndDashboardRejection(t *testing.
 				}
 				return
 			}
-			if got.Status != "invalid" || len(got.Problems) != 1 || got.Problems[0].Path != "panels[0].sql" || got.Problems[0].Hint != panel.SQLTimestampGuide {
+			if got.Status != "invalid" || len(got.Problems) != 1 || got.Problems[0].Path != "panels[0].sql" || got.Problems[0].Hint != query.SQLTimestampGuide {
 				t.Fatalf("preview lost hint: %+v", got)
 			}
 			session := connectTestClient(t, s, nil)
 			result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{
-				Name: "create_dashboard", Arguments: DashboardCreateInput{Dashboard: panel.Dashboard{Name: "Time literals", Time: window, Panels: []panel.Panel{p}}},
+				Name: "create_dashboard", Arguments: DashboardCreateInput{Dashboard: query.Dashboard{Name: "Time literals", Time: window, Panels: []query.Panel{p}}},
 				Meta: mcpsdk.Meta{dashboard.OwnerMetaKey: "owner"},
 			})
 			if err != nil || !result.IsError {
@@ -58,10 +58,10 @@ func TestTimestampLiteralHintSurvivesMCPPreviewAndDashboardRejection(t *testing.
 			check := func(raw []byte) {
 				t.Helper()
 				var failure dashboardOutput
-				if err := json.Unmarshal(raw, &failure); err != nil || failure.Error == nil || failure.Error.Code != "invalid_spec" || !strings.Contains(failure.Error.Message, panel.SQLTimestampGuide) {
+				if err := json.Unmarshal(raw, &failure); err != nil || failure.Error == nil || failure.Error.Code != "invalid_spec" || !strings.Contains(failure.Error.Message, query.SQLTimestampGuide) {
 					t.Fatalf("failure=%s err=%v", raw, err)
 				}
-				if len(failure.Problems) != 1 || failure.Problems[0].Path != "panels[0].sql" || failure.Problems[0].Hint != panel.SQLTimestampGuide {
+				if len(failure.Problems) != 1 || failure.Problems[0].Path != "panels[0].sql" || failure.Problems[0].Hint != query.SQLTimestampGuide {
 					t.Fatalf("lost problem hint: %+v", failure.Problems)
 				}
 			}
@@ -80,7 +80,7 @@ type presentationExecutor struct {
 	guidance string
 }
 
-func (p presentationExecutor) EmptyGuidance(context.Context, panel.RunRequest) (string, string, error) {
+func (p presentationExecutor) EmptyGuidance(context.Context, query.RunRequest) (string, string, error) {
 	return "no_data", p.guidance, nil
 }
 
@@ -113,8 +113,8 @@ func TestPresentationAcrossMCPPreviewsReceiptsGuidanceAndErrors(t *testing.T) {
 					t.Errorf("lost author diagnostic: %q", got)
 				}
 			}
-			s.panels = presentationExecutor{receiptExecutor: receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
-				return []panel.Result{{ID: "notes", Status: "error", Error: message, Diagnosis: "No matching data."}}, nil
+			s.panels = presentationExecutor{receiptExecutor: receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+				return []query.Result{{ID: "notes", Status: "error", Error: message, Diagnosis: "No matching data."}}, nil
 			}}, guidance: "No matching data."}
 			text, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: textDashboard("Preview").Panels})
 			if err != nil {
@@ -128,13 +128,13 @@ func TestPresentationAcrossMCPPreviewsReceiptsGuidanceAndErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			check(saved)
-			guidance := s.noDataError(t.Context(), PanelFragment{Dashboard: textDashboard("Empty"), Results: []panel.Result{{ID: "notes", Diagnosis: "No matching data."}}})
+			guidance := s.noDataError(t.Context(), PanelFragment{Dashboard: textDashboard("Empty"), Results: []query.Result{{ID: "notes", Diagnosis: "No matching data."}}})
 			if guidance == nil {
 				t.Fatal("missing no_data guidance")
 			}
 			check(guidance.Error())
-			s.panels = receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
-				return nil, panel.Problems{{Path: "panels[0].sql", Message: message, Hint: message}}
+			s.panels = receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+				return nil, query.Problems{{Path: "panels[0].sql", Message: message, Hint: message}}
 			}}
 			text, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: textDashboard("Invalid").Panels})
 			if err != nil {
@@ -149,7 +149,7 @@ func TestPresentationAcrossMCPPreviewsReceiptsGuidanceAndErrors(t *testing.T) {
 			}
 			cause := errors.New(message)
 			got := safePanelToolError(cause)
-			if !errors.Is(got, cause) || got.Error() != panel.ReadFailure {
+			if !errors.Is(got, cause) || got.Error() != query.ReadFailure {
 				t.Fatalf("operational error: %v", got)
 			}
 			// Exercise actual MCP middleware and both error content paths.
@@ -169,7 +169,7 @@ func TestPresentationAcrossMCPPreviewsReceiptsGuidanceAndErrors(t *testing.T) {
 
 func TestStructuredFilterRuntimeDiagnosticReachesPreview(t *testing.T) {
 	s := panelServerFixture(t, true)
-	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "p", Title: "Calls", Viz: "table", Query: &panel.Query{From: "spans", Measures: []string{"count()"}, Where: []string{"CAST(service AS INTEGER) > 0"}}}}})
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "p", Title: "Calls", Viz: "table", Query: &query.Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"CAST(service AS INTEGER) > 0"}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,14 +185,14 @@ func TestProductDiagnosesSurvivePublicationBoundaries(t *testing.T) {
 	const routeDiagnosis = "No spans match this combination of filters in this time range. Without HTTP route /api/cart, 120 match the remaining filters. Values seen: /cart (60), /quote (60)."
 	for _, diagnosis := range []string{routeDiagnosis, "No logs for body /srv/checkout/a.parquet or value 'IO Error: DuckDB'."} {
 		s := newToolServer(t, structural{}, nil)
-		s.panels = presentationExecutor{receiptExecutor: receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
-			return []panel.Result{{ID: "notes", Status: "empty", Diagnosis: diagnosis}}, nil
+		s.panels = presentationExecutor{receiptExecutor: receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+			return []query.Result{{ID: "notes", Status: "empty", Diagnosis: diagnosis}}, nil
 		}}, guidance: diagnosis}
 		_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: textDashboard("Preview").Panels})
 		if err != nil || out.Panels[0].Diagnosis != diagnosis {
 			t.Fatalf("preview: %+v %v", out, err)
 		}
-		guidance := s.noDataError(t.Context(), PanelFragment{Dashboard: textDashboard("Empty"), Results: []panel.Result{{ID: "notes", Diagnosis: diagnosis}}})
+		guidance := s.noDataError(t.Context(), PanelFragment{Dashboard: textDashboard("Empty"), Results: []query.Result{{ID: "notes", Diagnosis: diagnosis}}})
 		if guidance == nil || !strings.Contains(guidance.Error(), diagnosis) {
 			t.Fatalf("guidance: %v", guidance)
 		}
@@ -201,7 +201,7 @@ func TestProductDiagnosesSurvivePublicationBoundaries(t *testing.T) {
 			t.Fatalf("receipt: %+v %v", saved, err)
 		}
 		spec := textDashboard("Empty telemetry")
-		spec.Panels[0] = panel.Panel{ID: "notes", Title: "Calls", Viz: "table", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}
+		spec.Panels[0] = query.Panel{ID: "notes", Title: "Calls", Viz: "table", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}
 		result, rejected, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 		if err != nil || !result.IsError || rejected.Error == nil || rejected.Error.Code != "invalid_spec" || !strings.Contains(rejected.Error.Message, diagnosis) {
 			t.Fatalf("save validation lost diagnosis: %+v %v", rejected, err)
@@ -212,17 +212,17 @@ func TestProductDiagnosesSurvivePublicationBoundaries(t *testing.T) {
 func TestNoDataRouteGuidanceSurvivesMCPMiddleware(t *testing.T) {
 	const diagnosis = "No spans match these filters. Without HTTP route /api/cart, 120 match the remaining filters."
 	s := newToolServer(t, structural{}, presentationExecutor{
-		receiptExecutor: receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
-			return []panel.Result{{ID: "calls", Status: panel.StatusEmpty, Diagnosis: diagnosis}}, nil
+		receiptExecutor: receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+			return []query.Result{{ID: "calls", Status: query.StatusEmpty, Diagnosis: diagnosis}}, nil
 		}},
 		guidance: diagnosis,
 	})
 	session := connectTestClient(t, s, nil)
 	result, err := session.CallTool(t.Context(), &mcpsdk.CallToolParams{
 		Name: "query_telemetry",
-		Arguments: map[string]any{"panel": panel.Panel{
+		Arguments: map[string]any{"panel": query.Panel{
 			ID: "calls", Title: "Calls", Viz: "table",
-			Query: &panel.Query{From: "spans", Where: []string{"http_route = '/api/cart'"}},
+			Query: &query.Spec{From: "spans", Where: []string{"http_route = '/api/cart'"}},
 		}},
 	})
 	if err != nil || !result.IsError {
@@ -239,16 +239,16 @@ func TestNoDataRouteGuidanceSurvivesMCPMiddleware(t *testing.T) {
 
 func TestDashboardRejectionsPreserveRouteDiagnosesThroughMiddleware(t *testing.T) {
 	const diagnosis = "No spans match these filters. Without HTTP route /api/orders/{id}, 120 match the remaining filters."
-	s := newToolServer(t, structural{}, receiptExecutor{run: func(context.Context, panel.RunRequest) ([]panel.Result, error) {
-		return []panel.Result{{ID: "calls", Status: panel.StatusEmpty, Diagnosis: diagnosis}}, nil
+	s := newToolServer(t, structural{}, receiptExecutor{run: func(context.Context, query.RunRequest) ([]query.Result, error) {
+		return []query.Result{{ID: "calls", Status: query.StatusEmpty, Diagnosis: diagnosis}}, nil
 	}})
 	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("Saved")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := panel.Dashboard{Name: "Rejected", Panels: []panel.Panel{{ID: "calls", Title: "Calls", Viz: "table", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}}
-	want := panel.PresentProblems(panel.Problems{panel.DiagnosisProblem("panels[0]", "Calls: "+diagnosis, "Replace or drop this panel; dashboards contain only panels that return data.")}).Error()
-	if panel.PresentMessage(want) != panel.ReadFailure {
+	spec := query.Dashboard{Name: "Rejected", Panels: []query.Panel{{ID: "calls", Title: "Calls", Viz: "table", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}}
+	want := query.PresentProblems(query.Problems{query.DiagnosisProblem("panels[0]", "Calls: "+diagnosis, "Replace or drop this panel; dashboards contain only panels that return data.")}).Error()
+	if query.PresentMessage(want) != query.ReadFailure {
 		t.Fatal("route diagnosis no longer reproduces operational path presentation")
 	}
 	session := connectTestClient(t, s, nil)

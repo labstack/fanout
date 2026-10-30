@@ -12,11 +12,11 @@ import (
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type fakeFanQLParser struct {
-	panel.Parser
+	query.Parser
 	err error
 }
 
@@ -43,13 +43,13 @@ func (*fakeFanQLParser) RenderSQL(context.Context, map[string]any) (string, erro
 
 type fakeFanQLPanels struct{ fakePanels }
 
-func (*fakeFanQLPanels) Schema(_ context.Context, req panel.SchemaRequest) (*panel.Schema, error) {
-	return &panel.Schema{Window: req.Window, Signals: map[string]panel.SignalSchema{
-		"logs": {Columns: []panel.ColumnSchema{{Field: panel.Field{Name: "severity", Type: panel.TypeString}, Values: []panel.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}}}},
+func (*fakeFanQLPanels) Schema(_ context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	return &query.Schema{Window: req.Window, Signals: map[string]query.SignalSchema{
+		"logs": {Columns: []query.ColumnSchema{{Field: query.Field{Name: "severity", Type: query.TypeString}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}}}},
 	}}, nil
 }
 
-func serveFanQL(t *testing.T, parser panel.Parser, engine PanelEngine, method, path, body string) *httptest.ResponseRecorder {
+func serveFanQL(t *testing.T, parser query.Parser, engine QueryEngine, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	s := newTestAuthServer(t)
 	if _, err := s.users.CreateWithAudit("admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"}); err != nil {
@@ -81,16 +81,16 @@ func TestFanQLParseReturnsQueryCanonicalAndVizzes(t *testing.T) {
 	text := "spans where status:error | count() by service"
 	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"`+text+`"}`)
 	var body struct {
-		Query     panel.Query `json:"query"`
-		Canonical string      `json:"canonical"`
+		Query     query.Spec `json:"query"`
+		Canonical string     `json:"canonical"`
 		Viz       struct {
-			Compatible []panel.VizCompat `json:"compatible"`
+			Compatible []query.VizCompat `json:"compatible"`
 			Edits      []fanql.VizEdit   `json:"edits"`
 		} `json:"viz"`
 		Notices []fanql.Notice `json:"notices"`
 	}
 	fanqlResponse(t, rec, http.StatusOK, &body)
-	want := panel.Query{From: "spans", Where: []string{"status = 'STATUS_CODE_ERROR'"}, Measures: []string{"count()"}, By: []string{"service"}}
+	want := query.Spec{From: "spans", Where: []string{"status = 'STATUS_CODE_ERROR'"}, Measures: []string{"count()"}, By: []string{"service"}}
 	if !reflect.DeepEqual(body.Query, want) || body.Canonical != text || body.Notices == nil || len(body.Notices) != 0 {
 		t.Fatalf("response: %s", rec.Body)
 	}
@@ -122,7 +122,7 @@ func TestFanQLParseProblemsHaveNoQuery(t *testing.T) {
 		var body struct {
 			Code     string         `json:"code"`
 			Message  string         `json:"message"`
-			Problems panel.Problems `json:"problems"`
+			Problems query.Problems `json:"problems"`
 			Preview  *struct {
 				Text string `json:"text"`
 				Note string `json:"note"`
@@ -152,9 +152,9 @@ func TestFanQLParseProblemsHaveNoQuery(t *testing.T) {
 func TestFanQLParseSearchBarAndViz(t *testing.T) {
 	rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"service:api timeout","source":"logs"}`)
 	var body struct {
-		Query panel.Query `json:"query"`
+		Query query.Spec `json:"query"`
 		Viz   struct {
-			Compatible []panel.VizCompat `json:"compatible"`
+			Compatible []query.VizCompat `json:"compatible"`
 			Requested  string            `json:"requested"`
 		} `json:"viz"`
 		Notices []fanql.Notice `json:"notices"`
@@ -198,7 +198,7 @@ func TestFanQLFormat(t *testing.T) {
 	if string(failure["code"]) != `"unavailable"` || failure["problems"] != nil {
 		t.Fatalf("operational: %s", rec.Body)
 	}
-	q := panel.Query{From: "logs"}
+	q := query.Spec{From: "logs"}
 	for i := range 16 {
 		q.Where = append(q.Where, "body = '"+strings.Repeat("x", 480)+fmt.Sprint(i)+"'")
 	}
@@ -216,7 +216,7 @@ func TestFanQLFormat(t *testing.T) {
 			t.Fatal("format truncated a body literal")
 		}
 	}
-	q = panel.Query{From: "logs"}
+	q = query.Spec{From: "logs"}
 	for i := range 16 {
 		q.Where = append(q.Where, "coalesce(body, '"+strings.Repeat("𝔘", 110)+strings.Repeat("`", 30)+fmt.Sprint(i)+"') = ''")
 	}
@@ -239,7 +239,7 @@ func TestFanQLFormat(t *testing.T) {
 func TestFanQLComplete(t *testing.T) {
 	rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14}`)
 	var body struct {
-		Replace panel.TextSpan `json:"replace"`
+		Replace query.TextSpan `json:"replace"`
 		Items   []struct {
 			Label string `json:"label"`
 		} `json:"items"`
@@ -251,7 +251,7 @@ func TestFanQLComplete(t *testing.T) {
 		Notices []fanql.Notice `json:"notices"`
 	}
 	fanqlResponse(t, rec, http.StatusOK, &body)
-	if body.Replace != (panel.TextSpan{Start: 11, End: 14}) || len(body.Items) == 0 || body.Items[0].Label != "severity" || body.Schema.Window != "24h" || body.Schema.Warm || !body.Schema.Recent {
+	if body.Replace != (query.TextSpan{Start: 11, End: 14}) || len(body.Items) == 0 || body.Items[0].Label != "severity" || body.Schema.Window != "24h" || body.Schema.Warm || !body.Schema.Recent {
 		t.Fatalf("complete: %s", rec.Body)
 	}
 	rec = serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14,"window":"","namespace":"prod"}`)

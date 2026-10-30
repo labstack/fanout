@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/intelligence"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -113,9 +113,9 @@ func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
 	if _, err := db.DB.Exec(`INSERT INTO users(id,email) VALUES ('owner','owner@example.test'),('other','other@example.test')`); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(nil, 30)
+	executor := query.NewExecutor(nil, 30)
 	service := dashboard.New(db.DB, executor)
-	created, err := service.Create(t.Context(), "owner", panel.Dashboard{Name: "History", Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "first"}}}, dashboard.Author{Kind: "user", ID: "owner"})
+	created, err := service.Create(t.Context(), "owner", query.Dashboard{Name: "History", Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "first"}}}, dashboard.Author{Kind: "user", ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}

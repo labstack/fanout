@@ -33,7 +33,7 @@ jobs:
           cache: true
       - name: Verify pinned engine, typed Parquet and SQL boundary
         run: >-
-          bash scripts/with-duckdb.sh go test ./internal/query ./internal/telemetry ./internal/observability ./internal/ingest
+          bash scripts/with-duckdb.sh go test ./internal/engine ./internal/telemetry ./internal/observability ./internal/ingest
           -run 'TestPinnedEngine|TestSQLBoundary|TestLogicalType|TestVariant|TestUnsupportedFormat|TestCommitBatchAllocation|TestDependencies|TestExportsBound|TestMaximumAttributeNesting|TestHTTPRejectsExcessiveAttributeNesting'
           -count=1
 

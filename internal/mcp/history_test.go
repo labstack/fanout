@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,7 +23,7 @@ type restoreConflictValidator struct {
 	release chan struct{}
 }
 
-func (v *restoreConflictValidator) Validate(ctx context.Context, d *panel.Dashboard) error {
+func (v *restoreConflictValidator) Validate(ctx context.Context, d *query.Dashboard) error {
 	if v.armed.Load() && d.Panels[0].Content == "hello" {
 		attempt := int(v.attempt.Add(1))
 		if attempt <= 2 {
@@ -124,7 +124,7 @@ func TestRestoreLosesTwoContestedBasesWithoutReceipt(t *testing.T) {
 
 func TestDashboardHistoryToolsAppendRestoreVersion(t *testing.T) {
 	s := newPanelServer(t)
-	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: panel.Dashboard{Name: "History", Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "first"}}}})
+	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: query.Dashboard{Name: "History", Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "first"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestDashboardHistoryToolsAppendRestoreVersion(t *testing.T) {
 }
 
 func TestDashboardRestoreReceiptUsesLatestCommittedBase(t *testing.T) {
-	s := newToolServer(t, structural{}, panel.NewExecutor(nil, 30))
+	s := newToolServer(t, structural{}, query.NewExecutor(nil, 30))
 	_, created, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: textDashboard("History")})
 	if err != nil {
 		t.Fatal(err)

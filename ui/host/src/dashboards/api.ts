@@ -52,16 +52,16 @@ export const replaceDashboard = (id: string, spec: DashboardSpec, baseVersion: n
   request<DashboardRecord>(path(id), { method: "PUT", json: { spec, base_version: baseVersion, message } });
 export const patchDashboard = (id: string, operations: Operation[], baseVersion: number, message?: string) =>
   request<DashboardRecord>(path(id), { method: "PATCH", json: { operations, base_version: baseVersion, message } });
-export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/panels/query", { method: "POST", json: body, signal }).then((r) => r.results);
+export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/queries/run", { method: "POST", json: body, signal }).then((r) => r.results);
 export const getTelemetrySchema = (signal?: AbortSignal) => request<TelemetrySchema>("/api/telemetry/schema", { signal });
 export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
-  request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/panels/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
+  request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/queries/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
 
 export type ExemplarBody = { dashboard: DashboardSpec; panel_id: string; kind?: "traces" | "logs"; time?: DashboardTime; from: string; to: string; dimensions?: Record<string, string>; bucket?: Selection["bucket"]; vars?: Record<string, VarValue> };
 export type Exemplar = { trace_id: string; namespace: string; service: string; operation: string; duration_ms: number; status: string; start: string };
 export type ExemplarResponse = { traces: Exemplar[]; logs?: Frame; truncated?: boolean };
-export const queryExemplars = (body: ExemplarBody, signal?: AbortSignal) => request<ExemplarResponse>("/api/panels/exemplars", { method: "POST", json: body, signal });
+export const queryExemplars = (body: ExemplarBody, signal?: AbortSignal) => request<ExemplarResponse>("/api/queries/exemplars", { method: "POST", json: body, signal });
 export function getTrace(target: DrillTarget, signal?: AbortSignal): Promise<Result<TraceDetail>> {
   const params = new URLSearchParams({ namespace: target.namespace ?? "", from: target.window_from, to: target.window_to, limit: "200" });
   return request<Result<TraceDetail>>(`/api/traces/${encodeURIComponent(target.trace_id ?? "")}?${params}`, { signal });

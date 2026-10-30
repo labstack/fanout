@@ -8,20 +8,20 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestQueryTelemetryAcceptsFanQLText(t *testing.T) {
 	s := panelServerFixture(t, true)
-	p := panel.Panel{ID: "t", Title: "t", Viz: "table"}
+	p := query.Panel{ID: "t", Title: "t", Viz: "table"}
 	input := QueryTelemetryInput{Panel: p, Text: "spans where status:error | count() by service"}
 	_, got, err := s.queryTelemetry(t.Context(), nil, input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &panel.Query{From: "spans", Where: []string{"status = 'STATUS_CODE_ERROR'"}, Measures: []string{"count()"}, By: []string{"service"}}
+	want := &query.Spec{From: "spans", Where: []string{"status = 'STATUS_CODE_ERROR'"}, Measures: []string{"count()"}, By: []string{"service"}}
 	if !reflect.DeepEqual(got.Dashboard.Panels[0].Query, want) {
 		t.Fatalf("query: %+v", got.Dashboard.Panels[0].Query)
 	}
@@ -43,7 +43,7 @@ type fanqlRunCounter struct {
 	calls int
 }
 
-func (e *fanqlRunCounter) Run(ctx context.Context, req panel.RunRequest) ([]panel.Result, error) {
+func (e *fanqlRunCounter) Run(ctx context.Context, req query.RunRequest) ([]query.Result, error) {
 	e.calls++
 	return e.panelExecutor.Run(ctx, req)
 }
@@ -72,7 +72,7 @@ func checkFanQLToolFailure(t *testing.T, input QueryTelemetryInput, code, messag
 }
 
 func TestQueryTelemetryRejectsTextWithQueryOrSQL(t *testing.T) {
-	for _, p := range []panel.Panel{{Query: &panel.Query{From: "spans"}}, {SQL: "SELECT 1"}} {
+	for _, p := range []query.Panel{{Query: &query.Spec{From: "spans"}}, {SQL: "SELECT 1"}} {
 		checkFanQLToolFailure(t, QueryTelemetryInput{Panel: p, Text: "spans"}, "invalid_input", "text cannot be combined with panel.query or panel.sql")
 	}
 }
@@ -153,7 +153,7 @@ func TestQueryTelemetryDescriptionPrefersStructuredInput(t *testing.T) {
 
 func TestQueryTelemetryFanQLMetadataAndStructuredProblems(t *testing.T) {
 	s := panelServerFixture(t, true)
-	_, out, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: panel.Panel{ID: "t", Title: "t", Viz: "table"}, Text: "spans where status:error | count() by service"})
+	_, out, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Panel: query.Panel{ID: "t", Title: "t", Viz: "table"}, Text: "spans where status:error | count() by service"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestQueryTelemetryFanQLMetadataAndStructuredProblems(t *testing.T) {
 	raw, _ := json.Marshal(failed)
 	var failure struct {
 		Error    toolerror.Error `json:"error"`
-		Problems panel.Problems  `json:"problems"`
+		Problems query.Problems  `json:"problems"`
 	}
 	if err != nil || result == nil || !result.IsError || json.Unmarshal(raw, &failure) != nil || failure.Error.Code != "invalid_fanql" || len(failure.Problems) != 1 || failure.Problems[0].Span == nil || len(failure.Problems[0].FixIts) != 2 {
 		t.Fatalf("structured failure: %v", err)
@@ -198,7 +198,7 @@ func TestQueryTelemetryFanQLProblemsStayStructuredThroughMiddleware(t *testing.T
 		raw, _ := json.Marshal(content)
 		var body struct {
 			Error    toolerror.Error `json:"error"`
-			Problems panel.Problems  `json:"problems"`
+			Problems query.Problems  `json:"problems"`
 		}
 		if json.Unmarshal(raw, &body) != nil || body.Error.Code != "invalid_fanql" || len(body.Problems) != 1 || body.Problems[0].Span == nil || len(body.Problems[0].FixIts) != 2 {
 			t.Fatalf("structured failure: %s", raw)

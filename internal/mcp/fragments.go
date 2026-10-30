@@ -16,21 +16,21 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/labstack/fanout/internal/fanql"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type QueryTelemetryInput struct {
-	Panel     panel.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
+	Panel     query.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
 	Text      string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
-	Variables []panel.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
-	Time      *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
-	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
+	Variables []query.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
+	Time      *query.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
+	Vars      map[string]query.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 }
 
 type fanqlToolFailureOutput struct {
 	Error    fanql.Failure  `json:"error"`
-	Problems panel.Problems `json:"problems,omitempty"`
+	Problems query.Problems `json:"problems,omitempty"`
 }
 
 // QueryTelemetryOutput includes FanQL failures without changing preset fragments.
@@ -38,7 +38,7 @@ type QueryTelemetryOutput struct {
 	*PanelFragment
 	Notices  []fanql.Notice `json:"notices,omitempty"`
 	Error    *fanql.Failure `json:"error,omitempty"`
-	Problems panel.Problems `json:"problems,omitempty"`
+	Problems query.Problems `json:"problems,omitempty"`
 }
 type FragmentView struct {
 	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
@@ -46,30 +46,30 @@ type FragmentView struct {
 }
 type PanelFragment struct {
 	View      FragmentView                                     `json:"view"`
-	Dashboard panel.Dashboard                                  `json:"dashboard"`
-	Results   []panel.Result                                   `json:"results"`
-	Vars      map[string]panel.Value                           `json:"vars,omitempty"`
+	Dashboard query.Dashboard                                  `json:"dashboard"`
+	Results   []query.Result                                   `json:"results"`
+	Vars      map[string]query.Value                           `json:"vars,omitempty"`
 	Trace     *observability.Result[observability.TraceDetail] `json:"trace,omitempty"`
 }
 
 // The published schema deliberately has no subset selector. Raw input is
 // checked by middleware before the SDK decodes this type.
 type fragmentInput struct {
-	Dashboard panel.Dashboard        `json:"dashboard" jsonschema:"Complete v1 dashboard specification; every panel is executed"`
-	Time      *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
-	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
+	Dashboard query.Dashboard        `json:"dashboard" jsonschema:"Complete v1 dashboard specification; every panel is executed"`
+	Time      *query.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
+	Vars      map[string]query.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
 	Widths    map[string]int         `json:"widths,omitempty" jsonschema:"Optional panel widths in pixels, keyed by panel ID"`
 	Compare   *bool                  `json:"compare,omitempty" jsonschema:"Override previous-period comparison for the complete fragment"`
 }
 type variableOptions struct {
-	Options map[string][]panel.Option `json:"options"`
+	Options map[string][]query.Option `json:"options"`
 }
 
 // Value's wire form is scalar/list JSON, not the fields of its Go struct.
 // Supply the same override to input and output schema inference.
 func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolHandlerFor[In, Out]) {
 	options := &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[panel.Value](): {AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "array", Items: &jsonschema.Schema{Type: "string"}}}},
+		reflect.TypeFor[query.Value](): {AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "array", Items: &jsonschema.Schema{Type: "string"}}}},
 	}}
 	input, err := jsonschema.For[In](options)
 	if err != nil {
@@ -100,7 +100,7 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 	mcp.AddTool(server.mcp, tool, handler)
 }
 
-func (s *Server) runFragment(ctx context.Context, req panel.RunRequest, kinds ...string) (*mcp.CallToolResult, PanelFragment, error) {
+func (s *Server) runFragment(ctx context.Context, req query.RunRequest, kinds ...string) (*mcp.CallToolResult, PanelFragment, error) {
 	out, err := s.executeFragment(ctx, req)
 	if err != nil {
 		return nil, PanelFragment{}, err
@@ -126,25 +126,25 @@ func finishFragment(ctx context.Context, out PanelFragment, kinds ...string) (*m
 }
 
 func (s *Server) noDataError(ctx context.Context, out PanelFragment) error {
-	code, guidance, err := s.panels.EmptyGuidance(ctx, panel.RunRequest{Dashboard: out.Dashboard, Vars: out.Vars})
+	code, guidance, err := s.panels.EmptyGuidance(ctx, query.RunRequest{Dashboard: out.Dashboard, Vars: out.Vars})
 	if err != nil {
 		return safePanelToolError(err)
 	}
 	if code == "unknown_service" {
-		return guidanceError(code, panel.PresentDiagnosis(guidance))
+		return guidanceError(code, query.PresentDiagnosis(guidance))
 	}
-	notes := []string{"No matching data.", panel.PresentDiagnosis(guidance)}
+	notes := []string{"No matching data.", query.PresentDiagnosis(guidance)}
 	for i, r := range out.Results {
 		title := r.ID
 		if i < len(out.Dashboard.Panels) {
 			title = out.Dashboard.Panels[i].Title
 		}
-		notes = append(notes, fmt.Sprintf("%s: %s", title, panel.PresentDiagnosis(r.Diagnosis)))
+		notes = append(notes, fmt.Sprintf("%s: %s", title, query.PresentDiagnosis(r.Diagnosis)))
 	}
 	return guidanceError("no_data", strings.Join(notes, " "))
 }
 
-func (s *Server) executeFragment(ctx context.Context, req panel.RunRequest) (PanelFragment, error) {
+func (s *Server) executeFragment(ctx context.Context, req query.RunRequest) (PanelFragment, error) {
 	if s.panels == nil {
 		return PanelFragment{}, errors.New("panels are unavailable")
 	}
@@ -154,12 +154,12 @@ func (s *Server) executeFragment(ctx context.Context, req panel.RunRequest) (Pan
 	if err != nil {
 		return PanelFragment{}, err
 	}
-	var detached panel.RunRequest
+	var detached query.RunRequest
 	if err = json.Unmarshal(raw, &detached); err != nil {
 		return PanelFragment{}, err
 	}
 	req = detached
-	panel.Normalize(&req.Dashboard)
+	query.Normalize(&req.Dashboard)
 	if req.Time != nil {
 		req.Dashboard.Time = *req.Time
 		req.Time = nil
@@ -170,10 +170,10 @@ func (s *Server) executeFragment(ctx context.Context, req panel.RunRequest) (Pan
 			req.Dashboard.Time.Compare = "previous_period"
 		}
 	}
-	panel.Normalize(&req.Dashboard)
+	query.Normalize(&req.Dashboard)
 	// Reject oversized authored input before execution, rather than silently
 	// changing query semantics to fit the persisted-response budget.
-	authored, err := json.Marshal(PanelFragment{Dashboard: req.Dashboard, Vars: req.Vars, Results: []panel.Result{}})
+	authored, err := json.Marshal(PanelFragment{Dashboard: req.Dashboard, Vars: req.Vars, Results: []query.Result{}})
 	if err != nil {
 		return PanelFragment{}, fmt.Errorf("encode authored fragment: %w", err)
 	}
@@ -194,28 +194,28 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if input.Text != "" {
 		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
 		if len(problems) != 0 {
-			return fanqlToolFailure(fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}, panel.PresentProblems(problems))
+			return fanqlToolFailure(fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}, query.PresentProblems(problems))
 		}
 		input.Panel.Query = &compiled.Query
 		notices = append(notices, compiled.Notices...)
 	}
-	d := panel.Dashboard{Name: input.Panel.Title, Variables: input.Variables, Panels: []panel.Panel{input.Panel}}
-	result, out, err := s.runFragment(ctx, panel.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
+	d := query.Dashboard{Name: input.Panel.Title, Variables: input.Variables, Panels: []query.Panel{input.Panel}}
+	result, out, err := s.runFragment(ctx, query.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
 	response := QueryTelemetryOutput{PanelFragment: &out}
 	if err == nil && input.Text != "" {
 		response.Notices = notices
 	}
 	return result, response, err
 }
-func (s *Server) queryPanelFragment(ctx context.Context, _ *mcp.CallToolRequest, input panel.RunRequest) (*mcp.CallToolResult, PanelFragment, error) {
+func (s *Server) queryPanelFragment(ctx context.Context, _ *mcp.CallToolRequest, input query.RunRequest) (*mcp.CallToolResult, PanelFragment, error) {
 	if input.Panels != nil {
 		return nil, PanelFragment{}, errors.New("panels is forbidden for query_panel_fragment")
 	}
 	return s.runFragment(ctx, input)
 }
-func (s *Server) panelExemplars(ctx context.Context, _ *mcp.CallToolRequest, input panel.ExemplarRequest) (*mcp.CallToolResult, panel.ExemplarResponse, error) {
+func (s *Server) panelExemplars(ctx context.Context, _ *mcp.CallToolRequest, input query.ExemplarRequest) (*mcp.CallToolResult, query.ExemplarResponse, error) {
 	if s.panels == nil {
-		return nil, panel.ExemplarResponse{}, errors.New("panels are unavailable")
+		return nil, query.ExemplarResponse{}, errors.New("panels are unavailable")
 	}
 	out, err := s.panels.Exemplars(ctx, input)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *Server) panelExemplars(ctx context.Context, _ *mcp.CallToolRequest, inp
 	}
 	return summary(fmt.Sprintf("%d exemplar traces.", len(out.Traces))), out, nil
 }
-func (s *Server) resolvePanelVariables(ctx context.Context, _ *mcp.CallToolRequest, input panel.ResolveRequest) (*mcp.CallToolResult, variableOptions, error) {
+func (s *Server) resolvePanelVariables(ctx context.Context, _ *mcp.CallToolRequest, input query.ResolveRequest) (*mcp.CallToolResult, variableOptions, error) {
 	if s.panels == nil {
 		return nil, variableOptions{}, errors.New("panels are unavailable")
 	}
@@ -234,8 +234,8 @@ func (s *Server) resolvePanelVariables(ctx context.Context, _ *mcp.CallToolReque
 	return summary("Panel variable options."), variableOptions{Options: options}, nil
 }
 
-func fragmentPreset(kind, service, namespace, severity, search string, limit int) panel.Dashboard {
-	d := panel.Dashboard{Name: map[string]string{"overview": "System health", "topology": "Service dependencies", "performance": "Service performance", "logs": "Log explorer", "trace": "Trace detail"}[kind], Time: panel.Time{Range: "1h", Refresh: "off"}}
+func fragmentPreset(kind, service, namespace, severity, search string, limit int) query.Dashboard {
+	d := query.Dashboard{Name: map[string]string{"overview": "System health", "topology": "Service dependencies", "performance": "Service performance", "logs": "Log explorer", "trace": "Trace detail"}[kind], Time: query.Time{Range: "1h", Refresh: "off"}}
 	filters := []string{}
 	literal := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 	if namespace != "" {
@@ -245,7 +245,7 @@ func fragmentPreset(kind, service, namespace, severity, search string, limit int
 		filters = append(filters, "service = "+literal(service))
 	}
 	add := func(id, title, viz, signal, measure, unit string, by []string, bucket string) {
-		q := &panel.Query{From: signal, Where: append([]string(nil), filters...), By: by, Bucket: bucket}
+		q := &query.Spec{From: signal, Where: append([]string(nil), filters...), By: by, Bucket: bucket}
 		if measure != "" {
 			q.Measures = []string{measure}
 		}
@@ -260,7 +260,7 @@ func fragmentPreset(kind, service, namespace, severity, search string, limit int
 		if limit > 0 {
 			q.Limit = min(cap, limit)
 		}
-		d.Panels = append(d.Panels, panel.Panel{ID: id, Title: title, Viz: viz, Unit: unit, Query: q})
+		d.Panels = append(d.Panels, query.Panel{ID: id, Title: title, Viz: viz, Unit: unit, Query: q})
 	}
 	switch kind {
 	case "overview":
@@ -280,7 +280,7 @@ func fragmentPreset(kind, service, namespace, severity, search string, limit int
 		add("volume", "Log volume", "timeseries", "logs", "count()", "count", []string{"severity"}, "auto")
 		add("events", "Log events", "logs", "logs", "", "", nil, "")
 		if search != "" {
-			d.Panels[len(d.Panels)-1].Options = &panel.Options{Highlight: search}
+			d.Panels[len(d.Panels)-1].Options = &query.Options{Highlight: search}
 			d.Panels[0].Query.Where = append(d.Panels[0].Query.Where, "contains(lower(body),lower("+literal(search)+"))")
 		}
 	case "trace":
@@ -449,7 +449,7 @@ func numeric(value any) float64 {
 	}
 	return 0
 }
-func summaryCell(col panel.Column, value any) string {
+func summaryCell(col query.Column, value any) string {
 	if col.Type == "time" {
 		switch v := value.(type) {
 		case time.Time:
@@ -546,7 +546,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 		r.Diagnosis = clipJSON(r.Diagnosis, 512)
 		r.Error = clipJSON(r.Error, 512)
 		r.AnnotationError = clipJSON(r.AnnotationError, 256)
-		for _, f := range []*panel.Frame{r.Frame, r.Previous} {
+		for _, f := range []*query.Frame{r.Frame, r.Previous} {
 			if f != nil {
 				f.Note = clipJSON(f.Note, 512)
 			}
@@ -578,7 +578,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 			original := scope.Services
 			choices = append(choices, collection{r.ID + "/scope", len(original), func() any { return scope.Services }, func(n int) { scope.Services = original[:n]; scope.Limited = true; r.AnnotationError = payloadLimitNote }, func() any { return r }})
 		}
-		for j, f := range []*panel.Frame{r.Frame, r.Previous} {
+		for j, f := range []*query.Frame{r.Frame, r.Previous} {
 			if f == nil || f.Rows == 0 {
 				continue
 			}
@@ -764,7 +764,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 		// explicit empty/truncated frames rather than silently exceed the contract.
 		for i := range out.Results {
 			r := &out.Results[i]
-			r.Frame = &panel.Frame{Columns: []panel.Column{}, Values: [][]any{}, Truncated: true, Note: payloadLimitNote}
+			r.Frame = &query.Frame{Columns: []query.Column{}, Values: [][]any{}, Truncated: true, Note: payloadLimitNote}
 			r.Previous = nil
 			r.AnnotationScope = nil
 		}
@@ -783,7 +783,7 @@ func boundFragment(ctx context.Context, fragment PanelFragment) (PanelFragment, 
 	return out, nil
 }
 
-func fanqlToolFailure(problem fanql.Failure, problems panel.Problems) (*mcp.CallToolResult, QueryTelemetryOutput, error) {
+func fanqlToolFailure(problem fanql.Failure, problems query.Problems) (*mcp.CallToolResult, QueryTelemetryOutput, error) {
 	result := summary(problem.Message)
 	result.IsError = true
 	return result, QueryTelemetryOutput{Error: &problem, Problems: problems}, nil

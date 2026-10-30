@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
-type completionSchemaFunc func(context.Context, panel.SchemaRequest) (*panel.Schema, error)
+type completionSchemaFunc func(context.Context, query.SchemaRequest) (*query.Schema, error)
 
 // expectAt replaces a whole lexical token even when the cursor is in its middle.
 // Punctuation is consumed by the grammar: a cursor after ':' expects a value.
@@ -26,7 +26,7 @@ func expectAt(text string, cursor int) (lexToken, []expect) {
 
 func TestCompleteBoundsDistinctNamespaceFetchAdmission(t *testing.T) {
 	gate := make(chan struct{})
-	source := completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) {
+	source := completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		<-gate
 		return completionFixtureSchema(), nil
 	})
@@ -61,24 +61,24 @@ func TestCompleteBoundsDistinctNamespaceFetchAdmission(t *testing.T) {
 	}
 }
 
-func (f completionSchemaFunc) Schema(ctx context.Context, req panel.SchemaRequest) (*panel.Schema, error) {
+func (f completionSchemaFunc) Schema(ctx context.Context, req query.SchemaRequest) (*query.Schema, error) {
 	return f(ctx, req)
 }
 
-func completionFixtureSchema() *panel.Schema {
-	return &panel.Schema{Signals: map[string]panel.SignalSchema{
-		"logs": {Columns: []panel.ColumnSchema{
-			{Field: panel.Field{Name: "severity"}, Values: []panel.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}},
-			{Field: panel.Field{Name: "service"}, Values: []panel.Option{{Value: "api"}, {Value: "checkout"}}},
+func completionFixtureSchema() *query.Schema {
+	return &query.Schema{Signals: map[string]query.SignalSchema{
+		"logs": {Columns: []query.ColumnSchema{
+			{Field: query.Field{Name: "severity"}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}},
+			{Field: query.Field{Name: "service"}, Values: []query.Option{{Value: "api"}, {Value: "checkout"}}},
 		}},
-		"spans": {Attributes: []panel.AttributeSchema{
+		"spans": {Attributes: []query.AttributeSchema{
 			{Key: "http.target", Scope: "attributes", Type: "string", Count: 900},
 			{Key: "http.method", Scope: "attributes", Type: "string", Count: 500},
 			{Key: "user.score", Scope: "attributes", Type: "number", Count: 20},
 			{Key: "k8s.pod.name", Scope: "resource", Type: "string", Count: 10},
 			{Key: "enabled", Scope: "attributes", Type: "boolean", Count: 5},
 		}},
-		"metrics": {Metrics: []panel.MetricSchema{{Name: "http.server.duration", Count: 100}}},
+		"metrics": {Metrics: []query.MetricSchema{{Name: "http.server.duration", Count: 100}}},
 	}}
 }
 
@@ -114,7 +114,7 @@ func waitCompletion(t *testing.T, c *Completer, req CompleteRequest, ready func(
 
 func warmCompleter(t *testing.T) *Completer {
 	t.Helper()
-	c := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) {
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		return completionFixtureSchema(), nil
 	}))
 	waitCompletion(t, c, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
@@ -173,13 +173,13 @@ func TestCompleteFixtures(t *testing.T) {
 		text, viz                 string
 		exact, includes, excludes []string
 		first, insert, detail     string
-		replace                   *panel.TextSpan
+		replace                   *query.TextSpan
 	}{
-		{text: "logs where sev¦erity:error", first: "severity", replace: &panel.TextSpan{Start: 11, End: 19}},
+		{text: "logs where sev¦erity:error", first: "severity", replace: &query.TextSpan{Start: 11, End: 19}},
 		{text: "logs where severity:¦", includes: []string{"trace", "debug", "info", "warn", "error", "fatal", "*"}, excludes: []string{"ERROR", "INFO", "WARN"}},
 		{text: "logs where severity>=¦", exact: []string{"trace", "debug", "info", "warn", "error", "fatal"}},
 		{text: "spans where http.¦", exact: []string{"http.target", "http.method"}, insert: "http.target"},
-		{text: "spans where attributes['htt¦", first: "http.target", insert: "http.target']", replace: &panel.TextSpan{Start: 24, End: 27}},
+		{text: "spans where attributes['htt¦", first: "http.target", insert: "http.target']", replace: &query.TextSpan{Start: 24, End: 27}},
 		{text: "spans where resource[\"k8s.¦", first: "k8s.pod.name", insert: "k8s.pod.name\"]"},
 		{text: "logs where service in (api, ¦", exact: []string{"checkout", "api"}},
 		{text: "logs where ser¦", includes: []string{"service"}, detail: "free text searches body"},
@@ -214,7 +214,7 @@ func TestCompleteFixtures(t *testing.T) {
 		t.Run(tt.text+tt.viz, func(t *testing.T) {
 			req := completionRequest(tt.text)
 			req.Viz = tt.viz
-			req.Variables = []panel.Variable{{Name: "service"}}
+			req.Variables = []query.Variable{{Name: "service"}}
 			r := c.Complete(context.Background(), req)
 			labels := completionLabels(r)
 			if len(r.Items) > 50 || r.Schema.Window != "1h" || !r.Schema.Warm {
@@ -263,7 +263,7 @@ func TestCompleteFixtures(t *testing.T) {
 		}
 	}
 	r := c.Complete(context.Background(), completionRequest("spans where attributes['😀¦"))
-	if r.Replace != (panel.TextSpan{Start: 24, End: 25}) {
+	if r.Replace != (query.TextSpan{Start: 24, End: 25}) {
 		t.Errorf("code point replace %+v", r.Replace)
 	}
 	page := completionRequest("ser¦")
@@ -279,8 +279,8 @@ func TestCompleteRecentFlag(t *testing.T) {
 		recent       bool
 	}{{"7d", "24h", true}, {"", "24h", true}, {"1d", "24h", false}, {"1h", "1h", false}, {"30m", "1h", false}} {
 		t.Run(tt.window, func(t *testing.T) {
-			requests := make(chan panel.SchemaRequest, 1)
-			c := NewCompleter(completionSchemaFunc(func(_ context.Context, r panel.SchemaRequest) (*panel.Schema, error) {
+			requests := make(chan query.SchemaRequest, 1)
+			c := NewCompleter(completionSchemaFunc(func(_ context.Context, r query.SchemaRequest) (*query.Schema, error) {
 				requests <- r
 				return completionFixtureSchema(), nil
 			}))
@@ -303,7 +303,7 @@ func TestCompleteRecentFlag(t *testing.T) {
 func TestCompleteColdCacheCoalesces(t *testing.T) {
 	gate := make(chan struct{})
 	var calls, active, maximum atomic.Int32
-	c := NewCompleter(completionSchemaFunc(func(ctx context.Context, _ panel.SchemaRequest) (*panel.Schema, error) {
+	c := NewCompleter(completionSchemaFunc(func(ctx context.Context, _ query.SchemaRequest) (*query.Schema, error) {
 		calls.Add(1)
 		n := active.Add(1)
 		defer active.Add(-1)
@@ -346,7 +346,7 @@ func TestCompleteColdCacheCoalesces(t *testing.T) {
 		t.Fatalf("calls %d, max active %d", calls.Load(), maximum.Load())
 	}
 	var failed atomic.Int32
-	bad := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) {
+	bad := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		failed.Add(1)
 		return nil, errors.New("unavailable")
 	}))
@@ -386,9 +386,9 @@ func TestCompleteItemsRankByPrefixThenSubstringThenCount(t *testing.T) {
 func TestCompleteVocabularyPrecedesSampledValues(t *testing.T) {
 	schema := completionFixtureSchema()
 	logs := schema.Signals["logs"]
-	logs.Columns[0].Values = append(logs.Columns[0].Values, panel.Option{Value: "CUSTOM", Count: 999})
+	logs.Columns[0].Values = append(logs.Columns[0].Values, query.Option{Value: "CUSTOM", Count: 999})
 	schema.Signals["logs"] = logs
-	c := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) { return schema, nil }))
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	r := waitCompletion(t, c, completionRequest("logs where severity:¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
 	if got := completionLabels(r); len(got) < 7 || !slices.Equal(got[:7], []string{"trace", "debug", "info", "warn", "error", "fatal", "CUSTOM"}) {
 		t.Fatalf("vocabulary before samples: %v", got)
@@ -422,7 +422,7 @@ func TestCompleteServiceMetadataBoostsWithoutHiding(t *testing.T) {
 	spans := schema.Signals["spans"]
 	spans.Attributes[1].Services = "checkout, api"
 	schema.Signals["spans"] = spans
-	c := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) { return schema, nil }))
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	r := waitCompletion(t, c, completionRequest("spans where service:checkout http.¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
 	if !slices.Equal(completionLabels(r), []string{"http.method", "http.target"}) {
 		t.Fatalf("service boost: %v", completionLabels(r))
@@ -437,7 +437,7 @@ func TestCompleteSchemaConcurrencyIsProcessWide(t *testing.T) {
 	gate := make(chan struct{})
 	started := make(chan struct{}, 12)
 	var active, maximum, calls atomic.Int32
-	source := completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) {
+	source := completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		calls.Add(1)
 		n := active.Add(1)
 		defer active.Add(-1)
@@ -488,9 +488,9 @@ func TestCompleteRecoversInvalidFiltersBeforeStage(t *testing.T) {
 func TestCompleteInsertedValuesPreserveLiteralMeaning(t *testing.T) {
 	schema := completionFixtureSchema()
 	logs := schema.Signals["logs"]
-	logs.Columns[1].Values = []panel.Option{{Value: "checkout api"}, {Value: "checkout:api"}, {Value: "count | limit 1"}, {Value: `say "hello"`}, {Value: "$service"}, {Value: "*"}, {Value: "500ms"}, {Value: "true"}, {Value: "api"}}
+	logs.Columns[1].Values = []query.Option{{Value: "checkout api"}, {Value: "checkout:api"}, {Value: "count | limit 1"}, {Value: `say "hello"`}, {Value: "$service"}, {Value: "*"}, {Value: "500ms"}, {Value: "true"}, {Value: "api"}}
 	schema.Signals["logs"] = logs
-	c := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) { return schema, nil }))
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	req := completionRequest("logs where service:¦")
 	r := waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Warm })
 	for _, tt := range []struct{ label, sql string }{{"checkout api", `service = 'checkout api'`}, {"checkout:api", `service = 'checkout:api'`}, {"count | limit 1", `service = 'count | limit 1'`}, {`say "hello"`, `service = 'say "hello"'`}, {"$service", `service = '$service'`}, {"*", `service = '*'`}, {"500ms", `service = '500ms'`}, {"true", `service = 'true'`}, {"api", `service = 'api'`}} {
@@ -517,9 +517,9 @@ func TestCompleteInsertedValuesPreserveLiteralMeaning(t *testing.T) {
 func TestCompleteInsertedAttributeFieldsPreserveScope(t *testing.T) {
 	schema := completionFixtureSchema()
 	spans := schema.Signals["spans"]
-	spans.Attributes = []panel.AttributeSchema{{Key: "resource.foo", Scope: "attributes"}, {Key: "attributes.foo", Scope: "attributes"}, {Key: "service-name", Scope: "resource"}, {Key: "owner's.name", Scope: "attributes"}, {Key: `owner"s.name`, Scope: "resource"}, {Key: "where", Scope: "resource"}, {Key: "service", Scope: "resource"}}
+	spans.Attributes = []query.AttributeSchema{{Key: "resource.foo", Scope: "attributes"}, {Key: "attributes.foo", Scope: "attributes"}, {Key: "service-name", Scope: "resource"}, {Key: "owner's.name", Scope: "attributes"}, {Key: `owner"s.name`, Scope: "resource"}, {Key: "where", Scope: "resource"}, {Key: "service", Scope: "resource"}}
 	schema.Signals["spans"] = spans
-	c := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) { return schema, nil }))
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	for _, tt := range []struct{ text, key, scope, label string }{
 		{"spans where res¦", "resource.foo", "attributes", "attributes['resource.foo']"},
 		{"spans where attr¦", "attributes.foo", "attributes", "attributes['attributes.foo']"},
@@ -558,7 +558,7 @@ func TestCompleteInsertedAttributeFieldsPreserveScope(t *testing.T) {
 	}
 }
 
-func applyCompletion(text string, replace panel.TextSpan, insert string) string {
+func applyCompletion(text string, replace query.TextSpan, insert string) string {
 	runes := []rune(text)
 	return string(runes[:replace.Start]) + insert + string(runes[replace.End:])
 }

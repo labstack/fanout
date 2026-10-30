@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/intelligence"
-	"github.com/labstack/fanout/internal/query"
 )
 
 const pruneHistDays = 7
@@ -21,7 +21,7 @@ const pruneHistDays = 7
 // Engine drives the alert evaluation loop.
 type Engine struct {
 	store       *Store
-	duck        *query.Duck            // may be nil in tests
+	duck        *engine.Duck           // may be nil in tests
 	detector    *intelligence.Detector // may be nil in tests
 	mu          sync.RWMutex
 	programs    map[string]Program // rule ID → compiled program
@@ -34,7 +34,7 @@ type Engine struct {
 // NewEngine creates an Engine ready to Run.
 func NewEngine(
 	store *Store,
-	duck *query.Duck,
+	duck *engine.Duck,
 	detector *intelligence.Detector,
 	interval time.Duration,
 	histDays int,
@@ -190,12 +190,12 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 	case noAlert && triggered && rule.ForSeconds == 0:
 		// Immediately firing.
 		a := Alert{
-			RuleID:   rule.ID,
-			Service:  svc,
-			State:    "firing",
-			Value:    primaryValue(rule, env),
-			FiredAt:  nowStr,
-			LastEval: nowStr,
+			RuleID:          rule.ID,
+			Service:         svc,
+			State:           "firing",
+			Value:           primaryValue(rule, env),
+			FiredAt:         nowStr,
+			LastEvaluatedAt: nowStr,
 		}
 		saved, upsertErr := e.store.UpsertAlert(a)
 		if upsertErr != nil {
@@ -207,11 +207,11 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 	case noAlert && triggered && rule.ForSeconds > 0:
 		// Enter pending state; wait for the for-duration to elapse.
 		a := Alert{
-			RuleID:   rule.ID,
-			Service:  svc,
-			State:    "pending",
-			Value:    primaryValue(rule, env),
-			LastEval: nowStr,
+			RuleID:          rule.ID,
+			Service:         svc,
+			State:           "pending",
+			Value:           primaryValue(rule, env),
+			LastEvaluatedAt: nowStr,
 		}
 		if _, upsertErr := e.store.UpsertAlert(a); upsertErr != nil {
 			slog.Error("alert: upsert pending", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -232,7 +232,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			// Promote to firing.
 			existing.State = "firing"
 			existing.FiredAt = nowStr
-			existing.LastEval = nowStr
+			existing.LastEvaluatedAt = nowStr
 			saved, upsertErr := e.store.UpsertAlert(existing)
 			if upsertErr != nil {
 				slog.Error("alert: promote to firing", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -241,9 +241,9 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			e.fireWebhookAsync(rule, saved, env, "firing")
 		} else {
 			// Still waiting.
-			existing.LastEval = nowStr
+			existing.LastEvaluatedAt = nowStr
 			if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
-				slog.Error("alert: update pending last_eval", "rule", rule.ID, "service", svc, "err", upsertErr)
+				slog.Error("alert: update pending last_evaluated_at", "rule", rule.ID, "service", svc, "err", upsertErr)
 			}
 		}
 
@@ -255,7 +255,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 
 	case !noAlert && existing.State == "firing" && triggered:
 		// Already firing; send repeat notification if repeat_interval has elapsed.
-		existing.LastEval = nowStr
+		existing.LastEvaluatedAt = nowStr
 		existing.Value = primaryValue(rule, env)
 		if rule.RepeatIntervalS > 0 {
 			ref := existing.RepeatedAt
@@ -279,14 +279,14 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			}
 		}
 		if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
-			slog.Error("alert: update firing last_eval", "rule", rule.ID, "service", svc, "err", upsertErr)
+			slog.Error("alert: update firing last_evaluated_at", "rule", rule.ID, "service", svc, "err", upsertErr)
 		}
 
 	case !noAlert && existing.State == "firing" && !triggered:
 		// Condition cleared — resolve.
 		existing.State = "resolved"
 		existing.ResolvedAt = nowStr
-		existing.LastEval = nowStr
+		existing.LastEvaluatedAt = nowStr
 		saved, upsertErr := e.store.UpsertAlert(existing)
 		if upsertErr != nil {
 			slog.Error("alert: resolve alert", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -301,10 +301,10 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 		if rule.CooldownS > 0 && existing.ResolvedAt != "" {
 			resolvedAt, parseErr := time.Parse(time.RFC3339, existing.ResolvedAt)
 			if parseErr == nil && now.Sub(resolvedAt) < time.Duration(rule.CooldownS)*time.Second {
-				// Still in cooldown — update last_eval but don't re-fire.
-				existing.LastEval = nowStr
+				// Still in cooldown — update last_evaluated_at but don't re-fire.
+				existing.LastEvaluatedAt = nowStr
 				if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
-					slog.Error("alert: update cooldown last_eval", "rule", rule.ID, "service", svc, "err", upsertErr)
+					slog.Error("alert: update cooldown last_evaluated_at", "rule", rule.ID, "service", svc, "err", upsertErr)
 				}
 				return
 			}
@@ -314,7 +314,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			existing.State = "firing"
 			existing.FiredAt = nowStr
 			existing.ResolvedAt = ""
-			existing.LastEval = nowStr
+			existing.LastEvaluatedAt = nowStr
 			existing.Value = primaryValue(rule, env)
 			saved, upsertErr := e.store.UpsertAlert(existing)
 			if upsertErr != nil {
@@ -327,7 +327,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			existing.State = "pending"
 			existing.FiredAt = ""
 			existing.ResolvedAt = ""
-			existing.LastEval = nowStr
+			existing.LastEvaluatedAt = nowStr
 			existing.Value = primaryValue(rule, env)
 			if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
 				slog.Error("alert: re-pend from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -419,7 +419,7 @@ SELECT c.service, c.error_rate, c.p50, c.p95, c.throughput, c.log_count,
     ((c.throughput - p.throughput) / NULLIF(p.throughput, 0)) * 100 as throughput_delta
 FROM current c LEFT JOIN previous p ON c.service = p.service`
 
-	resp := e.duck.ExecuteSQL(ctx, query.SQLRequest{Query: envSQL})
+	resp := e.duck.ExecuteSQL(ctx, engine.SQLRequest{Query: envSQL})
 	if resp.Error != "" {
 		slog.Error("alert: buildEnvs query failed", "err", resp.Error)
 		return nil

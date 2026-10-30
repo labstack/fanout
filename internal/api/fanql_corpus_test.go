@@ -13,7 +13,7 @@ import (
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/fanql"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type nonExecutingFanQLPanels struct {
@@ -21,7 +21,7 @@ type nonExecutingFanQLPanels struct {
 	calls int
 }
 
-func (p *nonExecutingFanQLPanels) Run(context.Context, panel.RunRequest) ([]panel.Result, error) {
+func (p *nonExecutingFanQLPanels) Run(context.Context, query.RunRequest) ([]query.Result, error) {
 	p.calls++
 	return nil, fmt.Errorf("FanQL parsing must not execute telemetry")
 }
@@ -51,8 +51,8 @@ func TestNonExecution(t *testing.T) {
 		var tc struct {
 			Text         string         `json:"text"`
 			Viz          string         `json:"viz"`
-			Query        *panel.Query   `json:"query"`
-			Problems     panel.Problems `json:"problems"`
+			Query        *query.Spec    `json:"query"`
+			Problems     query.Problems `json:"problems"`
 			GateProblems bool           `json:"gate_problems"`
 		}
 		if err := decoder.Decode(&tc); err == io.EOF {

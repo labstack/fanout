@@ -104,7 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME}"
-          bash scripts/with-duckdb.sh go test ./internal/query -run 'TestPinnedEngine|TestSQLBoundary' -count=1
+          bash scripts/with-duckdb.sh go test ./internal/engine -run 'TestPinnedEngine|TestSQLBoundary' -count=1
           mkdir -p stage
           bash scripts/with-duckdb.sh go build -trimpath -ldflags "-s -w -X main.version=${version}" -o stage/fanout ./cmd/fanout
           for doc in LICENSE NOTICE README.md THIRD_PARTY_NOTICES TRADEMARK.md; do

@@ -67,7 +67,7 @@ func (q *Queries) DeleteAlertsByRuleIDAndState(ctx context.Context, arg DeleteAl
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE rule_id = ? AND service = ?
+SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE rule_id = ? AND service = ?
 `
 
 type GetAlertParams struct {
@@ -87,7 +87,7 @@ func (q *Queries) GetAlert(ctx context.Context, arg GetAlertParams) (Alert, erro
 		&i.FiredAt,
 		&i.ResolvedAt,
 		&i.RepeatedAt,
-		&i.LastEval,
+		&i.LastEvaluatedAt,
 		&i.LastDeliveryStatus,
 		&i.LastDeliveryAt,
 		&i.CreatedAt,
@@ -96,7 +96,7 @@ func (q *Queries) GetAlert(ctx context.Context, arg GetAlertParams) (Alert, erro
 }
 
 const listAlerts = `-- name: ListAlerts :many
-SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at FROM alerts ORDER BY created_at DESC
+SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAlerts(ctx context.Context) ([]Alert, error) {
@@ -117,7 +117,7 @@ func (q *Queries) ListAlerts(ctx context.Context) ([]Alert, error) {
 			&i.FiredAt,
 			&i.ResolvedAt,
 			&i.RepeatedAt,
-			&i.LastEval,
+			&i.LastEvaluatedAt,
 			&i.LastDeliveryStatus,
 			&i.LastDeliveryAt,
 			&i.CreatedAt,
@@ -136,7 +136,7 @@ func (q *Queries) ListAlerts(ctx context.Context) ([]Alert, error) {
 }
 
 const listAlertsByRuleID = `-- name: ListAlertsByRuleID :many
-SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE rule_id = ? ORDER BY created_at DESC
+SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE rule_id = ? ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAlertsByRuleID(ctx context.Context, ruleID string) ([]Alert, error) {
@@ -157,7 +157,7 @@ func (q *Queries) ListAlertsByRuleID(ctx context.Context, ruleID string) ([]Aler
 			&i.FiredAt,
 			&i.ResolvedAt,
 			&i.RepeatedAt,
-			&i.LastEval,
+			&i.LastEvaluatedAt,
 			&i.LastDeliveryStatus,
 			&i.LastDeliveryAt,
 			&i.CreatedAt,
@@ -176,7 +176,7 @@ func (q *Queries) ListAlertsByRuleID(ctx context.Context, ruleID string) ([]Aler
 }
 
 const listAlertsByService = `-- name: ListAlertsByService :many
-SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE service = ? ORDER BY created_at DESC
+SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE service = ? ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAlertsByService(ctx context.Context, service string) ([]Alert, error) {
@@ -197,7 +197,7 @@ func (q *Queries) ListAlertsByService(ctx context.Context, service string) ([]Al
 			&i.FiredAt,
 			&i.ResolvedAt,
 			&i.RepeatedAt,
-			&i.LastEval,
+			&i.LastEvaluatedAt,
 			&i.LastDeliveryStatus,
 			&i.LastDeliveryAt,
 			&i.CreatedAt,
@@ -216,7 +216,7 @@ func (q *Queries) ListAlertsByService(ctx context.Context, service string) ([]Al
 }
 
 const listAlertsByState = `-- name: ListAlertsByState :many
-SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE state = ? ORDER BY created_at DESC
+SELECT id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at FROM alerts WHERE state = ? ORDER BY created_at DESC
 `
 
 func (q *Queries) ListAlertsByState(ctx context.Context, state string) ([]Alert, error) {
@@ -237,7 +237,7 @@ func (q *Queries) ListAlertsByState(ctx context.Context, state string) ([]Alert,
 			&i.FiredAt,
 			&i.ResolvedAt,
 			&i.RepeatedAt,
-			&i.LastEval,
+			&i.LastEvaluatedAt,
 			&i.LastDeliveryStatus,
 			&i.LastDeliveryAt,
 			&i.CreatedAt,
@@ -288,7 +288,7 @@ func (q *Queries) UpdateDeliveryStatus(ctx context.Context, arg UpdateDeliverySt
 const upsertAlert = `-- name: UpsertAlert :one
 INSERT INTO alerts (
     id, rule_id, service, state, value, fired_at, resolved_at,
-    repeated_at, last_eval, last_delivery_status, last_delivery_at
+    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(rule_id, service) DO UPDATE SET
     state = excluded.state,
@@ -296,10 +296,10 @@ ON CONFLICT(rule_id, service) DO UPDATE SET
     fired_at = excluded.fired_at,
     resolved_at = excluded.resolved_at,
     repeated_at = excluded.repeated_at,
-    last_eval = excluded.last_eval,
+    last_evaluated_at = excluded.last_evaluated_at,
     last_delivery_status = excluded.last_delivery_status,
     last_delivery_at = excluded.last_delivery_at
-RETURNING id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at
+RETURNING id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
 `
 
 type UpsertAlertParams struct {
@@ -311,7 +311,7 @@ type UpsertAlertParams struct {
 	FiredAt            sql.NullString  `json:"fired_at"`
 	ResolvedAt         sql.NullString  `json:"resolved_at"`
 	RepeatedAt         sql.NullString  `json:"repeated_at"`
-	LastEval           sql.NullString  `json:"last_eval"`
+	LastEvaluatedAt    sql.NullString  `json:"last_evaluated_at"`
 	LastDeliveryStatus sql.NullString  `json:"last_delivery_status"`
 	LastDeliveryAt     sql.NullString  `json:"last_delivery_at"`
 }
@@ -326,7 +326,7 @@ func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) (Alert
 		arg.FiredAt,
 		arg.ResolvedAt,
 		arg.RepeatedAt,
-		arg.LastEval,
+		arg.LastEvaluatedAt,
 		arg.LastDeliveryStatus,
 		arg.LastDeliveryAt,
 	)
@@ -340,7 +340,7 @@ func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) (Alert
 		&i.FiredAt,
 		&i.ResolvedAt,
 		&i.RepeatedAt,
-		&i.LastEval,
+		&i.LastEvaluatedAt,
 		&i.LastDeliveryStatus,
 		&i.LastDeliveryAt,
 		&i.CreatedAt,

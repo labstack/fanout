@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestCompileNestedMeasureNegation(t *testing.T) {
@@ -19,7 +19,7 @@ func TestCompileNestedMeasureNegation(t *testing.T) {
 			if len(ps) != 0 || c == nil {
 				t.Fatalf("compile %q: %+v", text, ps)
 			}
-			if _, err := panel.ParseMeasure(c.Query.From, c.Query.Measures[0]); err != nil {
+			if _, err := query.ParseMeasure(c.Query.From, c.Query.Measures[0]); err != nil {
 				t.Fatalf("lowered measure %q: %v", c.Query.Measures[0], err)
 			}
 			again, ps := Compile(c.Canonical, Options{})

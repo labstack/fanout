@@ -15,13 +15,13 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type storedQueryFixture struct {
 	Name      string
-	Panel     panel.Panel
-	Variables []panel.Variable
+	Panel     query.Panel
+	Variables []query.Variable
 }
 
 // Read the actual product fixtures, so additions to any dashboard automatically
@@ -29,12 +29,12 @@ type storedQueryFixture struct {
 func storedQueryFixtures(t testing.TB) []storedQueryFixture {
 	t.Helper()
 	var out []storedQueryFixture
-	add := func(name string, p panel.Panel, vars []panel.Variable) {
+	add := func(name string, p query.Panel, vars []query.Variable) {
 		if p.Query == nil {
 			return
 		}
-		d := panel.Dashboard{Name: name, Variables: vars, Panels: []panel.Panel{p}}
-		panel.Normalize(&d)
+		d := query.Dashboard{Name: name, Variables: vars, Panels: []query.Panel{p}}
+		query.Normalize(&d)
 		out = append(out, storedQueryFixture{Name: name, Panel: d.Panels[0], Variables: d.Variables})
 	}
 	d := dashboard.DefaultSpec()
@@ -49,8 +49,8 @@ func storedQueryFixtures(t testing.TB) []storedQueryFixture {
 	if err := json.Unmarshal(raw, &root); err != nil {
 		t.Fatal(err)
 	}
-	var walk func(any, string, []panel.Variable)
-	walk = func(v any, path string, vars []panel.Variable) {
+	var walk func(any, string, []query.Variable)
+	walk = func(v any, path string, vars []query.Variable) {
 		switch x := v.(type) {
 		case map[string]any:
 			if value, ok := x["variables"]; ok {
@@ -61,7 +61,7 @@ func storedQueryFixtures(t testing.TB) []storedQueryFixture {
 			}
 			if _, ok := x["query"]; ok {
 				b, _ := json.Marshal(x)
-				var p panel.Panel
+				var p query.Panel
 				if err := json.Unmarshal(b, &p); err != nil {
 					t.Fatal(err)
 				}
@@ -94,7 +94,7 @@ func storedQueryFixtures(t testing.TB) []storedQueryFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var d panel.Dashboard
+		var d query.Dashboard
 		if err := json.Unmarshal([]byte(text), &d); err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func storedQueryFixtures(t testing.TB) []storedQueryFixture {
 	return out
 }
 
-func canonicalSQL(t testing.TB, p panel.Parser, signal, filter string) string {
+func canonicalSQL(t testing.TB, p query.Parser, signal, filter string) string {
 	t.Helper()
 	n, err := p.ParseSQL(context.Background(), "SELECT 1 FROM "+signal+" WHERE ("+filter+")")
 	if err != nil {
@@ -122,23 +122,23 @@ func canonicalSQL(t testing.TB, p panel.Parser, signal, filter string) string {
 	return s
 }
 
-func measureMeaning(t testing.TB, p panel.Parser, signal string, expr panel.MeasureExpr) any {
+func measureMeaning(t testing.TB, p query.Parser, signal string, expr query.MeasureExpr) any {
 	t.Helper()
 	switch x := expr.(type) {
-	case panel.MeasureCall:
+	case query.MeasureCall:
 		if x.Field != nil {
 			f := *x.Field
 			f.Text = ""
 			x.Field = &f
 		}
 		return x
-	case panel.MeasureCountIf:
+	case query.MeasureCountIf:
 		return canonicalSQL(t, p, signal, x.Filter)
-	case panel.MeasureConst:
+	case query.MeasureConst:
 		return x.Value
-	case panel.MeasureNeg:
+	case query.MeasureNeg:
 		return []any{"neg", measureMeaning(t, p, signal, x.X)}
-	case panel.MeasureBinary:
+	case query.MeasureBinary:
 		return []any{x.Op, measureMeaning(t, p, signal, x.L), measureMeaning(t, p, signal, x.R)}
 	default:
 		t.Fatalf("unknown measure expression %T", expr)
@@ -146,7 +146,7 @@ func measureMeaning(t testing.TB, p panel.Parser, signal string, expr panel.Meas
 	}
 }
 
-func assertQueryTier(t testing.TB, p panel.Parser, stored, lowered panel.Query, tier Exactness) {
+func assertQueryTier(t testing.TB, p query.Parser, stored, lowered query.Spec, tier Exactness) {
 	t.Helper()
 	if len(stored.Where) != len(lowered.Where) {
 		t.Fatalf("entry boundaries changed: %+v -> %+v", stored, lowered)
@@ -174,11 +174,11 @@ func assertQueryTier(t testing.TB, p panel.Parser, stored, lowered panel.Query, 
 		t.Fatal("measure count changed")
 	}
 	for i, text := range stored.Measures {
-		a, err := panel.ParseMeasure(stored.From, text)
+		a, err := query.ParseMeasure(stored.From, text)
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := panel.ParseMeasure(lowered.From, lowered.Measures[i])
+		b, err := query.ParseMeasure(lowered.From, lowered.Measures[i])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,7 +205,7 @@ func TestRoundTripCorpusFixedPoint(t *testing.T) {
 		f, ps, err := Format(t.Context(), p, c.Query, Options{Viz: fixture.Viz})
 		// Compile can parse filter-only metrics without a viz. There is no
 		// metrics row viz, so these are outside Format's valid-query contract.
-		if len(panel.CompatibleVizzes(&c.Query, nil)) == 0 {
+		if len(query.CompatibleVizzes(&c.Query, nil)) == 0 {
 			if f != nil || len(ps) == 0 || err != nil {
 				t.Fatalf("invalid shape %q: %+v %+v %v", fixture.Text, f, ps, err)
 			}
@@ -252,14 +252,14 @@ func TestRoundTripStoredDashboards(t *testing.T) {
 				t.Fatalf("%q: %+v", f.Text, ps)
 			}
 			assertQueryTier(t, engine, stored, c.Query, f.Exactness)
-			d := panel.Dashboard{Version: 1, Name: "round trip", Variables: fixture.Variables, Panels: []panel.Panel{p}}
-			panel.Normalize(&d)
-			_, before, err := panel.Check(t.Context(), engine, &d)
+			d := query.Dashboard{Version: 1, Name: "round trip", Variables: fixture.Variables, Panels: []query.Panel{p}}
+			query.Normalize(&d)
+			_, before, err := query.Check(t.Context(), engine, &d)
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Panels[0].Query = &c.Query
-			_, after, err := panel.Check(t.Context(), engine, &d)
+			_, after, err := query.Check(t.Context(), engine, &d)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -271,17 +271,17 @@ func TestRoundTripStoredDashboards(t *testing.T) {
 }
 
 func ownQueryText(r *rand.Rand, i int) string {
-	signal := panel.SignalNames()[r.Intn(3)]
-	columns, _ := panel.SignalColumns(signal)
-	var fields []panel.Field
+	signal := query.SignalNames()[r.Intn(3)]
+	columns, _ := query.SignalColumns(signal)
+	var fields []query.Field
 	for _, f := range columns {
-		if f.Type == panel.TypeNumber || f.Type == panel.TypeString {
+		if f.Type == query.TypeNumber || f.Type == query.TypeString {
 			fields = append(fields, f)
 		}
 	}
 	f := fields[r.Intn(len(fields))]
 	value := `"api*$'𝔘"`
-	if f.Type == panel.TypeNumber {
+	if f.Type == query.TypeNumber {
 		value = strconv.Itoa(r.Intn(1000) - 100)
 	}
 	filter := f.Name + ":" + value
@@ -309,8 +309,8 @@ func ownQueryText(r *rand.Rand, i int) string {
 		}
 		return signal + " where " + filter + " | histogram(" + field + ") by service"
 	}
-	var measures []panel.MeasureSpec
-	for _, m := range panel.MeasureSpecs() {
+	var measures []query.MeasureSpec
+	for _, m := range query.MeasureSpecs() {
 		if m.Name == "count_if" {
 			continue
 		}
@@ -349,7 +349,7 @@ func containsString(values []string, value string) bool {
 func TestRoundTripProperties(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	r := rand.New(rand.NewSource(20261029))
-	vars := []panel.Variable{{Name: "svc", Kind: "text"}, {Name: "svcs", Kind: "custom", Options: []string{"api", "worker"}, Multi: true}}
+	vars := []query.Variable{{Name: "svc", Kind: "text"}, {Name: "svcs", Kind: "custom", Options: []string{"api", "worker"}, Multi: true}}
 	for i := range 500 {
 		text := ownQueryText(r, i)
 		c, ps := Compile(text, Options{Variables: vars})
@@ -388,15 +388,15 @@ func TestRoundTripProperties(t *testing.T) {
 				t.Fatal(ps)
 			}
 			assertQueryTier(t, engine, stored, lowered.Query, formatted.Exactness)
-			p := panel.Panel{ID: "p", Title: "p", Viz: "table", Query: &stored}
-			d := panel.Dashboard{Name: "property", Panels: []panel.Panel{p}}
-			panel.Normalize(&d)
-			_, before, err := panel.Check(t.Context(), engine, &d)
+			p := query.Panel{ID: "p", Title: "p", Viz: "table", Query: &stored}
+			d := query.Dashboard{Name: "property", Panels: []query.Panel{p}}
+			query.Normalize(&d)
+			_, before, err := query.Check(t.Context(), engine, &d)
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Panels[0].Query = &lowered.Query
-			_, after, err := panel.Check(t.Context(), engine, &d)
+			_, after, err := query.Check(t.Context(), engine, &d)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -409,7 +409,7 @@ func TestRoundTripProperties(t *testing.T) {
 
 func TestEntryBoundaryShapesDiffer(t *testing.T) {
 	engine, _ := newTestEngine(t)
-	queries := []panel.Query{{From: "spans", Where: []string{`attributes['a'] = 1`, `attributes['b'] = 2`}}, {From: "spans", Where: []string{`attributes['a'] = 1 AND attributes['b'] = 2`}}}
+	queries := []query.Spec{{From: "spans", Where: []string{`attributes['a'] = 1`, `attributes['b'] = 2`}}, {From: "spans", Where: []string{`attributes['a'] = 1 AND attributes['b'] = 2`}}}
 	texts := []string{}
 	for _, q := range queries {
 		f, ps, err := Format(t.Context(), engine, q, Options{})
@@ -429,7 +429,7 @@ func TestEntryBoundaryShapesDiffer(t *testing.T) {
 }
 
 func TestEditableFalsePreservationThroughEnvelope(t *testing.T) {
-	q := panel.Query{From: "logs"}
+	q := query.Spec{From: "logs"}
 	for i := range 16 {
 		q.Where = append(q.Where, "body = '"+strings.Repeat("x", 480)+strconv.Itoa(i)+"'")
 	}
@@ -439,13 +439,13 @@ func TestEditableFalsePreservationThroughEnvelope(t *testing.T) {
 		t.Fatalf("oversized format: %+v %+v %v; engine calls=%d", f, ps, err, p.calls)
 	}
 	type envelope struct {
-		Text     string      `json:"text"`
-		Editable bool        `json:"editable"`
-		Query    panel.Query `json:"query"`
-		Viz      string      `json:"viz"`
-		Time     panel.Time  `json:"time"`
+		Text     string     `json:"text"`
+		Editable bool       `json:"editable"`
+		Query    query.Spec `json:"query"`
+		Viz      string     `json:"viz"`
+		Time     query.Time `json:"time"`
 	}
-	original := envelope{Text: f.Text, Query: q, Viz: "logs", Time: panel.Time{Range: "1h"}}
+	original := envelope{Text: f.Text, Query: q, Viz: "logs", Time: query.Time{Range: "1h"}}
 	raw, err := json.Marshal(original)
 	if err != nil {
 		t.Fatal(err)

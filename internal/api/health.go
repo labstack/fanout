@@ -14,18 +14,18 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // HealthHandler handles health check endpoints
 type HealthHandler struct {
-	duck    *query.Duck
+	duck    *engine.Duck
 	cfg     config.Config
 	started time.Time
 }
 
 // NewHealthHandler creates a new health handler
-func NewHealthHandler(duck *query.Duck, cfg config.Config) *HealthHandler {
+func NewHealthHandler(duck *engine.Duck, cfg config.Config) *HealthHandler {
 	return &HealthHandler{duck: duck, cfg: cfg, started: time.Now()}
 }
 
@@ -196,7 +196,7 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	// Use the same snapshot gate as public reads so a short compaction/retention
 	// publication cannot race the Parquet scan and report a false outage.
 	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM telemetry.spans LIMIT 1")
-	if errors.Is(err, query.ErrParquetReadWait) {
+	if errors.Is(err, engine.ErrParquetReadWait) {
 		return CheckResult{
 			Status:    "degraded",
 			LatencyMs: time.Since(start).Milliseconds(),
@@ -347,7 +347,7 @@ FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 }
 
 // RegisterHealthRoutes registers health check endpoints
-func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
+func RegisterHealthRoutes(e *echo.Echo, duck *engine.Duck, cfg config.Config) {
 	h := NewHealthHandler(duck, cfg)
 	e.GET("/healthz", h.Liveness)
 	e.GET("/readyz", h.Readiness)

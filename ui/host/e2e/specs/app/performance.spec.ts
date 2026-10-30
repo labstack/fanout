@@ -63,7 +63,7 @@ async function evidence(observed: ReturnType<typeof observe>, start = 0): Promis
   for (const event of events) {
     expect(event.finished, `Complete body: ${event.path}`).toBe(true);
     expect(event.response?.ok(), `HTTP success: ${event.path}`).toBe(true);
-    if (event.path !== "/api/panels/query") continue;
+    if (event.path !== "/api/queries/run") continue;
     const body = await event.response!.json() as { results: PanelResult[] };
     const selected = (event.request.postDataJSON() as { panels?: string[] }).panels ?? panelIds;
     const returned = body.results.map(result => result.id).sort();
@@ -90,7 +90,7 @@ async function evidence(observed: ReturnType<typeof observe>, start = 0): Promis
 
 async function assertInitial(page: Page, observed: ReturnType<typeof observe>) {
   await settled(page, observed);
-  await expect.poll(() => observed.events.filter(event => event.path === "/api/panels/variables/resolve" && event.finished).length).toBe(1);
+  await expect.poll(() => observed.events.filter(event => event.path === "/api/queries/variables/resolve" && event.finished).length).toBe(1);
   await expect.poll(() => observed.events.filter(event => event.path === "/api/annotations" && event.finished).length).toBeGreaterThan(0);
   const initial = await evidence(observed);
   expect([...new Set(initial.batches.flatMap(batch => batch.results.map(result => result.id)))].sort()).toEqual(panelIds);
@@ -189,16 +189,16 @@ test("refreshes once per batch and resolves variables once per range", async ({ 
         const start = observed.events.length;
         await page.getByRole("group", { name: "Dashboard controls", exact: true }).getByRole("button").first().click();
         await page.getByRole("menuitem", { name: "Last 12 hours", exact: true }).click();
-        await expect.poll(() => observed.events.slice(start).filter(event => event.path === "/api/panels/variables/resolve" && event.finished).length).toBe(1);
+        await expect.poll(() => observed.events.slice(start).filter(event => event.path === "/api/queries/variables/resolve" && event.finished).length).toBe(1);
         await page.waitForFunction(allPanelsPainted, spec.panels, { polling: "raf" }).then(handle => handle.dispose());
         await settled(page, observed);
-        await expect.poll(() => observed.events.slice(start).filter(event => event.path === "/api/panels/variables/resolve").length).toBe(1);
+        await expect.poll(() => observed.events.slice(start).filter(event => event.path === "/api/queries/variables/resolve").length).toBe(1);
         await attach("range-change.json", await evidence(observed, start));
       }
       for (let cycle = 1; cycle <= 3; cycle++) {
         const start = observed.events.length;
         await page.getByRole("button", { name: "Refresh now", exact: true }).click();
-        for (const path of ["/api/panels/query", "/api/annotations"]) {
+        for (const path of ["/api/queries/run", "/api/annotations"]) {
           await expect.poll(() => observed.events.slice(start).filter(event => event.path === path && event.finished).length).toBe(1);
         }
         await page.waitForFunction(allPanelsPainted, spec.panels, { polling: "raf" }).then(handle => handle.dispose());

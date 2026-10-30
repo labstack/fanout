@@ -14,8 +14,8 @@ import (
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	controlstore "github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -31,7 +31,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	engine, err := query.NewDuck(t.Context(), cfg, repo)
+	engine, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	if err = repo.Commit(t.Context(), telemetrystore.Batch{ID: "eval_fixture", Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", TraceID: "trace", SpanID: "span", Name: "request", Kind: "SPAN_KIND_SERVER", StartUnixNanos: from.UnixNano(), EndUnixNanos: from.Add(time.Millisecond).UnixNano(), DurationMS: 1, StatusCode: "STATUS_CODE_OK", IngestedAt: from.UnixNano()}}}); err != nil {
 		t.Fatal(err)
 	}
-	executor := panel.NewExecutor(engine, 30)
+	executor := query.NewExecutor(engine, 30)
 	db, err := controlstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -67,8 +67,8 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal("embedded AI tools lost the shared MCP inventory guidance")
 	}
 	ctx := dashboard.WithOwner(t.Context(), "owner")
-	authored := panel.Dashboard{Name: "Eval fixture", Time: panel.Time{From: &from, To: &to}, Panels: []panel.Panel{
-		{ID: "actual_latency", Title: "Latency", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"p95(duration_ms)"}, Where: []string{"service = 'checkout'", "namespace = 'shop'"}}, Unit: "ms", Thresholds: []panel.Threshold{{Value: 100, Status: "warn"}}},
+	authored := query.Dashboard{Name: "Eval fixture", Time: query.Time{From: &from, To: &to}, Panels: []query.Panel{
+		{ID: "actual_latency", Title: "Latency", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"p95(duration_ms)"}, Where: []string{"service = 'checkout'", "namespace = 'shop'"}}, Unit: "ms", Thresholds: []query.Threshold{{Value: 100, Status: "warn"}}},
 		{ID: "actual_text", Title: "Explanation", Viz: "text", Content: "Seeded checkout request.", Description: "Fixture context."},
 	}}
 	authoredJSON := evalObject(t, authored)
@@ -91,13 +91,13 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 	if created.ID == "" || created.Version != 1 {
 		t.Fatalf("missing tool save: %+v", saved)
 	}
-	added := panel.Panel{ID: "added_panel", Title: "Added fixture panel", Viz: "timeseries", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}
+	added := query.Panel{ID: "added_panel", Title: "Added fixture panel", Viz: "timeseries", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}
 	addedJSON := evalObject(t, added)
 	edited, err := service.Edit(t.Context(), "owner", created.ID, []dashboard.Operation{{Op: "add_panel", Panel: &added, After: "actual_latency"}}, created.Version, dashboard.Author{Kind: "agent", ID: "owner"}, "Add fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
-	statAdded := panel.Panel{ID: "added_stat", Title: "Added stat", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}
+	statAdded := query.Panel{ID: "added_stat", Title: "Added stat", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}
 	statJSON := evalObject(t, statAdded)
 	statEdited, err := service.Edit(t.Context(), "owner", created.ID, []dashboard.Operation{{Op: "add_panel", Panel: &statAdded}}, edited.Version, dashboard.Author{Kind: "agent", ID: "owner"}, "Add stat fixture")
 	if err != nil {
@@ -123,11 +123,11 @@ func TestDashboardEvalGoldensCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	evalStableSave(editedOutput)
-	results, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: created.Spec})
+	results, err := executor.Run(t.Context(), query.RunRequest{Dashboard: created.Spec})
 	if err != nil {
 		t.Fatal(err)
 	}
-	addedResults, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: edited.Spec})
+	addedResults, err := executor.Run(t.Context(), query.RunRequest{Dashboard: edited.Spec})
 	if err != nil {
 		t.Fatal(err)
 	}

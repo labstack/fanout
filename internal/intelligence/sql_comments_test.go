@@ -8,7 +8,7 @@ import (
 )
 
 // Every statement this package issues goes through a validator that rejects
-// SQL comments outright (internal/query/sql.go: "SQL comments (--) are not
+// SQL comments outright (internal/engine/sql.go: "SQL comments (--) are not
 // allowed"). A "--" inside a query string therefore fails at runtime, on a
 // background goroutine, as a logged error nobody is watching -- the anomaly
 // detector silently stopped reporting latency for half an hour that way.
@@ -47,7 +47,7 @@ func TestNoSQLCommentsInQueryStrings(t *testing.T) {
 
 // DuckDB's FLOAT is single precision, so the driver returns float32 and the
 // `row["x"].(float64)` every caller here writes fails -- silently yielding 0.0.
-// internal/query now widens float32 on the way out, which disarms the trap, but
+// internal/engine now widens float32 on the way out, which disarms the trap, but
 // a rate or a count has no business being single precision in the first place
 // and the next reader should not have to know about the widening to trust it.
 func TestNoFloatCastsInQueryStrings(t *testing.T) {

@@ -94,7 +94,7 @@ it.each(["Back", "Escape then Back"])("opens shared URL state (%s) without a que
     const path = new URL(String(input), "http://localhost").pathname;
     if (path === "/api/dashboards") return Response.json({ dashboards: [{ id: "board", name: "Observed" }] });
     if (path === "/api/dashboards/board") return Response.json({ id: "board", version: 7, spec: { ...spec, time: { ...spec.time, refresh: "off" } } });
-    if (path === "/api/panels/query") { queries++; return Response.json({ results: [result] }); }
+    if (path === "/api/queries/run") { queries++; return Response.json({ results: [result] }); }
     if (path === "/api/annotations") return Response.json({ deploys: [], anomalies: [] });
     return Response.json({ options: {} });
   }));

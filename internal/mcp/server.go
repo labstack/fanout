@@ -17,7 +17,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -91,14 +91,14 @@ type LogsInput struct {
 
 // panelExecutor keeps execution injectable while production uses the pinned engine.
 type panelExecutor interface {
-	Run(context.Context, panel.RunRequest) ([]panel.Result, error)
-	Validate(context.Context, *panel.Dashboard) error
-	Schema(context.Context, panel.SchemaRequest) (*panel.Schema, error)
-	Exemplars(context.Context, panel.ExemplarRequest) (panel.ExemplarResponse, error)
-	ResolveVariables(context.Context, panel.ResolveRequest) (map[string][]panel.Option, error)
+	Run(context.Context, query.RunRequest) ([]query.Result, error)
+	Validate(context.Context, *query.Dashboard) error
+	Schema(context.Context, query.SchemaRequest) (*query.Schema, error)
+	Exemplars(context.Context, query.ExemplarRequest) (query.ExemplarResponse, error)
+	ResolveVariables(context.Context, query.ResolveRequest) (map[string][]query.Option, error)
 	ResolveWindow(time.Time, time.Time) (time.Time, time.Time, error)
 	ServiceGuidance(context.Context, time.Time, time.Time, string, string) (string, error)
-	EmptyGuidance(context.Context, panel.RunRequest) (string, string, error)
+	EmptyGuidance(context.Context, query.RunRequest) (string, string, error)
 }
 
 type Server struct {
@@ -111,11 +111,11 @@ type Server struct {
 	limitTools   map[string]bool
 }
 
-func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
+func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, panels *query.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	return newServer(queries, dashboards, panels, snapshots, version)
 }
 
-func newServer(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
+func newServer(queries Observability, dashboards *dashboard.Service, panels *query.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
 			Name:    "fanout",
@@ -204,12 +204,12 @@ func normalizeToolErrors(next mcp.MethodHandler) mcp.MethodHandler {
 		switch failure := payload["error"].(type) {
 		case *toolerror.Error:
 			if !slices.Contains(alreadyPresented, failure.Code) {
-				failure.Message = panel.PresentMessage(failure.Message)
+				failure.Message = query.PresentMessage(failure.Message)
 			}
 		case map[string]any:
 			code, _ := failure["code"].(string)
 			if message, ok := failure["message"].(string); ok && !slices.Contains(alreadyPresented, code) {
-				failure["message"] = panel.PresentMessage(message)
+				failure["message"] = query.PresentMessage(message)
 			}
 		}
 		raw, marshalErr := json.Marshal(payload)
@@ -463,8 +463,8 @@ func (s *Server) presetFragment(ctx context.Context, input QueryInput, kind, ser
 		return nil, PanelFragment{}, err
 	}
 	d := fragmentPreset(kind, service, input.Namespace, severity, search, input.Limit)
-	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
-	out, err := s.executeFragment(ctx, panel.RunRequest{Dashboard: d})
+	d.Time = query.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
+	out, err := s.executeFragment(ctx, query.RunRequest{Dashboard: d})
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
@@ -498,12 +498,12 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 		return nil, PanelFragment{}, safePanelToolError(err)
 	}
 	d := fragmentPreset("trace", input.Service, input.Namespace, "", "", input.Limit)
-	d.Time = panel.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
+	d.Time = query.Time{From: &scope.Start, To: &scope.End, Refresh: "off"}
 	// A representative lookup is performed once. The list must represent that
 	// selected trace, even when no match exists (empty id cannot show others).
 	id := detail.Data.TraceID
 	d.Panels[0].Query.Where = append(d.Panels[0].Query.Where, "trace_id = '"+strings.ReplaceAll(id, "'", "''")+"'")
-	out, err := s.executeFragment(ctx, panel.RunRequest{Dashboard: d})
+	out, err := s.executeFragment(ctx, query.RunRequest{Dashboard: d})
 	if err != nil {
 		return nil, PanelFragment{}, err
 	}
@@ -528,12 +528,12 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 	return summary(fragmentSummary(out)), out, nil
 }
 
-func allResultsEmpty(results []panel.Result) bool {
+func allResultsEmpty(results []query.Result) bool {
 	if len(results) == 0 {
 		return false
 	}
 	for _, result := range results {
-		if result.Status != panel.StatusEmpty {
+		if result.Status != query.StatusEmpty {
 			return false
 		}
 	}

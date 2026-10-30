@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestRawFragmentsPreservePrecedence(t *testing.T) {
@@ -62,7 +62,7 @@ func TestPrintParsePrintFixtureCorpus(t *testing.T) {
 }
 
 func TestPrintFunctionSearchWordsBeforeGroups(t *testing.T) {
-	for _, name := range panel.FilterFunctionNames() {
+	for _, name := range query.FilterFunctionNames() {
 		standalone, ps := Compile("logs "+name, Options{})
 		if len(ps) != 0 || standalone.Canonical != "logs where "+name {
 			t.Fatalf("standalone search spelling: %+v %+v", standalone, ps)
@@ -153,7 +153,7 @@ func TestSortPreservesMeasureAliasDuration(t *testing.T) {
 }
 
 func TestHTTPStatusVariableRangeUsesNumericCast(t *testing.T) {
-	c, ps := Compile(`spans where http_status_code>=$code`, Options{Variables: []panel.Variable{{Name: "code"}}})
+	c, ps := Compile(`spans where http_status_code>=$code`, Options{Variables: []query.Variable{{Name: "code"}}})
 	if len(ps) != 0 {
 		t.Fatal(ps)
 	}
@@ -175,7 +175,7 @@ func TestHTTPStatusVariableRangeUsesNumericCast(t *testing.T) {
 
 func TestComparedCallVariablesBindAndRespectCountIf(t *testing.T) {
 	t.Run("bind", func(t *testing.T) {
-		c, ps := Compile(`logs where lower(service)=$svc`, Options{Variables: []panel.Variable{{Name: "svc"}}})
+		c, ps := Compile(`logs where lower(service)=$svc`, Options{Variables: []query.Variable{{Name: "svc"}}})
 		if len(ps) != 0 {
 			t.Fatal(ps)
 		}
@@ -226,9 +226,9 @@ func TestGroupByAcceptsLiteralKeys(t *testing.T) {
 		if len(ps) != 0 || !reflect.DeepEqual(c.Query, d.Query) {
 			t.Fatalf("round trip: %+v %+v", d, ps)
 		}
-		dashboard := panel.Dashboard{Name: "keys", Panels: []panel.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
-		panel.Normalize(&dashboard)
-		if _, ps, err := panel.Check(t.Context(), engine, &dashboard); len(ps) != 0 || err != nil {
+		dashboard := query.Dashboard{Name: "keys", Panels: []query.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
+		query.Normalize(&dashboard)
+		if _, ps, err := query.Check(t.Context(), engine, &dashboard); len(ps) != 0 || err != nil {
 			t.Fatalf("engine check for %q: %+v %v", text, ps, err)
 		}
 	}
@@ -240,9 +240,9 @@ func TestLiteralKeyQuotesSurviveCheckedMetadata(t *testing.T) {
 		t.Fatal(ps)
 	}
 	engine, _ := newTestEngine(t)
-	d := panel.Dashboard{Name: "Keys", Panels: []panel.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
-	panel.Normalize(&d)
-	checked, ps, err := panel.Check(t.Context(), engine, &d)
+	d := query.Dashboard{Name: "Keys", Panels: []query.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
+	query.Normalize(&d)
+	checked, ps, err := query.Check(t.Context(), engine, &d)
 	if err != nil || len(ps) != 0 {
 		t.Fatal(ps, err)
 	}

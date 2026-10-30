@@ -7,26 +7,26 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func newCompletedReadTest(t *testing.T) (*query.Duck, *telemetrystore.Repository, *Service) {
+func newCompletedReadTest(t *testing.T) (*engine.Duck, *telemetrystore.Repository, *Service) {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := query.NewDuck(t.Context(), cfg, repo)
+	d, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
 	return d, repo, New(d, d, 30)
 }
-func warmCompletedReads(t *testing.T, d *query.Duck, want int) {
+func warmCompletedReads(t *testing.T, d *engine.Duck, want int) {
 	t.Helper()
 	for attempt := 0; attempt <= want; attempt++ {
 		if _, err := d.RefreshReadCaches(t.Context()); err != nil {

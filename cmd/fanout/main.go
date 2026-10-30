@@ -37,12 +37,12 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/mcp"
 	appmetrics "github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/server"
 	"github.com/labstack/fanout/internal/settings"
@@ -134,7 +134,7 @@ func main() {
 	defer repository.Close()
 
 	// DuckDB is the query facade over open Parquet and its indexed trace sidecars.
-	q, err := query.NewDuck(ctx, cfg, repository)
+	q, err := engine.NewDuck(ctx, cfg, repository)
 	if err != nil {
 		slog.Error("duckdb init failed", "err", err)
 		os.Exit(1)
@@ -275,9 +275,9 @@ func main() {
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
-	panels := panel.NewExecutor(q, cfg.RetentionDays)
+	panels := query.NewExecutor(q, cfg.RetentionDays)
 	panels.SetRollupReader(queries)
-	api.RegisterPanelRoutes(e, panels)
+	api.RegisterQueryRoutes(e, panels)
 	api.RegisterFanQLRoutes(e, q, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
 	api.RegisterTraceRoutes(e, queries, cfg.RetentionDays)

@@ -16,9 +16,9 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -61,12 +61,12 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var spec panel.Dashboard
+	var spec query.Dashboard
 	if err := decodeFixture(data, &spec); err != nil {
 		t.Fatal(err)
 	}
-	panel.Normalize(&spec)
-	if problems := panel.Validate(&spec); len(problems) != 0 {
+	query.Normalize(&spec)
+	if problems := query.Validate(&spec); len(problems) != 0 {
 		t.Fatalf("invalid fixture: %v", problems)
 	}
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 4, RollupInterval: time.Hour}
@@ -75,12 +75,12 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = repo.Close() })
-	engine, err := query.NewDuck(t.Context(), cfg, repo)
+	engine, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
-	if _, problems, err := panel.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
+	if _, problems, err := query.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
 	types := map[string]bool{}
@@ -98,7 +98,7 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 	}
 }
 
-func decodeFixture(data []byte, spec *panel.Dashboard) error {
+func decodeFixture(data []byte, spec *query.Dashboard) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(spec)
@@ -115,7 +115,7 @@ func TestAllPanelsFixtureRejectsUnknownFields(t *testing.T) {
 	} {
 		t.Run(mutation.name, func(t *testing.T) {
 			mutated := bytes.Replace(data, []byte(mutation.old), []byte(mutation.replacement), 1)
-			var spec panel.Dashboard
+			var spec query.Dashboard
 			if err := decodeFixture(mutated, &spec); err == nil {
 				t.Fatal("fixture accepted an unknown field")
 			}
@@ -389,12 +389,12 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var spec panel.Dashboard
+	var spec query.Dashboard
 	if err := decodeFixture(data, &spec); err != nil {
 		t.Fatal(err)
 	}
-	panel.Normalize(&spec)
-	if problems := panel.Validate(&spec); len(problems) != 0 {
+	query.Normalize(&spec)
+	if problems := query.Validate(&spec); len(problems) != 0 {
 		t.Fatalf("invalid fixture: %v", problems)
 	}
 	if len(spec.Panels) != 12 || spec.Time.Range != "24h" || spec.Time.Refresh != "off" {
@@ -442,16 +442,16 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 	if _, err := collectormetrics.NewMetricsServiceClient(conn).Export(t.Context(), &metricRequest); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := query.NewDuck(t.Context(), cfg, repo)
+	engine, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
-	if _, problems, err := panel.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
+	if _, problems, err := query.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
 	from := base.Add(-24 * time.Hour)
-	results, err := panel.NewExecutor(engine, 30).Run(t.Context(), panel.RunRequest{Dashboard: spec, Time: &panel.Time{From: &from, To: &base}})
+	results, err := query.NewExecutor(engine, 30).Run(t.Context(), query.RunRequest{Dashboard: spec, Time: &query.Time{From: &from, To: &base}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, result := range results {
-		if seen[result.ID] || result.Status != panel.StatusOK || result.Frame == nil || result.Frame.Rows == 0 {
+		if seen[result.ID] || result.Status != query.StatusOK || result.Frame == nil || result.Frame.Rows == 0 {
 			t.Fatalf("unpopulated/duplicate panel: %+v", result)
 		}
 		seen[result.ID] = true
@@ -483,16 +483,16 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		// Execute the system SQL panels and the existing external-peer reader.
 		system.Panels = system.Panels[8:]
 		system.Panels = append(system.Panels[:2], system.Panels[3:]...)
-		executor := panel.NewExecutor(engine, 30)
+		executor := query.NewExecutor(engine, 30)
 		executor.SetRollupReader(observability.New(engine, engine, 30))
 		from := base.Add(-time.Hour)
-		results, err := executor.Run(t.Context(), panel.RunRequest{Dashboard: system, Vars: map[string]panel.Value{"service": {All: true}}, Time: &panel.Time{From: &from, To: &base}})
+		results, err := executor.Run(t.Context(), query.RunRequest{Dashboard: system, Vars: map[string]query.Value{"service": {All: true}}, Time: &query.Time{From: &from, To: &base}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		rows := map[string][]map[string]any{}
 		for _, result := range results {
-			if result.Status != panel.StatusOK || result.Frame == nil {
+			if result.Status != query.StatusOK || result.Frame == nil {
 				t.Fatalf("%s: %+v", result.ID, result)
 			}
 			for i := range result.Frame.Rows {

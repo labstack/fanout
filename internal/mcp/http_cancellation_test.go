@@ -11,7 +11,7 @@ import (
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/queryrows"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -19,8 +19,8 @@ import (
 )
 
 type disconnectQueryEngine struct {
-	panel.Engine
-	duck       *query.Duck
+	query.Engine
+	duck       *engine.Duck
 	started    chan struct{}
 	stopped    chan disconnectResult
 	release    chan struct{}
@@ -67,7 +67,7 @@ func TestHTTPDisconnectCancelsPanelDuckDBQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repo.Close()
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestHTTPDisconnectCancelsPanelDuckDBQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := NewWithIntelligence(nil, nil, panel.NewExecutor(engine, 30), nil, "test")
+	server := NewWithIntelligence(nil, nil, query.NewExecutor(engine, 30), nil, "test")
 	httpServer := httptest.NewServer(server.HTTPHandler())
 	defer httpServer.Close()
 	defer close(engine.release)

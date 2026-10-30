@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type registryMeaning struct {
@@ -55,9 +55,9 @@ func TestRegistryGrowth(t *testing.T) {
 	)
 	baseline := registrySnapshot(fixtures, vocab)
 	columns, measures, functions, bucketNames := vocab.columns, vocab.measures, vocab.functions, vocab.buckets
-	vocab.measures = func() []panel.MeasureSpec {
+	vocab.measures = func() []query.MeasureSpec {
 		out := measures()
-		out = append(out, panel.MeasureSpec{Name: "p42", Args: 1, Numeric: true, Quantile: .42, Signals: []string{"spans", "logs"}})
+		out = append(out, query.MeasureSpec{Name: "p42", Args: 1, Numeric: true, Quantile: .42, Signals: []string{"spans", "logs"}})
 		return out
 	}
 	vocab.functions = func() []string { return append(functions(), "ltrim") }
@@ -83,10 +83,10 @@ func TestRegistryGrowth(t *testing.T) {
 			t.Fatalf("synthetic registry hook didn't reach %q: %+v", text, ps)
 		}
 	}
-	vocab.columns = func(source string) ([]panel.Field, bool) {
+	vocab.columns = func(source string) ([]query.Field, bool) {
 		out, ok := columns(source)
 		if source == "spans" {
-			out = append(out, panel.Field{Name: "value", Type: panel.TypeNumber, Unit: "none"})
+			out = append(out, query.Field{Name: "value", Type: query.TypeNumber, Unit: "none"})
 		}
 		return out, ok
 	}

@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // buildEnvs feeds CEL rules from a SQL aggregate over service_rollup. DuckDB
@@ -39,7 +39,7 @@ INSERT INTO service_rollup VALUES
 		t.Fatalf("seed service_rollup: %v", err)
 	}
 
-	eng := NewEngine(nil, &query.Duck{DB: db}, nil, time.Minute, 7)
+	eng := NewEngine(nil, &engine.Duck{DB: db}, nil, time.Minute, 7)
 	envs := eng.buildEnvs(context.Background())
 	env, ok := envs["svc-a"]
 	if !ok {

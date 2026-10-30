@@ -6,22 +6,22 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 // lower is pure: it emits one SQL string per entry and keeps all stored order.
-func lower(r *resolved) (panel.Query, panel.Problems) {
+func lower(r *resolved) (query.Spec, query.Problems) {
 	q := r.Query
-	out := panel.Query{From: q.Source}
-	var problems panel.Problems
+	out := query.Spec{From: q.Source}
+	var problems query.Problems
 	for i, e := range q.Where {
 		if i == 16 {
-			problems = append(problems, panel.Problem{Path: fmt.Sprintf("where[%d]", i), Message: "at most 16 filters", Span: textSpan(e.Span())})
+			problems = append(problems, query.Problem{Path: fmt.Sprintf("where[%d]", i), Message: "at most 16 filters", Span: textSpan(e.Span())})
 			break
 		}
 		sql := lowerEntry(e)
 		if len(sql) > 500 {
-			problems = append(problems, panel.Problem{Path: fmt.Sprintf("where[%d]", i), Message: fmt.Sprintf("this filter lowers to %d bytes; filters are at most 500", len(sql)), Span: textSpan(e.Span())})
+			problems = append(problems, query.Problem{Path: fmt.Sprintf("where[%d]", i), Message: fmt.Sprintf("this filter lowers to %d bytes; filters are at most 500", len(sql)), Span: textSpan(e.Span())})
 		}
 		out.Where = append(out.Where, sql)
 	}
@@ -36,7 +36,7 @@ func lower(r *resolved) (panel.Query, panel.Problems) {
 				buckets = "explicit"
 			}
 			out.Measures = []string{"count()"}
-			out.Histogram = &panel.Histogram{Field: lowerField(*s.Histogram), Buckets: buckets}
+			out.Histogram = &query.Histogram{Field: lowerField(*s.Histogram), Buckets: buckets}
 		} else {
 			for _, m := range s.Measures {
 				out.Measures = append(out.Measures, lowerMeasure(m))
@@ -100,13 +100,13 @@ func lowerValue(f fieldName, v literalValue) string {
 		n, _ := durationMS(v.Text)
 		return decimal(n)
 	}
-	if f.Ref != nil && f.Ref.Type == panel.TypeTime && f.Ref.Key == "" {
+	if f.Ref != nil && f.Ref.Type == query.TypeTime && f.Ref.Key == "" {
 		return sqlString(text) + "::TIMESTAMPTZ_NS"
 	}
 	if v.Kind == stringValue {
 		return sqlString(text)
 	}
-	if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == panel.TypeString && f.Ref.CompareAs == "" {
+	if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == query.TypeString && f.Ref.CompareAs == "" {
 		return sqlString(text)
 	}
 	if v.Kind == numberValue {
@@ -329,7 +329,7 @@ func lowerCall(c *filterCall) string {
 }
 
 func lowerMeasure(m measureNode) string {
-	text := renderMeasure(m.Parsed.Expr, 0, func(f *panel.FieldRef) string { return f.Text }, func(sql string) string { return sql })
+	text := renderMeasure(m.Parsed.Expr, 0, func(f *query.FieldRef) string { return f.Text }, func(sql string) string { return sql })
 	if m.Alias != "" {
 		text += " as " + m.Alias
 	}

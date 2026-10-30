@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 var lowerFixtures = []struct{ text, sql string }{
@@ -80,7 +80,7 @@ func TestLowerPreservesExactIntegerLiterals(t *testing.T) {
 			if len(ps) != 0 {
 				t.Fatal(ps)
 			}
-			want := panel.Query{From: "logs", Where: []string{"attributes['id'] = " + value}}
+			want := query.Spec{From: "logs", Where: []string{"attributes['id'] = " + value}}
 			if !reflect.DeepEqual(c.Query, want) {
 				t.Fatalf("lowered %#v; want %#v", c.Query, want)
 			}
@@ -102,7 +102,7 @@ func TestLowerCountIfRawSQLComments(t *testing.T) {
 		if want := "count_if(" + body + ") as n"; len(c.Query.Measures) != 1 || c.Query.Measures[0] != want {
 			t.Fatalf("%q: got %#v; want %q", text, c.Query.Measures, want)
 		}
-		if _, err := panel.ParseMeasure(c.Query.From, c.Query.Measures[0]); err != nil {
+		if _, err := query.ParseMeasure(c.Query.From, c.Query.Measures[0]); err != nil {
 			t.Fatalf("%q: %v", text, err)
 		}
 	}
@@ -115,7 +115,7 @@ func TestLowerPositiveFixtures(t *testing.T) {
 			if len(ps) > 0 {
 				t.Fatal(ps)
 			}
-			want := panel.Query{From: strings.Fields(tt.text)[0], Where: []string{tt.sql}}
+			want := query.Spec{From: strings.Fields(tt.text)[0], Where: []string{tt.sql}}
 			if !reflect.DeepEqual(c.Query, want) {
 				t.Fatalf("got %#v; want %#v", c.Query, want)
 			}
@@ -123,13 +123,13 @@ func TestLowerPositiveFixtures(t *testing.T) {
 	}
 	for _, tt := range []struct {
 		text string
-		want panel.Query
+		want query.Spec
 	}{
-		{`spans | histogram(duration) by service`, panel.Query{From: "spans", Measures: []string{"count()"}, Histogram: &panel.Histogram{Field: "duration_ms", Buckets: "log2"}, By: []string{"service"}}},
-		{`metrics where name:x | histogram(value) every 1m`, panel.Query{From: "metrics", Where: []string{"name = 'x'"}, Measures: []string{"count()"}, Histogram: &panel.Histogram{Field: "value", Buckets: "explicit"}, Bucket: "1m"}},
-		{`spans sort errors limit 50`, panel.Query{From: "spans", Sort: "errors", Limit: 50}},
-		{`spans sort duration`, panel.Query{From: "spans", Sort: "duration_ms"}},
-		{`logs sort +time`, panel.Query{From: "logs", Sort: "+time"}},
+		{`spans | histogram(duration) by service`, query.Spec{From: "spans", Measures: []string{"count()"}, Histogram: &query.Histogram{Field: "duration_ms", Buckets: "log2"}, By: []string{"service"}}},
+		{`metrics where name:x | histogram(value) every 1m`, query.Spec{From: "metrics", Where: []string{"name = 'x'"}, Measures: []string{"count()"}, Histogram: &query.Histogram{Field: "value", Buckets: "explicit"}, Bucket: "1m"}},
+		{`spans sort errors limit 50`, query.Spec{From: "spans", Sort: "errors", Limit: 50}},
+		{`spans sort duration`, query.Spec{From: "spans", Sort: "duration_ms"}},
+		{`logs sort +time`, query.Spec{From: "logs", Sort: "+time"}},
 	} {
 		c, ps := Compile(tt.text, Options{})
 		if len(ps) > 0 || !reflect.DeepEqual(c.Query, tt.want) {
@@ -226,7 +226,7 @@ func TestLowerStructuredBounds(t *testing.T) {
 
 func TestLowerSearchBarMode(t *testing.T) {
 	c, ps := Compile("service:api timeout", Options{Source: "logs"})
-	want := panel.Query{From: "logs", Where: []string{`service = 'api'`, `contains(lower(body), lower('timeout'))`}}
+	want := query.Spec{From: "logs", Where: []string{`service = 'api'`, `contains(lower(body), lower('timeout'))`}}
 	if len(ps) > 0 || !reflect.DeepEqual(c.Query, want) {
 		t.Fatal(c, ps)
 	}

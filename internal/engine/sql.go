@@ -1,0 +1,307 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/labstack/fanout/internal/metrics"
+)
+
+// SQLRequest represents a direct SQL query request
+type SQLRequest struct {
+	Query     string `json:"query"`
+	MaxRows   int    `json:"max_rows,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+	Explain   bool   `json:"explain,omitempty"`
+}
+
+// SQLResponse represents the response from a SQL query
+type SQLResponse struct {
+	Results         []RowMap `json:"results"`
+	ExecutionTimeMs int64    `json:"execution_time_ms"`
+	RowsReturned    int      `json:"rows_returned"`
+	Error           string   `json:"error,omitempty"`
+	QueryPlan       string   `json:"query_plan,omitempty"`
+}
+
+// RowMap represents a single row as a map of column name to value
+type RowMap map[string]interface{}
+
+const (
+	defaultQueryTimeoutMs = 15_000
+	maxQueryTimeoutMs     = 25_000
+)
+
+// ExecuteSQL validates and executes a SQL query
+func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse) {
+	start := time.Now()
+
+	// Record query latency + status for /metrics (fanout_query_*). Covers the
+	// raw SQL path (MCP query tool); service-layer endpoints are timed by the
+	// HTTP request-duration metric.
+	defer func() {
+		status := "ok"
+		if resp.Error != "" {
+			status = "error"
+		}
+		metrics.RecordQuery("sql", status, time.Since(start).Seconds())
+	}()
+
+	// Set default max rows. Guard against non-positive values too: a negative
+	// MaxRows would reach make([]RowMap, 0, req.MaxRows) below and panic.
+	if req.MaxRows <= 0 {
+		req.MaxRows = 1000
+	}
+
+	// Set a default timeout and clamp arbitrary SQL so one request cannot occupy
+	// a DuckDB worker indefinitely.
+	// Keep untrusted ad-hoc reads shorter than the Parquet publisher grace period.
+	// Otherwise one query can make maintenance queue, close the reader gate, and
+	// turn its remaining runtime into an API-wide read outage.
+	timeoutMs := req.TimeoutMs
+	if timeoutMs <= 0 {
+		timeoutMs = defaultQueryTimeoutMs
+	}
+	if timeoutMs > maxQueryTimeoutMs {
+		timeoutMs = maxQueryTimeoutMs
+	}
+
+	// Validate SQL (skip validation for EXPLAIN-prefixed queries that we construct)
+	if err := validateSQL(req.Query); err != nil {
+		return SQLResponse{
+			Error: fmt.Sprintf("SQL validation failed: %v", err),
+		}
+	}
+
+	// Add timeout to context
+	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
+	defer cancel()
+
+	// Execute the query against immutable Parquet files and the local cache.
+	rows, serialized, err := d.querySQL(queryCtx, req.Query, req.MaxRows, req.Explain)
+	if err != nil {
+		return SQLResponse{
+			Error:           fmt.Sprintf("Query execution failed: %v", err),
+			ExecutionTimeMs: time.Since(start).Milliseconds(),
+		}
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return SQLResponse{
+			Error:           fmt.Sprintf("Failed to get columns: %v", err),
+			ExecutionTimeMs: time.Since(start).Milliseconds(),
+		}
+	}
+
+	// Read results
+	results := make([]RowMap, 0, req.MaxRows)
+	var planLines []string
+	for rows.Next() {
+		if !req.Explain && len(results) >= req.MaxRows {
+			break
+		}
+
+		// Create slice of interface{} to hold column values
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return SQLResponse{
+				Error:           fmt.Sprintf("Failed to scan row: %v", err),
+				ExecutionTimeMs: time.Since(start).Milliseconds(),
+			}
+		}
+
+		if req.Explain {
+			// EXPLAIN returns text rows; collect them into a plan string
+			for _, val := range values {
+				switch v := val.(type) {
+				case []byte:
+					planLines = append(planLines, string(v))
+				case string:
+					planLines = append(planLines, v)
+				default:
+					planLines = append(planLines, fmt.Sprintf("%v", v))
+				}
+			}
+		} else {
+			// Convert to map
+			row := make(RowMap)
+			for i, col := range columns {
+				val := values[i]
+				if serialized[i] && val != nil {
+					text, ok := val.(string)
+					if !ok {
+						return SQLResponse{Error: "Invalid JSON result representation"}
+					}
+					decoder := json.NewDecoder(strings.NewReader(normalizeJSONNumbers(text)))
+					decoder.UseNumber()
+					if err := decoder.Decode(&val); err != nil {
+						return SQLResponse{Error: fmt.Sprintf("Decode JSON result: %v", err)}
+					}
+				}
+				switch v := val.(type) {
+				case []byte:
+					// Convert []uint8 to string for better JSON representation
+					row[col] = string(v)
+				case float32:
+					// DuckDB's FLOAT is single precision, so the driver returns
+					// float32. Callers assert float64 -- every other numeric
+					// column they meet is one -- and a failed assertion yields
+					// 0.0 from a value that was never zero, silently. Widening
+					// here costs nothing and disarms the whole class.
+					row[col] = jsonFloat(float64(v))
+				case float64:
+					row[col] = jsonFloat(v)
+				default:
+					row[col] = val
+				}
+			}
+			results = append(results, row)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return SQLResponse{
+			Error:           fmt.Sprintf("Error reading rows: %v", err),
+			ExecutionTimeMs: time.Since(start).Milliseconds(),
+		}
+	}
+
+	if req.Explain {
+		return SQLResponse{
+			QueryPlan:       strings.Join(planLines, "\n"),
+			ExecutionTimeMs: time.Since(start).Milliseconds(),
+		}
+	}
+
+	return SQLResponse{
+		Results:         results,
+		ExecutionTimeMs: time.Since(start).Milliseconds(),
+		RowsReturned:    len(results),
+	}
+}
+
+// validateSQL checks if the SQL query is safe to execute
+func validateSQL(query string) error {
+	upperQuery := strings.ToUpper(strings.TrimSpace(query))
+
+	// Must start with SELECT or WITH (for CTEs)
+	if !strings.HasPrefix(upperQuery, "SELECT") && !strings.HasPrefix(upperQuery, "WITH") {
+		return fmt.Errorf("only SELECT and WITH queries are allowed")
+	}
+
+	// Keyword/function checks run against a copy with string-literal contents
+	// blanked out, so log searches like body ILIKE '%DELETE%' or scalar calls
+	// like replace(body, ...) are not rejected for words that only appear inside
+	// quoted strings.
+	scrubbed := strings.ToUpper(stripStringLiterals(query))
+
+	// Disallowed keywords (write operations, schema changes, etc.)
+	// Note: REPLACE is intentionally omitted — it is a common scalar function
+	// (replace(body, …)) and its only write forms, INSERT OR REPLACE / CREATE OR
+	// REPLACE, are already blocked by INSERT / CREATE.
+	disallowedKeywords := []string{
+		"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
+		"TRUNCATE", "MERGE", "EXEC", "EXECUTE",
+		"GRANT", "REVOKE", "ATTACH", "DETACH",
+	}
+
+	for _, keyword := range disallowedKeywords {
+		// Use word boundaries to avoid false positives (e.g., "DROP" in "DROPDUPLICATE")
+		pattern := regexp.MustCompile(`\b` + keyword + `\b`)
+		if pattern.MatchString(scrubbed) {
+			return fmt.Errorf("keyword '%s' is not allowed", keyword)
+		}
+	}
+
+	// Check for dangerous functions
+	dangerousFunctions := []string{
+		"COPY", "LOAD", "IMPORT", "EXPORT",
+	}
+
+	for _, fn := range dangerousFunctions {
+		pattern := regexp.MustCompile(`\b` + fn + `\s*\(`)
+		if pattern.MatchString(scrubbed) {
+			return fmt.Errorf("function '%s' is not allowed", fn)
+		}
+	}
+
+	// Block file-reading table functions (prevent arbitrary file access)
+	fileReaders := []string{
+		"READ_CSV", "READ_JSON", "READ_TEXT", "READ_BLOB", "READ_PARQUET",
+		"READ_CSV_AUTO", "READ_JSON_AUTO",
+	}
+	for _, fn := range fileReaders {
+		pattern := regexp.MustCompile(`\b` + fn + `\s*\(`)
+		if pattern.MatchString(scrubbed) {
+			return fmt.Errorf("function '%s' is not allowed", fn)
+		}
+	}
+
+	// Block SQL comment syntax outside string literals
+	if tokenOutsideStrings(query, "--") {
+		return fmt.Errorf("SQL comments (--) are not allowed")
+	}
+	if tokenOutsideStrings(query, "/*") {
+		return fmt.Errorf("SQL block comments (/* */) are not allowed")
+	}
+
+	return nil
+}
+
+// stripStringLiterals replaces the contents of single-quoted string literals
+// (and the quotes) with spaces, preserving everything outside them and the
+// overall length/structure. This lets keyword/function scanners ignore SQL
+// keywords that appear only inside string literals (e.g. body = 'DROP TABLE').
+// Escaped quotes (”) inside a string are handled.
+func stripStringLiterals(query string) string {
+	out := []byte(query)
+	inString := false
+	for i := 0; i < len(query); i++ {
+		if query[i] == '\'' {
+			if inString && i+1 < len(query) && query[i+1] == '\'' {
+				out[i] = ' '
+				out[i+1] = ' '
+				i++
+				continue
+			}
+			out[i] = ' '
+			inString = !inString
+			continue
+		}
+		if inString {
+			out[i] = ' '
+		}
+	}
+	return string(out)
+}
+
+// tokenOutsideStrings returns true if the given token appears outside single-quoted strings.
+func tokenOutsideStrings(query, token string) bool {
+	inString := false
+	for i := 0; i < len(query); i++ {
+		if query[i] == '\'' {
+			// When already inside a string, handle escaped single quotes ('')
+			// by consuming the second quote without leaving the string.
+			if inString && i+1 < len(query) && query[i+1] == '\'' {
+				i++ // skip escaped quote
+				continue
+			}
+			inString = !inString
+		} else if !inString && i+len(token) <= len(query) && query[i:i+len(token)] == token {
+			return true
+		}
+	}
+	return false
+}

@@ -11,11 +11,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 )
 
 type budgetParser struct {
-	panel.Parser
+	query.Parser
 	parseCalls, renderCalls int
 }
 
@@ -46,7 +46,7 @@ func TestLatencyBudgets(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	parser := &budgetParser{Parser: engine}
 	var schemaFetches atomic.Int32
-	warm := NewCompleter(completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) {
+	warm := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		schemaFetches.Add(1)
 		return completionFixtureSchema(), nil
 	}))
@@ -147,13 +147,13 @@ func latencyFormatFixtures(t testing.TB) []storedQueryFixture {
 		if q == nil || len(q.Where) > 16 {
 			continue
 		}
-		if problems, _ := panel.QueryShape(q, fixture.Panel.Viz, nil); len(problems) != 0 {
+		if problems, _ := query.Shape(q, fixture.Panel.Viz, nil); len(problems) != 0 {
 			t.Fatalf("stored fixture %q is not shape-valid: %+v", fixture.Name, problems)
 		}
 		queries = append(queries, fixture)
 	}
 	q := generatedStructuredQuery([]byte{0}) // 16 complete stored entries.
-	return append(queries, storedQueryFixture{Name: "16 entries", Panel: panel.Panel{Query: &q}})
+	return append(queries, storedQueryFixture{Name: "16 entries", Panel: query.Panel{Query: &q}})
 }
 
 func benchmarkLatency(b *testing.B, percentile float64, metric string, run func(int)) {

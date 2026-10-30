@@ -9,8 +9,8 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/observability"
-	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -20,10 +20,10 @@ import (
 
 func TestPreviewReportsTotalAndExecutedPanelTimings(t *testing.T) {
 	s := newPanelServer(t)
-	s.panels = receiptExecutor{panelExecutor: s.panels, run: func(_ context.Context, req panel.RunRequest) ([]panel.Result, error) {
-		return []panel.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
+	s.panels = receiptExecutor{panelExecutor: s.panels, run: func(_ context.Context, req query.RunRequest) ([]query.Result, error) {
+		return []query.Result{{ID: req.Dashboard.Panels[0].ID, Status: "ok", ElapsedMS: 37}}, nil
 	}}
-	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "hello"}}})
 	if err != nil || out.ElapsedMS < 0 || len(out.Panels) != 1 || (out.Panels[0].ElapsedMS == nil || *out.Panels[0].ElapsedMS != 37) || out.Panels[0].Status != "ok" {
 		t.Fatalf("out=%+v err=%v", out, err)
 	}
@@ -44,7 +44,7 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	duck, err := query.NewDuck(t.Context(), cfg, repo)
+	duck, err := engine.NewDuck(t.Context(), cfg, repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 			t.Fatal(err)
 		}
 	}
-	executor := panel.NewExecutor(duck, 30)
+	executor := query.NewExecutor(duck, 30)
 	executor.SetRollupReader(observability.New(duck, duck, 30))
 	if seed {
 		server := NewWithIntelligence(observability.New(duck, duck, 30), dashboard.New(sqlite.DB, executor), executor, nil, "test")
@@ -95,9 +95,9 @@ func ownerRequest() *mcp.CallToolRequest {
 
 func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	s := newPanelServer(t)
-	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{
-		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
-		{ID: "typo", Title: "Typo", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"p95(duraton_ms)"}}},
+	_, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{
+		{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
+		{ID: "typo", Title: "Typo", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"p95(duraton_ms)"}}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
 		t.Fatalf("invalid/not_run timing = %+v", out)
 	}
-	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []panel.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}}}})
+	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
 	if err != nil || out.Panels[0].Status != "empty" || out.Panels[0].Diagnosis == "" {
 		t.Fatalf("empty store preview = %+v %v", out.Panels, err)
 	}
@@ -119,9 +119,9 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 
 func TestCreateAndEditDashboardTools(t *testing.T) {
 	s := panelServerFixture(t, true)
-	spec := panel.Dashboard{Name: "Checkout", Panels: []panel.Panel{
+	spec := query.Dashboard{Name: "Checkout", Panels: []query.Panel{
 		{ID: "notes", Title: "Notes", Viz: "text", Content: "Money path."},
-		{ID: "requests", Title: "Requests", Viz: "stat", Query: &panel.Query{From: "spans", Measures: []string{"count()"}}},
+		{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}},
 	}}
 	result, out, err := s.dashboardCreate(t.Context(), ownerRequest(), DashboardCreateInput{Dashboard: spec})
 	if err != nil {

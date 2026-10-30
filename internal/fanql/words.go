@@ -2,7 +2,7 @@ package fanql
 
 import (
 	"fmt"
-	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/query"
 	"strings"
 )
 
@@ -233,7 +233,7 @@ func message(code diagnosticCode) string {
 	case diagByFirst:
 		return "by needs measures first; write | count() by service"
 	case diagBucket:
-		return "unknown bucket %q; use auto or one of " + strings.Join(panel.BucketNames()[1:], ", ")
+		return "unknown bucket %q; use auto or one of " + strings.Join(query.BucketNames()[1:], ", ")
 	case diagByMax:
 		return "at most 3 grouping fields"
 	case diagHistogramBy:
