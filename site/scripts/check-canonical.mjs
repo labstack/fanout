@@ -2,7 +2,7 @@
 // actually publishes.
 //
 // Starlight derives the canonical from the file it wrote to disk, and under
-// `build.format: "file"` that carries a `.html` nothing else here uses: the
+// `build.format: "preserve"` that carries a `.html` nothing else here uses: the
 // sitemap lists `/docs/get-started/install`, links point at `/docs/get-started/install`, `llms.txt`
 // points at `/docs/get-started/install.md`, and Cloudflare Pages 301s the `.html` form to
 // the extensionless one. `src/starlight-route-data.ts` corrects the tags, and
