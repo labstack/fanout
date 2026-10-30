@@ -104,6 +104,38 @@ describe("PanelEditor", () => {
     expect(bodies("/api/dashboards/d1", "PUT")[0]).toMatchObject({ base_version: 7, message: "Edited Requests and saved layout", spec: { panels: [{ id: "panel", title: "Requests", query: { where: ["service = $service"] } }] } });
   });
 
+  it("edits a SQL panel in the SQL tab and keeps its viz", async () => {
+    const sqlPanel = { id: "panel", title: "SQL requests", viz: "stat" as const, unit: "count" as const, sql: "SELECT count(*) AS total FROM spans WHERE $__window(start_time)" };
+    const { ui, wait } = await render({ panel: sqlPanel });
+    await wait(() => expect(ui.getByRole("textbox", { name: "Panel SQL" })).toBeTruthy());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ viz: "stat", unit: "count", sql: sqlPanel.sql });
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Panel SQL" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } }));
+    await act(async () => ui.getByRole("button", { name: "Run" }).click());
+    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
+    await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
+    expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0]).toEqual({ op: "update_panel", id: "panel", set: { sql: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } });
+  });
+
+  it("asks before discarding a draft", async () => {
+    const { ui, onClose, wait } = await render({ add: true });
+    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, insert: "spans" } }));
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => ui.getByRole("button", { name: "Keep editing" }).click());
+    expect(ui.queryByText("Discard changes?")).toBeNull();
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    await act(async () => ui.getByRole("button", { name: "Discard changes" }).click());
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
   it("explains a version conflict and stays open", async () => {
     patch = async () => json({ code: "dashboard_version_conflict", message: "conflict" }, 409);
     const { ui, onClose, wait } = await render();

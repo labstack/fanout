@@ -48,6 +48,10 @@ export type DashboardContext = {
   panel?: Panel;
   /** Turns a run's draft into the panel to preview and save, carrying the edited panel's settings. */
   compose?(draft: Panel): Panel;
+  /** Reports whether the query or SQL differs from what the editor opened with. */
+  onDirtyChange?(dirty: boolean): void;
+  /** Closes the editor without saving; the host asks before discarding a draft. */
+  cancel?(): void;
   /** Seeds the Builder when the panel's query cannot be edited as text. */
   initial?: { query: Query; formatted: Formatted };
 };
@@ -68,6 +72,11 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const [saving, setSaving] = useState<Panel>();
   const [text, setText] = useState(search.q);
   const [sql, setSql] = useState(search.sql ?? "");
+  const opened = useRef({ text: search.q, sql: search.sql ?? "" });
+  const dirty = text !== opened.current.text || sql !== opened.current.sql;
+  const onDirtyChange = context?.onDirtyChange;
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  const runButton = useRef<HTMLButtonElement>(null);
   const [parsed, setParsed] = useState<Parsed & { text: string }>();
   const [built, setBuilt] = useState<Query | undefined>(context?.initial?.query);
   const [formatted, setFormatted] = useState<Formatted | undefined>(context?.initial?.formatted);
@@ -116,7 +125,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         canonical = next.canonical;
         onSearch({ ...searchNow.current, q: source, viz: chosen, ...(source !== searchNow.current.q ? { drill: undefined } : {}) }, true);
       } else {
-        panel = compose({ id: explorePanelID, title: "SQL", viz: "table", sql: source });
+        // SQL has no viz analysis; an edited panel keeps its own viz.
+        panel = compose({ id: explorePanelID, title: "SQL", viz: base?.viz ?? "table", sql: source });
         setNotices([]);
         onSearch({ ...searchNow.current, sql: source }, true);
       }
@@ -127,6 +137,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       const result = results.find(r => r.id === explorePanelID);
       if (!result) throw new Error("The query returned no result.");
       setRun({ kind, source, window: windowKey, panel, result: classifyPanelResult(result, [explorePanelID]), canonical });
+      // A SQL error that a retry cannot fix is a problem with the statement, shown at the editor.
+      if (kind === "sql" && result.status === "error" && !result.retryable && current.current.sql === source) setProblems([{ path: "sql", message: result.error ?? "Query failed" }]);
     } catch (failure) {
       if (abort.signal.aborted) return;
       if (failure instanceof ApiError && failure.problems.length > 0) {
@@ -242,12 +254,13 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="sql" pt="sm">
-        <SqlEditor value={sql} onChange={value => { setSql(value); setProblems([]); }} onRun={() => void execute("sql", sql)} onEscape={() => undefined} schema={schema.data} problems={search.tab === "sql" ? problems : []} label="Explore SQL" />
+        <SqlEditor value={sql} onChange={value => { setSql(value); setProblems([]); }} onRun={() => void execute("sql", sql)} onEscape={() => runButton.current?.focus()} schema={schema.data} problems={search.tab === "sql" ? problems : []} label={context ? "Panel SQL" : "Explore SQL"} />
+        {search.tab === "sql" && problems.length > 0 && <Alert color="bad" mt="xs" title="The SQL has problems"><ul>{problems.map((problem, index) => <li className="sql-problem" key={index}>{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul></Alert>}
       </Tabs.Panel>
     </Tabs>
     <Group justify="space-between">
       <Group gap="xs">
-        <Button loading={running} disabled={search.tab === "builder" ? !built || formatProblems.length > 0 : !source.trim()}
+        <Button ref={runButton} loading={running} disabled={search.tab === "builder" ? !built || formatProblems.length > 0 : !source.trim()}
           onClick={() => void (search.tab === "builder" ? runBuilder(search.viz) : execute(kind, source, search.viz, readOnlyText ? built : undefined))}>Run</Button>
         {kind === "query" && compatible.length > 0 && <SegmentedControl size="xs" aria-label="Visualization" value={run?.panel.viz ?? search.viz ?? ""}
           onChange={value => void (search.tab === "builder" ? runBuilder(value as Viz) : execute("query", text, value as Viz, readOnlyText ? built : undefined))}
@@ -258,6 +271,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
           <Button size="compact-sm" variant="subtle" onClick={() => { setText(edit.text); void execute("query", edit.text, edit.viz); }}>{vizLabel[edit.viz]}…</Button>
         </Tooltip>)}
       </Group>
+      <Group gap="xs">
+      {context?.cancel && <Button variant="default" disabled={savingPanel} onClick={context.cancel}>Cancel</Button>}
       <Tooltip label="Run a query that returns rows first" disabled={canSave}><span>
         {context
           ? <Button disabled={!canSave} loading={savingPanel} onClick={() => {
@@ -267,6 +282,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
           }}>{context.save.label}</Button>
           : <Button variant="default" disabled={!canSave} onClick={() => run && setSaving(run.panel)}>Save to dashboard</Button>}
       </span></Tooltip>
+      </Group>
     </Group>
     {error && <Alert color="bad" title="The query could not run">{error}</Alert>}
     {savingError && <Alert color="bad" title="Not saved">{savingError}</Alert>}

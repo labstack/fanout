@@ -1,6 +1,6 @@
-import { Alert, Loader, Modal } from "@mantine/core";
+import { Alert, Button, Group, Loader, Modal, Text } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DashboardSpec, DashboardTime, Panel, VarValue } from "../../../panels/types";
 import { ApiError } from "../api-error";
 import { formatFanql, type Formatted } from "../explore/api";
@@ -16,13 +16,14 @@ type PanelEditorProps = {
   /** True when `spec` carries layout changes not yet saved; saving then writes the whole dashboard. */
   layoutChanged?: boolean;
   time: DashboardTime; vars: Record<string, VarValue>;
-  /** The structured panel to edit; omitted adds a new panel. */
+  /** The structured or SQL panel to edit; omitted adds a new panel. */
   panel?: Panel;
   onClose(): void;
 };
 
 function initialSearch(time: DashboardTime, panel: Panel | undefined, formatted: Formatted | undefined): ExploreSearch {
   const window = time.from && time.to ? { range: defaultRange, from: time.from, to: time.to } : { range: panel?.time?.range ?? time.range ?? defaultRange };
+  if (panel?.sql !== undefined) return { q: "", sql: panel.sql, viz: panel.viz, tab: "sql", ...window };
   if (!panel || !formatted) return { q: "", tab: "query", ...window };
   return { q: formatted.text, viz: panel.viz, tab: formatted.editable ? "query" : "builder", ...window };
 }
@@ -57,7 +58,7 @@ function changes(panel: Panel, next: Panel): Record<string, unknown> {
   return set;
 }
 
-/** Adds or edits a structured panel with the Explore editor; the dashboard's variables apply. */
+/** Adds or edits a panel with the Explore editor (Query, Builder or SQL); the dashboard's variables apply. */
 export default function PanelEditor({ dashboardId, version, spec, layoutChanged = false, time, vars, panel, onClose }: PanelEditorProps) {
   const client = useQueryClient();
   const formatted = useQuery({
@@ -65,9 +66,15 @@ export default function PanelEditor({ dashboardId, version, spec, layoutChanged 
     queryFn: ({ signal }) => formatFanql({ query: panel!.query!, viz: panel!.viz }, signal),
     enabled: Boolean(panel?.query), staleTime: Infinity, retry: false,
   });
-  const ready = !panel || formatted.isSuccess;
+  const ready = !panel?.query || formatted.isSuccess;
   const [search, setSearch] = useState<ExploreSearch>();
   const current = search ?? (ready ? initialSearch(time, panel, formatted.data) : undefined);
+  const [dirty, setDirty] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const keepEditing = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (confirming) keepEditing.current?.focus(); }, [confirming]);
+  // A draft is never discarded silently.
+  const requestClose = () => { if (dirty) setConfirming(true); else onClose(); };
 
   const save = async (result: Panel) => {
     const added = panel ? undefined : { ...result, id: uniquePanelID("panel", spec.panels.map(p => p.id)) };
@@ -90,12 +97,19 @@ export default function PanelEditor({ dashboardId, version, spec, layoutChanged 
   };
 
   // Escape first reaches the editor, which closes its completion list; only an unhandled Escape closes the dialog.
-  return <Modal opened onClose={onClose} closeOnEscape={false} title={panel ? `Edit panel · ${panel.title}` : "Add panel"} size="min(1280px, 100vw - 32px)"
-    onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) onClose(); }}>
+  return <Modal opened onClose={requestClose} closeOnEscape={false} title={panel ? `Edit panel · ${panel.title}` : "Add panel"} size="min(1280px, 100vw - 32px)"
+    onKeyDown={event => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing) return;
+      if (confirming) setConfirming(false); else requestClose();
+    }}>
+    {confirming && <Alert color="warn" title="Discard changes?" mb="sm">
+      <Text size="sm">Your changes to this panel have not been saved.</Text>
+      <Group gap="xs" mt="sm"><Button ref={keepEditing} variant="default" onClick={() => setConfirming(false)}>Keep editing</Button><Button color="bad" onClick={onClose}>Discard changes</Button></Group>
+    </Alert>}
     {formatted.error ? <Alert color="bad" title="This panel's query could not be opened">{formatted.error.message}</Alert>
       : !current ? <Loader size="sm" aria-label="Loading the panel's query" />
       : <ExplorePage search={current} onSearch={setSearch}
-          context={{ spec, vars, panel, compose: panel ? draft => composePanel(panel, draft) : undefined,
+          context={{ spec, vars, panel, compose: panel ? draft => composePanel(panel, draft) : undefined, onDirtyChange: setDirty, cancel: requestClose,
             save: { label: panel ? "Save panel" : "Add panel", run: save },
             initial: panel?.query && formatted.data && !formatted.data.editable ? { query: panel.query, formatted: formatted.data } : undefined }} />}
   </Modal>;
