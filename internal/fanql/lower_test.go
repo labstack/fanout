@@ -68,6 +68,46 @@ var lowerFixtures = []struct{ text, sql string }{
 	{`spans where -k:$v`, `(attributes['k'] IS NULL OR attributes['k'] != $v)`},
 }
 
+func TestLowerPreservesExactIntegerLiterals(t *testing.T) {
+	for _, value := range []string{
+		"9007199254740991", "9007199254740992", "9007199254740993",
+		"-9007199254740991", "-9007199254740992", "-9007199254740993",
+		"9223372036854775807", "-9223372036854775808",
+	} {
+		t.Run(value, func(t *testing.T) {
+			text := "logs where attributes['id']:" + value
+			c, ps := Compile(text, Options{})
+			if len(ps) != 0 {
+				t.Fatal(ps)
+			}
+			want := panel.Query{From: "logs", Where: []string{"attributes['id'] = " + value}}
+			if !reflect.DeepEqual(c.Query, want) {
+				t.Fatalf("lowered %#v; want %#v", c.Query, want)
+			}
+			again, ps := Compile(c.Canonical, Options{})
+			if len(ps) != 0 || !reflect.DeepEqual(again.Query, want) {
+				t.Fatalf("canonical %q lost integer: %+v %v", c.Canonical, again, ps)
+			}
+		})
+	}
+}
+
+func TestLowerCountIfRawSQLComments(t *testing.T) {
+	for _, body := range []string{"body = 'x' /* ) */", "body = 'x' -- )\n", "body = 'it''s )' /* ) */"} {
+		text := "logs | count_if(`" + body + "`) as n"
+		c, ps := Compile(text, Options{})
+		if len(ps) != 0 {
+			t.Fatalf("%q: %v", text, ps)
+		}
+		if want := "count_if(" + body + ") as n"; len(c.Query.Measures) != 1 || c.Query.Measures[0] != want {
+			t.Fatalf("%q: got %#v; want %q", text, c.Query.Measures, want)
+		}
+		if _, err := panel.ParseMeasure(c.Query.From, c.Query.Measures[0]); err != nil {
+			t.Fatalf("%q: %v", text, err)
+		}
+	}
+}
+
 func TestLowerPositiveFixtures(t *testing.T) {
 	for _, tt := range lowerFixtures {
 		t.Run(tt.text, func(t *testing.T) {

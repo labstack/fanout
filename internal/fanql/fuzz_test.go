@@ -76,6 +76,42 @@ func FuzzLexParsePrint(f *testing.F) {
 	})
 }
 
+func TestStructuredGeneratorCoversConditionalMeasuresAndArithmetic(t *testing.T) {
+	engine, _ := newTestEngine(t)
+	conditional, arithmetic := false, false
+	for source := range 2 {
+		for choice := range 16 {
+			// Fixed bytes keep the generated filters short while varying measures.
+			q := generatedStructuredQuery([]byte{byte(source), byte(choice), 1, 1, 1, 1, 1, 1})
+			m, err := panel.ParseMeasure(q.From, q.Measures[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch x := m.Expr.(type) {
+			case panel.MeasureCountIf:
+				conditional = true
+			case panel.MeasureBinary:
+				arithmetic = true
+				if _, ok := x.L.(panel.MeasureCountIf); ok {
+					conditional = true
+				}
+			}
+			f, ps, err := Format(t.Context(), engine, q, FormatOptions{})
+			if err != nil || len(ps) != 0 || !f.Editable {
+				t.Fatalf("format %#v: %+v %v", q, ps, err)
+			}
+			c, ps := Compile(f.Text, Options{})
+			if len(ps) != 0 {
+				t.Fatal(ps)
+			}
+			assertQueryTier(t, engine, q, c.Query, f.Exactness)
+		}
+	}
+	if !conditional || !arithmetic {
+		t.Fatalf("generator coverage: conditional=%t arithmetic=%t", conditional, arithmetic)
+	}
+}
+
 // generatedStructuredQuery is generator B: a bounded grammar of SQL accepted
 // by the existing gate, independent of FanQL's own lowerer and printer.
 func generatedStructuredQuery(data []byte) panel.Query {
@@ -86,7 +122,20 @@ func generatedStructuredQuery(data []byte) panel.Query {
 		return data[i%len(data)]
 	}
 	source := []string{"spans", "logs", "metrics"}[int(byteAt(0))%3]
-	q := panel.Query{From: source, Measures: []string{[]string{"count()", "count(  )", "  count()  ", "count ( )"}[int(byteAt(1))%4]}}
+	measures := []string{"count()", "count(  )", "  count()  ", "count ( )"}
+	if source != "metrics" {
+		measures = append(measures,
+			"count_if(service = '(')",
+			"count_if(service = ')') as n",
+			"count_if(attributes['( ) , |'] = ',') as n",
+			"count_if(service = 'api') / count() as ratio",
+			"(count_if(service = 'api') + count_if(service = 'worker')) / count() as ratio",
+			"count() * 2 as doubled",
+			"count() - count() as zero",
+			"count() / 2 as half",
+		)
+	}
+	q := panel.Query{From: source, Measures: []string{measures[int(byteAt(1))%len(measures)]}}
 	if byteAt(2)%5 == 0 {
 		// Every entry remains under 500 bytes; their complete text exceeds the
 		// interactive character bound without invalidating the structured Query.

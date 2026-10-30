@@ -99,6 +99,31 @@ func TestParseMeasureExpressions(t *testing.T) {
 	}
 }
 
+func TestParseMeasureCountIfIgnoresCommentDelimiters(t *testing.T) {
+	for _, body := range []string{
+		"body = 'x' /* ) */",
+		"body = 'x' -- ) ( , |\n",
+		"body = 'x' /* ( /* ) */ ( */",
+		"body = 'it''s ) /* --' /* ) ' */",
+		`attributes[')'] = '(' /* ) */`,
+		"body = 'x' -- ' /* )\r\n",
+	} {
+		t.Run(body, func(t *testing.T) {
+			m, err := ParseMeasure("logs", "count_if("+body+") as n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			conditional, ok := m.Expr.(MeasureCountIf)
+			if !ok || conditional.Filter != body || m.Alias != "n" {
+				t.Fatalf("parsed %+v; want complete filter %q and alias n", m, body)
+			}
+		})
+	}
+	if _, err := ParseMeasure("logs", "count_if(body = 'x' /* ) as n"); err == nil {
+		t.Fatal("accepted an unterminated block comment")
+	}
+}
+
 // A balanced expression isolates node budgets from the independent depth cap.
 func balancedMeasureNodes(n int) string { return balancedMeasureTree(n, 0) }
 func balancedMeasureTree(n, level int) string {

@@ -3,6 +3,7 @@ package fanql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,6 +16,50 @@ import (
 )
 
 type completionSchemaFunc func(context.Context, panel.SchemaRequest) (*panel.Schema, error)
+
+// expectAt replaces a whole lexical token even when the cursor is in its middle.
+// Punctuation is consumed by the grammar: a cursor after ':' expects a value.
+func expectAt(text string, cursor int) (Token, []Expect) {
+	token, p := completionPrefix(text, cursor, "")
+	return token, p.expected
+}
+
+func TestCompleteBoundsDistinctNamespaceFetchAdmission(t *testing.T) {
+	gate := make(chan struct{})
+	source := completionSchemaFunc(func(context.Context, panel.SchemaRequest) (*panel.Schema, error) {
+		<-gate
+		return completionFixtureSchema(), nil
+	})
+	completers := []*Completer{NewCompleter(source), NewCompleter(source)}
+	defer func() {
+		var pending []chan struct{}
+		for _, c := range completers {
+			c.mu.Lock()
+			for _, done := range c.inflight {
+				pending = append(pending, done)
+			}
+			c.mu.Unlock()
+		}
+		close(gate)
+		for _, done := range pending {
+			<-done
+		}
+	}()
+	for i := 0; i < 256; i++ {
+		completers[i%2].Complete(context.Background(), CompleteRequest{
+			Text: "logs ", Cursor: 5, Window: "1h", Namespace: fmt.Sprintf("namespace-%d", i),
+		})
+		pending := 0
+		for _, c := range completers {
+			c.mu.Lock()
+			pending += len(c.inflight)
+			c.mu.Unlock()
+		}
+		if pending > 4 {
+			t.Fatalf("%d distinct namespaces admitted %d fetches; cap is 4", i+1, pending)
+		}
+	}
+}
 
 func (f completionSchemaFunc) Schema(ctx context.Context, req panel.SchemaRequest) (*panel.Schema, error) {
 	return f(ctx, req)

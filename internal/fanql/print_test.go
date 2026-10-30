@@ -69,6 +69,29 @@ func TestPrintIsAFixedPoint(t *testing.T) {
 	}
 }
 
+func TestPrintPreservesQuotedNonFiniteNumbers(t *testing.T) {
+	for _, text := range []string{
+		`logs where service:"1e309"`,
+		`logs where service:"-1e309"`,
+		`logs where service:"1e+309"`,
+		`logs where service in ("1e309", "-1e309")`,
+	} {
+		t.Run(text, func(t *testing.T) {
+			c, ps := Compile(text, Options{})
+			if len(ps) != 0 {
+				t.Fatal(ps)
+			}
+			if c.Canonical != text {
+				t.Errorf("canonical %q; want %q", c.Canonical, text)
+			}
+			again, ps := Compile(c.Canonical, Options{})
+			if len(ps) != 0 || !reflect.DeepEqual(again.Query, c.Query) {
+				t.Fatalf("recompile: %+v %v", again, ps)
+			}
+		})
+	}
+}
+
 func TestPrintCompatibleEditPlacesBucketBeforeSortAndLimit(t *testing.T) {
 	c, ps := Compile(`spans | count() by service sort count limit 10`, Options{})
 	if len(ps) > 0 {

@@ -2,6 +2,7 @@ package fanql
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 
@@ -78,6 +79,17 @@ func compareField(f Field) string {
 }
 func sqlString(text string) string { return "'" + strings.ReplaceAll(text, "'", "''") + "'" }
 func decimal(n float64) string     { return strconv.FormatFloat(n, 'f', -1, 64) }
+func numberText(text string) string {
+	// Integer spelling carries precision that a float64 cannot preserve.
+	if n, ok := new(big.Int).SetString(text, 10); ok {
+		return n.String()
+	}
+	n, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return text
+	}
+	return decimal(n)
+}
 func lowerValue(f Field, v Value) string {
 	text := v.Stored
 	if text == "" {
@@ -100,8 +112,7 @@ func lowerValue(f Field, v Value) string {
 		return sqlString(text)
 	}
 	if v.Kind == NumberValue {
-		n, _ := strconv.ParseFloat(text, 64)
-		return decimal(n)
+		return numberText(text)
 	}
 	if v.Kind == BooleanValue {
 		return strings.ToLower(text)

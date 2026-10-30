@@ -1,3 +1,2 @@
 # Exact symbol<TAB>reviewed reason for genuine non-main entry points only.
 github.com/labstack/fanout/internal/auth.OAuthTokenPair.String	fmt.Stringer security boundary: formatting token pairs must redact both credentials; not a callable product action.
-github.com/labstack/fanout/internal/fanql.expectAt	Completion parser contract seam for token and expected-class fixtures; Complete shares its underlying context parser to avoid parsing twice.

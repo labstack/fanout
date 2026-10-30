@@ -783,12 +783,15 @@ func liftCountIfBodies(ctx context.Context, p panel.Parser, signal, text string)
 	var b strings.Builder
 	end := 0
 	for i := 0; i+1 < len(tokens); i++ {
-		if !strings.EqualFold(tokens[i].text, "count_if") || tokens[i+1].text != "(" {
+		if tokens[i].quote != 0 || !strings.EqualFold(tokens[i].text, "count_if") || tokens[i+1].quote != 0 || tokens[i+1].text != "(" {
 			continue
 		}
 		depth := 1
 		j := i + 2
 		for ; j < len(tokens); j++ {
+			if tokens[j].quote != 0 {
+				continue
+			}
 			if tokens[j].text == "(" {
 				depth++
 			}

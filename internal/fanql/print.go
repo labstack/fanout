@@ -374,7 +374,9 @@ func printValue(v Value, f Field, aliases bool) string {
 	if v.Kind == StringValue {
 		if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == "string" && f.Ref.CompareAs == "" {
 			if numberPattern.MatchString(v.Text) {
-				return v.Text
+				if _, err := strconv.ParseFloat(v.Text, 64); err == nil {
+					return v.Text
+				}
 			}
 			if v.Text == "true" || v.Text == "false" {
 				return strings.ToLower(v.Text)
@@ -399,9 +401,7 @@ func printLiteral(v Value, forceQuote bool) string {
 		return v.Text
 	}
 	if v.Kind == NumberValue {
-		if n, err := strconv.ParseFloat(v.Text, 64); err == nil {
-			return strconv.FormatFloat(n, 'f', -1, 64)
-		}
+		return numberText(v.Text)
 	}
 	if v.Kind == BooleanValue {
 		return strings.ToLower(v.Text)

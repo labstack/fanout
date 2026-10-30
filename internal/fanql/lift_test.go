@@ -48,6 +48,39 @@ func TestFormatOwnLoweringNeedsNoEngine(t *testing.T) {
 	}
 }
 
+func TestFormatCountIfQuotedDelimiters(t *testing.T) {
+	for _, text := range []string{
+		`spans | count_if(service:"(")`,
+		`spans | count_if(service:")")`,
+		`spans | count_if(service:",")`,
+		`spans | count_if(service:"|")`,
+		`spans | count_if(attributes['(']:x)`,
+		`spans | count_if(attributes[')']:x)`,
+		`spans | count_if(attributes[',']:x)`,
+		`spans | count_if(attributes['|']:x)`,
+		`spans | count_if(attributes['( ) , |']:"( ) , |") / count() as ratio`,
+	} {
+		t.Run(text, func(t *testing.T) {
+			c, ps := Compile(text, Options{})
+			if len(ps) != 0 {
+				t.Fatal(ps)
+			}
+			p := &countingParser{fail: true}
+			f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{})
+			if err != nil || len(ps) != 0 {
+				t.Fatalf("format: %v %v", ps, err)
+			}
+			if f.Exactness != "exact" || !f.Editable || f.Text != c.Canonical || p.calls != 0 {
+				t.Fatalf("format: %+v, calls %d; want %q", f, p.calls, c.Canonical)
+			}
+			again, ps := Compile(f.Text, Options{})
+			if len(ps) != 0 || !reflect.DeepEqual(again.Query, c.Query) {
+				t.Fatalf("recompile: %+v %v", again, ps)
+			}
+		})
+	}
+}
+
 func TestLiftStoredSQLShapes(t *testing.T) {
 	d, _ := newTestEngine(t)
 	for _, tt := range []struct{ signal, sql, text, tier string }{

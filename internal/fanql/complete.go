@@ -22,13 +22,6 @@ type Expect struct {
 	Scope string
 }
 
-// expectAt replaces a whole lexical token even when the cursor is in its middle.
-// Punctuation is consumed by the grammar: a cursor after ':' expects a value.
-func expectAt(text string, cursor int) (Token, []Expect) {
-	token, p := completionPrefix(text, cursor, "")
-	return token, p.expected
-}
-
 func completionPrefix(text string, cursor int, source string) (token Token, p *parser) {
 	runes := []rune(text)
 	cursor = max(0, min(cursor, len(runes)))
@@ -107,8 +100,8 @@ type completionSchemaEntry struct {
 	failed  bool
 }
 
-// Schema work is limited across all Completers, including requests queued after
-// their HTTP contexts have gone away. No request waits for this semaphore.
+// Schema work is admitted before spawning across all Completers. No request
+// waits or queues work when the slots are full; a later completion can retry.
 var completionSchemaSlots = make(chan struct{}, 4)
 
 type Completer struct {
@@ -159,6 +152,11 @@ func (c *Completer) schema(ctx context.Context, key completionKey) (*panel.Schem
 		return nil, false, false
 	}
 	if _, ok := c.inflight[key]; !ok {
+		select {
+		case completionSchemaSlots <- struct{}{}:
+		default:
+			return nil, false, false
+		}
 		done := make(chan struct{})
 		c.inflight[key] = done
 		go c.fetch(context.WithoutCancel(ctx), key, done)
@@ -167,17 +165,10 @@ func (c *Completer) schema(ctx context.Context, key completionKey) (*panel.Schem
 }
 
 func (c *Completer) fetch(parent context.Context, key completionKey, done chan struct{}) {
+	defer func() { <-completionSchemaSlots }()
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
-	var schema *panel.Schema
-	var err error
-	select {
-	case completionSchemaSlots <- struct{}{}:
-		schema, err = c.source.Schema(ctx, panel.SchemaRequest{Window: key.window, Namespace: key.namespace})
-		<-completionSchemaSlots
-	case <-ctx.Done():
-		err = ctx.Err()
-	}
+	schema, err := c.source.Schema(ctx, panel.SchemaRequest{Window: key.window, Namespace: key.namespace})
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()

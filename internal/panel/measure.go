@@ -128,8 +128,9 @@ type measureParser struct {
 	message, hint     string
 }
 
-// Strings (including escaped SQL quotes) remain one token. The scanner counts
-// SQL tokens inside count_if too, without interpreting or trusting that SQL.
+// Strings (including escaped SQL quotes) remain one token, and SQL comments
+// are skipped. The scanner counts SQL tokens inside count_if too, without
+// interpreting or trusting that SQL.
 func measureTokens(text string) ([]measureToken, string) {
 	var tokens []measureToken
 	for i := 0; i < len(text); {
@@ -141,6 +142,30 @@ func measureTokens(text string) ([]measureToken, string) {
 		c := text[i]
 		i++
 		switch {
+		case c == '-' && i < len(text) && text[i] == '-':
+			for i < len(text) && text[i] != '\n' && text[i] != '\r' {
+				i++
+			}
+			continue
+		case c == '/' && i < len(text) && text[i] == '*':
+			i++
+			depth := 1
+			for i < len(text) && depth > 0 {
+				switch {
+				case i+1 < len(text) && text[i:i+2] == "/*":
+					depth++
+					i += 2
+				case i+1 < len(text) && text[i:i+2] == "*/":
+					depth--
+					i += 2
+				default:
+					i++
+				}
+			}
+			if depth != 0 {
+				return nil, "unterminated block comment"
+			}
+			continue
 		case c == '\'' || c == '"':
 			closed := false
 			for i < len(text) {
