@@ -69,7 +69,7 @@ type Config struct {
 	// MaintenanceInterval controls Parquet retention and compaction, and
 	// query-cache checkpointing.
 	MaintenanceInterval time.Duration `group:"storage" env:"FANOUT_MAINTENANCE_INTERVAL" default:"1h"`
-	// RollupSkipToLatest, set once at boot, advances the service and edge rollup
+	// Set once at boot, this advances the service and edge rollup
 	// watermarks to the current max ingested timestamp. Existing history is not
 	// aggregated into those analytical rollups. Completed-batch trace caches
 	// still rebuild all retained history in bounded passes;

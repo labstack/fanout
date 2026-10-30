@@ -1,7 +1,7 @@
 ---
 title: Configuration
-description: How Fanout is configured, where settings come from, and how the reference stays true to the binary.
-summary: The rules that govern every setting — precedence, naming, secret files, and validation.
+description: How Fanout reads and validates configuration settings.
+summary: Setting precedence, naming, secret files, and validation.
 read_when:
   - You are configuring an instance and want the rules before the list.
   - A setting you set appears to have been ignored.
@@ -12,9 +12,9 @@ Fanout resolves built-in defaults followed by nonempty process environment
 values. Every setting is listed under [Settings](/docs/reference/configuration/server),
 grouped by the part of the product it belongs to.
 
-Those pages and `.env.example` are generated from `internal/config` by
-`cmd/fanout-docgen`. `just docs-generate-check` verifies that they match the
-schema the binary uses.
+`internal/config` defines the configuration schema. Use `cmd/fanout-docgen`
+to write the settings pages and `.env.example`, and `just docs-generate-check`
+to check them against that schema.
 
 ## Where a value comes from
 
@@ -35,8 +35,8 @@ environment values or managed secret mounts.
 
 ## Naming
 
-Custom names use `FANOUT_` plus a clear name, adding the area only when it
-clarifies. Vendor credentials and endpoints keep `ANTHROPIC_API_KEY`,
+Fanout settings use the `FANOUT_` prefix. Vendor credentials and endpoints keep
+`ANTHROPIC_API_KEY`,
 `ANTHROPIC_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL`.
 
 `FANOUT_AI_PROVIDER` defaults to empty, disabling chat. Exactly `anthropic`
@@ -107,3 +107,22 @@ host and cgroup limits, the selected source, and whether detection was
 incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
 set `FANOUT_DUCKDB_MEMORY` for a guaranteed bound. See
 [storage settings](/docs/reference/configuration/storage) for types and defaults.
+
+## Image tags
+
+| Image tag | Points at |
+|---|---|
+| `labstack/fanout:latest` | the newest release |
+| `labstack/fanout:2026.10.1-alpha` | that exact release |
+| `ghcr.io/labstack/fanout:main` | the tip of `main` |
+| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
+
+Release and `latest` tags also exist under `ghcr.io/labstack/fanout`.
+Development tags are GHCR-only.
+
+## Ports and paths
+
+| Port or path | Purpose | Native default |
+|---|---|---|
+| `7520` | Browser, API, chat, MCP, OTLP/gRPC and OTLP/HTTP | `127.0.0.1:7520`, loopback |
+| `./data` | Telemetry, query state, users, sessions, dashboards, alerts and agent history | `./data` |

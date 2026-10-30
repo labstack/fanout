@@ -114,7 +114,7 @@ Work down this list in order:
    configuration; HTTP/1.1 proxy forwarding cannot carry gRPC.
 
 For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
-endpoint — `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
+endpoint, `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
 and `/v1/logs` from it themselves.
 
 ## Someone cannot sign in and SMTP is not configured
@@ -147,7 +147,7 @@ falls back to `FANOUT_DEFAULT_NAMESPACE`, so telemetry exported without one
 lands in `default`.
 
 An unscoped query spans every namespace, so this is only a problem when
-something has scoped the query — a dashboard filter, or an MCP call passing
+something has scoped the query, through a dashboard filter or an MCP call passing
 `namespace`. Clear the scope before concluding the data is missing.
 
 The alert engine and overview read analytical rollups, which follow durable

@@ -8,14 +8,14 @@ read_when:
 status: preview
 ---
 
-Open chat and describe the system view you need. For example: “Build a dashboard
-of checkout latency and errors by service.” Fanout reads the telemetry schema,
+Open chat and describe the system view you need. For example: "Build a dashboard
+of checkout latency and errors by service." Fanout reads the telemetry schema,
 previews the panels and saves a dashboard. The save receipt records the saved
 version and reports panels that need attention. **Open dashboard** opens the
 current dashboard.
 
-To refine the result, name the panel and the change: “On the checkout latency
-panel, add a warning threshold at 500 ms.” Use the receipt's changes and version
+To refine the result, name the panel and the change: "On the checkout latency
+panel, add a warning threshold at 500 ms." Use the receipt's changes and version
 history to inspect what changed.
 
 ## Build, check and refine
@@ -126,12 +126,12 @@ lists column types and semantics.
 ### System overview defaults
 
 Each user receives an owned copy of **System overview**. Saved copies retain
-their specification when the binary’s default changes. The default’s **What
+their specification when the binary's default changes. The default's **What
 changed?** panel (`versions`) and service-host input to **Is it reachable?**
 (`check_states`) use `resource_inventory`.
 
 Deploy a binary supporting `resource_inventory` before editing saved panels.
-Use `list_dashboards` and `get_dashboard` to select the owner’s dashboard by ID
+Use `list_dashboards` and `get_dashboard` to select the owner's dashboard by ID
 and capture its version and spec. Compare `versions` and `check_states` with
 the shipped definitions; skip customized or missing definitions. Preview
 replacements with the saved time and variables, then submit two `update_panel`
@@ -328,7 +328,7 @@ Content and Spec instead of Data.
 
 Empty panels show their diagnosis in Chart. When filters together match nothing,
 the diagnosis names that combination. Chat keeps views whose results are all
-empty collapsed on an “empty” summary. Expand an empty view to inspect its
+empty collapsed on an "empty" summary. Expand an empty view to inspect its
 diagnosis. Check the time range, selected variables and panel description before
 interpreting missing results.
 Truncation and other result notes remain visible below the panel. If a refresh
@@ -357,8 +357,8 @@ Ask chat to add variables for filters you want to reuse:
 
 Query and custom variables can allow multiple selections. **All** removes filters
 that use that variable. Clearing a multi-select chooses All if it is enabled;
-otherwise **None** is an empty selection that matches no values. All and None
-have different meanings. A query variable can depend on an earlier variable,
+otherwise **None** is an empty selection that matches no values. A query variable
+can depend on an earlier variable,
 so selecting a service can narrow a later route selector. Options resolve in
 saved variable order and change with the window and dependencies.
 
@@ -380,9 +380,8 @@ Use an absolute range when the recipient needs the same time bounds. A relative
 range moves with the time the link is opened. Links open the current saved
 dashboard and query its data; they do not freeze a historical version or result.
 
-The recipient needs an account and access to that dashboard. Dashboards are
-owner-scoped: another account cannot open your dashboard just because
-you copied its link. A view link grants no access and is not a public snapshot.
+Dashboard access remains owner-scoped; a view link grants another account no
+access and does not create a public snapshot.
 
 ## Layout and saved versions
 
@@ -404,7 +403,7 @@ but the selected spec can still be inspected.
 
 Choose **Restore version** on an older entry to save that spec as a **new version**.
 For example, restoring v2 while v5 is current creates v6; it does not rewrite
-v2 or remove v3–v5. The dashboard reloads the restored panels. History and restore
+v2 or remove v3 through v5. The dashboard reloads the restored panels. History and restore
 have the same owner scope as the dashboard.
 
 ## Keyboard controls

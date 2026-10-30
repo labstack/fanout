@@ -53,11 +53,9 @@ replacing it; omitted fields take their zero values.
 
 ## Variables available to an expression
 
-An expression reads one service's rollup for the current window. The full list —
-`error_rate`, `p95`, `throughput`, the baseline deltas and the rest — is
-[generated from the evaluation environment
-itself](/docs/reference/alert-expressions), so it cannot drift from what the
-evaluator actually binds.
+An expression reads one service's rollup for the current window. The
+[alert expression reference](/docs/reference/alert-expressions) lists every
+variable, including `error_rate`, `p95`, `throughput` and the baseline deltas.
 
 For example:
 
@@ -72,11 +70,11 @@ prevents a single failure on a quiet service from triggering this rule.
 
 An alert moves through three states:
 
-- **pending** — the condition is true but has not held for `for_seconds` yet.
+- **pending**: the condition is true but has not held for `for_seconds` yet.
   With `for_seconds: 0` a rule skips this and fires immediately.
-- **firing** — it has held. The webhook is delivered, and re-delivered every
+- **firing**: it has held. The webhook is delivered, and re-delivered every
   `repeat_interval_s` while it stays true.
-- **resolved** — the expression went false. If `notify_on_resolve` is set, that
+- **resolved**: the expression went false. If `notify_on_resolve` is set, that
   is delivered too.
 
 `cooldown_s` then holds the rule quiet for that long after resolving, which is
@@ -98,4 +96,4 @@ Evaluation reads analytical rollups. The rollup pass follows durable telemetry
 publication; the evaluation interval and `for_seconds` add further delay.
 [How storage works](/docs/concepts/storage#rollups-follow-durable-publication)
 explains the publication horizon and watermark. A shorter evaluation interval
-does not increase the rollups’ time resolution.
+does not increase the rollups' time resolution.

@@ -76,8 +76,8 @@ service:
 The gRPC exporter requires an explicit port. Use `https://` for TLS and `:443`
 for a proxy serving standard HTTPS.
 
-If nothing in front of Fanout terminates TLS — a local instance, or one on a
-private network — the endpoint is `http://fanout.example.com:7520` and the
+If nothing in front of Fanout terminates TLS (a local instance, or one on a
+private network), the endpoint is `http://fanout.example.com:7520` and the
 exporter needs `tls: { insecure: true }` under `otlp/fanout`, or it will fail
 to connect. **Connect telemetry** in the application generates this block with
 your own endpoint already in it, and includes that line when it applies.
@@ -174,8 +174,7 @@ run on hosts that also run observed services.
 - **What changed?** uses `service.version` on application resources, along with
   runtime and SDK attributes. Send a new version when deploying a service.
 
-Silence is not health. After two reporting intervals, an endpoint with no
-result shows **no recent result**, and a host or container shows **not reporting**,
+After two reporting intervals, an endpoint with no result shows **no recent result**, and a host or container shows **not reporting**,
 both in the bad state. A receiver that has never sent data shows an empty panel.
 If the machine running Fanout fails, Fanout cannot report that failure on its
 own page: monitor Fanout itself from outside that machine.
@@ -193,9 +192,7 @@ instance hold several services' telemetry without them running together.
 A query with no namespace filter spans all namespaces. Add a namespace filter
 to narrow the result.
 
-They are not an authorisation boundary. A namespace is not a user, an
-organisation or a tenant, and anyone who can query the instance can query every
-namespace in it. An instance is the trust domain.
+See [namespace access limits](/docs/reference/capabilities#operating-limits).
 
 ## One listener
 
@@ -212,9 +209,9 @@ See [terminate TLS](/docs/guides/tls).
 ## Investigate the data
 
 With an [AI provider configured](/docs/reference/configuration/ai), open chat and ask a
-question such as “Why is checkout slower in the last hour?” The agent queries
+question such as "Why is checkout slower in the last hour?" The agent queries
 telemetry and displays its evidence in interactive views. Ask it to
 [build a dashboard](/docs/guides/dashboards) to save a view for repeated use.
 
 To use your own agent, [connect over MCP](/docs/guides/mcp). MCP does not
-require Fanout’s built-in AI provider.
+require Fanout's built-in AI provider.

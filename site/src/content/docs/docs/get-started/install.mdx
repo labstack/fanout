@@ -55,7 +55,7 @@ against it before extracting**, and installs to `/usr/local/bin` when that is
 writable or `~/.local/bin` otherwise. Set `FANOUT_PREFIX` to choose the
 directory, or `FANOUT_VERSION` to pin a tag instead of taking the latest.
 
-Versions are CalVer — `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each
+Versions use CalVer format `vYYYY.M.N[-alpha|-beta|-rc]`, numbered from 0 within each
 month across all maturity suffixes. Fanout is alpha, so
 `v2026.10.1-alpha` is the second release of October 2026. GA has no suffix.
 Container tags omit the leading `v`, and every release moves `latest`.
@@ -80,7 +80,7 @@ export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32)
 ## Verify what you downloaded
 
 The install script checks the archive for you. If you took one from the releases
-page by hand, check it yourself — both the checksum and the build provenance:
+page by hand, check both the checksum and the build provenance:
 
 ```sh
 sha256sum -c SHA256SUMS
@@ -99,25 +99,15 @@ Release images are multi-architecture for `linux/amd64` and `linux/arm64`, and
 archives cover Linux and macOS on both. Every artifact is built on a native
 runner, because DuckDB needs cgo.
 
-| Image tag | Points at |
-|---|---|
-| `labstack/fanout:latest` | the newest release |
-| `labstack/fanout:2026.10.1-alpha` | that exact release |
-| `ghcr.io/labstack/fanout:main` | the tip of `main` |
-| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
-
-Release and `latest` tags also exist under `ghcr.io/labstack/fanout`.
-Development tags are GHCR-only.
+See [image tags](/docs/reference/configuration#image-tags).
 
 See the [release contract](https://github.com/labstack/fanout/blob/main/docs/release.md)
 for the artifact inventory and verification workflow.
 
 ## What an instance opens
 
-| Port or path | Purpose | Native default |
-|---|---|---|
-| `7520` | Browser, API, chat, MCP, OTLP/gRPC and OTLP/HTTP | `127.0.0.1:7520`, loopback |
-| `./data` | Telemetry, query state, users, sessions, dashboards, alerts and agent history | `./data` |
+See [ports and paths](/docs/reference/configuration#ports-and-paths) for listener
+and data-directory defaults.
 
 Complete [first boot](/docs/get-started/first-boot) to create the administrator and ingest
 token, then [configure exporters](/docs/get-started/send-telemetry). **Connect telemetry**

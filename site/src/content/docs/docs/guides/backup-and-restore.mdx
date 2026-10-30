@@ -29,7 +29,7 @@ and the control SQLite database. Preserve all three together.
 :::caution[Not while it is running]
 Do not take a recursive copy of a live data directory. A storage-level snapshot
 is acceptable only if it gives a crash-consistent point-in-time view of the
-whole directory at once — a copy that walks the tree while commits publish can
+whole directory at once. A copy that walks the tree while commits publish can
 capture related files from different moments.
 :::
 
@@ -51,7 +51,7 @@ capture related files from different moments.
    representative queries.
 
 Migrations run forward at startup. A rollback to the previous binary after they
-have run is not assumed safe — restore the pre-upgrade backup with the previous
+have run is not assumed safe. Restore the pre-upgrade backup with the previous
 version instead.
 
 ## Never delete an account from the control database

@@ -51,8 +51,7 @@ operating tradeoffs.
 SDKs and Collectors export to Fanout as their telemetry backend. Fanout runs on
 one machine with local storage. It has no clustering, replication or object tier.
 
-Namespaces scope queries. Every account with telemetry access can read every
-namespace; deploy separate instances for separate trust domains.
+See [namespace access limits](/docs/reference/capabilities#operating-limits).
 
 ## Who it is for
 
@@ -63,4 +62,4 @@ The reference deployment target is a single small VM.
 ## Stability
 
 Fanout is alpha. User-facing contracts can change without migration paths.
-The [capabilities page](/docs/reference/capabilities) lists each feature’s stability.
+The [capabilities page](/docs/reference/capabilities) lists each feature's stability.

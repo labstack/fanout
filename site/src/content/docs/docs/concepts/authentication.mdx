@@ -1,7 +1,7 @@
 ---
 title: Authentication modes
 description: Why Fanout has two sign-in modes, what each one owns, and where the boundary between them sits.
-summary: Local codes versus an identity provider — who owns roles in each, and what happens on every login.
+summary: Local codes versus an identity provider, who owns roles in each, and what happens on every login.
 read_when:
   - You are choosing between local sign-in and OIDC.
   - You expect a provider group change to take effect and want to know when it does.
@@ -32,7 +32,7 @@ an email address.
 ## OIDC
 
 An identity provider handles sign-in. Group and domain allowlists are evaluated
-on every login, including for linked identities. Removing a user’s eligibility
+on every login, including for linked identities. Removing a user's eligibility
 blocks their next login; it does not revoke a browser session already issued.
 Suspending the account in Fanout blocks access and revokes its sessions.
 
@@ -75,6 +75,5 @@ sessions. The last active administrator cannot be demoted, suspended or deleted.
 
 ## Access boundaries
 
-Every telemetry reader can query every namespace. Namespaces filter queries;
-separate trust domains require separate instances. Dashboard access is scoped
-to the owner for every role, including administrators.
+See [namespace access limits](/docs/reference/capabilities#operating-limits).
+Dashboard access is scoped to the owner for every role, including administrators.

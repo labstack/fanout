@@ -9,7 +9,7 @@ status: preview
 ---
 
 Fanout serves MCP at `/mcp` for external agents. Its [tools](/docs/reference/mcp)
-query telemetry and manage the authenticated user’s dashboards. The browser
+query telemetry and manage the authenticated user's dashboards. The browser
 client and built-in agent use the same typed query results.
 
 [Build and refine dashboards](/docs/guides/dashboards) covers schema discovery,
@@ -26,12 +26,12 @@ origin is the URL your MCP client connects to.
 export FANOUT_PUBLIC_URL=https://fanout.example.com
 ```
 
-Fanout derives the MCP resource URI from this — the canonical, externally
+Fanout derives the MCP resource URI from this canonical, externally
 reachable origin that clients are issued tokens against. It must be HTTPS, and
 it must stay **stable across restarts**: tokens carry the derived resource as
 their audience, so changing it invalidates every one already issued.
 
-The resource is derived from `FANOUT_PUBLIC_URL`; see
+`FANOUT_PUBLIC_URL` is the only public-origin setting; see
 [server settings](/docs/reference/configuration/server#fanout_public_url).
 
 Set `FANOUT_MCP_ENABLED=false` to turn the endpoint off entirely; it defaults
@@ -45,7 +45,7 @@ needs only the URL:
 1. Discovers the endpoints from
    `/.well-known/oauth-protected-resource` and
    `/.well-known/oauth-authorization-server`.
-2. Registers itself at `/oauth/register` — dynamic client registration, so
+2. Registers itself at `/oauth/register` through dynamic client registration, so
    nothing is pre-provisioned by hand.
 3. Obtains a token from `/oauth/token`, bound to the resource URI above.
 
@@ -78,7 +78,7 @@ on `/mcp`. Modern `2026-07-28` requests carry per-request metadata and
 `MCP-Protocol-Version: 2026-07-28`, with no session or `initialize` handshake.
 Legacy clients use `initialize` to negotiate `2025-11-25` or `2025-06-18` and
 receive an `Mcp-Session-Id` bound to the authenticated user. Legacy sessions
-expire after 10 idle minutes, with at most eight live sessions per user–OAuth
+expire after 10 idle minutes, with at most eight live sessions per user/OAuth
 client pair. An expired session or a server restart requires re-initialization.
 Versions `2025-03-26` and `2024-11-05` are not served. The browser's `/api/mcp`
 route uses only the modern protocol.
@@ -88,7 +88,7 @@ serialization of `FANOUT_PUBLIC_URL`. Malformed or untrusted origins receive
 `403` before authentication. Without a public URL, only same-authority loopback
 origins are accepted. Requests without `Origin` pass this check.
 
-`tools/call` requests are limited to 20 per second per user–OAuth client pair,
+`tools/call` requests are limited to 20 per second per user/OAuth client pair,
 with a burst of 100. Excess calls receive `429` with `Retry-After`. The in-process
 agent is exempt. Modern client disconnects cancel in-flight tool calls, including
 DuckDB queries.
