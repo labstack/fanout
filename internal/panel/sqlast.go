@@ -57,3 +57,26 @@ func SQLExpression(raw any) *SQLExpr {
 	return e
 }
 func sqlArray(raw any) []any { a, _ := raw.([]any); return a }
+
+// everySQLExpression visits the typed tree without rebuilding subtrees.
+func everySQLExpression(n *SQLExpr, accept func(*SQLExpr) bool) bool {
+	if n == nil {
+		return true
+	}
+	if !accept(n) {
+		return false
+	}
+	for _, child := range []*SQLExpr{n.Left, n.Right, n.Child, n.Input, n.Lower, n.Upper} {
+		if !everySQLExpression(child, accept) {
+			return false
+		}
+	}
+	for _, children := range [][]*SQLExpr{n.Children, n.Arguments} {
+		for _, child := range children {
+			if !everySQLExpression(child, accept) {
+				return false
+			}
+		}
+	}
+	return true
+}
