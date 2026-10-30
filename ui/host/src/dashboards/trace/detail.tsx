@@ -7,7 +7,7 @@ import { filledTextOn } from "../../../../theme";
 import { duration } from "../../../../format";
 import { EmptyState } from "./components";
 import { ListBullets } from "@phosphor-icons/react";
-import { Waterfall } from "./trace-components";
+import { Waterfall } from "./waterfall";
 import { LogsViz } from "../viz/logs";
 import type { PanelResult } from "../../../../panels/types";
 

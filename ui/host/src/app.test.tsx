@@ -5,7 +5,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import App from "./App";
+import App from "./app";
 import { ChatPage } from "./chat";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { parseSearch, toSearchParams } from "./dashboards/search";

@@ -6,7 +6,7 @@ import { build } from "vite";
 import { expect, it } from "vitest";
 import { appBuildBoundary, blobWorkerOnly } from "../build/apps";
 
-it.each(["auth.ts", "auth-session.ts", "api.ts", "observability.ts", "mcp-app-frame.tsx", "router.ts", "routes/index.ts", "App.tsx", "main.tsx", "app-context.tsx", "provider-context.tsx", "dashboards/api.ts"].flatMap(file => [false, true].map(transitive => ({ file, transitive }))))("rejects forbidden runtime imports: $file transitive=$transitive", async ({ file, transitive }) => {
+it.each(["auth.ts", "auth-session.ts", "api.ts", "observability.ts", "mcp-app-frame.tsx", "router.ts", "routes/index.ts", "app.tsx", "main.tsx", "app-context.tsx", "provider-context.tsx", "dashboards/api.ts"].flatMap(file => [false, true].map(transitive => ({ file, transitive }))))("rejects forbidden runtime imports: $file transitive=$transitive", async ({ file, transitive }) => {
   const root = mkdtempSync(resolve(tmpdir(), "fanout-graph-"));
   try {
     mkdirSync(resolve(root, "src/mcp-apps"), { recursive: true }); mkdirSync(resolve(root, "src/dashboards"));

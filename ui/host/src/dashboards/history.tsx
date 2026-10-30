@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { exactTimestamp } from "../../../format";
 import { changeChips } from "../dashboard-receipt";
-import { EditChips } from "../dashboard-change-chips";
+import { DashboardChangeChips } from "../dashboard-change-chips";
 import { dashboardDataPredicate } from "./cache";
 import { ApiError, dashboardsKey, getVersion, listVersions, restoreVersion, type DashboardRecord, type VersionInfo, type VersionRecord } from "./api";
 
@@ -136,7 +136,7 @@ function VersionDetails({ record, currentVersion, pending, onRestore }: { record
     </Group>
     {dashboard.description && <Text size="sm">{dashboard.description}</Text>}
     {record.changes_available ? <>
-      <EditChips labels={labels} />
+      <DashboardChangeChips labels={labels} />
       {!labels.length && !record.layout_changed && <Text size="sm" c="dimmed">No authored changes.</Text>}
     </> : <Alert color="warn" title="Changes unavailable">The preceding version is no longer retained. This saved spec is still available.</Alert>}
     <Text size="sm" c="dimmed">Read-only · {dashboard.spec.panels.length} panels. Historical data is not queried.</Text>
