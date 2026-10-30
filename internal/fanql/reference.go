@@ -57,7 +57,7 @@ func Reference() string {
 	for _, vocabulary := range []struct {
 		name    string
 		aliases map[string]string
-	}{{"status (spans)", statusAliases}, {"kind (spans)", kindAliases}, {"type (metrics)", typeAliases}, {"severity (logs)", telemetry.SeverityAliases()}} {
+	}{{"status (spans)", panel.FieldAliases("status")}, {"kind (spans)", panel.FieldAliases("kind")}, {"type (metrics)", panel.FieldAliases("type")}, {"severity (logs)", telemetry.SeverityAliases()}} {
 		fmt.Fprintf(&b, "### %s\n\n| Input | Stored |\n|---|---|\n", vocabulary.name)
 		for _, alias := range referenceKeys(vocabulary.aliases) {
 			fmt.Fprintf(&b, "| `%s` | `%s` |\n", alias, vocabulary.aliases[alias])

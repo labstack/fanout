@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"github.com/labstack/fanout/internal/suggest"
 	"slices"
 	"strings"
 )
@@ -79,7 +80,7 @@ func CompatibleVizzes(q *Query, vars map[string]Variable) []VizCompat {
 func queryShapeVariables(q *Query, vars map[string]Variable, path string, problems *Problems) {
 	for _, ref := range varRefs(strings.Join(q.Where, " ")) {
 		if _, ok := vars[ref]; !ok {
-			problems.addHint(path+".where", fmt.Sprintf("$%s is not a dashboard variable", ref), suggest(ref, mapKeys(vars)))
+			problems.addHint(path+".where", fmt.Sprintf("$%s is not a dashboard variable", ref), suggest.Spelling(ref, mapKeys(vars)))
 		}
 	}
 }

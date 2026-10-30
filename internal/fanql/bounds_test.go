@@ -31,7 +31,7 @@ func TestEachInteractiveBoundIndependently(t *testing.T) {
 				}
 				problems = ps
 			} else {
-				parsed, ps := Parse(tc.text, "")
+				parsed, ps := parse(tc.text, "")
 				if parsed != nil {
 					t.Fatal("bound produced a parsed query")
 				}
@@ -46,14 +46,14 @@ func TestEachInteractiveBoundIndependently(t *testing.T) {
 
 func TestAstralCharactersSpanInCodePoints(t *testing.T) {
 	const text = `logs where body:"𝔘𝔫𝔦" x:1`
-	parsed, ps := Parse(text, "")
+	parsed, ps := parse(text, "")
 	if len(ps) != 0 || parsed == nil || len(parsed.Where) != 2 {
 		t.Fatal(parsed, ps)
 	}
-	if got := parsed.Where[1].Span(); got != (Span{Start: 22, End: 25}) {
+	if got := parsed.Where[1].Span(); got != (span{Start: 22, End: 25}) {
 		t.Fatalf("second term span = %+v", got)
 	}
-	_, ps = Parse(text+" +", "")
+	_, ps = parse(text+" +", "")
 	if len(ps) != 1 || ps[0].Message != "unexpected +" || ps[0].Span == nil || *ps[0].Span != (panel.TextSpan{Start: 26, End: 27}) {
 		t.Fatalf("diagnostic after astral text = %+v", ps)
 	}
@@ -61,7 +61,7 @@ func TestAstralCharactersSpanInCodePoints(t *testing.T) {
 
 func TestParseColonRecoveryAcrossWhitespace(t *testing.T) {
 	for _, text := range []string{`""A: 0:0`, `logs where service: api:x`, `logs where attributes['user name']: 'a b':c`} {
-		q, problems := Parse(text, "")
+		q, problems := parse(text, "")
 		if q != nil || len(problems) == 0 {
 			t.Fatalf("malformed colon input accepted: %q", text)
 		}
@@ -125,7 +125,7 @@ func TestParseQuotedTokensStayLiteral(t *testing.T) {
 			}
 		})
 	}
-	if q, ps := Parse(`logs | count"(")`, ""); q != nil || len(ps) == 0 {
+	if q, ps := parse(`logs | count"(")`, ""); q != nil || len(ps) == 0 {
 		t.Fatal("quoted parenthesis opened a measure call")
 	}
 }
@@ -149,11 +149,11 @@ func TestParseCallsRequireAnIdentifierAndAdjacentParenthesis(t *testing.T) {
 			}
 		})
 	}
-	parsed, problems := Parse(`logs mystery(body)`, "")
+	parsed, problems := parse(`logs mystery(body)`, "")
 	if len(problems) != 0 || parsed == nil {
 		t.Fatal(parsed, problems)
 	}
-	if _, ok := parsed.Where[0].(*Call); !ok {
+	if _, ok := parsed.Where[0].(*filterCall); !ok {
 		t.Fatalf("an adjacent identifier must be parsed as a call: %T", parsed.Where[0])
 	}
 	wantProblem(t, `logs starts_with (body, "x")`, "", "write starts_with(...) without a space", "")

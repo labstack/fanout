@@ -8,9 +8,6 @@ import (
 	"time"
 )
 
-var statusAliases = map[string]string{"error": "STATUS_CODE_ERROR", "ok": "STATUS_CODE_OK", "unset": "STATUS_CODE_UNSET"}
-var kindAliases = map[string]string{"server": "SPAN_KIND_SERVER", "client": "SPAN_KIND_CLIENT", "internal": "SPAN_KIND_INTERNAL", "producer": "SPAN_KIND_PRODUCER", "consumer": "SPAN_KIND_CONSUMER", "unspecified": "SPAN_KIND_UNSPECIFIED"}
-var typeAliases = map[string]string{"gauge": "gauge", "counter": "counter", "updown": "updown", "histogram": "histogram", "summary": "summary"}
 var identifierPath = regexp.MustCompile(`^[A-Za-z_][A-Za-z_0-9]*(\.[A-Za-z_][A-Za-z_0-9]*)*$`)
 var aliasName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 

@@ -178,129 +178,99 @@ func onlyWhereClause(node map[string]any, table string) bool {
 	return from != nil && from["type"] == "BASE_TABLE" && from["table_name"] == table && from["schema_name"] == "" && from["catalog_name"] == ""
 }
 
-func walkFilter(n any, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
-	switch v := n.(type) {
-	case nil:
-		return nil
-	case []any:
-		for _, child := range v {
-			if err := walkFilter(child, sig, vars, f, uses); err != nil {
-				return err
-			}
-		}
-		return nil
-	case map[string]any:
-		class, _ := v["class"].(string)
-		kind, _ := v["type"].(string)
-		walk := func(keys ...string) error {
-			for _, key := range keys {
-				if err := walkFilter(v[key], sig, vars, f, uses); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		switch class {
-		case "CONJUNCTION":
-			return walk("children")
-		case "COMPARISON":
-			return walk("left", "right")
-		case "BETWEEN":
-			return walk("input", "lower", "upper")
-		case "OPERATOR":
-			if kind == "ARRAY_EXTRACT" {
-				return checkAttributeLookup(v)
-			}
-			if !filterOperators[kind] {
-				return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(kind))
-			}
-			if kind == "COMPARE_IN" || kind == "COMPARE_NOT_IN" {
-				if children, _ := v["children"].([]any); len(children) > 1 {
-					for _, c := range children[1:] {
-						if param, _ := c.(map[string]any); param != nil && param["class"] == "PARAMETER" {
-							id, _ := param["identifier"].(string)
-							f.InParams[id] = true
-						}
-					}
-				}
-			}
-			return walk("children")
-		case "CAST":
-			castType, _ := v["type_expr"].(map[string]any)
-			id, _ := castType["type_name"].(string)
-			if !filterCasts[id] {
-				return fmt.Errorf("casting to %s is not allowed in a filter", id)
-			}
-			return walk("child")
-		case "COLUMN_REF":
-			names, _ := v["column_names"].([]any)
-			if len(names) != 1 {
-				return errors.New("qualified column names are not allowed in a filter")
-			}
-			name, _ := names[0].(string)
-			if _, err := sig.field(name); err != nil {
-				return err
-			}
-			return nil
-		case "CONSTANT":
-			return nil
-		case "PARAMETER":
-			name, _ := v["identifier"].(string)
-			if name == "" || (name[0] >= '0' && name[0] <= '9') {
-				return errors.New("use $name variables, not positional parameters")
-			}
-			if _, ok := vars[name]; !ok {
-				return fmt.Errorf("$%s is not a declared variable", name)
-			}
-			uses[name]++
-			if !slices.Contains(f.Params, name) {
-				f.Params = append(f.Params, name)
-			}
-			return nil
-		case "FUNCTION":
-			name, _ := v["function_name"].(string)
-			if !filterFunctions[name] {
-				return fmt.Errorf("function %s is not allowed in a filter", name)
-			}
-			if distinct, _ := v["distinct"].(bool); distinct {
-				return errors.New("DISTINCT is not allowed in a filter")
-			}
-			if orders, _ := v["order_bys"].(map[string]any); orders != nil {
-				if list, _ := orders["orders"].([]any); len(list) > 0 {
-					return errors.New("ORDER BY is not allowed in a filter")
-				}
-			}
-			if v["filter"] != nil {
-				return errors.New("FILTER is not allowed in a filter")
-			}
-			args := functionArguments(v)
-			if name == "contains" && len(args) == 2 {
-				if param, _ := args[0].(map[string]any); param != nil && param["class"] == "PARAMETER" {
-					id, _ := param["identifier"].(string)
-					f.InParams[id] = true
-				}
-			}
-			return walkFilter(args, sig, vars, f, uses)
-		default:
-			return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(kind, "VALUE_")))
-		}
-	}
-	return nil
+func walkFilter(raw any, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
+	return walkFilterExpr(SQLExpression(raw), sig, vars, f, uses)
 }
-
-func checkAttributeLookup(v map[string]any) error {
-	children, _ := v["children"].([]any)
-	if len(children) != 2 {
+func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter, uses map[string]int) error {
+	if v == nil {
+		return nil
+	}
+	walk := func(nodes ...*SQLExpr) error {
+		for _, child := range nodes {
+			if err := walkFilterExpr(child, sig, vars, f, uses); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	switch v.Class {
+	case "CONJUNCTION":
+		return walk(v.Children...)
+	case "COMPARISON":
+		return walk(v.Left, v.Right)
+	case "BETWEEN":
+		return walk(v.Input, v.Lower, v.Upper)
+	case "OPERATOR":
+		if v.Type == "ARRAY_EXTRACT" {
+			return checkAttributeExpr(v)
+		}
+		if !filterOperators[v.Type] {
+			return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(v.Type))
+		}
+		if v.Type == "COMPARE_IN" || v.Type == "COMPARE_NOT_IN" {
+			for _, c := range v.Children[min(1, len(v.Children)):] {
+				if c != nil && c.Class == "PARAMETER" {
+					f.InParams[c.Identifier] = true
+				}
+			}
+		}
+		return walk(v.Children...)
+	case "CAST":
+		if !filterCasts[v.CastType] {
+			return fmt.Errorf("casting to %s is not allowed in a filter", v.CastType)
+		}
+		return walk(v.Child)
+	case "COLUMN_REF":
+		if len(v.Columns) != 1 {
+			return errors.New("qualified column names are not allowed in a filter")
+		}
+		_, err := sig.field(v.Columns[0])
+		return err
+	case "CONSTANT":
+		return nil
+	case "PARAMETER":
+		name := v.Identifier
+		if name == "" || name[0] >= '0' && name[0] <= '9' {
+			return errors.New("use $name variables, not positional parameters")
+		}
+		if _, ok := vars[name]; !ok {
+			return fmt.Errorf("$%s is not a declared variable", name)
+		}
+		uses[name]++
+		if !slices.Contains(f.Params, name) {
+			f.Params = append(f.Params, name)
+		}
+		return nil
+	case "FUNCTION":
+		if !filterFunctions[v.Function] {
+			return fmt.Errorf("function %s is not allowed in a filter", v.Function)
+		}
+		if v.Distinct {
+			return errors.New("DISTINCT is not allowed in a filter")
+		}
+		if v.HasOrder {
+			return errors.New("ORDER BY is not allowed in a filter")
+		}
+		if v.HasFilter {
+			return errors.New("FILTER is not allowed in a filter")
+		}
+		if v.Function == "contains" && len(v.Arguments) == 2 && v.Arguments[0] != nil && v.Arguments[0].Class == "PARAMETER" {
+			f.InParams[v.Arguments[0].Identifier] = true
+		}
+		return walk(v.Arguments...)
+	default:
+		return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(v.Type, "VALUE_")))
+	}
+}
+func checkAttributeExpr(v *SQLExpr) error {
+	if len(v.Children) != 2 {
 		return errors.New("attribute lookups take one key")
 	}
-	column, _ := children[0].(map[string]any)
-	names, _ := column["column_names"].([]any)
-	if column["class"] != "COLUMN_REF" || len(names) != 1 || (names[0] != "attributes" && names[0] != "resource") {
+	column, key := v.Children[0], v.Children[1]
+	if column == nil || column.Class != "COLUMN_REF" || len(column.Columns) != 1 || column.Columns[0] != "attributes" && column.Columns[0] != "resource" {
 		return errors.New("only attributes['key'] and resource['key'] lookups are allowed")
 	}
-	key, _ := children[1].(map[string]any)
-	text := constantText(key)
-	if key["class"] != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s[%s]", names[0], sqlString(text))) {
+	if key == nil || key.Class != "CONSTANT" || !attributePattern.MatchString(fmt.Sprintf("%s[%s]", column.Columns[0], sqlString(key.LiteralText))) {
 		return errors.New("attribute keys must be literal strings such as attributes['http.route']")
 	}
 	return nil

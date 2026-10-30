@@ -39,19 +39,9 @@ func SeverityRank(band string) (int, bool) {
 // — the log-bucket query already labels that case UNSPECIFIED, and a level you
 // can see in the chart should be one you can filter on.
 func NormalizeSeverity(text string, number int32) string {
-	switch {
-	case number >= 21:
-		return "FATAL"
-	case number >= 17:
-		return "ERROR"
-	case number >= 13:
-		return "WARN"
-	case number >= 9:
-		return "INFO"
-	case number >= 5:
-		return "DEBUG"
-	case number >= 1:
-		return "TRACE"
+	if number > 0 {
+		rank := min(int((number-1)/4), len(SeverityBands)-1)
+		return SeverityBands[rank]
 	}
 	return SeverityFromText(text)
 }

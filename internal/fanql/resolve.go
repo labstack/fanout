@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/suggest"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -17,13 +18,9 @@ type Notice struct {
 	Message string          `json:"message"`
 	Span    *panel.TextSpan `json:"span,omitempty"`
 }
-type ResolveOptions struct {
-	Viz       string
-	Variables []panel.Variable
-	Schema    *panel.Schema
-}
-type Resolved struct {
-	Query      *Query
+
+type resolved struct {
+	Query      *queryTree
 	Compatible []panel.VizCompat
 	Edits      []VizEdit
 	Notices    []Notice
@@ -33,27 +30,34 @@ type VizEdit struct {
 	Text string `json:"text"`
 }
 
-// Installed by the lowering layer. Resolution itself never executes SQL.
-var resolveLower func(*Resolved) (panel.Query, panel.Problems)
-var resolvePrint func(*Query) string
+// Vocabulary dependencies are snapshots supplied per compilation, so prospective
+// catalog changes can be tested without mutating process-wide state.
+type vocabulary struct {
+	columns   func(string) ([]panel.Field, bool)
+	measures  func() []panel.MeasureSpec
+	functions func() []string
+	buckets   func() []string
+}
 
-// Catalog reads remain private and return snapshots. Tests can substitute a
-// prospective registry to detect accepted text that would need a version bump.
-var resolveColumns = panel.SignalColumns
-var resolveMeasures = panel.MeasureSpecs
-var resolveFilterFunctions = panel.FilterFunctionNames
+func currentVocabulary() vocabulary {
+	return vocabulary{panel.SignalColumns, panel.MeasureSpecs, panel.FilterFunctionNames, panel.BucketNames}
+}
 
 type resolver struct {
-	opts     ResolveOptions
-	out      *Resolved
+	opts     Options
+	vocab    vocabulary
+	out      *resolved
 	problems panel.Problems
 	countIf  bool
 	path     string
 }
 
 // Resolve annotates fields and values in place, retaining entry boundaries.
-func Resolve(q *Query, opts ResolveOptions) (*Resolved, panel.Problems) {
-	r := &resolver{opts: opts, out: &Resolved{Query: q, Notices: []Notice{}, Compatible: []panel.VizCompat{}, Edits: []VizEdit{}}}
+func resolve(q *queryTree, opts Options) (*resolved, panel.Problems) {
+	return resolveWith(q, opts, currentVocabulary())
+}
+func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel.Problems) {
+	r := &resolver{opts: opts, vocab: vocab, out: &resolved{Query: q, Notices: []Notice{}, Compatible: []panel.VizCompat{}, Edits: []VizEdit{}}}
 	if q == nil {
 		return nil, panel.Problems{{Path: "text", Message: "a query is required"}}
 	}
@@ -86,8 +90,8 @@ func Resolve(q *Query, opts ResolveOptions) (*Resolved, panel.Problems) {
 		}
 	}
 	r.sort()
-	if len(r.problems) == 0 && resolveLower != nil {
-		pq, ps := resolveLower(r.out)
+	if len(r.problems) == 0 {
+		pq, ps := lower(r.out)
 		r.problems = append(r.problems, ps...)
 		vars := map[string]panel.Variable(nil)
 		if opts.Variables != nil {
@@ -106,20 +110,20 @@ func Resolve(q *Query, opts ResolveOptions) (*Resolved, panel.Problems) {
 		r.out.Compatible = panel.CompatibleVizzes(&pq, vars)
 		if pq.Bucket == "" && q.Stage != nil && q.Stage.Histogram == nil {
 			pq.Bucket = "auto"
-			if ps, _ := panel.QueryShape(&pq, "timeseries", vars); len(ps) == 0 && resolvePrint != nil {
+			if ps, _ := panel.QueryShape(&pq, "timeseries", vars); len(ps) == 0 {
 				edit := *q
 				stage := *q.Stage
 				stage.Bucket = "auto"
 				edit.Stage = &stage
-				r.out.Edits = append(r.out.Edits, VizEdit{Viz: "timeseries", Text: resolvePrint(&edit)})
+				r.out.Edits = append(r.out.Edits, VizEdit{Viz: "timeseries", Text: print(&edit)})
 			}
 		}
 	}
 	sort.SliceStable(r.problems, func(i, j int) bool {
 		return r.problems[i].Span != nil && r.problems[j].Span != nil && r.problems[i].Span.Start < r.problems[j].Span.Start
 	})
-	if len(r.problems) > MaxProblems {
-		r.problems = append(r.problems[:MaxProblems], panel.Problem{Path: "text", Message: messages["more"], Span: r.problems[MaxProblems].Span})
+	if len(r.problems) > maxProblems {
+		r.problems = append(r.problems[:maxProblems], panel.Problem{Path: "text", Message: message(diagMore), Span: r.problems[maxProblems].Span})
 	}
 	if len(r.problems) > 0 {
 		return nil, r.problems
@@ -127,15 +131,15 @@ func Resolve(q *Query, opts ResolveOptions) (*Resolved, panel.Problems) {
 	return r.out, nil
 }
 
-func textSpan(s Span) *panel.TextSpan { return &panel.TextSpan{Start: s.Start, End: s.End} }
-func (r *resolver) issue(at Span, message string) {
+func textSpan(s span) *panel.TextSpan { return &panel.TextSpan{Start: s.Start, End: s.End} }
+func (r *resolver) issue(at span, message string) {
 	r.problems = append(r.problems, panel.Problem{Path: r.path, Message: message, Span: textSpan(at)})
 }
-func (r *resolver) notice(at Span, message string) {
+func (r *resolver) notice(at span, message string) {
 	r.out.Notices = append(r.out.Notices, Notice{Path: r.path, Message: message, Span: textSpan(at)})
 }
 
-func (r *resolver) field(f *Field) {
+func (r *resolver) field(f *fieldName) {
 	if f.Ref != nil {
 		return
 	}
@@ -145,19 +149,19 @@ func (r *resolver) field(f *Field) {
 		r.issue(f.At, "attribute keys must not be empty")
 	}
 	if strings.HasPrefix(key, "$__") {
-		r.issue(f.At, messages["variable"])
+		r.issue(f.At, message(diagVariable))
 	}
 	if scope == "" && !f.Bracket && strings.EqualFold(key, "duration") {
 		key = "duration_ms"
 	}
-	columns, _ := resolveColumns(r.out.Query.Source)
+	columns, _ := r.vocab.columns(r.out.Query.Source)
 	if scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		for _, c := range columns {
 			if strings.EqualFold(key, c.Name) {
 				if c.Type == panel.TypeMap {
 					r.issue(f.At, c.Name+" is a map; use "+c.Name+"['key']")
 				}
-				f.Ref = &FieldRef{Column: c.Name, Type: c.Type, Unit: c.Unit}
+				f.Ref = &fieldRef{Column: c.Name, Type: c.Type, Unit: c.Unit}
 				return
 			}
 		}
@@ -168,10 +172,10 @@ func (r *resolver) field(f *Field) {
 	if !f.Bracket && !identifierPath.MatchString(key) {
 		r.issue(f.At, fmt.Sprintf("%q needs brackets", key))
 	}
-	f.Ref = &FieldRef{Column: scope, Key: key, Type: panel.TypeString, Unit: "none"}
+	f.Ref = &fieldRef{Column: scope, Key: key, Type: panel.TypeString, Unit: "none"}
 	if f.Scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		message := fmt.Sprintf("%q is not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
-		for _, m := range resolveMeasures() {
+		for _, m := range r.vocab.measures() {
 			if strings.EqualFold(m.Name, key) {
 				message = fmt.Sprintf("%q is a measure, not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
 				break
@@ -181,32 +185,32 @@ func (r *resolver) field(f *Field) {
 		for _, c := range columns {
 			names = append(names, c.Name)
 		}
-		if hint := panel.Suggest(strings.ToLower(key), names); hint != "" {
+		if hint := suggest.Spelling(strings.ToLower(key), names); hint != "" {
 			message += "; " + hint
 		}
 		r.notice(f.At, message)
 	}
 }
 
-func (r *resolver) expr(e Expr) {
+func (r *resolver) expr(e filterExpr) {
 	switch x := e.(type) {
-	case *And:
+	case *andExpr:
 		for _, v := range x.Terms {
 			r.expr(v)
 		}
-	case *Or:
+	case *orExpr:
 		for _, v := range x.Terms {
 			r.expr(v)
 		}
-	case *Not:
+	case *notExpr:
 		r.expr(x.X)
-	case *Compare:
+	case *comparison:
 		r.field(&x.Field)
 		r.value(&x.Field, &x.Value, x.Op, false)
 		if x.Field.Ref.Column == "severity" && x.Field.Ref.Key == "" && isRange(x.Op) {
 			x.Bands = r.bands(x.Field, x.Op, x.Value, nil)
 		}
-	case *In:
+	case *inExpr:
 		r.field(&x.Field)
 		if x.Variable != "" {
 			r.variable("$"+x.Variable, x.Field.Key, x.At, true)
@@ -214,23 +218,23 @@ func (r *resolver) expr(e Expr) {
 		for i := range x.Values {
 			r.value(&x.Field, &x.Values[i], "in", true)
 		}
-	case *Between:
+	case *betweenExpr:
 		r.field(&x.Field)
 		r.value(&x.Field, &x.Lo, "between", false)
 		r.value(&x.Field, &x.Hi, "between", false)
 		if x.Field.Ref.Column == "severity" && x.Field.Ref.Key == "" {
 			x.Bands = r.bands(x.Field, "between", x.Lo, &x.Hi)
 		}
-	case *Like:
+	case *likeExpr:
 		r.field(&x.Field)
 		x.Pattern.Stored = x.Pattern.Text
-	case *Exists:
+	case *existsExpr:
 		r.field(&x.Field)
-	case *IsNull:
+	case *nullExpr:
 		r.field(&x.Field)
-	case *Call:
+	case *filterCall:
 		r.call(x)
-	case *FreeText:
+	case *textExpr:
 		x.Value.Stored = x.Value.Text
 		x.column = "body"
 		if r.out.Query.Source == "spans" {
@@ -239,17 +243,17 @@ func (r *resolver) expr(e Expr) {
 		if r.out.Query.Source == "metrics" {
 			r.issue(x.At, "free text needs a field on metrics; use name:http.server.duration")
 		}
-		cols, _ := resolveColumns(r.out.Query.Source)
+		cols, _ := r.vocab.columns(r.out.Query.Source)
 		for _, c := range cols {
 			if strings.EqualFold(c.Name, x.Value.Text) {
 				r.notice(x.At, fmt.Sprintf("%q is a field; did you mean %s:<value>?", x.Value.Text, c.Name))
 				break
 			}
 		}
-	case *RawExpr:
+	case *rawEntry:
 		// SQL is retained verbatim; the panel gate checks its syntax at execution.
-		for _, tok := range Lex(x.Text) {
-			if tok.Kind == Word && strings.HasPrefix(tok.Text, "$") {
+		for _, tok := range lex(x.Text) {
+			if tok.Kind == tokenWord && strings.HasPrefix(tok.Text, "$") {
 				r.variable(tok.Text, "", x.At, false)
 			}
 		}
@@ -259,7 +263,7 @@ func (r *resolver) expr(e Expr) {
 func isRange(op string) bool {
 	return op == ">" || op == ">=" || op == "<" || op == "<=" || op == "between"
 }
-func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
+func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 	v.Stored = v.Text
 	if !r.finiteValue(*v) {
 		return
@@ -268,11 +272,11 @@ func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
 	if ref.Column == "http_status_code" && ref.Key == "" && isRange(op) {
 		ref.CompareAs = "integer"
 	}
-	if v.Kind == VariableValue {
+	if v.Kind == variableValue {
 		r.variable(v.Text, f.Key, v.At, multi)
 		return
 	}
-	if v.Kind == DurationValue {
+	if v.Kind == durationValue {
 		if !strings.EqualFold(f.Key, "duration") || f.Scope != "" {
 			text := v.Text
 			for _, u := range []string{"us", "ms", "s", "m", "h"} {
@@ -299,39 +303,28 @@ func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
 	if ref.Type == panel.TypeTime && ref.Key == "" {
 		if !isRange(op) {
 			r.issue(f.At, fmt.Sprintf("%q is a time column; compare it with > or <", ref.Column))
-		} else if v.Kind != StringValue || !timestamp(v.Text) {
+		} else if v.Kind != stringValue || !timestamp(v.Text) {
 			r.issue(v.At, "time needs a quoted timestamp in RFC 3339 or YYYY-MM-DD HH:MM:SS form (optional fraction and offset)")
 		}
 		return
 	}
-	if ref.Type == panel.TypeNumber && ref.Key == "" && v.Kind != NumberValue {
+	if ref.Type == panel.TypeNumber && ref.Key == "" && v.Kind != numberValue {
 		r.issue(v.At, ref.Column+" needs a number")
 		return
 	}
-	if v.Kind == BooleanValue {
+	if v.Kind == booleanValue {
 		v.Stored = strings.ToLower(v.Text)
 	}
-	if v.Kind != WordValue || !(op == ":" || op == "=" || op == "!=" || op == "<>" || op == "in") || ref.Key != "" {
+	if v.Kind != wordValue || !(op == ":" || op == "=" || op == "!=" || op == "<>" || op == "in") || ref.Key != "" {
 		return
 	}
-	var table map[string]string
-	var choices string
+	vocabulary := panel.FieldVocabularies()[ref.Column]
+	table := vocabulary.Aliases
+	if vocabulary.Signal != r.out.Query.Source {
+		table = nil
+	}
+	choices := aliasChoices(ref.Column, table)
 	switch ref.Column {
-	case "status":
-		if r.out.Query.Source == "spans" {
-			table = statusAliases
-			choices = "status:error, status:ok or status:unset"
-		}
-	case "kind":
-		if r.out.Query.Source == "spans" {
-			table = kindAliases
-			choices = "kind:server, kind:client, kind:internal, kind:producer, kind:consumer or kind:unspecified"
-		}
-	case "type":
-		if r.out.Query.Source == "metrics" {
-			table = typeAliases
-			choices = "type:gauge, type:counter, type:updown, type:histogram or type:summary"
-		}
 	case "severity":
 		v.Stored = telemetry.SeverityFromText(v.Text)
 		if _, ok := telemetry.SeverityRank(v.Stored); !ok && v.Stored != "UNSPECIFIED" && r.opts.Schema != nil {
@@ -360,11 +353,11 @@ func (r *resolver) value(f *Field, v *Value, op string, multi bool) {
 	}
 }
 
-func (r *resolver) finiteValue(v Value) bool {
+func (r *resolver) finiteValue(v literalValue) bool {
 	var n float64
-	if v.Kind == NumberValue {
+	if v.Kind == numberValue {
 		n, _ = strconv.ParseFloat(v.Text, 64)
-	} else if v.Kind == DurationValue {
+	} else if v.Kind == durationValue {
 		n, _ = durationMS(v.Text)
 	}
 	if math.IsInf(n, 0) || math.IsNaN(n) {
@@ -374,7 +367,7 @@ func (r *resolver) finiteValue(v Value) bool {
 	return true
 }
 
-func (r *resolver) bands(f Field, op string, lo Value, hi *Value) []string {
+func (r *resolver) bands(f fieldName, op string, lo literalValue, hi *literalValue) []string {
 	level := telemetry.SeverityFromText(lo.Text)
 	rank, ok := telemetry.SeverityRank(level)
 	if !ok {
@@ -411,13 +404,13 @@ func (r *resolver) bands(f Field, op string, lo Value, hi *Value) []string {
 	return slices.Clone(telemetry.SeverityBands[start : end+1])
 }
 
-func (r *resolver) variable(name, field string, at Span, multi bool) {
+func (r *resolver) variable(name, field string, at span, multi bool) {
 	if r.countIf {
 		r.issue(at, "variables are not allowed inside count_if")
 		return
 	}
 	if strings.HasPrefix(name, "$__") {
-		r.issue(at, messages["variable"])
+		r.issue(at, message(diagVariable))
 		return
 	}
 	if r.opts.Variables == nil {
@@ -437,8 +430,8 @@ func (r *resolver) variable(name, field string, at Span, multi bool) {
 	r.issue(at, "undeclared variable "+name+"; declared variables: "+strings.Join(names, ", "))
 }
 
-func (r *resolver) call(c *Call) {
-	if !slices.Contains(resolveFilterFunctions(), c.Name) {
+func (r *resolver) call(c *filterCall) {
+	if !slices.Contains(r.vocab.functions(), c.Name) {
 		r.issue(c.At, "function "+c.Name+" is not allowed in a filter")
 		return
 	}
@@ -460,7 +453,7 @@ func (r *resolver) call(c *Call) {
 			} else {
 				r.issue(c.At, c.Name+" needs a field")
 			}
-		} else if a.Value == nil || a.Value.Kind != StringValue {
+		} else if a.Value == nil || a.Value.Kind != stringValue {
 			r.issue(c.At, c.Name+" needs a quoted string")
 		} else {
 			a.Value.Stored = a.Value.Text
@@ -475,17 +468,17 @@ func (r *resolver) call(c *Call) {
 	if c.Cmp != nil {
 		c.Cmp.Value.Stored = c.Cmp.Value.Text
 		r.finiteValue(c.Cmp.Value)
-		if c.Cmp.Value.Kind == VariableValue {
+		if c.Cmp.Value.Kind == variableValue {
 			r.variable(c.Cmp.Value.Text, "", c.Cmp.Value.At, false)
 		}
 	}
 }
 
-func (r *resolver) measure(e MExpr) {
+func (r *resolver) measure(e mExpr) {
 	switch x := e.(type) {
-	case *MCall:
+	case *mCall:
 		var spec *panel.MeasureSpec
-		for _, s := range resolveMeasures() {
+		for _, s := range r.vocab.measures() {
 			if s.Name == x.Name {
 				s := s
 				spec = &s
@@ -520,7 +513,7 @@ func (r *resolver) measure(e MExpr) {
 		if x.Name == "quantile" && (len(x.Args) < 2 || x.Args[1].Number == nil || *x.Args[1].Number <= 0 || *x.Args[1].Number >= 1) {
 			r.issue(x.At, "quantile q must be a number between 0 and 1")
 		}
-	case *MCountIf:
+	case *mCountIf:
 		if r.out.Query.Source == "metrics" {
 			r.issue(x.At, "measure arithmetic is not available for metrics")
 			return
@@ -528,14 +521,14 @@ func (r *resolver) measure(e MExpr) {
 		r.countIf = true
 		r.expr(x.Filter)
 		r.countIf = false
-	case *MBinary:
+	case *mBinary:
 		if r.out.Query.Source == "metrics" {
 			r.issue(x.At, "measure arithmetic is not available for metrics")
 			return
 		}
 		r.measure(x.L)
 		r.measure(x.R)
-	case *MNeg:
+	case *mNeg:
 		if r.out.Query.Source == "metrics" {
 			r.issue(x.At, "measure arithmetic is not available for metrics")
 			return
@@ -544,20 +537,20 @@ func (r *resolver) measure(e MExpr) {
 	}
 }
 
-func measureAlias(m Measure, all []Measure) string {
+func measureAlias(m measureNode, all []measureNode) string {
 	if m.Alias != "" {
 		return m.Alias
 	}
-	if _, ok := m.Expr.(*MCountIf); ok {
+	if _, ok := m.Expr.(*mCountIf); ok {
 		return "count_if"
 	}
-	c, ok := m.Expr.(*MCall)
+	c, ok := m.Expr.(*mCall)
 	if !ok {
 		return ""
 	}
 	n := 0
 	for _, v := range all {
-		if x, ok := v.Expr.(*MCall); ok && x.Name == c.Name && v.Alias == "" {
+		if x, ok := v.Expr.(*mCall); ok && x.Name == c.Name && v.Alias == "" {
 			n++
 		}
 	}
@@ -583,7 +576,7 @@ func measureAlias(m Measure, all []Measure) string {
 	return c.Name
 }
 
-func sortIsMeasureAlias(q *Query) bool {
+func sortIsMeasureAlias(q *queryTree) bool {
 	if q.Sort != nil && q.Stage != nil {
 		for _, m := range q.Stage.Measures {
 			if measureAlias(m, q.Stage.Measures) == q.Sort.Key {
@@ -638,7 +631,7 @@ func (r *resolver) sort() {
 	}
 }
 
-func queryPathSpan(q *Query, path string) Span {
+func queryPathSpan(q *queryTree, path string) span {
 	var i int
 	if _, err := fmt.Sscanf(path, "where[%d]", &i); err == nil && i >= 0 && i < len(q.Where) {
 		return q.Where[i].Span()
@@ -664,4 +657,20 @@ func queryPathSpan(q *Query, path string) Span {
 		return q.SourceSpan
 	}
 	return q.Span
+}
+
+func aliasChoices(field string, aliases map[string]string) string {
+	keys := sortedCompletionKeys(aliases)
+	// Preserve the documented order for diagnostic suggestions.
+	if order := panel.FieldVocabularies()[field].Order; len(order) == len(keys) {
+		keys = order
+	}
+	var choices []string
+	for _, key := range keys {
+		choices = append(choices, field+":"+key)
+	}
+	if len(choices) < 2 {
+		return strings.Join(choices, "")
+	}
+	return strings.Join(choices[:len(choices)-1], ", ") + " or " + choices[len(choices)-1]
 }

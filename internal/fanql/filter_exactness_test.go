@@ -62,7 +62,7 @@ func TestPrintParsePrintFixtureCorpus(t *testing.T) {
 }
 
 func TestPrintFunctionSearchWordsBeforeGroups(t *testing.T) {
-	for _, name := range resolveFilterFunctions() {
+	for _, name := range panel.FilterFunctionNames() {
 		standalone, ps := Compile("logs "+name, Options{})
 		if len(ps) != 0 || standalone.Canonical != "logs where "+name {
 			t.Fatalf("standalone search spelling: %+v %+v", standalone, ps)

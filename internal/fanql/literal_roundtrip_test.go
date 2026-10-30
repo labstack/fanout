@@ -57,7 +57,7 @@ func TestPrintExactIntegerThresholds(t *testing.T) {
 				if len(ps) != 0 || again == nil || !reflect.DeepEqual(c.Query, again.Query) {
 					t.Fatalf("canonical %q changed query: %+v %+v", c.Canonical, again, ps)
 				}
-				f, ps, err := Format(t.Context(), engine, c.Query, FormatOptions{})
+				f, ps, err := Format(t.Context(), engine, c.Query, Options{})
 				if err != nil || len(ps) != 0 || f == nil {
 					t.Fatalf("format: %+v %v", ps, err)
 				}
@@ -85,7 +85,7 @@ func TestFormatCountIfSQLComments(t *testing.T) {
 			if len(ps) != 0 || c == nil {
 				t.Fatalf("compile: %+v", ps)
 			}
-			f, ps, err := Format(t.Context(), engine, c.Query, FormatOptions{})
+			f, ps, err := Format(t.Context(), engine, c.Query, Options{})
 			if err != nil || len(ps) != 0 || f == nil {
 				t.Fatalf("format: %+v %v", ps, err)
 			}

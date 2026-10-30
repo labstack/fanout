@@ -5,14 +5,13 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-func init() { resolvePrint = Print }
-
 // Print prints the canonical spelling of a resolved tree. This spelling is
 // frozen for Version; in particular, filter entry boundaries are preserved.
-func Print(q *Query) string {
+func print(q *queryTree) string {
 	if q == nil {
 		return ""
 	}
@@ -68,52 +67,54 @@ func Print(q *Query) string {
 	return text
 }
 
-func printEntry(e Expr, grouped bool) string { return printExpr(canonicalExpr(e, false), grouped) }
+func printEntry(e filterExpr, grouped bool) string {
+	return printExpr(canonicalExpr(e, false), grouped)
+}
 
 // Canonical negation follows the lowerer's NNF so text with the same lowered
 // form has a single spelling and can be lifted without origin metadata.
-func canonicalExpr(e Expr, neg bool) Expr {
+func canonicalExpr(e filterExpr, neg bool) filterExpr {
 	switch x := e.(type) {
-	case *Not:
+	case *notExpr:
 		return canonicalExpr(x.X, !neg)
-	case *And:
-		terms := make([]Expr, len(x.Terms))
+	case *andExpr:
+		terms := make([]filterExpr, len(x.Terms))
 		for i, t := range x.Terms {
 			terms[i] = canonicalExpr(t, neg)
 		}
 		if neg {
-			return &Or{Terms: terms, At: x.At}
+			return &orExpr{Terms: terms, At: x.At}
 		}
-		return &And{Terms: terms, At: x.At}
-	case *Or:
-		terms := make([]Expr, len(x.Terms))
+		return &andExpr{Terms: terms, At: x.At}
+	case *orExpr:
+		terms := make([]filterExpr, len(x.Terms))
 		for i, t := range x.Terms {
 			terms[i] = canonicalExpr(t, neg)
 		}
 		if neg {
-			return &And{Terms: terms, At: x.At}
+			return &andExpr{Terms: terms, At: x.At}
 		}
-		return &Or{Terms: terms, At: x.At}
-	case *In:
+		return &orExpr{Terms: terms, At: x.At}
+	case *inExpr:
 		if !x.Negated && x.Variable == "" && x.Field.Ref != nil && x.Field.Ref.Column == "severity" && x.Field.Ref.Key == "" {
 			if candidate := liftSeverityRange(x); candidate != x {
 				return canonicalExpr(candidate, neg)
 			}
 		}
-	case *Between:
+	case *betweenExpr:
 		if x.Negated && len(x.Bands) > 0 {
 			return canonicalExpr(bandMembership(x.Field, x.Bands, true), neg)
 		}
-	case *IsNull:
-		return canonicalExpr(&Exists{Field: x.Field, At: x.At}, neg != !x.Negated)
-	case *Compare:
-		if x.Op == "~" && x.Value.Kind != VariableValue && x.Field.Ref != nil && x.Field.Ref.Key == "" && (x.Field.Ref.Column == "body" || x.Field.Ref.Column == "operation") {
+	case *nullExpr:
+		return canonicalExpr(&existsExpr{Field: x.Field, At: x.At}, neg != !x.Negated)
+	case *comparison:
+		if x.Op == "~" && x.Value.Kind != variableValue && x.Field.Ref != nil && x.Field.Ref.Key == "" && (x.Field.Ref.Column == "body" || x.Field.Ref.Column == "operation") {
 			v := x.Value
-			v.Kind = WordValue
+			v.Kind = wordValue
 			if v.Stored != "" {
 				v.Text = v.Stored
 			}
-			return canonicalExpr(&FreeText{Value: v, column: x.Field.Ref.Column, At: x.At}, neg)
+			return canonicalExpr(&textExpr{Value: v, column: x.Field.Ref.Column, At: x.At}, neg)
 		}
 		if x.Op == "!~" {
 			copy := *x
@@ -122,14 +123,14 @@ func canonicalExpr(e Expr, neg bool) Expr {
 		}
 	}
 	if neg {
-		return &Not{X: e, At: e.Span()}
+		return &notExpr{X: e, At: e.Span()}
 	}
 	return e
 }
 
-func printExpr(e Expr, grouped bool) string {
+func printExpr(e filterExpr, grouped bool) string {
 	switch x := e.(type) {
-	case *And:
+	case *andExpr:
 		terms := make([]string, len(x.Terms))
 		for i, t := range x.Terms {
 			terms[i] = printExpr(t, true)
@@ -140,7 +141,7 @@ func printExpr(e Expr, grouped bool) string {
 			}
 		}
 		return "(" + strings.Join(terms, " ") + ")"
-	case *Or:
+	case *orExpr:
 		terms := make([]string, len(x.Terms))
 		for i, t := range x.Terms {
 			terms[i] = printExpr(t, true)
@@ -150,11 +151,11 @@ func printExpr(e Expr, grouped bool) string {
 			text = "(" + text + ")"
 		}
 		return text
-	case *Not:
+	case *notExpr:
 		odd := true
 		inner := x.X
 		for {
-			n, ok := inner.(*Not)
+			n, ok := inner.(*notExpr)
 			if !ok {
 				break
 			}
@@ -165,7 +166,7 @@ func printExpr(e Expr, grouped bool) string {
 			return printExpr(inner, grouped)
 		}
 		return "-" + printExpr(inner, true)
-	case *Compare:
+	case *comparison:
 		if len(x.Bands) > 0 {
 			return printBandRange(x.Field, x.Bands)
 		}
@@ -178,10 +179,10 @@ func printExpr(e Expr, grouped bool) string {
 		}
 		if op == "~" || op == "!~" {
 			value := x.Value
-			if value.Kind != VariableValue {
+			if value.Kind != variableValue {
 				// Contains interprets every literal as text, including its exact
 				// exponent spelling; numeric normalization would change the search.
-				value.Kind = StringValue
+				value.Kind = stringValue
 				if value.Stored != "" {
 					value.Text = value.Stored
 				}
@@ -190,7 +191,7 @@ func printExpr(e Expr, grouped bool) string {
 		}
 		field, native := printFilterField(x.Field, x.Value)
 		return field + op + printFilterValue(x.Value, x.Field, op == ":" || op == "=" || op == "!=" || op == "<>", native)
-	case *In:
+	case *inExpr:
 		op := " in "
 		if x.Negated {
 			op = " not in "
@@ -204,7 +205,7 @@ func printExpr(e Expr, grouped bool) string {
 			vs[i] = printFilterValue(v, x.Field, true, native)
 		}
 		return field + op + "(" + strings.Join(vs, ", ") + ")"
-	case *Between:
+	case *betweenExpr:
 		if len(x.Bands) > 0 && !x.Negated {
 			return printBandRange(x.Field, x.Bands)
 		}
@@ -214,7 +215,7 @@ func printExpr(e Expr, grouped bool) string {
 		}
 		field, native := printFilterField(x.Field, x.Lo, x.Hi)
 		return field + op + printFilterValue(x.Lo, x.Field, false, native) + " and " + printFilterValue(x.Hi, x.Field, false, native)
-	case *Like:
+	case *likeExpr:
 		op := "like"
 		if x.Insensitive {
 			op = "ilike"
@@ -223,18 +224,18 @@ func printExpr(e Expr, grouped bool) string {
 			op = "not " + op
 		}
 		return printField(x.Field) + " " + op + " " + quoteText(x.Pattern.Text)
-	case *Exists:
+	case *existsExpr:
 		return printField(x.Field) + ":*"
-	case *IsNull:
+	case *nullExpr:
 		if x.Negated {
 			return printField(x.Field) + ":*"
 		}
 		return "-" + printField(x.Field) + ":*"
-	case *Call:
+	case *filterCall:
 		return printCall(x)
-	case *FreeText:
+	case *textExpr:
 		return printLiteral(x.Value, false)
-	case *RawExpr:
+	case *rawEntry:
 		return "`" + strings.ReplaceAll(x.Text, "`", "``") + "`"
 	}
 	return ""
@@ -242,14 +243,14 @@ func printExpr(e Expr, grouped bool) string {
 
 // Canonical negation can introduce a following group. A function-shaped search
 // word needs quotes only in that context, where it would become a spaced call.
-func quoteSearchBeforeGroup(e Expr, text string) string {
+func quoteSearchBeforeGroup(e filterExpr, text string) string {
 	e = canonicalExpr(e, false)
 	neg := false
-	if n, ok := e.(*Not); ok {
+	if n, ok := e.(*notExpr); ok {
 		neg, e = true, n.X
 	}
-	if x, ok := e.(*FreeText); ok {
-		for _, name := range resolveFilterFunctions() {
+	if x, ok := e.(*textExpr); ok {
+		for _, name := range panel.FilterFunctionNames() {
 			if strings.EqualFold(x.Value.Text, name) {
 				text = quoteText(x.Value.Text)
 				if neg {
@@ -262,7 +263,7 @@ func quoteSearchBeforeGroup(e Expr, text string) string {
 	return text
 }
 
-func printField(f Field) string {
+func printField(f fieldName) string {
 	column, key := f.Key, ""
 	if f.Ref != nil {
 		column, key = f.Ref.Column, f.Ref.Key
@@ -293,10 +294,10 @@ func quoteText(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) 
 // The explicit numeric column accepts negative numbers; the duration shorthand
 // forbids negative units and uses float64 milliseconds. Keep the numeric field
 // for a whole list/range if a value cannot use that shorthand exactly.
-func printFilterField(f Field, values ...Value) (string, bool) {
+func printFilterField(f fieldName, values ...literalValue) (string, bool) {
 	if f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
 		for _, v := range values {
-			if v.Kind == NumberValue {
+			if v.Kind == numberValue {
 				if n, err := strconv.ParseFloat(v.Text, 64); err == nil && (n < 0 || decimal(n) != numberText(v.Text)) {
 					return "duration_ms", true
 				}
@@ -306,25 +307,25 @@ func printFilterField(f Field, values ...Value) (string, bool) {
 	return printField(f), false
 }
 
-func printFilterValue(v Value, f Field, aliases, nativeDuration bool) string {
-	if nativeDuration && v.Kind == NumberValue {
+func printFilterValue(v literalValue, f fieldName, aliases, nativeDuration bool) string {
+	if nativeDuration && v.Kind == numberValue {
 		return printLiteral(v, false)
 	}
 	return printValue(v, f, aliases)
 }
 
-func printValue(v Value, f Field, aliases bool) string {
+func printValue(v literalValue, f fieldName, aliases bool) string {
 	// In alias-bearing positions, unresolved fields cannot prove that removing
 	// the user's quotes preserves the value. Keep them until that proof exists.
-	if aliases && v.Kind == StringValue && f.Ref == nil {
+	if aliases && v.Kind == stringValue && f.Ref == nil {
 		return quoteText(v.Text)
 	}
-	if v.Kind == NumberValue && f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
+	if v.Kind == numberValue && f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
 		if n, err := strconv.ParseFloat(v.Text, 64); err == nil {
 			return durationText(n)
 		}
 	}
-	if aliases && v.Kind != VariableValue {
+	if aliases && v.Kind != variableValue {
 		stored := v.Stored
 		if stored == "" {
 			stored = v.Text
@@ -336,43 +337,30 @@ func printValue(v Value, f Field, aliases bool) string {
 				column = ""
 			}
 		}
+		for alias, value := range panel.FieldAliases(column) {
+			if stored == value {
+				return alias
+			}
+		}
 		switch column {
-		case "status":
-			for alias, value := range statusAliases {
-				if stored == value {
-					return alias
-				}
-			}
-		case "kind":
-			for alias, value := range kindAliases {
-				if stored == value {
-					return alias
-				}
-			}
 		case "severity":
-			if v.Kind != StringValue || telemetry.SeverityFromText(stored) == stored {
+			if v.Kind != stringValue || telemetry.SeverityFromText(stored) == stored {
 				alias := strings.ToLower(stored)
 				// Numeric, boolean and duration-shaped tokens are literals, not
 				// vocabulary words. Keep quoted strings' spelling in those cases.
-				if classify(Token{Kind: Word, Text: alias}).Kind == WordValue {
+				if classify(lexToken{Kind: tokenWord, Text: alias}).Kind == wordValue {
 					if bareValue(alias) {
 						return alias
 					}
 					return quoteText(stored)
 				}
 			}
-		case "type":
-			for alias, value := range typeAliases {
-				if stored == value {
-					return alias
-				}
-			}
 		}
 	}
-	if v.Kind == NumberValue && f.Ref != nil && f.Ref.Type == "string" && f.Ref.Key == "" && f.Ref.CompareAs == "" {
+	if v.Kind == numberValue && f.Ref != nil && f.Ref.Type == "string" && f.Ref.Key == "" && f.Ref.CompareAs == "" {
 		return v.Text
 	}
-	if v.Kind == StringValue {
+	if v.Kind == stringValue {
 		if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == "string" && f.Ref.CompareAs == "" {
 			if numberPattern.MatchString(v.Text) {
 				if _, err := strconv.ParseFloat(v.Text, 64); err == nil {
@@ -397,17 +385,17 @@ func printValue(v Value, f Field, aliases bool) string {
 	return printLiteral(v, false)
 }
 
-func printLiteral(v Value, forceQuote bool) string {
-	if v.Kind == VariableValue {
+func printLiteral(v literalValue, forceQuote bool) string {
+	if v.Kind == variableValue {
 		return v.Text
 	}
-	if v.Kind == NumberValue {
+	if v.Kind == numberValue {
 		return numberText(v.Text)
 	}
-	if v.Kind == BooleanValue {
+	if v.Kind == booleanValue {
 		return strings.ToLower(v.Text)
 	}
-	if v.Kind == DurationValue {
+	if v.Kind == durationValue {
 		if ms, ok := durationMS(v.Text); ok {
 			return durationText(ms)
 		}
@@ -434,7 +422,7 @@ func bareValue(s string) bool {
 	return true
 }
 
-func printCall(x *Call) string {
+func printCall(x *filterCall) string {
 	args := make([]string, len(x.Args))
 	for i, a := range x.Args {
 		switch {
@@ -442,7 +430,7 @@ func printCall(x *Call) string {
 			args[i] = printField(*a.Field)
 		case a.Value != nil:
 			args[i] = quoteText(a.Value.Text)
-			if a.Value.Kind == NumberValue {
+			if a.Value.Kind == numberValue {
 				args[i] = printLiteral(*a.Value, false)
 			}
 		case a.Call != nil:
@@ -452,7 +440,7 @@ func printCall(x *Call) string {
 	text := x.Name + "(" + strings.Join(args, ", ") + ")"
 	if x.Cmp != nil {
 		value := printLiteral(x.Cmp.Value, false)
-		if x.Cmp.Value.Kind == StringValue {
+		if x.Cmp.Value.Kind == stringValue {
 			value = quoteText(x.Cmp.Value.Text)
 		}
 		text += x.Cmp.Op + value
@@ -460,7 +448,7 @@ func printCall(x *Call) string {
 	return text
 }
 
-func printMeasure(m Measure) string {
+func printMeasure(m measureNode) string {
 	text := printMExpr(m.Expr, 0)
 	if m.Alias != "" {
 		text += " as " + m.Alias
@@ -468,9 +456,9 @@ func printMeasure(m Measure) string {
 	return text
 }
 
-func printMExpr(e MExpr, parent int) string {
+func printMExpr(e mExpr, parent int) string {
 	switch x := e.(type) {
-	case *MCall:
+	case *mCall:
 		if x.Name == "count" && len(x.Args) == 1 && x.Args[0].Star {
 			return "count()"
 		}
@@ -486,13 +474,13 @@ func printMExpr(e MExpr, parent int) string {
 			}
 		}
 		return x.Name + "(" + strings.Join(args, ", ") + ")"
-	case *MCountIf:
+	case *mCountIf:
 		body := printEntry(x.Filter, false)
-		if _, ok := x.Filter.(*And); ok {
+		if _, ok := x.Filter.(*andExpr); ok {
 			body = strings.TrimSuffix(strings.TrimPrefix(body, "("), ")")
 		}
 		return "count_if(" + body + ")"
-	case *MBinary:
+	case *mBinary:
 		prec := 1
 		if x.Op == '*' || x.Op == '/' {
 			prec = 2
@@ -502,18 +490,18 @@ func printMExpr(e MExpr, parent int) string {
 			text = "(" + text + ")"
 		}
 		return text
-	case *MNeg:
-		if _, nested := x.X.(*MNeg); nested {
+	case *mNeg:
+		if _, nested := x.X.(*mNeg); nested {
 			return "-(" + printMExpr(x.X, 0) + ")"
 		}
 		return "-" + printMExpr(x.X, 3)
-	case *MConst:
+	case *mConst:
 		return strconv.FormatFloat(x.Value, 'f', -1, 64)
 	}
 	return ""
 }
 
-func printBandRange(f Field, bands []string) string {
+func printBandRange(f fieldName, bands []string) string {
 	first, last := strings.ToLower(bands[0]), strings.ToLower(bands[len(bands)-1])
 	field := printField(f)
 	if last == "fatal" {

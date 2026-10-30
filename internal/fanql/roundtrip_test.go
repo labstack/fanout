@@ -146,7 +146,7 @@ func measureMeaning(t testing.TB, p panel.Parser, signal string, expr panel.Meas
 	}
 }
 
-func assertQueryTier(t testing.TB, p panel.Parser, stored, lowered panel.Query, tier string) {
+func assertQueryTier(t testing.TB, p panel.Parser, stored, lowered panel.Query, tier Exactness) {
 	t.Helper()
 	if len(stored.Where) != len(lowered.Where) {
 		t.Fatalf("entry boundaries changed: %+v -> %+v", stored, lowered)
@@ -202,7 +202,7 @@ func TestRoundTripCorpusFixedPoint(t *testing.T) {
 		// under the engine's authority. The structured Query has no origin
 		// metadata that could distinguish those authored forms from stored SQL.
 		p := &countingParser{Parser: engine, fail: !strings.ContainsRune(fixture.Text, '`') && !strings.Contains(strings.ToLower(fixture.Text), "lower(") && !strings.Contains(strings.ToLower(fixture.Text), "upper(")}
-		f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{Viz: fixture.Viz})
+		f, ps, err := Format(t.Context(), p, c.Query, Options{Viz: fixture.Viz})
 		// Compile can parse filter-only metrics without a viz. There is no
 		// metrics row viz, so these are outside Format's valid-query contract.
 		if len(panel.CompatibleVizzes(&c.Query, nil)) == 0 {
@@ -235,7 +235,7 @@ func TestRoundTripStoredDashboards(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			p := fixture.Panel
 			stored := *p.Query
-			f, ps, err := Format(t.Context(), engine, stored, FormatOptions{Viz: p.Viz, Variables: fixture.Variables})
+			f, ps, err := Format(t.Context(), engine, stored, Options{Viz: p.Viz, Variables: fixture.Variables})
 			if err != nil || len(ps) != 0 {
 				t.Fatalf("format: %+v %v", ps, err)
 			}
@@ -357,7 +357,7 @@ func TestRoundTripProperties(t *testing.T) {
 			t.Fatalf("A[%d] %q: %+v", i, text, ps)
 		}
 		p := &countingParser{Parser: engine, fail: !strings.ContainsRune(text, '`')}
-		f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{Variables: vars})
+		f, ps, err := Format(t.Context(), p, c.Query, Options{Variables: vars})
 		if err != nil || len(ps) != 0 || f == nil {
 			t.Fatalf("A[%d] %q: %+v %v", i, text, ps, err)
 		}
@@ -372,13 +372,13 @@ func TestRoundTripProperties(t *testing.T) {
 		bytes := make([]byte, 32)
 		_, _ = r.Read(bytes)
 		stored := generatedStructuredQuery(bytes)
-		formatted, ps, err := Format(t.Context(), engine, stored, FormatOptions{})
+		formatted, ps, err := Format(t.Context(), engine, stored, Options{})
 		if err != nil || len(ps) != 0 {
 			t.Fatalf("B[%d]: %+v %v", i, ps, err)
 		}
 		// Count runes/bytes/tokens independently; parser bounds cover AST size
 		// and depth in their own tests. Generator B stays within those bounds.
-		within := len([]rune(formatted.Text)) <= 4000 && len(formatted.Text) <= 8192 && len(Lex(formatted.Text))-1 <= 1024
+		within := len([]rune(formatted.Text)) <= 4000 && len(formatted.Text) <= 8192 && len(lex(formatted.Text))-1 <= 1024
 		if formatted.Editable != within {
 			t.Fatalf("B[%d] editable disagrees with independent bounds: %+v", i, formatted)
 		}
@@ -412,7 +412,7 @@ func TestEntryBoundaryShapesDiffer(t *testing.T) {
 	queries := []panel.Query{{From: "spans", Where: []string{`attributes['a'] = 1`, `attributes['b'] = 2`}}, {From: "spans", Where: []string{`attributes['a'] = 1 AND attributes['b'] = 2`}}}
 	texts := []string{}
 	for _, q := range queries {
-		f, ps, err := Format(t.Context(), engine, q, FormatOptions{})
+		f, ps, err := Format(t.Context(), engine, q, Options{})
 		if err != nil || len(ps) != 0 {
 			t.Fatal(ps, err)
 		}
@@ -434,7 +434,7 @@ func TestEditableFalsePreservationThroughEnvelope(t *testing.T) {
 		q.Where = append(q.Where, "body = '"+strings.Repeat("x", 480)+strconv.Itoa(i)+"'")
 	}
 	p := &countingParser{fail: true}
-	f, ps, err := Format(t.Context(), p, q, FormatOptions{Viz: "logs"})
+	f, ps, err := Format(t.Context(), p, q, Options{Viz: "logs"})
 	if err != nil || len(ps) != 0 || f == nil || f.Editable || f.Reason == "" || p.calls != 0 {
 		t.Fatalf("oversized format: %+v %+v %v; engine calls=%d", f, ps, err, p.calls)
 	}

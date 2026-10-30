@@ -37,7 +37,7 @@ func TestFormatOwnLoweringNeedsNoEngine(t *testing.T) {
 				t.Fatalf("compile: %+v", problems)
 			}
 			p := &countingParser{fail: true}
-			f, problems, err := Format(t.Context(), p, c.Query, FormatOptions{})
+			f, problems, err := Format(t.Context(), p, c.Query, Options{})
 			if err != nil || len(problems) != 0 {
 				t.Fatalf("format: %+v %v", problems, err)
 			}
@@ -66,7 +66,7 @@ func TestFormatCountIfQuotedDelimiters(t *testing.T) {
 				t.Fatal(ps)
 			}
 			p := &countingParser{fail: true}
-			f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{})
+			f, ps, err := Format(t.Context(), p, c.Query, Options{})
 			if err != nil || len(ps) != 0 {
 				t.Fatalf("format: %v %v", ps, err)
 			}
@@ -115,11 +115,11 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 	} {
 		t.Run(tt.sql, func(t *testing.T) {
 			q := panel.Query{From: tt.signal, Where: []string{tt.sql}}
-			f, problems, err := Format(t.Context(), d, q, FormatOptions{})
+			f, problems, err := Format(t.Context(), d, q, Options{})
 			if err != nil || len(problems) != 0 {
 				t.Fatalf("format: %+v %v", problems, err)
 			}
-			if f.Text != tt.signal+" where "+tt.text || f.Exactness != tt.tier {
+			if f.Text != tt.signal+" where "+tt.text || f.Exactness != Exactness(tt.tier) {
 				t.Fatalf("got %+v, want %q %s", f, tt.text, tt.tier)
 			}
 			c, ps := Compile(f.Text, Options{})
@@ -145,7 +145,7 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 		})
 	}
 	q := panel.Query{From: "spans", Where: []string{`attributes['a'] = 1 OR attributes['b'] = 2`, `service = 'api'`}}
-	f, ps, err := Format(t.Context(), d, q, FormatOptions{})
+	f, ps, err := Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) > 0 || f.Text != `spans where (attributes['a']:1 or attributes['b']:2) service:api` {
 		t.Fatalf("entry grouping: %+v %+v %v", f, ps, err)
 	}
@@ -159,23 +159,23 @@ func TestLiftMeasures(t *testing.T) {
 		{`count_distinct(attributes['user.id'])`, `count_distinct(user.id)`, "exact"},
 		{`quantile(duration_ms, 0.999) as q`, `quantile(duration, 0.999) as q`, "exact"},
 	} {
-		f, ps, err := Format(t.Context(), d, panel.Query{From: "spans", Measures: []string{tt.stored}}, FormatOptions{})
-		if err != nil || len(ps) > 0 || f.Text != "spans | "+tt.want || f.Exactness != tt.tier {
+		f, ps, err := Format(t.Context(), d, panel.Query{From: "spans", Measures: []string{tt.stored}}, Options{})
+		if err != nil || len(ps) > 0 || f.Text != "spans | "+tt.want || f.Exactness != Exactness(tt.tier) {
 			t.Fatalf("%s: %+v %+v %v", tt.stored, f, ps, err)
 		}
 	}
 	q := panel.Query{From: "spans", Measures: []string{"count()"}, Histogram: &panel.Histogram{Field: "duration_ms", Buckets: "log2"}}
-	f, ps, err := Format(t.Context(), d, q, FormatOptions{})
+	f, ps, err := Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) > 0 || f.Text != "spans | histogram(duration)" {
 		t.Fatalf("histogram: %+v %+v %v", f, ps, err)
 	}
 	q.Measures = []string{"p95(duration_ms)"}
-	f, ps, err = Format(t.Context(), d, q, FormatOptions{})
+	f, ps, err = Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) == 0 || f != nil {
 		t.Fatalf("invalid histogram: %+v %+v %v", f, ps, err)
 	}
 	for _, sort := range []string{"errors", "duration_ms", "+start"} {
-		f, ps, err = Format(t.Context(), d, panel.Query{From: "spans", Sort: sort}, FormatOptions{Viz: "traces"})
+		f, ps, err = Format(t.Context(), d, panel.Query{From: "spans", Sort: sort}, Options{Viz: "traces"})
 		want := sort
 		if sort == "duration_ms" {
 			want = "duration"
@@ -195,7 +195,7 @@ func TestFormatEditableFalseIsCompleteAndReasoned(t *testing.T) {
 	for i := range 16 {
 		q.Where = append(q.Where, "body = '"+strings.Repeat("x", 480)+fmt.Sprint(i)+"'")
 	}
-	f, ps, err := Format(t.Context(), d, q, FormatOptions{})
+	f, ps, err := Format(t.Context(), d, q, Options{})
 	if err != nil || len(ps) > 0 {
 		t.Fatalf("format: %+v %v", ps, err)
 	}
@@ -211,7 +211,7 @@ func TestFormatEditableFalseIsCompleteAndReasoned(t *testing.T) {
 	for i := range 16 {
 		rawQuery.Where = append(rawQuery.Where, "coalesce(body, '"+strings.Repeat("𝔘", 110)+strings.Repeat("`", 30)+fmt.Sprint(i)+"') = ''")
 	}
-	rawFormat, ps, err := Format(t.Context(), d, rawQuery, FormatOptions{})
+	rawFormat, ps, err := Format(t.Context(), d, rawQuery, Options{})
 	if err != nil || len(ps) > 0 {
 		t.Fatalf("raw format: %+v %v", ps, err)
 	}
@@ -238,7 +238,7 @@ func TestFormatEditableFalseIsCompleteAndReasoned(t *testing.T) {
 
 func TestFormatOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 	for _, wantErr := range []error{context.DeadlineExceeded, errors.New("disk failure")} {
-		f, ps, err := Format(t.Context(), &countingParser{failErr: wantErr}, panel.Query{From: "logs", Where: []string{`coalesce(body, '') = ''`}}, FormatOptions{})
+		f, ps, err := Format(t.Context(), &countingParser{failErr: wantErr}, panel.Query{From: "logs", Where: []string{`coalesce(body, '') = ''`}}, Options{})
 		if f != nil || len(ps) > 0 || !errors.Is(err, wantErr) {
 			t.Fatalf("got %+v %+v %v", f, ps, err)
 		}
@@ -257,7 +257,7 @@ func (p failingRenderParser) RenderSQL(context.Context, map[string]any) (string,
 func TestFormatRenderOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 	d, _ := newTestEngine(t)
 	wantErr := errors.New("engine serialization failed")
-	f, ps, err := Format(t.Context(), failingRenderParser{Parser: d, err: wantErr}, panel.Query{From: "spans", Where: []string{`service='api'`}}, FormatOptions{})
+	f, ps, err := Format(t.Context(), failingRenderParser{Parser: d, err: wantErr}, panel.Query{From: "spans", Where: []string{`service='api'`}}, Options{})
 	if f != nil || len(ps) > 0 || !errors.Is(err, wantErr) {
 		t.Fatalf("got %+v %+v %v", f, ps, err)
 	}
@@ -265,7 +265,7 @@ func TestFormatRenderOperationalErrorIsReturnedNotAProblem(t *testing.T) {
 
 func TestFormatRejectsQueryInvalidUnderEveryViz(t *testing.T) {
 	p := &countingParser{fail: true}
-	f, ps, err := Format(t.Context(), p, panel.Query{From: "spans", Measures: []string{"count()"}, By: []string{"a", "b", "c", "d"}}, FormatOptions{})
+	f, ps, err := Format(t.Context(), p, panel.Query{From: "spans", Measures: []string{"count()"}, By: []string{"a", "b", "c", "d"}}, Options{})
 	if f != nil || len(ps) == 0 || err != nil || p.calls != 0 {
 		t.Fatalf("got %+v %+v %v calls %d", f, ps, err, p.calls)
 	}
@@ -286,7 +286,7 @@ func TestFormatOwnLoweringFilterFixturesNeedNoEngine(t *testing.T) {
 				t.Fatal(ps)
 			}
 			p := &countingParser{fail: true}
-			f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{})
+			f, ps, err := Format(t.Context(), p, c.Query, Options{})
 			if err != nil || len(ps) > 0 {
 				t.Fatalf("format %+v %v; canonical %q", ps, err, c.Canonical)
 			}
@@ -310,7 +310,7 @@ func TestFormatReportsIgnoredSortAndLimit(t *testing.T) {
 		{"stat", panel.Query{From: "spans", Measures: []string{"count()"}, Limit: 10}},
 		{"gauge", panel.Query{From: "spans", Measures: []string{"count()"}, Limit: 10}},
 	} {
-		f, ps, err := Format(t.Context(), &countingParser{fail: true}, tt.q, FormatOptions{Viz: tt.viz})
+		f, ps, err := Format(t.Context(), &countingParser{fail: true}, tt.q, Options{Viz: tt.viz})
 		if err != nil || len(ps) > 0 || len(f.Notices) != 1 || f.Notices[0].Message != "sort does not apply to bucketed series; series are chosen by top (options)" {
 			t.Fatalf("%s: %+v %+v %v", tt.viz, f, ps, err)
 		}
@@ -334,7 +334,7 @@ func TestFormatOwnSeverityBandsAreFixedPoints(t *testing.T) {
 				t.Fatal(ps)
 			}
 			p := &countingParser{fail: true}
-			f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{})
+			f, ps, err := Format(t.Context(), p, c.Query, Options{})
 			if err != nil || len(ps) > 0 || f.Exactness != "exact" || f.Text != c.Canonical || p.calls != 0 {
 				t.Fatalf("format %+v %+v %v calls %d, want %q", f, ps, err, p.calls, c.Canonical)
 			}
@@ -372,7 +372,7 @@ func TestFormatOwnLiteralSpellingsAreFixedPoints(t *testing.T) {
 				t.Fatal(ps)
 			}
 			p := &countingParser{fail: true}
-			f, ps, err := Format(t.Context(), p, c.Query, FormatOptions{})
+			f, ps, err := Format(t.Context(), p, c.Query, Options{})
 			if err != nil || len(ps) > 0 || f.Exactness != "exact" || f.Text != c.Canonical || p.calls != 0 {
 				t.Fatalf("format %+v %+v %v calls %d, want %q", f, ps, err, p.calls, c.Canonical)
 			}

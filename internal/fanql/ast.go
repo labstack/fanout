@@ -2,118 +2,118 @@ package fanql
 
 import "github.com/labstack/fanout/internal/panel"
 
-type Query struct {
+type queryTree struct {
 	Source     string
-	SourceSpan Span
-	Where      []Expr
+	SourceSpan span
+	Where      []filterExpr
 	WhereWord  bool
-	Stage      *Stage
-	Sort       *Sort
-	Limit      *Limit
-	Span       Span
+	Stage      *aggregation
+	Sort       *sortClause
+	Limit      *limitClause
+	Span       span
 }
 
-type Expr interface{ Span() Span }
-type And struct {
-	Terms []Expr
-	At    Span
+type filterExpr interface{ Span() span }
+type andExpr struct {
+	Terms []filterExpr
+	At    span
 }
-type Or struct {
-	Terms []Expr
-	At    Span
+type orExpr struct {
+	Terms []filterExpr
+	At    span
 }
-type Not struct {
-	X  Expr
-	At Span
+type notExpr struct {
+	X  filterExpr
+	At span
 }
-type Compare struct {
-	Field Field
+type comparison struct {
+	Field fieldName
 	Op    string
-	Value Value
+	Value literalValue
 	Bands []string
-	At    Span
+	At    span
 }
-type In struct {
-	Field    Field
-	Values   []Value
+type inExpr struct {
+	Field    fieldName
+	Values   []literalValue
 	Variable string
 	Negated  bool
-	At       Span
+	At       span
 }
-type Between struct {
-	Field   Field
-	Lo, Hi  Value
+type betweenExpr struct {
+	Field   fieldName
+	Lo, Hi  literalValue
 	Negated bool
 	Bands   []string
-	At      Span
+	At      span
 }
-type Like struct {
-	Field       Field
-	Pattern     Value
+type likeExpr struct {
+	Field       fieldName
+	Pattern     literalValue
 	Insensitive bool
 	Negated     bool
-	At          Span
+	At          span
 }
-type IsNull struct {
-	Field   Field
+type nullExpr struct {
+	Field   fieldName
 	Negated bool
-	At      Span
+	At      span
 }
-type Exists struct {
-	Field Field
-	At    Span
+type existsExpr struct {
+	Field fieldName
+	At    span
 }
-type Call struct {
+type filterCall struct {
 	Name string
-	Args []CallArg
-	Cmp  *Comparison
-	At   Span
+	Args []callArg
+	Cmp  *callComparison
+	At   span
 }
-type CallArg struct {
-	Field *Field
-	Value *Value
-	Call  *Call
+type callArg struct {
+	Field *fieldName
+	Value *literalValue
+	Call  *filterCall
 }
-type Comparison struct {
+type callComparison struct {
 	Op    string
-	Value Value
+	Value literalValue
 }
-type FreeText struct {
-	Value  Value
-	At     Span
+type textExpr struct {
+	Value  literalValue
+	At     span
 	column string // resolved search column: body on logs, operation on spans
 }
 
 // RawExpr is a raw SQL filter entry. Raw names its lexical token kind.
-type RawExpr struct {
+type rawEntry struct {
 	Text string
-	At   Span
+	At   span
 }
 
-func (x And) Span() Span      { return x.At }
-func (x Or) Span() Span       { return x.At }
-func (x Not) Span() Span      { return x.At }
-func (x Compare) Span() Span  { return x.At }
-func (x In) Span() Span       { return x.At }
-func (x Between) Span() Span  { return x.At }
-func (x Like) Span() Span     { return x.At }
-func (x IsNull) Span() Span   { return x.At }
-func (x Exists) Span() Span   { return x.At }
-func (x Call) Span() Span     { return x.At }
-func (x FreeText) Span() Span { return x.At }
-func (x RawExpr) Span() Span  { return x.At }
+func (x andExpr) Span() span     { return x.At }
+func (x orExpr) Span() span      { return x.At }
+func (x notExpr) Span() span     { return x.At }
+func (x comparison) Span() span  { return x.At }
+func (x inExpr) Span() span      { return x.At }
+func (x betweenExpr) Span() span { return x.At }
+func (x likeExpr) Span() span    { return x.At }
+func (x nullExpr) Span() span    { return x.At }
+func (x existsExpr) Span() span  { return x.At }
+func (x filterCall) Span() span  { return x.At }
+func (x textExpr) Span() span    { return x.At }
+func (x rawEntry) Span() span    { return x.At }
 
-type Field struct {
+type fieldName struct {
 	Scope   string
 	Key     string
 	Bracket bool
 	Single  bool
-	Ref     *FieldRef
-	At      Span
+	Ref     *fieldRef
+	At      span
 }
 
 // FieldRef is populated by resolution; parsing leaves Ref nil.
-type FieldRef struct {
+type fieldRef struct {
 	Column    string
 	Key       string
 	Type      panel.FieldType
@@ -121,80 +121,80 @@ type FieldRef struct {
 	CompareAs string
 }
 
-type ValueKind uint8
+type valueKind uint8
 
 const (
-	WordValue ValueKind = iota
-	StringValue
-	NumberValue
-	DurationValue
-	BooleanValue
-	VariableValue
-	StarValue
+	wordValue valueKind = iota
+	stringValue
+	numberValue
+	durationValue
+	booleanValue
+	variableValue
+	starValue
 )
 
-type Value struct {
-	Kind   ValueKind
+type literalValue struct {
+	Kind   valueKind
 	Text   string
 	Stored string
-	At     Span
+	At     span
 }
 
-type Stage struct {
-	Measures  []Measure
-	Histogram *Field
-	By        []Field
+type aggregation struct {
+	Measures  []measureNode
+	Histogram *fieldName
+	By        []fieldName
 	Bucket    string
-	At        Span
+	At        span
 }
-type Measure struct {
-	Expr  MExpr
+type measureNode struct {
+	Expr  mExpr
 	Alias string
-	At    Span
+	At    span
 }
-type MExpr interface{ Span() Span }
-type MCall struct {
+type mExpr interface{ Span() span }
+type mCall struct {
 	Name string
-	Args []MArg
-	At   Span
+	Args []mArg
+	At   span
 }
-type MArg struct {
-	Field  *Field
+type mArg struct {
+	Field  *fieldName
 	Number *float64
 	Star   bool
-	At     Span
+	At     span
 }
-type MCountIf struct {
-	Filter Expr
-	At     Span
+type mCountIf struct {
+	Filter filterExpr
+	At     span
 }
-type MBinary struct {
+type mBinary struct {
 	Op   byte
-	L, R MExpr
-	At   Span
+	L, R mExpr
+	At   span
 }
-type MNeg struct {
-	X  MExpr
-	At Span
+type mNeg struct {
+	X  mExpr
+	At span
 }
-type MConst struct {
+type mConst struct {
 	Value float64
 	Text  string
-	At    Span
+	At    span
 }
 
-func (x MCall) Span() Span    { return x.At }
-func (x MCountIf) Span() Span { return x.At }
-func (x MBinary) Span() Span  { return x.At }
-func (x MNeg) Span() Span     { return x.At }
-func (x MConst) Span() Span   { return x.At }
+func (x mCall) Span() span    { return x.At }
+func (x mCountIf) Span() span { return x.At }
+func (x mBinary) Span() span  { return x.At }
+func (x mNeg) Span() span     { return x.At }
+func (x mConst) Span() span   { return x.At }
 
-type Sort struct {
+type sortClause struct {
 	Key       string
 	Ascending bool
-	At        Span
+	At        span
 }
-type Limit struct {
+type limitClause struct {
 	N  int
-	At Span
+	At span
 }

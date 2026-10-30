@@ -9,10 +9,8 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 )
 
-func init() { resolveLower = lower }
-
 // lower is pure: it emits one SQL string per entry and keeps all stored order.
-func lower(r *Resolved) (panel.Query, panel.Problems) {
+func lower(r *resolved) (panel.Query, panel.Problems) {
 	q := r.Query
 	out := panel.Query{From: q.Source}
 	var problems panel.Problems
@@ -61,7 +59,7 @@ func lower(r *Resolved) (panel.Query, panel.Problems) {
 	return out, problems
 }
 
-func lowerField(f Field) string {
+func lowerField(f fieldName) string {
 	if f.Ref == nil {
 		return f.Key
 	}
@@ -70,7 +68,7 @@ func lowerField(f Field) string {
 	}
 	return f.Ref.Column
 }
-func compareField(f Field) string {
+func compareField(f fieldName) string {
 	s := lowerField(f)
 	if f.Ref != nil && f.Ref.CompareAs == "integer" {
 		return "TRY_CAST(" + s + " AS INTEGER)"
@@ -90,53 +88,53 @@ func numberText(text string) string {
 	}
 	return decimal(n)
 }
-func lowerValue(f Field, v Value) string {
+func lowerValue(f fieldName, v literalValue) string {
 	text := v.Stored
 	if text == "" {
 		text = v.Text
 	}
-	if v.Kind == VariableValue {
+	if v.Kind == variableValue {
 		return v.Text
 	}
-	if v.Kind == DurationValue {
+	if v.Kind == durationValue {
 		n, _ := durationMS(v.Text)
 		return decimal(n)
 	}
 	if f.Ref != nil && f.Ref.Type == panel.TypeTime && f.Ref.Key == "" {
 		return sqlString(text) + "::TIMESTAMPTZ_NS"
 	}
-	if v.Kind == StringValue {
+	if v.Kind == stringValue {
 		return sqlString(text)
 	}
 	if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == panel.TypeString && f.Ref.CompareAs == "" {
 		return sqlString(text)
 	}
-	if v.Kind == NumberValue {
+	if v.Kind == numberValue {
 		return numberText(text)
 	}
-	if v.Kind == BooleanValue {
+	if v.Kind == booleanValue {
 		return strings.ToLower(text)
 	}
 	return sqlString(text)
 }
 
-func lowerEntry(e Expr) string {
+func lowerEntry(e filterExpr) string {
 	// A whole raw entry is the exact interchange spelling (section 0.8).
 	// Raw fragments inside boolean expressions are parenthesized below.
-	if raw, ok := e.(*RawExpr); ok {
+	if raw, ok := e.(*rawEntry); ok {
 		return raw.Text
 	}
 	return lowerNegated(e, false)
 }
-func lowerNegated(e Expr, neg bool) string {
+func lowerNegated(e filterExpr, neg bool) string {
 	switch x := e.(type) {
-	case *Not:
+	case *notExpr:
 		return lowerNegated(x.X, !neg)
-	case *And:
+	case *andExpr:
 		return lowerTerms(x.Terms, false, neg)
-	case *Or:
+	case *orExpr:
 		return lowerTerms(x.Terms, true, neg)
-	case *Compare:
+	case *comparison:
 		if x.Op == "!~" {
 			copy := *x
 			copy.Op = "~"
@@ -160,7 +158,7 @@ func lowerNegated(e Expr, neg bool) string {
 				field = "CAST(" + field + " AS VARCHAR)"
 			}
 			v = sqlString(x.Value.Stored)
-			if x.Value.Kind == VariableValue {
+			if x.Value.Kind == variableValue {
 				v = x.Value.Text
 			}
 			p := containsSQL(field, v)
@@ -178,7 +176,7 @@ func lowerNegated(e Expr, neg bool) string {
 			return nullNegation(p)
 		}
 		return p
-	case *In:
+	case *inExpr:
 		var vals []string
 		for _, v := range x.Values {
 			vals = append(vals, lowerValue(x.Field, v))
@@ -196,7 +194,7 @@ func lowerNegated(e Expr, neg bool) string {
 			return "(" + lowerField(x.Field) + " IS NULL OR " + p + ")"
 		}
 		return p
-	case *Between:
+	case *betweenExpr:
 		if x.Bands != nil {
 			return lowerBands(x.Field, x.Bands, x.Negated, neg)
 		}
@@ -216,7 +214,7 @@ func lowerNegated(e Expr, neg bool) string {
 			return nullNegation(p)
 		}
 		return p
-	case *Like:
+	case *likeExpr:
 		op := "~~"
 		if x.Insensitive {
 			op += "*"
@@ -229,17 +227,17 @@ func lowerNegated(e Expr, neg bool) string {
 			return "(" + lowerField(x.Field) + " IS NULL OR " + p + ")"
 		}
 		return p
-	case *Exists:
+	case *existsExpr:
 		if neg {
 			return lowerField(x.Field) + " IS NULL"
 		}
 		return lowerField(x.Field) + " IS NOT NULL"
-	case *IsNull:
+	case *nullExpr:
 		if x.Negated != neg {
 			return lowerField(x.Field) + " IS NOT NULL"
 		}
 		return lowerField(x.Field) + " IS NULL"
-	case *FreeText:
+	case *textExpr:
 		field := "body"
 		if x.column != "" {
 			field = x.column
@@ -249,13 +247,13 @@ func lowerNegated(e Expr, neg bool) string {
 			return "(" + field + " IS NULL OR NOT " + p + ")"
 		}
 		return p
-	case *Call:
+	case *filterCall:
 		p := lowerCall(x)
 		if neg {
 			return nullNegation(p)
 		}
 		return p
-	case *RawExpr:
+	case *rawEntry:
 		if neg {
 			return nullNegation(x.Text)
 		}
@@ -264,7 +262,7 @@ func lowerNegated(e Expr, neg bool) string {
 	return ""
 }
 
-func lowerTerms(terms []Expr, or, neg bool) string {
+func lowerTerms(terms []filterExpr, or, neg bool) string {
 	var out []string
 	for _, e := range terms {
 		out = append(out, lowerNegated(e, neg))
@@ -276,10 +274,10 @@ func lowerTerms(terms []Expr, or, neg bool) string {
 	return "(" + strings.Join(out, sep) + ")"
 }
 func nullNegation(p string) string { return "NOT coalesce((" + p + "), FALSE)" }
-func simpleOperand(f Field, op string) bool {
+func simpleOperand(f fieldName, op string) bool {
 	return f.Ref != nil && f.Ref.CompareAs == "" && !(f.Ref.Key != "" && isRange(op))
 }
-func lowerBands(f Field, bands []string, sqlNeg, neg bool) string {
+func lowerBands(f fieldName, bands []string, sqlNeg, neg bool) string {
 	var out []string
 	for _, b := range bands {
 		out = append(out, sqlString(b))
@@ -297,7 +295,7 @@ func lowerBands(f Field, bands []string, sqlNeg, neg bool) string {
 func containsSQL(field, value string) string {
 	return "contains(lower(" + field + "), lower(" + value + "))"
 }
-func lowerCall(c *Call) string {
+func lowerCall(c *filterCall) string {
 	var args []string
 	for _, a := range c.Args {
 		if a.Field != nil {
@@ -306,7 +304,7 @@ func lowerCall(c *Call) string {
 			args = append(args, lowerCall(a.Call))
 		} else if a.Value != nil {
 			v := a.Value
-			if v.Kind == NumberValue || v.Kind == BooleanValue {
+			if v.Kind == numberValue || v.Kind == booleanValue {
 				args = append(args, v.Text)
 			} else {
 				args = append(args, sqlString(v.Text))
@@ -316,13 +314,13 @@ func lowerCall(c *Call) string {
 	p := c.Name + "(" + strings.Join(args, ", ") + ")"
 	if c.Cmp != nil {
 		v := c.Cmp.Value.Text
-		if c.Cmp.Value.Kind == NumberValue {
+		if c.Cmp.Value.Kind == numberValue {
 			v = numberText(v)
 		}
-		if c.Cmp.Value.Kind == BooleanValue {
+		if c.Cmp.Value.Kind == booleanValue {
 			v = strings.ToLower(v)
 		}
-		if c.Cmp.Value.Kind != NumberValue && c.Cmp.Value.Kind != BooleanValue && c.Cmp.Value.Kind != VariableValue {
+		if c.Cmp.Value.Kind != numberValue && c.Cmp.Value.Kind != booleanValue && c.Cmp.Value.Kind != variableValue {
 			v = sqlString(v)
 		}
 		p += " " + c.Cmp.Op + " " + v
@@ -330,16 +328,16 @@ func lowerCall(c *Call) string {
 	return p
 }
 
-func lowerMeasure(m Measure) string {
+func lowerMeasure(m measureNode) string {
 	text := lowerMExpr(m.Expr, 0)
 	if m.Alias != "" {
 		text += " as " + m.Alias
 	}
 	return text
 }
-func lowerMExpr(e MExpr, parent int) string {
+func lowerMExpr(e mExpr, parent int) string {
 	switch x := e.(type) {
-	case *MCall:
+	case *mCall:
 		var args []string
 		for _, a := range x.Args {
 			if a.Field != nil {
@@ -349,20 +347,20 @@ func lowerMExpr(e MExpr, parent int) string {
 			}
 		}
 		return x.Name + "(" + strings.Join(args, ", ") + ")"
-	case *MCountIf:
+	case *mCountIf:
 		sql := lowerEntry(x.Filter)
-		if _, ok := x.Filter.(*And); ok {
+		if _, ok := x.Filter.(*andExpr); ok {
 			sql = strings.TrimSuffix(strings.TrimPrefix(sql, "("), ")")
 		}
 		return "count_if(" + sql + ")"
-	case *MConst:
+	case *mConst:
 		return decimal(x.Value)
-	case *MNeg:
-		if _, nested := x.X.(*MNeg); nested {
+	case *mNeg:
+		if _, nested := x.X.(*mNeg); nested {
 			return "-(" + lowerMExpr(x.X, 0) + ")"
 		}
 		return "-" + lowerMExpr(x.X, 3)
-	case *MBinary:
+	case *mBinary:
 		prec := 1
 		if x.Op == '*' || x.Op == '/' {
 			prec = 2

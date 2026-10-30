@@ -93,7 +93,7 @@ func TestLatencyBudgets(t *testing.T) {
 	for _, fixture := range latencyFormatFixtures(t) {
 		measure("Format "+fixture.Name, 3500, &formatSamples, func() {
 			parser.parseCalls, parser.renderCalls = 0, 0
-			formatted, ps, err := Format(t.Context(), parser, *fixture.Panel.Query, FormatOptions{Viz: fixture.Panel.Viz, Variables: fixture.Variables})
+			formatted, ps, err := Format(t.Context(), parser, *fixture.Panel.Query, Options{Viz: fixture.Panel.Viz, Variables: fixture.Variables})
 			if err != nil || len(ps) != 0 || formatted == nil {
 				t.Fatalf("format %q: %+v %v", fixture.Name, ps, err)
 			}
@@ -185,7 +185,7 @@ func BenchmarkFormat(b *testing.B) {
 	queries := latencyFormatFixtures(b)
 	format := func(i int) {
 		fixture := queries[i%len(queries)]
-		if f, ps, err := Format(b.Context(), engine, *fixture.Panel.Query, FormatOptions{Viz: fixture.Panel.Viz, Variables: fixture.Variables}); err != nil || len(ps) != 0 || f == nil {
+		if f, ps, err := Format(b.Context(), engine, *fixture.Panel.Query, Options{Viz: fixture.Panel.Viz, Variables: fixture.Variables}); err != nil || len(ps) != 0 || f == nil {
 			b.Fatal(ps, err)
 		}
 	}

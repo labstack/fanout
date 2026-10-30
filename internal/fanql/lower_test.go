@@ -199,7 +199,7 @@ func TestLowerEntryBoundaries(t *testing.T) {
 
 func TestLowerStructuredBounds(t *testing.T) {
 	text := "spans where " + strings.Repeat("a:1 ", 16) + "z:2"
-	q, ps := Parse(text, "")
+	q, ps := parse(text, "")
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}

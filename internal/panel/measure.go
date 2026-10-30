@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"github.com/labstack/fanout/internal/suggest"
 	"math"
 	"regexp"
 	"slices"
@@ -519,7 +520,7 @@ func constantValue(e MeasureExpr) (float64, bool) {
 }
 
 func suggestOr(word string, candidates []string, fallback string) string {
-	if hint := suggest(word, candidates); hint != "" {
+	if hint := suggest.Spelling(word, candidates); hint != "" {
 		return hint
 	}
 	return fallback

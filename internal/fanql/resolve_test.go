@@ -8,13 +8,13 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 )
 
-func resolvedText(t *testing.T, text string, opts ResolveOptions) (*Resolved, panel.Problems) {
+func resolvedText(t *testing.T, text string, opts Options) (*resolved, panel.Problems) {
 	t.Helper()
-	q, ps := Parse(text, "")
+	q, ps := parse(text, "")
 	if len(ps) != 0 {
 		t.Fatalf("parse %q: %v", text, ps)
 	}
-	return Resolve(q, opts)
+	return resolve(q, opts)
 }
 
 func TestResolveSingleSegmentFieldIsColumnOrAttribute(t *testing.T) {
@@ -30,11 +30,11 @@ func TestResolveSingleSegmentFieldIsColumnOrAttribute(t *testing.T) {
 		{"spans where servce:api", "attributes", "servce", panel.TypeString, "did you mean service?"},
 	} {
 		t.Run(tt.text, func(t *testing.T) {
-			r, ps := resolvedText(t, tt.text, ResolveOptions{})
+			r, ps := resolvedText(t, tt.text, Options{})
 			if len(ps) > 0 {
 				t.Fatal(ps)
 			}
-			f := r.Query.Where[0].(*Compare).Field.Ref
+			f := r.Query.Where[0].(*comparison).Field.Ref
 			if f.Column != tt.column || f.Key != tt.key || f.Type != tt.typ {
 				t.Fatalf("ref %#v", f)
 			}
@@ -54,27 +54,27 @@ func TestResolveDottedAndPrefixedKeys(t *testing.T) {
 		{"resource.k8s.pod.name", "resource", "k8s.pod.name"}, {"attributes.http.target", "attributes", "http.target"},
 		{"attributes['resource.k']", "attributes", "resource.k"}, {"HTTP.Target", "attributes", "HTTP.Target"},
 	} {
-		r, ps := resolvedText(t, "spans where "+tt.field+":x", ResolveOptions{})
+		r, ps := resolvedText(t, "spans where "+tt.field+":x", Options{})
 		if len(ps) > 0 {
 			t.Fatal(ps)
 		}
-		f := r.Query.Where[0].(*Compare).Field.Ref
+		f := r.Query.Where[0].(*comparison).Field.Ref
 		if f.Column != tt.column || f.Key != tt.key {
 			t.Fatal(f)
 		}
 	}
-	r, ps := resolvedText(t, "spans | count_distinct(user.id), p95(resource.k)", ResolveOptions{})
+	r, ps := resolvedText(t, "spans | count_distinct(user.id), p95(resource.k)", Options{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
-	if r.Query.Stage.Measures[0].Expr.(*MCall).Args[0].Field.Ref.Key != "user.id" || r.Query.Stage.Measures[1].Expr.(*MCall).Args[0].Field.Ref.Column != "resource" {
+	if r.Query.Stage.Measures[0].Expr.(*mCall).Args[0].Field.Ref.Key != "user.id" || r.Query.Stage.Measures[1].Expr.(*mCall).Args[0].Field.Ref.Column != "resource" {
 		t.Fatal(r.Query.Stage)
 	}
-	r, ps = resolvedText(t, "metrics | last(value) by resource.k8s.pod.name", ResolveOptions{})
+	r, ps = resolvedText(t, "metrics | last(value) by resource.k8s.pod.name", Options{})
 	if len(ps) > 0 || r.Query.Stage.By[0].Ref.Key != "k8s.pod.name" {
 		t.Fatal(r, ps)
 	}
-	_, ps = resolvedText(t, "spans where x-y.z:1", ResolveOptions{})
+	_, ps = resolvedText(t, "spans where x-y.z:1", Options{})
 	if len(ps) == 0 || ps[0].Message != `"x-y.z" needs brackets` {
 		t.Fatal(ps)
 	}
@@ -85,24 +85,24 @@ func TestResolveVocabularies(t *testing.T) {
 		{"spans where status:error", "STATUS_CODE_ERROR"}, {"spans where status:STATUS_CODE_ERROR", "STATUS_CODE_ERROR"}, {`spans where status:"error"`, "error"},
 		{"spans where kind:server", "SPAN_KIND_SERVER"}, {"metrics where type:counter", "counter"}, {"logs where severity:warning", "WARN"}, {"logs where severity:Error", "ERROR"}, {"logs where severity ~ error", "error"},
 	} {
-		r, ps := resolvedText(t, tt.text, ResolveOptions{})
+		r, ps := resolvedText(t, tt.text, Options{})
 		if len(ps) > 0 {
 			t.Fatal(ps)
 		}
-		if v := r.Query.Where[0].(*Compare).Value.Stored; v != tt.want {
+		if v := r.Query.Where[0].(*comparison).Value.Stored; v != tt.want {
 			t.Fatalf("%s: %s", tt.text, v)
 		}
 	}
-	r, ps := resolvedText(t, "spans where status in (error, ok)", ResolveOptions{})
+	r, ps := resolvedText(t, "spans where status in (error, ok)", Options{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
-	if got := r.Query.Where[0].(*In).Values; got[0].Stored != "STATUS_CODE_ERROR" || got[1].Stored != "STATUS_CODE_OK" {
+	if got := r.Query.Where[0].(*inExpr).Values; got[0].Stored != "STATUS_CODE_ERROR" || got[1].Stored != "STATUS_CODE_OK" {
 		t.Fatal(got)
 	}
 	schema := &panel.Schema{Signals: map[string]panel.SignalSchema{"logs": {Columns: []panel.ColumnSchema{{Field: panel.Field{Name: "severity"}, Values: []panel.Option{{Value: "ERROR"}, {Value: "INFO"}}}}}}}
-	r, ps = resolvedText(t, "logs where severity:custom", ResolveOptions{Schema: schema})
-	if len(ps) > 0 || r.Query.Where[0].(*Compare).Value.Stored != "CUSTOM" || len(r.Notices) != 1 || r.Notices[0].Message != "not a standard level; stored levels in this window: ERROR, INFO" {
+	r, ps = resolvedText(t, "logs where severity:custom", Options{Schema: schema})
+	if len(ps) > 0 || r.Query.Where[0].(*comparison).Value.Stored != "CUSTOM" || len(r.Notices) != 1 || r.Notices[0].Message != "not a standard level; stored levels in this window: ERROR, INFO" {
 		t.Fatal(r, ps)
 	}
 }
@@ -116,47 +116,47 @@ func TestResolveSeverityRanges(t *testing.T) {
 		{"severity<error", []string{"TRACE", "DEBUG", "INFO", "WARN"}}, {"severity<=error", []string{"TRACE", "DEBUG", "INFO", "WARN", "ERROR"}},
 		{"severity between info and error", []string{"INFO", "WARN", "ERROR"}},
 	} {
-		r, ps := resolvedText(t, "logs where "+tt.text, ResolveOptions{})
+		r, ps := resolvedText(t, "logs where "+tt.text, Options{})
 		if len(ps) > 0 {
 			t.Fatal(ps)
 		}
 		var bands []string
 		switch x := r.Query.Where[0].(type) {
-		case *Compare:
+		case *comparison:
 			bands = x.Bands
-		case *Between:
+		case *betweenExpr:
 			bands = x.Bands
 		}
 		if !reflect.DeepEqual(bands, tt.want) {
 			t.Fatal(bands, tt.want)
 		}
 	}
-	r, ps := resolvedText(t, "spans where http_status_code>=warn", ResolveOptions{})
-	if len(ps) > 0 || r.Query.Where[0].(*Compare).Bands != nil {
+	r, ps := resolvedText(t, "spans where http_status_code>=warn", Options{})
+	if len(ps) > 0 || r.Query.Where[0].(*comparison).Bands != nil {
 		t.Fatal(r, ps)
 	}
 }
 
 func TestResolveTypedLiterals(t *testing.T) {
 	for _, text := range []string{"logs where severity:14", "logs where severity:true", "spans where status:500", "metrics where type:false"} {
-		r, ps := resolvedText(t, text, ResolveOptions{})
+		r, ps := resolvedText(t, text, Options{})
 		if len(ps) != 0 {
 			t.Fatal(text, ps)
 		}
-		v := r.Query.Where[0].(*Compare).Value
+		v := r.Query.Where[0].(*comparison).Value
 		if v.Stored != v.Text {
 			t.Fatalf("typed literals must not be vocabulary words: %#v", v)
 		}
 	}
 	for _, text := range []string{"spans where duration_ms>500", `spans where start_time>"2026-10-29T10:00:00Z"`, `spans where start_time>"2026-10-29 10:00:00"`} {
-		_, ps := resolvedText(t, text, ResolveOptions{})
+		_, ps := resolvedText(t, text, Options{})
 		if len(ps) > 0 {
 			t.Fatal(ps)
 		}
 	}
 	for _, tt := range []struct{ text, want string }{{"spans where http_status_code>=500", "integer"}, {"spans where http_status_code:500", ""}} {
-		r, ps := resolvedText(t, tt.text, ResolveOptions{})
-		if len(ps) > 0 || r.Query.Where[0].(*Compare).Field.Ref.CompareAs != tt.want {
+		r, ps := resolvedText(t, tt.text, Options{})
+		if len(ps) > 0 || r.Query.Where[0].(*comparison).Field.Ref.CompareAs != tt.want {
 			t.Fatal(r, ps)
 		}
 	}
@@ -164,19 +164,19 @@ func TestResolveTypedLiterals(t *testing.T) {
 
 func TestResolveFilterFunctions(t *testing.T) {
 	for _, text := range []string{`logs where length(body)>1000`, `spans where lower(service) = "api"`, `spans where starts_with(http_route, "/api")`, `logs where regexp_matches(body, "error.*")`} {
-		if _, ps := resolvedText(t, text, ResolveOptions{}); len(ps) != 0 {
+		if _, ps := resolvedText(t, text, Options{}); len(ps) != 0 {
 			t.Fatal(text, ps)
 		}
 	}
 }
 
 func TestResolveMeasures(t *testing.T) {
-	r, ps := resolvedText(t, `spans | count_distinct(flag)`, ResolveOptions{})
-	if len(ps) != 0 || len(r.Notices) != 1 || r.Query.Stage.Measures[0].Expr.(*MCall).Args[0].Field.Ref.Key != "flag" {
+	r, ps := resolvedText(t, `spans | count_distinct(flag)`, Options{})
+	if len(ps) != 0 || len(r.Notices) != 1 || r.Query.Stage.Measures[0].Expr.(*mCall).Args[0].Field.Ref.Key != "flag" {
 		t.Fatal(r, ps)
 	}
 	for _, text := range []string{`spans | count(*)`, `spans | quantile(duration, 0.999) as q`, `spans | count_if(status:error)`} {
-		if _, ps := resolvedText(t, text, ResolveOptions{}); len(ps) != 0 {
+		if _, ps := resolvedText(t, text, Options{}); len(ps) != 0 {
 			t.Fatal(text, ps)
 		}
 	}
@@ -218,7 +218,7 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"spans where $__window:x", "$__ names are reserved"},
 	} {
 		t.Run(tt.text, func(t *testing.T) {
-			_, ps := resolvedText(t, tt.text, ResolveOptions{})
+			_, ps := resolvedText(t, tt.text, Options{})
 			if len(ps) == 0 || !strings.Contains(ps[0].Message, tt.want) || ps[0].Span == nil {
 				t.Fatalf("want %q: %v", tt.want, ps)
 			}
@@ -226,7 +226,7 @@ func TestResolveDiagnostics(t *testing.T) {
 	}
 	// These syntax diagnostics belong to the existing parser, before resolution.
 	for _, text := range []string{"spans | count_distinct(x-y)", "spans | count() by a, b, c, d"} {
-		if _, ps := Parse(text, ""); len(ps) == 0 {
+		if _, ps := parse(text, ""); len(ps) == 0 {
 			t.Fatal(text)
 		}
 	}
@@ -243,7 +243,7 @@ func TestResolveSortKeys(t *testing.T) {
 		{"logs | count() by body_template sort count", "log_patterns", false, ""}, {"logs | count() by body_template sort rate", "log_patterns", true, ""},
 		{"spans | count() every 1m sort count", "timeseries", false, "sort does not apply to bucketed series; series are chosen by top (options)"}, {"spans | count() every 1m sort count", "", false, ""},
 	} {
-		r, ps := resolvedText(t, tt.text, ResolveOptions{Viz: tt.viz})
+		r, ps := resolvedText(t, tt.text, Options{Viz: tt.viz})
 		if tt.bad {
 			if len(ps) == 0 {
 				t.Fatal(tt.text)
@@ -263,7 +263,7 @@ func TestResolveSortKeys(t *testing.T) {
 }
 
 func TestResolveVariables(t *testing.T) {
-	opts := ResolveOptions{Variables: []panel.Variable{{Name: "service", Kind: "query"}, {Name: "svcs", Kind: "query", Multi: true}}}
+	opts := Options{Variables: []panel.Variable{{Name: "service", Kind: "query"}, {Name: "svcs", Kind: "query", Multi: true}}}
 	for _, tt := range []struct{ text, want string }{{"service:$region", "service, svcs"}, {"service:$svcs", "$svcs holds several values; use service in $svcs"}} {
 		_, ps := resolvedText(t, "spans where "+tt.text, opts)
 		if len(ps) == 0 || !strings.Contains(ps[0].Message, tt.want) {
@@ -274,14 +274,14 @@ func TestResolveVariables(t *testing.T) {
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
-	r, ps := resolvedText(t, "spans where service:$x", ResolveOptions{})
+	r, ps := resolvedText(t, "spans where service:$x", Options{})
 	if len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].Message != "declared variables are needed to check $x" {
 		t.Fatal(r, ps)
 	}
 }
 
 func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
-	r, ps := resolvedText(t, "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route", ResolveOptions{})
+	r, ps := resolvedText(t, "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route", Options{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
@@ -295,11 +295,11 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto" {
 		t.Fatal(r.Edits)
 	}
-	r, ps = resolvedText(t, "spans where status:error", ResolveOptions{})
+	r, ps = resolvedText(t, "spans where status:error", Options{})
 	if len(ps) > 0 || len(r.Compatible) != 1 || r.Compatible[0].Viz != "traces" {
 		t.Fatal(r, ps)
 	}
-	r, ps = resolvedText(t, "spans | count()", ResolveOptions{})
+	r, ps = resolvedText(t, "spans | count()", Options{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}

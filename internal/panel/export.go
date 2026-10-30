@@ -73,6 +73,3 @@ func FilterFunctionNames() []string {
 	slices.Sort(out)
 	return out
 }
-
-// Suggest returns the catalog's spelling suggestion, if any.
-func Suggest(word string, candidates []string) string { return suggest(word, candidates) }

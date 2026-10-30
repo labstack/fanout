@@ -14,32 +14,32 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-type Expect struct {
+type expect struct {
 	Class string
-	Field *Field
+	Field *fieldName
 	Func  string
 	Arg   int
 	Scope string
 }
 
-func completionPrefix(text string, cursor int, source string) (token Token, p *parser) {
+func completionPrefix(text string, cursor int, source string) (token lexToken, p *parser) {
 	runes := []rune(text)
 	cursor = max(0, min(cursor, len(runes)))
-	token = Token{Kind: EOF, Span: Span{cursor, cursor}}
-	for _, candidate := range Lex(text) {
-		if candidate.Kind == EOF {
+	token = lexToken{Kind: eof, Span: span{cursor, cursor}}
+	for _, candidate := range lex(text) {
+		if candidate.Kind == eof {
 			break
 		}
 		if candidate.Span.Start <= cursor && cursor <= candidate.Span.End {
 			switch candidate.Kind {
-			case Word, Ident, Path, String, Raw, BracketKey, Number:
+			case tokenWord, tokenIdent, tokenPath, tokenString, tokenRaw, tokenBracketKey, tokenNumber:
 				token = candidate
 			}
 		}
 	}
 	start := token.Span.Start
 	prefix := string(runes[:start])
-	p = &parser{runes: []rune(prefix), tokens: Lex(prefix), bounded: true, heights: make(map[any]int), completion: true, completionUsed: make(map[string]bool)}
+	p = &parser{vocab: currentVocabulary(), runes: []rune(prefix), tokens: lex(prefix), bounded: true, heights: make(map[any]int), completion: true, completionUsed: make(map[string]bool)}
 	defer func() {
 		if v := recover(); v != nil {
 			switch v.(type) {
@@ -49,14 +49,14 @@ func completionPrefix(text string, cursor int, source string) (token Token, p *p
 			}
 		}
 	}()
-	if len(p.runes) > MaxTextRunes || len(prefix) > MaxTextBytes || len(p.tokens) > MaxTokens+1 {
+	if len(p.runes) > maxTextRunes || len(prefix) > maxTextBytes || len(p.tokens) > maxTokens+1 {
 		return token, p
 	}
 	p.query(source)
 	return token, p
 }
 
-type SchemaSource interface {
+type schemaSource interface {
 	Schema(context.Context, panel.SchemaRequest) (*panel.Schema, error)
 }
 
@@ -91,7 +91,7 @@ type CompleteResponse struct {
 	Schema  SchemaStatus   `json:"schema"`
 }
 
-const MaxCompletionItems = 50
+const maxCompletionItems = 50
 
 type completionKey struct{ window, namespace string }
 type completionSchemaEntry struct {
@@ -105,14 +105,14 @@ type completionSchemaEntry struct {
 var completionSchemaSlots = make(chan struct{}, 4)
 
 type Completer struct {
-	source   SchemaSource
+	source   schemaSource
 	mu       sync.Mutex
 	inflight map[completionKey]chan struct{}
 	cache    map[completionKey]completionSchemaEntry
 	now      func() time.Time
 }
 
-func NewCompleter(source SchemaSource) *Completer {
+func NewCompleter(source schemaSource) *Completer {
 	return &Completer{source: source, inflight: make(map[completionKey]chan struct{}), cache: make(map[completionKey]completionSchemaEntry), now: time.Now}
 }
 
@@ -200,7 +200,7 @@ type completionCandidate struct {
 
 type completionCandidates struct {
 	req            CompleteRequest
-	token          Token
+	token          lexToken
 	p              *parser
 	signal         panel.SignalSchema
 	source, prefix string
@@ -213,7 +213,7 @@ func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteR
 	schema, warm, failed := c.schema(ctx, completionKey{window, req.Namespace})
 	token, p := completionPrefix(req.Text, req.Cursor, req.Source)
 	r := CompleteResponse{Replace: panel.TextSpan{Start: token.Span.Start, End: token.Span.End}, Items: []Item{}, Schema: SchemaStatus{Window: window, Sampled: true, Warm: warm, Recent: recent, Error: failed}}
-	if token.Kind == String || token.Kind == Raw {
+	if token.Kind == tokenString || token.Kind == tokenRaw {
 		return r
 	}
 	source := req.Source
@@ -225,10 +225,10 @@ func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteR
 		state.signal = schema.Signals[source]
 	}
 	cursor := max(token.Span.Start, min(req.Cursor, token.Span.End))
-	if token.Kind != EOF {
+	if token.Kind != eof {
 		state.prefix = string([]rune(req.Text)[token.Span.Start:cursor])
 	}
-	if token.Kind == BracketKey {
+	if token.Kind == tokenBracketKey {
 		r.Replace.Start++
 		if !token.Unclosed {
 			r.Replace.End--
@@ -264,7 +264,7 @@ func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteR
 		}
 		seen[candidate.item.Label] = true
 		r.Items = append(r.Items, candidate.item)
-		if len(r.Items) == MaxCompletionItems {
+		if len(r.Items) == maxCompletionItems {
 			break
 		}
 	}
@@ -297,7 +297,7 @@ func (s *completionCandidates) words(kind string, words ...string) {
 	}
 }
 
-func (s *completionCandidates) candidates(e Expect) {
+func (s *completionCandidates) candidates(e expect) {
 	switch e.Class {
 	case "source":
 		s.words("keyword", panel.SignalNames()...)
@@ -396,7 +396,7 @@ func (s *completionCandidates) bucketAllowed() bool {
 	return s.req.Viz == "" || slices.Contains([]string{"timeseries", "heatmap", "state_timeline", "log_patterns"}, s.req.Viz)
 }
 
-func (s *completionCandidates) fields(e Expect, numeric bool, scope string) {
+func (s *completionCandidates) fields(e expect, numeric bool, scope string) {
 	if e.Func == "by" {
 		maximum := 3
 		switch s.req.Viz {
@@ -446,7 +446,7 @@ func (s *completionCandidates) fields(e Expect, numeric bool, scope string) {
 				insert += quote + "]"
 			}
 		} else {
-			label = printField(Field{Scope: attributeScope, Key: attribute.Key})
+			label = printField(fieldName{Scope: attributeScope, Key: attribute.Key})
 			insert = label
 		}
 		boost := 0
@@ -464,14 +464,14 @@ func (s *completionCandidates) serviceBoost(services string) bool {
 	if services == "" || s.p.completionQuery == nil {
 		return false
 	}
-	var has func(Expr) bool
-	has = func(x Expr) bool {
+	var has func(filterExpr) bool
+	has = func(x filterExpr) bool {
 		switch x := x.(type) {
-		case *Compare:
-			if x.Field.Key == "service" && x.Field.Scope == "" && (x.Op == ":" || x.Op == "=") && x.Value.Kind != VariableValue {
+		case *comparison:
+			if x.Field.Key == "service" && x.Field.Scope == "" && (x.Op == ":" || x.Op == "=") && x.Value.Kind != variableValue {
 				return slices.Contains(strings.Split(services, ", "), x.Value.Text)
 			}
-		case *And:
+		case *andExpr:
 			for _, term := range x.Terms {
 				if has(term) {
 					return true
@@ -488,7 +488,7 @@ func (s *completionCandidates) serviceBoost(services string) bool {
 	return false
 }
 
-func (s *completionCandidates) operators(field *Field) {
+func (s *completionCandidates) operators(field *fieldName) {
 	if field == nil {
 		return
 	}
@@ -512,7 +512,7 @@ func (s *completionCandidates) operators(field *Field) {
 	s.words("operator", ":", ">", ">=", "<", "<=", "!=", "~", "in", "not in", "between", "is null", "like")
 }
 
-func (s *completionCandidates) values(e Expect) {
+func (s *completionCandidates) values(e expect) {
 	if e.Field == nil {
 		return
 	}
@@ -532,7 +532,7 @@ func (s *completionCandidates) values(e Expect) {
 	}
 	value := func(label, stored string, count int64) { addValue(label, stored, label, count) }
 	sampledValue := func(label string, count int64) {
-		addValue(label, label, printValue(Value{Kind: StringValue, Text: label}, *f, false), count)
+		addValue(label, label, printValue(literalValue{Kind: stringValue, Text: label}, *f, false), count)
 	}
 	if f.Scope == "" {
 		if f.Key == "severity" {
@@ -543,15 +543,7 @@ func (s *completionCandidates) values(e Expect) {
 				return
 			}
 		} else {
-			var aliases map[string]string
-			switch f.Key {
-			case "status":
-				aliases = statusAliases
-			case "kind":
-				aliases = kindAliases
-			case "type":
-				aliases = typeAliases
-			}
+			aliases := panel.FieldAliases(f.Key)
 			for _, label := range sortedCompletionKeys(aliases) {
 				value(label, aliases[label], 0)
 			}
@@ -626,7 +618,7 @@ func (s *completionCandidates) sortKeys() {
 	if q := s.p.completionQuery; q != nil && q.Stage != nil {
 		// The resolver owns aliases, including repeated calls whose argument's
 		// resolved spelling forms part of the alias (duration -> duration_ms).
-		r := resolver{out: &Resolved{Query: q}}
+		r := resolver{vocab: currentVocabulary(), out: &resolved{Query: q}}
 		for _, measure := range q.Stage.Measures {
 			r.measure(measure.Expr)
 		}

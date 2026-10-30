@@ -9,9 +9,9 @@ import (
 	"github.com/labstack/fanout/internal/panel"
 )
 
-func mustParse(t *testing.T, text string) *Query {
+func mustParse(t *testing.T, text string) *queryTree {
 	t.Helper()
-	q, ps := Parse(text, "")
+	q, ps := parse(text, "")
 	if len(ps) != 0 || q == nil {
 		t.Fatalf("Parse(%q): %#v", text, ps)
 	}
@@ -20,7 +20,7 @@ func mustParse(t *testing.T, text string) *Query {
 
 func wantProblem(t *testing.T, text, source, message, hint string) panel.Problems {
 	t.Helper()
-	q, ps := Parse(text, source)
+	q, ps := parse(text, source)
 	if q != nil || len(ps) == 0 {
 		t.Fatalf("Parse(%q) = %#v, %#v; want problem %q", text, q, ps, message)
 	}
@@ -41,30 +41,30 @@ func TestParseEntriesAndGrouping(t *testing.T) {
 	if len(q.Where) != 4 {
 		t.Fatal(q)
 	}
-	if _, ok := q.Where[0].(*Compare); !ok {
+	if _, ok := q.Where[0].(*comparison); !ok {
 		t.Fatal(q.Where)
 	}
-	if _, ok := q.Where[1].(*Compare); !ok {
+	if _, ok := q.Where[1].(*comparison); !ok {
 		t.Fatal(q.Where)
 	}
-	if x, ok := q.Where[2].(*Or); !ok || len(x.Terms) != 2 {
+	if x, ok := q.Where[2].(*orExpr); !ok || len(x.Terms) != 2 {
 		t.Fatal(q.Where)
 	}
-	if x, ok := q.Where[3].(*And); !ok || len(x.Terms) != 2 {
+	if x, ok := q.Where[3].(*andExpr); !ok || len(x.Terms) != 2 {
 		t.Fatal(q.Where)
 	}
 	q = mustParse(t, "spans where a:1 or b:2")
 	if len(q.Where) != 1 {
 		t.Fatal(q)
 	}
-	if _, ok := q.Where[0].(*Or); !ok {
+	if _, ok := q.Where[0].(*orExpr); !ok {
 		t.Fatal(q)
 	}
 	q = mustParse(t, "spans where (a:1)")
 	if len(q.Where) != 1 {
 		t.Fatal(q)
 	}
-	if _, ok := q.Where[0].(*Compare); !ok {
+	if _, ok := q.Where[0].(*comparison); !ok {
 		t.Fatal(q)
 	}
 	q = mustParse(t, "spans status:error | count()")
@@ -96,31 +96,31 @@ func TestParseMixedAndOrIsRejectedWithFixIts(t *testing.T) {
 func TestParseNegationNesting(t *testing.T) {
 	for _, input := range []string{"logs where --severity:error", "logs where not not a:1", "logs where -not a:1"} {
 		q := mustParse(t, input)
-		outer, ok := q.Where[0].(*Not)
+		outer, ok := q.Where[0].(*notExpr)
 		if !ok {
 			t.Fatal(q)
 		}
-		inner, ok := outer.X.(*Not)
+		inner, ok := outer.X.(*notExpr)
 		if !ok {
 			t.Fatal(outer)
 		}
-		if _, ok := inner.X.(*Compare); !ok {
+		if _, ok := inner.X.(*comparison); !ok {
 			t.Fatal(inner)
 		}
 	}
 	q := mustParse(t, "spans where -(a:1 or b:2)")
-	n, ok := q.Where[0].(*Not)
+	n, ok := q.Where[0].(*notExpr)
 	if !ok || len(q.Where) != 1 {
 		t.Fatal(q)
 	}
-	if _, ok := n.X.(*Or); !ok {
+	if _, ok := n.X.(*orExpr); !ok {
 		t.Fatal(n)
 	}
 	q = mustParse(t, "spans where not a:1 b:2")
 	if len(q.Where) != 2 {
 		t.Fatal(q)
 	}
-	if _, ok := q.Where[0].(*Not); !ok {
+	if _, ok := q.Where[0].(*notExpr); !ok {
 		t.Fatal(q)
 	}
 }
@@ -128,14 +128,14 @@ func TestParseNegationNesting(t *testing.T) {
 func TestParseValueClassification(t *testing.T) {
 	for _, tc := range []struct {
 		input, text string
-		kind        ValueKind
-	}{{"k:500", "500", NumberValue}, {"k:1.5s", "1.5s", DurationValue}, {"k:true", "true", BooleanValue}, {"k:$v", "$v", VariableValue}, {`k:"500"`, "500", StringValue}, {"value>-3", "-3", NumberValue}, {"k:api", "api", WordValue}, {`start_time>"2026-10-29T10:00:00Z"`, "2026-10-29T10:00:00Z", StringValue}} {
-		x := mustParse(t, "spans where "+tc.input).Where[0].(*Compare)
+		kind        valueKind
+	}{{"k:500", "500", numberValue}, {"k:1.5s", "1.5s", durationValue}, {"k:true", "true", booleanValue}, {"k:$v", "$v", variableValue}, {`k:"500"`, "500", stringValue}, {"value>-3", "-3", numberValue}, {"k:api", "api", wordValue}, {`start_time>"2026-10-29T10:00:00Z"`, "2026-10-29T10:00:00Z", stringValue}} {
+		x := mustParse(t, "spans where "+tc.input).Where[0].(*comparison)
 		if x.Value.Kind != tc.kind || x.Value.Text != tc.text {
 			t.Fatal(x)
 		}
 	}
-	if _, ok := mustParse(t, "spans where k:*").Where[0].(*Exists); !ok {
+	if _, ok := mustParse(t, "spans where k:*").Where[0].(*existsExpr); !ok {
 		t.Fatal("expected exists")
 	}
 	wantProblem(t, "spans where k:-foo", "", "k: needs a value; e.g. k:api", "")
@@ -151,17 +151,17 @@ func TestParseColonEndsWord(t *testing.T) {
 
 func TestParseFieldVsFreeText(t *testing.T) {
 	for _, s := range []string{"service", "in", `"limit"`, "stats"} {
-		if _, ok := mustParse(t, "logs where "+s).Where[0].(*FreeText); !ok {
+		if _, ok := mustParse(t, "logs where "+s).Where[0].(*textExpr); !ok {
 			t.Fatal(s)
 		}
 	}
 	for _, s := range []string{"where", "join"} {
-		x := mustParse(t, "logs where service:"+s).Where[0].(*Compare)
-		if x.Value.Kind != WordValue || x.Value.Text != s {
+		x := mustParse(t, "logs where service:"+s).Where[0].(*comparison)
+		if x.Value.Kind != wordValue || x.Value.Text != s {
 			t.Fatal(x)
 		}
 	}
-	x := mustParse(t, "logs where service in (sort, limit)").Where[0].(*In)
+	x := mustParse(t, "logs where service in (sort, limit)").Where[0].(*inExpr)
 	if len(x.Values) != 2 || x.Values[0].Text != "sort" || x.Values[1].Text != "limit" {
 		t.Fatal(x)
 	}
@@ -182,19 +182,19 @@ func TestParseOperatorsAfterField(t *testing.T) {
 		x := mustParse(t, "spans where "+input).Where[0]
 		neg := strings.Contains(op, "not")
 		switch x := x.(type) {
-		case *In:
+		case *inExpr:
 			if x.Negated != neg || len(x.Values) != 2 {
 				t.Fatal(x)
 			}
-		case *Between:
+		case *betweenExpr:
 			if x.Negated != neg || x.Lo.Text != "1" || x.Hi.Text != "2" {
 				t.Fatal(x)
 			}
-		case *IsNull:
+		case *nullExpr:
 			if x.Negated != neg {
 				t.Fatal(x)
 			}
-		case *Like:
+		case *likeExpr:
 			if x.Negated != neg || x.Insensitive != strings.Contains(op, "ilike") || x.Pattern.Text != "a%" {
 				t.Fatal(x)
 			}
@@ -202,28 +202,28 @@ func TestParseOperatorsAfterField(t *testing.T) {
 			t.Fatalf("%s: %T", op, x)
 		}
 	}
-	if mustParse(t, "spans where k:>5").Where[0].(*Compare).Op != ">" {
+	if mustParse(t, "spans where k:>5").Where[0].(*comparison).Op != ">" {
 		t.Fatal("colon comparison")
 	}
 	wantProblem(t, "spans where k like a%", "", "like needs a quoted pattern", "")
 	wantProblem(t, "spans where duration between 1s", "", "between needs two values", "")
-	x := mustParse(t, "spans where service in $svcs").Where[0].(*In)
+	x := mustParse(t, "spans where service in $svcs").Where[0].(*inExpr)
 	if x.Variable != "svcs" {
 		t.Fatal(x)
 	}
 }
 
 func TestParseCalls(t *testing.T) {
-	x := mustParse(t, `spans where starts_with(http_route, "/api")`).Where[0].(*Call)
+	x := mustParse(t, `spans where starts_with(http_route, "/api")`).Where[0].(*filterCall)
 	if x.Name != "starts_with" || len(x.Args) != 2 || x.Args[0].Field == nil || x.Args[0].Field.Key != "http_route" || x.Args[1].Value == nil || x.Args[1].Value.Text != "/api" {
 		t.Fatal(x)
 	}
-	x = mustParse(t, "logs where length(body) > 1000").Where[0].(*Call)
+	x = mustParse(t, "logs where length(body) > 1000").Where[0].(*filterCall)
 	if x.Cmp == nil || x.Cmp.Op != ">" || x.Cmp.Value.Text != "1000" {
 		t.Fatal(x)
 	}
 	wantProblem(t, `logs where starts_with (x, "y")`, "", "write starts_with(...) without a space", "")
-	x = mustParse(t, "spans where P95(Duration)").Where[0].(*Call)
+	x = mustParse(t, "spans where P95(Duration)").Where[0].(*filterCall)
 	if x.Name != "p95" {
 		t.Fatal(x)
 	}
@@ -232,35 +232,35 @@ func TestParseCalls(t *testing.T) {
 func TestParseStageMeasuresAndArithmetic(t *testing.T) {
 	q := mustParse(t, "spans | count_if(status:error) / count() * 100 as err_pct by http_route every 1m sort err_pct limit 10")
 	m := q.Stage.Measures[0]
-	mul, ok := m.Expr.(*MBinary)
+	mul, ok := m.Expr.(*mBinary)
 	if !ok || mul.Op != '*' || m.Alias != "err_pct" {
 		t.Fatal(m)
 	}
-	div, ok := mul.L.(*MBinary)
+	div, ok := mul.L.(*mBinary)
 	if !ok || div.Op != '/' {
 		t.Fatal(mul)
 	}
-	if _, ok := div.L.(*MCountIf); !ok {
+	if _, ok := div.L.(*mCountIf); !ok {
 		t.Fatal(div)
 	}
-	if div.R.(*MCall).Name != "count" || mul.R.(*MConst).Value != 100 {
+	if div.R.(*mCall).Name != "count" || mul.R.(*mConst).Value != 100 {
 		t.Fatal(mul)
 	}
 	if q.Stage.By[0].Key != "http_route" || q.Stage.Bucket != "1m" || q.Sort.Key != "err_pct" || q.Sort.Ascending || q.Limit.N != 10 {
 		t.Fatal(q)
 	}
-	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Expr.(*MBinary)
-	if x.Op != '-' || x.L.(*MCall).Name != "p95" || x.R.(*MCall).Name != "p50" {
+	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Expr.(*mBinary)
+	if x.Op != '-' || x.L.(*mCall).Name != "p95" || x.R.(*mCall).Name != "p50" {
 		t.Fatal(x)
 	}
-	x = mustParse(t, "spans | count() * -1 as neg").Stage.Measures[0].Expr.(*MBinary)
-	if x.R.(*MNeg).X.(*MConst).Value != 1 {
+	x = mustParse(t, "spans | count() * -1 as neg").Stage.Measures[0].Expr.(*mBinary)
+	if x.R.(*mNeg).X.(*mConst).Value != 1 {
 		t.Fatal(x)
 	}
 	for _, s := range []string{"count()*100 as c100", "count()/count() as one", "count() * 1e3 as k", "count() * 1.5 as x", "(count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex"} {
 		mustParse(t, "spans | "+s)
 	}
-	c := mustParse(t, "spans | count() * 1e3 as k").Stage.Measures[0].Expr.(*MBinary).R.(*MConst)
+	c := mustParse(t, "spans | count() * 1e3 as k").Stage.Measures[0].Expr.(*mBinary).R.(*mConst)
 	if c.Value != 1000 || c.Text != "1e3" {
 		t.Fatal(c)
 	}
@@ -282,7 +282,7 @@ func TestParseExpressionRules(t *testing.T) {
 	if q.Stage.Histogram == nil || q.Stage.Histogram.Key != "duration" || len(q.Stage.By) != 1 {
 		t.Fatal(q)
 	}
-	x := mustParse(t, "spans | count(*)").Stage.Measures[0].Expr.(*MCall)
+	x := mustParse(t, "spans | count(*)").Stage.Measures[0].Expr.(*mCall)
 	if x.Name != "count" || len(x.Args) != 1 || !x.Args[0].Star {
 		t.Fatal(x)
 	}
@@ -327,12 +327,12 @@ func TestParseSourceErrors(t *testing.T) {
 }
 
 func TestParseSearchBarFilters(t *testing.T) {
-	q, ps := Parse("service:api timeout", "logs")
+	q, ps := parse("service:api timeout", "logs")
 	if len(ps) != 0 || q == nil || q.Source != "logs" || len(q.Where) != 2 {
 		t.Fatalf("%#v %#v", q, ps)
 	}
 	wantProblem(t, "where service:api", "logs", "the page supplies where", "")
-	if q, ps := Parse("| count()", "logs"); q != nil || len(ps) == 0 {
+	if q, ps := parse("| count()", "logs"); q != nil || len(ps) == 0 {
 		t.Fatal(q, ps)
 	}
 }
@@ -354,7 +354,7 @@ func TestParseReservedAndForeignWords(t *testing.T) {
 	} {
 		wantProblem(t, tc.text, "", tc.message, tc.hint)
 	}
-	if _, ok := mustParse(t, "spans where stats").Where[0].(*FreeText); !ok {
+	if _, ok := mustParse(t, "spans where stats").Where[0].(*textExpr); !ok {
 		t.Fatal("foreign free text")
 	}
 }
@@ -378,7 +378,7 @@ func TestParseUnclosedAndUnmatched(t *testing.T) {
 }
 
 func TestParseCollectsAllProblemsInOrderCappedAt20(t *testing.T) {
-	q, ps := Parse("spans where "+strings.Repeat("!k:v ", 25), "")
+	q, ps := parse("spans where "+strings.Repeat("!k:v ", 25), "")
 	if q != nil || len(ps) != 21 || ps[20].Message != "more problems follow; fix these first" {
 		t.Fatal(q, ps)
 	}
@@ -387,7 +387,7 @@ func TestParseCollectsAllProblemsInOrderCappedAt20(t *testing.T) {
 			t.Fatal(ps)
 		}
 	}
-	q, ps = Parse("traces | stats x take 5", "")
+	q, ps = parse("traces | stats x take 5", "")
 	if q != nil || len(ps) != 3 {
 		t.Fatal(q, ps)
 	}
@@ -406,7 +406,7 @@ func TestParseBoundsAreEnforcedIndependently(t *testing.T) {
 		{"spans " + strings.Repeat("(", 17) + "a:1" + strings.Repeat(")", 17), "depth"},
 		{"spans service in (" + strings.Join(values, ",") + ")", "list"},
 	} {
-		q, ps := Parse(tc.text, "")
+		q, ps := parse(tc.text, "")
 		if q != nil || len(ps) != 1 || !strings.Contains(ps[0].Message, tc.fragment) || ps[0].Span == nil {
 			t.Fatalf("%s: %#v %#v", tc.fragment, q, ps)
 		}
@@ -418,8 +418,8 @@ func TestParseBoundsAreEnforcedIndependently(t *testing.T) {
 
 func TestParseKeywordCaseFolding(t *testing.T) {
 	q := mustParse(t, "SPANS WHERE Service:API | COUNT() BY service EVERY 1M SORT COUNT LIMIT 5")
-	x := q.Where[0].(*Compare)
-	if q.Source != "spans" || x.Field.Key != "Service" || x.Value.Text != "API" || q.Stage.Measures[0].Expr.(*MCall).Name != "count" || q.Stage.Bucket != "1m" || q.Sort.Key != "count" {
+	x := q.Where[0].(*comparison)
+	if q.Source != "spans" || x.Field.Key != "Service" || x.Value.Text != "API" || q.Stage.Measures[0].Expr.(*mCall).Name != "count" || q.Stage.Bucket != "1m" || q.Sort.Key != "count" {
 		t.Fatal(q, x)
 	}
 }
@@ -433,11 +433,11 @@ func TestParseEntryParserIsUnbounded(t *testing.T) {
 
 func TestParseFieldsAndLiteralSpans(t *testing.T) {
 	q := mustParse(t, `logs where attributes['𝔘.key']:"✓" resource.k8s.pod.name:x a.b:y`)
-	fields := []Field{q.Where[0].(*Compare).Field, q.Where[1].(*Compare).Field, q.Where[2].(*Compare).Field}
+	fields := []fieldName{q.Where[0].(*comparison).Field, q.Where[1].(*comparison).Field, q.Where[2].(*comparison).Field}
 	if fields[0].Scope != "attributes" || fields[0].Key != "𝔘.key" || !fields[0].Bracket || fields[0].Single || fields[1].Scope != "resource" || fields[1].Key != "k8s.pod.name" || fields[2].Scope != "" || fields[2].Key != "a.b" {
 		t.Fatal(fields)
 	}
-	if !reflect.DeepEqual(q.SourceSpan, Span{0, 4}) {
+	if !reflect.DeepEqual(q.SourceSpan, span{0, 4}) {
 		t.Fatal(q)
 	}
 }
@@ -460,17 +460,17 @@ func TestParseGroupingFixItsRepairLongerChains(t *testing.T) {
 
 func TestParseApdexTree(t *testing.T) {
 	q := mustParse(t, "spans | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex")
-	var walk func(MExpr) (int, int)
-	walk = func(x MExpr) (int, int) {
+	var walk func(mExpr) (int, int)
+	walk = func(x mExpr) (int, int) {
 		switch x := x.(type) {
-		case *MBinary:
+		case *mBinary:
 			ld, ln := walk(x.L)
 			rd, rn := walk(x.R)
 			return max(ld, rd) + 1, ln + rn
-		case *MNeg:
+		case *mNeg:
 			d, n := walk(x.X)
 			return d + 1, n
-		case *MCall, *MCountIf:
+		case *mCall, *mCountIf:
 			return 1, 1
 		default:
 			return 1, 0
@@ -495,14 +495,14 @@ func TestParseFilterSignsAndFieldShapes(t *testing.T) {
 	if len(q.Where) != 2 {
 		t.Fatal(q)
 	}
-	if _, ok := q.Where[1].(*Not); !ok {
+	if _, ok := q.Where[1].(*notExpr); !ok {
 		t.Fatal(q.Where)
 	}
 }
 
 func TestParseForeignSyntaxInEachPosition(t *testing.T) {
 	for _, s := range []string{"spans | sort by service", "spans where body::text", "spans |= err", "spans |~ err", "spans group by service", "spans facet service", "spans where ago(1h)", "spans where now()", "spans where earliest=1h", "spans where _time:x"} {
-		if q, ps := Parse(s, ""); q != nil || len(ps) == 0 {
+		if q, ps := parse(s, ""); q != nil || len(ps) == 0 {
 			t.Fatalf("accepted %s: %#v", s, q)
 		}
 	}
@@ -516,7 +516,7 @@ func TestParseCombinedNestingBounds(t *testing.T) {
 		"spans where " + strings.Repeat("(", 9) + strings.Repeat("not ", 8) + "a:1" + strings.Repeat(")", 9),
 		"spans | count()" + strings.Repeat(" + 1", 17) + " as x",
 	} {
-		_, ps := Parse(text, "")
+		_, ps := parse(text, "")
 		if len(ps) != 1 || !strings.Contains(ps[0].Message, "depth") {
 			t.Fatalf("%q: %#v", text, ps)
 		}

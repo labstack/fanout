@@ -14,10 +14,10 @@ type registryMeaning struct {
 	problems string
 }
 
-func registrySnapshot(fixtures []corpusFixture) map[string]registryMeaning {
+func registrySnapshot(fixtures []corpusFixture, vocab vocabulary) map[string]registryMeaning {
 	out := make(map[string]registryMeaning, len(fixtures))
 	for _, fixture := range fixtures {
-		compiled, problems := Compile(fixture.Text, Options{Viz: fixture.Viz})
+		compiled, problems := compileWith(fixture.Text, Options{Viz: fixture.Viz}, vocab)
 		var query []byte
 		if compiled != nil {
 			query, _ = json.Marshal(compiled.Query)
@@ -46,29 +46,23 @@ func registryVersionBumpEvents(before, after map[string]registryMeaning) []strin
 }
 
 func TestRegistryGrowth(t *testing.T) {
+	t.Parallel()
+	vocab := currentVocabulary()
 	fixtures := readCorpus(t)
 	fixtures = append(slices.Clone(fixtures),
 		corpusFixture{Text: `spans where value>-3`},
 		corpusFixture{Text: `spans where attributes['value']>-3`},
 	)
-	baseline := registrySnapshot(fixtures)
-	columns, measures, functions := resolveColumns, resolveMeasures, resolveFilterFunctions
-	oldBuckets := buckets
-	t.Cleanup(func() {
-		resolveColumns, resolveMeasures, resolveFilterFunctions, buckets = columns, measures, functions, oldBuckets
-	})
-	resolveMeasures = func() []panel.MeasureSpec {
+	baseline := registrySnapshot(fixtures, vocab)
+	columns, measures, functions, bucketNames := vocab.columns, vocab.measures, vocab.functions, vocab.buckets
+	vocab.measures = func() []panel.MeasureSpec {
 		out := measures()
 		out = append(out, panel.MeasureSpec{Name: "p42", Args: 1, Numeric: true, Quantile: .42, Signals: []string{"spans", "logs"}})
 		return out
 	}
-	resolveFilterFunctions = func() []string { return append(functions(), "ltrim") }
-	buckets = make(map[string]bool, len(oldBuckets)+1)
-	for name, enabled := range oldBuckets {
-		buckets[name] = enabled
-	}
-	buckets["2m"] = true
-	afterAdditive := registrySnapshot(fixtures)
+	vocab.functions = func() []string { return append(functions(), "ltrim") }
+	vocab.buckets = func() []string { return append(bucketNames(), "2m") }
+	afterAdditive := registrySnapshot(fixtures, vocab)
 	if !reflect.DeepEqual(baseline, afterAdditive) {
 		for text, before := range baseline {
 			if before != afterAdditive[text] {
@@ -85,18 +79,18 @@ func TestRegistryGrowth(t *testing.T) {
 		t.Fatalf("additive changes requested a version bump: %q", events)
 	}
 	for _, text := range []string{`spans | p42(duration)`, `spans | count() every 2m`, `logs where ltrim(service)="api"`} {
-		if c, ps := Compile(text, Options{}); len(ps) != 0 || c == nil {
+		if c, ps := compileWith(text, Options{}, vocab); len(ps) != 0 || c == nil {
 			t.Fatalf("synthetic registry hook didn't reach %q: %+v", text, ps)
 		}
 	}
-	resolveColumns = func(source string) ([]panel.Field, bool) {
+	vocab.columns = func(source string) ([]panel.Field, bool) {
 		out, ok := columns(source)
 		if source == "spans" {
 			out = append(out, panel.Field{Name: "value", Type: panel.TypeNumber, Unit: "none"})
 		}
 		return out, ok
 	}
-	afterColumn := registrySnapshot(fixtures)
+	afterColumn := registrySnapshot(fixtures, vocab)
 	events := registryVersionBumpEvents(baseline, afterColumn)
 	if !slices.Contains(events, `spans where value>-3`) {
 		t.Fatalf("new column must report a version-bump event; got %q", events)

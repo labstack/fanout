@@ -130,7 +130,7 @@ func TestTruthTable(t *testing.T) {
 	}
 	t.Run("stored SQL negative stays SQL", func(t *testing.T) {
 		q := panel.Query{From: "spans", Where: []string{"namespace = 'values'", "NOT (attributes['k'] = 'v')"}, Measures: []string{"count()"}}
-		f, problems, err := Format(t.Context(), d, q, FormatOptions{Viz: "table"})
+		f, problems, err := Format(t.Context(), d, q, Options{Viz: "table"})
 		if err != nil || len(problems) != 0 {
 			t.Fatalf("format: %+v %v", problems, err)
 		}

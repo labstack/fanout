@@ -1,10 +1,10 @@
-package panel
+package suggest
 
 import "strings"
 
-// suggest returns "did you mean X?" for the closest candidate within a small
+// Spelling returns "did you mean X?" for the closest candidate within a small
 // edit distance, or "" when nothing is close.
-func suggest(word string, candidates []string) string {
+func Spelling(word string, candidates []string) string {
 	// A candidate that contains the word ("route" in "http_route") is the
 	// strongest hint; prefer the shortest such candidate.
 	contained := ""

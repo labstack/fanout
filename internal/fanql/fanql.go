@@ -7,10 +7,10 @@ import "github.com/labstack/fanout/internal/panel"
 const Version = 1
 
 type Options struct {
-	Source    string
-	Viz       string
-	Variables []panel.Variable
-	Schema    *panel.Schema
+	Source    string           `json:"source,omitempty"`
+	Viz       string           `json:"viz,omitempty"`
+	Variables []panel.Variable `json:"variables,omitempty"`
+	Schema    *panel.Schema    `json:"-"`
 }
 
 type Compiled struct {
@@ -24,11 +24,14 @@ type Compiled struct {
 // Compile parses, resolves and lowers text without executing SQL. A problem
 // always prevents an executable query from being returned.
 func Compile(text string, opts Options) (*Compiled, panel.Problems) {
-	q, problems := Parse(text, opts.Source)
+	return compileWith(text, opts, currentVocabulary())
+}
+func compileWith(text string, opts Options, vocab vocabulary) (*Compiled, panel.Problems) {
+	q, problems := parseWith(text, opts.Source, vocab)
 	if len(problems) != 0 {
 		return nil, problems
 	}
-	r, problems := Resolve(q, ResolveOptions{Viz: opts.Viz, Variables: opts.Variables, Schema: opts.Schema})
+	r, problems := resolveWith(q, opts, vocab)
 	if len(problems) != 0 {
 		return nil, problems
 	}
@@ -36,5 +39,5 @@ func Compile(text string, opts Options) (*Compiled, panel.Problems) {
 	if len(problems) != 0 {
 		return nil, problems
 	}
-	return &Compiled{Query: pq, Canonical: Print(q), Notices: r.Notices, Compatible: r.Compatible, Edits: r.Edits}, nil
+	return &Compiled{Query: pq, Canonical: print(q), Notices: r.Notices, Compatible: r.Compatible, Edits: r.Edits}, nil
 }

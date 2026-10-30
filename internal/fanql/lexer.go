@@ -6,43 +6,43 @@ import (
 	"unicode"
 )
 
-type Context uint8
+type tokenContext uint8
 
 const (
-	FilterContext Context = iota
-	MeasureContext
+	filterContext tokenContext = iota
+	measureContext
 )
 
-type Kind uint8
+type tokenKind uint8
 
 const (
-	EOF Kind = iota
-	Word
-	Ident
-	Path
-	String
-	Raw
-	BracketKey
-	Number
-	Punct
-	Bad
+	eof tokenKind = iota
+	tokenWord
+	tokenIdent
+	tokenPath
+	tokenString
+	tokenRaw
+	tokenBracketKey
+	tokenNumber
+	tokenPunct
+	tokenBad
 )
 
 // Span uses code-point offsets, with an exclusive end.
-type Span struct{ Start, End int }
+type span struct{ Start, End int }
 
-type Token struct {
-	Kind     Kind
+type lexToken struct {
+	Kind     tokenKind
 	Text     string
 	Quote    byte
 	Unclosed bool
-	Ctx      Context
-	Span     Span
+	Ctx      tokenContext
+	Span     span
 	Message  string
 	Hint     string
 }
 
-type Tokens []Token
+type lexTokens []lexToken
 
 func identStart(r rune) bool    { return unicode.IsLetter(r) || r == '_' }
 func identContinue(r rune) bool { return identStart(r) || unicode.IsDigit(r) }
@@ -51,10 +51,10 @@ func digit(r rune) bool         { return r >= '0' && r <= '9' }
 // Lex never fails and always ends with EOF. A depth-zero pipe enters measure
 // context; by/every/sort/limit or another pipe leaves it. count_if's matching
 // parentheses enclose filter context, ignoring delimiters inside quoted tokens.
-func Lex(text string) Tokens {
+func lex(text string) lexTokens {
 	r := []rune(text)
-	ts := make(Tokens, 0, min(len(r)+1, 1024))
-	ctx := FilterContext
+	ts := make(lexTokens, 0, min(len(r)+1, 1024))
+	ctx := filterContext
 	depth, brackets := 0, 0
 	var conditional []int
 	for i := 0; i < len(r); {
@@ -63,15 +63,15 @@ func Lex(text string) Tokens {
 			continue
 		}
 		start := i
-		tok := Token{Ctx: ctx}
+		tok := lexToken{Ctx: ctx}
 		c := r[i]
 		switch {
 		case c == '"' || c == '\'' || c == '`':
-			tok.Kind, tok.Quote = String, byte(c)
+			tok.Kind, tok.Quote = tokenString, byte(c)
 			if c == '`' {
-				tok.Kind = Raw
+				tok.Kind = tokenRaw
 			} else if n := len(ts); n >= 2 && ts[n-1].Text == "[" && (strings.EqualFold(ts[n-2].Text, "attributes") || strings.EqualFold(ts[n-2].Text, "resource")) {
-				tok.Kind = BracketKey
+				tok.Kind = tokenBracketKey
 			}
 			i++
 			var body strings.Builder
@@ -91,14 +91,14 @@ func Lex(text string) Tokens {
 				i++
 			}
 			tok.Text = body.String()
-		case ctx == MeasureContext && identStart(c):
-			tok.Kind = Ident
+		case ctx == measureContext && identStart(c):
+			tok.Kind = tokenIdent
 			i++
 			for i < len(r) && identContinue(r[i]) {
 				i++
 			}
 			for i+1 < len(r) && r[i] == '.' && identStart(r[i+1]) {
-				tok.Kind = Path
+				tok.Kind = tokenPath
 				i += 2
 				for i < len(r) && identContinue(r[i]) {
 					i++
@@ -108,27 +108,27 @@ func Lex(text string) Tokens {
 			if depth == 0 && brackets == 0 {
 				switch strings.ToLower(tok.Text) {
 				case "by", "every", "sort", "limit":
-					ctx = FilterContext
+					ctx = filterContext
 					tok.Ctx = ctx
-					tok.Kind = Word
+					tok.Kind = tokenWord
 				}
 			}
-		case ctx == MeasureContext && digit(c):
-			tok.Kind = Number
+		case ctx == measureContext && digit(c):
+			tok.Kind = tokenNumber
 			i = scanNumber(r, i)
 		case c == '$':
 			i++
-			if ctx == FilterContext && i < len(r) && identStart(r[i]) {
-				tok.Kind = Word
+			if ctx == filterContext && i < len(r) && identStart(r[i]) {
+				tok.Kind = tokenWord
 				for i < len(r) && identContinue(r[i]) {
 					i++
 				}
 			} else {
-				tok.Kind = Bad
+				tok.Kind = tokenBad
 				tok.Message = "unexpected $"
 			}
-		case strings.ContainsRune("|(),:=!<>~[]+-*", c) || (ctx == MeasureContext && c == '/'):
-			tok.Kind = Punct
+		case strings.ContainsRune("|(),:=!<>~[]+-*", c) || (ctx == measureContext && c == '/'):
+			tok.Kind = tokenPunct
 			i++
 			if i < len(r) {
 				pair := string(r[start : i+1])
@@ -137,28 +137,28 @@ func Lex(text string) Tokens {
 					i++
 				case "~~":
 					i++
-					tok.Kind = Bad
+					tok.Kind = tokenBad
 					tok.Hint = "~~ is SQL LIKE; use like, ilike or ~"
 					tok.Message = tok.Hint
 				}
 			}
 			if c == '!' && i == start+1 {
-				tok.Kind = Bad
+				tok.Kind = tokenBad
 				tok.Message = "! negation is not FanQL"
 			}
 		case strings.ContainsRune("#{}@", c):
-			tok.Kind = Bad
+			tok.Kind = tokenBad
 			i++
-		case ctx == FilterContext:
-			tok.Kind = Word
+		case ctx == filterContext:
+			tok.Kind = tokenWord
 			i++
 			for i < len(r) && !unicode.IsSpace(r[i]) && !strings.ContainsRune("|(),:=!<>~\"'`[]*${}#@", r[i]) {
 				i++
 			}
 		default:
-			tok.Kind = Bad
+			tok.Kind = tokenBad
 			i++
-			if c == '.' && len(ts) > 0 && ts[len(ts)-1].Kind == Ident {
+			if c == '.' && len(ts) > 0 && ts[len(ts)-1].Kind == tokenIdent {
 				prev := ts[len(ts)-1].Text
 				tok.Message = fmt.Sprintf("unexpected . after %s; write the full key, e.g. %s.id", prev, prev)
 			}
@@ -166,11 +166,11 @@ func Lex(text string) Tokens {
 		if tok.Text == "" && tok.Quote == 0 {
 			tok.Text = string(r[start:i])
 		}
-		tok.Span = Span{start, i}
-		if tok.Kind == Bad && tok.Message == "" {
+		tok.Span = span{start, i}
+		if tok.Kind == tokenBad && tok.Message == "" {
 			tok.Message = "unexpected " + tok.Text
 		}
-		if tok.Kind == Punct {
+		if tok.Kind == tokenPunct {
 			switch tok.Text {
 			case "[":
 				brackets++
@@ -178,30 +178,30 @@ func Lex(text string) Tokens {
 				brackets = max(0, brackets-1)
 			case "(":
 				depth++
-				if ctx == MeasureContext && len(ts) > 0 && strings.EqualFold(ts[len(ts)-1].Text, "count_if") {
+				if ctx == measureContext && len(ts) > 0 && strings.EqualFold(ts[len(ts)-1].Text, "count_if") {
 					conditional = append(conditional, depth)
-					ctx = FilterContext
+					ctx = filterContext
 				}
 			case ")":
 				if n := len(conditional); n > 0 && depth == conditional[n-1] {
-					ctx = MeasureContext
+					ctx = measureContext
 					tok.Ctx = ctx
 					conditional = conditional[:n-1]
 				}
 				depth = max(0, depth-1)
 			case "|":
 				if depth == 0 && brackets == 0 {
-					if ctx == FilterContext {
-						ctx = MeasureContext
+					if ctx == filterContext {
+						ctx = measureContext
 					} else {
-						ctx = FilterContext
+						ctx = filterContext
 					}
 				}
 			}
 		}
 		ts = append(ts, tok)
 	}
-	return append(ts, Token{Kind: EOF, Ctx: FilterContext, Span: Span{len(r), len(r)}})
+	return append(ts, lexToken{Kind: eof, Ctx: filterContext, Span: span{len(r), len(r)}})
 }
 
 func scanNumber(r []rune, i int) int {

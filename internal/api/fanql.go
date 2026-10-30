@@ -119,7 +119,7 @@ func (h *FanQLHandler) format(c *echo.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
 	defer cancel()
-	formatted, problems, err := fanql.Format(ctx, h.parser, req.Query, fanql.FormatOptions{Viz: req.Viz, Variables: req.Variables})
+	formatted, problems, err := fanql.Format(ctx, h.parser, req.Query, fanql.Options{Viz: req.Viz, Variables: req.Variables})
 	if err != nil {
 		return fanqlError(err)
 	}

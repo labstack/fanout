@@ -19,7 +19,7 @@ type completionSchemaFunc func(context.Context, panel.SchemaRequest) (*panel.Sch
 
 // expectAt replaces a whole lexical token even when the cursor is in its middle.
 // Punctuation is consumed by the grammar: a cursor after ':' expects a value.
-func expectAt(text string, cursor int) (Token, []Expect) {
+func expectAt(text string, cursor int) (lexToken, []expect) {
 	token, p := completionPrefix(text, cursor, "")
 	return token, p.expected
 }
@@ -157,10 +157,10 @@ func TestExpectAtRecordsClasses(t *testing.T) {
 			if tt.function != "" && (got[0].Func != tt.function || got[0].Arg != tt.arg) {
 				t.Fatalf("argument = %+v", got)
 			}
-			if strings.HasSuffix(tt.text, "service") && token.Span != (Span{12, 19}) {
+			if strings.HasSuffix(tt.text, "service") && token.Span != (span{12, 19}) {
 				t.Fatalf("replace token = %+v", token)
 			}
-			if strings.Contains(tt.text, "['ht") && (token.Kind != BracketKey || got[0].Scope != "attributes") {
+			if strings.Contains(tt.text, "['ht") && (token.Kind != tokenBracketKey || got[0].Scope != "attributes") {
 				t.Fatalf("bracket = %+v %+v", token, got)
 			}
 		})
@@ -403,11 +403,11 @@ func TestCompleteSortAliasesLower(t *testing.T) {
 		t.Fatalf("sort aliases %v", got)
 	}
 	for _, item := range r.Items {
-		q, problems := Parse(req.Text+item.Insert, "")
+		q, problems := parse(req.Text+item.Insert, "")
 		if len(problems) > 0 {
 			t.Fatal(problems)
 		}
-		resolved, problems := Resolve(q, ResolveOptions{Viz: "table"})
+		resolved, problems := resolve(q, Options{Viz: "table"})
 		if len(problems) > 0 {
 			t.Fatal(problems)
 		}

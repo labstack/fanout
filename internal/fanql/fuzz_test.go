@@ -52,7 +52,7 @@ func FuzzCompileFormatCompile(f *testing.F) {
 		} else if len(problems) != 0 {
 			return
 		}
-		formatted, ps, err := Format(t.Context(), engine, c.Query, FormatOptions{Viz: viz, Variables: vars})
+		formatted, ps, err := Format(t.Context(), engine, c.Query, Options{Viz: viz, Variables: vars})
 		if err != nil || len(ps) != 0 || formatted == nil {
 			t.Fatalf("format %q: %+v %v", text, ps, err)
 		}
@@ -74,9 +74,9 @@ func FuzzLexParsePrint(f *testing.F) {
 		if len(text) > 65536 {
 			return
 		}
-		tokens := Lex(text)
+		tokens := lex(text)
 		runes := utf8.RuneCountInString(text)
-		if len(tokens) > runes+1 || len(tokens) == 0 || tokens[len(tokens)-1].Kind != EOF {
+		if len(tokens) > runes+1 || len(tokens) == 0 || tokens[len(tokens)-1].Kind != eof {
 			t.Fatalf("nonlinear or unterminated token stream: %d tokens for %d runes", len(tokens), runes)
 		}
 		for _, tok := range tokens {
@@ -84,12 +84,12 @@ func FuzzLexParsePrint(f *testing.F) {
 				t.Fatalf("invalid token span: %+v", tok)
 			}
 		}
-		q, ps := Parse(text, "")
+		q, ps := parse(text, "")
 		if len(ps) != 0 {
 			if q != nil {
 				t.Fatal("problems returned an executable tree")
 			}
-			if len(ps) > MaxProblems+1 {
+			if len(ps) > maxProblems+1 {
 				t.Fatalf("too many problems: %d", len(ps))
 			}
 			if runes > 4000 || len(text) > 8192 {
@@ -103,27 +103,27 @@ func FuzzLexParsePrint(f *testing.F) {
 			}
 			return
 		}
-		printed := Print(q)
-		var again *Query
+		printed := print(q)
+		var again *queryTree
 		if editableReason(printed) != "" {
 			// Printing is total and may expand short attribute spellings past an
 			// interactive bound, or De Morgan negation past the node bound. The
 			// internal exactness parser remains unbounded.
-			if rejected, problems := Parse(printed, ""); rejected != nil || len(problems) == 0 {
+			if rejected, problems := parse(printed, ""); rejected != nil || len(problems) == 0 {
 				t.Fatal("expanded text ignored its bound")
 			}
-			p := &parser{runes: []rune(printed), tokens: Lex(printed), heights: make(map[any]int)}
+			p := &parser{vocab: currentVocabulary(), runes: []rune(printed), tokens: lex(printed), heights: make(map[any]int)}
 			again = p.query("")
 			if problems := p.finish(); len(problems) != 0 {
 				t.Fatalf("unbounded print reparse %q: %+v", printed, problems)
 			}
 		} else {
-			again, ps = Parse(printed, "")
+			again, ps = parse(printed, "")
 			if len(ps) != 0 {
 				t.Fatalf("print reparse %q: %+v", printed, ps)
 			}
 		}
-		if next := Print(again); next != printed {
+		if next := print(again); next != printed {
 			t.Fatalf("not a fixed point: %q -> %q -> %q", text, printed, next)
 		}
 	})
@@ -149,7 +149,7 @@ func TestStructuredGeneratorCoversConditionalMeasuresAndArithmetic(t *testing.T)
 					conditional = true
 				}
 			}
-			f, ps, err := Format(t.Context(), engine, q, FormatOptions{})
+			f, ps, err := Format(t.Context(), engine, q, Options{})
 			if err != nil || len(ps) != 0 || !f.Editable {
 				t.Fatalf("format %#v: %+v %v", q, ps, err)
 			}
@@ -295,7 +295,7 @@ func FuzzFormatRoundTrip(f *testing.F) {
 		} else if len(problems) != 0 {
 			return
 		}
-		formatted, ps, err := Format(t.Context(), engine, stored, FormatOptions{Variables: input.Variables})
+		formatted, ps, err := Format(t.Context(), engine, stored, Options{Variables: input.Variables})
 		if err != nil || len(ps) != 0 || formatted == nil {
 			t.Fatalf("format %#v: %+v %v", stored, ps, err)
 		}

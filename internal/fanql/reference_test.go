@@ -34,7 +34,7 @@ func TestReferenceCoversEveryRegistryEntry(t *testing.T) {
 			}
 		}
 	}
-	for _, table := range []map[string]string{statusAliases, kindAliases, typeAliases, telemetry.SeverityAliases()} {
+	for _, table := range []map[string]string{panel.FieldAliases("status"), panel.FieldAliases("kind"), panel.FieldAliases("type"), telemetry.SeverityAliases()} {
 		for alias, stored := range table {
 			check(alias)
 			check(stored)
