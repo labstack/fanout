@@ -3,6 +3,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { DashboardSpec, Panel } from "../../../panels/types";
 import { ApiError, type Problem } from "../api-error";
 import { queryPanels } from "../dashboards/api";
+import { DrillDrawer } from "../dashboards/drill";
+import { exploreDrillClient } from "./drill";
+import { parseDrill } from "../dashboards/drill-state";
+import { drillSelection } from "../dashboards/panel-handlers";
 import { PanelCard } from "../dashboards/panel-card";
 import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/panel-result";
 import { RangeMenu } from "../dashboards/toolbar";
@@ -43,6 +47,8 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
   const windowKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
   const sort = search.sort && preset.sorts.some(s => s.value === search.sort) ? search.sort : preset.sorts[0].value;
   const current = useRef(text); current.current = text;
+  // The filters this page last wrote to the URL; any other value came from history.
+  const written = useRef(search.q);
   const searchNow = useRef(search); searchNow.current = search;
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -56,7 +62,10 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
       if (abort.signal.aborted) return;
       setNotices(parsed.notices);
       const panel: Panel = { id: panelID, title: defaultTitle(`${preset.name}: ${filters.trim() || "all"}`), viz: preset.viz, query: { ...parsed.query, sort: order } };
-      onSearch({ ...searchNow.current, q: filters, sort: order }, true);
+      // A drawer opened from earlier results closes when the filters change.
+      const changed = filters !== written.current;
+      written.current = filters;
+      onSearch({ ...searchNow.current, q: filters, sort: order, ...(changed ? { drill: undefined } : {}) }, true);
       const dashboard: DashboardSpec = { version: 1, name: preset.name, time, panels: [panel] };
       const width = resultBox.current?.clientWidth || 960;
       const results = await queryPanels({ dashboard, panels: [panelID], time, widths: { [panelID]: width } }, abort.signal);
@@ -77,6 +86,11 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
   const rerun = useRef<() => void>(() => undefined);
   rerun.current = () => void execute(current.current, sort);
   useEffect(() => { rerun.current(); }, [windowKey, sort]);
+  // Back and Forward restore earlier filters; show and run them.
+  useEffect(() => {
+    if (search.q === written.current) return;
+    written.current = search.q; setText(search.q); void execute(search.q, sort);
+  }, [search.q]);
 
   const stale = ran !== undefined && (ran.text !== text || ran.sort !== sort || ran.window !== windowKey);
   const canSave = ran !== undefined && !stale && !running && ran.result.status === "ok" && (ran.result.frame?.rows ?? 0) > 0;
@@ -107,10 +121,13 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
         {stale && <Text size="sm" fw={600} role="status">Result of the last search · filters have changed</Text>}
         <Box h={resultHeight}>
           <PanelCard panel={ran.panel} title={ran.panel.title} result={ran.result} loading={running} height={resultHeight} group={`search-${preset.viz}`} editing={false} agentAvailable={false}
-            range={time.range} onRetry={() => void execute(ran.text, ran.sort)} />
+            range={time.range} onRetry={() => void execute(ran.text, ran.sort)} traceLinks="button"
+            onPoint={selection => { const selected = drillSelection(ran.panel, ran.result, selection, {}); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); }} />
         </Box>
       </Stack>}
     </Box>
+    {ran && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: preset.name, time, panels: [ran.panel] }} time={time} vars={{}} target={parseDrill(search.drill)}
+      onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}
     {saving && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
   </Stack>;
 }

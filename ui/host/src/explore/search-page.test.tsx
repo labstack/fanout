@@ -25,6 +25,7 @@ beforeEach(() => {
     const url = String(input);
     if (url === "/api/fanql/parse") return parse(JSON.parse(String(init?.body)));
     if (url === "/api/queries/run") return json({ results: [{ id: "search", status: "ok", elapsed_ms: 3, frame }] });
+    if (url.startsWith("/api/traces/")) return json({ summary: "", provenance: { window: "1h", generated_at: "", complete: true }, data: { trace_id: "abc", duration_ms: 5, has_error: false, services: ["checkout"], spans: [{ span_id: "s1", service: "checkout", operation: "GET /", kind: "server", start: "2026-10-30T10:00:00Z", duration_ms: 5, status: "ok" }], logs: [], span_count: 1, service_count: 1, truncated: false } });
     if (url === "/api/fanql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -70,6 +71,21 @@ describe("SearchPage", () => {
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
     expect(search().sort).toBe("errors");
     expect(bodies("/api/queries/run")[1].dashboard.panels[0].query.sort).toBe("errors");
+  });
+
+  it("opens the trace drawer named in the URL", async () => {
+    const drill = JSON.stringify({ panel_id: "search", kind: "traces", from: "2026-10-30T10:00:00Z", to: "2026-10-30T10:01:00Z", window_from: "2026-10-30T10:00:00Z", window_to: "2026-10-30T10:01:00Z", dimensions: {}, trace_id: "abc" });
+    const { wait } = await render(tracesPreset, { drill });
+    await wait(() => expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/traces/abc?"))).toBe(true));
+    await wait(() => expect(document.body.querySelector('[role="dialog"]')).not.toBeNull());
+  });
+
+  it("follows Back to earlier filters", async () => {
+    const { wait, onSearch, search, ui } = await render(logsPreset, { q: "service:b" });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await act(async () => onSearch({ ...search(), q: "service:a" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "service:a", source: "logs", viz: "logs" }));
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!.state.doc.toString()).toBe("service:a");
   });
 
   it("shows the problem when a where is typed", async () => {

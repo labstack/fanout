@@ -1,0 +1,1 @@
+import{t as e}from"./chat-B2o_Ifqu.js";var t=e;export{t as component};

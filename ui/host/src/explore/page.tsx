@@ -4,7 +4,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { DashboardSpec, Panel, Query, Viz } from "../../../panels/types";
 import { ApiError, type Problem } from "../api-error";
 import { getTelemetrySchema, queryPanels } from "../dashboards/api";
+import { DrillDrawer } from "../dashboards/drill";
+import { parseDrill } from "../dashboards/drill-state";
+import { drillSelection } from "../dashboards/panel-handlers";
 import { PanelCard } from "../dashboards/panel-card";
+import { exploreDrillClient } from "./drill";
 import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/panel-result";
 import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
@@ -89,7 +93,7 @@ export function ExplorePage({ search, onSearch, onSaved }: {
         const chosen = viz && next.viz.compatible.some(c => c.viz === viz && c.requires.length === 0) ? viz : next.viz.compatible.find(c => c.requires.length === 0)?.viz ?? "table";
         panel = { id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query };
         canonical = next.canonical;
-        onSearch({ ...searchNow.current, q: source, viz: chosen }, true);
+        onSearch({ ...searchNow.current, q: source, viz: chosen, ...(source !== searchNow.current.q ? { drill: undefined } : {}) }, true);
       } else {
         panel = { id: explorePanelID, title: "SQL", viz: "table", sql: source };
         setNotices([]);
@@ -241,10 +245,13 @@ export function ExplorePage({ search, onSearch, onSaved }: {
         <Text size="sm" fw={600} role="status">{stale ? "Result of the last run · query has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>
         <Box h={resultHeight}>
           <PanelCard panel={run.panel} title={run.panel.title} result={run.result} loading={running} height={resultHeight} group="explore" editing={false} agentAvailable={false}
-            range={time.range} onRetry={() => void execute(run.kind, run.source, run.panel.viz, readOnlyText ? built : undefined)} />
+            range={time.range} onRetry={() => void execute(run.kind, run.source, run.panel.viz, readOnlyText ? built : undefined)} traceLinks="button"
+            onPoint={selection => { const selected = drillSelection(run.panel, run.result, selection, {}); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); }} />
         </Box>
       </Stack> : <Text c="dimmed" size="sm" data-explore-empty>Type a query, for example <code>spans | count() by service</code>, and press Enter.</Text>}
     </Box>
+    {run && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: "Explore", time, panels: [run.panel] }} time={time} vars={{}} target={parseDrill(search.drill)}
+      onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}
     {saving && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
   </Stack>;
 }
