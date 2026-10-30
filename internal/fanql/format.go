@@ -59,7 +59,7 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 		problems, _ = panel.QueryShape(&stored, viz, vars)
 	}
 	if len(problems) > 0 {
-		return nil, problems, nil
+		return nil, oneProblemPerPathClause(problems), nil
 	}
 	q := &queryTree{Source: stored.From}
 	f := &Formatted{Exactness: Exact, Notices: []Notice{}, Requires: []Requirement{}}

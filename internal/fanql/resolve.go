@@ -131,6 +131,7 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, panel
 	sort.SliceStable(r.problems, func(i, j int) bool {
 		return r.problems[i].Span != nil && r.problems[j].Span != nil && r.problems[i].Span.Start < r.problems[j].Span.Start
 	})
+	r.problems = oneProblemPerPathClause(r.problems)
 	if len(r.problems) > maxProblems {
 		r.problems = append(r.problems[:maxProblems], panel.Problem{Path: "text", Message: message(diagMore), Span: r.problems[maxProblems].Span})
 	}
@@ -250,7 +251,21 @@ func (r *resolver) expr(e filterExpr) {
 			x.column = "operation"
 		}
 		if r.out.Query.Source == "metrics" {
-			r.issue(x.At, "free text needs a field on metrics; use name:http.server.duration")
+			name := "http.server.duration"
+			if r.opts.Schema != nil {
+				var selected *panel.MetricSchema
+				for _, metric := range r.opts.Schema.Signals["metrics"].Metrics {
+					if metric.Name != "" && (selected == nil || metric.Count > selected.Count || metric.Count == selected.Count && metric.Name < selected.Name) {
+						copy := metric
+						selected = &copy
+					}
+				}
+				if selected != nil {
+					name = selected.Name
+				}
+			}
+			example := printValue(literalValue{Kind: stringValue, Text: name}, fieldName{Key: "name", Single: true}, false)
+			r.issue(x.At, "free text needs a field on metrics; use name:"+example)
 		}
 		cols, _ := r.vocab.columns(r.out.Query.Source)
 		for _, c := range cols {
@@ -635,7 +650,7 @@ func (r *resolver) sort() {
 			}
 		case "log_patterns":
 			if s.Key != "count" || s.Ascending {
-				r.issue(s.At, "log_patterns sort by count only")
+				r.issue(s.At, "pattern lists sort by count only")
 			}
 		default:
 			if q.Stage != nil && q.Stage.Histogram == nil {
@@ -726,4 +741,30 @@ func ignoredClauseNotices(q panel.Query, viz string) []Notice {
 		notices = append(notices, Notice{Path: "limit", Message: "limit does not apply to " + viz + " panels; the whole window produces one value"})
 	}
 	return notices
+}
+
+func oneProblemPerPathClause(problems panel.Problems) panel.Problems {
+	seen := map[string]bool{}
+	out := make(panel.Problems, 0, len(problems))
+	for _, p := range problems {
+		root := strings.FieldsFunc(p.Path, func(r rune) bool { return r == '[' || r == '.' })
+		clause := p.Path
+		if len(root) > 0 {
+			clause = root[0]
+		}
+		if clause == "histogram" {
+			clause = "measures"
+		}
+		if seen[clause] {
+			continue
+		}
+		seen[clause] = true
+		p.Message = diagnosticVizNames(p.Message)
+		p.Hint = diagnosticVizNames(p.Hint)
+		out = append(out, p)
+	}
+	return out
+}
+func diagnosticVizNames(text string) string {
+	return strings.NewReplacer("log_patterns", "pattern lists", "state_timeline", "state timelines", "service_map", "service maps").Replace(text)
 }

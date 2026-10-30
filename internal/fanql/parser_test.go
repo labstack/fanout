@@ -138,7 +138,7 @@ func TestParseValueClassification(t *testing.T) {
 	if _, ok := mustParse(t, "spans where k:*").Where[0].(*existsExpr); !ok {
 		t.Fatal("expected exists")
 	}
-	wantProblem(t, "spans where k:-foo", "", "k: needs a value; e.g. k:api", "")
+	wantProblem(t, "spans where k:-foo", "", "k: needs a value; e.g. k:value", "")
 }
 
 func TestParseColonEndsWord(t *testing.T) {
@@ -304,7 +304,7 @@ func TestParseSortLimitAndSecondPipe(t *testing.T) {
 		t.Fatal(q)
 	}
 	for _, tc := range []struct{ text, message, hint string }{
-		{"spans | count() by service | top 3 by count", "FanQL 1 runs one aggregation stage", "remove the second |; more stages come in a later version"},
+		{"spans | count() by service | top 3 by count", "one aggregation stage is supported; combine measures after a single |", "remove the second |; more stages come in a later version"},
 		{"spans limit 10 sort duration", "sort comes before limit: … sort duration limit 10", "write spans sort duration limit 10"},
 		{"spans | count() limit 0", "limit needs a whole number from 1 to 1000; e.g. limit 50", ""},
 		{"spans where a:1 where b:2", "where appears twice; combine the filters into one where", ""},
@@ -348,9 +348,9 @@ func TestParseReservedAndForeignWords(t *testing.T) {
 		{`spans where {service="api"}`, "{ selectors are not FanQL; write labels as key:value, e.g. service:api", ""},
 		{"spans where @http.target:x", `"@http.target" is not a field name; write the attribute without @: http.target`, ""},
 		{"spans where !service:api", "! negation is not FanQL; write -service:api", ""},
-		{"spans since 1h", "the time range is not part of FanQL 1; use the time picker (since is reserved)", ""},
-		{"spans until 1h", "the time range is not part of FanQL 1; use the time picker (until is reserved)", ""},
-		{"spans where service:api*", "* wildcards are not in FanQL 1", `use ~ for contains, or quote "api*"`},
+		{"spans since 1h", "set the time range with the time picker, not in the query", ""},
+		{"spans until 1h", "set the time range with the time picker, not in the query", ""},
+		{"spans where service:api*", "* wildcards are not supported; use ~ for contains or quote the value", `use ~ for contains, or quote "api*"`},
 	} {
 		wantProblem(t, tc.text, "", tc.message, tc.hint)
 	}
@@ -378,7 +378,7 @@ func TestParseUnclosedAndUnmatched(t *testing.T) {
 }
 
 func TestParseCollectsAllProblemsInOrderCappedAt20(t *testing.T) {
-	q, ps := parse("spans where "+strings.Repeat("!k:v ", 25), "")
+	q, ps := parse("spans where k:v "+strings.Repeat("where k:v ", 25), "")
 	if q != nil || len(ps) != 21 || ps[20].Message != "more problems follow; fix these first" {
 		t.Fatal(q, ps)
 	}
@@ -388,7 +388,7 @@ func TestParseCollectsAllProblemsInOrderCappedAt20(t *testing.T) {
 		}
 	}
 	q, ps = parse("traces | stats x take 5", "")
-	if q != nil || len(ps) != 3 {
+	if q != nil || len(ps) != 2 {
 		t.Fatal(q, ps)
 	}
 }
@@ -486,7 +486,7 @@ func TestParseFilterSignsAndFieldShapes(t *testing.T) {
 	for _, tc := range []struct{ text, message string }{
 		{"spans where k:+3", "unexpected +"},
 		{"spans where 500>3", "a filter needs a field before >"},
-		{"spans where *foo", "* wildcards are not in FanQL 1"},
+		{"spans where *foo", "* wildcards are not supported; use ~ for contains or quote the value"},
 		{"spans | avg(*)", "* is only allowed as the sole argument of count(*)"},
 	} {
 		wantProblem(t, tc.text, "", tc.message, "")
@@ -532,5 +532,5 @@ func TestParseDistributionStandsAlone(t *testing.T) {
 }
 
 func TestParseListsRejectWildcards(t *testing.T) {
-	wantProblem(t, "spans where service in (*)", "", "* wildcards are not in FanQL 1", "")
+	wantProblem(t, "spans where service in (*)", "", "* wildcards are not supported; use ~ for contains or quote the value", "")
 }

@@ -25,6 +25,8 @@ var numberPattern = regexp.MustCompile(`^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[e
 var durationPattern = regexp.MustCompile(`(?i)^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:us|ms|s|m|h)$`)
 
 type parser struct {
+	clauseID        int
+	reported        map[int]bool
 	measureInfo     map[panel.MeasureExpr]*measureSource
 	vocab           vocabulary
 	tokens          lexTokens
@@ -157,6 +159,13 @@ func (p *parser) issue(at span, message, hint string) {
 	if p.completion {
 		return
 	}
+	if p.reported == nil {
+		p.reported = map[int]bool{}
+	}
+	if p.reported[p.clauseID] {
+		return
+	}
+	p.reported[p.clauseID] = true
 	p.problems = append(p.problems, panel.Problem{Path: "text", Message: message, Hint: hint, Span: &panel.TextSpan{Start: at.Start, End: at.End}})
 }
 func (p *parser) report(at span, code diagnosticCode, args ...any) {
@@ -164,6 +173,7 @@ func (p *parser) report(at span, code diagnosticCode, args ...any) {
 }
 func (p *parser) bound(at span, code diagnosticCode) {
 	p.problems = nil
+	p.reported = nil
 	p.report(at, code)
 	panic(parseBound{})
 }
@@ -195,12 +205,15 @@ func (p *parser) finish() panel.Problems {
 	if len(p.problems) > maxProblems {
 		at := *p.problems[maxProblems].Span
 		p.problems = p.problems[:maxProblems]
-		p.issue(span{at.Start, at.End}, diagnostic(diagMore), "")
+		p.problems = append(p.problems, panel.Problem{Path: "text", Message: diagnostic(diagMore), Span: &at})
 	}
 	return p.problems
 }
 
+func (p *parser) beginClause() { p.clauseID++ }
+
 func (p *parser) query(source string) *queryTree {
+	p.beginClause()
 	q := &queryTree{Span: span{0, len(p.runes)}}
 	p.completionQuery = q
 	if source != "" {
@@ -208,6 +221,7 @@ func (p *parser) query(source string) *queryTree {
 		if !sources[q.Source] {
 			p.report(span{}, diagSource, source)
 		}
+		p.beginClause()
 		if p.is("where") {
 			p.report(p.take().Span, diagPageWhere)
 		}
@@ -234,6 +248,7 @@ func (p *parser) query(source string) *queryTree {
 			p.issue(first.Span, diagnostic(diagSource, first.Text), suggestion)
 		}
 	}
+	p.beginClause()
 	q.WhereWord = p.eat("where")
 	whereAt := p.i - 1
 	q.Where = p.filters(false)
@@ -249,6 +264,7 @@ func (p *parser) query(source string) *queryTree {
 		switch {
 		case p.is("|"):
 			pipe := p.take()
+			p.beginClause()
 			if p.is("=") || p.is("~") {
 				op := p.take()
 				p.report(span{pipe.Span.Start, op.Span.End}, diagPipeOp, "|"+op.Text)
@@ -271,9 +287,11 @@ func (p *parser) query(source string) *queryTree {
 				continue
 			}
 		case p.is("where"):
+			p.beginClause()
 			p.report(p.take().Span, diagWhereTwice)
 			q.Where = append(q.Where, p.filters(false)...)
 		case p.is("sort"):
+			p.beginClause()
 			orderAt := p.peek().Span
 			outOfOrder := q.Limit != nil
 			if q.Sort != nil {
@@ -288,11 +306,13 @@ func (p *parser) query(source string) *queryTree {
 				p.issue(orderAt, diagnostic(diagLimitBeforeSort, key, q.Limit.N), "write "+print(q))
 			}
 		case p.is("limit"):
+			p.beginClause()
 			if q.Limit != nil {
 				p.report(p.peek().Span, diagDuplicate, "limit")
 			}
 			q.Limit = p.parseLimit()
 		case p.is("by"), p.is("every"):
+			p.beginClause()
 			if q.Stage == nil {
 				code := diagByFirst
 				if p.is("every") {
@@ -367,7 +387,9 @@ func (p *parser) filters(nested bool) []filterExpr {
 		second := p.groupingEdit(terms, ops, ops[0])
 		p.issue(at, diagnostic(diagMixed), groupingHint(first, second))
 		span := panel.TextSpan{Start: at.Start, End: at.End}
-		p.problems[len(p.problems)-1].FixIts = []panel.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
+		if len(p.problems) > 0 && p.problems[len(p.problems)-1].Message == diagnostic(diagMixed) {
+			p.problems[len(p.problems)-1].FixIts = []panel.FixIt{{Label: first, Span: span, Text: first}, {Label: second, Span: span, Text: second}}
+		}
 	}
 	if mode == "or" && len(terms) > 1 {
 		x := &orExpr{Terms: terms, At: span{terms[0].Span().Start, terms[len(terms)-1].Span().End}}
@@ -586,10 +608,7 @@ func (p *parser) primary(nested bool) filterExpr {
 				p.skipRun()
 				return nil
 			}
-			example := "api"
-			if field.Key == "duration" {
-				example = "500ms"
-			}
+			example := fieldExample(field, op)
 			p.report(span{field.At.Start, oper.Span.End}, diagValue, field.Key, op, field.Key, op, example)
 			p.skipRun()
 			return nil
@@ -786,7 +805,7 @@ func (p *parser) in(f fieldName, neg bool) filterExpr {
 		return x
 	}
 	if !p.eat("(") {
-		p.report(p.peek().Span, diagList)
+		p.report(p.peek().Span, diagList, printField(f), listExamples(f))
 		return nil
 	}
 	p.expectNext(expect{Class: "value", Field: &f, Scope: "in"})
@@ -819,7 +838,7 @@ func (p *parser) in(f fieldName, neg bool) filterExpr {
 		p.report(p.peek().Span, diagListValue)
 	}
 	if !p.eat(")") {
-		p.report(p.peek().Span, diagList)
+		p.report(p.peek().Span, diagList, printField(f), listExamples(f))
 	}
 	x.At.End = p.previousEnd()
 	p.node(x)
@@ -988,7 +1007,7 @@ func (p *parser) foreignTerm() bool {
 	t := p.peek()
 	word := p.lower()
 	if word == "since" || word == "until" {
-		p.report(t.Span, diagTime, word)
+		p.report(t.Span, diagTime)
 		p.take()
 		if p.peek().Kind == tokenWord {
 			p.take()
@@ -1001,7 +1020,7 @@ func (p *parser) foreignTerm() bool {
 		return true
 	}
 	if word == "earliest" && grammarText(p.ahead(1)) == "=" || word == "_time" && grammarText(p.ahead(1)) == ":" {
-		p.report(t.Span, diagTime, word)
+		p.report(t.Span, diagTime)
 		p.skipRun()
 		return true
 	}
@@ -1103,6 +1122,7 @@ func (p *parser) parseLimit() *limitClause {
 }
 
 func (p *parser) stage(start int) *aggregation {
+	p.beginClause()
 	p.measureInfo = map[panel.MeasureExpr]*measureSource{}
 	s := &aggregation{At: span{Start: start}}
 	if p.completion {
@@ -1124,7 +1144,7 @@ func (p *parser) stage(start int) *aggregation {
 			p.skipRun()
 			continue
 		}
-		expr := p.mexpr(0)
+		expr := p.measureExpression(0)
 		if expr != nil {
 			m := measureNode{Parsed: panel.Measure{Expr: expr}, At: p.measureSpan(expr), Info: p.measureInfo, Filters: map[string]filterExpr{}}
 			if modifiers[p.lower()] && p.eat("as") {
@@ -1189,6 +1209,7 @@ func (p *parser) stage(start int) *aggregation {
 	p.expectNext(expect{Class: "clause", Scope: "measure"})
 	for p.is("by") || p.is("every") {
 		if p.eat("by") {
+			p.beginClause()
 			if len(s.By) > 0 {
 				p.report(p.tokens[p.i-1].Span, diagDuplicate, "by")
 			}
@@ -1220,6 +1241,7 @@ func (p *parser) stage(start int) *aggregation {
 			}
 		} else {
 			at := p.take().Span
+			p.beginClause()
 			p.expectNext(expect{Class: "bucket"})
 			if len(s.Measures) == 0 && s.Histogram == nil {
 				p.report(at, diagEveryFirst)
@@ -1246,7 +1268,7 @@ func (p *parser) stage(start int) *aggregation {
 }
 
 func (p *parser) measureSpan(e panel.MeasureExpr) span { return p.measureInfo[e].at }
-func (p *parser) mexpr(minPrec int) panel.MeasureExpr {
+func (p *parser) measureExpression(minPrec int) panel.MeasureExpr {
 	g := panel.MeasureGrammar{
 		Peek: func() string { return grammarText(p.peek()) }, Take: func() { p.take() }, Position: func() int { return p.peek().Span.Start },
 		CanAtom: func() bool {
@@ -1268,7 +1290,7 @@ func (p *parser) mexpr(minPrec int) panel.MeasureExpr {
 				return x
 			}
 			if t.Kind == tokenIdent && grammarText(p.ahead(1)) == "(" {
-				return p.mcall()
+				return p.measureCall()
 			}
 			if t.Kind == tokenBad {
 				p.badTerm()
@@ -1324,7 +1346,7 @@ func (p *parser) recordMeasure(e panel.MeasureExpr, at span, children ...panel.M
 	}
 }
 
-func (p *parser) mcall() panel.MeasureExpr {
+func (p *parser) measureCall() panel.MeasureExpr {
 	name := p.take()
 	open := p.take()
 	at := span{Start: name.Span.Start}
@@ -1426,4 +1448,73 @@ func measureLeaves(x panel.MeasureExpr) (int, bool, bool) {
 		return measureLeaves(x.X)
 	}
 	return 0, false, false
+}
+
+func fieldExample(field fieldName, op string) string {
+	if field.Scope != "" || field.Bracket {
+		return "value"
+	}
+	name := strings.ToLower(field.Key)
+	if vocabulary := panel.FieldVocabularies()[name]; len(vocabulary.Order) > 0 {
+		return vocabulary.Order[0]
+	}
+	switch name {
+	case "service":
+		return "api"
+	case "severity":
+		if isRange(op) {
+			return "warn"
+		}
+		return "error"
+	case "name":
+		return "http.server.duration"
+	case "duration":
+		return "500ms"
+	case "enabled":
+		return "true"
+	}
+	var columns []panel.Field
+	for _, source := range panel.SignalNames() {
+		if cols, ok := panel.SignalColumns(source); ok {
+			columns = append(columns, cols...)
+		}
+	}
+	for _, column := range columns {
+		if column.Name == name {
+			switch column.Type {
+			case panel.TypeNumber:
+				return "1000"
+			case panel.TypeTime:
+				return `"2026-10-29T10:00:00Z"`
+			}
+		}
+	}
+	return "value"
+}
+
+func listExamples(field fieldName) string {
+	if field.Scope == "" && !field.Bracket {
+		name := strings.ToLower(field.Key)
+		if vocabulary := panel.FieldVocabularies()[name]; len(vocabulary.Order) > 1 {
+			return strings.Join(vocabulary.Order[:2], ", ")
+		}
+		switch name {
+		case "service":
+			return "api, web"
+		case "severity":
+			return "warn, error"
+		case "name":
+			return "http.server.duration, http.server.requests"
+		case "duration":
+			return "500ms, 1s"
+		}
+	}
+	first := fieldExample(field, "in")
+	if first == "1000" {
+		return "1000, 2000"
+	}
+	if first == "true" {
+		return "true, false"
+	}
+	return first + ", other"
 }

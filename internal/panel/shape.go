@@ -162,7 +162,7 @@ func queryShapeAggregate(p *Panel, spec vizSpec, path string, problems *Problems
 		problems.add(path+".bucket", fmt.Sprintf("%s panels do not take a bucket", p.Viz))
 	case q.Bucket != "" && q.Bucket != "auto":
 		if _, ok := buckets[q.Bucket]; !ok {
-			problems.add(path+".bucket", "bucket must be auto or one of 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d")
+			problems.add(path+".bucket", "bucket must be auto or one of "+strings.Join(BucketNames()[1:], ", "))
 		}
 	}
 	if p.Viz == "heatmap" || p.Viz == "histogram" {
@@ -246,7 +246,7 @@ func queryShapeRows(q *Query, viz, path string, problems *Problems) {
 		}
 		if q.Bucket != "" && q.Bucket != "auto" {
 			if _, ok := buckets[q.Bucket]; !ok {
-				problems.addHint(path+".bucket", "bucket must be auto or a supported interval", "use auto, 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h or 1d")
+				problems.addHint(path+".bucket", "bucket must be auto or a supported interval", "use "+strings.Join(BucketNames()[:len(BucketNames())-1], ", ")+" or "+BucketNames()[len(BucketNames())-1])
 			}
 		}
 	}

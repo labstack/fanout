@@ -151,7 +151,7 @@ func message(code diagnosticCode) string {
 	case diagNull:
 		return "is needs null or not null"
 	case diagList:
-		return "in needs a list or variable, e.g. in (api, web)"
+		return "in needs a list or variable, e.g. %s in (%s)"
 	case diagListValue:
 		return "a list needs a value after each comma"
 	case diagCallSpace:
@@ -173,7 +173,7 @@ func message(code diagnosticCode) string {
 	case diagPlus:
 		return "unexpected +"
 	case diagWildcard:
-		return "* wildcards are not in FanQL 1"
+		return "* wildcards are not supported; use ~ for contains or quote the value"
 	case diagVariable:
 		return "$__ names are reserved; use a dashboard variable name"
 	case diagReserved:
@@ -185,7 +185,7 @@ func message(code diagnosticCode) string {
 	case diagForeignClause:
 		return "%s is not FanQL; use by after measures, e.g. | count() by service"
 	case diagTime:
-		return "the time range is not part of FanQL 1; use the time picker (%s is reserved)"
+		return "set the time range with the time picker, not in the query"
 	case diagTimeCall:
 		return "%s(...) is not FanQL; use the time picker"
 	case diagEqeq:
@@ -227,7 +227,7 @@ func message(code diagnosticCode) string {
 	case diagAlias:
 		return "as needs a measure alias"
 	case diagSecondStage:
-		return "FanQL 1 runs one aggregation stage"
+		return "one aggregation stage is supported; combine measures after a single |"
 	case diagEveryFirst:
 		return "every needs measures first; write | count() every 1m"
 	case diagByFirst:
