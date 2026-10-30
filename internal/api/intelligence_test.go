@@ -12,15 +12,15 @@ import (
 )
 
 type fakeIntelligenceSnapshots struct {
-	snapshot *intelligence.IntelligenceSnapshot
+	snapshot *intelligence.Snapshot
 }
 
-func (f fakeIntelligenceSnapshots) LatestSnapshot() *intelligence.IntelligenceSnapshot {
+func (f fakeIntelligenceSnapshots) LatestSnapshot() *intelligence.Snapshot {
 	return f.snapshot
 }
 
 func TestIntelligenceLatestReturnsSnapshot(t *testing.T) {
-	want := &intelligence.IntelligenceSnapshot{
+	want := &intelligence.Snapshot{
 		GeneratedAt: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
 		Timeframe:   "last_15m",
 		Summary:     "System healthy (98/100).",
@@ -38,7 +38,7 @@ func TestIntelligenceLatestReturnsSnapshot(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	var got intelligence.IntelligenceSnapshot
+	var got intelligence.Snapshot
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

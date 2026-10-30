@@ -405,7 +405,7 @@ func TestBacklogAnnotationTimeoutsIdentifyWriteGateAndPreserveDeadline(t *testin
 	for _, label := range []string{"version_rollup/write_gate", "anomaly_log/write_gate"} {
 		t.Run(label, func(t *testing.T) {
 			d := &Duck{repository: &telemetrystore.Repository{}}
-			unlock := d.writeGate.Lock(writegate.WriteRollupService)
+			unlock := d.writeGate.Lock(writegate.RollupService)
 			defer unlock()
 			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 			defer cancel()

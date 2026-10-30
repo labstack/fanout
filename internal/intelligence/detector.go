@@ -28,7 +28,7 @@ type Detector struct {
 	duck                *query.Duck
 	config              DetectorConfig
 	mu                  sync.RWMutex
-	snapshot            *IntelligenceSnapshot
+	snapshot            *Snapshot
 	evaluationMu        sync.Mutex
 	evaluation          *anomalyEvaluation
 	annotationMu        sync.Mutex
@@ -111,7 +111,7 @@ func (d *Detector) runCheck(ctx context.Context) {
 	}
 }
 
-func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
+func (d *Detector) publishSnapshot(snapshot Snapshot) {
 	d.mu.Lock()
 	d.snapshot = &snapshot
 	d.mu.Unlock()
@@ -205,19 +205,19 @@ func (d *Detector) persistAnnotations(ctx context.Context, record func(context.C
 }
 
 // LatestSnapshot returns the most recent intelligence snapshot, or nil if none.
-func (d *Detector) LatestSnapshot() *IntelligenceSnapshot {
+func (d *Detector) LatestSnapshot() *Snapshot {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.snapshot
 }
 
 // GenerateSnapshot generates a complete intelligence snapshot
-func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, error) {
+func (d *Detector) GenerateSnapshot(ctx context.Context) (Snapshot, error) {
 	d.evaluationMu.Lock()
 	defer d.evaluationMu.Unlock()
 	completed, err := d.duck.CompletedServiceRollupMinute(ctx)
 	if err != nil {
-		return IntelligenceSnapshot{}, fmt.Errorf("read detector service watermark: %w", err)
+		return Snapshot{}, fmt.Errorf("read detector service watermark: %w", err)
 	}
 	now := time.Now()
 	lookback := now.Add(-d.config.LookbackWindow)
@@ -227,7 +227,7 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, 
 	if d.evaluation == nil || !completed.Equal(d.evaluation.through) {
 		anomalies, err := d.detectAnomalies(ctx, completed.Add(-d.config.LookbackWindow), completed)
 		if err != nil {
-			return IntelligenceSnapshot{}, err
+			return Snapshot{}, err
 		}
 		d.evaluation = &anomalyEvaluation{through: completed, findings: anomalies}
 	}
@@ -239,9 +239,9 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, 
 		// A later watermark may replace this evaluation before patterns recover.
 		// Keep its original intervals until a successful annotation publication.
 		d.annotationMu.Lock()
-		d.unpublishedFindings = mergeAnnotationFindings(d.unpublishedFindings, detectorAnnotations(IntelligenceSnapshot{Anomalies: anomalies}, d.duck.DefaultNamespace()))
+		d.unpublishedFindings = mergeAnnotationFindings(d.unpublishedFindings, detectorAnnotations(Snapshot{Anomalies: anomalies}, d.duck.DefaultNamespace()))
 		d.annotationMu.Unlock()
-		return IntelligenceSnapshot{}, err
+		return Snapshot{}, err
 	}
 
 	// Calculate health score
@@ -250,7 +250,7 @@ func (d *Detector) GenerateSnapshot(ctx context.Context) (IntelligenceSnapshot, 
 	// Generate insights from anomalies
 	insights := d.generateInsights(anomalies, patterns)
 
-	return IntelligenceSnapshot{
+	return Snapshot{
 		evaluatedThrough: completed,
 		GeneratedAt:      now,
 		Timeframe:        fmt.Sprintf("last_%dm", int(d.config.LookbackWindow.Minutes())),
@@ -812,7 +812,7 @@ func toInt(v interface{}) int {
 	return int(toInt64(v))
 }
 
-func detectorAnnotations(snapshot IntelligenceSnapshot, namespace string) []annotations.Anomaly {
+func detectorAnnotations(snapshot Snapshot, namespace string) []annotations.Anomaly {
 	findings := make([]annotations.Anomaly, 0, len(snapshot.Anomalies))
 	for _, a := range snapshot.Anomalies {
 		severity := "warn"

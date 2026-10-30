@@ -20,7 +20,7 @@ func RegisterAlertRoutes(e *echo.Echo, store *alert.Store, engine *alert.Engine)
 	e.GET("/api/alerting/summary", h.AlertSummary, read)
 	e.GET("/api/alerting/rules", h.ListRules, read)
 	e.POST("/api/alerting/rules", h.CreateRule, manage)
-	e.PUT("/api/alerting/rules/:id", h.UpdateRule, manage)
+	e.PUT("/api/alerting/rules/:id", h.ReplaceRule, manage)
 	e.DELETE("/api/alerting/rules/:id", h.DeleteRule, manage)
 	e.POST("/api/alerting/rules/:id/test", h.TestRule, manage)
 }
@@ -53,7 +53,7 @@ func (h *alertHandler) ListAlerts(c *echo.Context) error {
 // AlertSummary returns firing/pending/resolved counts.
 func (h *alertHandler) AlertSummary(c *echo.Context) error {
 	if h.store == nil {
-		return c.JSON(200, alert.AlertSummary{})
+		return c.JSON(200, alert.Summary{})
 	}
 	summary, err := h.store.AlertSummary()
 	if err != nil {
@@ -114,8 +114,8 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 	return c.JSON(201, created)
 }
 
-// UpdateRule updates an existing alert rule.
-func (h *alertHandler) UpdateRule(c *echo.Context) error {
+// ReplaceRule replaces an existing alert rule.
+func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 	if h.store == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "alerts not configured")
 	}
@@ -133,7 +133,7 @@ func (h *alertHandler) UpdateRule(c *echo.Context) error {
 		}
 	}
 
-	updated, err := h.store.UpdateRule(req)
+	updated, err := h.store.ReplaceRule(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "rule not found")
@@ -209,10 +209,10 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 	envs := h.engine.BuildAllEnvs(c.Request().Context())
 
 	type testResult struct {
-		Service   string         `json:"service"`
-		Triggered bool           `json:"triggered"`
-		Error     string         `json:"error,omitempty"`
-		Env       alert.AlertEnv `json:"env"`
+		Service   string    `json:"service"`
+		Triggered bool      `json:"triggered"`
+		Error     string    `json:"error,omitempty"`
+		Env       alert.Env `json:"env"`
 	}
 
 	var results []testResult
@@ -237,7 +237,7 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 	})
 }
 
-func resolveTestServices(rule alert.Rule, envs map[string]alert.AlertEnv) []string {
+func resolveTestServices(rule alert.Rule, envs map[string]alert.Env) []string {
 	if rule.Service == "" || rule.Service == "*" {
 		svcs := make([]string, 0, len(envs))
 		for svc := range envs {

@@ -71,13 +71,13 @@ func TestEvalExpression(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		env      AlertEnv
+		env      Env
 		expected bool
 	}{
-		{"both above threshold", AlertEnv{ErrorRate: 0.1, P95: 600}, true},
-		{"error_rate below", AlertEnv{ErrorRate: 0.01, P95: 600}, false},
-		{"p95 below", AlertEnv{ErrorRate: 0.1, P95: 100}, false},
-		{"both below", AlertEnv{ErrorRate: 0.01, P95: 100}, false},
+		{"both above threshold", Env{ErrorRate: 0.1, P95: 600}, true},
+		{"error_rate below", Env{ErrorRate: 0.01, P95: 600}, false},
+		{"p95 below", Env{ErrorRate: 0.1, P95: 100}, false},
+		{"both below", Env{ErrorRate: 0.01, P95: 100}, false},
 	}
 
 	for _, tc := range cases {
@@ -99,7 +99,7 @@ func TestSafeEval_NoPanic(t *testing.T) {
 		t.Fatalf("CompileExpression: %v", err)
 	}
 
-	env := AlertEnv{ErrorRate: 0.5}
+	env := Env{ErrorRate: 0.5}
 	result, err := SafeEval(prog, env)
 	if err != nil {
 		t.Fatalf("SafeEval: unexpected error: %v", err)
@@ -109,29 +109,29 @@ func TestSafeEval_NoPanic(t *testing.T) {
 	}
 }
 
-// TestAlertEnvVariablesDeclaredAndBound makes the AlertEnv struct the single
+// TestEnvVariablesDeclaredAndBound makes the Env struct the single
 // source of truth for alert variables: every field's `expr` tag must be both a
 // declared CEL variable (so a rule can reference it) and a key in celActivation
 // (so it's bound at eval). Without this, adding a field to the struct + the
 // cel.Variable list but forgetting celActivation would compile fine yet fail
 // every 30s eval cycle with "no such attribute" — a silent, partial failure.
-func TestAlertEnvVariablesDeclaredAndBound(t *testing.T) {
-	act := celActivation(AlertEnv{})
-	tp := reflect.TypeOf(AlertEnv{})
+func TestEnvVariablesDeclaredAndBound(t *testing.T) {
+	act := celActivation(Env{})
+	tp := reflect.TypeOf(Env{})
 
 	tags := map[string]bool{}
 	for i := 0; i < tp.NumField(); i++ {
 		f := tp.Field(i)
 		name := f.Tag.Get("expr")
 		if name == "" {
-			t.Errorf("AlertEnv.%s has no `expr` tag", f.Name)
+			t.Errorf("Env.%s has no `expr` tag", f.Name)
 			continue
 		}
 		tags[name] = true
 
 		// (1) bound at eval time.
 		if _, ok := act[name]; !ok {
-			t.Errorf("variable %q (AlertEnv.%s) is not bound in celActivation", name, f.Name)
+			t.Errorf("variable %q (Env.%s) is not bound in celActivation", name, f.Name)
 		}
 
 		// (2) declared in the CEL env — a type-appropriate boolean expression
@@ -143,18 +143,18 @@ func TestAlertEnvVariablesDeclaredAndBound(t *testing.T) {
 		case reflect.String:
 			expr = name + ` == ""`
 		default:
-			t.Errorf("AlertEnv.%s has unsupported kind %s for a CEL variable", f.Name, f.Type.Kind())
+			t.Errorf("Env.%s has unsupported kind %s for a CEL variable", f.Name, f.Type.Kind())
 			continue
 		}
 		if _, err := CompileExpression(expr); err != nil {
-			t.Errorf("variable %q (AlertEnv.%s) not declared/usable in the CEL env: %v", name, f.Name, err)
+			t.Errorf("variable %q (Env.%s) not declared/usable in the CEL env: %v", name, f.Name, err)
 		}
 	}
 
 	// Reverse direction: no activation key without a backing struct field.
 	for k := range act {
 		if !tags[k] {
-			t.Errorf("celActivation binds %q with no matching AlertEnv `expr` tag", k)
+			t.Errorf("celActivation binds %q with no matching Env `expr` tag", k)
 		}
 	}
 }
@@ -169,12 +169,12 @@ func TestEvalExpression_StringVar(t *testing.T) {
 	}
 	cases := []struct {
 		name string
-		env  AlertEnv
+		env  Env
 		want bool
 	}{
-		{"match + over threshold", AlertEnv{Service: "checkout", ErrorRate: 0.1}, true},
-		{"service mismatch", AlertEnv{Service: "cart", ErrorRate: 0.1}, false},
-		{"match but under threshold", AlertEnv{Service: "checkout", ErrorRate: 0.01}, false},
+		{"match + over threshold", Env{Service: "checkout", ErrorRate: 0.1}, true},
+		{"service mismatch", Env{Service: "cart", ErrorRate: 0.1}, false},
+		{"match but under threshold", Env{Service: "checkout", ErrorRate: 0.01}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

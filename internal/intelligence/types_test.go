@@ -144,9 +144,9 @@ func TestInsight(t *testing.T) {
 	}
 }
 
-func TestIntelligenceSnapshot(t *testing.T) {
+func TestSnapshot(t *testing.T) {
 	now := time.Now()
-	snap := IntelligenceSnapshot{
+	snap := Snapshot{
 		GeneratedAt: now,
 		Timeframe:   "last_15m",
 		Insights: []Insight{

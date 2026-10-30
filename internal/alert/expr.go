@@ -14,7 +14,7 @@ import (
 // the package (and callers) refer only to alert.Program.
 type Program = cel.Program
 
-// alertCELEnv is the CEL environment shared by every compile. Each AlertEnv field
+// alertCELEnv is the CEL environment shared by every compile. Each Env field
 // is declared as a typed variable so the type checker rejects unknown names and
 // non-boolean expressions at compile time. CrossTypeNumericComparisons lets a
 // double variable be compared against an integer literal (e.g. `p95 > 500`)
@@ -62,12 +62,12 @@ func CompileExpression(expression string) (Program, error) {
 	return prog, nil
 }
 
-// celActivation binds the CEL variables to an AlertEnv's values. The keys must
+// celActivation binds the CEL variables to an Env's values. The keys must
 // stay in sync with the cel.Variable declarations in mustAlertCELEnv above;
-// TestAlertEnvVariablesDeclaredAndBound enforces that against the AlertEnv `expr`
+// TestEnvVariablesDeclaredAndBound enforces that against the Env `expr`
 // field tags, so a drift fails the build instead of silently breaking a rule at
 // eval time.
-func celActivation(env AlertEnv) map[string]any {
+func celActivation(env Env) map[string]any {
 	return map[string]any{
 		"error_rate":       env.ErrorRate,
 		"p50":              env.P50,
@@ -84,7 +84,7 @@ func celActivation(env AlertEnv) map[string]any {
 }
 
 // EvalExpression runs a compiled program with the given environment.
-func EvalExpression(prog Program, env AlertEnv) (bool, error) {
+func EvalExpression(prog Program, env Env) (bool, error) {
 	out, _, err := prog.Eval(celActivation(env))
 	if err != nil {
 		return false, fmt.Errorf("eval expression: %w", err)
@@ -98,7 +98,7 @@ func EvalExpression(prog Program, env AlertEnv) (bool, error) {
 
 // SafeEval wraps EvalExpression with panic recovery, logging unexpected panics
 // via slog. Returns false on panic.
-func SafeEval(prog Program, env AlertEnv) (result bool, err error) {
+func SafeEval(prog Program, env Env) (result bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("alert: expression eval panic", "panic", r, "stack", string(debug.Stack()))

@@ -37,10 +37,10 @@ func withName(d panel.Dashboard, name string) panel.Dashboard {
 }
 
 type fakeIntelligence struct {
-	snapshot *intelligence.IntelligenceSnapshot
+	snapshot *intelligence.Snapshot
 }
 
-func (f fakeIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot {
+func (f fakeIntelligence) LatestSnapshot() *intelligence.Snapshot {
 	return f.snapshot
 }
 
@@ -188,7 +188,7 @@ func TestDependencyToolForwardsScopeAndBounds(t *testing.T) {
 }
 
 func TestIntelligenceSnapshotReturnsStructuredOutput(t *testing.T) {
-	want := &intelligence.IntelligenceSnapshot{
+	want := &intelligence.Snapshot{
 		GeneratedAt: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
 		Timeframe:   "last_15m",
 		Summary:     "One anomaly requires attention.",

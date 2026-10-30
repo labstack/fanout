@@ -461,7 +461,7 @@ func RecordParquetRead(reader string, waitSec float64, admitted bool) {
 }
 
 // RecordWriteGate records one complete Telemetry catalog write critical section.
-// Callers constrain operation to the fixed writegate.WriteOperation set so this
+// Callers constrain operation to the fixed writegate.Operation set so this
 // metric cannot grow with tenant or telemetry cardinality.
 func RecordWriteGate(operation string, waitSec, holdSec float64) {
 	WriteGateWait.WithLabelValues(operation).Observe(waitSec)
