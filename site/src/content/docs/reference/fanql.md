@@ -1,12 +1,12 @@
 ---
 title: "FanQL"
 description: "The preview text syntax for structured telemetry queries."
-summary: "FanQL 1 syntax, fields, functions, variables, null semantics and examples, generated from query registries."
+summary: "FanQL syntax, fields, functions, variables, null semantics and examples, generated from query registries."
 status: preview
 generated: true
 ---
 
-# FanQL 1
+# FanQL
 
 Preview: the syntax may change before GA
 
@@ -323,12 +323,10 @@ metrics where name:http.server.requests | rate() by service every 1m
 metrics where name:k8s.container.restarts | last(value) by resource.k8s.pod.name
 ```
 
-## Versioning and transport
+## Transport
 
-The language version is separate from product CalVer and the panel contract. Machine text inputs carry the FanQL version plus visualization, time, comparison, declarations, resolved values, namespace and options as needed. The structured query is required when editable is false. Panels keep storing queries, never text. Unsupported versions produce unsupported_fanql_version.
-
-A version bump is required when accepted text changes meaning or stops parsing, including columns that reinterpret bare identifiers and severity aliases that reinterpret accepted literals. New status/kind aliases that were errors, stage words and filter functions are additive. Canonical spelling is frozen per version; preview changes can rewrite through the shared structured query.
+Machine text inputs carry visualization, time, comparison, declarations, resolved values, namespace and options as needed. The structured query is required when editable is false. Panels keep storing queries, never text.
 
 Completion accepts a relative `window` duration or absolute `from` and `to` timestamps. Absolute windows and durations over 24h use recent 24h schema, disclosed by `schema.recent` and `schema.notice`. With no selected window, the same recent fallback applies.
 
-HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference?fanql_version=1`, requiring telemetry:read. MCP query_telemetry accepts text with fanql_version beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.
+HTTP exposes `/api/fanql/parse`, `/api/fanql/format`, `/api/fanql/complete` and `/api/fanql/reference`, requiring telemetry:read. MCP query_telemetry accepts optional text beside panel; agents should prefer panel.query, or panel.sql for complex work. This reference is also `fanout://fanql/reference`.

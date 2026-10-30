@@ -2,9 +2,7 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -35,41 +33,24 @@ type fanqlPreview struct {
 // FanQL adds editor-only metadata at its own error boundary.
 type fanqlFailure struct {
 	*apiError
-	Hint    string        `json:"hint,omitempty"`
 	Preview *fanqlPreview `json:"preview,omitempty"`
 }
 
 func (e *fanqlFailure) ResponseBody() any { return e }
-func checkFanQLVersion(version fanql.VersionRequest) (bool, error) {
-	notice, problem := version.Validate()
-	if problem != nil {
-		return false, &fanqlFailure{apiError: newAPIError(http.StatusBadRequest, problem.Code, problem.Message), Hint: problem.Hint}
-	}
-	return notice != nil, nil
-}
-func fanqlNotices(notices []fanql.Notice, missing bool) []fanql.Notice {
+func fanqlNotices(notices []fanql.Notice) []fanql.Notice {
 	if notices == nil {
-		notices = []fanql.Notice{}
-	}
-	if missing {
-		notice := fanql.MissingVersionNotice()
-		notices = append(notices, notice)
+		return []fanql.Notice{}
 	}
 	return notices
 }
 
 func (h *FanQLHandler) parse(c *echo.Context) error {
 	var req struct {
-		fanql.VersionRequest
 		fanql.Options
 		Text    string `json:"text"`
 		Preview bool   `json:"preview,omitempty"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
-		return err
-	}
-	missing, err := checkFanQLVersion(req.VersionRequest)
-	if err != nil {
 		return err
 	}
 	compiled, problems := fanql.Compile(req.Text, req.Options)
@@ -82,7 +63,6 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 		return failure
 	}
 	return c.JSON(http.StatusOK, struct {
-		Version   int         `json:"fanql_version"`
 		Query     panel.Query `json:"query"`
 		Canonical string      `json:"canonical"`
 		Viz       struct {
@@ -92,27 +72,22 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 		} `json:"viz"`
 		Notices []fanql.Notice `json:"notices"`
 	}{
-		Version: fanql.Version, Query: compiled.Query, Canonical: compiled.Canonical,
+		Query: compiled.Query, Canonical: compiled.Canonical,
 		Viz: struct {
 			Requested  string            `json:"requested,omitempty"`
 			Compatible []panel.VizCompat `json:"compatible"`
 			Edits      []fanql.VizEdit   `json:"edits"`
 		}{Requested: req.Viz, Compatible: compiled.Compatible, Edits: compiled.Edits},
-		Notices: fanqlNotices(compiled.Notices, missing),
+		Notices: fanqlNotices(compiled.Notices),
 	})
 }
 
 func (h *FanQLHandler) format(c *echo.Context) error {
 	var req struct {
-		fanql.VersionRequest
 		fanql.Options
 		Query panel.Query `json:"query"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
-		return err
-	}
-	missing, err := checkFanQLVersion(req.VersionRequest)
-	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
@@ -126,11 +101,8 @@ func (h *FanQLHandler) format(c *echo.Context) error {
 		failure.Problems = panel.PresentProblems(problems)
 		return failure
 	}
-	formatted.Notices = fanqlNotices(formatted.Notices, missing)
-	return c.JSON(http.StatusOK, struct {
-		Version int `json:"fanql_version"`
-		*fanql.Formatted
-	}{Version: fanql.Version, Formatted: formatted})
+	formatted.Notices = fanqlNotices(formatted.Notices)
+	return c.JSON(http.StatusOK, formatted)
 }
 
 func fanqlError(err error) error {
@@ -139,7 +111,6 @@ func fanqlError(err error) error {
 
 func (h *FanQLHandler) complete(c *echo.Context) error {
 	var req struct {
-		fanql.VersionRequest
 		fanql.Options
 		Text      string     `json:"text"`
 		Cursor    int        `json:"cursor"`
@@ -149,10 +120,6 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 		Namespace string     `json:"namespace,omitempty"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
-		return err
-	}
-	missing, err := checkFanQLVersion(req.VersionRequest)
-	if err != nil {
 		return err
 	}
 	if req.From != nil || req.To != nil {
@@ -170,38 +137,9 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 		Text: req.Text, Cursor: req.Cursor, Options: req.Options,
 		Window: window, From: req.From, To: req.To, Namespace: req.Namespace,
 	})
-	var notices []fanql.Notice
-	if missing {
-		notices = fanqlNotices(nil, true)
-	}
-	return c.JSON(http.StatusOK, struct {
-		Version int `json:"fanql_version"`
-		fanql.CompleteResponse
-		Notices []fanql.Notice `json:"notices,omitempty"`
-	}{Version: fanql.Version, CompleteResponse: out, Notices: notices})
+	return c.JSON(http.StatusOK, out)
 }
 
 func (h *FanQLHandler) reference(c *echo.Context) error {
-	var version json.RawMessage
-	if values, ok := c.Request().URL.Query()["fanql_version"]; ok {
-		if len(values) != 1 {
-			version = json.RawMessage(`null`)
-		} else {
-			version, _ = json.Marshal(values[0])
-			if values[0] == strconv.Itoa(fanql.Version) {
-				version = json.RawMessage(values[0])
-			}
-		}
-	}
-	missing, err := checkFanQLVersion(fanql.VersionRequest{FanQLVersion: version})
-	if err != nil {
-		return err
-	}
-	text := fanql.Reference()
-	c.Response().Header().Set("FanQL-Version", strconv.Itoa(fanql.Version))
-	if missing {
-		notice := fanql.MissingVersionNotice()
-		c.Response().Header().Set("FanQL-Notice", notice.Message)
-	}
-	return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(text))
+	return c.Blob(http.StatusOK, "text/markdown; charset=utf-8", []byte(fanql.Reference()))
 }

@@ -21,9 +21,8 @@ import (
 )
 
 type QueryTelemetryInput struct {
-	Panel panel.Panel `json:"panel" jsonschema:"One v1 panel to display in the answer"`
-	Text  string      `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
-	fanql.VersionRequest
+	Panel     panel.Panel            `json:"panel" jsonschema:"One v1 panel to display in the answer"`
+	Text      string                 `json:"text,omitempty" jsonschema:"FanQL text that becomes panel.query; prefer panel.query (structured) or panel.sql; see fanout://fanql/reference"`
 	Variables []panel.Variable       `json:"variables,omitempty" jsonschema:"Optional v1 variable definitions used by this panel"`
 	Time      *panel.Time            `json:"time,omitempty" jsonschema:"Optional dashboard time override: exact from/to or a relative range"`
 	Vars      map[string]panel.Value `json:"vars,omitempty" jsonschema:"Resolved variable values: strings or lists; preserves $__all and empty lists"`
@@ -37,10 +36,9 @@ type fanqlToolFailureOutput struct {
 // QueryTelemetryOutput includes FanQL failures without changing preset fragments.
 type QueryTelemetryOutput struct {
 	*PanelFragment
-	FanQLVersion int            `json:"fanql_version,omitempty"`
-	Notices      []fanql.Notice `json:"notices,omitempty"`
-	Error        *fanql.Failure `json:"error,omitempty"`
-	Problems     panel.Problems `json:"problems,omitempty"`
+	Notices  []fanql.Notice `json:"notices,omitempty"`
+	Error    *fanql.Failure `json:"error,omitempty"`
+	Problems panel.Problems `json:"problems,omitempty"`
 }
 type FragmentView struct {
 	Kind string `json:"kind" jsonschema:"View kind: preset or query"`
@@ -77,9 +75,6 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 	if err != nil {
 		panic(err)
 	}
-	if reflect.TypeFor[In]() == reflect.TypeFor[QueryTelemetryInput]() {
-		input.Properties["fanql_version"] = &jsonschema.Schema{Type: "integer", Description: input.Properties["fanql_version"].Description}
-	}
 	output, err := jsonschema.For[Out](options)
 	if err != nil {
 		panic(err)
@@ -89,7 +84,6 @@ func fragmentTool[In, Out any](server *Server, tool *mcp.Tool, handler mcp.ToolH
 		if err != nil {
 			panic(err)
 		}
-		success.Properties["fanql_version"] = output.Properties["fanql_version"]
 		success.Properties["notices"] = output.Properties["notices"]
 		failure, err := jsonschema.For[fanqlToolFailureOutput](options)
 		if err != nil {
@@ -197,15 +191,6 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 		return nil, QueryTelemetryOutput{}, guidanceError("invalid_input", "text cannot be combined with panel.query or panel.sql")
 	}
 	var notices []fanql.Notice
-	if input.Text != "" || len(input.FanQLVersion) > 0 {
-		notice, problem := input.VersionRequest.Validate()
-		if problem != nil {
-			return fanqlToolFailure(*problem, nil)
-		}
-		if notice != nil {
-			notices = append(notices, *notice)
-		}
-	}
 	if input.Text != "" {
 		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
 		if len(problems) != 0 {
@@ -218,7 +203,6 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	result, out, err := s.runFragment(ctx, panel.RunRequest{Dashboard: d, Time: input.Time, Vars: input.Vars})
 	response := QueryTelemetryOutput{PanelFragment: &out}
 	if err == nil && input.Text != "" {
-		response.FanQLVersion = fanql.Version
 		response.Notices = notices
 	}
 	return result, response, err

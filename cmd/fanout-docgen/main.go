@@ -118,7 +118,7 @@ func run(source, alertSource, routeDirs, outDir, envExample string, check bool) 
 		return err
 	}
 	pages["mcp-tools.mdx"] = toolsPage
-	pages["fanql.md"] = []byte("---\ntitle: \"FanQL\"\ndescription: \"The preview text syntax for structured telemetry queries.\"\nsummary: \"FanQL 1 syntax, fields, functions, variables, null semantics and examples, generated from query registries.\"\nstatus: preview\ngenerated: true\n---\n\n" + fanql.Reference())
+	pages["fanql.md"] = []byte("---\ntitle: \"FanQL\"\ndescription: \"The preview text syntax for structured telemetry queries.\"\nsummary: \"FanQL syntax, fields, functions, variables, null semantics and examples, generated from query registries.\"\nstatus: preview\ngenerated: true\n---\n\n" + fanql.Reference())
 
 	outputs := map[string][]byte{envExample: renderEnvironment(fields)}
 	for name, body := range pages {

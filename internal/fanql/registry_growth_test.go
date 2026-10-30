@@ -32,9 +32,9 @@ func registrySnapshot(fixtures []corpusFixture, vocab vocabulary) map[string]reg
 	return out
 }
 
-// Previously accepted text whose meaning changes is a version-bump event;
-// newly accepted syntax is additive. The canonical attribute form stays stable.
-func registryVersionBumpEvents(before, after map[string]registryMeaning) []string {
+// Detect changed meanings in previously accepted text; newly accepted syntax
+// is additive. The canonical attribute form stays stable.
+func registryMeaningChanges(before, after map[string]registryMeaning) []string {
 	var changes []string
 	for text, original := range before {
 		if original.query != "" && original != after[text] {
@@ -75,8 +75,8 @@ func TestRegistryGrowth(t *testing.T) {
 			}
 		}
 	}
-	if events := registryVersionBumpEvents(baseline, afterAdditive); len(events) != 0 {
-		t.Fatalf("additive changes requested a version bump: %q", events)
+	if events := registryMeaningChanges(baseline, afterAdditive); len(events) != 0 {
+		t.Fatalf("additive changes altered accepted meanings: %q", events)
 	}
 	for _, text := range []string{`spans | p42(duration)`, `spans | count() every 2m`, `logs where ltrim(service)="api"`} {
 		if c, ps := compileWith(text, Options{}, vocab); len(ps) != 0 || c == nil {
@@ -91,9 +91,9 @@ func TestRegistryGrowth(t *testing.T) {
 		return out, ok
 	}
 	afterColumn := registrySnapshot(fixtures, vocab)
-	events := registryVersionBumpEvents(baseline, afterColumn)
+	events := registryMeaningChanges(baseline, afterColumn)
 	if !slices.Contains(events, `spans where value>-3`) {
-		t.Fatalf("new column must report a version-bump event; got %q", events)
+		t.Fatalf("new column must report a meaning change; got %q", events)
 	}
 	if baseline[`spans where attributes['value']>-3`] != afterColumn[`spans where attributes['value']>-3`] {
 		t.Fatal("new column changed canonical bracket meaning")
@@ -103,5 +103,5 @@ func TestRegistryGrowth(t *testing.T) {
 	if before == after {
 		t.Fatal("column hook did not change hand-typed bare text")
 	}
-	t.Logf("registry detector: adding spans.value changes accepted bare text (%d corpus version-bump events)", len(events))
+	t.Logf("registry detector: adding spans.value changes accepted bare text (%d corpus meaning changes)", len(events))
 }

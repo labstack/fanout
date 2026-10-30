@@ -1,10 +1,7 @@
-// Package fanql parses the versioned text form of Fanout's structured telemetry queries.
+// Package fanql parses the text form of Fanout's structured telemetry queries.
 package fanql
 
 import "github.com/labstack/fanout/internal/panel"
-
-// Version identifies the interactive language contract.
-const Version = 1
 
 type Options struct {
 	Panel     *panel.Panel     `json:"panel,omitempty"`

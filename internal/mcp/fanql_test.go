@@ -81,10 +81,6 @@ func TestQueryTelemetryReportsFanQLProblems(t *testing.T) {
 	checkFanQLToolFailure(t, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"}, "invalid_fanql", "The query has problems.")
 }
 
-func TestQueryTelemetryRejectsUnsupportedFanQLVersion(t *testing.T) {
-	checkFanQLToolFailure(t, QueryTelemetryInput{Text: "spans", VersionRequest: fanql.VersionRequest{FanQLVersion: json.RawMessage(`2`)}}, "unsupported_fanql_version", "This server cannot read the requested FanQL version.")
-}
-
 func TestFanQLReferenceResource(t *testing.T) {
 	s := newPanelServer(t)
 	client := connectTestClient(t, s, nil)
@@ -108,7 +104,7 @@ func TestFanQLReferenceResource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Contents) != 1 || r.Contents[0].MIMEType != "text/markdown" || r.Contents[0].Text != fanql.Reference() || !strings.Contains(r.Contents[0].Text, "FanQL 1") || !strings.Contains(r.Contents[0].Text, "Preview") {
+	if len(r.Contents) != 1 || r.Contents[0].MIMEType != "text/markdown" || r.Contents[0].Text != fanql.Reference() || !strings.Contains(r.Contents[0].Text, "# FanQL") || !strings.Contains(r.Contents[0].Text, "Preview") {
 		t.Fatal(r)
 	}
 }
@@ -131,10 +127,24 @@ func TestQueryTelemetryDescriptionPrefersStructuredInput(t *testing.T) {
 			t.Fatal("query must remain read-only")
 		}
 		raw, _ := json.Marshal(tool.InputSchema)
-		for _, field := range []string{`"text"`, `"fanql_version"`} {
-			if !strings.Contains(string(raw), field) {
-				t.Fatalf("missing %s: %s", field, raw)
+		var input struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			Required   []string                   `json:"required"`
+		}
+		if err := json.Unmarshal(raw, &input); err != nil {
+			t.Fatal(err)
+		}
+		if input.Properties["text"] == nil || input.Properties["fanql_version"] != nil {
+			t.Fatalf("text contract: %s", raw)
+		}
+		for _, field := range input.Required {
+			if field == "text" {
+				t.Fatalf("text must remain optional: %s", raw)
 			}
+		}
+		raw, _ = json.Marshal(tool.OutputSchema)
+		if strings.Contains(string(raw), "fanql_version") {
+			t.Fatalf("output version: %s", raw)
 		}
 		return
 	}
@@ -147,7 +157,7 @@ func TestQueryTelemetryFanQLMetadataAndStructuredProblems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.FanQLVersion != fanql.Version || len(out.Notices) != 1 || out.Notices[0].Path != "fanql_version" {
+	if len(out.Notices) != 0 {
 		t.Fatalf("metadata: %+v", out)
 	}
 	result, failed, err := s.queryTelemetry(t.Context(), nil, QueryTelemetryInput{Text: "spans where a:1 b:2 or c:3"})
@@ -179,7 +189,7 @@ func TestQueryTelemetryFanQLProblemsStayStructuredThroughMiddleware(t *testing.T
 	client := connectTestClient(t, newPanelServer(t), nil)
 	result, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: "query_telemetry", Arguments: map[string]any{
 		"panel": map[string]any{"id": "errors", "title": "Errors", "viz": "table"},
-		"text":  "spans where a:1 b:2 or c:3", "fanql_version": 1,
+		"text":  "spans where a:1 b:2 or c:3",
 	}})
 	if err != nil || result == nil || !result.IsError {
 		t.Fatalf("failure: %+v %v", result, err)
@@ -212,7 +222,7 @@ func TestPresetSchemasExcludeFanQLMetadata(t *testing.T) {
 	}
 	for _, tool := range listed.Tools {
 		raw, _ := json.Marshal(tool.OutputSchema)
-		for _, field := range []string{`"fanql_version"`, `"notices"`} {
+		for _, field := range []string{`"notices"`} {
 			has := strings.Contains(string(raw), field)
 			if tool.Name == "query_telemetry" && !has || tool.Name != "query_telemetry" && has {
 				t.Errorf("%s metadata %s: %s", tool.Name, field, raw)
@@ -241,21 +251,5 @@ func TestFragmentRawJSONIsNotAnInteger(t *testing.T) {
 	}
 	if reflect.DeepEqual(schema.Properties["payload"].Type, "integer") {
 		t.Fatalf("arbitrary JSON restricted to integer: %s", raw)
-	}
-	client := connectTestClient(t, s, nil)
-	listed, err := client.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tool := range listed.Tools {
-		if tool.Name == "query_telemetry" {
-			raw, _ = json.Marshal(tool.InputSchema)
-			if err := json.Unmarshal(raw, &schema); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(schema.Properties["fanql_version"].Type, "integer") {
-				t.Fatalf("version must be integer: %s", raw)
-			}
-		}
 	}
 }

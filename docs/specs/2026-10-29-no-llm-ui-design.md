@@ -37,7 +37,7 @@ Fanout must be fully usable when no AI provider is configured (`FANOUT_AI_PROVID
 
 ### 0. FanQL, the text query syntax (owner-approved 2026-10-29; preview)
 
-FanQL is the one-line text form of the structured panel query. Text parses into the same `panel.Query` that panels store and execute, and every valid query formats back to text; panels keep storing the query and the text is derived. One hand-written lexer and recursive-descent parser in Go (`internal/fanql`, with Pratt parsing for the boolean and arithmetic layers) serves the API, MCP and the UI; the UI calls an endpoint and ships no second parser. `fanql.Version` is 1. The syntax is preview: it may change before GA, with a version bump (0.13).
+FanQL is the one-line text form of the structured panel query. Text parses into the same `panel.Query` that panels store and execute, and every valid query formats back to text; panels keep storing the query and the text is derived. One hand-written lexer and recursive-descent parser in Go (`internal/fanql`, with Pratt parsing for the boolean and arithmetic layers) serves the API, MCP and the UI; the UI calls an endpoint and ships no second parser. The syntax is preview: it may change before GA.
 
 **Two contracts.** The *interactive language* is the text, bounded for editing (0.13). The *exact interchange form* is the structured `Query` itself: every envelope may carry it, and clients that cannot parse text use it. `Format` is total over valid queries and never truncates; text beyond the interactive bounds is returned complete and marked `editable: false` (0.11).
 
@@ -162,10 +162,10 @@ Rules, each with fixtures in the corpus:
 8. **Value classification.** In value position the classifier tries duration, then number, then boolean, then word. In field position a number-shaped token is `a filter needs a field before >`.
 9. **Calls.** An identifier immediately followed by `(` is a call. In `where` the name must be a filter function (`lower upper starts_with contains regexp_matches length`); `spans where P95(Duration)` is `function p95 is not allowed in a filter`. Arguments are typed by signature: `starts_with(field, string)`, `contains(field, string)`, `regexp_matches(field, string)`, `lower(field)`, `upper(field)`, `length(field)`. A bare word in a `string` slot is `starts_with needs a quoted string`. `length`, `lower`, `upper` must be compared (`length(...) needs a comparison`); `starts_with`, `contains`, `regexp_matches` are predicates alone. A space before `(` is `write starts_with(...) without a space`.
 10. **Optional `where`.** `where` may be omitted after the source; canonical prints it whenever a filter is present. Search bars never contain it and reject it.
-11. **Foreign syntax** gets a hint, never an alias, and only on unmistakable syntax: a known foreign stage command directly after `|` (`stats summarize select project extend eval fields rename take head top order sort by`), `order by`/`group by`/`facet` at a clause position, a foreign call shape at stage position (`bin( span( percentile( perc95( pct( count_over_time( quantile_over_time( avg( mean( median( dc( distinct_count( cardinality(`), `from`, `index=`, `source=`, `search` as the first token, `ago(`, `now(`, `earliest=`, `_time:`, `since`/`until` at clause position, the operators `== =~ |= |~ ::`, `{` at term start, `@word:`, `!word:`. A bare foreign word in filter position is free text. Messages name the FanQL form: `"summarize" is not FanQL; write the measures after |, e.g. | count() by service`; `== is not FanQL; use key:value or =`; `=~ is not FanQL; ~ is contains; use regexp_matches(field, 're') for a regular expression`; `{ selectors are not FanQL; write labels as key:value, e.g. service:api`; `"@http.target" is not a field name; write the attribute without @: http.target`; `! negation is not FanQL; write -service:api`; `the time range is not part of FanQL 1; use the time picker (since is reserved)`.
+11. **Foreign syntax** gets a hint, never an alias, and only on unmistakable syntax: a known foreign stage command directly after `|` (`stats summarize select project extend eval fields rename take head top order sort by`), `order by`/`group by`/`facet` at a clause position, a foreign call shape at stage position (`bin( span( percentile( perc95( pct( count_over_time( quantile_over_time( avg( mean( median( dc( distinct_count( cardinality(`), `from`, `index=`, `source=`, `search` as the first token, `ago(`, `now(`, `earliest=`, `_time:`, `since`/`until` at clause position, the operators `== =~ |= |~ ::`, `{` at term start, `@word:`, `!word:`. A bare foreign word in filter position is free text. Messages name the FanQL form: `"summarize" is not FanQL; write the measures after |, e.g. | count() by service`; `== is not FanQL; use key:value or =`; `=~ is not FanQL; ~ is contains; use regexp_matches(field, 're') for a regular expression`; `{ selectors are not FanQL; write labels as key:value, e.g. service:api`; `"@http.target" is not a field name; write the attribute without @: http.target`; `! negation is not FanQL; write -service:api`; `the time range is not part of FanQL; use the time picker (since is reserved)`.
 12. **Quotes, backticks, brackets.** `"` or `'` with doubling as the only escape (no backslash escapes). Unclosed quote: `unclosed quote; close the value with "`, running to the end of the text. Backticks open a raw entry (0.8); `unclosed raw filter; close it with `` ` ``. Parentheses are preserved in the token stream: `unmatched ); remove it or add the opening (` and `unclosed (; add ) before |, sort, limit or the end` with the opening span. Recovery after a bad term consumes to the next whitespace at the term's depth.
-13. **`*` and `$`.** `*` is legal as `k:*`, `-k:*`, `count(*)`; elsewhere in an unquoted value it is `* wildcards are not in FanQL 1`, hint `use ~ for contains, or quote "api*"`. `$ident` is a variable; `$` followed by anything else is `unexpected $`; `$__` names are rejected.
-14. **Second `|`.** `| sort x` and `| limit n` after the stage are accepted and canonicalised without the pipe. Any other second stage: `FanQL 1 runs one aggregation stage`, hint `remove the second |; more stages come in a later version`.
+13. **`*` and `$`.** `*` is legal as `k:*`, `-k:*`, `count(*)`; elsewhere in an unquoted value it is `* wildcards are not in FanQL`, hint `use ~ for contains, or quote "api*"`. `$ident` is a variable; `$` followed by anything else is `unexpected $`; `$__` names are rejected.
+14. **Second `|`.** `| sort x` and `| limit n` after the stage are accepted and canonicalised without the pipe. Any other second stage: `FanQL runs one aggregation stage`, hint `remove the second |; more stages come in a later version`.
 15. **Sort.** `sort key`, `sort +key`, `sort -key`, `sort key asc`, `sort key desc`. Two directions is `sort takes one direction`. Canonical: `sort key` (descending) or `sort +key`. `limit` before `sort` is `limit comes before sort here; write ... sort duration limit 10`. The key is checked against the stage's aliases (`sort "p95" must name a measure alias; aliases here: count`) or the viz's row keys (0.12).
 16. **Case.** Keywords, function names, column names, units and vocabulary aliases fold case. Values, free text and attribute/resource keys keep case (`HTTP.Target` is the key `HTTP.Target`).
 17. **Limits** (0.13) are each reported at a span; `limit 0` is `limit needs a whole number from 1 to 1000; e.g. limit 50`; `every 2m` is `unknown bucket "2m"; use auto or one of 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d`; `| every 1m` alone is `every needs measures first; write | count() every 1m`; a fourth `by` field is `at most 3 grouping fields`.
@@ -185,7 +185,7 @@ Field position means a `where` term read as a field (0.3 rule 4), a measure argu
 
 - A word of identifier segments is an attribute path: `http.target` is `attributes['http.target']`; `resource.<path>` is `resource['<path>']`; `attributes.<path>` is `attributes['<path>']` (canonical drops the prefix). A bracket key (`attributes['k']`, `resource["k"]`) is literal; the printer never canonicalises a bracket key into a prefix form when the prefix would change the map, so an attribute whose key begins `resource.` is reachable only as `attributes['resource.k']`.
 - A **single-segment** identifier is a column when the source has one, else `attributes['ident']`, **never an error**: `spans where value>-3` is `attributes['value'] > -3` and `metrics where rate:x` is `attributes['rate'] = 'x'`. When no column matches, a notice names the reading (`"value" is not a spans column; reading attributes['value']`; for a measure name, `"rate" is a measure, not a metrics column; reading attributes['rate']`) and adds `did you mean service?` when a column is one edit away. Notices never block, so meaning never depends on discovery.
-- Canonical prints the **bracket form** for single-segment attribute keys (`attributes['flag']:true`, `count_distinct(attributes['flag'])`) and the bare form for dotted keys (`http.target:/h`, `count_distinct(user.id)`). Adding a column therefore never changes the meaning of canonical or stored text; it changes hand-typed bare text and is a version bump (0.13).
+- Canonical prints the **bracket form** for single-segment attribute keys (`attributes['flag']:true`, `count_distinct(attributes['flag'])`) and the bare form for dotted keys (`http.target:/h`, `count_distinct(user.id)`). Adding a column therefore never changes the meaning of canonical or stored text; it changes hand-typed bare text and must be reviewed against the corpus (0.13).
 - Registry invariant, tested: column names contain no `.`, so a dotted key is never a column. A segment that is not an identifier (`x-y.z`) is `"x-y.z" needs brackets`; in measure context, where `-` is an operator, `count_distinct(x-y)` is `unexpected - in count_distinct; write attributes['x-y']`.
 - `duration` is `duration_ms` in filters, measures and `sort`; `time`, `start_time`, `end_time` are time columns (`"time" is a time column; compare it with > or <`).
 - In measure context a dotted word is one `Path` token (`count_distinct(user.id)`, `avg(attributes.http.response_size)`, `p95(resource.k)`); a token starting with a digit is a number (`count() * 1.5`). After `by` the lexer is back in filter context, so `by resource.k8s.pod.name` is a word read as a field.
@@ -345,7 +345,7 @@ Measures, as the reference documents them:
 | `count_if` filter text | 500 bytes (a `where` entry) | — |
 | Measures | — | 6 |
 
-Problems are reported at `panels[i].query.measures[j]` with the figure and the limit (`measures[2] has 70 nodes; a measure is at most 64`); FanQL maps them to the measure's text span. Raising a budget is additive (a spec note, no FanQL version bump); tightening one so that accepted text would be rejected bumps the FanQL version.
+Problems are reported at `panels[i].query.measures[j]` with the figure and the limit (`measures[2] has 70 nodes; a measure is at most 64`); FanQL maps them to the measure's text span. Raising a budget is additive; tightening one can reject previously accepted text and must be reviewed against the corpus.
 
 **Ranking of grouped series.** Grouped timeseries and two-dimension bars select `top` series by ranking the first measure over the whole window; today's rules (`error_rate` by Wilson lower bound behind a 20-sample floor regardless of `better`; numeric measures by value behind the same floor counting actual samples; count-family by value) stay, and every order ends with the compiler's deterministic tie-breakers `n DESC, d` (dimension string ascending). Expressions attach ranking metadata instead of dispatching on the root:
 
@@ -423,27 +423,27 @@ type FixIt struct {
 
 `panel.Problem` keeps `Path`, `Message`, `Hint`; `Span` and `FixIts` are additive. There is no severity field: notices (`{path, message, span?}`) use their own list.
 
-#### 0.13 API, envelope, versioning, bounds
+#### 0.13 API, envelope, compatibility, bounds
 
 ```
 POST /api/fanql/parse
-  {fanql_version: 1, text, source?, viz?, variables?, preview?: bool}
-  200 {fanql_version: 1, query, canonical, viz: {requested?, compatible: [{viz, requires: []}], edits: [{viz, text}]},
+  {text, source?, viz?, variables?, preview?: bool}
+  200 {query, canonical, viz: {requested?, compatible: [{viz, requires: []}], edits: [{viz, text}]},
        notices: [{path, message, span?}]}
   400 {code: "invalid_fanql", message: "The query has problems.", problems: [...], preview?: {text, note: "not executable"}}
 
 POST /api/fanql/format
-  {fanql_version: 1, query, viz?, variables?, panel?}
-  200 {fanql_version: 1, text, exactness: "exact" | "normalized", editable: bool, reason?: string, requires: [{name, satisfied}], notices: [...]}
+  {query, viz?, variables?, panel?}
+  200 {text, exactness: "exact" | "normalized", editable: bool, reason?: string, requires: [{name, satisfied}], notices: [...]}
   400 {code: "invalid_spec", ... problems}           (the query fails QueryShape under every viz)
   503 {code: "unavailable", message}                 (engine parse failed operationally)
 
 POST /api/fanql/complete
-  {fanql_version: 1, text, cursor, source?, viz?, window?, from?, to?, namespace?, variables?}
-  200 {fanql_version: 1, replace: {start, end}, items: [{label, insert, kind, detail}],
+  {text, cursor, source?, viz?, window?, from?, to?, namespace?, variables?}
+  200 {replace: {start, end}, items: [{label, insert, kind, detail}],
        schema: {window, sampled: true, warm: bool, recent: bool}}
 
-GET  /api/fanql/reference?fanql_version=1        text/markdown
+GET  /api/fanql/reference        text/markdown
 ```
 
 `format` needs in-memory shape validity under some viz, the supplied `variables` to judge `$x` references (without them, references are notices), and the engine only for `ParseSQL`/`RenderSQL` of stored entries; it never runs `Check`'s bind step or `Normalize`; `panel` is accepted so a builder round trip reports `requires: [{name, satisfied}]`; gauge needs `min_max`, and a state timeline needs `thresholds`. Other panel configuration is ignored.
@@ -458,13 +458,12 @@ type FanQLHandler struct {
 func RegisterFanQLRoutes(e *echo.Echo, parser panel.Parser, engine PanelEngine)
 ```
 
-Routes use the 20-second panel deadline; operational errors (`panel.isOperational`) become `503 unavailable` and are logged through `PresentError`, never turned into problems; bodies are decoded with `decodeStrict` and the existing 512 KiB limit; all routes need the `telemetry:read` capability and are classified in `classifyRoute`. Unknown or unsupported `fanql_version`: `400 {code: "unsupported_fanql_version", message, hint: "this server reads FanQL 1"}`. A missing `fanql_version` means the current one and adds a notice.
+Routes use the 20-second panel deadline; operational errors (`panel.isOperational`) become `503 unavailable` and are logged through `PresentError`, never turned into problems; bodies are decoded with `decodeStrict` and the existing 512 KiB limit; all routes need the `telemetry:read` capability and are classified in `classifyRoute`.
 
-**Envelope.** Panels store `panel.Query` only; the text is derived. Everything else that carries text carries the version and the context the text needs:
+**Envelope.** Panels store `panel.Query` only; the text is derived. Everything else that carries text carries the context the text needs:
 
 ```json
 {
-  "fanql": 1,
   "text": "spans where service:$service | p95(duration) by http_route every 1m",
   "editable": true,
   "query": { "...": "the lowered Query; required when editable is false, optional otherwise" },
@@ -478,9 +477,9 @@ Routes use the 20-second panel deadline; operational errors (`panel.isOperationa
 }
 ```
 
-When `editable` is false the envelope must carry `query`; consumers open the builder on it, show `text` read-only and never submit that text to `parse`. Explore URL: `?v=1&q=<text>&viz=&range=1h|from=..&to=..&compare=&vars=<json>&ns=`; `v` dispatches the parser version, and an unsupported `v` shows the text read-only with the `unsupported_fanql_version` message; an oversized text falls back to a saved view carrying `query`. `time` is `panel.Time`; `compare` is `previous_period` (the only value); `namespace` scopes schema and completion and is not a query filter (`namespace:prod` is). MCP `query_telemetry` gains `text` and `fanql_version` beside `panel`; `panel.query` stays the documented first choice for agents, with SQL for complex work; the text form is accepted and documented for agents but never required. Chat transcripts and documentation carry text without an envelope; they are not machine inputs.
+When `editable` is false the envelope must carry `query`; consumers open the builder on it, show `text` read-only and never submit that text to `parse`. Explore URL: `?q=<text>&viz=&range=1h|from=..&to=..&compare=&vars=<json>&ns=`; an oversized text falls back to a saved view carrying `query`. `time` is `panel.Time`; `compare` is `previous_period` (the only value); `namespace` scopes schema and completion and is not a query filter (`namespace:prod` is). MCP `query_telemetry` gains optional `text` beside `panel`; `panel.query` stays the documented first choice for agents, with SQL for complex work; the text form is accepted and documented for agents but never required. Chat transcripts and documentation carry text without an envelope; they are not machine inputs.
 
-**Versioning.** (1) `fanql.Version = 1` is accepted on every input and returned on every output. (2) The version changes when a text that parsed under N parses differently or not at all under N+1; reinterpreting a bare word that was already accepted with a meaning is such a change, so a new `severity` alias bumps the version (every bare word is already a stored literal there) while a new `status`/`kind` alias (previously an error), a new stage word after `|` and a new filter function name are additive. (3) Adding a column to a signal changes the meaning of hand-typed single-segment `name:v` text and bumps the version; canonical text is unaffected because single-segment attribute keys print in bracket form; a registry test checks every new column name against the corpus. (4) Canonical output is frozen within a version by a pinned corpus of canonical outputs. (5) Preview status: breaking changes are allowed with a bump and a rewrite path (`Format_2(Lower_1(Parse_1(text)))`), since the lowered `panel.Query` is the shared meaning. (6) The structured `Query` evolves under `panel.SpecVersion` (1); the measure grammar is additive to the spec.
+**Compatibility.** FanQL has no language-version field or negotiation. Canonical output is pinned by a corpus, and registry tests detect changes to accepted text meanings. The structured query evolves under `panel.SpecVersion` (1); the measure grammar is additive to the spec.
 
 **Bounds.** Interactive (the text): 4,000 code points **and** 8,192 bytes, whichever fails first (`a query is at most 4000 characters (8192 bytes)`); 1,024 tokens; 512 AST nodes; nesting depth 16 (groups, negation, calls, arithmetic together); `in` lists of 100 values; 20 problems; 50 completion items. Structured (the `Query`), enforced at lowering and reported at the text span: 16 entries (at the 17th entry's span); 500 **bytes** per lowered entry (`this filter lowers to N bytes; filters are at most 500`); 6 measures; 3 `by` fields and the viz's maximum; the expression budgets of 0.10. UI spans are code points; the UI converts once with `Array.from(text)`, and a test covers astral characters in values and keys.
 
@@ -549,11 +548,11 @@ One line per query. Prefix `-` excludes and includes rows missing the field; `!=
 
 Comparison claims are descriptive only: over the four reference queries whose output contract is equivalent across FanQL, Fanout SQL, SPL, KQL and Grafana, the FanQL strings total 255 characters against 285 (SPL), 324 (Grafana, with two UI settings), 460 (KQL) and 670 (SQL). These are string sums for typing on a stated dataset, not claims about task completion, learning time or error rates.
 
-#### 0.16 Scope: version 1 and later
+#### 0.16 Scope: preview and later
 
-Version 1 covers, as corpus fixtures that parse, lower, pass `Check` against the pinned engine and run on seed data: error rate by service; p99 by endpoint; top-N slow operations; Apdex; logs for a trace; count distinct users; latency histograms (spans and metrics); 4xx/5xx classes via `count_if`; slow DB statements; queue lag gauges; pod restarts; counter rates; per-route error ratios; errors, total and ratio in one table; absence of a field through `-k:*`; save, share and rerun through the envelope. Partial in v1: comparison with the previous period (envelope `compare`, not text); logs around a trace's time (typed timestamps by hand).
+The preview covers, as corpus fixtures that parse, lower, pass `Check` against the pinned engine and run on seed data: error rate by service; p99 by endpoint; top-N slow operations; Apdex; logs for a trace; count distinct users; latency histograms (spans and metrics); 4xx/5xx classes via `count_if`; slow DB statements; queue lag gauges; pod restarts; counter rates; per-route error ratios; errors, total and ratio in one table; absence of a field through `-k:*`; save, share and rerun through the envelope. Partial in the preview: comparison with the previous period (envelope `compare`, not text); logs around a trace's time (typed timestamps by hand).
 
-| Later capability | Why not v1 | Where it goes |
+| Later capability | Why deferred | Where it goes |
 |---|---|---|
 | Derived grouping (`4xx`/`5xx` classes in `by`) | needs row expressions in `by`; the engine groups by catalog fields only | `eval` stage in a typed plan lowered to SQL |
 | Multi-dimension timeseries | renderer and series selection are one-dimensional | engine and renderer |
@@ -566,7 +565,7 @@ Version 1 covers, as corpus fixtures that parse, lower, pass `Check` against the
 | Metrics arithmetic | series alignment across kinds | after the spans/logs expressions land |
 | Alias references between measures | not in the structured query | later |
 
-Extensibility by construction: the parser builds a tree and a separate lowering maps it to the structured query; `|` is a list of stages and any second aggregation stage is `FanQL 1 runs one aggregation stage`, not a syntax error; the reserved words of 0.3 are errors now; functions, field spellings, vocabularies, buckets and foreign-word hints live in registries and the reference is generated from them with a test that every entry appears. Later plans store `Panel.SQL` for execution plus `Panel.Plan` for the round trip; the text round-trips from the plan, never from generated SQL, and editing a plan panel in the SQL tab detaches it. One engine, one gate, one renderer.
+Extensibility by construction: the parser builds a tree and a separate lowering maps it to the structured query; `|` is a list of stages and any second aggregation stage is `FanQL runs one aggregation stage`, not a syntax error; the reserved words of 0.3 are errors now; functions, field spellings, vocabularies, buckets and foreign-word hints live in registries and the reference is generated from them with a test that every entry appears. Later plans store `Panel.SQL` for execution plus `Panel.Plan` for the round trip; the text round-trips from the plan, never from generated SQL, and editing a plan panel in the SQL tab detaches it. One engine, one gate, one renderer.
 
 Acceptance replaces size and time estimates: the corpus (every fixture, the twelve examples, the covered workloads, at least sixty more texts); the round-trip guarantees of 0.11; DuckDB-backed truth tables for every negation row and leaf class, variables under All, and severity through ingestion; engine binding of every lowered shape; non-execution of texts with problems; fuzzing over lex, parse, resolve, lower and print in both lexer contexts plus random valid queries through `Format`; completion fixtures and the cold-cache test; ranking fixtures with the `Ranking` disclosure; measured latency (parse, resolve and lower p99 under 1 ms without the engine; `format` p99 under 20 ms for stored queries with up to 16 entries; `complete` p95 under 30 ms warm); every registry entry in the reference and `just docs-generate-check` guarding the site copy; the canonical freeze; registry growth detection; and the structural budgets on structured and text inputs alike.
 

@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,10 +57,13 @@ func TestLatencyBudgets(t *testing.T) {
 	registryOnly := NewCompleter(nil)
 	var compileSamples, formatSamples, completeSamples, parseRankSamples []time.Duration
 	maxParse, maxRender := 0, 0
+	maxAllocations := map[string]float64{}
 	measure := func(name string, allocationLimit float64, samples *[]time.Duration, run func()) {
 		t.Helper()
 		// AllocsPerRun includes an untimed warmup before measuring steady state.
 		allocs := testing.AllocsPerRun(5, run)
+		kind, _, _ := strings.Cut(name, " ")
+		maxAllocations[kind] = max(maxAllocations[kind], allocs)
 		if allocs > allocationLimit {
 			t.Errorf("%s allocations/request = %.0f, want <= %.0f", name, allocs, allocationLimit)
 		}
@@ -71,8 +75,8 @@ func TestLatencyBudgets(t *testing.T) {
 			}
 		}
 	}
-	// Rounded ceilings leave headroom above corpus maxima (~1050, 120, 215,
-	// and 2300 allocations for Compile, completion, parse/rank, and Format).
+	// Rounded ceilings leave headroom above corpus maxima (~1050, 125, 250,
+	// and 1050 allocations for Compile, completion, parse/rank, and Format).
 	for _, fixture := range fixtures {
 		measure("Compile "+fixture.Text, 1500, &compileSamples, func() {
 			_, _ = Compile(fixture.Text, Options{Viz: fixture.Viz})
@@ -98,6 +102,7 @@ func TestLatencyBudgets(t *testing.T) {
 			maxParse, maxRender = max(maxParse, parser.parseCalls), max(maxRender, parser.renderCalls)
 		})
 	}
+	t.Logf("maximum allocations/request: %v", maxAllocations)
 	if maxParse > 2 || maxRender > 2 {
 		t.Errorf("Format engine calls/request: ParseSQL max=%d, RenderSQL max=%d; want <= 2 each", maxParse, maxRender)
 	}

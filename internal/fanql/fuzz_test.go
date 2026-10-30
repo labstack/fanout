@@ -303,11 +303,10 @@ func FuzzFormatRoundTrip(f *testing.F) {
 			// Complete, noneditable text is never sent through public Parse.
 			before, _ := json.Marshal(stored)
 			raw, err := json.Marshal(struct {
-				FanQL    int         `json:"fanql"`
 				Text     string      `json:"text"`
 				Editable bool        `json:"editable"`
 				Query    panel.Query `json:"query"`
-			}{Version, formatted.Text, false, stored})
+			}{formatted.Text, false, stored})
 			if err != nil {
 				t.Fatal(err)
 			}

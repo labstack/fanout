@@ -1,7 +1,6 @@
 package fanql
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -60,8 +59,8 @@ func TestReferenceIsDeterministicAndMarksPreview(t *testing.T) {
 			t.Fatal("reference order is unstable")
 		}
 	}
-	if !strings.HasPrefix(ref, fmt.Sprintf("# FanQL %d\n", Version)) || !strings.Contains(ref, "Preview: the syntax may change before GA") {
-		t.Fatal("missing version/preview")
+	if !strings.HasPrefix(ref, "# FanQL\n") || !strings.Contains(ref, "Preview: the syntax may change before GA") {
+		t.Fatal("missing title/preview")
 	}
 }
 

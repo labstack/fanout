@@ -50,16 +50,18 @@ func Format(ctx context.Context, p panel.Parser, stored panel.Query, opts Option
 			vars[v.Name] = v
 		}
 	}
-	var problems panel.Problems
-	if len(panel.CompatibleVizzes(&stored, vars)) == 0 {
+	// Most stored queries are valid tables. Prove shape validity there first
+	// instead of reparsing every measure for every possible visualization.
+	problems, _ := panel.QueryShape(&stored, "table", vars)
+	if len(problems) > 0 && len(panel.CompatibleVizzes(&stored, vars)) == 0 {
 		viz := opts.Viz
 		if viz == "" {
 			viz = "table"
 		}
 		problems, _ = panel.QueryShape(&stored, viz, vars)
-	}
-	if len(problems) > 0 {
-		return nil, presentProblems(problems), nil
+		if len(problems) > 0 {
+			return nil, presentProblems(problems), nil
+		}
 	}
 	q := &queryTree{Source: stored.From}
 	f := &Formatted{Exactness: Exact, Notices: []Notice{}, Requires: []Requirement{}}

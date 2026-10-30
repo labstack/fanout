@@ -2,7 +2,6 @@ package fanql
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"reflect"
@@ -84,7 +83,7 @@ func TestCorpus(t *testing.T) {
 }
 
 func TestCanonicalFreeze(t *testing.T) {
-	path := fmt.Sprintf("testdata/canonical.v%d.golden", Version)
+	path := "testdata/canonical.golden"
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +103,7 @@ func TestCanonicalFreeze(t *testing.T) {
 			t.Fatal(f.Text, ps)
 		}
 		if want, ok := golden[f.Text]; !ok || c.Canonical != want {
-			t.Fatalf("FanQL %d canonical changed for %q: %q; pinned %q", Version, f.Text, c.Canonical, want)
+			t.Fatalf("FanQL canonical changed for %q: %q; pinned %q", f.Text, c.Canonical, want)
 		}
 	}
 	if len(golden) != len(clean) {

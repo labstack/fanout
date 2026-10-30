@@ -439,14 +439,13 @@ func TestEditableFalsePreservationThroughEnvelope(t *testing.T) {
 		t.Fatalf("oversized format: %+v %+v %v; engine calls=%d", f, ps, err, p.calls)
 	}
 	type envelope struct {
-		FanQL    int         `json:"fanql"`
 		Text     string      `json:"text"`
 		Editable bool        `json:"editable"`
 		Query    panel.Query `json:"query"`
 		Viz      string      `json:"viz"`
 		Time     panel.Time  `json:"time"`
 	}
-	original := envelope{FanQL: Version, Text: f.Text, Query: q, Viz: "logs", Time: panel.Time{Range: "1h"}}
+	original := envelope{Text: f.Text, Query: q, Viz: "logs", Time: panel.Time{Range: "1h"}}
 	raw, err := json.Marshal(original)
 	if err != nil {
 		t.Fatal(err)

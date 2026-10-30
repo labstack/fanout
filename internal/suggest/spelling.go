@@ -36,8 +36,11 @@ func editDistance(a, b string) int {
 	if len(a) > maxSuggestLength || len(b) > maxSuggestLength {
 		return max(len(a), len(b))
 	}
-	previous := make([]int, len(b)+1)
-	current := make([]int, len(b)+1)
+	// The length bound lets both rows stay on the stack. Field resolution
+	// compares many candidates, so allocating rows per candidate is costly.
+	var rows [2][maxSuggestLength + 1]int
+	previous := rows[0][:len(b)+1]
+	current := rows[1][:len(b)+1]
 	for j := range previous {
 		previous[j] = j
 	}

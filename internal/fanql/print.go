@@ -10,7 +10,7 @@ import (
 )
 
 // Print prints the canonical spelling of a resolved tree. This spelling is
-// frozen for Version; in particular, filter entry boundaries are preserved.
+// pinned by the canonical corpus; in particular, filter entry boundaries are preserved.
 func print(q *queryTree) string {
 	if q == nil {
 		return ""
