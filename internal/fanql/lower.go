@@ -317,8 +317,7 @@ func lowerCall(c *Call) string {
 	if c.Cmp != nil {
 		v := c.Cmp.Value.Text
 		if c.Cmp.Value.Kind == NumberValue {
-			n, _ := strconv.ParseFloat(v, 64)
-			v = decimal(n)
+			v = numberText(v)
 		}
 		if c.Cmp.Value.Kind == BooleanValue {
 			v = strings.ToLower(v)
@@ -359,6 +358,9 @@ func lowerMExpr(e MExpr, parent int) string {
 	case *MConst:
 		return decimal(x.Value)
 	case *MNeg:
+		if _, nested := x.X.(*MNeg); nested {
+			return "-(" + lowerMExpr(x.X, 0) + ")"
+		}
 		return "-" + lowerMExpr(x.X, 3)
 	case *MBinary:
 		prec := 1

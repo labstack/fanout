@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/labstack/fanout/internal/sqlscan"
 )
 
 // Measure is one parsed aggregate.
@@ -140,49 +142,18 @@ func measureTokens(text string) ([]measureToken, string) {
 		}
 		start := i
 		c := text[i]
+		region := sqlscan.At(text, start)
+		if region.Message != "" {
+			return nil, region.Message
+		}
+		if region.Comment {
+			i = region.End
+			continue
+		}
 		i++
 		switch {
-		case c == '-' && i < len(text) && text[i] == '-':
-			for i < len(text) && text[i] != '\n' && text[i] != '\r' {
-				i++
-			}
-			continue
-		case c == '/' && i < len(text) && text[i] == '*':
-			i++
-			depth := 1
-			for i < len(text) && depth > 0 {
-				switch {
-				case i+1 < len(text) && text[i:i+2] == "/*":
-					depth++
-					i += 2
-				case i+1 < len(text) && text[i:i+2] == "*/":
-					depth--
-					i += 2
-				default:
-					i++
-				}
-			}
-			if depth != 0 {
-				return nil, "unterminated block comment"
-			}
-			continue
-		case c == '\'' || c == '"':
-			closed := false
-			for i < len(text) {
-				if text[i] == c {
-					i++
-					if i < len(text) && text[i] == c {
-						i++
-						continue
-					}
-					closed = true
-					break
-				}
-				i++
-			}
-			if !closed {
-				return nil, "unterminated quoted literal"
-			}
+		case region.Quote != 0:
+			i = region.End
 		case c >= '0' && c <= '9' || c == '.' && i < len(text) && text[i] >= '0' && text[i] <= '9':
 			for i < len(text) && ((text[i] >= '0' && text[i] <= '9') || text[i] == '.') {
 				i++

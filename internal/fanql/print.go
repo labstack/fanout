@@ -291,12 +291,13 @@ func validPath(s string) bool { return identifierPath.MatchString(s) }
 func quoteText(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }
 
 // The explicit numeric column accepts negative numbers; the duration shorthand
-// forbids negative units. Keep the numeric field for a whole mixed list/range.
+// forbids negative units and uses float64 milliseconds. Keep the numeric field
+// for a whole list/range if a value cannot use that shorthand exactly.
 func printFilterField(f Field, values ...Value) (string, bool) {
 	if f.Ref != nil && f.Ref.Column == "duration_ms" && f.Ref.Key == "" {
 		for _, v := range values {
 			if v.Kind == NumberValue {
-				if n, err := strconv.ParseFloat(v.Text, 64); err == nil && n < 0 {
+				if n, err := strconv.ParseFloat(v.Text, 64); err == nil && (n < 0 || decimal(n) != numberText(v.Text)) {
 					return "duration_ms", true
 				}
 			}
@@ -502,6 +503,9 @@ func printMExpr(e MExpr, parent int) string {
 		}
 		return text
 	case *MNeg:
+		if _, nested := x.X.(*MNeg); nested {
+			return "-(" + printMExpr(x.X, 0) + ")"
+		}
 		return "-" + printMExpr(x.X, 3)
 	case *MConst:
 		return strconv.FormatFloat(x.Value, 'f', -1, 64)

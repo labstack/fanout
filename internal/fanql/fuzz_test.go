@@ -3,12 +3,65 @@ package fanql
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/panel"
 )
+
+func FuzzCompileFormatCompile(f *testing.F) {
+	for _, fixture := range readCorpus(f) {
+		f.Add(fixture.Text, fixture.Viz)
+	}
+	r := rand.New(rand.NewSource(20261029))
+	for i := range 500 {
+		f.Add(ownQueryText(r, i), "")
+	}
+	for _, text := range []string{
+		"logs | -(-count()) as n",
+		"spans where duration_ms>9007199254740993",
+		"logs | count_if(`body = 'x' /* ) */`) as n",
+		"logs | count_if(`body = 'x' -- )\n`) as n",
+	} {
+		f.Add(text, "")
+	}
+	engine, _ := newTestEngine(f)
+	vars := []panel.Variable{{Name: "svc", Kind: "text"}, {Name: "svcs", Kind: "custom", Options: []string{"api", "worker"}, Multi: true}}
+	f.Fuzz(func(t *testing.T, text, viz string) {
+		c, ps := Compile(text, Options{Viz: viz, Variables: vars})
+		if len(ps) != 0 {
+			return
+		}
+		compatible := panel.CompatibleVizzes(&c.Query, nil)
+		if len(compatible) == 0 {
+			// Filter-only metrics have no valid panel visualization.
+			return
+		}
+		checkViz := viz
+		if checkViz == "" {
+			checkViz = compatible[0].Viz
+		}
+		d := panel.Dashboard{Name: "Round trip", Variables: vars, Panels: []panel.Panel{{ID: "p", Title: "p", Viz: checkViz, Query: &c.Query}}}
+		// Compile leaves raw SQL validation to the panel gate. The property
+		// applies to executable panel queries, including raw SQL and comments.
+		if _, problems, err := panel.Check(t.Context(), engine, &d); err != nil {
+			t.Fatal(err)
+		} else if len(problems) != 0 {
+			return
+		}
+		formatted, ps, err := Format(t.Context(), engine, c.Query, FormatOptions{Viz: viz, Variables: vars})
+		if err != nil || len(ps) != 0 || formatted == nil {
+			t.Fatalf("format %q: %+v %v", text, ps, err)
+		}
+		again, ps := Compile(formatted.Text, Options{Viz: viz, Variables: vars})
+		if len(ps) != 0 || again == nil || !reflect.DeepEqual(c.Query, again.Query) {
+			t.Fatalf("%q -> %q changed panel query: %#v -> %#v; %+v", text, formatted.Text, c.Query, again, ps)
+		}
+	})
+}
 
 func FuzzLexParsePrint(f *testing.F) {
 	for _, fixture := range readCorpus(f) {

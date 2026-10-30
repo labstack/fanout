@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/panel"
+	"github.com/labstack/fanout/internal/sqlscan"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -369,7 +370,7 @@ func spellingValue(f Field, v Value, aliases bool) Value {
 		return v
 	}
 	if f.Ref.Column == "duration_ms" && f.Ref.Key == "" && v.Kind == NumberValue {
-		if n, err := strconv.ParseFloat(v.Text, 64); err == nil && n >= 0 {
+		if n, err := strconv.ParseFloat(v.Text, 64); err == nil && n >= 0 && decimal(n) == numberText(v.Text) {
 			v.Kind = DurationValue
 			v.Text = durationText(n)
 		}
@@ -824,6 +825,11 @@ func liftCountIfBodies(ctx context.Context, p panel.Parser, signal, text string)
 				return "", err
 			}
 		}
+		// Keep the stored SQL when lifting would discard comments or otherwise
+		// change the conditional body. Raw FanQL preserves it byte for byte.
+		if lowerMExpr(&MCountIf{Filter: e}, 0) != "count_if("+body+")" {
+			e = &RawExpr{Text: body}
+		}
 		b.WriteString(text[end:tokens[i+1].end])
 		b.WriteString(printEntry(e, false))
 		end = tokens[j].start
@@ -851,24 +857,19 @@ func ownSQLTokens(text string) []ownSQLToken {
 		}
 		start := i
 		c := text[i]
-		if c == '\'' || c == '"' {
-			quote := c
-			i++
-			var b strings.Builder
-			for i < len(text) {
-				if text[i] == quote {
-					if i+1 < len(text) && text[i+1] == quote {
-						b.WriteByte(quote)
-						i += 2
-						continue
-					}
-					i++
-					break
-				}
-				b.WriteByte(text[i])
-				i++
+		region := sqlscan.At(text, start)
+		if region.Comment {
+			i = region.End
+			continue
+		}
+		if region.Quote != 0 {
+			i = region.End
+			if region.Message != "" {
+				return nil
 			}
-			out = append(out, ownSQLToken{text: b.String(), quote: quote, start: start, end: i})
+			quote := string(region.Quote)
+			value := strings.ReplaceAll(text[start+1:i-1], quote+quote, quote)
+			out = append(out, ownSQLToken{text: value, quote: region.Quote, start: start, end: i})
 			continue
 		}
 		if strings.ContainsRune("(),[]", rune(c)) {
@@ -885,6 +886,9 @@ func ownSQLTokens(text string) []ownSQLToken {
 			continue
 		}
 		for i < len(text) && !strings.ContainsRune(" \t\r\n(),[]=<>!~:'\"", rune(text[i])) {
+			if sqlscan.At(text, i).Comment {
+				break
+			}
 			i++
 		}
 		if i == start {
