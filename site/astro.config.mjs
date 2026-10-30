@@ -75,6 +75,7 @@ export default defineConfig({
       pagination: true,
       favicon: "/favicon.svg",
       sidebar: [
+        { label: "Docs home", slug: "docs" },
         {
           label: "Get started",
           items: [

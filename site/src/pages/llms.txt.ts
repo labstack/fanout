@@ -9,13 +9,13 @@ import { getCollection } from "astro:content";
 // yet shipped says so in the index rather than in a page the agent may never
 // open.
 //
-// The landing page is its own group: splitting on the first path segment gives
-// it "index", which a list of directory names does not contain, so without it
-// the page would be dropped from an index whose own heading promises every one.
+// The landing page and docs home share the "index" group, listed explicitly
+// so neither is dropped from an index whose heading promises every one.
 const ROOT = "index";
 const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "privacy"];
 
 function groupOf(id: string): string {
+  if (id === "docs") return ROOT;
   return id.replace(/^docs\//, "").split("/")[0] ?? ROOT;
 }
 

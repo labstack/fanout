@@ -9,7 +9,7 @@
  * using the product. They belong on the marketing site. */
 export const docs = {
   /** Where an operator starts reading, not the marketing page above it. */
-  home: "https://fanout.run/docs/get-started/overview",
+  home: "https://fanout.run/docs",
   /** Sending telemetry: endpoint, authentication, collector and SDK setup. */
   ingest: "https://fanout.run/docs/get-started/send-telemetry",
   connect: "https://fanout.run/docs/guides/mcp",

@@ -7,13 +7,13 @@ import { toPlainMarkdown } from "../lib/markdown";
 // agent reading top to bottom should meet what Fanout is before it meets a
 // settings table.
 //
-// The landing page groups as "index" rather than under a directory, so it is
-// listed explicitly — otherwise it is dropped from a document headed "complete
-// documentation".
+// The landing page and docs home share the "index" group, listed explicitly
+// so neither is dropped from a document headed "complete documentation".
 const ROOT = "index";
 const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "privacy"];
 
 function groupOf(id: string): string {
+  if (id === "docs") return ROOT;
   return id.replace(/^docs\//, "").split("/")[0] ?? ROOT;
 }
 
