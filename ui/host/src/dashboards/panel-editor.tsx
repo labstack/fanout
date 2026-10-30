@@ -36,7 +36,8 @@ export default function PanelEditor({ dashboardId, version, spec, time, vars, pa
 
   const save = async (result: Panel) => {
     const operation = panel
-      ? { op: "update_panel" as const, id: panel.id, set: { query: result.query, viz: result.viz } }
+      // null removes the other form, so a panel is either structured or SQL.
+      ? { op: "update_panel" as const, id: panel.id, set: result.sql !== undefined ? { sql: result.sql, query: null, viz: result.viz } : { query: result.query, sql: null, viz: result.viz } }
       : { op: "add_panel" as const, panel: { ...result, id: uniquePanelID("panel", spec.panels.map(p => p.id)) } };
     try {
       const record = await patchDashboard(dashboardId, [operation], version, panel ? `Edited ${panel.title}` : `Added ${result.title}`);

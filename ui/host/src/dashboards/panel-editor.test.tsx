@@ -58,7 +58,7 @@ describe("PanelEditor", () => {
     await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(onClose).toHaveBeenCalled());
-    expect(bodies("/api/dashboards/d1", "PATCH")[0]).toEqual({ operations: [{ op: "update_panel", id: "panel", set: { query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, viz: "table" } }], base_version: 7, message: "Edited Requests" });
+    expect(bodies("/api/dashboards/d1", "PATCH")[0]).toEqual({ operations: [{ op: "update_panel", id: "panel", set: { query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, sql: null, viz: "table" } }], base_version: 7, message: "Edited Requests" });
   });
 
   it("adds a new panel with a free id", async () => {
