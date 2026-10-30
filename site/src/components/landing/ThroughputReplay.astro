@@ -73,7 +73,7 @@ const description = `${benchmark.release}: ${formatRate(sustained.accepted_per_s
   </div>
   </div>
   <div class="fo-replay-status"><span data-state>Full measured run</span><span class="fo-replay-readout"><span data-elapsed>{clock(seconds)} / {clock(seconds)}</span><span class="fo-replay-rate" data-rate hidden style={`min-width: ${rateWidth}ch`}></span></span></div>
-  <p class="fo-replay-setup"><span>Replay of the measured run · {machine} · {host.logical_cpus} vCPU</span><a class="fo-link" href="/explanation/performance">How we measured →</a></p>
+  <p class="fo-replay-setup"><span>Replay of the measured run · {machine} · {host.logical_cpus} vCPU</span><a class="fo-link" href="/docs/concepts/performance">How we measured →</a></p>
   {benchmark.development_preview && <p class="fo-replay-note">{benchmark.series_phase} · Partial run · Completion gate failed</p>}
 </figure>
 

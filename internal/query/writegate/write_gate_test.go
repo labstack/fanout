@@ -13,22 +13,22 @@ import (
 	dto "github.com/prometheus/client_model/go"
 )
 
-func TestWriteGateLockContextHonorsCancellation(t *testing.T) {
-	var gate WriteGate
-	unlock := gate.Lock(WriteMaintenance)
+func TestGateLockContextHonorsCancellation(t *testing.T) {
+	var gate Gate
+	unlock := gate.Lock(Maintenance)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := gate.LockContext(ctx, WriteMaintenance); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := gate.LockContext(ctx, Maintenance); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("LockContext error = %v, want deadline exceeded", err)
 	}
 	unlock()
-	gate.Lock(WriteMaintenance)()
+	gate.Lock(Maintenance)()
 }
 
-func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
+func TestGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 	t.Parallel()
 
-	var gate WriteGate
+	var gate Gate
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
 	secondStarted := make(chan struct{})
@@ -37,7 +37,7 @@ func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 
 	go func() {
 		defer func() { done <- struct{}{} }()
-		unlock := gate.Lock(WriteMaintenance)
+		unlock := gate.Lock(Maintenance)
 		close(firstEntered)
 		<-releaseFirst
 		unlock()
@@ -47,7 +47,7 @@ func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 	go func() {
 		defer func() { done <- struct{}{} }()
 		close(secondStarted)
-		defer gate.Lock(WriteMaintenance)()
+		defer gate.Lock(Maintenance)()
 		close(secondEntered)
 	}()
 	<-secondStarted
@@ -70,23 +70,23 @@ func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 
 // A panicking holder must not strand the gate. Recovering and re-acquiring in
 // the same test proves the mutex is free, which a leaked lock would deadlock on.
-func TestWriteGateReleasesAfterPanic(t *testing.T) {
+func TestGateReleasesAfterPanic(t *testing.T) {
 	t.Parallel()
 
-	var gate WriteGate
+	var gate Gate
 	func() {
 		defer func() {
 			if recover() == nil {
 				t.Error("expected panic to propagate")
 			}
 		}()
-		defer gate.Lock(WriteMaintenance)()
+		defer gate.Lock(Maintenance)()
 		panic("boom")
 	}()
 
 	acquired := make(chan struct{})
 	go func() {
-		defer gate.Lock(WriteMaintenance)()
+		defer gate.Lock(Maintenance)()
 		close(acquired)
 	}()
 	select {
@@ -101,8 +101,8 @@ func TestWriteGateReleasesAfterPanic(t *testing.T) {
 // catalog write behind the metrics registry. Asserting the gate is acquirable
 // from inside the observer is what makes the ordering detectable — timing the
 // release cannot, because a Prometheus write is only microseconds.
-func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
-	var gate WriteGate
+func TestGateObservesOutsideTheCriticalSection(t *testing.T) {
+	var gate Gate
 
 	var freeDuringObserve bool
 	restore := swapObserver(t, func(string, float64, float64) {
@@ -115,7 +115,7 @@ func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
 	})
 	defer restore()
 
-	gate.Lock(WriteMaintenance)()
+	gate.Lock(Maintenance)()
 
 	if !freeDuringObserve {
 		t.Fatal("gate was still held while the observation ran — move the Unlock above observe()")
@@ -125,17 +125,17 @@ func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
 // Both halves must reach Prometheus: wait time without hold time cannot answer
 // whether ingest is stalling behind rollups, which is the question this
 // instrumentation exists to answer.
-func TestWriteGateRecordsBothWaitAndHoldHistograms(t *testing.T) {
-	beforeWait := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMaintenance)
-	beforeHold := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMaintenance)
+func TestGateRecordsBothWaitAndHoldHistograms(t *testing.T) {
+	beforeWait := histogramCount(t, "fanout_write_gate_wait_seconds", Maintenance)
+	beforeHold := histogramCount(t, "fanout_write_gate_hold_seconds", Maintenance)
 
-	var gate WriteGate
-	gate.Lock(WriteMaintenance)()
+	var gate Gate
+	gate.Lock(Maintenance)()
 
-	if after := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMaintenance); after != beforeWait+1 {
+	if after := histogramCount(t, "fanout_write_gate_wait_seconds", Maintenance); after != beforeWait+1 {
 		t.Errorf("wait sample count = %d, want %d", after, beforeWait+1)
 	}
-	if after := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMaintenance); after != beforeHold+1 {
+	if after := histogramCount(t, "fanout_write_gate_hold_seconds", Maintenance); after != beforeHold+1 {
 		t.Errorf("hold sample count = %d, want %d", after, beforeHold+1)
 	}
 }
@@ -151,7 +151,7 @@ func swapObserver(t *testing.T, fn func(string, float64, float64)) func() {
 
 // histogramCount reports how many samples one write-gate histogram holds for an
 // operation. Deltas rather than Reset() keep this immune to test order.
-func histogramCount(t *testing.T, name string, operation WriteOperation) uint64 {
+func histogramCount(t *testing.T, name string, operation Operation) uint64 {
 	t.Helper()
 
 	families, err := prometheus.DefaultGatherer.Gather()

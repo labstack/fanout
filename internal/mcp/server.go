@@ -39,7 +39,7 @@ type Observability interface {
 }
 
 type IntelligenceSnapshots interface {
-	LatestSnapshot() *intelligence.IntelligenceSnapshot
+	LatestSnapshot() *intelligence.Snapshot
 }
 
 type QueryInput struct {
@@ -449,10 +449,10 @@ func (s *Server) dependencies(ctx context.Context, _ *mcp.CallToolRequest, input
 	return summary(output.Summary), output, nil
 }
 
-func (s *Server) intelligenceSnapshot(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, intelligence.IntelligenceSnapshot, error) {
+func (s *Server) intelligenceSnapshot(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, intelligence.Snapshot, error) {
 	snapshot := s.intelligence.LatestSnapshot()
 	if snapshot == nil {
-		return nil, intelligence.IntelligenceSnapshot{}, fmt.Errorf("intelligence snapshot is not ready")
+		return nil, intelligence.Snapshot{}, fmt.Errorf("intelligence snapshot is not ready")
 	}
 	return summary(snapshot.Summary), *snapshot, nil
 }

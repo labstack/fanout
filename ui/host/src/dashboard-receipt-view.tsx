@@ -2,7 +2,7 @@ import { Button, Collapse, Group, Loader, Paper, Stack, Text } from "@mantine/co
 import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import { changeChips, stageNames, type BuildReceipt } from "./dashboard-receipt";
-import { EditChips } from "./dashboard-change-chips";
+import { DashboardChangeChips } from "./dashboard-change-chips";
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 export function DashboardReceiptView({ receipt, running = false, activity = "", awaitingAnswer = false }: { receipt: BuildReceipt; running?: boolean; activity?: string; awaitingAnswer?: boolean }) {
@@ -27,7 +27,7 @@ export function DashboardReceiptView({ receipt, running = false, activity = "", 
         <Button component="button" variant="subtle" color="gray" size="compact-xs" aria-expanded={expanded} aria-controls={detailsID} onClick={() => setExpanded(v => !v)}>Details{chips.length > 4 ? ` (+${chips.length - 4})` : ""}</Button>
       </Group>
       {running && awaitingAnswer && <Group gap="xs" data-build-running><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
-      <EditChips labels={chips.slice(0,4)} />
+      <DashboardChangeChips labels={chips.slice(0,4)} />
       {receipt.explanations.map(text => running ? text.split(" · ").filter(part => !part.endsWith(": incomplete")).join(" · ") : text).filter(Boolean).map((text,i) => <Text key={i} size="xs" c="dimmed" data-receipt-attention>{text}</Text>)}
       {saved && <Button renderRoot={(props) => <Link {...props} to="/dashboards/$dashboardId" params={{dashboardId:saved.id}} search={{}} />} variant="subtle" size="compact-sm" color="gray" style={{alignSelf:"flex-start"}}>Open dashboard</Button>}
       <Collapse expanded={expanded} id={detailsID}>

@@ -881,7 +881,7 @@ func TestRepositoryOpenRejectsUnsafeCompactionMarker(t *testing.T) {
 // removes that risk while it resolves, so the anchor is checked here rather
 // than trusted.
 func TestUnresolvedCompactionRunbookExists(t *testing.T) {
-	const guide = "../../../site/src/content/docs/guides/troubleshoot.mdx"
+	const guide = "../../../site/src/content/docs/docs/guides/troubleshooting.mdx"
 	data, err := os.ReadFile(guide)
 	if err != nil {
 		t.Fatalf("read the runbook the startup log links to: %v", err)

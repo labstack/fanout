@@ -15,7 +15,7 @@ INSERT INTO alert_rules (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
--- name: UpdateRule :one
+-- name: ReplaceRule :one
 UPDATE alert_rules SET
     name = ?, description = ?, enabled = ?, service = ?, namespace = ?,
     expression = ?, for_seconds = ?, cooldown_s = ?, repeat_interval_s = ?,

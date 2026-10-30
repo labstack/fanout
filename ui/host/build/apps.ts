@@ -10,7 +10,7 @@ export function appBuildBoundary(): Plugin {
       const walk = (id: string, chain: string[]) => {
         if (seen.has(id)) return; seen.add(id);
         const path = id.replaceAll("\\", "/").split("?")[0];
-        if (/\/src\/(?:auth[\w-]*(?:\.[jt]sx?$|\/)|router(?:\.[jt]sx?|\/)|routes\/|(?:App|main)\.[jt]sx?$|(?:app-context|provider-context)(?:\.[jt]sx?|\/)|(?:app|providers?)\/|(?:api|observability|mcp-app-frame)\.[jt]sx?$|dashboards\/api\.[jt]sx?$)/.test(path)) this.error(`Forbidden MCP app import: ${[...chain, id].join(" -> ")}`);
+        if (/\/src\/(?:auth[\w-]*(?:\.[jt]sx?$|\/)|router(?:\.[jt]sx?|\/)|routes\/|(?:app|main)\.[jt]sx?$|(?:app-context|provider-context)(?:\.[jt]sx?|\/)|(?:app|providers?)\/|(?:api|observability|mcp-app-frame)\.[jt]sx?$|dashboards\/api\.[jt]sx?$)/.test(path)) this.error(`Forbidden MCP app import: ${[...chain, id].join(" -> ")}`);
         const info = this.getModuleInfo(id);
         for (const next of [...(info?.importedIds ?? []), ...(info?.dynamicallyImportedIds ?? [])]) walk(next, [...chain, id]);
       };

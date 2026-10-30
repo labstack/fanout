@@ -18,7 +18,7 @@ import (
 func TestVersionRollupBudgetStartsAfterGate(t *testing.T) {
 	d, repo := versionEngine(t)
 	commitVersionLogs(t, repo, "healthy", time.Now().UTC().Add(-time.Hour), 1)
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	timer := time.AfterFunc(10100*time.Millisecond, unlock)
 	defer func() {
 		if timer.Stop() {
@@ -35,7 +35,7 @@ func TestVersionRollupBudgetStartsAfterGate(t *testing.T) {
 func TestGateTimeoutDoesNotBackOff(t *testing.T) {
 	d, repo := versionEngine(t)
 	commitVersionLogs(t, repo, "healthy", time.Now().UTC().Add(-time.Hour), 1)
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	defer unlock()
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
@@ -50,7 +50,7 @@ func TestGateTimeoutDoesNotBackOff(t *testing.T) {
 func TestVersionRollupWaitIsBoundedWithoutCallerDeadline(t *testing.T) {
 	d, repo := versionEngine(t)
 	commitVersionLogs(t, repo, "healthy", time.Now().UTC().Add(-time.Hour), 1)
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(unlock) }
 	defer release()
@@ -86,7 +86,7 @@ func TestVersionRollupWaitIsBoundedWithoutCallerDeadline(t *testing.T) {
 func TestVersionRollupWaitHonorsCallerCancellation(t *testing.T) {
 	d, repo := versionEngine(t)
 	commitVersionLogs(t, repo, "healthy", time.Now().UTC().Add(-time.Hour), 1)
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	var once sync.Once
 	release := func() { once.Do(unlock) }
 	defer release()
@@ -126,7 +126,7 @@ func TestVersionRollupWaitHonorsCallerCancellation(t *testing.T) {
 // the write gate.
 // This test-only probe avoids adding instrumentation to the production gates.
 func signalVersionGateWait(blocked chan<- struct{}, stop <-chan struct{}) {
-	frame := "writegate.(*WriteGate).LockContext"
+	frame := "writegate.(*Gate).LockContext"
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	buffer := make([]byte, 1<<20)

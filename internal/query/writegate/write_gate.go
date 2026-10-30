@@ -10,29 +10,29 @@ import (
 	"github.com/labstack/fanout/internal/metrics"
 )
 
-// WriteOperation is a bounded metric label for a rollup-cache write.
+// Operation is a bounded metric label for a rollup-cache write.
 // Keep this list exhaustive: arbitrary strings would create an unbounded
 // Prometheus label surface.
-type WriteOperation string
+type Operation string
 
 const (
-	WriteRollupSkip    WriteOperation = "rollup_skip_to_latest"
-	WriteRollupService WriteOperation = "rollup_service"
-	WriteReadCache     WriteOperation = "read_cache"
-	WriteRollupEdge    WriteOperation = "rollup_edge"
-	WriteRollupVersion WriteOperation = "rollup_version"
-	WriteAnomalyLog    WriteOperation = "anomaly_log"
-	WriteMaintenance   WriteOperation = "maintenance"
+	RollupSkip    Operation = "rollup_skip_to_latest"
+	RollupService Operation = "rollup_service"
+	ReadCache     Operation = "read_cache"
+	RollupEdge    Operation = "rollup_edge"
+	RollupVersion Operation = "rollup_version"
+	AnomalyLog    Operation = "anomaly_log"
+	Maintenance   Operation = "maintenance"
 )
 
-// WriteGate serializes DuckDB writes while measuring how long each operation
+// Gate serializes DuckDB writes while measuring how long each operation
 // waits for and holds the critical section. The zero value is ready for use.
-type WriteGate struct {
+type Gate struct {
 	once  sync.Once
 	token chan struct{}
 }
 
-func (g *WriteGate) init() {
+func (g *Gate) init() {
 	g.once.Do(func() {
 		g.token = make(chan struct{}, 1)
 		g.token <- struct{}{}
@@ -48,7 +48,7 @@ var observe = metrics.RecordWriteGate
 // Lock acquires the cache write gate and returns its release function.
 // Callers must defer the returned function before acquiring a database
 // connection, transaction, or appender, and must call it exactly once.
-func (g *WriteGate) Lock(operation WriteOperation) func() {
+func (g *Gate) Lock(operation Operation) func() {
 	unlock, err := g.LockContext(context.Background(), operation)
 	if err != nil {
 		panic(err)
@@ -57,7 +57,7 @@ func (g *WriteGate) Lock(operation WriteOperation) func() {
 }
 
 // LockContext acquires the cache write gate, or returns when ctx expires.
-func (g *WriteGate) LockContext(ctx context.Context, operation WriteOperation) (func(), error) {
+func (g *Gate) LockContext(ctx context.Context, operation Operation) (func(), error) {
 	g.init()
 	waitStarted := time.Now()
 	select {

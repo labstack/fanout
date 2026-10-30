@@ -1,0 +1,60 @@
+---
+title: Tune retention
+description: Control how long telemetry is kept and how aggressively Fanout compacts what it has written.
+summary: Retention, atomic batch sizing, and the maintenance pass that keeps query latency bounded.
+read_when:
+  - Disk use is growing faster than expected.
+  - Query or rollup latency is climbing on an instance that was fine.
+status: preview
+---
+
+Retention controls telemetry lifetime. Group commits and compaction control
+file count and query cost. All configuration changes require a restart.
+
+## How long data is kept
+
+```sh
+export FANOUT_RETENTION_DAYS=30
+```
+
+Zero means keep everything. Changing it does not delete anything immediately;
+expired data goes when maintenance next runs, so disk use falls on the
+maintenance cycle after restart. Expiry uses ingestion time; see
+[storage semantics](/docs/concepts/storage#small-files-are-bounded-by-compaction).
+
+Observability API, MCP, and dashboard queries can span up to this retention
+period. With unlimited retention, each query remains capped at 30 days. Fanout
+automatically uses wider timeline buckets for windows longer than 24 hours.
+
+## The maintenance cycle
+
+```sh
+export FANOUT_MAINTENANCE_INTERVAL=1h
+```
+
+The maintenance pass removes expired batches, compacts eligible files and
+checkpoints query state. Shorter intervals run this work more frequently.
+
+## Group-commit target
+
+The target number of telemetry rows that concurrent small requests may share in
+one atomic Parquet batch:
+
+```sh
+export FANOUT_INGEST_BATCH_SIZE=50000
+```
+
+A larger target can improve sustained write throughput and create fewer files
+under concurrent ingest. The target groups concurrent small requests; a request
+above the target remains one atomic batch. Every request is acknowledged only
+after its Parquet batch is durably published.
+
+## What the knobs interact with
+
+Maintenance prepares merges while reads continue, then briefly gates readers
+while it swaps or removes immutable files. New batches keep encoding and need
+only the short publication lock. Ingest, queries, and maintenance still share
+CPU, memory bandwidth and disk. Change one setting at a time and watch `/metrics`.
+
+The full list, with defaults and types, is in the [storage
+settings](/docs/reference/configuration/storage) reference.

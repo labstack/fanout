@@ -84,7 +84,7 @@ func TestDetectorRetriesFailedQueriesAtUnchangedWatermark(t *testing.T) {
 				seedDetectorRecoveryRollup(t, db, end)
 				d := NewDetector(&query.Duck{DB: db}, DefaultDetectorConfig())
 				if withPrevious {
-					d.publishSnapshot(IntelligenceSnapshot{GeneratedAt: time.Now().Add(-time.Minute), evaluatedThrough: end.Add(-time.Minute), HealthScore: 85})
+					d.publishSnapshot(Snapshot{GeneratedAt: time.Now().Add(-time.Minute), evaluatedThrough: end.Add(-time.Minute), HealthScore: 85})
 					<-d.annotationBatches
 				}
 				previous := d.LatestSnapshot()
@@ -138,7 +138,7 @@ func TestDetectorRetriesPersistenceAtUnchangedWatermark(t *testing.T) {
 	d := NewDetector(duck, DefaultDetectorConfig())
 	d.runCheck(t.Context())
 	previous := d.LatestSnapshot()
-	unlock := duck.WriteGate().Lock(writegate.WriteRollupService)
+	unlock := duck.WriteGate().Lock(writegate.RollupService)
 	defer func() {
 		if unlock != nil {
 			unlock()
@@ -280,7 +280,7 @@ func TestDetectorKeepsUnpublishedFindingsWhenWatermarkAdvances(t *testing.T) {
 	if d.evaluation == nil || len(d.evaluation.findings) != 3 {
 		t.Fatalf("missing successful anomaly evaluation: %+v", d.evaluation)
 	}
-	want := detectorAnnotations(IntelligenceSnapshot{Anomalies: d.evaluation.findings}, d.duck.DefaultNamespace())
+	want := detectorAnnotations(Snapshot{Anomalies: d.evaluation.findings}, d.duck.DefaultNamespace())
 
 	// Replace the failed-publication evaluation with a healthy, later window
 	// while patterns still fail, then recover at that new watermark.

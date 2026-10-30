@@ -59,8 +59,8 @@ type Duck struct {
 	// Cached under writeGate so an idle pass executes no SQL at all.
 	rollupWatermarks map[string]int64
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
-	writeGate writegate.WriteGate
-	cacheGate writegate.WriteGate
+	writeGate writegate.Gate
+	cacheGate writegate.Gate
 	// Protected by writeGate; controls periodic version-history retirement.
 	versionRollupPasses   uint64
 	versionRollupFailures map[string]versionRollupFailure
@@ -127,7 +127,7 @@ var parquetStatsWait = 5 * time.Second
 
 // WriteGate returns the gate that serializes writes to DuckDB's rebuildable
 // rollup cache.
-func (d *Duck) WriteGate() *writegate.WriteGate { return &d.writeGate }
+func (d *Duck) WriteGate() *writegate.Gate { return &d.writeGate }
 
 // duckDBPoolSize is the effective connection-pool size: the configured value,
 // floored at 1.
@@ -306,7 +306,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 // historical dataset. Runs once at boot before RunRollups, so taking the write
 // gate here is uncontended.
 func (d *Duck) skipRollupToLatest(ctx context.Context) error {
-	unlock := d.writeGate.Lock(writegate.WriteRollupSkip)
+	unlock := d.writeGate.Lock(writegate.RollupSkip)
 	defer unlock()
 
 	tx, err := d.writer().BeginTx(ctx, nil)
@@ -751,12 +751,12 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		pruneErr = errors.Join(pruneErr, recoveryErr, cleanupErr, parquetErr, compactErr)
 	}
 	cacheErr := func() error {
-		unlock, err := d.writeGate.LockContext(ctx, writegate.WriteMaintenance)
+		unlock, err := d.writeGate.LockContext(ctx, writegate.Maintenance)
 		if err != nil {
 			return err
 		}
 		defer unlock()
-		unlockCache, err := d.cacheGate.LockContext(ctx, writegate.WriteMaintenance)
+		unlockCache, err := d.cacheGate.LockContext(ctx, writegate.Maintenance)
 		if err != nil {
 			return err
 		}
@@ -812,7 +812,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	// Serialize against other DuckDB writers (edge rollup and maintenance).
 	// The write gate is always acquired before a connection to keep lock ordering
 	// consistent and deadlock-free.
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	defer unlock()
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -925,7 +925,7 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 			updateRollupProgress(metrics.RollupEdge, true, watermark, sourceMax)
 		}
 	}()
-	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
+	unlock := d.writeGate.Lock(writegate.RollupEdge)
 	defer unlock()
 	if err := ctx.Err(); err != nil {
 		return 0, false, err

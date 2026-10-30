@@ -1,7 +1,7 @@
 # Authentication and access operations
 
 Operator reference for running Fanout's authentication safely. Settings are
-environment variables; see the [settings reference](https://fanout.run/reference/configuration).
+environment variables; see the [settings reference](https://fanout.run/docs/reference/configuration).
 
 ## First run
 

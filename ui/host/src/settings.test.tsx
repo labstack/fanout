@@ -67,7 +67,7 @@ describe("connect telemetry", () => {
         expect(document.body.textContent).toContain("openai");
         expect(document.body.textContent).toContain("OPENAI_API_KEY");
         expect(document.body.textContent).toContain("Claude, Codex, or ChatGPT");
-        expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/guides/connect-over-mcp"]')).not.toBeNull();
+        expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/docs/guides/mcp"]')).not.toBeNull();
       }
     } finally { await act(async () => root.unmount()); }
   });
@@ -285,7 +285,7 @@ describe("connected agents", () => {
     agentsFetchMock.mockImplementation(async () => json({ connections: [] }));
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("No agents connected"));
-    expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/guides/connect-over-mcp"]')?.textContent).toBe("Connect an agent over MCP");
+    expect(document.querySelector<HTMLAnchorElement>('a[href="https://fanout.run/docs/guides/mcp"]')?.textContent).toBe("Connect an agent over MCP");
     await act(async () => root.unmount());
   });
 

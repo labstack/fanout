@@ -173,7 +173,7 @@ their HTTP `Host` matches that origin, so the reverse proxy must preserve the
 original host.
 
 MCP also validates `Origin` before authentication; see
-[Connect an agent over MCP](https://fanout.run/guides/connect-over-mcp#protocol).
+[Connect an agent over MCP](https://fanout.run/docs/guides/mcp#protocol).
 
 ## Health and monitoring
 

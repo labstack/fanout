@@ -83,7 +83,7 @@ func Open(root string) (*Repository, error) {
 // the other saying something the code no longer guarantees. Guidance an
 // operator can act on wrongly is worse than guidance in one place they have to
 // open. TestUnresolvedCompactionRunbookExists keeps the link honest.
-const compactionRunbookURL = "https://fanout.run/guides/troubleshoot#an-unresolved-compaction-blocks-startup"
+const compactionRunbookURL = "https://fanout.run/docs/guides/troubleshooting#an-unresolved-compaction-blocks-startup"
 
 // logUnresolvedCompaction spells out the operator's options for a marker that
 // blocks startup.

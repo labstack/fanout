@@ -40,7 +40,7 @@ func renderMCPTools() ([]byte, error) {
 	b.WriteString("title: \"MCP tools\"\n")
 	b.WriteString("description: \"Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything.\"\n")
 	fmt.Fprintf(&b,
-		"summary: \"%s served at /mcp, each with its inputs and mutation semantics, taken from the server's Apps-enabled tools/list answer.\"\n",
+		"summary: \"%s served at /mcp, each with its inputs and mutation semantics.\"\n",
 		count(len(tools), "tool"),
 	)
 	b.WriteString("read_when:\n")
@@ -55,7 +55,7 @@ func renderMCPTools() ([]byte, error) {
 	b.WriteString("    this page. */}\n\n")
 
 	fmt.Fprintf(&b,
-		"A Fanout instance serves MCP at `/mcp`. %s, listed below exactly as the\nserver reports them to an Apps-enabled client. Ordinary clients receive the %d model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.\n\n",
+		"A Fanout instance serves MCP at `/mcp`. %s are available to an Apps-enabled client. Ordinary clients receive the %d model-visible tools; the three app-only helpers require Apps negotiation and are never offered to the model.\n\n",
 		count(len(tools), "tool"), modelVisible,
 	)
 
@@ -124,7 +124,7 @@ func renderMCPTools() ([]byte, error) {
 
 	for _, tool := range tools {
 		fmt.Fprintf(&b, "## %s\n\n", tool.Name)
-		fmt.Fprintf(&b, "**%s** — %s\n\n", mdx(tool.Title), mdx(tool.Description))
+		fmt.Fprintf(&b, "**%s**: %s\n\n", mdx(tool.Title), mdx(tool.Description))
 		fmt.Fprintf(&b, "%s\n\n", effectProse(tool))
 		if tool.AppOnly {
 			b.WriteString("**Visibility:** app only; no resource attachment.\n\n")
@@ -172,7 +172,7 @@ func renderMCPTools() ([]byte, error) {
 		b.WriteString("\n")
 	}
 	b.WriteString("## Authentication\n\n")
-	b.WriteString("MCP uses OAuth tokens bound to the instance’s resource URI.\n[Connect an agent](/guides/connect-over-mcp#scopes) documents protocol\nrequirements and delegated scopes. Dashboard tools operate on the authenticated\nuser’s own dashboards and require the account capability\n`dashboards:manage-own`; see [roles](/reference/roles).\n\n## Other interfaces\n\nUse OTLP to write telemetry. Configuration uses environment variables, and user\nand alert management use the [HTTP API](/reference/http-routes).\n")
+	b.WriteString("MCP uses OAuth tokens bound to the instance's resource URI.\n[Connect an agent](/docs/guides/mcp#scopes) documents protocol\nrequirements and delegated scopes. Dashboard tools operate on the authenticated\nuser's own dashboards and require the account capability\n`dashboards:manage-own`; see [roles](/docs/reference/roles).\n\n## Other interfaces\n\nUse OTLP to write telemetry. Configuration uses environment variables, and user\nand alert management use the [HTTP API](/docs/reference/api).\n")
 
 	toolCount = tools
 	return []byte(b.String()), nil

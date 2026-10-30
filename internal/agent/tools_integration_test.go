@@ -19,8 +19,8 @@ type registryQueries struct{}
 
 type registryIntelligence struct{}
 
-func (registryIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot {
-	return &intelligence.IntelligenceSnapshot{Summary: "healthy", HealthScore: 100}
+func (registryIntelligence) LatestSnapshot() *intelligence.Snapshot {
+	return &intelligence.Snapshot{Summary: "healthy", HealthScore: 100}
 }
 
 func (registryQueries) Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {

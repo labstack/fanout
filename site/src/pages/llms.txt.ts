@@ -9,19 +9,22 @@ import { getCollection } from "astro:content";
 // yet shipped says so in the index rather than in a page the agent may never
 // open.
 //
-// The landing page is its own group: splitting on the first path segment gives
-// it "index", which a list of directory names does not contain, so without it
-// the page would be dropped from an index whose own heading promises every one.
+// The landing page and docs home share the "index" group, listed explicitly
+// so neither is dropped from an index whose heading promises every one.
 const ROOT = "index";
-const ORDER = [ROOT, "start", "guides", "reference", "explanation", "status", "privacy"];
+const ORDER = [ROOT, "get-started", "guides", "reference", "concepts", "privacy"];
+
+function groupOf(id: string): string {
+  if (id === "docs") return ROOT;
+  return id.replace(/^docs\//, "").split("/")[0] ?? ROOT;
+}
 
 const GROUP_TITLES: Record<string, string> = {
   [ROOT]: "Overview",
-  start: "Start here",
+  "get-started": "Get started",
   guides: "Guides",
   reference: "Reference",
-  explanation: "Explanation",
-  status: "Status",
+  concepts: "Concepts",
   privacy: "Site terms",
 };
 
@@ -57,7 +60,7 @@ export const GET: APIRoute = async ({ site }) => {
     "",
     "## Agent Resources",
     "",
-    `- [Markdown page export](${origin}/start/install.md): Append \`.md\` to any docs page URL for clean Markdown.`,
+    `- [Markdown page export](${origin}/docs/get-started/install.md): Append \`.md\` to any docs page URL for clean Markdown.`,
     `- [Full documentation text](${origin}/llms-full.txt): Every page concatenated, for one-shot ingestion.`,
     `- [Sitemap](${origin}/sitemap-index.xml): Crawler URL index.`,
     "",
@@ -75,7 +78,7 @@ export const GET: APIRoute = async ({ site }) => {
   // Silently dropping a section is how a whole directory of documentation
   // becomes invisible to every agent while the site builds clean and the
   // sidebar still shows it. Fail the build instead.
-  const groups = new Set(docs.map((doc) => doc.id.split("/")[0] ?? ROOT));
+  const groups = new Set(docs.map((doc) => groupOf(doc.id)));
   const unlisted = [...groups].filter((group) => !ORDER.includes(group));
   if (unlisted.length > 0) {
     throw new Error(
@@ -98,7 +101,7 @@ export const GET: APIRoute = async ({ site }) => {
 
   const byGroup = new Map<string, typeof docs>();
   for (const doc of docs) {
-    const group = doc.id.split("/")[0] ?? ROOT;
+    const group = groupOf(doc.id);
     const bucket = byGroup.get(group) ?? [];
     bucket.push(doc);
     byGroup.set(group, bucket);

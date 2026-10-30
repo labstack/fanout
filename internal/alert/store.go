@@ -45,16 +45,16 @@ func ruleToCreateParams(r Rule) generated.CreateRuleParams {
 		ForSeconds:      int64(r.ForSeconds),
 		CooldownS:       int64(r.CooldownS),
 		RepeatIntervalS: int64(r.RepeatIntervalS),
-		WebhookUrl:      nullString(r.WebhookURL),
+		WebhookURL:      nullString(r.WebhookURL),
 		WebhookHeaders:  nullString(r.WebhookHeaders),
 		WebhookTemplate: nullString(r.WebhookTemplate),
 		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
 	}
 }
 
-// ruleToUpdateParams converts a domain Rule to generated UpdateRuleParams.
-func ruleToUpdateParams(r Rule) generated.UpdateRuleParams {
-	return generated.UpdateRuleParams{
+// ruleToReplaceParams converts a domain Rule to generated ReplaceRuleParams.
+func ruleToReplaceParams(r Rule) generated.ReplaceRuleParams {
+	return generated.ReplaceRuleParams{
 		ID:              r.ID,
 		Name:            r.Name,
 		Description:     nullString(r.Description),
@@ -65,7 +65,7 @@ func ruleToUpdateParams(r Rule) generated.UpdateRuleParams {
 		ForSeconds:      int64(r.ForSeconds),
 		CooldownS:       int64(r.CooldownS),
 		RepeatIntervalS: int64(r.RepeatIntervalS),
-		WebhookUrl:      nullString(r.WebhookURL),
+		WebhookURL:      nullString(r.WebhookURL),
 		WebhookHeaders:  nullString(r.WebhookHeaders),
 		WebhookTemplate: nullString(r.WebhookTemplate),
 		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
@@ -85,7 +85,7 @@ func alertRuleToRule(ar generated.AlertRule) Rule {
 		ForSeconds:      int(ar.ForSeconds),
 		CooldownS:       int(ar.CooldownS),
 		RepeatIntervalS: int(ar.RepeatIntervalS),
-		WebhookURL:      ar.WebhookUrl.String,
+		WebhookURL:      ar.WebhookURL.String,
 		WebhookHeaders:  ar.WebhookHeaders.String,
 		WebhookTemplate: ar.WebhookTemplate.String,
 		NotifyOnResolve: ar.NotifyOnResolve != 0,
@@ -184,9 +184,9 @@ func (s *Store) ListEnabledRules() ([]Rule, error) {
 	return rules, nil
 }
 
-// UpdateRule updates a rule by ID and returns the updated record.
-func (s *Store) UpdateRule(r Rule) (Rule, error) {
-	ar, err := s.q.UpdateRule(context.Background(), ruleToUpdateParams(r))
+// ReplaceRule replaces a rule by ID and returns the persisted record.
+func (s *Store) ReplaceRule(r Rule) (Rule, error) {
+	ar, err := s.q.ReplaceRule(context.Background(), ruleToReplaceParams(r))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Rule{}, fmt.Errorf("store: rule %q not found", r.ID)
 	}
@@ -333,12 +333,12 @@ func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string
 }
 
 // AlertSummary returns counts of alerts grouped by state.
-func (s *Store) AlertSummary() (AlertSummary, error) {
+func (s *Store) AlertSummary() (Summary, error) {
 	rows, err := s.q.AlertSummary(context.Background())
 	if err != nil {
-		return AlertSummary{}, fmt.Errorf("store: alert summary: %w", err)
+		return Summary{}, fmt.Errorf("store: alert summary: %w", err)
 	}
-	var sum AlertSummary
+	var sum Summary
 	for _, row := range rows {
 		switch row.State {
 		case "firing":

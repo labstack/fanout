@@ -1,0 +1,99 @@
+---
+title: Set up alerts
+description: Write alert rules as expressions over service metrics, and deliver them by webhook.
+summary: The rule model, the variables available to an expression, the pending/firing/resolved lifecycle, and webhook delivery.
+read_when:
+  - You want to be told when a service degrades.
+  - A rule is not firing when you expect it to.
+status: preview
+---
+
+The alert engine runs inside the binary and is on by default. It evaluates
+persisted rules every `FANOUT_ALERTS_EVALUATION_INTERVAL` (30s) against service
+rollups, and delivers by webhook.
+
+Manage rules through the HTTP API using an operator or administrator session.
+The browser client has no alert-rule editor.
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/alerting/alerts` | Current alert state |
+| `GET /api/alerting/summary` | Counts by state |
+| `GET /api/alerting/rules` | List rules |
+| `POST /api/alerting/rules` | Create and compile a rule |
+| `PUT /api/alerting/rules/:id` | Replace a rule; recompile it when enabled |
+| `POST /api/alerting/rules/:id/test` | Evaluate a saved expression against live data without changing alert state or delivering a webhook |
+| `DELETE /api/alerting/rules/:id` | Delete the rule and its alerts |
+
+Reading takes `telemetry:read`; creating and replacing takes `alerts:manage`,
+which starts at the `operator` role. See [roles](/docs/reference/roles).
+
+## What a rule contains
+
+An expression, an optional service to scope it to, timing, and delivery:
+
+| Field | Means |
+|---|---|
+| `name` | Required rule name |
+| `enabled` | Set `true` to evaluate the rule; omitted means disabled |
+| `expression` | The condition, in [CEL](https://cel.dev) |
+| `service` | Evaluate only for this service; omit for all |
+| `for_seconds` | How long the condition must hold before firing |
+| `cooldown_s` | Minimum quiet period after resolving before firing again |
+| `repeat_interval_s` | How often to re-deliver while still firing |
+| `webhook_url` | Where to deliver |
+| `webhook_headers` | JSON-encoded object of extra headers, supplied as a string |
+| `webhook_template` | Go text/template payload body; omit for the default |
+| `notify_on_resolve` | Also deliver when the alert clears |
+
+Nonempty expressions supplied when creating or replacing a rule are type-checked
+against the declared variables and must return a boolean. An unknown variable
+or a type mistake is rejected at save time. Supply a complete rule body when
+replacing it; omitted fields take their zero values.
+
+## Variables available to an expression
+
+An expression reads one service's rollup for the current window. The
+[alert expression reference](/docs/reference/alert-expressions) lists every
+variable, including `error_rate`, `p95`, `throughput` and the baseline deltas.
+
+For example:
+
+```text
+error_rate > 0.02 && throughput > 10
+```
+
+`throughput` is the total span count in the rollup window. A traffic floor
+prevents a single failure on a quiet service from triggering this rule.
+
+## The lifecycle
+
+An alert moves through three states:
+
+- **pending**: the condition is true but has not held for `for_seconds` yet.
+  With `for_seconds: 0` a rule skips this and fires immediately.
+- **firing**: it has held. The webhook is delivered, and re-delivered every
+  `repeat_interval_s` while it stays true.
+- **resolved**: the expression went false. If `notify_on_resolve` is set, that
+  is delivered too.
+
+`cooldown_s` then holds the rule quiet for that long after resolving, which is
+what stops a metric hovering at the threshold from delivering repeatedly.
+
+Each alert records its last delivery status and timestamp in `GET /api/alerting/alerts`.
+Setting `repeat_interval_s` to zero disables repeat delivery. Disabling a rule
+removes its pending and firing alerts.
+
+:::caution[The namespace field on a rule is not applied]
+A rule stores `namespace`, but evaluation combines service rollups across
+namespaces. Scope with `service`; services with the same name in different
+namespaces are evaluated together.
+:::
+
+## Why alerts lag the raw data
+
+Evaluation reads analytical rollups. The rollup pass follows durable telemetry
+publication; the evaluation interval and `for_seconds` add further delay.
+[How storage works](/docs/concepts/storage#rollups-follow-durable-publication)
+explains the publication horizon and watermark. A shorter evaluation interval
+does not increase the rollups' time resolution.

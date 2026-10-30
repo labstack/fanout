@@ -116,7 +116,7 @@ func TestVersionFailureBackoffCapsAtThirtyMinutes(t *testing.T) {
 
 func TestVersionPassTimeoutWarnAndMetric(t *testing.T) {
 	d, _ := versionEngine(t)
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	defer unlock()
 	counter := metrics.RollupComponentTotal.WithLabelValues("version", "error")
 	before := testutil.ToFloat64(counter)
@@ -265,7 +265,7 @@ func TestSlowVersionPassCommits(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "slow", Logs: []telemetry.Log{{ServiceName: "svc", Resource: map[string]any{"service.version": "v1"}, EventUnixNanos: now, IngestedAt: now}}}); err != nil {
 		t.Fatal(err)
 	}
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	timer := time.AfterFunc(2200*time.Millisecond, unlock)
 	defer func() {
 		if timer.Stop() {

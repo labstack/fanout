@@ -49,8 +49,8 @@ func TestEngine_Transition_NoneToFiring(t *testing.T) {
 
 	rule := makeTestRule(t, store, "error_rate > 0.1", 0)
 
-	env := AlertEnv{Service: "svc-a", ErrorRate: 0.5}
-	eng.envOverride = map[string]AlertEnv{"svc-a": env}
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	eng.envOverride = map[string]Env{"svc-a": env}
 
 	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
 		t.Fatalf("RecompileRule: %v", err)
@@ -76,8 +76,8 @@ func TestEngine_Transition_NoneToPending(t *testing.T) {
 
 	rule := makeTestRule(t, store, "error_rate > 0.1", 60)
 
-	env := AlertEnv{Service: "svc-a", ErrorRate: 0.5}
-	eng.envOverride = map[string]AlertEnv{"svc-a": env}
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	eng.envOverride = map[string]Env{"svc-a": env}
 
 	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
 		t.Fatalf("RecompileRule: %v", err)
@@ -104,8 +104,8 @@ func TestEngine_Transition_PendingClears(t *testing.T) {
 
 	rule := makeTestRule(t, store, "error_rate > 0.1", 60)
 
-	env := AlertEnv{Service: "svc-a", ErrorRate: 0.5}
-	eng.envOverride = map[string]AlertEnv{"svc-a": env}
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	eng.envOverride = map[string]Env{"svc-a": env}
 
 	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
 		t.Fatalf("RecompileRule: %v", err)
@@ -138,8 +138,8 @@ func TestEngine_Transition_FiringToResolved(t *testing.T) {
 	rule := makeTestRule(t, store, "error_rate > 0.1", 0)
 	rule.NotifyOnResolve = true
 
-	env := AlertEnv{Service: "svc-a", ErrorRate: 0.5}
-	eng.envOverride = map[string]AlertEnv{"svc-a": env}
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	eng.envOverride = map[string]Env{"svc-a": env}
 
 	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
 		t.Fatalf("RecompileRule: %v", err)
@@ -157,7 +157,7 @@ func TestEngine_Transition_FiringToResolved(t *testing.T) {
 	}
 
 	// Resolve it.
-	envClear := AlertEnv{Service: "svc-a", ErrorRate: 0.01}
+	envClear := Env{Service: "svc-a", ErrorRate: 0.01}
 	eng.transition(rule, "svc-a", false, envClear)
 
 	a, err = store.GetAlert(rule.ID, "svc-a")
@@ -197,7 +197,7 @@ func TestEngine_ResolveServices_Wildcard(t *testing.T) {
 	eng, _ := newTestEngine(t)
 
 	rule := Rule{Service: "*"}
-	envs := map[string]AlertEnv{
+	envs := map[string]Env{
 		"svc-a": {},
 		"svc-b": {},
 		"svc-c": {},
@@ -220,7 +220,7 @@ func TestEngine_ResolveServices_Specific(t *testing.T) {
 	eng, _ := newTestEngine(t)
 
 	rule := Rule{Service: "svc-b"}
-	envs := map[string]AlertEnv{
+	envs := map[string]Env{
 		"svc-a": {},
 		"svc-b": {},
 		"svc-c": {},
@@ -250,7 +250,7 @@ func TestEngine_RunOnce(t *testing.T) {
 		t.Fatalf("CreateRule: %v", err)
 	}
 
-	eng.envOverride = map[string]AlertEnv{
+	eng.envOverride = map[string]Env{
 		"api": {Service: "api", ErrorRate: 0.20},
 	}
 
