@@ -1,8 +1,10 @@
 # Milestone 5: correct metrics and the system page
 
-Status: draft for review · 2026-10-10 · branch `feat/agent-dashboards-m5`
+Status: Implemented
+Date: 2026-10-10
+Pull request: #297
 
-This extends `2026-10-04-agent-dashboards-design.md`. Milestones 1 to 4 are
+This extends [0002-agent-dashboards.md](0002-agent-dashboards.md). Milestones 1 to 4 are
 merged. Its success criteria S1 to S13 stay in force; this milestone adds S14
 to S16, S20 and S22. Performance work (a scale benchmark, per-minute summaries
 and metric query speed) is deferred to a later milestone.

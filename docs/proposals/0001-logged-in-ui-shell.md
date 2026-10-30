@@ -1,7 +1,8 @@
 # Logged-in UI: shell rebuild, chat pane, native dashboard widgets, sign-in code step
 
+Status: Implemented
 Date: 2026-09-05
-Status: approved design, pending implementation plan
+Pull request: #226
 Scope: `ui/host` (React host app), `ui/apps` (embedded MCP views, small changes), `ui/` shared modules. No Go changes are expected; the server widget allowlist and routes stay as they are.
 
 ## Why

@@ -1,6 +1,7 @@
 # Full UI without an LLM key
 
-Design, 2026-10-29. Status: draft for review; section 0 (FanQL) is owner-approved as of 2026-10-29.
+Status: Accepted (section 0, FanQL, implemented in #410; sections 1 to 5 pending)
+Date: 2026-10-29
 
 ## Intent
 

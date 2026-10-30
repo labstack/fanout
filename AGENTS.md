@@ -41,6 +41,9 @@
   session links out of tracked files, commit messages, and pull request descriptions.
 - Keep local agent caches, indexes, evaluation records, and browser evidence out
   of both Git and the Docker build context. Git ignores do not exclude Docker inputs.
+- Design proposals live in `docs/proposals/NNNN-slug.md` and decision records
+  in `docs/adr/NNNN-slug.md`. Agent working plans and scratch specs stay out of
+  the repository.
 
 ## Control database
 
