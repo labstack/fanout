@@ -33,7 +33,7 @@ func latencyPercentile(samples []time.Duration, percentile float64) time.Duratio
 	return ordered[max(0, int(math.Ceil(float64(len(ordered))*percentile))-1)]
 }
 
-// Latency requirements: ../../docs/superpowers/specs/2026-10-29-no-llm-ui-design.md,
+// Latency requirements: ../../docs/specs/2026-10-29-no-llm-ui-design.md,
 // section 0 (especially 0.14 and 0.16). Tests bound work deterministically;
 // benchmarks report the strict spec percentiles on an uninstrumented build.
 func TestLatencyBudgets(t *testing.T) {
