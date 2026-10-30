@@ -1,14 +1,9 @@
 import { ActionIcon, Badge, Button, Group, NumberInput, Select, Stack, Text, TextInput } from "@mantine/core";
 import { Plus, X } from "@phosphor-icons/react";
 import type { Query } from "../../../panels/types";
+import type { TelemetrySchema } from "../sql-editor/schema";
 import { operators, parseWhere, printWhere, type Condition, type Operator } from "./where";
 
-/** The parts of GET /api/telemetry/schema the builder reads. */
-export type BuilderSchema = {
-  signals: Record<string, { columns: { name: string; type: string }[]; attributes?: { key: string; scope: string; type: string }[] }>;
-  services?: { value: string }[];
-  measures: string[];
-};
 
 const sources = ["spans", "logs", "metrics"] as const;
 const buckets = ["auto", "1m", "5m", "15m", "1h"];
@@ -24,7 +19,7 @@ function parseMeasure(entry: string): Measure | undefined {
 }
 const printMeasure = (m: Measure) => `${m.fn}(${fieldless.has(m.fn) ? "" : m.field})`;
 
-function fieldsOf(schema: BuilderSchema, source: string) {
+function fieldsOf(schema: TelemetrySchema, source: string) {
   const signal = schema.signals[source];
   const columns = (signal?.columns ?? []).filter(c => c.type !== "map" && c.type !== "time");
   const attributes = (signal?.attributes ?? []).map(a => ({ name: `${a.scope === "resource" ? "resource" : "attributes"}['${a.key.replaceAll("'", "''")}']`, type: a.type }));
@@ -36,7 +31,7 @@ function Chip({ text, onRemove }: { text: string; onRemove(): void }) {
   return <Badge variant="light" color="gray" size="lg" tt="none" rightSection={<ActionIcon size="xs" variant="subtle" color="gray" aria-label={`Remove ${text}`} onClick={onRemove}><X size={10} /></ActionIcon>}><code>{text}</code></Badge>;
 }
 
-export function Builder({ query, schema, onChange }: { query: Query; schema: BuilderSchema; onChange(next: Query): void }) {
+export function Builder({ query, schema, onChange }: { query: Query; schema: TelemetrySchema; onChange(next: Query): void }) {
   const fields = fieldsOf(schema, query.from);
   const names = new Set(fields.map(f => f.name));
   const numeric = new Set(fields.filter(f => f.type === "number" || f.type === "int" || f.type === "float").map(f => f.name));
@@ -69,7 +64,7 @@ export function Builder({ query, schema, onChange }: { query: Query; schema: Bui
         const m = parseMeasure(entry);
         if (!m) return <Group key={index}><Chip text={entry} onRemove={() => set({ measures: remove(measures, index) })} /></Group>;
         return <Group key={index} gap="xs" wrap="nowrap">
-          <Select aria-label={`Measure ${index + 1} function`} w={160} allowDeselect={false} searchable value={m.fn} data={schema.measures.filter(fn => !textOnly.has(fn))}
+          <Select aria-label={`Measure ${index + 1} function`} w={160} allowDeselect={false} searchable value={m.fn} data={(schema.measures ?? []).filter(fn => !textOnly.has(fn))}
             onChange={fn => fn && set({ measures: replace(measures, index, printMeasure({ fn, field: fieldless.has(fn) ? "" : m.field || (numeric.values().next().value ?? "") })) })} />
           {!fieldless.has(m.fn) && <Select aria-label={`Measure ${index + 1} field`} w={260} searchable value={m.field || null} data={measureFields(m.fn, fieldData, numeric, rowField(m.field))}
             onChange={field => field && set({ measures: replace(measures, index, printMeasure({ ...m, field })) })} />}

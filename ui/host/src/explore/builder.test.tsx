@@ -4,9 +4,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Query } from "../../../panels/types";
-import { Builder, type BuilderSchema } from "./builder";
+import type { TelemetrySchema } from "../sql-editor/schema";
+import { Builder } from "./builder";
 
-const schema: BuilderSchema = {
+const schema: TelemetrySchema = {
+  sql_relations: {},
   signals: {
     spans: { columns: [{ name: "service", type: "string" }, { name: "operation", type: "string" }, { name: "duration_ms", type: "number" }, { name: "start_time", type: "time" }, { name: "attributes", type: "map" }], attributes: [{ key: "http.route", scope: "attributes", type: "string" }] },
     logs: { columns: [{ name: "service", type: "string" }, { name: "body", type: "string" }, { name: "severity", type: "string" }] },

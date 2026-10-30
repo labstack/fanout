@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { within } from "@testing-library/dom";
+import { fireEvent, within } from "@testing-library/dom";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,6 +20,7 @@ const json = (body: unknown, status = 200) => Response.json(body, { status });
 const bodies = (url: string) => fetchMock.mock.calls.filter(([input]) => String(input) === url).map(([, init]) => JSON.parse(String(init?.body)));
 let parse: (body: { text: string; viz?: string }) => Promise<Response>;
 let runQuery: () => Promise<Response>;
+let format: (body: { query: unknown }) => Promise<Response>;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -28,12 +29,14 @@ beforeEach(() => {
   fetchMock.mockReset();
   parse = async body => json(parsed(body.text));
   runQuery = async () => json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] });
+  format = async () => json({ text: "spans | p95(duration) by service", exactness: "exact", editable: true, requires: [], notices: [] });
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/fanql/parse") return parse(JSON.parse(String(init?.body)));
     if (url === "/api/fanql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
     if (url === "/api/queries/run") return runQuery();
-    if (url === "/api/telemetry/schema") return json({ signals: {}, sql_relations: {} });
+    if (url === "/api/telemetry/schema") return json({ signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] } }, sql_relations: {}, measures: ["count", "p95"], services: [{ value: "checkout" }] });
+    if (url === "/api/fanql/format") return format(JSON.parse(String(init?.body)));
     throw new Error(`Unexpected request: ${url}`);
   });
 });
@@ -213,6 +216,62 @@ describe("ExplorePage", () => {
     await wait(() => expect(ui.getByRole("button", { name: "Time series…" })).toBeTruthy());
     await type("spans where service:a | count() by service");
     expect(ui.queryByRole("button", { name: "Time series…" })).toBeNull();
+  });
+
+  it("opens the Builder from the parsed text and prints builder edits back as text", async () => {
+    parse = async body => json({ ...parsed(body.text), query: { from: "spans", measures: ["count()"], by: ["service"] } });
+    const { ui, type, wait, search } = await render();
+    await type("spans | count() by service");
+    await act(async () => ui.getByRole("tab", { name: "Builder" }).click());
+    await wait(() => expect(search().tab).toBe("builder"));
+    await wait(() => expect(ui.getByLabelText("Measure 1 function", { selector: "input" })).toBeTruthy());
+    const fn = ui.getByLabelText("Measure 1 function", { selector: "input" });
+    await act(async () => { fireEvent.focus(fn); fireEvent.click(fn); fireEvent.keyDown(fn, { key: "ArrowDown" }); });
+    const list = () => within(document.getElementById(fn.getAttribute("aria-controls") ?? "")!);
+    await wait(() => list().getByRole("option", { name: "p95", hidden: true }));
+    await act(async () => { fireEvent.click(list().getByRole("option", { name: "p95", hidden: true })); });
+    await wait(() => expect(bodies("/api/fanql/format").at(-1)).toEqual({ query: { from: "spans", measures: ["p95(duration_ms)"], by: ["service"] } }));
+    await wait(() => expect(ui.getByText("spans | p95(duration) by service")).toBeTruthy());
+    await act(async () => ui.getByRole("tab", { name: "Query" }).click());
+    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | p95(duration) by service"));
+  });
+
+  it("stays on the Query tab when the text has problems", async () => {
+    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unexpected |" }] }, 400);
+    const { ui, type, wait, search } = await render();
+    await type("spans ||");
+    await act(async () => ui.getByRole("tab", { name: "Builder" }).click());
+    await wait(() => expect(ui.getByRole("alert").textContent).toBe("unexpected |"));
+    expect(search().tab).toBe("query");
+  });
+
+  it("runs from the Builder through the formatted text", async () => {
+    const { ui, wait, click } = await render({ tab: "builder" });
+    await wait(() => expect(ui.getByLabelText("Measure 1 function", { selector: "input" })).toBeTruthy());
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await click("Run");
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | p95(duration) by service" }));
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+  });
+
+  it("keeps a query the text cannot hold in the Builder and runs it directly", async () => {
+    format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "it has more than 64 filters", requires: [], notices: [] });
+    const { ui, wait, click } = await render({ tab: "builder" });
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(bodies("/api/fanql/parse")).toHaveLength(0);
+    expect(bodies("/api/queries/run")[0].dashboard.panels[0].query).toEqual({ from: "spans", measures: ["count()"], by: ["service"] });
+    await act(async () => ui.getByRole("tab", { name: "Query" }).click());
+    await wait(() => expect(ui.getByText(/This query is edited in the Builder: it has more than 64 filters/)).toBeTruthy());
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.readOnly).toBe(true);
+  });
+
+  it("disables Run while the builder query has problems", async () => {
+    format = async () => json({ code: "invalid_spec", message: "The query spec is invalid.", problems: [{ path: "measures[0]", message: "p95 needs a numeric field" }] }, 400);
+    const { ui, wait } = await render({ tab: "builder" });
+    await wait(() => expect(ui.getByRole("alert").textContent).toBe("p95 needs a numeric field"));
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true);
   });
 
   it("runs SQL as a table", async () => {
