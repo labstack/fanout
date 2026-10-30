@@ -107,7 +107,7 @@ func (s *Service) VersionRecord(ctx context.Context, owner, id string, version i
 		return VersionRecord{}, err
 	}
 	var spec panel.Dashboard
-	if err := json.Unmarshal([]byte(r.SpecJson), &spec); err != nil {
+	if err := json.Unmarshal([]byte(r.SpecJSON), &spec); err != nil {
 		return VersionRecord{}, err
 	}
 	record := Record{ID: r.ID, Name: spec.Name, Description: spec.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), Spec: spec, CreatedAt: r.DashboardCreatedAt, UpdatedAt: r.VersionCreatedAt}
@@ -121,7 +121,7 @@ func (s *Service) VersionRecord(ctx context.Context, owner, id string, version i
 		if err != nil {
 			return VersionRecord{}, err
 		}
-		if err := json.Unmarshal([]byte(prior.SpecJson), &before); err != nil {
+		if err := json.Unmarshal([]byte(prior.SpecJSON), &before); err != nil {
 			return VersionRecord{}, err
 		}
 	}
@@ -185,7 +185,7 @@ func (s *Service) get(ctx context.Context, ownerID, id string) (Record, error) {
 
 func decodeRecord(row generated.Dashboard) (Record, error) {
 	record := Record{ID: row.ID, Name: row.Name, Description: row.Description, IsDefault: row.IsDefault == 1, Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
-	if err := json.Unmarshal([]byte(row.SpecJson), &record.Spec); err != nil {
+	if err := json.Unmarshal([]byte(row.SpecJSON), &record.Spec); err != nil {
 		return Record{}, fmt.Errorf("decode dashboard %s: %w", row.ID, err)
 	}
 	return record, nil
@@ -252,7 +252,7 @@ func (s *Service) CreateWithChanges(ctx context.Context, ownerID string, spec pa
 	defer func() { _ = tx.Rollback() }()
 	q := generated.New(tx)
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	affected, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: id, OwnerID: ownerID, Name: spec.Name, Description: spec.Description, Version: 1, SpecJson: string(raw), PanelCount: int64(len(spec.Panels)), CreatedAt: now, UpdatedAt: now})
+	affected, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: id, OwnerID: ownerID, Name: spec.Name, Description: spec.Description, Version: 1, SpecJSON: string(raw), PanelCount: int64(len(spec.Panels)), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		if isUnique(err) {
 			return Mutation{}, ErrConflict
@@ -274,7 +274,7 @@ func (s *Service) CreateWithChanges(ctx context.Context, ownerID string, spec pa
 			return Mutation{}, errors.New("dashboard build origin thread is not owned by the dashboard owner")
 		}
 	}
-	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: 1, SpecJson: string(raw), AuthorKind: author.Kind, AuthorID: author.ID, Message: "Created", CreatedAt: now}); err != nil {
+	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: 1, SpecJSON: string(raw), AuthorKind: author.Kind, AuthorID: author.ID, Message: "Created", CreatedAt: now}); err != nil {
 		return Mutation{}, err
 	}
 	row, err := q.GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: ownerID})
@@ -432,7 +432,7 @@ func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec 
 	q := generated.New(tx)
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	next := int64(base + 1)
-	affected, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: spec.Name, Description: spec.Description, NextVersion: next, SpecJson: raw, PanelCount: int64(len(spec.Panels)), UpdatedAt: now, ID: id, OwnerID: ownerID, BaseVersion: int64(base)})
+	affected, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: spec.Name, Description: spec.Description, NextVersion: next, SpecJSON: raw, PanelCount: int64(len(spec.Panels)), UpdatedAt: now, ID: id, OwnerID: ownerID, BaseVersion: int64(base)})
 	if err != nil {
 		if isUnique(err) {
 			return Record{}, false, ErrConflict
@@ -442,7 +442,7 @@ func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec 
 	if affected == 0 {
 		return Record{}, false, nil
 	}
-	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: next, SpecJson: raw, AuthorKind: author.Kind, AuthorID: author.ID, Message: strings.TrimSpace(message), CreatedAt: now}); err != nil {
+	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: next, SpecJSON: raw, AuthorKind: author.Kind, AuthorID: author.ID, Message: strings.TrimSpace(message), CreatedAt: now}); err != nil {
 		return Record{}, false, err
 	}
 	if err := q.PruneDashboardVersions(ctx, generated.PruneDashboardVersionsParams{DashboardID: id, KeepFrom: next - keepVersions + 1}); err != nil {

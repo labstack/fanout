@@ -139,7 +139,7 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 	}()
 	waitCtx, cancelWait := context.WithTimeout(ctx, waitBudget)
 	defer cancelWait()
-	unlock, err := d.writeGate.LockContext(waitCtx, writegate.WriteRollupVersion)
+	unlock, err := d.writeGate.LockContext(waitCtx, writegate.RollupVersion)
 	if err != nil {
 		return 0, fmt.Errorf("version_rollup/write_gate: %w", err)
 	}
@@ -419,7 +419,7 @@ func mergeAnomalies(existing, incoming []annotations.Anomaly) []annotations.Anom
 func (d *Duck) RecordAnomalies(ctx context.Context, findings []annotations.Anomaly, now time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	unlock, err := d.writeGate.LockContext(ctx, writegate.WriteAnomalyLog)
+	unlock, err := d.writeGate.LockContext(ctx, writegate.AnomalyLog)
 	if err != nil {
 		return fmt.Errorf("anomaly_log/write_gate: %w", err)
 	}
@@ -519,7 +519,7 @@ func drainVersionRollup(ctx context.Context, refresh func(context.Context) (int6
 }
 
 func (d *Duck) transferVersionMarker(ctx context.Context, output telemetry.BatchMetadata, inputs []string) error {
-	unlock, err := d.writeGate.LockContext(ctx, writegate.WriteRollupVersion)
+	unlock, err := d.writeGate.LockContext(ctx, writegate.RollupVersion)
 	if err != nil {
 		return err
 	}

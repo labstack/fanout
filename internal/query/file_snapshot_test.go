@@ -265,7 +265,7 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 
 func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
-	release := d.writeGate.Lock(writegate.WriteRollupService)
+	release := d.writeGate.Lock(writegate.RollupService)
 	defer release()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -465,7 +465,7 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	waitForQueuedWriter(t, &d.parquetMu)
 	passCtx, stop := context.WithTimeout(t.Context(), time.Second)
 	defer stop()
-	unlock, err := d.cacheGate.LockContext(passCtx, writegate.WriteReadCache)
+	unlock, err := d.cacheGate.LockContext(passCtx, writegate.ReadCache)
 	if err != nil {
 		t.Fatalf("preparation held cache gate behind publication: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestCompletedBatchWriterProgressesDuringAnalyticalTransaction(t *testing.T)
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "independent", Spans: []telemetry.Span{{TraceID: "trace", StartUnixNanos: 1, EndUnixNanos: 2, IngestedAt: 1}}}); err != nil {
 		t.Fatal(err)
 	}
-	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	unlock := d.writeGate.Lock(writegate.RollupService)
 	defer unlock()
 	tx, err := d.writer().BeginTx(t.Context(), nil)
 	if err != nil {

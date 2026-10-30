@@ -390,7 +390,7 @@ func TestPublishParquetHonorsContext(t *testing.T) {
 
 func TestParquetPublicationDoesNotWaitForDuckDBWriteGate(t *testing.T) {
 	d := &Duck{}
-	release := d.writeGate.Lock(writegate.WriteRollupService)
+	release := d.writeGate.Lock(writegate.RollupService)
 	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -559,7 +559,7 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	d := &Duck{DB: db, writeDB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
 	mustRLock(t, &d.parquetMu)
-	release := d.writeGate.Lock(writegate.WriteRollupService)
+	release := d.writeGate.Lock(writegate.RollupService)
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
 	deadline := time.Now().Add(time.Second)

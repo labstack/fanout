@@ -79,7 +79,7 @@ func TestStore_ListRules(t *testing.T) {
 	}
 }
 
-func TestStore_UpdateRule(t *testing.T) {
+func TestStore_ReplaceRule(t *testing.T) {
 	s := newTestStore(t)
 
 	r, err := s.CreateRule(makeRule("update-me"))
@@ -90,9 +90,9 @@ func TestStore_UpdateRule(t *testing.T) {
 	r.Name = "updated-name"
 	r.Enabled = false
 
-	updated, err := s.UpdateRule(r)
+	updated, err := s.ReplaceRule(r)
 	if err != nil {
-		t.Fatalf("UpdateRule: %v", err)
+		t.Fatalf("ReplaceRule: %v", err)
 	}
 	if updated.Name != "updated-name" {
 		t.Errorf("Name = %q, want %q", updated.Name, "updated-name")
@@ -127,8 +127,8 @@ func TestStore_ListEnabledRules(t *testing.T) {
 	r2, _ := s.CreateRule(makeRule("disabled"))
 
 	r2.Enabled = false
-	if _, err := s.UpdateRule(r2); err != nil {
-		t.Fatalf("UpdateRule: %v", err)
+	if _, err := s.ReplaceRule(r2); err != nil {
+		t.Fatalf("ReplaceRule: %v", err)
 	}
 
 	enabled, err := s.ListEnabledRules()

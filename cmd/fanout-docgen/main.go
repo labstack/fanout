@@ -45,7 +45,7 @@ import (
 func main() {
 	var (
 		source = flag.String("source", "internal/config/config.go", "path to the file declaring config.Config")
-		alerts = flag.String("alert-source", "internal/alert/types.go", "path to the file declaring alert.AlertEnv")
+		alerts = flag.String("alert-source", "internal/alert/types.go", "path to the file declaring alert.Env")
 		// Every directory that registers routes. cmd/fanout carries the
 		// operational, protocol and SPA routes; internal/agent the investigator.
 		// A directory listed here that registers nothing is an error, so this
@@ -178,16 +178,16 @@ func run(source, alertSource, routeDirs, outDir, envExample string, check bool) 
 // without threading the slice back through run's return.
 var alertEnvCount []field
 
-// collectAlertEnv reads alert.AlertEnv the way collect reads config.Config:
+// collectAlertEnv reads alert.Env the way collect reads config.Config:
 // reflection for the contract, the source for the prose, and a cross-check that
 // refuses to proceed when the two disagree.
 func collectAlertEnv(source string) ([]field, error) {
-	docs, err := docComments(source, "AlertEnv")
+	docs, err := docComments(source, "Env")
 	if err != nil {
 		return nil, err
 	}
 
-	typ := reflect.TypeOf(alert.AlertEnv{})
+	typ := reflect.TypeOf(alert.Env{})
 	out := make([]field, 0, typ.NumField())
 	seen := make(map[string]bool, typ.NumField())
 
@@ -199,7 +199,7 @@ func collectAlertEnv(source string) ([]field, error) {
 		name := sf.Tag.Get("expr")
 		if name == "" {
 			return nil, fmt.Errorf(
-				"alert.AlertEnv field %s has no expr tag, so a rule author has no name to write for it",
+				"alert.Env field %s has no expr tag, so a rule author has no name to write for it",
 				sf.Name,
 			)
 		}
@@ -215,7 +215,7 @@ func collectAlertEnv(source string) ([]field, error) {
 	for name := range docs {
 		if !seen[name] {
 			return nil, fmt.Errorf(
-				"%s declares field %s, which is not in alert.AlertEnv — is --alert-source correct?",
+				"%s declares field %s, which is not in alert.Env — is --alert-source correct?",
 				source, name,
 			)
 		}

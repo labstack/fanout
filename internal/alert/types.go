@@ -38,13 +38,13 @@ type Alert struct {
 	CreatedAt          string  `json:"created_at"`
 }
 
-// AlertEnv holds the metric values available to alert expressions.
+// Env holds the metric values available to alert expressions.
 //
 // The `expr` tag is the name a rule author writes, and each field's doc comment
 // is published as that variable's description by cmd/fanout-docgen. Adding a
 // field here adds a row to the reference; describe it in a sentence a rule
 // author would find useful, not in terms of how it is computed.
-type AlertEnv struct {
+type Env struct {
 	// Mean of minute-rollup span error proportions over the evaluation window,
 	// from 0 to 1; not a request-weighted whole-window error rate.
 	ErrorRate float64 `expr:"error_rate"`
@@ -81,8 +81,8 @@ type AlertEnv struct {
 	Service string `expr:"service"`
 }
 
-// AlertSummary aggregates alert state counts.
-type AlertSummary struct {
+// Summary aggregates alert state counts.
+type Summary struct {
 	Firing   int `json:"firing"`
 	Pending  int `json:"pending"`
 	Resolved int `json:"resolved"`
@@ -92,7 +92,7 @@ type AlertSummary struct {
 type ActionContext struct {
 	Rule  Rule      `json:"rule"`
 	Alert Alert     `json:"alert"`
-	Env   AlertEnv  `json:"env"`
+	Env   Env       `json:"env"`
 	Event string    `json:"event"`
 	Time  time.Time `json:"time"`
 }

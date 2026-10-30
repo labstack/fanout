@@ -28,7 +28,7 @@ type Engine struct {
 	interval    time.Duration
 	histDays    int
 	lastPrune   time.Time
-	envOverride map[string]AlertEnv // for testing — bypasses DuckDB query
+	envOverride map[string]Env // for testing — bypasses DuckDB query
 }
 
 // NewEngine creates an Engine ready to Run.
@@ -79,11 +79,11 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 }
 
-// BuildAllEnvs returns all current AlertEnvs keyed by service name.
-func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]AlertEnv {
+// BuildAllEnvs returns all current Envs keyed by service name.
+func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]Env {
 	envs := e.buildEnvs(ctx)
 	if envs == nil {
-		return map[string]AlertEnv{}
+		return map[string]Env{}
 	}
 	return envs
 }
@@ -157,7 +157,7 @@ func (e *Engine) compileRules(rules []Rule) {
 
 // resolveServices returns the sorted list of services to evaluate for a rule.
 // '*' matches all services present in envs; a specific name targets just that one.
-func (e *Engine) resolveServices(rule Rule, envs map[string]AlertEnv) []string {
+func (e *Engine) resolveServices(rule Rule, envs map[string]Env) []string {
 	if rule.Service == "" || rule.Service == "*" {
 		svcs := make([]string, 0, len(envs))
 		for svc := range envs {
@@ -175,7 +175,7 @@ func (e *Engine) resolveServices(rule Rule, envs map[string]AlertEnv) []string {
 }
 
 // transition implements the alert state machine for a (rule, service) pair.
-func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv) {
+func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 	now := time.Now()
 	nowStr := now.Format(time.RFC3339)
 
@@ -339,7 +339,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 // primaryValue picks the most relevant metric value based on the rule expression.
 // If the expression mentions p95, use P95. If it mentions throughput, use that.
 // Default to error_rate as the most common alert metric.
-func primaryValue(rule Rule, env AlertEnv) float64 {
+func primaryValue(rule Rule, env Env) float64 {
 	expr := rule.Expression
 	if strings.Contains(expr, "p95") {
 		return env.P95
@@ -357,7 +357,7 @@ func primaryValue(rule Rule, env AlertEnv) float64 {
 }
 
 // fireWebhookAsync fires the webhook for an alert in a goroutine and updates delivery status.
-func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env AlertEnv, event string) {
+func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env Env, event string) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -382,14 +382,14 @@ func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env AlertEnv, event st
 	}()
 }
 
-// buildEnvs returns AlertEnv keyed by service name. If envOverride is set it
+// buildEnvs returns Env keyed by service name. If envOverride is set it
 // is returned directly (for tests). Otherwise DuckDB is queried.
-func (e *Engine) buildEnvs(ctx context.Context) map[string]AlertEnv {
+func (e *Engine) buildEnvs(ctx context.Context) map[string]Env {
 	if e.envOverride != nil {
 		return e.envOverride
 	}
 	if e.duck == nil {
-		return map[string]AlertEnv{}
+		return map[string]Env{}
 	}
 
 	const envSQL = `
@@ -440,13 +440,13 @@ FROM current c LEFT JOIN previous p ON c.service = p.service`
 		}
 	}
 
-	envs := make(map[string]AlertEnv, len(resp.Results))
+	envs := make(map[string]Env, len(resp.Results))
 	for _, row := range resp.Results {
 		svc, _ := row["service"].(string)
 		if svc == "" {
 			continue
 		}
-		env := AlertEnv{
+		env := Env{
 			Service:         svc,
 			ErrorRate:       toFloat(row["error_rate"]),
 			P50:             toFloat(row["p50"]),

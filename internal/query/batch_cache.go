@@ -134,7 +134,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	if d.repository == nil {
 		return 0, nil
 	}
-	unlock, err := d.cacheGate.LockContext(ctx, writegate.WriteReadCache)
+	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
 	if err != nil {
 		return 0, err
 	}
@@ -414,7 +414,7 @@ func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.B
 	if len(inputs) == 0 {
 		return d.PublishParquet(ctx, publish)
 	}
-	unlock, err := d.cacheGate.LockContext(ctx, writegate.WriteReadCache)
+	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
 	if err != nil {
 		return err
 	}

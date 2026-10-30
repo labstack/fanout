@@ -189,7 +189,7 @@ func assertEffectSizeFinding(t *testing.T, d *Detector, anomalies []Anomaly, ser
 		if score := d.calculateHealthScore(found, nil); score != 100 {
 			t.Fatalf("noise lowered health to %g", score)
 		}
-		if len(detectorAnnotations(IntelligenceSnapshot{Anomalies: found}, "default")) != 0 || len(d.generateInsights(found, nil)) != 0 {
+		if len(detectorAnnotations(Snapshot{Anomalies: found}, "default")) != 0 || len(d.generateInsights(found, nil)) != 0 {
 			t.Fatal("noise emitted annotations or insights")
 		}
 		return
@@ -200,7 +200,7 @@ func assertEffectSizeFinding(t *testing.T, d *Detector, anomalies []Anomaly, ser
 	if score := d.calculateHealthScore(found, nil); score >= 100 {
 		t.Fatalf("qualified finding did not lower health: %g", score)
 	}
-	annotations := detectorAnnotations(IntelligenceSnapshot{Anomalies: found}, "default")
+	annotations := detectorAnnotations(Snapshot{Anomalies: found}, "default")
 	severity := "warn"
 	if math.Abs(found[0].ZScore) >= 4 {
 		severity = "bad"

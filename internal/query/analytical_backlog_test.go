@@ -97,7 +97,7 @@ FROM rollup_state`, edgeRollupStateKey, edgeRollupSubCursorKey).Scan(&watermark,
 
 	// The completed-batch writer still works with an analytical transaction
 	// occupying its gate and pool slot.
-	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
+	unlock := d.writeGate.Lock(writegate.RollupEdge)
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		unlock()

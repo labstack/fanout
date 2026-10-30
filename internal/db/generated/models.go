@@ -56,7 +56,7 @@ type AlertRule struct {
 	ForSeconds      int64          `json:"for_seconds"`
 	CooldownS       int64          `json:"cooldown_s"`
 	RepeatIntervalS int64          `json:"repeat_interval_s"`
-	WebhookUrl      sql.NullString `json:"webhook_url"`
+	WebhookURL      sql.NullString `json:"webhook_url"`
 	WebhookHeaders  sql.NullString `json:"webhook_headers"`
 	WebhookTemplate sql.NullString `json:"webhook_template"`
 	NotifyOnResolve int64          `json:"notify_on_resolve"`
@@ -84,7 +84,7 @@ type Dashboard struct {
 	Description string `json:"description"`
 	IsDefault   int64  `json:"is_default"`
 	Version     int64  `json:"version"`
-	SpecJson    string `json:"spec_json"`
+	SpecJSON    string `json:"spec_json"`
 	PanelCount  int64  `json:"panel_count"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
@@ -100,7 +100,7 @@ type DashboardOrigin struct {
 type DashboardVersion struct {
 	DashboardID string `json:"dashboard_id"`
 	Version     int64  `json:"version"`
-	SpecJson    string `json:"spec_json"`
+	SpecJSON    string `json:"spec_json"`
 	AuthorKind  string `json:"author_kind"`
 	AuthorID    string `json:"author_id"`
 	Message     string `json:"message"`

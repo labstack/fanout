@@ -18,17 +18,17 @@ func TestDashboardVersionsCascadeAndOptimisticUpdate(t *testing.T) {
 	}
 	q := generated.New(sqlite.DB)
 	ctx := t.Context()
-	if n, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: "d1", OwnerID: "u1", Name: "Ops", Version: 1, SpecJson: "{}", PanelCount: 0, CreatedAt: "t", UpdatedAt: "t"}); err != nil || n != 1 {
+	if n, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: "d1", OwnerID: "u1", Name: "Ops", Version: 1, SpecJSON: "{}", PanelCount: 0, CreatedAt: "t", UpdatedAt: "t"}); err != nil || n != 1 {
 		t.Fatal(err)
 	}
-	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: "d1", Version: 1, SpecJson: "{}", AuthorKind: "system", CreatedAt: "t"}); err != nil {
+	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: "d1", Version: 1, SpecJSON: "{}", AuthorKind: "system", CreatedAt: "t"}); err != nil {
 		t.Fatal(err)
 	}
-	n, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: "Ops", NextVersion: 2, SpecJson: "{}", UpdatedAt: "t2", ID: "d1", OwnerID: "u1", BaseVersion: 1})
+	n, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: "Ops", NextVersion: 2, SpecJSON: "{}", UpdatedAt: "t2", ID: "d1", OwnerID: "u1", BaseVersion: 1})
 	if err != nil || n != 1 {
 		t.Fatalf("update = %d %v", n, err)
 	}
-	if n, _ := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: "Ops", NextVersion: 2, SpecJson: "{}", UpdatedAt: "t3", ID: "d1", OwnerID: "u1", BaseVersion: 1}); n != 0 {
+	if n, _ := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: "Ops", NextVersion: 2, SpecJSON: "{}", UpdatedAt: "t3", ID: "d1", OwnerID: "u1", BaseVersion: 1}); n != 0 {
 		t.Fatal("a stale base version updated the row")
 	}
 	if _, err := sqlite.DB.Exec(`DELETE FROM users WHERE id = 'u1'`); err != nil {
