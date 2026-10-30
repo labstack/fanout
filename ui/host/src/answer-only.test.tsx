@@ -4,7 +4,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import App from "./App";
+import App from "./app";
 import { useFanoutApp } from "./app-context";
 
 vi.mock("./auth", () => ({

@@ -132,9 +132,9 @@ URLs are unchanged: `/chat`, `/chat/$threadId`, `/dashboards`, `/dashboards/$das
 |---|---|---|
 | Embedded views render in the system font, eight console errors per view | `ui/host/src/mcp-app-frame.tsx` `mcpAppCSP` | always emit `font-src 'self' data:` |
 | "994.6 Ms" | `ui/host/src/dashboard.tsx` `Metric` | drop `tt="capitalize"`, format with `duration()` |
-| 404 on every new chat | `ui/host/src/App.tsx` thread load effect | draft pane, fetch only existing threads |
-| Header clips at 390px | `ui/host/src/App.tsx` header | header reduced to four controls, rail in drawer |
-| Hard-coded "Live" dot | `ui/host/src/App.tsx` header | removed |
+| 404 on every new chat | `ui/host/src/app.tsx` thread load effect | draft pane, fetch only existing threads |
+| Header clips at 390px | `ui/host/src/app.tsx` header | header reduced to four controls, rail in drawer |
+| Hard-coded "Live" dot | `ui/host/src/app.tsx` header | removed |
 | Dashboard polls every 3s | `ui/host/src/dashboard.tsx` | 30s |
 
 ## 6. Testing and gates
