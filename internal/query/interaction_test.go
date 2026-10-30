@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestPanelTimeWindow(t *testing.T) {
+func TestTimeOverrideWindow(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
 	d.Panels = d.Panels[:1]
