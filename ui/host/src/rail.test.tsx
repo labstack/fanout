@@ -197,7 +197,7 @@ describe("Rail", () => {
       const { root, render, handlers } = mount({ agentAvailable, activePath: "/logs" });
       await act(async () => render());
       const link = (path: string) => [...document.querySelectorAll<HTMLAnchorElement>(`a[href="${path}"]`)].at(-1)!;
-      expect(["/explore", "/logs", "/traces"].map(path => link(path).textContent)).toEqual(["Explore", "Logs", "Traces"]);
+      expect(["/explore", "/logs", "/traces", "/alerts"].map(path => link(path).textContent)).toEqual(["Explore", "Logs", "Traces", "Alerts"]);
       expect(link("/logs").getAttribute("aria-current")).toBe("page");
       expect(link("/explore").getAttribute("aria-current")).toBeNull();
       await act(async () => link("/traces").click());

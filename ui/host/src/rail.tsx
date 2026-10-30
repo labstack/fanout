@@ -1,6 +1,6 @@
 import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Kbd, Loader, Menu, Modal, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useDebouncedValue } from "@mantine/hooks";
-import { Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
+import { Bell, Compass, DotsThree, ListMagnifyingGlass, MagnifyingGlass, Path, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { getJSON, threadHistoryQueryKey } from "./api";
@@ -28,11 +28,12 @@ export type RailProps = {
   ref?: Ref<RailHandle>;
 };
 
-export type PagePath = "/explore" | "/logs" | "/traces";
+export type PagePath = "/explore" | "/logs" | "/traces" | "/alerts";
 const pages = [
   { path: "/explore", label: "Explore", Icon: Compass },
   { path: "/logs", label: "Logs", Icon: ListMagnifyingGlass },
   { path: "/traces", label: "Traces", Icon: Path },
+  { path: "/alerts", label: "Alerts", Icon: Bell },
 ] as const;
 
 type ThreadSummary = { id: string; title: string; updated_at: string };
