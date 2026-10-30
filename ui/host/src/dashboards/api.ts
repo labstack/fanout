@@ -27,7 +27,7 @@ export type QueryBody = { dashboard: DashboardSpec; panels?: string[]; time?: Da
 export const dashboardsKey = ["dashboards"] as const;
 export const dashboardsStaleTime = 30_000;
 
-async function request<T>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+export async function request<T>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
   const headers = new Headers(rest.headers);
   let body = rest.body;
@@ -53,6 +53,7 @@ export const replaceDashboard = (id: string, spec: DashboardSpec, baseVersion: n
 export const patchDashboard = (id: string, operations: Operation[], baseVersion: number, message?: string) =>
   request<DashboardRecord>(path(id), { method: "PATCH", json: { operations, base_version: baseVersion, message } });
 export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/queries/run", { method: "POST", json: body, signal }).then((r) => r.results);
+export const createDashboard = (spec: DashboardSpec) => request<DashboardRecord>("/api/dashboards", { method: "POST", json: { spec } });
 export const getTelemetrySchema = (signal?: AbortSignal) => request<TelemetrySchema>("/api/telemetry/schema", { signal });
 export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
