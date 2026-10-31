@@ -58,6 +58,22 @@ func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 			results[i] = s
 		})
 	}
+	// Every caller joins the one discovery before the first gives up, so its
+	// leaving cannot be the last and cancel the shared flight.
+	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(time.Millisecond) {
+		e.mu.Lock()
+		joined := 0
+		if f := e.schemas["1h|"].flight; f != nil {
+			joined = f.waiters
+		}
+		e.mu.Unlock()
+		if joined == len(results)+1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d callers joined the discovery", joined, len(results)+1)
+		}
+	}
 	quit()
 	if err := <-quitDone; err == nil {
 		t.Fatal("a caller that gave up got a schema")
