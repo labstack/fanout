@@ -17,6 +17,7 @@ const fetchMock = vi.fn<typeof fetch>();
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const bodies = (url: string, method = "POST") => fetchMock.mock.calls.filter(([input, init]) => String(input) === url && (init?.method ?? "GET") === method).map(([, init]) => JSON.parse(String(init?.body)));
 let patch: () => Promise<Response>;
+let ranFrame: typeof frame;
 let compatible: { viz: string; requires: string[] }[];
 
 beforeEach(() => {
@@ -26,11 +27,12 @@ beforeEach(() => {
   fetchMock.mockReset();
   patch = async () => json({ id: "d1", version: 8, spec });
   compatible = [{ viz: "table", requires: [] }];
+  ranFrame = frame;
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/fanql/format") return json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] });
     if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible, edits: [] }, notices: [] });
-    if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: "ok", elapsed_ms: 2, frame }] });
+    if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: "ok", elapsed_ms: 2, frame: ranFrame }] });
     if (url === "/api/dashboards/d1" && (init?.method === "PATCH" || init?.method === "PUT")) return patch();
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });
@@ -117,6 +119,22 @@ describe("PanelEditor", () => {
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
     expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0]).toEqual({ op: "update_panel", id: "panel", set: { sql: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } });
+  });
+
+  it("saves an edited panel that is empty right now, but adds no empty panel", async () => {
+    ranFrame = { ...frame, values: [[], []], rows: 0 };
+    const edited = await render();
+    await edited.wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await edited.wait(() => expect(edited.ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await act(async () => cleanups.splice(0).forEach(cleanup => cleanup()));
+    document.body.innerHTML = "";
+    const added = await render({ add: true });
+    await added.wait(() => expect(added.ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
+    const view = EditorView.findFromDOM(added.ui.getByRole("textbox", { name: "FanQL query" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
+    await act(async () => added.ui.getByRole("button", { name: "Run" }).click());
+    await added.wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    expect(added.ui.getByRole<HTMLButtonElement>("button", { name: "Add panel" }).disabled).toBe(true);
   });
 
   it("asks before discarding a draft", async () => {

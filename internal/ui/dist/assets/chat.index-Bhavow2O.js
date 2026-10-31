@@ -1,0 +1,1 @@
+import{t as e}from"./chat-CTB98-Yh.js";var t=e;export{t as component};

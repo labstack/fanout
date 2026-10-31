@@ -35,8 +35,9 @@ const starter: Query = { from: "spans", measures: ["count()"], by: ["service"] }
 /** What the last run sent, so later edits can be shown as stale and not saved. */
 type ExploreRun = { kind: Kind; source: string; window: string; panel: Panel; result: PanelDisplayResult; canonical?: string };
 
-function hasRows(run?: ExploreRun): boolean {
-  return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
+/** New panels must return rows; an edited panel may be legitimately empty now, so a clean run is enough. */
+function canKeep(run: ExploreRun | undefined, editing: boolean): boolean {
+  return run?.result.status === "ok" && (editing || (run.result.frame?.rows ?? 0) > 0);
 }
 
 /** Explore inside a dashboard: its variables resolve, and saving writes the panel there. */
@@ -219,7 +220,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const readOnlyText = formatted?.editable === false;
   const stale = run !== undefined && (run.kind !== kind || run.source !== source || run.window !== windowKey);
   const compatible = parsed?.viz.compatible ?? [];
-  const canSave = !stale && !running && hasRows(run);
+  const editing = context?.panel !== undefined;
+  const canSave = !stale && !running && canKeep(run, editing);
 
   return <Stack gap="md" p="lg" maw={1400} data-explore>
     <Group justify={context ? "flex-end" : "space-between"} align="flex-end">
@@ -273,7 +275,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       </Group>
       <Group gap="xs">
       {context?.cancel && <Button variant="default" disabled={savingPanel} onClick={context.cancel}>Cancel</Button>}
-      <Tooltip label="Run a query that returns rows first" disabled={canSave}><span>
+      <Tooltip label={editing ? "Run the query first" : "Run a query that returns rows first"} disabled={canSave}><span>
         {context
           ? <Button disabled={!canSave} loading={savingPanel} onClick={() => {
             if (!run) return;
