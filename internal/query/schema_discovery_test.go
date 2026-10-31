@@ -99,3 +99,59 @@ func TestSchemaAttributeValuesAndServices(t *testing.T) {
 		}
 	}
 }
+
+type activeEngine struct {
+	Engine
+	active, peak atomic.Int32
+	gate         chan struct{}
+}
+
+func (a *activeEngine) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
+	n := a.active.Add(1)
+	defer a.active.Add(-1)
+	for old := a.peak.Load(); n > old && !a.peak.CompareAndSwap(old, n); old = a.peak.Load() {
+	}
+	select {
+	case <-a.gate:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return a.Engine.QueryContext(ctx, query, args...)
+}
+
+// Distinct keys start at most two detached discoveries at once, and a
+// discovery whose callers all left is cancelled instead of running on.
+func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
+	fixture := newFixtureExecutor(t)
+	engine := &activeEngine{Engine: fixture.engine, gate: make(chan struct{})}
+	e := NewExecutor(engine, 30)
+	e.now = fixture.now
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() { _, _ = e.Schema(ctx, SchemaRequest{Window: "1h", Namespace: string(rune('a' + i))}) })
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for engine.active.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if peak := engine.peak.Load(); peak != 2 {
+		t.Fatalf("peak concurrent discoveries %d, want 2", peak)
+	}
+	cancel()
+	wg.Wait()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		e.mu.Lock()
+		n := len(e.schemas)
+		e.mu.Unlock()
+		if n == 0 && engine.active.Load() == 0 {
+			break
+		}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.schemas) != 0 || engine.active.Load() != 0 || engine.peak.Load() != 2 {
+		t.Fatalf("abandoned discoveries kept running: entries %d active %d peak %d", len(e.schemas), engine.active.Load(), engine.peak.Load())
+	}
+}

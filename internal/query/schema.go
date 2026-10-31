@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -65,9 +66,11 @@ type schemaEntry struct {
 }
 
 type schemaFlight struct {
-	done   chan struct{}
-	schema *Schema
-	err    error
+	done    chan struct{}
+	schema  *Schema
+	err     error
+	waiters int
+	cancel  context.CancelFunc
 }
 
 const (
@@ -76,11 +79,17 @@ const (
 	schemaDeadline   = 20 * time.Second
 )
 
+// Detached discoveries run at most two at a time process-wide, like the
+// engine's read pool; the rest wait for a slot until their callers leave.
+var schemaSlots = make(chan struct{}, 2)
+
+var errSchemaBusy = errors.New("too many schema discoveries are running; retry shortly")
+
 // Schema describes what telemetry exists: columns with their common values,
 // attribute keys and values sampled from recent rows, metric names and
 // services. It is the agent's map before it drafts panels, and is cached for a
 // minute. Concurrent callers for one window and namespace share one
-// discovery, which outlives a caller that gives up.
+// discovery; it is cancelled when its last caller leaves.
 func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, error) {
 	if req.Window == "" {
 		req.Window = "1h"
@@ -100,25 +109,39 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 		return entry.schema, nil
 	}
 	flight := entry.flight
-	if !ok || flight == nil {
-		flight = &schemaFlight{done: make(chan struct{})}
-		e.schemas[key] = schemaEntry{flight: flight}
-		go e.discoverFlight(context.WithoutCancel(ctx), key, req, span, flight)
+	if flight != nil && flight.waiters == 0 {
+		// Every caller of this flight left and cancelled it; start afresh.
+		flight = nil
 	}
+	if flight == nil {
+		if !e.makeSchemaRoom() {
+			e.mu.Unlock()
+			return nil, errSchemaBusy
+		}
+		work, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		flight = &schemaFlight{done: make(chan struct{}), cancel: cancel}
+		e.schemas[key] = schemaEntry{flight: flight}
+		go e.discoverFlight(work, key, req, span, flight)
+	}
+	flight.waiters++
 	e.mu.Unlock()
 	select {
 	case <-flight.done:
 		return flight.schema, flight.err
 	case <-ctx.Done():
+		e.mu.Lock()
+		if flight.waiters--; flight.waiters == 0 {
+			flight.cancel()
+		}
+		e.mu.Unlock()
 		return nil, ctx.Err()
 	}
 }
 
-func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaRequest, span time.Duration, flight *schemaFlight) {
-	ctx, cancel := context.WithTimeout(ctx, schemaDeadline)
-	defer cancel()
-	flight.schema, flight.err = e.discover(ctx, req, span)
-	e.mu.Lock()
+// makeSchemaRoom evicts expired and then all finished entries when the cache
+// is full; in-flight discoveries count toward the cap. It reports whether a
+// new entry fits.
+func (e *Executor) makeSchemaRoom() bool {
 	now := e.now()
 	for k, v := range e.schemas {
 		if v.flight == nil && !now.Before(v.expires) {
@@ -132,10 +155,27 @@ func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaReq
 			}
 		}
 	}
-	if flight.err != nil {
-		delete(e.schemas, key)
-	} else {
-		e.schemas[key] = schemaEntry{schema: flight.schema, expires: now.Add(schemaTTL)}
+	return len(e.schemas) < maxSchemaEntries
+}
+
+func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaRequest, span time.Duration, flight *schemaFlight) {
+	defer flight.cancel()
+	select {
+	case schemaSlots <- struct{}{}:
+		ctx, cancel := context.WithTimeout(ctx, schemaDeadline)
+		flight.schema, flight.err = e.discover(ctx, req, span)
+		cancel()
+		<-schemaSlots
+	case <-ctx.Done():
+		flight.err = ctx.Err()
+	}
+	e.mu.Lock()
+	if e.schemas[key].flight == flight {
+		if flight.err != nil {
+			delete(e.schemas, key)
+		} else {
+			e.schemas[key] = schemaEntry{schema: flight.schema, expires: e.now().Add(schemaTTL)}
+		}
 	}
 	e.mu.Unlock()
 	close(flight.done)
