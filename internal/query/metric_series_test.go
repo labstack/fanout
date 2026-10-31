@@ -35,7 +35,7 @@ func bindFixtureTimes(t *testing.T, text string, args []any) string {
 
 func metricIncreaseResult(t *testing.T, e *Executor, scope Scope, selectSQL string) Result {
 	t.Helper()
-	cte, args, err := metricSeriesCTE(nil, scope, []string{"counter", "histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{"counter", "histogram"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestHistogramIncreaseResetsAllChannels(t *testing.T) {
 		m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum, m.StartTimeUnixNanos = p.bounds, p.counts, p.count, p.sum, p.start
 		insertMetrics(t, db, m)
 	}
-	cte, args, err := metricSeriesCTE(nil, Scope{Start: fixtureStart, End: fixtureStart.Add(5 * time.Minute), Interval: time.Minute}, []string{"histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{}, Scope{Start: fixtureStart, End: fixtureStart.Add(5 * time.Minute), Interval: time.Minute}, []string{"histogram"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestMetricReadScopeIncludesSeparateLookbackBatch(t *testing.T) {
 		t.Fatalf("read=%+v original=%+v", read, original)
 	}
 	e := NewExecutor(engine, 30)
-	cte, args, err := metricSeriesCTE(nil, original, []string{"counter"})
+	cte, args, err := metricSeriesCTE(metricRead{}, original, []string{"counter"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestMetricSeriesFiltersKindsAtInput(t *testing.T) {
 		{[]string{"gauge", "counter"}, []any{"counter", "gauge"}},
 		{[]string{"histogram"}, []any{"histogram"}},
 	} {
-		cte, args, err := metricSeriesCTE(nil, scope, tc.kinds)
+		cte, args, err := metricSeriesCTE(metricRead{}, scope, tc.kinds)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -500,7 +500,7 @@ func TestMetricSeriesFiltersKindsAtInput(t *testing.T) {
 
 func TestMetricSeriesRejectsEmptyKinds(t *testing.T) {
 	for _, kinds := range [][]string{nil, {}} {
-		text, args, err := metricSeriesCTE(nil, Scope{}, kinds)
+		text, args, err := metricSeriesCTE(metricRead{}, Scope{}, kinds)
 		if err == nil || err.Error() != "metric series requires at least one kind" || text != "" || args != nil {
 			t.Fatalf("kinds=%v: text=%q args=%v err=%v", kinds, text, args, err)
 		}
@@ -519,7 +519,7 @@ func TestMetricSeriesKindFilterPreservesHistogramAgainstLaterGauge(t *testing.T)
 	gauge.IngestedAt++
 	insertMetrics(t, db, gauge)
 	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Minute)}
-	cte, args, err := metricSeriesCTE(nil, scope, []string{"histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{"histogram"})
 	if err != nil {
 		t.Fatal(err)
 	}

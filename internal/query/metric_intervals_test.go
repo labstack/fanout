@@ -25,7 +25,7 @@ func TestMetricGapDeltasAttributeWholeIncreaseAndBoundExpansion(t *testing.T) {
 				insertMetrics(t, db, metricHistogram(later, "[10,20]", "[43210,43210,0]", 86420, 1296300, "a"))
 			}
 			scope := Scope{Start: fixtureStart, End: later.Add(6 * time.Minute), Interval: 10 * time.Second}
-			cte, args, err := metricSeriesCTE(nil, scope, []string{kind})
+			cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{kind})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +108,7 @@ func TestMetricExactlyLookbackDeltasStillSpread(t *testing.T) {
 				insertMetrics(t, db, metricHistogram(later, "[10,20]", "[310,310,0]", 620, 9300, "a"))
 			}
 			scope := Scope{Start: fixtureStart, End: later.Add(time.Second), Interval: 10 * time.Second}
-			cte, args, err := metricSeriesCTE(nil, scope, []string{kind})
+			cte, args, err := metricSeriesCTE(metricRead{}, scope, []string{kind})
 			if err != nil {
 				t.Fatal(err)
 			}

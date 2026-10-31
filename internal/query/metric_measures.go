@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -76,16 +77,21 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 	}
 
 	sig := signals["metrics"]
-	where, args, err := buildWhere(sig, filters, scope)
-	if err != nil {
-		return Compiled{}, err
-	}
 	bucket := "0::BIGINT"
 	bucketed := scope.Interval > 0
 	if bucketed {
 		bucket = metricBucketSQL(scope.Interval)
 	}
-	ctes := []string{"metric_raw_window AS (SELECT *," + bucket + " AS _bucket FROM metrics WHERE " + where + ")"}
+	// Every builder and the raw window read one scan of metrics. The scan is
+	// prepended once its readers, their earliest window and kinds are known.
+	var ctes []string
+	var args []any
+	var err error
+	var scanStart time.Time
+	scan := metricRead{scan: "metric_scan", start: &scanStart}
+	scanKinds := map[string]bool{}
+	readers := 0
+	rawUsed := false
 	dims := make([]FieldRef, 0, len(p.Query.By))
 	dimNames, dimExprs := []string{}, []string{}
 	columns := []Column{}
@@ -125,12 +131,16 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			return name, nil
 		}
 		name := fmt.Sprintf("metric_builder_%d", len(builders))
+		readers++
+		for _, kind := range kinds {
+			scanKinds[kind] = true
+		}
 		var cte string
 		var builderArgs []any
 		var err error
 		switch source {
 		case "metric_increases":
-			cte, builderArgs, err = metricSeriesCTE(filters, scope, kinds)
+			cte, builderArgs, err = metricSeriesCTE(scan, scope, kinds)
 			spread, spreadArgs := metricSpreadCTE(scope)
 			cte += spread
 			builderArgs = append(builderArgs, spreadArgs...)
@@ -142,11 +152,11 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 				source = "metric_spread_rows"
 			}
 		case "metric_gauge_rows":
-			cte, builderArgs, err = metricGaugeCTE(filters, scope, kinds)
+			cte, builderArgs, err = metricGaugeCTE(scan, scope, kinds)
 		case "metric_last_points":
-			cte, builderArgs, err = metricLastCTE(filters, scope, kinds)
+			cte, builderArgs, err = metricLastCTE(scan, scope, kinds)
 		default:
-			cte, builderArgs, err = metricPointsCTE(filters, scope, kinds, 0)
+			cte, builderArgs, err = metricPointsCTE(scan, scope, kinds, 0)
 			source = "metric_points"
 		}
 		if err != nil {
@@ -185,7 +195,9 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			ctes = append(ctes, prefix+"rows AS (SELECT "+fields+",NULL::DOUBLE AS increase FROM "+gaugeRows+
 				" UNION ALL BY NAME SELECT * FROM "+counterRows+")")
 			source = prefix + "rows"
-		} else if source != "metric_raw_window" {
+		} else if source == "metric_raw_window" {
+			rawUsed = true
+		} else {
 			kinds := metricMeasureKinds(m)
 			if metricHistogramMeasure(m) {
 				kinds = slices.DeleteFunc(slices.Clone(kinds), func(kind string) bool { return kind == "histogram" })
@@ -335,6 +347,8 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		rankSource := "metric_raw_window"
 		if first.Func == "last" && metricValueMeasure(first) {
 			rankSource = sources[0]
+		} else {
+			rawUsed = true
 		}
 		if samples == "r.n" {
 			samples = "coalesce(r.n,0)"
@@ -360,6 +374,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 	if !bucketed && len(dims) == 0 {
 		ctes = append(ctes, "metric_groups AS (SELECT 0::BIGINT AS _bucket)")
 	} else {
+		rawUsed = true
 		groupSource := "SELECT " + strings.Join(keySelect, ",") + " FROM metric_raw_window"
 		for _, source := range bucketSources {
 			groupSource += " UNION ALL SELECT " + strings.Join(keySelect, ",") + " FROM " + source
@@ -406,8 +421,42 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		selects = append(selects, expr+" AS "+quoteIdent(m.Alias))
 	}
 	if p.Viz == "state_timeline" {
+		rawUsed = true
 		ctes = append(ctes, fmt.Sprintf("metric_items AS (SELECT %s AS item FROM metric_raw_window GROUP BY 1 ORDER BY count(*) DESC,1 LIMIT %d)", dimExprs[0], p.Top()))
 	}
+	// Builders select their kinds from the scan, and the raw window keeps every
+	// kind. A scan with several readers is materialized so metrics is read once.
+	if rawUsed {
+		readers++
+		scanKinds = nil
+		if scanStart.IsZero() || scope.Start.Before(scanStart) {
+			scanStart = scope.Start
+		}
+	}
+	read := scope
+	read.Start = scanStart
+	where, scanArgs, err := buildWhere(sig, filters, read)
+	if err != nil {
+		return Compiled{}, err
+	}
+	if len(scanKinds) > 0 {
+		where += " AND type IN (" + metricKindList(slices.Sorted(maps.Keys(scanKinds))) + ")"
+	}
+	materialized := ""
+	if readers > 1 {
+		materialized = "MATERIALIZED "
+	}
+	head := []string{"metric_scan AS " + materialized + "(SELECT * FROM metrics WHERE " + where + ")"}
+	if rawUsed {
+		rawWhere, rawArgs, err := buildWhere(sig, nil, scope)
+		if err != nil {
+			return Compiled{}, err
+		}
+		head = append(head, "metric_raw_window AS (SELECT *,"+bucket+" AS _bucket FROM metric_scan WHERE "+rawWhere+")")
+		scanArgs = append(scanArgs, rawArgs...)
+	}
+	ctes = append(head, ctes...)
+	args = append(scanArgs, args...)
 	text := "WITH " + strings.Join(ctes, ",\n") + " SELECT " + strings.Join(selects, ",") + " FROM metric_groups g" + strings.Join(joins, "")
 	if p.Viz == "state_timeline" {
 		// Shares were computed across the whole scope before item selection.

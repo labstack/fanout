@@ -39,24 +39,50 @@ func metricBucketSQL(interval time.Duration) string {
 	return fmt.Sprintf("epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS,%s))::BIGINT", int64(interval/time.Second), bucketOrigin)
 }
 
+// metricRead is the relation a builder reads. The zero value reads metrics
+// itself under the given filters. A query with several builders reads one
+// shared scan that already applied its filters, so each builder only narrows
+// it to its own window and kinds; the scan records the earliest window.
+type metricRead struct {
+	filters []Filter
+	scan    string
+	start   *time.Time
+}
+
+func (r metricRead) where(read Scope) (string, string, []any, error) {
+	if r.scan == "" {
+		where, args, err := buildWhere(signals["metrics"], r.filters, read)
+		return "metrics", where, args, err
+	}
+	if r.start.IsZero() || read.Start.Before(*r.start) {
+		*r.start = read.Start
+	}
+	where, args, err := buildWhere(signals["metrics"], nil, read)
+	return r.scan, where, args, err
+}
+
+func metricKindList(kinds []string) string {
+	quoted := make([]string, len(kinds))
+	for i, kind := range kinds {
+		quoted[i] = sqlString(kind)
+	}
+	return strings.Join(quoted, ",")
+}
+
 // Point-only builders never lag or decode a ten-minute history. Separate SQL
 // scopes let callers share a builder without rewriting authored filter text.
-func metricPointsCTE(filters []Filter, scope Scope, kinds []string, lookback time.Duration) (string, []any, error) {
+func metricPointsCTE(source metricRead, scope Scope, kinds []string, lookback time.Duration) (string, []any, error) {
 	if len(kinds) == 0 {
 		return "", nil, fmt.Errorf("metric series requires at least one kind")
 	}
 	read := scope
 	read.Start = read.Start.Add(-lookback)
-	where, args, err := buildWhere(signals["metrics"], filters, read)
+	from, where, args, err := source.where(read)
 	if err != nil {
 		return "", nil, err
 	}
-	quoted := make([]string, len(kinds))
-	for i, kind := range kinds {
-		quoted[i] = sqlString(kind)
-	}
-	where += " AND type IN (" + strings.Join(quoted, ",") + ")"
-	text := `WITH metric_input AS (SELECT * FROM metrics WHERE ` + where + `),
+	where += " AND type IN (" + metricKindList(kinds) + ")"
+	text := `WITH metric_input AS (SELECT * FROM ` + from + ` WHERE ` + where + `),
       metric_decoded AS (SELECT *,
         CASE WHEN type='histogram' THEN TRY(from_json(hist_bounds_json,'["DOUBLE"]')) END AS _bounds,
         CASE WHEN type='histogram' THEN TRY(from_json(hist_counts_json,'["UBIGINT"]')) END AS _counts
@@ -77,8 +103,8 @@ func metricPointsCTE(filters []Filter, scope Scope, kinds []string, lookback tim
 	return strings.TrimSpace(text), args, nil
 }
 
-func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
-	text, args, err := metricPointsCTE(filters, scope, kinds, metricLookback)
+func metricSeriesCTE(source metricRead, scope Scope, kinds []string) (string, []any, error) {
+	text, args, err := metricPointsCTE(source, scope, kinds, metricLookback)
 	if err != nil {
 		return "", nil, err
 	}
@@ -132,7 +158,7 @@ func metricSeriesCTE(filters []Filter, scope Scope, kinds []string) (string, []a
 }
 
 func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error) {
-	cte, args, err := metricSeriesCTE(filters, scope, []string{"histogram"})
+	cte, args, err := metricSeriesCTE(metricRead{filters: filters}, scope, []string{"histogram"})
 	if err != nil {
 		return "", nil, err
 	}
@@ -156,12 +182,12 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
 // A series' value at a bucket's exclusive end is its latest point strictly
 // before that end, found per series by an ASOF join so the cost follows
 // series times buckets rather than points times buckets.
-func metricLastCTE(filters []Filter, scope Scope, kinds []string) (string, []any, error) {
+func metricLastCTE(source metricRead, scope Scope, kinds []string) (string, []any, error) {
 	read := scope
 	if scope.Interval <= 0 {
 		read.Start = scope.End
 	}
-	cte, args, err := metricPointsCTE(filters, read, kinds, metricStaleness)
+	cte, args, err := metricPointsCTE(source, read, kinds, metricStaleness)
 	if err != nil {
 		return "", nil, err
 	}
