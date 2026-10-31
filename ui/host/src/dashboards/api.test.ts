@@ -71,6 +71,14 @@ describe("dashboard api", () => {
     const error = await queryPanels({ dashboard: spec }, undefined, () => {}).catch((e) => e);
     expect(error).toBeInstanceOf(ApiError); expect(error.problems).toEqual([{ path: "panels", message: "bad" }]);
   });
+  it("cancels the stream when a line is malformed", async () => {
+    let cancelled!: () => void;
+    const cancel = new Promise<void>((resolve) => { cancelled = resolve; });
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode('{"id":"a",\n')); }, cancel() { cancelled(); } });
+    fetchMock.mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "application/x-ndjson" } }));
+    await expect(queryPanels({ dashboard: spec }, undefined, () => {})).rejects.toBeInstanceOf(SyntaxError);
+    await cancel;
+  });
   it("posts annotation windows as JSON and forwards the abort signal", async () => {
     const annotations = { deploys: [], anomalies: [], truncated: true };
     fetchMock.mockResolvedValue(json(200, annotations));

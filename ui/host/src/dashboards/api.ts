@@ -65,19 +65,25 @@ export async function queryPanels(body: QueryBody, signal?: AbortSignal, onResul
   const results: PanelResult[] = [];
   const lines = response.body!.pipeThrough(new TextDecoderStream()).getReader();
   let pending = "";
-  for (;;) {
-    const { done, value } = await lines.read();
-    pending += value ?? "";
-    let end: number;
-    while ((end = pending.indexOf("\n")) >= 0) {
-      const line = pending.slice(0, end);
-      pending = pending.slice(end + 1);
-      if (!line.trim()) continue;
-      const result = JSON.parse(line) as PanelResult;
-      results.push(result);
-      onResult(result);
+  try {
+    for (;;) {
+      const { done, value } = await lines.read();
+      pending += value ?? "";
+      let end: number;
+      while ((end = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, end);
+        pending = pending.slice(end + 1);
+        if (!line.trim()) continue;
+        const result = JSON.parse(line) as PanelResult;
+        results.push(result);
+        onResult(result);
+      }
+      if (done) return results;
     }
-    if (done) return results;
+  } catch (error) {
+    // A malformed line or a throwing callback must not leave the response open.
+    void lines.cancel().catch(() => {});
+    throw error;
   }
 }
 export const createDashboard = (spec: DashboardSpec) => request<DashboardRecord>("/api/dashboards", { method: "POST", json: { spec } });
