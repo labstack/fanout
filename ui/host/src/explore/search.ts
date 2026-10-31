@@ -10,6 +10,8 @@ export type ExploreSearch = { q: string; viz?: Viz; range: string; from?: string
   picks?: Picks };
 
 export type Picks = { service?: string; severity?: string; errors?: "1"; slower?: string };
+/** The largest "slower than" filter in milliseconds that the URL keeps. */
+export const maxSlower = 9_999_999;
 const severities = ["trace", "debug", "info", "warn", "error", "fatal"];
 
 export const defaultRange = "1h";
@@ -25,7 +27,7 @@ export function parseExploreSearch(raw: Record<string, unknown>): ExploreSearch 
   if (raw.tab === "sql" || raw.tab === "builder") out.tab = raw.tab;
   if (typeof raw.sql === "string") out.sql = raw.sql;
   const picks: Picks = {};
-  if (typeof raw.service === "string" && raw.service && !raw.service.includes('"')) picks.service = raw.service;
+  if (typeof raw.service === "string" && raw.service) picks.service = raw.service;
   if (typeof raw.severity === "string" && severities.includes(raw.severity)) picks.severity = raw.severity;
   if (String(raw.errors) === "1") picks.errors = "1";
   if (/^[1-9]\d{0,6}$/.test(String(raw.slower ?? ""))) picks.slower = String(raw.slower);

@@ -2,6 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, within } from "@testing-library/dom";
 import { EditorView } from "@codemirror/view";
+import { forEachDiagnostic } from "@codemirror/lint";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,10 +94,17 @@ describe("SearchPage", () => {
     const { ui, wait, search } = await render(tracesPreset, { q: "operation:GET" });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => ui.getByRole("switch", { name: "Errors only" }).click());
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "operation:GET status:error", source: "spans", viz: "traces" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "(operation:GET) status:error", source: "spans", viz: "traces" }));
     expect(search().picks).toEqual({ errors: "1" });
+    const runs = bodies("/api/queries/run").length;
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Slower than (ms)" }), { target: { value: "500" } }); });
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe("operation:GET status:error duration>500ms"));
+    // Typing alone does not search; leaving the field commits it.
+    expect(bodies("/api/queries/run")).toHaveLength(runs);
+    await act(async () => { fireEvent.keyDown(ui.getByRole("textbox", { name: "Slower than (ms)" }), { key: "Enter" }); });
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe("(operation:GET) status:error duration>500ms"));
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Slower than (ms)" }), { target: { value: "800" } }); });
+    await act(async () => { fireEvent.focusOut(ui.getByRole("textbox", { name: "Slower than (ms)" })); });
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe("(operation:GET) status:error duration>800ms"));
   });
 
   it("filters logs by service and severity from the URL", async () => {
@@ -104,6 +112,21 @@ describe("SearchPage", () => {
     await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"billing\" severity>=warn", source: "logs", viz: "logs" }));
     // A service missing from the recent schema still shows as chosen.
     await wait(() => expect(ui.getByLabelText<HTMLInputElement>("Service", { selector: "input" }).value).toBe("billing"));
+  });
+
+  it("groups typed filters before the fields and maps problem spans back to the editor", async () => {
+    parse = async body => body.text.startsWith("(") && body.text.includes("where")
+      ? json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 1, end: 6 }, fix_its: [{ label: "Remove where", span: { start: 1, end: 7 }, text: "" }] }, { path: "text", message: "about the field", span: { start: 20, end: 30 } }] }, 400)
+      : json({ query: { from: "logs" }, canonical: "logs", viz: { compatible: [], edits: [] }, notices: [] });
+    const { ui, wait } = await render(logsPreset, { q: "service:a or service:b", picks: { severity: "warn" } });
+    await wait(() => expect(bodies("/api/fanql/parse")[0].text).toBe("(service:a or service:b) severity>=warn"));
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "where x" } }));
+    await act(async () => ui.getByRole("button", { name: "Search" }).click());
+    await wait(() => expect(ui.getByRole("alert").textContent).toContain("the page supplies where"));
+    const marks: [number, number][] = [];
+    forEachDiagnostic(view.state, (_d, from, to) => marks.push([from, to]));
+    expect(marks).toEqual([[0, 5], [0, 7]]);
   });
 
   it("shows the problem when a where is typed", async () => {

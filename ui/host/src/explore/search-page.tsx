@@ -14,7 +14,8 @@ import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { completeFanql, parseFanql, type Notice } from "./api";
 import { SaveDialog, defaultTitle } from "./save-dialog";
-import { exploreTime, type ExploreSearch, type Picks } from "./search";
+import { exploreTime, maxSlower, type ExploreSearch, type Picks } from "./search";
+import type { TextSpan } from "../api-error";
 
 /** Logs and Traces are Explore with the source and viz fixed by the page (proposal 0004, section 2). */
 export type Preset = {
@@ -34,7 +35,8 @@ const severityOptions = [{ value: "debug", label: "Debug and above" }, { value: 
 /** FanQL terms for the filter fields; the server parses them like typed filters. */
 function pickTerms(preset: Preset, picks: Picks): string {
   const terms: string[] = [];
-  if (preset.fields.includes("service") && picks.service) terms.push(`service:"${picks.service}"`);
+  // FanQL doubles a quote inside a quoted value.
+  if (preset.fields.includes("service") && picks.service) terms.push(`service:"${picks.service.replaceAll('"', '""')}"`);
   if (preset.fields.includes("severity") && picks.severity) terms.push(`severity>=${picks.severity}`);
   if (preset.fields.includes("errors") && picks.errors) terms.push("status:error");
   if (preset.fields.includes("slower") && picks.slower) terms.push(`duration>${picks.slower}ms`);
@@ -49,6 +51,7 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
 }) {
   const [text, setText] = useState(search.q);
   const [problems, setProblems] = useState<Problem[]>([]);
+  const [shifted, setShifted] = useState({ shift: 0, length: 0 });
   const [notices, setNotices] = useState<Notice[]>([]);
   const [error, setError] = useState<string>();
   const [ran, setRan] = useState<Ran>();
@@ -76,9 +79,13 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     const abort = new AbortController(); controller.current = abort;
     setRunning(true); setError(undefined); setProblems([]);
     try {
-      // Typed filters come first so problem spans keep indexing the editor's text.
+      // The typed filters are grouped so a top-level `or` stays theirs; the
+      // fields' terms follow, and problem spans are mapped back to the editor.
       const picked = termsNow.current;
-      const parsed = await parseFanql({ text: [filters.trim(), picked].filter(Boolean).join(" "), source: preset.source, viz: preset.viz }, abort.signal);
+      const combined = filters.trim() && picked ? `(${filters}) ${picked}` : filters.trim() ? filters : picked;
+      const shift = filters.trim() && picked ? 1 : 0;
+      setShifted({ shift, length: Array.from(filters).length });
+      const parsed = await parseFanql({ text: combined, source: preset.source, viz: preset.viz }, abort.signal);
       if (abort.signal.aborted) return;
       setNotices(parsed.notices);
       const panel: Panel = { id: panelID, title: defaultTitle(`${preset.name}: ${[filters.trim(), picked].filter(Boolean).join(" ") || "all"}`), viz: preset.viz, query: { ...parsed.query, sort: order } };
@@ -112,6 +119,11 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     written.current = search.q; setText(search.q); void execute(search.q, sort);
   }, [search.q]);
 
+  // Problems from the combined text, in the editor's coordinates; generated terms are not the author's to fix.
+  const local = problems.map(problem => {
+    const inText = (span?: TextSpan) => span && span.start >= shifted.shift && span.end - shifted.shift <= shifted.length ? { start: span.start - shifted.shift, end: span.end - shifted.shift } : undefined;
+    return { ...problem, span: inText(problem.span), fix_its: problem.fix_its?.flatMap(fix => { const span = inText(fix.span); return span ? [{ ...fix, span }] : []; }) };
+  });
   const stale = ran !== undefined && (ran.text !== text || ran.terms !== terms || ran.sort !== sort || ran.window !== windowKey);
   const canSave = ran !== undefined && !stale && !running && ran.result.status === "ok" && (ran.result.frame?.rows ?? 0) > 0;
 
@@ -122,18 +134,17 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     </Group>
     <Stack gap="xs">
       <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. Press Enter to search.</Text>
-      <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={problems}
+      <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local}
         onChange={value => { setText(value); setProblems([]); }} onRun={() => void execute(text, sort)}
         complete={(value, cursor, signal) => completeFanql({ text: value, cursor, source: preset.source, viz: preset.viz, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
-      {problems.length > 0 && <Stack gap={2} role="alert">{problems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
+      {local.length > 0 && <Stack gap={2} role="alert">{local.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
       {notices.length > 0 && <Stack gap={2}>{notices.map((notice, index) => <Text key={index} size="xs" c="dimmed">{notice.message}</Text>)}</Stack>}
     </Stack>
     <Group gap="sm" align="flex-end" data-search-fields>
       {preset.fields.includes("service") && <Select label="Service" placeholder="All services" w={220} clearable searchable value={search.picks?.service ?? null}
-        data={[...new Set([...(search.picks?.service ? [search.picks.service] : []), ...(services.data?.services ?? []).map(s => s.value).filter(name => !name.includes('"'))])]} onChange={service => pick({ service: service ?? undefined })} />}
+        data={[...new Set([...(search.picks?.service ? [search.picks.service] : []), ...(services.data?.services ?? []).map(s => s.value)])]} onChange={service => pick({ service: service ?? undefined })} />}
       {preset.fields.includes("severity") && <Select label="Severity" placeholder="Any severity" w={180} clearable value={search.picks?.severity ?? null} data={severityOptions} onChange={severity => pick({ severity: severity ?? undefined })} />}
-      {preset.fields.includes("slower") && <NumberInput label="Slower than (ms)" w={160} min={1} value={search.picks?.slower ? Number(search.picks.slower) : ""}
-        onChange={value => pick({ slower: typeof value === "number" && value >= 1 ? String(Math.floor(value)) : undefined })} />}
+      {preset.fields.includes("slower") && <SlowerThan value={search.picks?.slower} onCommit={slower => pick({ slower })} />}
       {preset.fields.includes("errors") && <Switch label="Errors only" mb={8} checked={search.picks?.errors === "1"} onChange={event => pick({ errors: event.currentTarget.checked ? "1" : undefined })} />}
     </Group>
     <Group justify="space-between">
@@ -158,4 +169,15 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
       onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}
     {saving && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
   </Stack>;
+}
+
+/** Commits on Enter or blur, so typing 500 searches once, not for 5, 50 and 500. */
+function SlowerThan({ value, onCommit }: { value?: string; onCommit(value?: string): void }) {
+  const [draft, setDraft] = useState<string | number>(value ? Number(value) : "");
+  useEffect(() => { setDraft(value ? Number(value) : ""); }, [value]);
+  const commit = () => {
+    const next = typeof draft === "number" && draft >= 1 ? String(Math.min(maxSlower, Math.floor(draft))) : undefined;
+    if (next !== value) onCommit(next);
+  };
+  return <NumberInput label="Slower than (ms)" w={160} min={1} max={maxSlower} clampBehavior="strict" value={draft} onChange={setDraft} onBlur={commit} onKeyDown={event => { if (event.key === "Enter") commit(); }} />;
 }

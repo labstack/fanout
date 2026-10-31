@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, drawSelection, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { autocompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import type { Problem } from "../api-error";
 import type { Completion } from "../explore/api";
@@ -52,6 +52,8 @@ export function FanqlEditor(props: FanqlEditorProps) {
   // What the suggestions are based on (section 0.14): the server's recency notice, or that the schema is unavailable.
   const [schemaNote, setSchemaNote] = useState<string>();
   const failures = useRef(0);
+  // The note describes the open suggestion list, so it shows only with one.
+  const [listOpen, setListOpen] = useState(false);
   const compartments = useRef({ editable: new Compartment(), attributes: new Compartment() });
   useEffect(() => {
     const { editable, attributes } = compartments.current;
@@ -62,6 +64,7 @@ export function FanqlEditor(props: FanqlEditorProps) {
       const abort = new AbortController(); pending.current = abort;
       context.addEventListener("abort", () => abort.abort());
       const text = context.state.doc.toString();
+      setSchemaNote(undefined);
       try {
         const result = await complete(text, pointOffset(text, context.pos), abort.signal);
         if (abort.signal.aborted) return null;
@@ -88,7 +91,10 @@ export function FanqlEditor(props: FanqlEditorProps) {
       // list accepts on Enter; otherwise Enter runs the query.
       keymap.of([{ key: "Enter", run: () => { latest.current.onRun(); return true; } }]),
       keymap.of([...defaultKeymap.filter(binding => binding.key !== "Enter"), ...historyKeymap]),
-      EditorView.updateListener.of(update => { if (update.docChanged) latest.current.onChange(update.state.doc.toString()); }),
+      EditorView.updateListener.of(update => {
+        if (update.docChanged) latest.current.onChange(update.state.doc.toString());
+        setListOpen(completionStatus(update.state) !== null);
+      }),
     ] }) });
     view.current = instance;
     return () => { pending.current?.abort(); view.current = null; instance.destroy(); };
@@ -102,6 +108,6 @@ export function FanqlEditor(props: FanqlEditorProps) {
   useEffect(() => { const instance = view.current!; instance.dispatch(setDiagnostics(instance.state, fanqlDiagnostics(instance.state.doc.toString(), problems))); }, [value, problems]);
   return <div data-fanql-editor>
     <div ref={host} />
-    {schemaNote && <Text size="xs" c="dimmed" mt={4} data-completion-note>Suggestions: {schemaNote}</Text>}
+    {schemaNote && listOpen && <Text size="xs" c="dimmed" mt={4} data-completion-note>Suggestions: {schemaNote}</Text>}
   </div>;
 }

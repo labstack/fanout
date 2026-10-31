@@ -92,6 +92,8 @@ describe("FanqlEditor", () => {
     await ask();
     expect(document.querySelector("[data-completion-note]")?.textContent).toBe("Suggestions: keys seen in the last 24h (recent), not in the selected interval");
     await act(async () => { closeCompletion(view); });
+    // The note belongs to the list; a closed list leaves no stale note behind.
+    expect(document.querySelector("[data-completion-note]")).toBeNull();
     await ask();
     expect(document.querySelector("[data-completion-note]")).toBeNull();
     await act(async () => { closeCompletion(view); });

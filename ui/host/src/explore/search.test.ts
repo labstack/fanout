@@ -19,7 +19,8 @@ describe("explore search", () => {
   it("keeps Logs and Traces filter fields and drops invalid ones", () => {
     const search: ExploreSearch = { q: "", range: "1h", tab: "query", picks: { service: "checkout", severity: "warn", errors: "1", slower: "500" } };
     expect(parseExploreSearch(toExploreParams(search))).toEqual(search);
-    expect(parseExploreSearch({ service: 'a"b', severity: "loud", errors: "yes", slower: "-5" })).toEqual({ q: "", range: "1h", tab: "query" });
+    expect(parseExploreSearch({ severity: "loud", errors: "yes", slower: "-5" })).toEqual({ q: "", range: "1h", tab: "query" });
+    expect(parseExploreSearch({ service: 'a"b' }).picks).toEqual({ service: 'a"b' });
   });
 
   it("keeps long text for the server to bound", () => {
