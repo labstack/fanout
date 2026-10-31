@@ -374,16 +374,17 @@ func (e *Executor) lowCardinality(ctx context.Context, sig *signal, start, end t
 
 func (e *Executor) attributes(ctx context.Context, sig *signal, start, end time.Time, namespace string) ([]AttributeSchema, error) {
 	where, args := windowWhere(sig, start, end, namespace)
-	// Values come from the same sample: the most common 12 scalar values of
-	// each key, as text, for completion.
-	query := `WITH sample AS (
-  SELECT service, to_json(attributes) AS a, to_json(resource) AS r FROM ` + sig.name + ` WHERE ` + where + ` LIMIT 5000
-), keyed AS (
-  SELECT service, 'attributes' AS scope, unnest(json_keys(a)) AS k, a AS j FROM sample
+	// Decoding a row's VARIANT maps dominates discovery, so it reads a fixed
+	// sample of rows, once: inlined, each reference reruns the scan. Spans
+	// sort by trace, so the sample spans services. json_each parses each map
+	// once rather than once per key. Values come from the same sample: the
+	// most common 12 scalar values of each key, as text, for completion.
+	query := `WITH sample AS MATERIALIZED (
+  SELECT service, to_json(attributes) AS a, to_json(resource) AS r FROM ` + sig.name + ` WHERE ` + where + ` LIMIT 1000
+), typed AS MATERIALIZED (
+  SELECT service, 'attributes' AS scope, e.key AS k, e.type AS t, e.value ->> '$' AS v FROM sample, json_each(a) AS e
   UNION ALL
-  SELECT service, 'resource' AS scope, unnest(json_keys(r)) AS k, r AS j FROM sample
-), typed AS (
-  SELECT service, scope, k, json_type(j, '$."' || replace(k, '"', '\"') || '"') AS t, json_extract_string(j, '$."' || replace(k, '"', '\"') || '"') AS v FROM keyed
+  SELECT service, 'resource' AS scope, e.key AS k, e.type AS t, e.value ->> '$' AS v FROM sample, json_each(r) AS e
 ), keys AS (
   SELECT scope, k, any_value(t) AS t, count(*) AS n,
          coalesce(array_to_string(list(DISTINCT service ORDER BY service) FILTER (WHERE service <> '')[1:3], ', '), '') AS services
