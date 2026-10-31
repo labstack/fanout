@@ -17,7 +17,7 @@ import (
 
 // readCacheVersion covers both schema and aggregation semantics. These tables
 // are disposable; a mismatch rebuilds them together from immutable Parquet.
-const readCacheVersion = 6
+const readCacheVersion = 7
 
 const (
 	readCacheBatchLimit = 64
@@ -79,7 +79,7 @@ func createBatchCaches(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS read_edge_buckets (namespace VARCHAR, bucket TIMESTAMPTZ_NS, spans BIGINT)`,
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
 		`CREATE TABLE IF NOT EXISTS read_resource_inventory (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,
-		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR PRIMARY KEY,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
+		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -212,7 +212,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 	var written int64
 	exec := func(stmt string) error {
 		result, err := tx.ExecContext(ctx, stmt)
-		if err == nil && strings.HasPrefix(stmt, "INSERT INTO read_") && !strings.HasPrefix(stmt, "INSERT INTO read_batches") {
+		if err == nil && (strings.HasPrefix(stmt, "INSERT INTO read_") && !strings.HasPrefix(stmt, "INSERT INTO read_batches") || strings.HasPrefix(stmt, "MERGE INTO read_")) {
 			n, e := result.RowsAffected()
 			if e != nil {
 				return e
@@ -239,7 +239,9 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		if err := exec(`DELETE FROM read_trace_candidates WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) AND trace_id NOT IN (SELECT trace_id FROM read_trace_parts)`); err != nil {
 			return 0, err
 		}
-		if err := exec(`INSERT INTO read_trace_candidates ` + traceCandidateSelect + ` FROM read_trace_parts WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) GROUP BY trace_id ON CONFLICT (trace_id) DO UPDATE SET namespace=excluded.namespace,service=excluded.service,min_start=excluded.min_start,max_start=excluded.max_start,max_end=excluded.max_end,has_error=excluded.has_error`); err != nil {
+		if err := exec(`MERGE INTO read_trace_candidates c USING (` + traceCandidateSelect + ` FROM read_trace_parts WHERE trace_id IN (SELECT trace_id FROM cache_retired_traces) GROUP BY trace_id) AS excluded ON c.trace_id=excluded.trace_id
+   WHEN MATCHED THEN UPDATE SET namespace=excluded.namespace,service=excluded.service,min_start=excluded.min_start,max_start=excluded.max_start,max_end=excluded.max_end,has_error=excluded.has_error
+   WHEN NOT MATCHED THEN INSERT ` + traceCandidateColumns); err != nil {
 			return 0, err
 		}
 		if err := exec(`DROP TABLE cache_retired_traces`); err != nil {
@@ -286,13 +288,15 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			return 0, err
 		}
 		candidates := traceCandidateSelect + ` FROM cache_new_trace_parts GROUP BY trace_id`
-		if err := exec(`INSERT INTO read_trace_candidates ` + candidates + ` ON CONFLICT (trace_id) DO UPDATE SET
-   namespace=CASE WHEN read_trace_candidates.namespace=excluded.namespace THEN excluded.namespace END,
-   service=CASE WHEN read_trace_candidates.service=excluded.service THEN excluded.service END,
-   min_start=least(read_trace_candidates.min_start,excluded.min_start),
-   max_start=greatest(read_trace_candidates.max_start,excluded.max_start),
-   max_end=greatest(read_trace_candidates.max_end,excluded.max_end),
-   has_error=greatest(read_trace_candidates.has_error,excluded.has_error)`); err != nil {
+		if err := exec(`MERGE INTO read_trace_candidates c USING (` + candidates + `) AS excluded ON c.trace_id=excluded.trace_id
+   WHEN MATCHED THEN UPDATE SET
+   namespace=CASE WHEN c.namespace=excluded.namespace THEN excluded.namespace END,
+   service=CASE WHEN c.service=excluded.service THEN excluded.service END,
+   min_start=least(c.min_start,excluded.min_start),
+   max_start=greatest(c.max_start,excluded.max_start),
+   max_end=greatest(c.max_end,excluded.max_end),
+   has_error=greatest(c.has_error,excluded.has_error)
+   WHEN NOT MATCHED THEN INSERT ` + traceCandidateColumns); err != nil {
 			return 0, err
 		}
 		if err := exec(`DROP TABLE cache_new_trace_parts`); err != nil {
@@ -468,6 +472,11 @@ func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []s
 	}
 	return tx.Commit()
 }
+
+// MERGE joins against the candidates instead of probing a key: an index on
+// every retained trace is loaded whole to upsert or checkpoint, and at a few
+// million traces that alone outgrew a 1 GB memory limit.
+const traceCandidateColumns = `VALUES (excluded.trace_id,excluded.namespace,excluded.service,excluded.min_start,excluded.max_start,excluded.max_end,excluded.has_error)`
 
 // One candidate row per trace is sufficient while the requested namespace and
 // service are unambiguous. Mixed scopes are NULL and use exact batch parts.

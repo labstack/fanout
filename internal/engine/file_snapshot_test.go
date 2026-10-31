@@ -355,7 +355,7 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 		t.Fatalf("rebuilt bound=%d: %v", minStart, err)
 	}
 	var version int
-	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != 6 {
+	if err := d.DB.QueryRow(`SELECT version FROM read_cache_version`).Scan(&version); err != nil || version != readCacheVersion {
 		t.Fatalf("version=%d: %v", version, err)
 	}
 

@@ -113,3 +113,34 @@ func TestCreateViews_AttrMacroWorks(t *testing.T) {
 		t.Errorf("attr() = %q, want %q", result, "hello")
 	}
 }
+
+// An index on the per-trace candidate table grows with every retained trace,
+// and DuckDB loads all of it to upsert or checkpoint. At a few million traces
+// that exceeded a 1 GB memory limit, failed the checkpoint and invalidated the
+// database, so the read cache keeps no index on per-trace rows.
+func TestCreateTables_ReadCacheHasNoTraceIndex(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables failed: %v", err)
+	}
+	var tables []string
+	rows, err := db.Query(`SELECT DISTINCT table_name FROM duckdb_constraints() WHERE table_name IN ('read_trace_candidates','read_trace_parts') AND constraint_type IN ('PRIMARY KEY','UNIQUE')
+UNION SELECT DISTINCT table_name FROM duckdb_indexes() WHERE table_name IN ('read_trace_candidates','read_trace_parts')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table string
+		if err := rows.Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) > 0 {
+		t.Fatalf("per-trace read cache tables have an index: %v", tables)
+	}
+}
