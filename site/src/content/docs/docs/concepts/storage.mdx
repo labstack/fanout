@@ -120,8 +120,12 @@ fail before cleanup or schema rewriting, leaving the files intact.
 ## Small files are bounded by compaction
 
 Atomic ingestion creates immutable batch directories. Maintenance drains every
-eligible compaction group, choosing inputs by both count and a 25-million-row
-ceiling. It combines same-day, same-generation files, builds a replacement trace
+eligible compaction group, choosing inputs by count, bytes, and a
+25-million-row ceiling. It combines files from the same ingestion hour and
+generation. Once an hour is more than a day old, its small files may also merge
+with neighbouring hours of the same UTC day, up to 250,000 rows per file, so a
+quiet install does not keep one small file per hour for its whole retention.
+Each merge builds a replacement trace
 index, and atomically swaps the replacement for its inputs. A durable compaction
 marker makes an interrupted swap resumable. Active DuckDB readers pin immutable
 files while retention or compaction removes them, so reads never lose an open
@@ -133,6 +137,13 @@ that work is prepared.
 
 Retention is based on ingestion time rather than event time. A service with a
 bad clock therefore cannot pin a batch on disk by emitting a far-future event.
+
+Retention removes whole files, never single rows, as Prometheus, Tempo, and
+Loki remove whole blocks or chunks. A file expires when its newest row passes
+the cutoff, so rows in a day-merged file can stay up to one day past
+`FANOUT_RETENTION_DAYS`, plus one maintenance interval. Service and edge
+rollups expire exactly at the cutoff, so for that last day raw telemetry can
+outlive its rollups.
 
 ## Dashboard reads pin completed batches
 
