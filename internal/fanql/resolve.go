@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/sqlscan"
@@ -58,72 +59,10 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, query
 	if q == nil {
 		return nil, query.Problems{{Path: "text", Message: "a query is required"}}
 	}
-	for i, e := range q.Where {
-		r.path = fmt.Sprintf("where[%d]", i)
-		r.expr(e)
-	}
-	if s := q.Stage; s != nil {
-		if s.Histogram != nil {
-			r.path = "histogram.field"
-			r.field(s.Histogram)
-		}
-		for i := range s.By {
-			r.path = fmt.Sprintf("by[%d]", i)
-			r.field(&s.By[i])
-		}
-		aliases := map[string]bool{}
-		for i := range s.Measures {
-			m := &s.Measures[i]
-			r.path = fmt.Sprintf("measures[%d]", i)
-			before := len(r.problems)
-			expr := r.measure(m.Parsed.Expr, m.Info, m.Filters)
-			if len(r.problems) == before {
-				parsed, message, hint := query.MeasureFromExpr(q.Source, expr, m.Alias, r.vocab.measures())
-				if message != "" {
-					r.problems = append(r.problems, query.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
-				} else {
-					m.Parsed = parsed
-				}
-			}
-			if m.Alias != "" && !aliasName.MatchString(m.Alias) {
-				r.issue(m.At, fmt.Sprintf("alias %q must be lowercase letters, digits and underscores", m.Alias))
-			}
-			name := measureAlias(*m, s.Measures)
-			if aliases[name] {
-				r.issue(m.At, "two measures are named "+name+"; add distinct aliases with as")
-			}
-			aliases[name] = true
-		}
-	}
+	r.check(q)
 	r.sort()
 	if len(r.problems) == 0 {
-		pq, ps := lower(r.out)
-		r.problems = append(r.problems, ps...)
-		vars := map[string]query.Variable(nil)
-		if opts.Variables != nil {
-			vars = map[string]query.Variable{}
-			for _, v := range opts.Variables {
-				vars[v.Name] = v
-			}
-		}
-		if opts.Viz != "" && len(ps) == 0 {
-			ps, _ = query.Shape(&pq, opts.Viz, vars, preparedMeasures(q))
-			for _, p := range ps {
-				p.Span = textSpan(queryPathSpan(q, p.Path))
-				r.problems = append(r.problems, p)
-			}
-		}
-		r.out.Compatible = query.CompatibleVizzes(&pq, vars, preparedMeasures(q))
-		if pq.Bucket == "" && q.Stage != nil && q.Stage.Histogram == nil {
-			pq.Bucket = "auto"
-			if ps, _ := query.Shape(&pq, "timeseries", vars, preparedMeasures(q)); len(ps) == 0 {
-				edit := *q
-				stage := *q.Stage
-				stage.Bucket = "auto"
-				edit.Stage = &stage
-				r.out.Edits = append(r.out.Edits, VizEdit{Viz: "timeseries", Text: print(&edit)})
-			}
-		}
+		r.shape(q, opts)
 	}
 	sort.SliceStable(r.problems, func(i, j int) bool {
 		return r.problems[i].Span != nil && r.problems[j].Span != nil && r.problems[i].Span.Start < r.problems[j].Span.Start
@@ -136,6 +75,135 @@ func resolveWith(q *queryTree, opts Options, vocab vocabulary) (*resolved, query
 		return nil, r.problems
 	}
 	return r.out, nil
+}
+
+// checkRecovered reports filter and grouping field problems in a tree
+// recovered from syntax problems, so one pass reports both kinds. Measures and
+// sort keys are not checked: a recovered stage is partial, and its problems
+// would repeat the syntax problem.
+func checkRecovered(q *queryTree, opts Options, vocab vocabulary) query.Problems {
+	r := &resolver{opts: opts, vocab: vocab, out: &resolved{Query: q, Notices: []Notice{}}}
+	for i, e := range q.Where {
+		r.path = fmt.Sprintf("where[%d]", i)
+		r.expr(e)
+	}
+	if q.Stage != nil {
+		for i := range q.Stage.By {
+			r.path = fmt.Sprintf("by[%d]", i)
+			r.field(&q.Stage.By[i])
+		}
+	}
+	return r.problems
+}
+
+func (r *resolver) check(q *queryTree) {
+	for i, e := range q.Where {
+		r.path = fmt.Sprintf("where[%d]", i)
+		r.expr(e)
+	}
+	s := q.Stage
+	if s == nil {
+		return
+	}
+	if s.Histogram != nil {
+		r.path = "histogram.field"
+		r.field(s.Histogram)
+	}
+	for i := range s.By {
+		r.path = fmt.Sprintf("by[%d]", i)
+		r.field(&s.By[i])
+	}
+	aliases := map[string]bool{}
+	for i := range s.Measures {
+		m := &s.Measures[i]
+		r.path = fmt.Sprintf("measures[%d]", i)
+		before := len(r.problems)
+		expr := r.measure(m.Parsed.Expr, m.Info, m.Filters)
+		if len(r.problems) == before {
+			parsed, message, hint := query.MeasureFromExpr(q.Source, expr, m.Alias, r.vocab.measures())
+			if message != "" {
+				r.problems = append(r.problems, query.Problem{Path: r.path, Message: message, Hint: hint, Span: textSpan(m.At)})
+			} else {
+				m.Parsed = parsed
+			}
+		}
+		if m.Alias != "" && !aliasName.MatchString(m.Alias) {
+			r.issue(m.At, fmt.Sprintf("alias %q must be lowercase letters, digits and underscores", m.Alias))
+		}
+		name := measureAlias(*m, s.Measures)
+		if aliases[name] {
+			r.issue(m.At, "two measures are named "+name+"; add distinct aliases with as")
+		}
+		aliases[name] = true
+	}
+}
+
+// shape lowers the query and checks it against the requested viz, or against
+// every viz when none is requested: a query no viz accepts is a problem here,
+// reported with the nearest viz's reasons, rather than a failed run.
+func (r *resolver) shape(q *queryTree, opts Options) {
+	pq, ps := lower(r.out)
+	r.problems = append(r.problems, ps...)
+	if len(ps) != 0 {
+		return
+	}
+	vars := map[string]query.Variable(nil)
+	if opts.Variables != nil {
+		vars = map[string]query.Variable{}
+		for _, v := range opts.Variables {
+			vars[v.Name] = v
+		}
+	}
+	r.out.Compatible = query.CompatibleVizzes(&pq, vars, preparedMeasures(q))
+	viz := opts.Viz
+	if viz == "" && len(r.out.Compatible) == 0 && q.Stage != nil {
+		viz = nearestViz(pq)
+	}
+	if viz != "" {
+		ps, _ = query.Shape(&pq, viz, vars, preparedMeasures(q))
+		for _, p := range ps {
+			p.Span = textSpan(queryPathSpan(q, p.Path))
+			r.problems = append(r.problems, p)
+		}
+	}
+	if opts.Viz == "" && pq.Bucket != "" && len(r.out.Compatible) > 0 && !slices.ContainsFunc(r.out.Compatible, func(c query.VizCompat) bool {
+		return !slices.Contains([]string{"timeseries", "heatmap", "state_timeline"}, c.Viz)
+	}) {
+		// Every viz this query fits picks series by top, so the notice holds
+		// before a viz is chosen.
+		for _, notice := range ignoredClauseNotices(pq, "timeseries") {
+			r.path = notice.Path
+			r.notice(queryPathSpan(q, notice.Path), notice.Message)
+		}
+	}
+	if pq.Bucket == "" && q.Stage != nil && q.Stage.Histogram == nil {
+		pq.Bucket = "auto"
+		if ps, _ := query.Shape(&pq, "timeseries", vars, preparedMeasures(q)); len(ps) == 0 {
+			edit := *q
+			stage := *q.Stage
+			stage.Bucket = "auto"
+			edit.Stage = &stage
+			r.out.Edits = append(r.out.Edits, VizEdit{Viz: "timeseries", Text: print(&edit)})
+		}
+	}
+}
+
+// nearestViz is the viz whose shape a query is closest to: its problems
+// explain why no viz accepts the query.
+func nearestViz(q query.Spec) string {
+	switch {
+	case q.Histogram != nil && q.Bucket != "":
+		return "heatmap"
+	case q.Histogram != nil:
+		return "histogram"
+	case len(q.Measures) == 0 && q.From == "logs":
+		return "logs"
+	case len(q.Measures) == 0 && q.From == "spans":
+		return "traces"
+	case q.Bucket != "":
+		return "timeseries"
+	}
+	return "table"
 }
 
 func textSpan(s span) *query.TextSpan { return &query.TextSpan{Start: s.Start, End: s.End} }
@@ -227,8 +295,14 @@ func (r *resolver) expr(e filterExpr) {
 		}
 	case *betweenExpr:
 		r.field(&x.Field)
+		before := len(r.problems)
 		r.value(&x.Field, &x.Lo, "between", false)
 		r.value(&x.Field, &x.Hi, "between", false)
+		if lo, ok := rangeNumber(x.Lo); ok && len(r.problems) == before {
+			if hi, ok := rangeNumber(x.Hi); ok && lo > hi {
+				r.issue(x.At, diagnostic(diagRangeOrder, printField(x.Field), x.Hi.Text, x.Lo.Text))
+			}
+		}
 		if x.Field.Ref.Column == "severity" && x.Field.Ref.Key == "" {
 			x.Bands = r.bands(x.Field, "between", x.Lo, &x.Hi)
 		}
@@ -278,6 +352,32 @@ func (r *resolver) expr(e filterExpr) {
 	}
 }
 
+// rangeNumber is a between bound's comparable number: milliseconds for a
+// duration, the value for a number.
+func rangeNumber(v literalValue) (float64, bool) {
+	switch v.Kind {
+	case durationValue:
+		return durationMS(v.Text)
+	case numberValue:
+		n, err := strconv.ParseFloat(v.Text, 64)
+		return n, err == nil
+	}
+	return 0, false
+}
+
+// singleUnit spells a duration in the largest unit that keeps it whole.
+func singleUnit(d time.Duration) string {
+	for _, u := range []struct {
+		name string
+		size time.Duration
+	}{{"h", time.Hour}, {"m", time.Minute}, {"s", time.Second}, {"ms", time.Millisecond}} {
+		if d%u.size == 0 {
+			return strconv.FormatInt(int64(d/u.size), 10) + u.name
+		}
+	}
+	return strconv.FormatInt(d.Microseconds(), 10) + "us"
+}
+
 func isRange(op string) bool {
 	return op == ">" || op == ">=" || op == "<" || op == "<=" || op == "between"
 }
@@ -315,6 +415,10 @@ func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 		return
 	}
 	if strings.EqualFold(f.Key, "duration") && f.Scope == "" {
+		if d, err := time.ParseDuration(strings.ToLower(v.Text)); err == nil && v.Kind == wordValue && d > 0 {
+			r.issue(v.At, diagnostic(diagCompoundDuration, singleUnit(d)))
+			return
+		}
 		r.issue(v.At, "duration needs a unit; e.g. duration>500ms")
 		return
 	}
@@ -699,6 +803,9 @@ func queryPathSpan(q *queryTree, path string) span {
 		}
 		if path == "bucket" {
 			return q.Stage.At
+		}
+		if path == "measures" && len(q.Stage.Measures) > 0 {
+			return span{q.Stage.Measures[0].At.Start, q.Stage.Measures[len(q.Stage.Measures)-1].At.End}
 		}
 	}
 	if path == "sort" && q.Sort != nil {

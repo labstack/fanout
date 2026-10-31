@@ -194,7 +194,7 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"spans where http_status_code>500ms", "units apply to duration only; write http_status_code>500"},
 		{"spans where duration>500", "duration needs a unit; e.g. duration>500ms"},
 		{"spans where duration>-1ms", "durations are not negative"},
-		{"spans where duration>1h30m", "duration needs a unit"},
+		{"spans where duration>1h30m", "compound durations are not supported; write 90m"},
 		{"spans where duration_ms:true", "duration_ms needs a number"},
 		{"logs where time:x", `"time" is a time column; compare it with > or <`},
 		{`spans where start_time>"yesterday"`, "RFC 3339"},
@@ -240,7 +240,8 @@ func TestResolveSortKeys(t *testing.T) {
 		{"spans sort +duration", "traces", true, ""}, {"spans sort duration", "traces", false, ""}, {"spans sort errors", "traces", false, "sort errors also filters to error spans; new queries: write status:error … sort duration"},
 		{"spans sort +start", "traces", false, ""}, {"logs sort time", "logs", false, ""}, {"logs sort +time", "logs", false, ""}, {"logs sort duration", "logs", true, ""},
 		{"logs | count() by body_template sort count", "log_patterns", false, ""}, {"logs | count() by body_template sort rate", "log_patterns", true, ""},
-		{"spans | count() every 1m sort count", "timeseries", false, "sort does not apply to bucketed series; series are chosen by top (options)"}, {"spans | count() every 1m sort count", "", false, ""},
+		{"spans | count() every 1m sort count", "timeseries", false, "sort does not apply to bucketed series; series are chosen by top (options)"}, {"spans | count() every 1m sort count", "", false, "sort does not apply to bucketed series; series are chosen by top (options)"},
+		{"logs | count() by body_template every 1m sort count", "", false, ""},
 	} {
 		r, ps := resolvedText(t, tt.text, Options{Viz: tt.viz})
 		if tt.bad {

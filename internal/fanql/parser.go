@@ -55,10 +55,21 @@ func (p *parser) expectNext(alternatives ...expect) {
 	}
 }
 
-func (p *parser) expectTerm(nested bool) {
+// Fields rank before clause words: a term start more often begins a filter
+// than it ends the filter list.
+func termAlternatives(nested bool) []expect {
 	alternatives := []expect{{Class: "field"}, {Class: "free_text"}, {Class: "operator", Scope: "term"}, {Class: "variable"}}
 	if !nested {
-		alternatives = append([]expect{{Class: "clause"}}, alternatives...)
+		alternatives = append(alternatives, expect{Class: "clause"})
+	}
+	return alternatives
+}
+
+func (p *parser) expectTerm(nested bool) {
+	alternatives := termAlternatives(nested)
+	if !nested && p.i == 1 && p.completionQuery != nil && !p.completionQuery.WhereWord {
+		// Directly after the source, where and the other clause words lead.
+		alternatives = append(alternatives[len(alternatives)-1:], alternatives[:len(alternatives)-1]...)
 	}
 	p.expectNext(alternatives...)
 }
@@ -67,7 +78,18 @@ func (p *parser) expectTerm(nested bool) {
 // allocation. Other panics remain visible to callers and tests.
 type parseBound struct{}
 
-func parseWith(text string, source string, vocab vocabulary) (q *queryTree, problems query.Problems) {
+func parseWith(text string, source string, vocab vocabulary) (*queryTree, query.Problems) {
+	q, problems := parseRecovered(text, source, vocab)
+	if len(problems) > 0 {
+		return nil, problems
+	}
+	return q, nil
+}
+
+// parseRecovered also returns the recovered tree beside syntax problems, so the
+// resolver can report its own problems in the same pass. A bound failure
+// returns no tree.
+func parseRecovered(text string, source string, vocab vocabulary) (q *queryTree, problems query.Problems) {
 	p := &parser{vocab: vocab, runes: []rune(text), bounded: true, heights: make(map[any]int)}
 	defer func() {
 		if v := recover(); v != nil {
@@ -77,9 +99,6 @@ func parseWith(text string, source string, vocab vocabulary) (q *queryTree, prob
 			q = nil
 		}
 		problems = p.finish()
-		if len(problems) > 0 {
-			q = nil
-		}
 	}()
 	if len(p.runes) > maxTextRunes || len(text) > maxTextBytes {
 		p.bound(span{0, len(p.runes)}, diagTextBound)
@@ -164,6 +183,13 @@ func (p *parser) issue(at span, message, hint string) {
 	p.reported[p.clauseID] = true
 	p.problems = append(p.problems, query.Problem{Path: "text", Message: message, Hint: hint, Span: &query.TextSpan{Start: at.Start, End: at.End}})
 }
+func (p *parser) fix(at span, message, hint string, fixes ...query.FixIt) {
+	before := len(p.problems)
+	p.issue(at, message, hint)
+	if len(p.problems) > before {
+		p.problems[len(p.problems)-1].FixIts = fixes
+	}
+}
 func (p *parser) report(at span, code diagnosticCode, args ...any) {
 	p.issue(at, diagnostic(code, args...), hint(code))
 }
@@ -241,7 +267,26 @@ func (p *parser) query(source string) *queryTree {
 	if first.Kind != tokenWord || !sources[q.Source] {
 		switch q.Source {
 		case "from", "index", "source", "search":
-			p.report(first.Span, diagFrom, q.Source)
+			// The source after a foreign lead word is still the source, so the
+			// rest of the query parses without a cascade.
+			if next := p.peek(); next.Kind == tokenWord && sources[strings.ToLower(next.Text)] && next.Span.Start > first.Span.End {
+				source := strings.ToLower(p.take().Text)
+				at := span{first.Span.Start, next.Span.End}
+				p.fix(at, diagnostic(diagFrom, q.Source, source), "", query.FixIt{Label: source, Span: query.TextSpan{Start: at.Start, End: at.End}, Text: source})
+				q.Source, q.SourceSpan = source, next.Span
+				break
+			}
+			p.report(first.Span, diagFrom, q.Source, "spans")
+		case "select", "{":
+			code := diagSQL
+			if q.Source == "{" {
+				code = diagSelector
+			}
+			p.report(first.Span, code)
+			for p.peek().Kind != eof {
+				p.take()
+			}
+			return q
 		default:
 			suggestion := hint(diagSource)
 			if q.Source == "traces" {
@@ -273,8 +318,8 @@ func (p *parser) query(source string) *queryTree {
 				p.skipRun()
 				continue
 			}
-			if p.is("sort") && grammarText(p.ahead(1)) == "by" {
-				p.report(p.take().Span, diagForeignStage, "sort")
+			if p.is("sort") && grammarText(p.ahead(1)) == "by" || q.Stage != nil && (p.is("head") || p.is("take") || (p.is("order") || p.is("group")) && grammarText(p.ahead(1)) == "by") {
+				p.foreignStage(pipe.Span.Start)
 				p.skipStage()
 				continue
 			}
@@ -378,6 +423,9 @@ func (p *parser) filters(nested bool) []filterExpr {
 		x := p.term(nested)
 		if x != nil {
 			terms = append(terms, x)
+			if p.completion && !nested {
+				p.completionQuery.Where = terms
+			}
 		} else if len(ops) >= len(terms) && len(ops) > 0 {
 			ops = ops[:len(ops)-1]
 		}
@@ -513,6 +561,8 @@ func (p *parser) term(nested bool) filterExpr {
 	p.expectTerm(nested)
 	if p.is("-") || p.is("not") {
 		t := p.take()
+		// A negation needs a term; clause words cannot follow it.
+		p.expectNext(termAlternatives(true)...)
 		p.enter(t.Span)
 		x := p.term(nested)
 		p.leave()
@@ -589,6 +639,11 @@ func (p *parser) primary(nested bool) filterExpr {
 		return nil
 	}
 	op := p.lower()
+	if p.completion && p.peek().Kind == eof && p.peek().Span.Start > field.At.End && !p.knownField(field) {
+		// After a word that names no column and a space, the word is most
+		// likely finished free text: the next term ranks before an operator.
+		p.expectNext(append(termAlternatives(nested), expect{Class: "operator", Field: &field})...)
+	}
 	p.expectNext(expect{Class: "operator", Field: &field})
 	if isComparison(op) || op == ":" || op == "~" || op == "!~" {
 		if numberPattern.MatchString(field.Key) || durationPattern.MatchString(field.Key) {
@@ -633,7 +688,8 @@ func (p *parser) primary(nested bool) filterExpr {
 				return nil
 			}
 			example := fieldExample(field, op)
-			p.report(span{field.At.Start, oper.Span.End}, diagValue, field.Key, op, field.Key, op, example)
+			typed := p.text(field.At)
+			p.report(span{field.At.Start, oper.Span.End}, diagValue, typed, op, typed, op, example)
 			if !boundary && !p.filterStop(nested) {
 				p.skipRun()
 			}
@@ -713,6 +769,12 @@ func (p *parser) primary(nested bool) filterExpr {
 		p.report(p.tokens[p.i-1].Span, diagUnexpected, "not")
 		return nil
 	}
+	if field.Bracket {
+		// A bracket key is unmistakably a field; it is never searched as text.
+		typed := p.text(field.At)
+		p.report(field.At, diagBracketOperator, typed, typed, typed)
+		return nil
+	}
 	if !nested && clauses[word] {
 		p.report(t.Span, diagUnexpected, t.Text)
 		return nil
@@ -721,9 +783,32 @@ func (p *parser) primary(nested bool) filterExpr {
 		p.wildcard(literalValue{Text: t.Text, At: t.Span})
 		return nil
 	}
+	if v := classify(t); v.Kind == variableValue && p.completionQuery != nil {
+		// A variable alone searches the free-text column for its value, so it is
+		// checked against the declarations like any other variable reference.
+		column := map[string]string{"spans": "operation", "logs": "body"}[p.completionQuery.Source]
+		if column != "" {
+			x := &comparison{Field: fieldName{Key: column, Single: true, At: span{t.Span.Start, t.Span.Start}}, Op: "~", Value: v, At: t.Span}
+			p.node(x)
+			return x
+		}
+	}
 	x := &textExpr{Value: literalValue{Kind: wordValue, Text: p.text(field.At), At: field.At}, At: field.At}
 	p.node(x)
 	return x
+}
+
+// knownField reports a word completion should treat as a field: a column of
+// the source, or an attribute path.
+func (p *parser) knownField(f fieldName) bool {
+	if !f.Single || f.Scope != "" || f.Bracket || p.completionQuery == nil {
+		return true
+	}
+	if strings.EqualFold(f.Key, "duration") {
+		return true
+	}
+	columns, _ := p.vocab.columns(p.completionQuery.Source)
+	return slices.ContainsFunc(columns, func(c query.Field) bool { return strings.EqualFold(c.Name, f.Key) })
 }
 
 func isComparison(s string) bool {
@@ -1051,14 +1136,91 @@ func (p *parser) foreignTerm() bool {
 		return true
 	}
 	if word == "facet" || (word == "order" || word == "group") && grammarText(p.ahead(1)) == "by" {
-		p.report(t.Span, diagForeignClause, word)
-		p.skipRun()
-		if p.is("by") {
-			p.take()
-		}
+		p.foreignStage(t.Span.Start)
 		return true
 	}
 	return false
+}
+
+// foreignStage reports a foreign command at the current token, naming the
+// FanQL clause it maps to, and consumes the command with its simple argument.
+// start is where a fix-it replacement begins, including a preceding |.
+func (p *parser) foreignStage(start int) {
+	t := p.take()
+	word := strings.ToLower(t.Text)
+	end := t.Span.End
+	if (word == "order" || word == "sort" || word == "group") && p.is("by") {
+		end = p.take().Span.End
+		word += " by"
+	}
+	fixAt := query.TextSpan{Start: start, End: end}
+	at := span{t.Span.Start, end}
+	switch word {
+	case "order by", "sort by":
+		key := "count"
+		if k := p.peek(); k.Kind == tokenWord || k.Kind == tokenIdent {
+			key = p.take().Text
+			for p.is("asc") || p.is("desc") {
+				p.take()
+			}
+		}
+		p.fix(at, diagnostic(diagForeignSort, word, key), "", query.FixIt{Label: "sort", Span: fixAt, Text: "sort"})
+	case "head", "take":
+		if n := p.peek(); n.Kind == tokenNumber || n.Kind == tokenWord && strings.IndexFunc(n.Text, func(r rune) bool { return !digit(r) }) < 0 {
+			p.take()
+			p.fix(at, diagnostic(diagForeignLimit, word, n.Text), "", query.FixIt{Label: "limit", Span: fixAt, Text: "limit"})
+			return
+		}
+		p.issue(at, diagnostic(diagForeignLimit, word, "10"), "")
+	case "group by", "facet":
+		p.report(at, diagForeignClause, word)
+		if word == "facet" {
+			p.skipRun()
+		}
+	default:
+		p.report(at, diagForeignStage, word)
+	}
+}
+
+var foreignPercentile = regexp.MustCompile(`(?i)^(percentile|pct|perc([0-9]{1,2})|median|mean|dc|distinct_count|cardinality)\(\s*([^\s,()]+)\s*(?:,\s*([0-9.]+)\s*)?\)$`)
+
+// foreignCall reports a foreign aggregate call, suggesting the FanQL measure
+// when the call has a direct equivalent: percentile(duration, 95) is p95(duration).
+func (p *parser) foreignCall() {
+	name := p.peek()
+	word := p.lower()
+	p.skipRun()
+	at := span{name.Span.Start, p.previousEnd()}
+	suggestion := ""
+	if m := foreignPercentile.FindStringSubmatch(p.text(at)); m != nil {
+		field := m[3]
+		switch fn := strings.ToLower(m[1]); {
+		case fn == "median":
+			suggestion = "p50(" + field + ")"
+		case fn == "mean":
+			suggestion = "avg(" + field + ")"
+		case fn == "dc" || fn == "distinct_count" || fn == "cardinality":
+			suggestion = "count_distinct(" + field + ")"
+		default:
+			percent := m[2]
+			if percent == "" {
+				percent = m[4]
+			}
+			if n, err := strconv.ParseFloat(percent, 64); err == nil && n > 0 && n < 100 {
+				suggestion = "quantile(" + field + ", " + strconv.FormatFloat(n/100, 'f', -1, 64) + ")"
+				for _, q := range []string{"50", "75", "90", "95", "99"} {
+					if percent == q {
+						suggestion = "p" + q + "(" + field + ")"
+					}
+				}
+			}
+		}
+	}
+	if suggestion == "" {
+		p.report(name.Span, diagForeignCall, word)
+		return
+	}
+	p.fix(at, diagnostic(diagForeignMeasure, word, suggestion), "", query.FixIt{Label: suggestion, Span: query.TextSpan{Start: at.Start, End: at.End}, Text: suggestion})
 }
 
 func (p *parser) unexpected() {
@@ -1158,16 +1320,18 @@ func (p *parser) stage(start int) *aggregation {
 	for p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] {
 		before := p.i
 		if p.peek().Kind == tokenIdent && foreignStages[p.lower()] {
-			t := p.take()
-			p.report(t.Span, diagForeignStage, strings.ToLower(t.Text))
+			stageStart := p.peek().Span.Start
+			if len(s.Measures) == 0 && s.Histogram == nil {
+				stageStart = start
+			}
+			p.foreignStage(stageStart)
 			for p.peek().Kind != eof && !p.is("|") && !p.is(",") && !clauses[p.lower()] && !foreignStages[p.lower()] && grammarText(p.ahead(1)) != "(" {
 				p.take()
 			}
 			continue
 		}
 		if p.peek().Kind == tokenIdent && foreignCalls[p.lower()] && grammarText(p.ahead(1)) == "(" {
-			p.report(p.peek().Span, diagForeignCall, p.lower())
-			p.skipRun()
+			p.foreignCall()
 			continue
 		}
 		expr := p.measureExpression(0)
@@ -1226,7 +1390,7 @@ func (p *parser) stage(start int) *aggregation {
 			}
 			continue
 		}
-		if expr != nil && p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] {
+		if expr != nil && p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] && !foreignStages[p.lower()] {
 			p.report(p.peek().Span, diagMeasureComma)
 		}
 		if p.i == before {

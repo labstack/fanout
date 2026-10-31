@@ -100,6 +100,13 @@ const (
 	diagLimit
 	diagDuplicate
 	diagOrder
+	diagSQL
+	diagForeignSort
+	diagForeignLimit
+	diagForeignMeasure
+	diagCompoundDuration
+	diagRangeOrder
+	diagBracketOperator
 )
 
 func message(code diagnosticCode) string {
@@ -121,7 +128,21 @@ func message(code diagnosticCode) string {
 	case diagSource:
 		return "unknown source %q"
 	case diagFrom:
-		return "%q is not FanQL; start with the source: spans where ..."
+		return "%q is not FanQL; start with the source: %s where ..."
+	case diagSQL:
+		return "SQL is not FanQL; start with the source, e.g. spans | count() by service"
+	case diagForeignSort:
+		return "%q is not FanQL; use sort, e.g. sort %s"
+	case diagForeignLimit:
+		return "%q is not FanQL; use limit, e.g. limit %s"
+	case diagForeignMeasure:
+		return "%s(...) is not FanQL; write %s"
+	case diagCompoundDuration:
+		return "compound durations are not supported; write %s"
+	case diagRangeOrder:
+		return "between needs the lower value first: %s between %s and %s"
+	case diagBracketOperator:
+		return "%s needs an operator, e.g. %s:value, or %s:* for any value"
 	case diagPageWhere:
 		return "the page supplies where"
 	case diagPageFilter:
@@ -183,7 +204,7 @@ func message(code diagnosticCode) string {
 	case diagForeignCall:
 		return "%s(...) is not FanQL; use the FanQL measure functions"
 	case diagForeignClause:
-		return "%s is not FanQL; use by after measures, e.g. | count() by service"
+		return "%q is not FanQL; use by after measures, e.g. | count() by service"
 	case diagTime:
 		return "set the time range with the time picker, not in the query"
 	case diagTimeCall:

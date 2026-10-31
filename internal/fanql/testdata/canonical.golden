@@ -132,6 +132,7 @@
   "spans status:error": "spans where status:error",
   "spans status:error | count()": "spans where status:error | count()",
   "spans status:error | count() by service": "spans where status:error | count() by service",
+  "spans where $x": "spans where operation ~ $x",
   "spans where (a:1 b:2)": "spans where (attributes['a']:1 attributes['b']:2)",
   "spans where (a:1 b:2) or c:3": "spans where (attributes['a']:1 attributes['b']:2) or attributes['c']:3",
   "spans where (a:1)": "spans where attributes['a']:1",

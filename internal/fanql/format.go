@@ -94,7 +94,7 @@ func Format(ctx context.Context, p query.Parser, stored query.Spec, opts Options
 		q.Where = append(q.Where, e)
 		if t == tierNormalized {
 			f.Exactness = Normalized
-			f.Notices = append(f.Notices, Notice{Path: fmt.Sprintf("where[%d]", i), Message: fmt.Sprintf("where[%d] is shown as %s; stored text is %q", i, printEntry(e, false), text)})
+			f.Notices = append(f.Notices, Notice{Path: fmt.Sprintf("where[%d]", i), Message: fmt.Sprintf("where[%d] is shown as %s; stored text is %q", i, printEntry(e, len(stored.Where) > 1), text)})
 		}
 	}
 	if len(stored.Measures) > 0 || stored.Histogram != nil || len(stored.By) > 0 || stored.Bucket != "" {

@@ -3,6 +3,8 @@ package fanql
 import (
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestCompileRejectsReservedVariablesInEveryPosition(t *testing.T) {
@@ -135,5 +137,40 @@ func TestCompileReportsIndependentSiblingGroupingProblems(t *testing.T) {
 		if p.Message != "mixed and/or needs parentheses" || len(p.FixIts) != 2 {
 			t.Fatalf("grouping repair: %+v", p)
 		}
+	}
+}
+
+func TestCompileReportsSyntaxAndFieldProblemsInOnePass(t *testing.T) {
+	_, ps := Compile("spans where opération:café 日本 kind:server or status:error", Options{})
+	if len(ps) != 2 || ps[0].Message != "mixed and/or needs parentheses" || ps[1].Message != `"opération" needs brackets` {
+		t.Fatalf("%+v", ps)
+	}
+	_, ps = Compile("from spans where service:cart", Options{})
+	if len(ps) != 1 || len(ps[0].FixIts) != 1 || ps[0].FixIts[0].Text != "spans" {
+		t.Fatalf("from cascades or lacks a fix-it: %+v", ps)
+	}
+}
+
+func TestCompileQueryNoVizAcceptsIsAProblem(t *testing.T) {
+	_, ps := Compile("spans | p95(duration), count() every 5m", Options{})
+	if len(ps) != 1 || !strings.Contains(ps[0].Message, "different units") || ps[0].Span == nil || ps[0].Span.Start != 8 || ps[0].Span.End != 30 {
+		t.Fatalf("%+v", ps)
+	}
+	if c, ps := Compile("spans | p95(duration), p99(duration) every 5m", Options{}); c == nil || len(ps) != 0 || c.Compatible[0].Viz != "timeseries" {
+		t.Fatalf("same-unit measures: %+v", ps)
+	}
+}
+
+func TestCompileNoticesWithoutViz(t *testing.T) {
+	c, ps := Compile("spans | count() by service every 5m limit 2", Options{})
+	if len(ps) != 0 || len(c.Notices) != 1 || c.Notices[0].Path != "limit" {
+		t.Fatalf("bucketed limit: %+v %+v", c, ps)
+	}
+	c, ps = Compile("spans where $x", Options{})
+	if len(ps) != 0 || c.Canonical != "spans where operation ~ $x" || len(c.Notices) != 1 || c.Notices[0].Message != "declared variables are needed to check $x" {
+		t.Fatalf("variable free text: %+v %+v", c, ps)
+	}
+	if _, ps := Compile("logs where $x", Options{Variables: []query.Variable{{Name: "service"}}}); len(ps) != 1 || !strings.Contains(ps[0].Message, "$x") {
+		t.Fatalf("undeclared variable free text: %+v", ps)
 	}
 }

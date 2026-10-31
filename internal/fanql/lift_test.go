@@ -149,6 +149,12 @@ func TestLiftStoredSQLShapes(t *testing.T) {
 	if err != nil || len(ps) > 0 || f.Text != `spans where (attributes['a']:1 or attributes['b']:2) service:api` {
 		t.Fatalf("entry grouping: %+v %+v %v", f, ps, err)
 	}
+	// The notice quotes the entry as the text shows it, parentheses included.
+	q = query.Spec{From: "spans", Where: []string{`service='a' OR service='b'`, `status = 'STATUS_CODE_ERROR'`}}
+	f, ps, err = Format(t.Context(), d, q, Options{})
+	if err != nil || len(ps) > 0 || len(f.Notices) != 1 || f.Notices[0].Message != `where[0] is shown as (service:a or service:b); stored text is "service='a' OR service='b'"` {
+		t.Fatalf("grouped notice: %+v %+v %v", f, ps, err)
+	}
 }
 
 func TestLiftMeasures(t *testing.T) {

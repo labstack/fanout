@@ -21,8 +21,18 @@
       "message": "\"from\" is not FanQL; start with the source: spans where ...",
       "span": {
         "start": 0,
-        "end": 4
-      }
+        "end": 10
+      },
+      "fix_its": [
+        {
+          "label": "spans",
+          "span": {
+            "start": 0,
+            "end": 10
+          },
+          "text": "spans"
+        }
+      ]
     }
   ]
 }
@@ -1963,7 +1973,7 @@
   "problems": [
     {
       "path": "text",
-      "message": "facet is not FanQL; use by after measures, e.g. | count() by service",
+      "message": "\"facet\" is not FanQL; use by after measures, e.g. | count() by service",
       "span": {
         "start": 6,
         "end": 11
@@ -1977,10 +1987,10 @@
   "problems": [
     {
       "path": "text",
-      "message": "group is not FanQL; use by after measures, e.g. | count() by service",
+      "message": "\"group by\" is not FanQL; use by after measures, e.g. | count() by service",
       "span": {
         "start": 6,
-        "end": 11
+        "end": 14
       }
     }
   ]
@@ -4296,7 +4306,7 @@
   "problems": [
     {
       "path": "where[0]",
-      "message": "duration needs a unit; e.g. duration>500ms",
+      "message": "compound durations are not supported; write 90m",
       "span": {
         "start": 21,
         "end": 26
@@ -5341,11 +5351,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "order is not FanQL; use by after measures, e.g. | count() by service",
+      "message": "\"order by\" is not FanQL; use sort, e.g. sort duration",
       "span": {
         "start": 24,
-        "end": 29
-      }
+        "end": 32
+      },
+      "fix_its": [
+        {
+          "label": "sort",
+          "span": {
+            "start": 24,
+            "end": 32
+          },
+          "text": "sort"
+        }
+      ]
     }
   ]
 }
@@ -5917,11 +5937,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "cardinality(...) is not FanQL; use the FanQL measure functions",
+      "message": "cardinality(...) is not FanQL; write count_distinct(duration)",
       "span": {
         "start": 8,
-        "end": 19
-      }
+        "end": 29
+      },
+      "fix_its": [
+        {
+          "label": "count_distinct(duration)",
+          "span": {
+            "start": 8,
+            "end": 29
+          },
+          "text": "count_distinct(duration)"
+        }
+      ]
     }
   ]
 }
@@ -6674,11 +6704,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "dc(...) is not FanQL; use the FanQL measure functions",
+      "message": "dc(...) is not FanQL; write count_distinct(duration)",
       "span": {
         "start": 8,
-        "end": 10
-      }
+        "end": 20
+      },
+      "fix_its": [
+        {
+          "label": "count_distinct(duration)",
+          "span": {
+            "start": 8,
+            "end": 20
+          },
+          "text": "count_distinct(duration)"
+        }
+      ]
     }
   ]
 }
@@ -6688,11 +6728,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "distinct_count(...) is not FanQL; use the FanQL measure functions",
+      "message": "distinct_count(...) is not FanQL; write count_distinct(duration)",
       "span": {
         "start": 8,
-        "end": 22
-      }
+        "end": 32
+      },
+      "fix_its": [
+        {
+          "label": "count_distinct(duration)",
+          "span": {
+            "start": 8,
+            "end": 32
+          },
+          "text": "count_distinct(duration)"
+        }
+      ]
     }
   ]
 }
@@ -6758,7 +6808,7 @@
   "problems": [
     {
       "path": "text",
-      "message": "\"head\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "message": "\"head\" is not FanQL; use limit, e.g. limit 10",
       "span": {
         "start": 8,
         "end": 12
@@ -6891,11 +6941,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "mean(...) is not FanQL; use the FanQL measure functions",
+      "message": "mean(...) is not FanQL; write avg(duration)",
       "span": {
         "start": 8,
-        "end": 12
-      }
+        "end": 22
+      },
+      "fix_its": [
+        {
+          "label": "avg(duration)",
+          "span": {
+            "start": 8,
+            "end": 22
+          },
+          "text": "avg(duration)"
+        }
+      ]
     }
   ]
 }
@@ -6905,11 +6965,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "median(...) is not FanQL; use the FanQL measure functions",
+      "message": "median(...) is not FanQL; write p50(duration)",
       "span": {
         "start": 8,
-        "end": 14
-      }
+        "end": 24
+      },
+      "fix_its": [
+        {
+          "label": "p50(duration)",
+          "span": {
+            "start": 8,
+            "end": 24
+          },
+          "text": "p50(duration)"
+        }
+      ]
     }
   ]
 }
@@ -7048,11 +7118,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "perc95(...) is not FanQL; use the FanQL measure functions",
+      "message": "perc95(...) is not FanQL; write p95(duration)",
       "span": {
         "start": 8,
-        "end": 14
-      }
+        "end": 24
+      },
+      "fix_its": [
+        {
+          "label": "p95(duration)",
+          "span": {
+            "start": 8,
+            "end": 24
+          },
+          "text": "p95(duration)"
+        }
+      ]
     }
   ]
 }
@@ -7209,11 +7289,21 @@
   "problems": [
     {
       "path": "text",
-      "message": "\"sort\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "message": "\"sort by\" is not FanQL; use sort, e.g. sort service",
       "span": {
         "start": 8,
-        "end": 12
-      }
+        "end": 15
+      },
+      "fix_its": [
+        {
+          "label": "sort",
+          "span": {
+            "start": 6,
+            "end": 15
+          },
+          "text": "sort"
+        }
+      ]
     }
   ]
 }
@@ -7301,7 +7391,7 @@
   "problems": [
     {
       "path": "text",
-      "message": "\"take\" is not FanQL; write the measures after |, e.g. | count() by service",
+      "message": "\"take\" is not FanQL; use limit, e.g. limit 10",
       "span": {
         "start": 8,
         "end": 12
@@ -7388,4 +7478,235 @@
       }
     }
   ]
+}
+
+{
+  "text": "from logs where service:cart",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"from\" is not FanQL; start with the source: logs where ...",
+      "span": {
+        "start": 0,
+        "end": 9
+      },
+      "fix_its": [
+        {
+          "label": "logs",
+          "span": {
+            "start": 0,
+            "end": 9
+          },
+          "text": "logs"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans | count() by service | head 5",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"head\" is not FanQL; use limit, e.g. limit 5",
+      "span": {
+        "start": 29,
+        "end": 33
+      },
+      "fix_its": [
+        {
+          "label": "limit",
+          "span": {
+            "start": 27,
+            "end": 33
+          },
+          "text": "limit"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans | count() by service order by count",
+  "problems": [
+    {
+      "path": "text",
+      "message": "\"order by\" is not FanQL; use sort, e.g. sort count",
+      "span": {
+        "start": 27,
+        "end": 35
+      },
+      "fix_its": [
+        {
+          "label": "sort",
+          "span": {
+            "start": 27,
+            "end": 35
+          },
+          "text": "sort"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "spans | percentile(duration, 95)",
+  "problems": [
+    {
+      "path": "text",
+      "message": "percentile(...) is not FanQL; write p95(duration)",
+      "span": {
+        "start": 8,
+        "end": 32
+      },
+      "fix_its": [
+        {
+          "label": "p95(duration)",
+          "span": {
+            "start": 8,
+            "end": 32
+          },
+          "text": "p95(duration)"
+        }
+      ]
+    }
+  ]
+}
+
+{
+  "text": "SELECT count(*) FROM spans",
+  "problems": [
+    {
+      "path": "text",
+      "message": "SQL is not FanQL; start with the source, e.g. spans | count() by service",
+      "span": {
+        "start": 0,
+        "end": 6
+      }
+    }
+  ]
+}
+
+{
+  "text": "{service=\"cart\"}",
+  "problems": [
+    {
+      "path": "text",
+      "message": "{ selectors are not FanQL; write labels as key:value, e.g. service:api",
+      "span": {
+        "start": 0,
+        "end": 1
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where duration between 1s and 100ms",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "between needs the lower value first: duration between 100ms and 1s",
+      "span": {
+        "start": 12,
+        "end": 41
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where http_status_code between 500 and 400",
+  "problems": [
+    {
+      "path": "where[0]",
+      "message": "between needs the lower value first: http_status_code between 400 and 500",
+      "span": {
+        "start": 12,
+        "end": 48
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where attributes['k']",
+  "problems": [
+    {
+      "path": "text",
+      "message": "attributes['k'] needs an operator, e.g. attributes['k']:value, or attributes['k']:* for any value",
+      "span": {
+        "start": 12,
+        "end": 27
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where opération:café 日本 kind:server or status:error",
+  "problems": [
+    {
+      "path": "text",
+      "message": "mixed and/or needs parentheses",
+      "hint": "write opération:café 日本 (kind:server or status:error) or (opération:café 日本 kind:server) or status:error",
+      "span": {
+        "start": 12,
+        "end": 57
+      },
+      "fix_its": [
+        {
+          "label": "opération:café 日本 (kind:server or status:error)",
+          "span": {
+            "start": 12,
+            "end": 57
+          },
+          "text": "opération:café 日本 (kind:server or status:error)"
+        },
+        {
+          "label": "(opération:café 日本 kind:server) or status:error",
+          "span": {
+            "start": 12,
+            "end": 57
+          },
+          "text": "(opération:café 日本 kind:server) or status:error"
+        }
+      ]
+    },
+    {
+      "path": "where[0]",
+      "message": "\"opération\" needs brackets",
+      "span": {
+        "start": 12,
+        "end": 21
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans | p95(duration), count() every 5m",
+  "problems": [
+    {
+      "path": "measures",
+      "message": "these measures have different units and would share one axis; split them into separate panels",
+      "span": {
+        "start": 8,
+        "end": 30
+      }
+    }
+  ]
+}
+
+{
+  "text": "spans where $x",
+  "query": {
+    "from": "spans",
+    "where": [
+      "contains(lower(operation), lower($x))"
+    ]
+  }
 }
