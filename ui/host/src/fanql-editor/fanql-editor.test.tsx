@@ -132,6 +132,24 @@ describe("FanqlEditor", () => {
     expect(view.state.doc.toString()).toBe("spans ");
   });
 
+  it("runs on Enter while a list that opened by itself shows, and accepts only after the arrows moved", async () => {
+    const items = [{ label: "service:cart", insert: "service:cart ", kind: "value", detail: "" }, { label: "service:cartservice", insert: "service:cartservice ", kind: "value", detail: "" }];
+    const complete = vi.fn().mockResolvedValue({ replace: { start: 0, end: 12 }, items, schema: { window: "1h", sampled: false, warm: true, recent: true } });
+    const { view, key, run } = await renderEditor({ value: "service:cart", complete });
+    const list = async () => act(async () => { view.dispatch({ selection: { anchor: 12 } }); startCompletion(view); await new Promise(resolve => setTimeout(resolve, 200)); });
+    await list();
+    expect(currentCompletions(view.state)).toHaveLength(2);
+    expect((await key("Enter")).defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(view.state.doc.toString()).toBe("service:cart");
+    expect(currentCompletions(view.state)).toHaveLength(0);
+    await list();
+    await key("ArrowDown");
+    await key("Enter");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(view.state.doc.toString()).toBe("service:cartservice ");
+  });
+
   it("wraps long text on screen and shows the placeholder when empty", async () => {
     const { view, editor } = await renderEditor({ value: "", placeholder: "spans | count() by service" });
     expect(view.lineWrapping).toBe(true);

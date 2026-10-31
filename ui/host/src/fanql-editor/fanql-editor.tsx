@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Annotation, Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, drawSelection, keymap, placeholder } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { acceptCompletion, autocompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, closeCompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import type { Problem } from "../api-error";
 import type { Completion } from "../explore/api";
@@ -15,6 +15,9 @@ const noProblems: readonly Problem[] = [];
 const oneLine = EditorView.theme({
   ".cm-scroller": { minHeight: "0", maxHeight: "none", overflow: "hidden", fontSize: "14px" },
   ".cm-content": { padding: "8px 4px" },
+  // The list stays clear of the screen edge, and on a phone its descriptions wrap instead of being cut.
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxWidth: "min(700px, calc(100vw - 32px))" },
+  "@media (max-width: 600px)": { ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { whiteSpace: "normal" } },
 });
 /** Marks a transaction that applies the value prop, so it is not reported back as an edit. */
 const fromProp = Annotation.define<boolean>();
@@ -56,6 +59,8 @@ export function FanqlEditor(props: FanqlEditorProps) {
   // The note describes the open suggestion list, so it shows only with one.
   const [listOpen, setListOpen] = useState(false);
   const open = useRef(false);
+  // Whether the user moved through the open list with the arrow keys.
+  const navigated = useRef(false);
   // Text reported through onChange that has not rendered back yet. A render
   // that lags behind typing echoes one of these and must not rewind the editor.
   const echoes = useRef<string[]>([]);
@@ -90,14 +95,24 @@ export function FanqlEditor(props: FanqlEditorProps) {
         return [{ changes, selection: tr.selection, scrollIntoView: tr.scrollIntoView }];
       }),
       editable.of([]), attributes.of([]),
-      autocompletion({ override: [source], activateOnTypingDelay: 120 }),
+      // Ahead of autocompletion(), whose own keys share the highest precedence.
       // Tab accepts an open suggestion; with no list it keeps the page's focus order.
-      Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => { latest.current.onRun(); return true; }, stopPropagation: true }, { key: "Tab", run: acceptCompletion }])),
-      // autocompletion() binds its own keys at high precedence, so an open
-      // list accepts on Enter; otherwise Enter runs the query.
-      keymap.of([{ key: "Enter", run: () => { latest.current.onRun(); return true; } }]),
+      // Enter accepts only a suggestion the user moved to with the arrow keys; a
+      // list that opened by itself does not stop Enter from running the query.
+      Prec.highest(keymap.of([
+        { key: "Mod-Enter", run: () => { latest.current.onRun(); return true; }, stopPropagation: true },
+        { key: "Tab", run: acceptCompletion },
+        { key: "Enter", run: view => {
+          if (navigated.current && completionStatus(view.state) === "active") return acceptCompletion(view);
+          closeCompletion(view); latest.current.onRun(); return true;
+        } },
+        ...["ArrowDown", "ArrowUp", "PageDown", "PageUp"].map(key => ({ key, run: (view: EditorView) => { if (completionStatus(view.state) === "active") navigated.current = true; return false; } })),
+      ])),
+      autocompletion({ override: [source], activateOnTypingDelay: 120 }),
       keymap.of([...defaultKeymap.filter(binding => binding.key !== "Enter"), ...historyKeymap]),
       EditorView.updateListener.of(update => {
+        // Typing changes the list, so a choice made with the arrows no longer stands.
+        if (update.docChanged || completionStatus(update.state) === null) navigated.current = false;
         if (update.docChanged && !update.transactions.some(tr => tr.annotation(fromProp))) {
           const text = update.state.doc.toString();
           echoes.current.push(text);
