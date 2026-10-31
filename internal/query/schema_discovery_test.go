@@ -26,8 +26,8 @@ func (c *gatedEngine) QueryContext(ctx context.Context, query string, args ...an
 	return c.Engine.QueryContext(ctx, query, args...)
 }
 
-// A cold burst for one window runs one discovery; callers that give up do not
-// cancel it for the others.
+// A cold burst for one window runs one discovery; a caller that gives up
+// does not cancel it, and later callers join it rather than start another.
 func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 	fixture := newFixtureExecutor(t)
 	open := make(chan struct{})
@@ -44,9 +44,11 @@ func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 	burst := &gatedEngine{Engine: fixture.engine, gate: gate}
 	e = NewExecutor(burst, 30)
 	e.now = fixture.now
-	quitter, quit := context.WithCancel(t.Context())
-	quitDone := make(chan error, 1)
-	go func() { _, err := e.Schema(quitter, SchemaRequest{Window: "1h"}); quitDone <- err }()
+	quitter, quit := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer quit()
+	if _, err := e.Schema(quitter, SchemaRequest{Window: "1h"}); !errors.Is(err, ErrSchemaBusy) {
+		t.Fatalf("a caller that gave up: %v", err)
+	}
 	results := make([]*Schema, 20)
 	var wg sync.WaitGroup
 	for i := range results {
@@ -58,26 +60,6 @@ func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 			results[i] = s
 		})
 	}
-	// Every caller joins the one discovery before the first gives up, so its
-	// leaving cannot be the last and cancel the shared flight.
-	for deadline := time.Now().Add(3 * time.Second); ; time.Sleep(time.Millisecond) {
-		e.mu.Lock()
-		joined := 0
-		if f := e.schemas["1h|"].flight; f != nil {
-			joined = f.waiters
-		}
-		e.mu.Unlock()
-		if joined == len(results)+1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%d of %d callers joined the discovery", joined, len(results)+1)
-		}
-	}
-	quit()
-	if err := <-quitDone; err == nil {
-		t.Fatal("a caller that gave up got a schema")
-	}
 	close(gate)
 	wg.Wait()
 	for _, s := range results {
@@ -87,6 +69,50 @@ func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 	}
 	if n := burst.queries.Load(); n != perDiscovery {
 		t.Fatalf("burst ran %d queries; one discovery runs %d", n, perDiscovery)
+	}
+}
+
+// A caller whose deadline passes while its discovery runs is told the schema
+// is busy; the discovery finishes and the next lookup is served from cache.
+func TestSchemaOutlivesItsCallers(t *testing.T) {
+	fixture := newFixtureExecutor(t)
+	gate := make(chan struct{})
+	e := NewExecutor(&gatedEngine{Engine: fixture.engine, gate: gate}, 30)
+	e.now = fixture.now
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := e.Schema(ctx, SchemaRequest{Window: "1h"}); !errors.Is(err, ErrSchemaBusy) {
+		t.Fatalf("caller out of time: %v", err)
+	}
+	close(gate)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if s, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Cached: true}); err == nil && s != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the abandoned discovery never warmed the cache")
+		}
+	}
+}
+
+// A discovery that overruns schemaDeadline is cancelled and frees its slot
+// and entry, so the next request starts afresh.
+func TestSchemaDiscoveryHasItsOwnDeadline(t *testing.T) {
+	saved := schemaDeadline
+	schemaDeadline = 50 * time.Millisecond
+	t.Cleanup(func() { schemaDeadline = saved })
+	fixture := newFixtureExecutor(t)
+	engine := &activeEngine{Engine: fixture.engine, gate: make(chan struct{})}
+	e := NewExecutor(engine, 30)
+	e.now = fixture.now
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h"}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("overrun discovery: %v", err)
+	}
+	e.mu.Lock()
+	_, kept := e.schemas["1h|"]
+	e.mu.Unlock()
+	if kept || engine.active.Load() != 0 || len(schemaSlots) != 0 {
+		t.Fatalf("overrun discovery kept entry=%v active=%d slots=%d", kept, engine.active.Load(), len(schemaSlots))
 	}
 }
 
@@ -138,10 +164,10 @@ func (a *activeEngine) QueryContext(ctx context.Context, query string, args ...a
 	return a.Engine.QueryContext(ctx, query, args...)
 }
 
-// Distinct keys start at most two detached discoveries at once, and a
-// discovery whose callers all left is cancelled instead of running on. A
-// cached key is served at once while both slots are busy, stale entries
-// included, and a new key past the cap is refused as busy without evicting.
+// Distinct keys start at most two detached discoveries at once, and the rest
+// wait for a slot after their callers leave. A cached key is served at once
+// while both slots are busy, stale entries included, and a new key past the
+// cap is refused as busy without evicting.
 func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 	fixture := newFixtureExecutor(t)
 	engine := &activeEngine{Engine: fixture.engine, gate: make(chan struct{})}
@@ -186,7 +212,7 @@ func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 	cachedEntry := e.schemas["5m|"]
 	delete(e.schemas, "5m|")
 	for i := len(e.schemas); i < maxSchemaEntries; i++ {
-		e.schemas[fmt.Sprintf("full%d", i)] = schemaEntry{flight: &schemaFlight{done: make(chan struct{}), waiters: 1, cancel: func() {}}}
+		e.schemas[fmt.Sprintf("full%d", i)] = schemaEntry{flight: &schemaFlight{done: make(chan struct{})}}
 	}
 	e.mu.Unlock()
 	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: "shop"}); !errors.Is(err, ErrSchemaBusy) {
@@ -202,21 +228,31 @@ func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 	e.mu.Unlock()
 	cancel()
 	wg.Wait()
+	if peak := engine.peak.Load(); peak != 2 {
+		t.Fatalf("peak concurrent discoveries %d after callers left, want 2", peak)
+	}
 	close(engine.gate)
-	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
 		e.mu.Lock()
-		busy := 0
+		busy, cachedKeys := 0, 0
 		for _, v := range e.schemas {
 			if v.flight != nil {
 				busy++
 			}
+			if v.schema != nil {
+				cachedKeys++
+			}
 		}
 		e.mu.Unlock()
 		if busy == 0 && engine.active.Load() == 0 {
+			// Every abandoned discovery ran to completion and was cached.
+			if cachedKeys != 7 || engine.peak.Load() != 2 {
+				t.Fatalf("cached %d keys with peak %d; want 7 with peak 2", cachedKeys, engine.peak.Load())
+			}
 			return
 		}
 	}
-	t.Fatal("abandoned discoveries kept running")
+	t.Fatal("abandoned discoveries never finished")
 }
 
 // A full table of finished entries makes room by dropping the least recently

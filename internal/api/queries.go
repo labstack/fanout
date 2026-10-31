@@ -115,15 +115,27 @@ func (h *QueryHandler) resolve(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"options": options})
 }
 
+// schemaWait bounds how long a request waits for a schema discovery. The
+// discovery itself runs on, so a caller told to retry finds it cached.
+const schemaWait = 15 * time.Second
+
 func (h *QueryHandler) schema(c *echo.Context) error {
-	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), schemaWait)
 	defer cancel()
 	schema, err := h.engine.Schema(ctx, query.SchemaRequest{Window: c.QueryParam("window"), Namespace: c.QueryParam("namespace")})
 	if errors.Is(err, query.ErrSchemaBusy) {
 		c.Response().Header().Set("Retry-After", "5")
-		return newAPIError(http.StatusServiceUnavailable, "schema_busy", "Schema discovery is busy. Try again in a few seconds.")
+		return newAPIError(http.StatusServiceUnavailable, "schema_busy", "The schema is still being read. Try again in a few seconds.")
 	}
-	if err != nil {
+	var problems query.Problems
+	switch {
+	case errors.As(err, &problems):
+		failure := newAPIError(http.StatusBadRequest, "invalid_request", problems[0].Message)
+		failure.Problems = query.PresentProblems(problems)
+		return failure
+	case errors.Is(err, context.DeadlineExceeded):
+		return echo.NewHTTPError(http.StatusGatewayTimeout, "Reading the schema took too long. Try a shorter window.").Wrap(err)
+	case err != nil:
 		return panelError(c, err, "schema unavailable")
 	}
 	return c.JSON(http.StatusOK, schema)
