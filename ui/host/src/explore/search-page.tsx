@@ -1,7 +1,8 @@
-import { Alert, Box, Button, Group, NumberInput, SegmentedControl, Select, Stack, Switch, Text, Title, Tooltip } from "@mantine/core";
+import { Alert, Anchor, Box, Button, Group, NumberInput, SegmentedControl, Select, Stack, Switch, Text, Title, Tooltip } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
-import type { DashboardSpec, Panel } from "../../../panels/types";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { rowModel } from "../../../panels/rows";
+import type { DashboardSpec, Panel, PanelResult, Selection } from "../../../panels/types";
 import { ApiError, type Problem } from "../api-error";
 import { getTelemetrySchema, queryPanels } from "../dashboards/api";
 import { DrillDrawer } from "../dashboards/drill";
@@ -11,6 +12,8 @@ import { drillSelection } from "../dashboards/panel-handlers";
 import { PanelCard } from "../dashboards/panel-card";
 import { classifyPanelResult, type PanelDisplayResult } from "../dashboards/panel-result";
 import { RangeMenu } from "../dashboards/toolbar";
+import type { RowControls } from "../dashboards/viz/table";
+import { LogDetails } from "./log-details";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { completeFanql, parseFanql, type Notice } from "./api";
 import { SaveDialog, defaultTitle } from "./save-dialog";
@@ -24,10 +27,14 @@ export type Preset = {
   fields: readonly ("service" | "severity" | "errors" | "slower")[];
   sorts: readonly { value: string; label: string }[];
   example: string;
+  /** How bare words and field values match, for the help line. */
+  matching: string;
 };
 
-export const logsPreset: Preset = { name: "Logs", source: "logs", viz: "logs", fields: ["service", "severity"], sorts: [{ value: "time", label: "Newest" }, { value: "+time", label: "Oldest" }], example: "service:checkout severity>=warn" };
-export const tracesPreset: Preset = { name: "Traces", source: "spans", viz: "traces", fields: ["service", "errors", "slower"], sorts: [{ value: "duration_ms", label: "Slowest" }, { value: "errors", label: "Errors first" }], example: "status:error duration>500ms" };
+export const logsPreset: Preset = { name: "Logs", source: "logs", viz: "logs", fields: ["service", "severity"], sorts: [{ value: "time", label: "Newest" }, { value: "+time", label: "Oldest" }], example: "service:checkout severity>=warn",
+  matching: "Bare words match anywhere in the body; body:x matches the whole body and body~x any part of it." };
+export const tracesPreset: Preset = { name: "Traces", source: "spans", viz: "traces", fields: ["service", "errors", "slower"], sorts: [{ value: "duration_ms", label: "Slowest" }, { value: "+start", label: "Oldest" }], example: "status:error duration>500ms",
+  matching: "Bare words match anywhere in the operation; operation:x matches the whole operation and operation~x any part of it." };
 
 const panelID = "search";
 const severityOptions = [{ value: "debug", label: "Debug and above" }, { value: "info", label: "Info and above" }, { value: "warn", label: "Warn and above" }, { value: "error", label: "Error and above" }, { value: "fatal", label: "Fatal" }];
@@ -43,6 +50,13 @@ function pickTerms(preset: Preset, picks: Picks): string {
   return terms.join(" ");
 }
 const resultHeight = 560;
+/** Rows rendered before "Show more": the search returns up to 1,000. */
+const rowPage = 100;
+/** The batch deadline names dashboards; this page runs one search. */
+const searchCopy = (result: PanelResult): PanelResult => result.error?.startsWith("Not run: the dashboard ran out of time.")
+  ? { ...result, error: "Not run: the search ran out of time. Narrow the time range or add filters." } : result;
+/** FanQL quotes a value with doubled inner quotes. */
+const quoted = (value: string) => `"${value.replaceAll('"', '""')}"`;
 
 type Ran = { text: string; terms: string; sort: string; window: string; panel: Panel; result: PanelDisplayResult };
 
@@ -71,6 +85,8 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
   // The filters this page last wrote to the URL; any other value came from history.
   const written = useRef(search.q);
   const searchNow = useRef(search); searchNow.current = search;
+  const onSearchNow = useRef(onSearch); onSearchNow.current = onSearch;
+  const sortNow = useRef(sort); sortNow.current = sort;
   useEffect(() => () => controller.current?.abort(), []);
 
   // Filters may be empty: an empty search lists the newest logs or slowest traces.
@@ -92,14 +108,15 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
       // A drawer opened from earlier results closes when the filters change.
       const changed = filters !== written.current;
       written.current = filters;
-      onSearch({ ...searchNow.current, q: filters, sort: order, ...(changed ? { drill: undefined } : {}) }, true);
+      // A changed search is a new history entry; reruns of the same one replace it.
+      onSearch({ ...searchNow.current, q: filters, sort: order, ...(changed ? { drill: undefined } : {}) }, !changed);
       const dashboard: DashboardSpec = { version: 1, name: preset.name, time, panels: [panel] };
       const width = resultBox.current?.clientWidth || 960;
       const results = await queryPanels({ dashboard, panels: [panelID], time, widths: { [panelID]: width } }, abort.signal);
       if (abort.signal.aborted) return;
       const result = results.find(r => r.id === panelID);
       if (!result) throw new Error("The search returned no result.");
-      setRan({ text: filters, terms: picked, sort: order, window: windowKey, panel, result: classifyPanelResult(result, [panelID]) });
+      setRan({ text: filters, terms: picked, sort: order, window: windowKey, panel, result: classifyPanelResult(searchCopy(result), [panelID]) });
     } catch (failure) {
       if (abort.signal.aborted) return;
       if (failure instanceof ApiError && failure.problems.length > 0) { if (current.current === filters) setProblems(failure.problems); }
@@ -109,6 +126,7 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     }
   };
 
+  const executeNow = useRef(execute); executeNow.current = execute;
   // Opens with results, and reruns when the window or the order changes.
   const rerun = useRef<() => void>(() => undefined);
   rerun.current = () => void execute(current.current, sort);
@@ -124,6 +142,25 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     const inText = (span?: TextSpan) => span && span.start >= shifted.shift && span.end - shifted.shift <= shifted.length ? { start: span.start - shifted.shift, end: span.end - shifted.shift } : undefined;
     return { ...problem, span: inText(problem.span), fix_its: problem.fix_its?.flatMap(fix => { const span = inText(fix.span); return span ? [{ ...fix, span }] : []; }) };
   });
+  // Stable row callbacks keep the table's cells mounted while the URL changes, so
+  // the drawer can return focus to the trace button that opened it.
+  const ranNow = useRef(ran); ranNow.current = ran;
+  const typed = useRef(text); typed.current = text;
+  const openRow = useCallback((selection: Selection) => {
+    const last = ranNow.current; if (!last) return;
+    const selected = drillSelection(last.panel, last.result, selection, {});
+    if (selected) onSearchNow.current({ ...searchNow.current, drill: JSON.stringify(selected.target) });
+  }, []);
+  const controls = useMemo<RowControls>(() => ({
+    page: rowPage,
+    details: preset.viz === "logs" ? row => <LogDetails row={row} onTrace={() => { const last = ranNow.current; if (last) openRow(rowModel(last.panel, last.result).selection(row)); }} /> : undefined,
+    exclude: preset.viz === "traces" ? (field, value) => {
+      // A top-level `or` keeps its meaning only inside parentheses.
+      const typedText = typed.current.trim();
+      const next = [/\bor\b/i.test(typedText) ? `(${typedText})` : typedText, `-${field}:${quoted(value)}`].filter(Boolean).join(" ");
+      setText(next); void executeNow.current(next, sortNow.current);
+    } : undefined,
+  }), [preset.viz, openRow]);
   const stale = ran !== undefined && (ran.text !== text || ran.terms !== terms || ran.sort !== sort || ran.window !== windowKey);
   const canSave = ran !== undefined && !stale && !running && ran.result.status === "ok" && (ran.result.frame?.rows ?? 0) > 0;
 
@@ -133,7 +170,7 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
       <RangeMenu time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
     </Group>
     <Stack gap="xs">
-      <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. Press Enter to search.</Text>
+      <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. {preset.matching} Press Enter to search.</Text>
       <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local}
         onChange={value => { setText(value); setProblems([]); }} onRun={() => void execute(text, sort)}
         complete={(value, cursor, signal) => completeFanql({ text: value, cursor, source: preset.source, viz: preset.viz, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
@@ -141,7 +178,8 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
       {notices.length > 0 && <Stack gap={2}>{notices.map((notice, index) => <Text key={index} size="xs" c="dimmed">{notice.message}</Text>)}</Stack>}
     </Stack>
     <Group gap="sm" align="flex-end" data-search-fields>
-      {preset.fields.includes("service") && <Select label="Service" placeholder="All services" w={220} clearable searchable value={search.picks?.service ?? null}
+      {preset.fields.includes("service") && <Select label="Service" placeholder={services.isPending ? "Loading services…" : "All services"} w={220} clearable searchable value={search.picks?.service ?? null}
+        error={services.isError && <>Services did not load. <Anchor component="button" type="button" fz="xs" onClick={() => void services.refetch()}>Retry</Anchor></>}
         data={[...new Set([...(search.picks?.service ? [search.picks.service] : []), ...(services.data?.services ?? []).map(s => s.value)])]} onChange={service => pick({ service: service ?? undefined })} />}
       {preset.fields.includes("severity") && <Select label="Severity" placeholder="Any severity" w={180} clearable value={search.picks?.severity ?? null} data={severityOptions} onChange={severity => pick({ severity: severity ?? undefined })} />}
       {preset.fields.includes("slower") && <SlowerThan value={search.picks?.slower} onCommit={slower => pick({ slower })} />}
@@ -160,12 +198,11 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
         {stale && <Text size="sm" fw={600} role="status">Result of the last search · filters have changed</Text>}
         <Box h={resultHeight}>
           <PanelCard panel={ran.panel} title={ran.panel.title} result={ran.result} loading={running} height={resultHeight} group={`search-${preset.viz}`} editing={false} agentAvailable={false}
-            range={time.range} onRetry={() => void execute(ran.text, ran.sort)} traceLinks="button"
-            onPoint={selection => { const selected = drillSelection(ran.panel, ran.result, selection, {}); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); }} />
+            range={time.range} onRetry={() => void execute(ran.text, ran.sort)} traceLinks="button" controls={controls} onPoint={openRow} />
         </Box>
       </Stack>}
     </Box>
-    {ran && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: preset.name, time, panels: [ran.panel] }} time={time} vars={{}} target={parseDrill(search.drill)}
+    {ran && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: preset.name, time, panels: [{ ...ran.panel, title: "this search" }] }} time={time} vars={{}} target={parseDrill(search.drill)}
       onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}
     {saving && <SaveDialog panel={saving} time={time} onClose={() => setSaving(undefined)} onSaved={onSaved} />}
   </Stack>;

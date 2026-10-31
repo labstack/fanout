@@ -38,7 +38,7 @@ async function render(preset: Preset, initial: Partial<ExploreSearch> = {}) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let search: ExploreSearch = { q: "", range: "1h", tab: "query", ...initial };
-  const onSearch = vi.fn((next: ExploreSearch) => { search = next; void draw(); });
+  const onSearch = vi.fn((next: ExploreSearch, _replace?: boolean) => { search = next; void draw(); });
   const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><SearchPage preset={preset} search={search} onSearch={onSearch} onSaved={vi.fn()} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
   await draw();
@@ -69,10 +69,98 @@ describe("SearchPage", () => {
   it("reruns when the order changes", async () => {
     const { ui, wait, search } = await render(tracesPreset);
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    await act(async () => ui.getByRole("radio", { name: "Errors first" }).click());
+    // Errors only is a field, so the order offers start time instead of a second error filter.
+    expect(ui.queryByRole("radio", { name: "Errors first" })).toBeNull();
+    await act(async () => ui.getByRole("radio", { name: "Oldest" }).click());
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
-    expect(search().sort).toBe("errors");
-    expect(bodies("/api/queries/run")[1].dashboard.panels[0].query.sort).toBe("errors");
+    expect(search().sort).toBe("+start");
+    expect(bodies("/api/queries/run")[1].dashboard.panels[0].query.sort).toBe("+start");
+  });
+
+  it("adds a typed search to history and replaces the entry for reruns", async () => {
+    const { ui, wait, onSearch } = await render(logsPreset);
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(onSearch.mock.calls.at(-1)?.[1]).toBe(true);
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, insert: "timeout" } }));
+    await act(async () => ui.getByRole("button", { name: "Search" }).click());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    expect(onSearch.mock.calls.at(-1)).toEqual([expect.objectContaining({ q: "timeout" }), false]);
+    await act(async () => ui.getByRole("button", { name: "Search" }).click());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(3));
+    expect(onSearch.mock.calls.at(-1)?.[1]).toBe(true);
+  });
+
+  it("says when services did not load and retries", async () => {
+    let fail = true;
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/telemetry/schema" && fail ? json({ code: "timeout", message: "Gateway timeout" }, 504) : base(input, init));
+    const { ui, wait } = await render(logsPreset);
+    await wait(() => expect(ui.getByText(/Services did not load/)).toBeTruthy());
+    fail = false;
+    await act(async () => ui.getByRole("button", { name: "Retry" }).click());
+    await wait(() => expect(ui.queryByText(/Services did not load/)).toBeNull());
+  });
+
+  it("names the search, not a dashboard, when the batch runs out of time", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "error", retryable: true, elapsed_ms: 1, error: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard." }] }) : base(input, init));
+    const { wait } = await render(tracesPreset);
+    await wait(() => expect(document.body.textContent).toContain("Not run: the search ran out of time. Narrow the time range or add filters."));
+    expect(document.body.textContent).not.toContain("dashboard ran out of time");
+  });
+
+  it("explains that body:x is exact while bare words match any part", async () => {
+    const { ui } = await render(logsPreset);
+    expect(ui.getByText(/Bare words match anywhere in the body; body:x matches the whole body/)).toBeTruthy();
+  });
+
+  it("shows the first rows and more on request", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    const many = { columns: [{ name: "time", type: "time", role: "time" }, { name: "body", type: "string", role: "dimension" }], values: [Array.from({ length: 250 }, (_, i) => 1_800_000_000_000 - i), Array.from({ length: 250 }, (_, i) => `line ${i}`)], rows: 250 };
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "ok", elapsed_ms: 1, frame: many }] }) : base(input, init));
+    const { ui, wait } = await render(logsPreset);
+    await wait(() => expect(document.querySelectorAll("[data-search-page] tbody tr")).toHaveLength(100));
+    expect(ui.getByText("Showing 100 of 250 rows")).toBeTruthy();
+    await act(async () => ui.getByRole("button", { name: "Show 100 more" }).click());
+    expect(document.querySelectorAll("[data-search-page] tbody tr")).toHaveLength(200);
+    await act(async () => ui.getByRole("button", { name: "Show 50 more" }).click());
+    expect(document.querySelectorAll("[data-search-page] tbody tr")).toHaveLength(250);
+    expect(ui.queryByText(/Showing/)).toBeNull();
+  });
+
+  it("opens a log's attributes, resource and trace under its row", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    const logs = { columns: [{ name: "time", type: "time", role: "time" }, { name: "service", type: "string", role: "dimension" }, { name: "body", type: "string", role: "dimension" }, { name: "trace_id", type: "string", role: "dimension" }, { name: "namespace", type: "string", role: "dimension" }], values: [[1_800_000_000_000], ["checkout"], ["it's done"], ["abc"], ["shop"]], rows: 1 };
+    const details = { columns: [{ name: "attributes", type: "json" }, { name: "resource", type: "json" }, { name: "span", type: "string" }, { name: "scope", type: "string" }], values: [['{"order.id":"42"}'], ['{"host.name":"pod-1"}'], ["s1"], ["checkout-lib"]], rows: 1 };
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run"
+      ? json({ results: [JSON.parse(String(init?.body)).panels[0] === "log" ? { id: "log", status: "ok", elapsed_ms: 1, frame: details } : { id: "search", status: "ok", elapsed_ms: 1, from_ms: 1_799_999_000_000, to_ms: 1_800_000_100_000, frame: logs }] }) : base(input, init));
+    const { ui, wait, search } = await render(logsPreset);
+    await wait(() => expect(document.querySelectorAll("[data-search-page] tbody tr")).toHaveLength(1));
+    const row = document.querySelector<HTMLElement>("[data-search-page] tbody tr")!;
+    await act(async () => row.click());
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    await wait(() => expect(document.querySelector("[data-log-details]")?.textContent).toContain("pod-1"));
+    const sql: string = bodies("/api/queries/run").at(-1).dashboard.panels[0].sql;
+    expect(sql).toContain("coalesce(body, '') = 'it''s done'");
+    expect(sql).toContain("coalesce(namespace, '') = 'shop'");
+    expect(bodies("/api/queries/run").at(-1).time).toMatchObject({ from: new Date(1_799_999_999_999).toISOString(), to: new Date(1_800_000_000_001).toISOString() });
+    const panel = within(document.querySelector<HTMLElement>("[data-log-details]")!);
+    expect(panel.getByText("order.id")).toBeTruthy(); expect(panel.getByText("s1")).toBeTruthy();
+    await act(async () => panel.getByRole("button", { name: "abc" }).click());
+    await wait(() => expect(JSON.parse(search().drill!)).toMatchObject({ trace_id: "abc", namespace: "shop" }));
+  });
+
+  it("excludes an operation from the traces with one click", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    const traces = { columns: [{ name: "trace_id", type: "string", role: "dimension" }, { name: "service", type: "string", role: "dimension" }, { name: "operation", type: "string", role: "dimension" }, { name: "duration_ms", type: "number", role: "measure", unit: "ms" }], values: [["abc"], ["flagd"], ['flagd.Service/"EventStream"'], [600000]], rows: 1 };
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "ok", elapsed_ms: 1, frame: traces }] }) : base(input, init));
+    const { ui, wait, search } = await render(tracesPreset, { q: "a or b" });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await act(async () => ui.getByRole("button", { name: 'Exclude operation flagd.Service/"EventStream"' }).click());
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
+    await wait(() => expect(search().q).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
+    expect(ui.getByRole("button", { name: "Exclude service flagd" })).toBeTruthy();
   });
 
   it("opens the trace drawer named in the URL", async () => {

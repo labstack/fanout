@@ -5,10 +5,11 @@ import type { Panel, PanelResult, Selection, VarValue } from "../../../../panels
 import { withAnnotations, type AnnotationsResponse } from "../../../../panels/annotations";
 import { pointSelection } from "../../../../panels/interaction";
 import { EChartCanvas } from "../echart-canvas";
+import type { RowControls } from "./table";
 
 export type AnalysisProps = {
   panel: Panel; title?: string; result: PanelResult; dark: boolean; height: number; group?: string;
-  foldConstants?: boolean; traceLinks?: "button"; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
+  foldConstants?: boolean; traceLinks?: "button"; controls?: RowControls; annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
   onVariable?: (name: string, value: string) => void; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void; onRangePending?(pending: boolean): void;
 };
 

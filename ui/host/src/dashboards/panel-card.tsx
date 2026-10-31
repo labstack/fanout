@@ -12,11 +12,12 @@ import { PanelData, PanelSpec } from "./inspect";
 import type { MapView } from "./viz/service-map";
 import { ChartHintContext, compactHint } from "./chart-keyboard";
 import { Viz } from "./viz";
+import type { RowControls } from "./viz/table";
 import { PanelTooltipContext } from "./panel-fullscreen";
 
-export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, suspended = false, menuRef }: {
+export function PanelCard({ panel, title, result, loading, compare, range, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onRangePending, onZoomReset, zoomed, onView, onCopyLink, onExplain, onFix, onRetry, onRemove, onDuplicate, onEdit, staleAt, traceLinks, controls, suspended = false, menuRef }: {
   compare?: boolean; range?: string; panel: Panel; title: string; result?: PanelDisplayResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
-  annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button";
+  annotations?: AnnotationsResponse; vars?: Record<string, VarValue>; traceLinks?: "button"; controls?: RowControls;
   onSelect?: (value: string) => void; onView?(): void; onCopyLink?: () => void; onExplain?: () => void; onFix?: () => void; onRetry?(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
   suspended?: boolean; menuRef?: Ref<HTMLButtonElement>; onEdit?(): void;
   onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
@@ -201,7 +202,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center" style={{overflowWrap:"anywhere"}}>{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
-        : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
+        : <ChartHintContext.Provider value={chartHint}><Viz traceLinks={traceLinks} controls={controls} onMapView={onMapView} compare={compare} range={range} panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} onRangePending={onRangePending} /></ChartHintContext.Provider>}
     </Box>
     {notes.length > 0 && <Box data-panel-notes className="dashboard-panel-padding" pb={12} style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0, position: "relative", zIndex: 1, paddingTop: 8, background: "var(--mantine-color-body)", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
       {notes.map(text => <Text key={text} data-panel-note fz={12} c="dimmed" role="status" title={text === note ? result?.frame?.note : undefined} style={{ overflowWrap: "anywhere" }}>{text}</Text>)}
