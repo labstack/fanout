@@ -130,7 +130,7 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     </Stack>
     <Group gap="sm" align="flex-end" data-search-fields>
       {preset.fields.includes("service") && <Select label="Service" placeholder="All services" w={220} clearable searchable value={search.picks?.service ?? null}
-        data={(services.data?.services ?? []).map(s => s.value).filter(name => !name.includes('"'))} onChange={service => pick({ service: service ?? undefined })} />}
+        data={[...new Set([...(search.picks?.service ? [search.picks.service] : []), ...(services.data?.services ?? []).map(s => s.value).filter(name => !name.includes('"'))])]} onChange={service => pick({ service: service ?? undefined })} />}
       {preset.fields.includes("severity") && <Select label="Severity" placeholder="Any severity" w={180} clearable value={search.picks?.severity ?? null} data={severityOptions} onChange={severity => pick({ severity: severity ?? undefined })} />}
       {preset.fields.includes("slower") && <NumberInput label="Slower than (ms)" w={160} min={1} value={search.picks?.slower ? Number(search.picks.slower) : ""}
         onChange={value => pick({ slower: typeof value === "number" && value >= 1 ? String(Math.floor(value)) : undefined })} />}

@@ -100,8 +100,10 @@ describe("SearchPage", () => {
   });
 
   it("filters logs by service and severity from the URL", async () => {
-    const { wait } = await render(logsPreset, { picks: { service: "checkout", severity: "warn" } });
-    await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"checkout\" severity>=warn", source: "logs", viz: "logs" }));
+    const { ui, wait } = await render(logsPreset, { picks: { service: "billing", severity: "warn" } });
+    await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"billing\" severity>=warn", source: "logs", viz: "logs" }));
+    // A service missing from the recent schema still shows as chosen.
+    await wait(() => expect(ui.getByLabelText<HTMLInputElement>("Service", { selector: "input" }).value).toBe("billing"));
   });
 
   it("shows the problem when a where is typed", async () => {
