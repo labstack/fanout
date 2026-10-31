@@ -140,7 +140,7 @@ func TestAlertRuleDisableResolvesFiringAlerts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertAlert(alert.Alert{RuleID: rule.ID, Service: "checkout", State: "firing", FiredAt: time.Now().Format(time.RFC3339)}); err != nil {
+	if _, err := store.UpsertAlert(alert.Alert{RuleID: rule.ID, Service: "checkout", State: "firing", FiredAt: time.Now().Format(time.RFC3339), CreatedAt: time.Now().Format(time.RFC3339)}); err != nil {
 		t.Fatal(err)
 	}
 	req := sessionRequest(http.MethodPut, "/api/alerting/rules/"+rule.ID, strings.NewReader(`{"name":"Errors","enabled":false,"expression":"error_rate > 0.05"}`), cookie)

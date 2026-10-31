@@ -299,7 +299,7 @@ ON CONFLICT(rule_id, service) DO UPDATE SET
     last_evaluated_at = excluded.last_evaluated_at,
     last_delivery_status = excluded.last_delivery_status,
     last_delivery_at = excluded.last_delivery_at,
-    created_at = excluded.created_at
+    created_at = COALESCE(NULLIF(excluded.created_at, ''), alerts.created_at)
 RETURNING id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
 `
 

@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"strings"
 	"testing"
 
 	appstore "github.com/labstack/fanout/internal/store"
@@ -15,6 +16,8 @@ func newTestStore(t *testing.T) *Store {
 	t.Cleanup(func() { sqlite.Close() })
 	return NewStore(sqlite.DB)
 }
+
+const episodeStart = "2026-10-31T20:00:00Z"
 
 func makeRule(name string) Rule {
 	return Rule{
@@ -152,11 +155,12 @@ func TestStore_UpsertAndGetAlert(t *testing.T) {
 	}
 
 	a := Alert{
-		RuleID:  rule.ID,
-		Service: "api",
-		State:   "firing",
-		Value:   0.25,
-		FiredAt: "2026-01-01T00:00:00Z",
+		RuleID:    rule.ID,
+		Service:   "api",
+		State:     "firing",
+		Value:     0.25,
+		FiredAt:   "2026-01-01T00:00:00Z",
+		CreatedAt: "2026-01-01T00:00:00Z",
 	}
 
 	created, err := s.UpsertAlert(a)
@@ -198,7 +202,7 @@ func TestStore_ListAlerts(t *testing.T) {
 	states := []string{"firing", "pending", "resolved"}
 	for i, state := range states {
 		svc := []string{"svc-a", "svc-b", "svc-c"}[i]
-		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: svc, State: state}); err != nil {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: svc, State: state, CreatedAt: episodeStart}); err != nil {
 			t.Fatalf("UpsertAlert(%q): %v", state, err)
 		}
 	}
@@ -224,7 +228,7 @@ func TestStore_DeleteAlert(t *testing.T) {
 	s := newTestStore(t)
 
 	rule, _ := s.CreateRule(makeRule("da-rule"))
-	a, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing"})
+	a, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing", CreatedAt: episodeStart})
 	if err != nil {
 		t.Fatalf("UpsertAlert: %v", err)
 	}
@@ -243,7 +247,7 @@ func TestStore_DeleteRule_CascadesAlerts(t *testing.T) {
 	s := newTestStore(t)
 
 	rule, _ := s.CreateRule(makeRule("cascade-rule"))
-	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing"}); err != nil {
+	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "svc", State: "firing", CreatedAt: episodeStart}); err != nil {
 		t.Fatalf("UpsertAlert: %v", err)
 	}
 
@@ -272,7 +276,7 @@ func TestStore_AlertSummary(t *testing.T) {
 		{"d", "resolved"},
 	}
 	for _, c := range cases {
-		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: c.svc, State: c.state}); err != nil {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: c.svc, State: c.state, CreatedAt: episodeStart}); err != nil {
 			t.Fatalf("UpsertAlert(%q, %q): %v", c.svc, c.state, err)
 		}
 	}
@@ -289,5 +293,63 @@ func TestStore_AlertSummary(t *testing.T) {
 	}
 	if sum.Resolved != 1 {
 		t.Errorf("Resolved = %d, want 1", sum.Resolved)
+	}
+}
+
+// Episode starts are stored as fixed-width RFC 3339 UTC, so listing sorts
+// them in time order whatever fraction or zone they were written with.
+func TestStoreOrdersAlertsByEpisodeStart(t *testing.T) {
+	s := newTestStore(t)
+	rule, err := s.CreateRule(makeRule("order-rule"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for svc, created := range map[string]string{
+		"first":  "2026-10-31T20:23:37Z",
+		"second": "2026-10-31T20:23:37.3Z",
+		"third":  "2026-10-31T13:23:37.31-07:00",
+	} {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: svc, State: "firing", CreatedAt: created}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, err := s.ListAlerts("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, a := range all {
+		order = append(order, a.Service)
+	}
+	if strings.Join(order, ",") != "third,second,first" {
+		t.Fatalf("order %v, want newest first", order)
+	}
+	if all[0].CreatedAt != "2026-10-31T20:23:37.310000000Z" {
+		t.Fatalf("stored created_at %q", all[0].CreatedAt)
+	}
+}
+
+// Only the engine starts an episode: an update without created_at keeps the
+// stored start, and a new alert without one is refused.
+func TestStoreUpsertKeepsEpisodeStart(t *testing.T) {
+	s := newTestStore(t)
+	rule, err := s.CreateRule(makeRule("keep-rule"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "api", State: "firing", CreatedAt: "2026-10-31T20:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.CreatedAt, a.State = "", "resolved"
+	updated, err := s.UpsertAlert(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.CreatedAt != "2026-10-31T20:00:00.000000000Z" || updated.State != "resolved" {
+		t.Fatalf("updated %+v", updated)
+	}
+	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "new", State: "firing"}); err == nil {
+		t.Fatal("a new alert without an episode start was stored")
 	}
 }

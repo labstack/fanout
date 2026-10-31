@@ -243,7 +243,7 @@ const holdSlack = time.Second
 // episode began.
 func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now time.Time) {
 	nowStr := now.Format(time.RFC3339)
-	began := now.UTC().Format(time.RFC3339Nano)
+	began := formatStoredTime(now)
 
 	existing, err := e.store.GetAlert(rule.ID, svc)
 	noAlert := errors.Is(err, ErrNotFound)
@@ -637,11 +637,16 @@ func (e *Engine) RecompileRule(ruleID, expression string) error {
 	return nil
 }
 
-// parseStoredTime reads a time the engine wrote (RFC 3339) or one SQLite's
-// datetime('now') column default wrote ("2006-01-02 15:04:05", UTC).
+// storedTimeLayout is RFC 3339 in UTC with all nine fraction digits, so
+// stored episode starts sort as text.
+const storedTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// formatStoredTime writes an episode start as the store keeps it.
+func formatStoredTime(t time.Time) string {
+	return t.UTC().Format(storedTimeLayout)
+}
+
+// parseStoredTime reads a time the engine or store wrote (RFC 3339).
 func parseStoredTime(value string) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, value); err == nil {
-		return t, nil
-	}
-	return time.ParseInLocation(time.DateTime, value, time.UTC)
+	return time.Parse(time.RFC3339, value)
 }

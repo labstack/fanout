@@ -291,7 +291,7 @@ func TestEngine_Transition_PendingPromotes(t *testing.T) {
 		t.Fatalf("RecompileRule: %v", err)
 	}
 	eng.transition(rule, "svc-a", true, env, time.Now())
-	if _, err := sqlite.DB.Exec(`UPDATE alerts SET created_at = datetime('now', '-2 minutes') WHERE rule_id = ?`, rule.ID); err != nil {
+	if _, err := sqlite.DB.Exec(`UPDATE alerts SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 minutes') WHERE rule_id = ?`, rule.ID); err != nil {
 		t.Fatal(err)
 	}
 	eng.transition(rule, "svc-a", true, env, time.Now())

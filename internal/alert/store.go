@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/labstack/fanout/internal/db/generated"
 	appid "github.com/labstack/fanout/internal/id"
@@ -223,8 +222,20 @@ func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 		}
 		a.ID = id
 	}
+	// Only the engine starts an episode. An update without a start keeps the
+	// stored one; a new alert must bring its own.
 	if a.CreatedAt == "" {
-		a.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		if _, err := s.GetAlert(a.RuleID, a.Service); errors.Is(err, ErrNotFound) {
+			return Alert{}, fmt.Errorf("store: new alert (%q, %q) needs created_at", a.RuleID, a.Service)
+		} else if err != nil {
+			return Alert{}, err
+		}
+	} else {
+		started, err := parseStoredTime(a.CreatedAt)
+		if err != nil {
+			return Alert{}, fmt.Errorf("store: alert created_at: %w", err)
+		}
+		a.CreatedAt = formatStoredTime(started)
 	}
 	ga, err := s.q.UpsertAlert(context.Background(), alertToUpsertParams(a))
 	if err != nil {
