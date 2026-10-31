@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"testing"
-	"time"
 )
 
 func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
@@ -102,25 +101,23 @@ func TestSchemaReturnsOperationalErrorsUnwrapped(t *testing.T) {
 
 func TestSchemaCacheIsBounded(t *testing.T) {
 	e := newFixtureExecutor(t)
-	now := e.now()
 	for i := range 70 {
-		if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: fmt.Sprintf("ns%d", i)}); err != nil {
-			t.Fatal(err)
-		}
-		e.mu.Lock()
-		n := len(e.schemas)
-		e.mu.Unlock()
-		if n > maxSchemaEntries {
-			t.Fatalf("cache holds %d entries", n)
+		_, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: fmt.Sprintf("ns%d", i)})
+		var problems Problems
+		if !errors.As(err, &problems) || problems[0].Path != "namespace" {
+			t.Fatalf("junk namespace: %v", err)
 		}
 	}
-	e.now = func() time.Time { return now.Add(schemaTTL + time.Second) }
-	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: "fresh"}); err != nil {
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "2h"}); err == nil {
+		t.Fatal("unsupported window accepted")
+	}
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: "shop"}); err != nil {
 		t.Fatal(err)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.schemas) != 1 {
-		t.Fatalf("expired entries kept: %d", len(e.schemas))
+	// The namespace listing and the one real key: junk took no entries.
+	if len(e.schemas) != 2 {
+		t.Fatalf("cache holds %d entries", len(e.schemas))
 	}
 }

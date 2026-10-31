@@ -2,6 +2,9 @@ package query
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -120,16 +123,23 @@ func (a *activeEngine) QueryContext(ctx context.Context, query string, args ...a
 }
 
 // Distinct keys start at most two detached discoveries at once, and a
-// discovery whose callers all left is cancelled instead of running on.
+// discovery whose callers all left is cancelled instead of running on. A
+// cached key is served at once while both slots are busy, stale entries
+// included, and a new key past the cap is refused as busy without evicting.
 func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 	fixture := newFixtureExecutor(t)
 	engine := &activeEngine{Engine: fixture.engine, gate: make(chan struct{})}
 	e := NewExecutor(engine, 30)
-	e.now = fixture.now
+	now := fixture.now()
+	var mu sync.Mutex
+	e.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	cached := &Schema{Window: "5m"}
+	e.schemas["5m|"] = schemaEntry{schema: cached, expires: now.Add(time.Minute), stale: now.Add(10 * time.Minute)}
+	e.schemas[namespacesKey] = schemaEntry{namespaces: []string{"shop"}, expires: now.Add(time.Hour)}
 	ctx, cancel := context.WithCancel(t.Context())
 	var wg sync.WaitGroup
-	for i := range 8 {
-		wg.Go(func() { _, _ = e.Schema(ctx, SchemaRequest{Window: "1h", Namespace: string(rune('a' + i))}) })
+	for _, window := range []string{"15m", "1h", "3h", "6h", "12h", "24h"} {
+		wg.Go(func() { _, _ = e.Schema(ctx, SchemaRequest{Window: window}) })
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for engine.active.Load() < 2 && time.Now().Before(deadline) {
@@ -139,19 +149,56 @@ func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 	if peak := engine.peak.Load(); peak != 2 {
 		t.Fatalf("peak concurrent discoveries %d, want 2", peak)
 	}
-	cancel()
-	wg.Wait()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
-		e.mu.Lock()
-		n := len(e.schemas)
-		e.mu.Unlock()
-		if n == 0 && engine.active.Load() == 0 {
-			break
+	hit := make(chan *Schema, 1)
+	go func() { s, _ := e.Schema(t.Context(), SchemaRequest{Window: "5m"}); hit <- s }()
+	select {
+	case s := <-hit:
+		if s != cached {
+			t.Fatal("cached key not served")
 		}
+	case <-time.After(time.Second):
+		t.Fatal("cached key blocked behind busy slots")
+	}
+	mu.Lock()
+	now = now.Add(2 * time.Minute)
+	mu.Unlock()
+	if s, err := e.Schema(t.Context(), SchemaRequest{Window: "5m"}); err != nil || s != cached {
+		t.Fatalf("stale key not served while busy: %v", err)
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if len(e.schemas) != 0 || engine.active.Load() != 0 || engine.peak.Load() != 2 {
-		t.Fatalf("abandoned discoveries kept running: entries %d active %d peak %d", len(e.schemas), engine.active.Load(), engine.peak.Load())
+	for i := len(e.schemas); i < maxSchemaEntries; i++ {
+		e.schemas[fmt.Sprintf("full%d", i)] = schemaEntry{flight: &schemaFlight{done: make(chan struct{}), waiters: 1, cancel: func() {}}}
 	}
+	e.mu.Unlock()
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h", Namespace: "shop"}); !errors.Is(err, ErrSchemaBusy) {
+		t.Fatalf("new key past the cap: %v", err)
+	}
+	e.mu.Lock()
+	_, kept := e.schemas["5m|"]
+	for k := range e.schemas {
+		if strings.HasPrefix(k, "full") {
+			delete(e.schemas, k)
+		}
+	}
+	e.mu.Unlock()
+	if !kept {
+		t.Fatal("a new key evicted a cached entry")
+	}
+	cancel()
+	wg.Wait()
+	close(engine.gate)
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+		e.mu.Lock()
+		busy := 0
+		for _, v := range e.schemas {
+			if v.flight != nil {
+				busy++
+			}
+		}
+		e.mu.Unlock()
+		if busy == 0 && engine.active.Load() == 0 {
+			return
+		}
+	}
+	t.Fatal("abandoned discoveries kept running")
 }
