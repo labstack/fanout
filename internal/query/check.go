@@ -91,17 +91,18 @@ func (m *checkMemo) put(key [32]byte, entry memoEntry) {
 }
 
 // memoKey hashes the variables, which every filter may reference, and the
-// panel fields Check reads; titles, layout and display options are left out.
+// panel fields Check reads, including the unit that infers a ranking
+// direction; titles, layout and other display options are left out.
 func memoKey(vars []Variable, p *Panel) [32]byte {
 	var input struct {
 		Vars                []Variable
 		ID, Viz, SQL, Split string
-		Better              string
+		Better, Unit        string
 		Query               *Spec
 	}
 	input.Vars = vars
 	if p != nil {
-		input.ID, input.Viz, input.SQL, input.Better, input.Query = p.ID, p.Viz, p.SQL, p.Better, p.Query
+		input.ID, input.Viz, input.SQL, input.Better, input.Unit, input.Query = p.ID, p.Viz, p.SQL, p.Better, p.Unit, p.Query
 		if p.Options != nil {
 			input.Split = p.Options.Split
 		}

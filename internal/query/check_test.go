@@ -207,3 +207,25 @@ func TestSQLCTEsCannotShadowTelemetry(t *testing.T) {
 		})
 	}
 }
+
+// The inferred ranking direction depends on the panel's unit, so a unit edit
+// must not reuse a memoized check.
+func TestCheckMemoKeysOnUnit(t *testing.T) {
+	d, _ := newTestEngine(t)
+	memo := &checkMemo{}
+	better := func(unit string) string {
+		spec := Dashboard{Name: "Unit", Panels: []Panel{{ID: "a", Title: "A", Viz: "stat", Unit: unit, Query: &Spec{From: "spans", Measures: []string{"count()"}}}}}
+		Normalize(&spec)
+		checked, problems, err := checkWith(t.Context(), d, &spec, memo)
+		if err != nil || len(problems) > 0 {
+			t.Fatalf("unit %q: problems=%v err=%v", unit, problems, err)
+		}
+		return checked.Measures["a"][0].Rank.Better
+	}
+	if got := better(""); got != "higher" {
+		t.Fatalf("no unit = %q", got)
+	}
+	if got := better("ms"); got != "lower" {
+		t.Fatalf("ms after no unit = %q", got)
+	}
+}
