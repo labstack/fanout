@@ -256,7 +256,7 @@ func (q *Queries) ListAlertsByState(ctx context.Context, state string) ([]Alert,
 }
 
 const pruneResolved = `-- name: PruneResolved :execresult
-DELETE FROM alerts WHERE state = 'resolved' AND resolved_at < datetime('now', ? || ' days')
+DELETE FROM alerts WHERE state = 'resolved' AND datetime(resolved_at) < datetime('now', ? || ' days')
 `
 
 func (q *Queries) PruneResolved(ctx context.Context, dollar_1 sql.NullString) (sql.Result, error) {

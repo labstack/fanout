@@ -44,4 +44,4 @@ WHERE rule_id = ? AND service = ?;
 SELECT state, COUNT(*) AS count FROM alerts GROUP BY state;
 
 -- name: PruneResolved :execresult
-DELETE FROM alerts WHERE state = 'resolved' AND resolved_at < datetime('now', ? || ' days');
+DELETE FROM alerts WHERE state = 'resolved' AND datetime(resolved_at) < datetime('now', ? || ' days');

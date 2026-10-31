@@ -3,6 +3,7 @@ package alert
 import (
 	"strings"
 	"testing"
+	"time"
 
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -351,5 +352,31 @@ func TestStoreUpsertKeepsEpisodeStart(t *testing.T) {
 	}
 	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "new", State: "firing"}); err == nil {
 		t.Fatal("a new alert without an episode start was stored")
+	}
+}
+
+// Resolved times carry the engine's local offset; pruning compares instants,
+// not text, so an alert resolved 30 hours ago in any zone is removed after one day.
+func TestStorePruneResolvedComparesInstants(t *testing.T) {
+	s := newTestStore(t)
+	r, err := s.CreateRule(makeRule("prune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 30 hours ago written at +14:00 reads as a later calendar day than the
+	// UTC cutoff, so a text comparison keeps it.
+	old := time.Now().Add(-30 * time.Hour).In(time.FixedZone("LINT", 14*3600)).Format(time.RFC3339)
+	recent := time.Now().Add(-time.Hour).In(time.FixedZone("IST", 5*3600+1800)).Format(time.RFC3339)
+	for svc, resolved := range map[string]string{"old": old, "recent": recent} {
+		if _, err := s.UpsertAlert(Alert{RuleID: r.ID, Service: svc, State: "resolved", ResolvedAt: resolved, CreatedAt: episodeStart}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.PruneResolved(1)
+	if err != nil || n != 1 {
+		t.Fatalf("pruned %d, %v; want 1", n, err)
+	}
+	if _, err := s.GetAlert(r.ID, "recent"); err != nil {
+		t.Fatalf("recent alert pruned: %v", err)
 	}
 }
