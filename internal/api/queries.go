@@ -41,6 +41,9 @@ func RegisterQueryRoutes(e *echo.Echo, engine QueryEngine) {
 // each panel finishes, instead of one object once the slowest panel is done.
 const streamType = "application/x-ndjson"
 
+// streamWriteTimeout bounds writing one streamed result to the client.
+const streamWriteTimeout = 10 * time.Second
+
 func (h *QueryHandler) query(c *echo.Context) error {
 	var req query.RunRequest
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
@@ -54,20 +57,31 @@ func (h *QueryHandler) query(c *echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"results": results})
 	}
 	response := c.Response()
+	control := http.NewResponseController(response)
+	// A client that stops reading must not hold the stream open: each write
+	// has its own deadline, and a failed write cancels the panels still running.
+	ctx, cancel := context.WithCancel(c.Request().Context())
+	defer cancel()
+	defer func() { _ = control.SetWriteDeadline(time.Time{}) }()
 	encoder := json.NewEncoder(response)
-	started := false
+	started, failed := false, false
 	begin := func() {
 		started = true
 		response.Header().Set(echo.HeaderContentType, streamType)
 		response.Header().Set(echo.HeaderCacheControl, "no-store")
 		response.WriteHeader(http.StatusOK)
 	}
-	err := h.engine.Stream(c.Request().Context(), req, func(result query.Result) {
+	err := h.engine.Stream(ctx, req, func(result query.Result) {
+		if failed {
+			return
+		}
+		_ = control.SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 		if !started {
 			begin()
 		}
-		if encoder.Encode(result) == nil {
-			_ = http.NewResponseController(response).Flush()
+		if encoder.Encode(result) != nil || control.Flush() != nil {
+			failed = true
+			cancel()
 		}
 	})
 	switch {

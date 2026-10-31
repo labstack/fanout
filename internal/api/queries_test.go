@@ -6,8 +6,10 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/fanout/internal/query"
 )
@@ -194,5 +196,51 @@ func TestExemplarRoutePolicy(t *testing.T) {
 	}
 	if _, ok := classifyRoute(http.MethodGet, "/api/queries/exemplars"); ok {
 		t.Fatal("GET accepted")
+	}
+}
+
+type stalledWriter struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *stalledWriter) Write([]byte) (int, error) { return 0, os.ErrDeadlineExceeded }
+
+func (w *stalledWriter) SetWriteDeadline(t time.Time) error {
+	w.deadlines = append(w.deadlines, t)
+	return nil
+}
+
+type cancelWatch struct {
+	fakePanels
+	cancelled bool
+}
+
+func (f *cancelWatch) Stream(ctx context.Context, _ query.RunRequest, emit func(query.Result)) error {
+	emit(query.Result{ID: "a", Status: query.StatusOK})
+	f.cancelled = ctx.Err() != nil
+	return ctx.Err()
+}
+
+// A client that stops reading must not hold a stream open: each write has a
+// deadline, and a failed write cancels the request so its panels stop.
+func TestPanelStreamWriteDeadline(t *testing.T) {
+	s := newTestAuthServer(t)
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &cancelWatch{}
+	RegisterQueryRoutes(s.e, engine)
+	req := sessionRequest(http.MethodPost, "/api/queries/run", strings.NewReader(`{"dashboard":{"name":"x","panels":[]}}`), s.login(t, viewer))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/x-ndjson")
+	w := &stalledWriter{ResponseRecorder: httptest.NewRecorder()}
+	s.e.ServeHTTP(w, req)
+	if len(w.deadlines) == 0 || w.deadlines[0].IsZero() {
+		t.Fatalf("write deadlines = %v", w.deadlines)
+	}
+	if !engine.cancelled {
+		t.Fatal("a failed write did not cancel the stream")
 	}
 }

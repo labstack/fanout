@@ -267,18 +267,25 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	group.SetLimit(e.parallel)
 	for i, p := range targets {
 		group.Go(func() error {
-			if p.Viz != "text" {
-				// Turns are first come, first served across every request, so a
-				// search is not starved by a dashboard that started earlier.
-				if e.slots.Acquire(ctx, 1) != nil {
-					if caller.Err() == nil {
-						notRun(i, p)
-					}
-					return nil
-				}
-				defer e.slots.Release(1)
+			if p.Viz == "text" {
+				send(i, e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare))
+				return nil
 			}
-			send(i, e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare))
+			// Turns are first come, first served across every request, so a
+			// search is not starved by a dashboard that started earlier.
+			if e.slots.Acquire(ctx, 1) != nil {
+				if caller.Err() == nil {
+					notRun(i, p)
+				}
+				return nil
+			}
+			// The slot is released before sending: a stream client that stops
+			// reading must not hold the engine from other requests.
+			r := func() Result {
+				defer e.slots.Release(1)
+				return e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare)
+			}()
+			send(i, r)
 			return nil
 		})
 	}

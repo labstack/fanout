@@ -127,6 +127,37 @@ func TestStreamEmitsEachPanelWhenItFinishes(t *testing.T) {
 	}
 }
 
+// A stream client that stops reading blocks emit. Its panels must not keep
+// their read slots while they wait to be written, or every other request
+// would be turned away as busy.
+func TestStalledStreamFreesReadSlots(t *testing.T) {
+	e := newFixtureExecutor(t)
+	e.slots = semaphore.NewWeighted(1)
+	e.batchTimeout = 2 * time.Second
+	panel := func(id string) Panel {
+		return Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}}
+	}
+	stalled := Dashboard{Name: "Stalled", Panels: []Panel{panel("a"), panel("b")}}
+	release := make(chan struct{})
+	emitted := make(chan struct{}, 2)
+	done := make(chan error, 1)
+	go func() {
+		done <- e.Stream(t.Context(), RunRequest{Dashboard: stalled}, func(Result) {
+			emitted <- struct{}{}
+			<-release
+		})
+	}()
+	<-emitted
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: Dashboard{Name: "Other", Panels: []Panel{panel("c")}}})
+	close(release)
+	if err != nil || len(results) != 1 || results[0].Status != StatusOK {
+		t.Fatalf("other request behind a stalled stream: results=%+v err=%v", results, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunPanelSelection(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
