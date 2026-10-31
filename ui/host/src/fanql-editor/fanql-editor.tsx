@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { Text } from "@mantine/core";
+import { useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, drawSelection, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -48,6 +49,9 @@ export function FanqlEditor(props: FanqlEditorProps) {
   const view = useRef<EditorView | null>(null);
   const latest = useRef(props); latest.current = props;
   const pending = useRef<AbortController | undefined>(undefined);
+  // What the suggestions are based on (section 0.14): the server's recency notice, or that the schema is unavailable.
+  const [schemaNote, setSchemaNote] = useState<string>();
+  const failures = useRef(0);
   const compartments = useRef({ editable: new Compartment(), attributes: new Compartment() });
   useEffect(() => {
     const { editable, attributes } = compartments.current;
@@ -60,7 +64,10 @@ export function FanqlEditor(props: FanqlEditorProps) {
       const text = context.state.doc.toString();
       try {
         const result = await complete(text, pointOffset(text, context.pos), abort.signal);
-        if (abort.signal.aborted || result.items.length === 0) return null;
+        if (abort.signal.aborted) return null;
+        failures.current = result.schema.error ? failures.current + 1 : 0;
+        setSchemaNote(failures.current >= 2 ? "Field suggestions are unavailable: the telemetry schema could not be read." : result.schema.notice);
+        if (result.items.length === 0) return null;
         const { from, to } = unitSpan(text, result.replace);
         return { from, to, filter: false, options: result.items.map(item => ({ label: item.label, apply: item.insert, detail: item.detail, type: item.kind })) };
       } catch { return null; }
@@ -93,5 +100,8 @@ export function FanqlEditor(props: FanqlEditorProps) {
   useEffect(() => { view.current!.dispatch({ effects: compartments.current.editable.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) }); }, [readOnly]);
   useEffect(() => { view.current!.dispatch({ effects: compartments.current.attributes.reconfigure(EditorView.contentAttributes.of({ role: "textbox", "aria-label": label, "aria-multiline": "false", "aria-describedby": describedBy ?? "", "aria-invalid": problems.length ? "true" : "false", spellcheck: "false" })) }); }, [label, describedBy, problems.length]);
   useEffect(() => { const instance = view.current!; instance.dispatch(setDiagnostics(instance.state, fanqlDiagnostics(instance.state.doc.toString(), problems))); }, [value, problems]);
-  return <div ref={host} data-fanql-editor />;
+  return <div data-fanql-editor>
+    <div ref={host} />
+    {schemaNote && <Text size="xs" c="dimmed" mt={4} data-completion-note>Suggestions: {schemaNote}</Text>}
+  </div>;
 }

@@ -7,7 +7,7 @@ export type VizCompat = { viz: Viz; requires: ("min_max" | "thresholds")[] };
 export type VizEdit = { viz: Viz; text: string };
 export type Parsed = { query: Query; canonical: string; viz: { requested?: string; compatible: VizCompat[]; edits: VizEdit[] }; notices: Notice[] };
 export type CompletionItem = { label: string; insert: string; kind: string; detail: string };
-export type Completion = { replace: TextSpan; items: CompletionItem[]; schema: { notice?: string; window: string; sampled: boolean; warm: boolean; recent: boolean } };
+export type Completion = { replace: TextSpan; items: CompletionItem[]; schema: { notice?: string; window: string; sampled: boolean; warm: boolean; recent: boolean; error?: boolean } };
 
 export type ParseBody = { text: string; source?: string; viz?: string; variables?: Variable[] };
 export type CompleteBody = { text: string; cursor: number; source?: string; viz?: string; window?: string; from?: string; to?: string };

@@ -2,7 +2,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorView } from "@codemirror/view";
 import { forEachDiagnostic, type Diagnostic } from "@codemirror/lint";
-import { startCompletion, currentCompletions, acceptCompletion } from "@codemirror/autocomplete";
+import { startCompletion, currentCompletions, acceptCompletion, closeCompletion } from "@codemirror/autocomplete";
+import { MantineProvider } from "@mantine/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FanqlEditor, type FanqlEditorProps } from "./fanql-editor";
 import { pointOffset, unitSpan } from "./spans";
@@ -25,7 +26,7 @@ async function renderEditor(extra: Partial<FanqlEditorProps> = {}) {
   const root = createRoot(host);
   const run = vi.fn(), change = vi.fn();
   const props: FanqlEditorProps = { value: "spans | count()", onChange: change, onRun: run, ...extra };
-  const render = async (more: Partial<FanqlEditorProps> = {}) => { await act(async () => root.render(<FanqlEditor {...props} {...more} />)); };
+  const render = async (more: Partial<FanqlEditorProps> = {}) => { await act(async () => root.render(<MantineProvider><FanqlEditor {...props} {...more} /></MantineProvider>)); };
   cleanups.push(() => root.unmount());
   await render();
   const editor = host.querySelector<HTMLElement>('[role="textbox"]')!;
@@ -80,6 +81,22 @@ describe("FanqlEditor", () => {
     expect(currentCompletions(view.state).map(option => option.label)).toEqual(["spans"]);
     await act(async () => { acceptCompletion(view); });
     expect(view.state.doc.toString()).toBe("spans ");
+  });
+
+  it("discloses recent-only suggestions and an unavailable schema after two failures", async () => {
+    const response = (schema: object) => ({ replace: { start: 0, end: 2 }, items: [{ label: "spans", insert: "spans ", kind: "keyword", detail: "" }], schema: { window: "24h", sampled: true, warm: true, recent: false, ...schema } });
+    const complete = vi.fn().mockResolvedValueOnce(response({ recent: true, notice: "keys seen in the last 24h (recent), not in the selected interval" }))
+      .mockResolvedValueOnce(response({ warm: false, error: true })).mockResolvedValueOnce(response({ warm: false, error: true }));
+    const { view } = await renderEditor({ value: "sp", complete });
+    const ask = async () => act(async () => { view.dispatch({ selection: { anchor: 2 } }); startCompletion(view); await new Promise(resolve => setTimeout(resolve, 200)); });
+    await ask();
+    expect(document.querySelector("[data-completion-note]")?.textContent).toBe("Suggestions: keys seen in the last 24h (recent), not in the selected interval");
+    await act(async () => { closeCompletion(view); });
+    await ask();
+    expect(document.querySelector("[data-completion-note]")).toBeNull();
+    await act(async () => { closeCompletion(view); });
+    await ask();
+    expect(document.querySelector("[data-completion-note]")?.textContent).toMatch(/schema could not be read/);
   });
 
   it("refuses edits when read-only", async () => {
