@@ -140,8 +140,11 @@ func TestSelectBoundedCompactionGroupCompactsAnUnderfilledDay(t *testing.T) {
 // A finished window merges even a pair, so a quiet install keeps one file per
 // hour, but a lone batch has nothing to merge with.
 func TestSelectBoundedCompactionGroupMergesAFinishedPair(t *testing.T) {
-	if got := selectBoundedCompactionGroup(genBatches(3, 1, 3, 5_000), 128, maxCompactionRows, true); len(got) != 3 {
-		t.Errorf("candidate = %d for a finished 3-batch window, want 3", len(got))
+	if got := selectBoundedCompactionGroup(genBatches(3, 1, 2, 5_000), 128, maxCompactionRows, true); len(got) != 2 {
+		t.Errorf("candidate = %d for a finished pair, want 2", len(got))
+	}
+	if got := selectBoundedCompactionGroup(genBatches(3, 1, 2, 5_000), 128, maxCompactionRows, false); len(got) != 0 {
+		t.Errorf("candidate = %d for a pair in a window still being written, want none", len(got))
 	}
 	if got := selectBoundedCompactionGroup(genBatches(3, 1, 1, 5_000), 128, maxCompactionRows, true); len(got) != 0 {
 		t.Errorf("candidate = %d for a lone batch, want none", len(got))

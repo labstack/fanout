@@ -49,6 +49,22 @@ const (
 	// minCompactionMergeInputs is the smallest group worth merging, and the
 	// floor the interrupted-pass halving stops at.
 	minCompactionMergeInputs = 2
+
+	// compactionSettledHours is how far an ingest hour trails the newest
+	// before its files may merge across the day. Hourly files keep narrow
+	// queries cheap, and a quiet install would otherwise keep one small file
+	// per hour per signal for its whole retention, 720 at 30 days.
+	compactionSettledHours = 24
+
+	// maxDayCompactionRows bounds a file merged across hours. Span files sort
+	// by trace, so a narrow query decodes the whole file, at about a million
+	// rows a second on two threads for an attribute filter, while each extra
+	// file costs a scan about a tenth of a millisecond. Merging busy hours
+	// would trade cheap files for slower narrow queries: on a 72-hour pico
+	// simulation, million-row day files cut 73 span files to 33 but slowed a
+	// one-minute attribute filter on old data from 0.12 to 0.66 seconds and a
+	// 24-hour one from 2.5 to 3.6. Only hours smaller than a busy one merge.
+	maxDayCompactionRows int64 = 250_000
 )
 
 var parquetSignals = [...]string{"spans", "logs", "metrics"}
@@ -115,9 +131,12 @@ func clearCompactionAttempt(root string) error {
 	return nil
 }
 
+// A compactionKey names a group: an ingest hour and generation, or, for
+// settled files, the first hour of their day.
 type compactionKey struct {
 	window     int64
 	generation uint32
+	day        bool
 }
 
 // ParquetPublisher lets the query layer exclude readers only for the atomic
@@ -170,9 +189,14 @@ func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublis
 	if len(selected) < minCompactionMergeInputs {
 		return 0, nil
 	}
+	// Day groups mix generations; the output sits above all of them.
+	var generation uint32
+	for _, batch := range selected {
+		generation = max(generation, batch.Generation)
+	}
 	output := telemetry.BatchMetadata{
 		ID: fmt.Sprintf("compact-%d", time.Now().UnixNano()), MinIngestedNanos: math.MaxInt64,
-		Generation: selected[0].Generation + 1,
+		Generation: generation + 1,
 	}
 	marker := compactionMarker{Output: output, Inputs: make([]string, 0, len(selected))}
 	for _, batch := range selected {
@@ -231,7 +255,7 @@ func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublis
 	if err := writeCompactionAttempt(r.root, len(selected)); err != nil {
 		return 0, err
 	}
-	err := r.mergeCompaction(ctx, selected[0].Generation, len(selected), func(ctx context.Context) error {
+	err := r.mergeCompaction(ctx, generation, len(selected), func(ctx context.Context) error {
 		group, mergeCtx := errgroup.WithContext(ctx)
 		for _, plan := range plans {
 			group.Go(func() error {
@@ -322,12 +346,22 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 	if maxBatches < minCompactionMergeInputs {
 		return nil
 	}
+	hour := int64(telemetry.CompactionWindow)
 	groups := make(map[compactionKey][]telemetry.BatchMetadata)
+	var spread []telemetry.BatchMetadata
+	newest := int64(math.MinInt64)
 	for _, batch := range batches {
 		if batch.MaxIngestedNanos <= 0 {
 			continue
 		}
-		key := compactionKey{window: batch.MaxIngestedNanos / int64(telemetry.CompactionWindow), generation: batch.Generation}
+		newest = max(newest, batch.MaxIngestedNanos/hour)
+		// A file spanning more than an hour came from a day merge; only its
+		// day group may take it, under the day bound.
+		if batch.MinIngestedNanos > 0 && batch.MaxIngestedNanos-batch.MinIngestedNanos >= hour {
+			spread = append(spread, batch)
+			continue
+		}
+		key := compactionKey{window: batch.MaxIngestedNanos / hour, generation: batch.Generation}
 		groups[key] = append(groups[key], batch)
 	}
 	// Under writer pressure, reclaim generation-0 debt before starting a
@@ -337,13 +371,13 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 	// window so continuous
 	// ingest cannot starve them.
 	pressure := debt >= telemetry.CompactionDebtLimit/2
-	newest := int64(math.MinInt64)
-	for key := range groups {
-		newest = max(newest, key.window)
+	candidates := make(map[compactionKey][]telemetry.BatchMetadata, len(groups))
+	days := make(map[int64][]telemetry.BatchMetadata)
+	for _, batch := range spread {
+		if window := batch.MaxIngestedNanos / hour; window < newest-compactionSettledHours {
+			days[window/24] = append(days[window/24], batch)
+		}
 	}
-	var chosen compactionKey
-	var selected []telemetry.BatchMetadata
-	found := false
 	for key, group := range groups {
 		batchCap := maxBatches
 		if key.generation > 0 {
@@ -354,14 +388,28 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 			rowLimit = telemetry.CompactionPressureMaxRows
 		}
 		candidate := selectBoundedCompactionGroup(group, batchCap, rowLimit, key.window < newest)
-		if len(candidate) < 2 {
-			continue
+		if len(candidate) >= minCompactionMergeInputs {
+			candidates[key] = candidate
+		} else if key.window < newest-compactionSettledHours {
+			// A settled hour has nothing left to merge within itself.
+			days[key.window/24] = append(days[key.window/24], group...)
 		}
-		priority := pressure && key.generation == 0
-		chosenPriority := pressure && chosen.generation == 0
+	}
+	for day, group := range days {
+		if candidate := selectDayCompactionGroup(group, min(maxBatches, higherMaxBatches), maxDayCompactionRows); len(candidate) >= minCompactionMergeInputs {
+			candidates[compactionKey{window: day * 24, day: true}] = candidate
+		}
+	}
+	var chosen compactionKey
+	var selected []telemetry.BatchMetadata
+	found := false
+	for key, candidate := range candidates {
+		priority := pressure && key.generation == 0 && !key.day
+		chosenPriority := pressure && chosen.generation == 0 && !chosen.day
 		better := !found || priority && !chosenPriority ||
 			priority == chosenPriority && (key.window < chosen.window ||
-				key.window == chosen.window && key.generation > chosen.generation)
+				key.window == chosen.window && key.generation > chosen.generation ||
+				key.window == chosen.window && key.generation == chosen.generation && chosen.day)
 		if better {
 			chosen, selected, found = key, candidate, true
 		}
@@ -450,6 +498,45 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 	}
 	if finished && len(candidate) >= minCompactionMergeInputs {
 		return candidate
+	}
+	return nil
+}
+
+// selectDayCompactionGroup takes the first run of files adjacent in ingest
+// time that fits the row, byte and count bounds, so each output covers one
+// stretch of the day and logs and metrics, which keep input order, stay in
+// time order. A file too large to join its neighbour ends the run.
+func selectDayCompactionGroup(group []telemetry.BatchMetadata, maxBatches int, rowLimit int64) []telemetry.BatchMetadata {
+	ordered := append([]telemetry.BatchMetadata(nil), group...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].MinIngestedNanos != ordered[j].MinIngestedNanos {
+			return ordered[i].MinIngestedNanos < ordered[j].MinIngestedNanos
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	var run []telemetry.BatchMetadata
+	var rows, bytes int64
+	for _, batch := range ordered {
+		batchRows, batchBytes := compactionBatchRows(batch), compactionBatchBytes(batch)
+		if batchRows <= 0 || batchRows >= rowLimit {
+			if len(run) >= minCompactionMergeInputs {
+				return run
+			}
+			run, rows, bytes = nil, 0, 0
+			continue
+		}
+		if len(run) == maxBatches || rows > rowLimit-batchRows || bytes > maxCompactionBytes-batchBytes {
+			if len(run) >= minCompactionMergeInputs {
+				return run
+			}
+			run, rows, bytes = nil, 0, 0
+		}
+		run = append(run, batch)
+		rows += batchRows
+		bytes += batchBytes
+	}
+	if len(run) >= minCompactionMergeInputs {
+		return run
 	}
 	return nil
 }
