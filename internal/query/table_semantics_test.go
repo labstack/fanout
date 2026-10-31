@@ -73,7 +73,7 @@ func TestTrendNotesAppend(t *testing.T) {
 			p := Panel{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", By: []string{"service"}, Measures: []string{"count()"}}, Options: &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}}}}
 			d := Dashboard{Name: "Notes", Panels: []Panel{p}}
 			Normalize(&d)
-			checked, problems, err := Check(t.Context(), e.engine, &d)
+			checked, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 			if err != nil || len(problems) > 0 {
 				t.Fatalf("check: %v %v", problems, err)
 			}

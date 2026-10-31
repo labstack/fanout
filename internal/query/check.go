@@ -51,15 +51,6 @@ func isOperational(err error) bool {
 	return false
 }
 
-// Check runs Validate and then the checks that need DuckDB's parser: every
-// filter expression and every SQL panel. It reports all problems it finds.
-// An operational failure (cancelled request, expired deadline, closed
-// database) stops the check and is returned as the error, never as a Problem.
-// The dashboard must already be normalized.
-func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems, error) {
-	return checkWith(ctx, parser, d, nil)
-}
-
 // checkMemo keeps what the database-backed checks found for each variable
 // list and each panel, keyed by exactly the fields those checks read. A save
 // that renames the dashboard, moves panels or edits one panel re-checks only

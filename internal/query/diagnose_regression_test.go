@@ -171,7 +171,7 @@ func TestDiagnosisBoundsReruns(t *testing.T) {
 	d := shopDashboard()
 	d.Panels = []Panel{*p}
 	Normalize(&d)
-	checked, problems, err := Check(t.Context(), engine, &d)
+	checked, problems, err := checkWith(t.Context(), engine, &d, nil)
 	if err != nil || len(problems) > 0 {
 		t.Fatalf("check: %v %v", err, problems)
 	}

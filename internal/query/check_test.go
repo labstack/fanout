@@ -26,7 +26,7 @@ func TestCheckCollectsFiltersAndSQLProblems(t *testing.T) {
 		Panel{ID: "ok_sql", Title: "OK SQL", Viz: "table", SQL: "SELECT service, count(*) AS n FROM spans WHERE $__window(start_time) AND service = $service GROUP BY 1"},
 	)
 	Normalize(&spec)
-	checked, problems, _ := Check(t.Context(), d, &spec)
+	checked, problems, _ := checkWith(t.Context(), d, &spec, nil)
 	paths := map[string]string{}
 	for _, p := range problems {
 		paths[p.Path] = p.Message + " " + p.Hint
@@ -114,7 +114,7 @@ func TestCheckBindsFilters(t *testing.T) {
 		}}},
 	)
 	Normalize(&spec)
-	checked, problems, _ := Check(t.Context(), d, &spec)
+	checked, problems, _ := checkWith(t.Context(), d, &spec, nil)
 	paths := map[string]string{}
 	for _, p := range problems {
 		paths[p.Path] = p.Message
@@ -147,7 +147,7 @@ func TestCheckSQLPanelsUseCanonicalText(t *testing.T) {
 		spec.Panels = []Panel{{ID: "p", Title: "P", Viz: "table", SQL: sql}}
 		spec.Variables = nil
 		Normalize(&spec)
-		_, problems, _ := Check(t.Context(), d, &spec)
+		_, problems, _ := checkWith(t.Context(), d, &spec, nil)
 		found := false
 		for _, p := range problems {
 			if p.Path == "panels[0].sql" && strings.Contains(p.Message, want) {
@@ -166,7 +166,7 @@ func TestCheckReturnsOperationalErrorsNotProblems(t *testing.T) {
 	Normalize(&spec)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, problems, err := Check(ctx, d, &spec)
+	_, problems, err := checkWith(ctx, d, &spec, nil)
 	if err == nil || len(problems) != 0 {
 		t.Fatalf("err = %v, problems = %v", err, problems)
 	}
@@ -176,7 +176,7 @@ func TestCheckReturnsEngineInterruptAsOperationalError(t *testing.T) {
 	d, _ := newTestEngine(t)
 	spec := decode(t, specExample)
 	Normalize(&spec)
-	_, problems, err := Check(t.Context(), interruptingParser{d}, &spec)
+	_, problems, err := checkWith(t.Context(), interruptingParser{d}, &spec, nil)
 	if err == nil || len(problems) != 0 {
 		t.Fatalf("err = %v, problems = %v", err, problems)
 	}
@@ -188,7 +188,7 @@ func TestSQLCTEsCannotShadowTelemetry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			d := Dashboard{Name: "CTE", Panels: []Panel{{ID: "p", Title: "P", Viz: "table", SQL: "WITH " + name + " AS (SELECT * FROM logs WHERE $__window(time)) SELECT count(*) FROM " + name}}}
 			Normalize(&d)
-			_, problems, err := Check(t.Context(), engine, &d)
+			_, problems, err := checkWith(t.Context(), engine, &d, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

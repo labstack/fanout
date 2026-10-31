@@ -578,7 +578,7 @@ func TestMetricMultiDayBucketsAndTableTrendsUseEpochOrigin(t *testing.T) {
 	p := Panel{ID: "m", Title: "Metric", Viz: "table", Query: &Spec{From: "metrics", Where: []string{"name='net'"}, By: []string{"service"}, Measures: []string{"avg(value)"}}, Options: &Options{Columns: []ColumnFormat{{Field: "avg", Format: "sparkline"}}}}
 	d := Dashboard{Name: "Metrics", Panels: []Panel{p}}
 	Normalize(&d)
-	checked, problems, err := Check(t.Context(), e.engine, &d)
+	checked, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 	if err != nil || len(problems) > 0 {
 		t.Fatalf("check: %v %v", err, problems)
 	}

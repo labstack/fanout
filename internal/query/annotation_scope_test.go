@@ -116,7 +116,7 @@ func TestCheckOperationalFailures(t *testing.T) {
 			d := Dashboard{Name: "Operational", Panels: []Panel{p}}
 			Normalize(&d)
 			parser := &failExtraParse{Parser: engine, failure: failure}
-			_, problems, err := Check(t.Context(), parser, &d)
+			_, problems, err := checkWith(t.Context(), parser, &d, nil)
 			if !errors.Is(err, failure) || len(problems) != 0 || parser.parses != 3 {
 				t.Fatalf("%s converted operational error to Problems: %+v %v calls=%d", p.Viz, problems, err, parser.parses)
 			}

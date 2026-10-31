@@ -78,14 +78,6 @@ func (p *parser) expectTerm(nested bool) {
 // allocation. Other panics remain visible to callers and tests.
 type parseBound struct{}
 
-func parseWith(text string, source string, vocab vocabulary) (*queryTree, query.Problems) {
-	q, problems := parseRecovered(text, source, vocab)
-	if len(problems) > 0 {
-		return nil, problems
-	}
-	return q, nil
-}
-
 // parseRecovered also returns the recovered tree beside syntax problems, so the
 // resolver can report its own problems in the same pass. A bound failure
 // returns no tree.

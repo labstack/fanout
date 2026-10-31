@@ -37,7 +37,7 @@ func TestMetricNameRuleUsesCheckedEqualities(t *testing.T) {
 			d := Dashboard{Name: "Metrics", Variables: []Variable{{Name: "metric", Kind: "custom", Options: []string{"net", "cpu"}, Default: "net", IncludeAll: tc.all, Multi: tc.multi}},
 				Panels: []Panel{{ID: "metric", Title: "Metric", Viz: "table", Query: &Spec{From: "metrics", Where: []string{tc.where}, Measures: []string{tc.measure}, By: tc.by}}}}
 			Normalize(&d)
-			_, problems, err := Check(t.Context(), e.engine, &d)
+			_, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +94,7 @@ func TestMetricNameInsideAndHintsAtSeparateWhereEntry(t *testing.T) {
 	e, _ := metricFixture(t)
 	d := Dashboard{Name: "Metrics", Panels: []Panel{{ID: "m", Title: "Metric", Viz: "table", Query: &Spec{From: "metrics", Where: []string{"service='svc' AND (name='net' AND type='counter')"}, Measures: []string{"rate()"}}}}}
 	Normalize(&d)
-	_, problems, err := Check(t.Context(), e.engine, &d)
+	_, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

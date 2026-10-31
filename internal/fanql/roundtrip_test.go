@@ -254,12 +254,12 @@ func TestRoundTripStoredDashboards(t *testing.T) {
 			assertQueryTier(t, engine, stored, c.Query, f.Exactness)
 			d := query.Dashboard{Version: 1, Name: "round trip", Variables: fixture.Variables, Panels: []query.Panel{p}}
 			query.Normalize(&d)
-			_, before, err := query.Check(t.Context(), engine, &d)
+			_, before, err := query.NewExecutor(engine, 30).Check(t.Context(), &d)
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Panels[0].Query = &c.Query
-			_, after, err := query.Check(t.Context(), engine, &d)
+			_, after, err := query.NewExecutor(engine, 30).Check(t.Context(), &d)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,12 +391,12 @@ func TestRoundTripProperties(t *testing.T) {
 			p := query.Panel{ID: "p", Title: "p", Viz: "table", Query: &stored}
 			d := query.Dashboard{Name: "property", Panels: []query.Panel{p}}
 			query.Normalize(&d)
-			_, before, err := query.Check(t.Context(), engine, &d)
+			_, before, err := query.NewExecutor(engine, 30).Check(t.Context(), &d)
 			if err != nil {
 				t.Fatal(err)
 			}
 			d.Panels[0].Query = &lowered.Query
-			_, after, err := query.Check(t.Context(), engine, &d)
+			_, after, err := query.NewExecutor(engine, 30).Check(t.Context(), &d)
 			if err != nil {
 				t.Fatal(err)
 			}

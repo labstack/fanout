@@ -141,7 +141,7 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			}
 			d := Dashboard{Name: "Review timings", Time: Time{From: &start, To: &end}, Panels: []Panel{p}}
 			Normalize(&d)
-			checked, problems, err := Check(t.Context(), e.engine, &d)
+			checked, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 			if err != nil || len(problems) > 0 {
 				t.Fatalf("check: %v %v", err, problems)
 			}

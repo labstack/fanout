@@ -313,7 +313,7 @@ func semanticCheckQuery(t *testing.T, d *engine.Duck, q query.Spec) {
 	}
 	dashboard := query.Dashboard{Name: "Binding", Variables: variables, Panels: []query.Panel{{ID: "binding", Title: "Binding", Viz: "table", Query: &q}}}
 	query.Normalize(&dashboard)
-	if _, problems, err := query.Check(t.Context(), d, &dashboard); err != nil || len(problems) != 0 {
+	if _, problems, err := query.NewExecutor(d, 30).Check(t.Context(), &dashboard); err != nil || len(problems) != 0 {
 		t.Fatalf("query %+v: %+v %v", q, problems, err)
 	}
 }
@@ -451,7 +451,7 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 			}
 			dashboard := query.Dashboard{Name: "V1 workload", Variables: variables, Panels: []query.Panel{{ID: "workload", Title: "Workload", Viz: tc.viz, Query: &c.Query}}}
 			query.Normalize(&dashboard)
-			if _, problems, err := query.Check(t.Context(), d, &dashboard); len(problems) != 0 || err != nil {
+			if _, problems, err := query.NewExecutor(d, 30).Check(t.Context(), &dashboard); len(problems) != 0 || err != nil {
 				t.Fatalf("check: %+v %v", problems, err)
 			}
 			result := semanticRunViz(t, executor, c.Query, tc.viz, variables, vars)

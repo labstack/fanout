@@ -106,6 +106,16 @@ func (e *Executor) Validate(ctx context.Context, d *Dashboard) error {
 	return err
 }
 
+// Check runs Validate's database-backed checks: every filter expression and
+// every SQL panel, through DuckDB's parser. It reports all problems it finds;
+// an operational failure (cancelled request, expired deadline, closed
+// database) is the error, never a Problem. The dashboard must already be
+// normalized. Results are remembered per panel, so an edit re-checks only
+// what changed.
+func (e *Executor) Check(ctx context.Context, d *Dashboard) (*Checked, Problems, error) {
+	return checkWith(ctx, e.engine, d, &e.memo)
+}
+
 // check memoizes Check by the spec's bytes: a dashboard refreshes the same
 // spec every 30 seconds, and its filters do not need re-parsing each time.
 func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
@@ -123,7 +133,7 @@ func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
 	if ok {
 		return cached, nil
 	}
-	checked, problems, err := checkWith(ctx, e.engine, d, &e.memo)
+	checked, problems, err := e.Check(ctx, d)
 	if err != nil {
 		return nil, err
 	}

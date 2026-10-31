@@ -16,7 +16,7 @@ func TestStructuredTableSparklineRejectsDimension(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Invalid trend", Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}, Options: &Options{Columns: []ColumnFormat{{Field: "service", Format: "sparkline"}}}}}}
 	Normalize(&d)
-	_, problems, err := Check(t.Context(), e.engine, &d)
+	_, problems, err := checkWith(t.Context(), e.engine, &d, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

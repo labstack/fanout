@@ -91,7 +91,7 @@ func metricFixture(t *testing.T) (*Executor, *sql.DB) {
 	if err := engine.CreateViews(db); err != nil {
 		t.Fatal(err)
 	}
-	e := NewExecutor(engine.OnDB(db), 30)
+	e := NewExecutor(&engine.Duck{DB: db}, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	return e, db
 }

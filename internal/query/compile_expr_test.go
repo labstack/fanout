@@ -16,13 +16,13 @@ func TestCheckCountIfFilters(t *testing.T) {
 		{"count_if(" + strings.Repeat(" ", 480) + "status = 'STATUS_CODE_ERROR') as e", "filters are 1 to 500 characters"},
 	} {
 		d := exprDashboard(tc.text)
-		_, problems, err := Check(t.Context(), duck, &d)
+		_, problems, err := checkWith(t.Context(), duck, &d, nil)
 		if err != nil || len(problems) != 1 || problems[0].Path != "panels[0].query.measures[0]" || !strings.Contains(problems[0].Message, tc.want) {
 			t.Errorf("%s: %+v %v", tc.text, problems, err)
 		}
 	}
 	d := exprDashboard("count_if(status = 'STATUS_CODE_ERROR') as e")
-	checked, problems, err := Check(t.Context(), duck, &d)
+	checked, problems, err := checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -38,7 +38,7 @@ func TestCompileExpressionSQL(t *testing.T) {
 	d := exprDashboard(text)
 	d.Panels[0].Query.By = []string{"http_route"}
 	d.Panels[0].Query.Where = []string{"kind = 'SPAN_KIND_SERVER'"}
-	checked, problems, err := Check(t.Context(), duck, &d)
+	checked, problems, err := checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -53,7 +53,7 @@ func TestCompileExpressionSQL(t *testing.T) {
 		}
 	}
 	d = exprDashboard("(count_if(duration_ms <= 500) + count_if(duration_ms > 500 AND duration_ms <= 2000) / 2) / count() as apdex")
-	checked, problems, err = Check(t.Context(), duck, &d)
+	checked, problems, err = checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}
@@ -64,7 +64,7 @@ func TestCompileExpressionSQL(t *testing.T) {
 	d = exprDashboard("count_if(status = 'STATUS_CODE_ERROR') as a", "p95(duration_ms)")
 	d.Panels[0].Viz = "scatter"
 	d.Panels[0].Query.By = []string{"service"}
-	checked, problems, err = Check(t.Context(), duck, &d)
+	checked, problems, err = checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
 		t.Fatalf("%+v %v", problems, err)
 	}

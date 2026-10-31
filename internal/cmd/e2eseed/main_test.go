@@ -80,7 +80,7 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
-	if _, problems, err := query.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
+	if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
 	types := map[string]bool{}
@@ -447,7 +447,7 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
-	if _, problems, err := query.Check(t.Context(), engine, &spec); err != nil || len(problems) != 0 {
+	if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
 	from := base.Add(-24 * time.Hour)

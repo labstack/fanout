@@ -2246,7 +2246,11 @@ func (d *Duck) WithReadTransaction(ctx context.Context, read func(queryrows.Quer
 // concurrent readers than there are connections.
 func (d *Duck) ReadConnections() int { return duckDBPoolSize(d.cfg) }
 
-// OnDB is a Duck that reads and parses on one existing handle, with no
-// repository or background work: for package tests that build their own
-// schema on an in-memory database.
-func OnDB(db *sql.DB) *Duck { return &Duck{DB: db, parseDB: db} }
+// parser is the handle for DuckDB's parser and renderer. A Duck built over an
+// existing handle, as package tests do, parses on that handle.
+func (d *Duck) parser() *sql.DB {
+	if d.parseDB == nil {
+		return d.DB
+	}
+	return d.parseDB
+}

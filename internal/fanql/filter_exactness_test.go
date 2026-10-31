@@ -228,7 +228,7 @@ func TestGroupByAcceptsLiteralKeys(t *testing.T) {
 		}
 		dashboard := query.Dashboard{Name: "keys", Panels: []query.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
 		query.Normalize(&dashboard)
-		if _, ps, err := query.Check(t.Context(), engine, &dashboard); len(ps) != 0 || err != nil {
+		if _, ps, err := query.NewExecutor(engine, 30).Check(t.Context(), &dashboard); len(ps) != 0 || err != nil {
 			t.Fatalf("engine check for %q: %+v %v", text, ps, err)
 		}
 	}
@@ -242,7 +242,7 @@ func TestLiteralKeyQuotesSurviveCheckedMetadata(t *testing.T) {
 	engine, _ := newTestEngine(t)
 	d := query.Dashboard{Name: "Keys", Panels: []query.Panel{{ID: "keys", Title: "Keys", Viz: "table", Query: &c.Query}}}
 	query.Normalize(&d)
-	checked, ps, err := query.Check(t.Context(), engine, &d)
+	checked, ps, err := query.NewExecutor(engine, 30).Check(t.Context(), &d)
 	if err != nil || len(ps) != 0 {
 		t.Fatal(ps, err)
 	}

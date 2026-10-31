@@ -28,7 +28,11 @@ func newTestEngine(t testing.TB) (*engine.Duck, *telemetrystore.Repository) {
 // Parse returns no query whenever a problem is present. source is empty for a
 // whole query, or the page-supplied source for a search-bar filter.
 func parse(text string, source string) (*queryTree, query.Problems) {
-	return parseWith(text, source, currentVocabulary())
+	q, problems := parseRecovered(text, source, currentVocabulary())
+	if len(problems) > 0 {
+		return nil, problems
+	}
+	return q, nil
 }
 
 // Resolve annotates fields and values in place, retaining entry boundaries.
