@@ -1,7 +1,7 @@
 import { logConstants } from "../../../panels/rows";
 import { useMergedRef } from "@mantine/hooks";
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
-import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, Trash, WarningCircle, Wrench } from "@phosphor-icons/react";
+import { ArrowsOut, ArrowCounterClockwise, ChatCircleText, Copy, DotsThree, HourglassMedium, Info, ListMagnifyingGlass, Trash, WarningCircle, Wrench } from "@phosphor-icons/react";
 import type { Panel, Selection, VarValue } from "../../../panels/types";
 import type { PanelDisplayResult } from "./panel-result";
 import type { AnnotationsResponse } from "../../../panels/annotations";
@@ -80,6 +80,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const refreshDetails = refreshError ? `${refreshAge ? `${refreshAge}. ` : ""}${refreshError}` : undefined;
   const refreshDescription = refreshDetails && refreshDetails.length > 200 ? `${refreshDetails.slice(0, 199)}…` : refreshDetails;
   const refreshDescriptionId = useId();
+  const busyReasonId = useId();
   const tooltipTarget = useRef<HTMLButtonElement>(null);
   const buttonRef = useMergedRef(menuRef, tooltipTarget);
   const [menuFocused, setMenuFocused] = useState(false);
@@ -191,6 +192,15 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
         the card's rounded bottom corners so that ground does not square them. */}
     <Box ref={body} data-panel-body className="dashboard-panel-padding" tabIndex={view !== "Chart" ? 0 : undefined} style={{ flex: "1 1 0px", isolation: "isolate", contain: rows || view === "Data" ? "paint" : undefined, minHeight: 0, minWidth: 0, padding: "16px", overflow: scrolls ? "auto" : "hidden", display: rows || view !== "Chart" ? "block" : "flex", flexDirection: "column", backgroundColor: "inherit", borderBottomLeftRadius: "inherit", borderBottomRightRadius: "inherit" }}>
       {suspended ? <Center h="100%"><Text size="sm" c="dimmed">Shown in full-screen</Text></Center> : view === "Data" ? <PanelData panel={panel} result={result} /> : view === "Spec" ? <PanelSpec panel={panel} dark={dark} /> : !result && panel.viz !== "text" ? <Center style={{ minHeight: "100%", flexShrink: 0 }}><Loader size="sm" role="status" aria-label="Loading panel" /></Center>
+        : result?.status === "error" && result.reason === "busy" ? <Box data-panel-busy style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
+          <HourglassMedium size={18} color="var(--mantine-color-dimmed)" style={{flexShrink:0}} />
+          <Text size="sm" fw={500} style={{flexShrink:0}}>Not run yet</Text>
+          {!compactError && <Text size="xs" c="dimmed" ta="center" style={{minWidth:0, minHeight:0, overflow:"hidden", overflowWrap:"anywhere", flex:"0 1 auto"}}>{result.error}</Text>}
+          {onRetry && <Tooltip label={result.error} disabled={!compactError} multiline maw="min(320px, calc(100vw - 32px))" events={{hover: true, focus: true, touch: true}}>
+            <Button size="compact-xs" variant="light" color="gray" style={{flexShrink:0}} disabled={loading} aria-describedby={busyReasonId} onClick={onRetry}>Retry</Button>
+          </Tooltip>}
+          <span id={busyReasonId} hidden>{result.error}</span>
+        </Box>
         : result?.status === "error" ? <Box data-panel-error style={{height:"100%", maxHeight:"100%", minHeight:0, minWidth:0, overflow:"hidden", display:"flex", flexDirection:compactError ? "row" : "column", alignItems:"center", justifyContent:"center", gap:compactError ? 6 : 4}}>
           <WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" style={{flexShrink:0}} />
           {!compactError && <Text size="sm" fw={500} c="bad" style={{flexShrink:0}}>This panel failed</Text>}
