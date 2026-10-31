@@ -14,6 +14,7 @@ import (
 	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 // Engine is the query engine the executor runs on. *engine.Duck implements it;
@@ -47,14 +48,17 @@ type Result struct {
 	Frame           *Frame           `json:"frame,omitempty"`
 	Previous        *Frame           `json:"previous,omitempty"`
 	Error           string           `json:"error,omitempty"`
-	Retryable       bool             `json:"retryable,omitempty"`
-	Diagnosis       string           `json:"diagnosis,omitempty"`
-	SQL             string           `json:"sql,omitempty"`
-	Interval        string           `json:"interval,omitempty"`
-	ElapsedMS       int64            `json:"elapsed_ms"`
-	FromMS          int64            `json:"from_ms"`
-	ToMS            int64            `json:"to_ms"`
-	Better          string           `json:"better,omitempty"`
+	// Reason classifies an error for clients that word it themselves:
+	// "busy" means the panel never started (see BatchDeadlineError).
+	Reason    string `json:"reason,omitempty"`
+	Retryable bool   `json:"retryable,omitempty"`
+	Diagnosis string `json:"diagnosis,omitempty"`
+	SQL       string `json:"sql,omitempty"`
+	Interval  string `json:"interval,omitempty"`
+	ElapsedMS int64  `json:"elapsed_ms"`
+	FromMS    int64  `json:"from_ms"`
+	ToMS      int64  `json:"to_ms"`
+	Better    string `json:"better,omitempty"`
 	// ShiftMS is how far Previous sits behind Frame, so a client can overlay it
 	// without guessing from the first populated bucket.
 	ShiftMS int64 `json:"shift_ms,omitempty"`
@@ -68,7 +72,11 @@ type Executor struct {
 	timeout      time.Duration
 	batchTimeout time.Duration
 	parallel     int
+	// slots admits panels to the engine's read connections in arrival order;
+	// a panel's own timeout starts once it holds one.
+	slots *semaphore.Weighted
 
+	memo    checkMemo
 	mu      sync.Mutex
 	checks  map[[32]byte]*Checked
 	schemas map[string]schemaEntry
@@ -79,8 +87,14 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 	if retentionDays > 0 {
 		maxWindow = time.Duration(retentionDays) * 24 * time.Hour
 	}
+	// A panel admitted beyond the engine's read connections would only wait
+	// for one inside the engine, with its own timeout already running.
+	slots := 4
+	if pool, ok := engine.(interface{ ReadConnections() int }); ok {
+		slots = max(1, pool.ReadConnections())
+	}
 	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: 10 * time.Second, batchTimeout: 20 * time.Second, parallel: 4,
-		checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{}}
+		slots: semaphore.NewWeighted(int64(slots)), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{}}
 }
 
 // Validate normalizes d and runs every check, returning Problems or nil.
@@ -109,7 +123,7 @@ func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
 	if ok {
 		return cached, nil
 	}
-	checked, problems, err := Check(ctx, e.engine, d)
+	checked, problems, err := checkWith(ctx, e.engine, d, &e.memo)
 	if err != nil {
 		return nil, err
 	}
@@ -128,13 +142,42 @@ func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
 // Run validates the dashboard and runs the requested panels concurrently. An
 // invalid spec returns its Problems; a panel that fails to run reports the
 // failure in its own result, so one broken panel cannot blank a dashboard.
+// Results are in panel order and share one response budget.
 func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
+	var results []Result
+	err := e.run(ctx, req, func(i int, r Result) {
+		for len(results) <= i {
+			results = append(results, Result{})
+		}
+		results[i] = r
+	})
+	if err != nil {
+		return nil, err
+	}
+	limitBatchFrames(results)
+	return results, nil
+}
+
+// Stream is Run with each result handed to emit as soon as its panel
+// finishes, so a slow panel does not hold back the others. emit is never
+// called concurrently, and only after the spec has checked out, so a caller
+// can still answer Problems as a whole. Each result has its own response
+// budget: the panel-order budget Run shares would need every result first.
+func (e *Executor) Stream(ctx context.Context, req RunRequest, emit func(Result)) error {
+	return e.run(ctx, req, func(_ int, r Result) {
+		results := []Result{r}
+		limitBatchFrames(results)
+		emit(results[0])
+	})
+}
+
+func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Result)) error {
 	caller := ctx
 	now := e.now()
 	d := req.Dashboard
 	Normalize(&d)
 	if len(req.Panels) > len(d.Panels) {
-		return nil, Problems{{Path: "panels", Message: "panel selection cannot exceed the dashboard's panel count"}}
+		return Problems{{Path: "panels", Message: "panel selection cannot exceed the dashboard's panel count"}}
 	}
 	targets := make([]*Panel, 0, len(d.Panels))
 	if len(req.Panels) == 0 {
@@ -150,25 +193,37 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 			seen[id] = true
 			index := slices.IndexFunc(d.Panels, func(p Panel) bool { return p.ID == id })
 			if index < 0 {
-				return nil, Problems{{Path: "panels", Message: fmt.Sprintf("no panel has id %q", id)}}
+				return Problems{{Path: "panels", Message: fmt.Sprintf("no panel has id %q", id)}}
 			}
 			targets = append(targets, &d.Panels[index])
 		}
 	}
+	// The batch deadline bounds checking the spec, resolving variables and
+	// waiting for a turn on the engine. A panel that starts in time keeps its
+	// whole own timeout: time spent queued behind other requests is not
+	// charged to it.
 	ctx, cancel := context.WithTimeout(ctx, e.batchTimeout)
 	defer cancel()
-	results := make([]Result, len(targets))
-	for i, p := range targets {
-		results[i] = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Retryable: true}
+	var mu sync.Mutex
+	send := func(i int, r Result) {
+		mu.Lock()
+		defer mu.Unlock()
+		emit(i, r)
 	}
-	batchError := func(err error) ([]Result, error) {
+	notRun := func(i int, p *Panel) {
+		send(i, Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Reason: ReasonBusy, Retryable: true})
+	}
+	batchError := func(err error) error {
 		if caller.Err() != nil {
-			return nil, caller.Err()
+			return caller.Err()
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			return results, nil
+			for i, p := range targets {
+				notRun(i, p)
+			}
+			return nil
 		}
-		return nil, err
+		return err
 	}
 	checked, err := e.check(ctx, &d)
 	if err != nil {
@@ -183,12 +238,12 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 		var problems Problems
 		validateTime(t, &problems)
 		if len(problems) > 0 {
-			return nil, problems
+			return problems
 		}
 	}
 	start, end, err := resolveWindow(t, nil, now, e.maxWindow)
 	if err != nil {
-		return nil, Problems{{Path: "time", Message: err.Error()}}
+		return Problems{{Path: "time", Message: err.Error()}}
 	}
 	vars, err := e.values(ctx, &d, checked, start, end, req.Vars)
 	if err != nil {
@@ -202,28 +257,32 @@ func (e *Executor) Run(ctx context.Context, req RunRequest) ([]Result, error) {
 	group.SetLimit(e.parallel)
 	for i, p := range targets {
 		group.Go(func() error {
-			if ctx.Err() != nil {
-				return nil
+			if p.Viz != "text" {
+				// Turns are first come, first served across every request, so a
+				// search is not starved by a dashboard that started earlier.
+				if e.slots.Acquire(ctx, 1) != nil {
+					if caller.Err() == nil {
+						notRun(i, p)
+					}
+					return nil
+				}
+				defer e.slots.Release(1)
 			}
-			result := e.runPanel(ctx, p, checked, t, now, vars, req.Widths[p.ID], compare)
-			if ctx.Err() == context.DeadlineExceeded {
-				// runPanel already logged the interrupted query; the overwrite adds no log line.
-				result = Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Retryable: true, ElapsedMS: result.ElapsedMS}
-			}
-			results[i] = result
+			send(i, e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare))
 			return nil
 		})
 	}
 	_ = group.Wait()
-	if err := caller.Err(); err != nil {
-		return nil, err
-	}
-	limitBatchFrames(results)
-	return results, nil
+	return caller.Err()
 }
 
-// BatchDeadlineError is shared by HTTP and MCP batch callers.
-const BatchDeadlineError = "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard."
+// BatchDeadlineError is shared by HTTP and MCP batch callers. It means the
+// panel never started: other queries held the engine for the whole batch
+// deadline. A panel that started and ran too long reports TimeoutError.
+const BatchDeadlineError = "Not run: other queries kept the server busy for 20 seconds. Refresh to try again."
+
+// ReasonBusy marks a result that was not run because of BatchDeadlineError.
+const ReasonBusy = "busy"
 
 // TimeoutError describes the executor's per-panel time limit.
 const TimeoutError = "The query took longer than 10 seconds. Narrow the time range or add filters."

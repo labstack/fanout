@@ -47,6 +47,11 @@ type Duck struct {
 	// memoryDB has one borrowed connection so a blocked memory query cannot
 	// occupy a request or write slot. The read pool owns the shared instance.
 	memoryDB *sql.DB
+	// parseDB serves DuckDB's parser and renderer, which touch no telemetry.
+	// Spec checks call them several times per filter; on the read pool each
+	// call queued behind panel scans, so saving or running a spec could wait
+	// many seconds while a dashboard loaded.
+	parseDB *sql.DB
 	// writeDB has two connections: analytical rollups share writeGate, while
 	// completed-batch aggregates use cacheGate and disjoint tables. Both stay
 	// outside the read pool. Maintenance acquires both gates for checkpointing.
@@ -249,11 +254,11 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, err
 	}
 
-	db, writeDB, memoryDB, err := openDuckDB(dsn, tempDir, duckDBPoolSize(cfg))
+	db, writeDB, memoryDB, parseDB, err := openDuckDB(dsn, tempDir, duckDBPoolSize(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
-	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
+	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, parseDB: parseDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
@@ -337,15 +342,15 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	return nil
 }
 
-// openDuckDB returns the read pool, the two-connection write handle, and the
-// single-connection memory sampling handle.
+// openDuckDB returns the read pool, the two-connection write handle, the
+// single-connection memory sampling handle, and the parser handle.
 //
 // All come from one connector so they share one DuckDB instance and therefore
 // one catalog: a write committed on one handle is visible to the other, and
 // DDL run at boot applies to both. (A second connector to the same file would
 // also work — DuckDB keeps an instance cache — but two owners of one instance
 // is exactly the hazard the wrapper below exists to avoid.)
-func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, error) {
+func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, *sql.DB, error) {
 	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
 	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
 	// TIMESTAMP values, while API windows arrive in UTC.
@@ -360,7 +365,7 @@ func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, e
 
 	native, err := duckdb.NewConnector(dsn, nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	connector := &initializedConnector{Connector: native, init: func(ctx context.Context, execer driver.ExecerContext) error {
 		if _, err := execer.ExecContext(ctx, "SET TimeZone='UTC'", nil); err != nil {
@@ -405,7 +410,12 @@ func openDuckDB(dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, *sql.DB, e
 	memoryDB := sql.OpenDB(borrowedConnector{connector})
 	memoryDB.SetMaxOpenConns(1)
 	memoryDB.SetMaxIdleConns(1)
-	return db, writeDB, memoryDB, nil
+	// Parsing is short and CPU-only; two connections keep concurrent checks
+	// from queueing behind one another.
+	parseDB := sql.OpenDB(borrowedConnector{connector})
+	parseDB.SetMaxOpenConns(2)
+	parseDB.SetMaxIdleConns(2)
+	return db, writeDB, memoryDB, parseDB, nil
 }
 
 // borrowedConnector hands out connections from a connector it does not own.
@@ -472,6 +482,9 @@ func (d *Duck) closeHandles() error {
 	var errs []error
 	if d.memoryDB != nil {
 		errs = append(errs, d.memoryDB.Close())
+	}
+	if d.parseDB != nil {
+		errs = append(errs, d.parseDB.Close())
 	}
 	if d.writeDB != nil {
 		errs = append(errs, d.writeDB.Close())
@@ -2228,3 +2241,12 @@ func (d *Duck) WithReadTransaction(ctx context.Context, read func(queryrows.Quer
 	}
 	return read(queryrows.SQLAdapter{DB: tx})
 }
+
+// ReadConnections is the size of the read pool, so a caller can admit no more
+// concurrent readers than there are connections.
+func (d *Duck) ReadConnections() int { return duckDBPoolSize(d.cfg) }
+
+// OnDB is a Duck that reads and parses on one existing handle, with no
+// repository or background work: for package tests that build their own
+// schema on an in-memory database.
+func OnDB(db *sql.DB) *Duck { return &Duck{DB: db, parseDB: db} }

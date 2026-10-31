@@ -10,7 +10,7 @@ import (
 // ParseSQL parses one statement with DuckDB's parser and returns its
 // serialized node. It reads no telemetry and takes no snapshot.
 func (d *Duck) ParseSQL(ctx context.Context, query string) (map[string]any, error) {
-	return parseStatement(ctx, d.DB, query)
+	return parseStatement(ctx, d.parseDB, query)
 }
 
 // PrepareTelemetrySQL checks one untrusted SELECT (both query and describe,
@@ -64,7 +64,7 @@ func (d *Duck) RenderSQL(ctx context.Context, node map[string]any) (string, erro
 		return "", err
 	}
 	var text string
-	if err := d.DB.QueryRowContext(ctx, "SELECT json_deserialize_sql(?::JSON)", string(wrapped)).Scan(&text); err != nil {
+	if err := d.parseDB.QueryRowContext(ctx, "SELECT json_deserialize_sql(?::JSON)", string(wrapped)).Scan(&text); err != nil {
 		return "", fmt.Errorf("SQL rendering failed: %w", err)
 	}
 	return text, nil

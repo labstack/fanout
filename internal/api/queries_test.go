@@ -29,6 +29,14 @@ func (f *fakePanels) Run(_ context.Context, req query.RunRequest) ([]query.Resul
 	return []query.Result{{ID: "a", Status: query.StatusOK}}, nil
 }
 
+func (f *fakePanels) Stream(ctx context.Context, req query.RunRequest, emit func(query.Result)) error {
+	results, err := f.Run(ctx, req)
+	for _, r := range results {
+		emit(r)
+	}
+	return err
+}
+
 func (f *fakePanels) ResolveVariables(context.Context, query.ResolveRequest) (map[string][]query.Option, error) {
 	return map[string][]query.Option{"service": {{Value: "checkout", Count: 3}}}, nil
 }
@@ -79,6 +87,33 @@ func TestPanelQueryRoute(t *testing.T) {
 	rec = servePanels(t, engine, http.MethodPost, "/api/queries/run", `{"dashboard":{},"unknown":1}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field status %d", rec.Code)
+	}
+}
+
+func TestPanelQueryRouteStreamsWhenAsked(t *testing.T) {
+	s := newTestAuthServer(t)
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &fakePanels{}
+	RegisterQueryRoutes(s.e, engine)
+	post := func(body string) *httptest.ResponseRecorder {
+		req := sessionRequest(http.MethodPost, "/api/queries/run", strings.NewReader(body), s.login(t, viewer))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/x-ndjson")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post(`{"dashboard":{"name":"x","panels":[]}}`)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/x-ndjson" || rec.Body.String() != `{"id":"a","status":"ok","elapsed_ms":0,"from_ms":0,"to_ms":0}`+"\n" || !rec.Flushed {
+		t.Fatalf("stream %d %q %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body)
+	}
+	// Spec problems come before any result, so they keep their status.
+	engine.problem = true
+	if rec := post(`{"dashboard":{"name":"x","panels":[]}}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "panels[0].viz") {
+		t.Fatalf("stream problems %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -136,11 +171,11 @@ func (f *partialBatchPanels) Run(ctx context.Context, _ query.RunRequest) ([]que
 	if _, ok := ctx.Deadline(); ok {
 		return nil, context.DeadlineExceeded
 	}
-	return []query.Result{{ID: "fast", Status: query.StatusOK}, {ID: "slow", Status: query.StatusError, Error: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard."}}, nil
+	return []query.Result{{ID: "fast", Status: query.StatusOK}, {ID: "slow", Status: query.StatusError, Error: query.BatchDeadlineError, Reason: query.ReasonBusy}}, nil
 }
 func TestPanelBatchHTTPKeepsPartialResults(t *testing.T) {
 	rec := servePanels(t, &partialBatchPanels{}, http.MethodPost, "/api/queries/run", `{"dashboard":{"name":"x","panels":[]}}`)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard.") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"reason":"busy"`) {
 		t.Fatalf("partial batch %d %s", rec.Code, rec.Body)
 	}
 }

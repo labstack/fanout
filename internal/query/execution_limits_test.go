@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/telemetry"
+	"golang.org/x/sync/semaphore"
 )
 
 type slowBatchEngine struct {
@@ -38,6 +39,7 @@ func TestBatchDeadlineKeepsCompletedPanels(t *testing.T) {
 	for _, id := range []string{"slow", "queued"} {
 		d.Panels = append(d.Panels, Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}})
 	}
+	started := time.Now()
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil || len(results) != 3 {
 		t.Fatalf("results=%+v err=%v", results, err)
@@ -45,14 +47,83 @@ func TestBatchDeadlineKeepsCompletedPanels(t *testing.T) {
 	if results[0].Status != StatusOK {
 		t.Fatalf("completed=%+v", results[0])
 	}
-	for _, r := range results[1:] {
-		assertRetryable(t, r, true)
-		if r.Status != StatusError || r.Error != "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard." {
-			t.Errorf("unfinished=%+v", r)
-		}
+	// A panel that started before the batch deadline keeps its own timeout
+	// and reports it, rather than being cut off at the batch deadline.
+	if time.Since(started) < e.timeout || results[1].Error != TimeoutError {
+		t.Errorf("started panel=%+v after %s", results[1], time.Since(started))
+	}
+	assertRetryable(t, results[2], true)
+	if results[2].Status != StatusError || results[2].Reason != ReasonBusy || results[2].Error != "Not run: other queries kept the server busy for 20 seconds. Refresh to try again." {
+		t.Errorf("unstarted=%+v", results[2])
 	}
 	if slow.calls.Load() != 1 {
 		t.Errorf("started %d slow panels, want only one", slow.calls.Load())
+	}
+}
+
+type delayedEngine struct {
+	Engine
+	delay time.Duration
+}
+
+func (e *delayedEngine) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
+	select {
+	case <-time.After(e.delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return e.Engine.QueryContext(ctx, query, args...)
+}
+
+// A queued panel used to start its timeout before it reached the engine, so
+// waiting behind other panels used up its budget and it failed having barely
+// run. Each panel here runs well inside its timeout, but together they take
+// longer than one timeout.
+func TestQueuedPanelsKeepTheirWholeTimeout(t *testing.T) {
+	e := newFixtureExecutor(t)
+	e.engine = &delayedEngine{Engine: e.engine, delay: 50 * time.Millisecond}
+	e.slots = semaphore.NewWeighted(1)
+	e.timeout = 200 * time.Millisecond
+	d := Dashboard{Name: "Queue"}
+	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
+		d.Panels = append(d.Panels, Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}}})
+	}
+	started := time.Now()
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < e.timeout {
+		t.Fatalf("panels finished in %s; the test needs them to queue past one timeout", elapsed)
+	}
+	for _, r := range results {
+		if r.Status != StatusOK {
+			t.Errorf("%s = %s %q", r.ID, r.Status, r.Error)
+		}
+	}
+}
+
+func TestStreamEmitsEachPanelWhenItFinishes(t *testing.T) {
+	e := newFixtureExecutor(t)
+	slow := &slowBatchEngine{Engine: e.engine}
+	e.engine = slow
+	e.timeout = 200 * time.Millisecond
+	d := Dashboard{Name: "Stream", Panels: []Panel{
+		{ID: "slow", Title: "Slow", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}},
+		{ID: "note", Title: "Note", Viz: "text", Content: "done"},
+	}}
+	started := time.Now()
+	var order []string
+	var at []time.Duration
+	err := e.Stream(t.Context(), RunRequest{Dashboard: d}, func(r Result) {
+		order = append(order, r.ID)
+		at = append(at, time.Since(started))
+	})
+	if err != nil || strings.Join(order, ",") != "note,slow" {
+		t.Fatalf("order=%v err=%v", order, err)
+	}
+	if at[0] >= e.timeout {
+		t.Fatalf("the finished panel waited %s for the slow one", at[0])
 	}
 }
 
@@ -278,5 +349,46 @@ func TestPanelErrorsStopAtTheByteBoundOnARuneBoundary(t *testing.T) {
 	got := failed(Result{ID: "p"}, Problems{{Message: strings.Repeat("界", maxPanelErrorBytes)}}, nil)
 	if !utf8.ValidString(got.Error) || !strings.HasSuffix(got.Error, "…") || len(got.Error) > maxPanelErrorBytes+len("…") {
 		t.Fatalf("unbounded or split error: %d bytes", len(got.Error))
+	}
+}
+
+type countingParser struct {
+	Engine
+	parses atomic.Int32
+}
+
+func (e *countingParser) ParseSQL(ctx context.Context, query string) (map[string]any, error) {
+	e.parses.Add(1)
+	return e.Engine.ParseSQL(ctx, query)
+}
+
+// Saving a renamed or rearranged dashboard used to check every filter and SQL
+// panel again, which took seconds while panels were running.
+func TestValidateRechecksOnlyChangedPanels(t *testing.T) {
+	e := newFixtureExecutor(t)
+	counter := &countingParser{Engine: e.engine}
+	e.engine = counter
+	d := shopDashboard()
+	if err := e.Validate(t.Context(), &d); err != nil {
+		t.Fatal(err)
+	}
+	if counter.parses.Load() == 0 {
+		t.Fatal("the first check parsed nothing")
+	}
+	renamed := shopDashboard()
+	renamed.Name, renamed.Panels[0].Title, renamed.Panels[3].Title = "Shop copy", "P95", "Top services"
+	counter.parses.Store(0)
+	if err := e.Validate(t.Context(), &renamed); err != nil || counter.parses.Load() != 0 {
+		t.Fatalf("renaming re-parsed %d times, err=%v", counter.parses.Load(), err)
+	}
+	edited := shopDashboard()
+	edited.Panels[1].Query.Where = []string{"service = 'cart'"}
+	counter.parses.Store(0)
+	if err := e.Validate(t.Context(), &edited); err != nil || counter.parses.Load() == 0 {
+		t.Fatalf("an edited filter was not checked: err=%v", err)
+	}
+	edited.Panels[1].Query.Where = []string{"service = "}
+	if err := e.Validate(t.Context(), &edited); err == nil {
+		t.Fatal("an invalid edit passed on cached checks")
 	}
 }

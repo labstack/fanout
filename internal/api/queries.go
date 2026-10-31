@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -16,6 +17,7 @@ import (
 type QueryEngine interface {
 	Exemplars(context.Context, query.ExemplarRequest) (query.ExemplarResponse, error)
 	Run(context.Context, query.RunRequest) ([]query.Result, error)
+	Stream(context.Context, query.RunRequest, func(query.Result)) error
 	ResolveVariables(context.Context, query.ResolveRequest) (map[string][]query.Option, error)
 	Schema(context.Context, query.SchemaRequest) (*query.Schema, error)
 }
@@ -35,16 +37,50 @@ func RegisterQueryRoutes(e *echo.Echo, engine QueryEngine) {
 	e.GET("/api/telemetry/schema", h.schema, read)
 }
 
+// streamType asks /api/queries/run for one JSON result per line, written as
+// each panel finishes, instead of one object once the slowest panel is done.
+const streamType = "application/x-ndjson"
+
 func (h *QueryHandler) query(c *echo.Context) error {
 	var req query.RunRequest
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
 	}
-	results, err := h.engine.Run(c.Request().Context(), req)
-	if err != nil {
-		return panelError(c, err, "panels unavailable")
+	if !strings.Contains(c.Request().Header.Get(echo.HeaderAccept), streamType) {
+		results, err := h.engine.Run(c.Request().Context(), req)
+		if err != nil {
+			return panelError(c, err, "panels unavailable")
+		}
+		return c.JSON(http.StatusOK, map[string]any{"results": results})
 	}
-	return c.JSON(http.StatusOK, map[string]any{"results": results})
+	response := c.Response()
+	encoder := json.NewEncoder(response)
+	started := false
+	begin := func() {
+		started = true
+		response.Header().Set(echo.HeaderContentType, streamType)
+		response.Header().Set(echo.HeaderCacheControl, "no-store")
+		response.WriteHeader(http.StatusOK)
+	}
+	err := h.engine.Stream(c.Request().Context(), req, func(result query.Result) {
+		if !started {
+			begin()
+		}
+		if encoder.Encode(result) == nil {
+			_ = http.NewResponseController(response).Flush()
+		}
+	})
+	switch {
+	case err != nil && started:
+		// Only the client's departure ends a stream early; nobody is reading.
+		return nil
+	case err != nil:
+		// Problems and failures before the first panel still get a status.
+		return panelError(c, err, "panels unavailable")
+	case !started:
+		begin()
+	}
+	return nil
 }
 
 func (h *QueryHandler) resolve(c *echo.Context) error {
@@ -65,6 +101,10 @@ func (h *QueryHandler) schema(c *echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
 	defer cancel()
 	schema, err := h.engine.Schema(ctx, query.SchemaRequest{Window: c.QueryParam("window"), Namespace: c.QueryParam("namespace")})
+	if errors.Is(err, query.ErrSchemaBusy) {
+		c.Response().Header().Set("Retry-After", "5")
+		return newAPIError(http.StatusServiceUnavailable, "schema_busy", "Schema discovery is busy. Try again in a few seconds.")
+	}
 	if err != nil {
 		return panelError(c, err, "schema unavailable")
 	}
