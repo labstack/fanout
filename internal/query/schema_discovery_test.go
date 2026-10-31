@@ -44,12 +44,20 @@ func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 	gate := make(chan struct{})
 	burst := &gatedEngine{Engine: fixture.engine, gate: gate}
 	e = NewExecutor(burst, 30)
-	e.now = fixture.now
+	// Each lookup reads the clock once under e.mu before it joins or starts
+	// a flight, so counting reads proves a caller arrived while the gated
+	// discovery was still running and could not have been served from cache.
+	var lookups atomic.Int32
+	e.now = func() time.Time { lookups.Add(1); return fixture.now() }
 	quitter, quit := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer quit()
 	if _, err := e.Schema(quitter, SchemaRequest{Window: "1h"}); !errors.Is(err, ErrSchemaBusy) {
 		t.Fatalf("a caller that gave up: %v", err)
 	}
+	for burst.queries.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	before := lookups.Load()
 	results := make([]*Schema, 20)
 	var wg sync.WaitGroup
 	for i := range results {
@@ -60,6 +68,17 @@ func TestSchemaColdBurstSharesOneDiscovery(t *testing.T) {
 			}
 			results[i] = s
 		})
+	}
+	for deadline := time.Now().Add(5 * time.Second); lookups.Load()-before < int32(len(results)); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of %d callers looked up", lookups.Load()-before, len(results))
+		}
+	}
+	e.mu.Lock()
+	cached := e.schemas["1h|"].schema != nil
+	e.mu.Unlock()
+	if cached {
+		t.Fatal("discovery finished before the gate opened")
 	}
 	close(gate)
 	wg.Wait()
@@ -96,24 +115,55 @@ func TestSchemaOutlivesItsCallers(t *testing.T) {
 	}
 }
 
-// A discovery that overruns schemaDeadline is cancelled and frees its slot
+// A discovery that overruns its run bound is cancelled and frees its slot
 // and entry, so the next request starts afresh.
 func TestSchemaDiscoveryHasItsOwnDeadline(t *testing.T) {
-	saved := schemaDeadline
-	schemaDeadline = 50 * time.Millisecond
-	t.Cleanup(func() { schemaDeadline = saved })
 	fixture := newFixtureExecutor(t)
 	engine := &activeEngine{Engine: fixture.engine, gate: make(chan struct{})}
 	e := NewExecutor(engine, 30)
 	e.now = fixture.now
+	e.discoverRun = 50 * time.Millisecond
 	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "1h"}); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("overrun discovery: %v", err)
 	}
 	e.mu.Lock()
 	_, kept := e.schemas["1h|"]
 	e.mu.Unlock()
-	if kept || engine.active.Load() != 0 || len(schemaSlots) != 0 {
-		t.Fatalf("overrun discovery kept entry=%v active=%d slots=%d", kept, engine.active.Load(), len(schemaSlots))
+	if kept || engine.active.Load() != 0 || len(e.discoveries) != 0 {
+		t.Fatalf("overrun discovery kept entry=%v active=%d slots=%d", kept, engine.active.Load(), len(e.discoveries))
+	}
+}
+
+// Close cancels discoveries that outlived their callers, both running and
+// waiting for a slot, and returns once they released their connections. A
+// later lookup fails at once rather than start another.
+func TestSchemaCloseCancelsDetachedDiscoveries(t *testing.T) {
+	fixture := newFixtureExecutor(t)
+	engine := &activeEngine{Engine: fixture.engine, gate: make(chan struct{})}
+	e := NewExecutor(engine, 30)
+	e.now = fixture.now
+	for _, window := range []string{"15m", "1h", "3h"} {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		if _, err := e.Schema(ctx, SchemaRequest{Window: window}); !errors.Is(err, ErrSchemaBusy) {
+			t.Fatalf("caller out of time: %v", err)
+		}
+		cancel()
+	}
+	for engine.active.Load() < 2 {
+		time.Sleep(time.Millisecond)
+	}
+	closed := make(chan struct{})
+	go func() { e.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close waited on detached discoveries")
+	}
+	if engine.active.Load() != 0 || len(e.discoveries) != 0 {
+		t.Fatalf("after Close active=%d slots=%d", engine.active.Load(), len(e.discoveries))
+	}
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "6h"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("lookup after Close: %v", err)
 	}
 }
 

@@ -80,6 +80,16 @@ type Executor struct {
 	mu      sync.Mutex
 	checks  map[[32]byte]*Checked
 	schemas map[string]schemaEntry
+
+	// Schema discoveries outlive their callers but not the executor: they
+	// run under life, which Close cancels, two at a time through discoveries.
+	life        context.Context
+	stop        context.CancelFunc
+	running     sync.WaitGroup
+	discoveries chan struct{}
+	// discoverWait bounds a discovery's wait for a slot; discoverRun bounds
+	// its run once it holds one.
+	discoverWait, discoverRun time.Duration
 }
 
 func NewExecutor(engine Engine, retentionDays int) *Executor {
@@ -93,8 +103,19 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 	if pool, ok := engine.(interface{ ReadConnections() int }); ok {
 		slots = max(1, pool.ReadConnections())
 	}
+	life, stop := context.WithCancel(context.Background())
 	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: 10 * time.Second, batchTimeout: 20 * time.Second, parallel: 4,
-		slots: semaphore.NewWeighted(int64(slots)), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{}}
+		slots: semaphore.NewWeighted(int64(slots)), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
+		life: life, stop: stop, discoveries: make(chan struct{}, 2), discoverWait: time.Minute, discoverRun: 25 * time.Second}
+}
+
+// Close cancels the schema discoveries still running and waits for them to
+// release their read connections.
+func (e *Executor) Close() {
+	e.mu.Lock()
+	e.stop()
+	e.mu.Unlock()
+	e.running.Wait()
 }
 
 // Validate normalizes d and runs every check, returning Problems or nil.

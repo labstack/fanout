@@ -441,6 +441,8 @@ func main() {
 		_ = httpSrv.Close()
 	}
 	shutdownCancel()
+	// Schema discoveries outlive their requests; stop them before the engine.
+	panels.Close()
 	grpcSrv.Stop()
 	cancel()
 	writer.Wait()

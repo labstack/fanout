@@ -87,15 +87,6 @@ const (
 	namespacesKey    = "\x00namespaces"
 )
 
-// schemaDeadline bounds a discovery's wait for a slot and, separately, its
-// run. It is longer than any caller waits, so a slow discovery still finishes
-// and warms the cache for the next request.
-var schemaDeadline = time.Minute
-
-// Detached discoveries run at most two at a time process-wide, like the
-// engine's read pool; the rest wait for a slot.
-var schemaSlots = make(chan struct{}, 2)
-
 // namespaceMu serializes the namespace listing so a burst runs it once.
 var namespaceMu sync.Mutex
 
@@ -112,10 +103,11 @@ var ErrSchemaNotCached = errors.New("schema is not cached")
 // services. It is the agent's map before it drafts panels. An entry is fresh
 // for a minute and then served stale while one background refresh runs.
 // Concurrent callers of a new key share one discovery, which runs on after
-// they leave so the next request finds it cached. Discoveries are bounded:
-// two run at a time, each within schemaDeadline, windows are the fixed set
-// and a namespace must have data in the last 24h. A Cached request is
-// answered at once.
+// they leave, until the executor closes, so the next request finds it
+// cached. Discoveries are bounded: two run at a time, each waits at most
+// discoverWait for a slot and runs at most discoverRun, windows are the
+// fixed set and a namespace must have data in the last 24h. A Cached request
+// is answered at once.
 func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, error) {
 	if req.Window == "" {
 		req.Window = "1h"
@@ -137,7 +129,7 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 		if !now.Before(entry.expires) && entry.flight == nil {
 			entry.flight = &schemaFlight{done: make(chan struct{})}
 			e.schemas[key] = entry
-			go e.discoverFlight(context.WithoutCancel(ctx), key, req, span, entry.flight)
+			e.startDiscovery(key, req, span, entry.flight)
 		}
 		e.mu.Unlock()
 		return entry.schema, nil
@@ -161,7 +153,7 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 		}
 		flight = &schemaFlight{done: make(chan struct{})}
 		e.schemas[key] = schemaEntry{flight: flight}
-		go e.discoverFlight(context.WithoutCancel(ctx), key, req, span, flight)
+		e.startDiscovery(key, req, span, flight)
 	}
 	e.mu.Unlock()
 	select {
@@ -248,18 +240,43 @@ func (e *Executor) makeSchemaRoom() bool {
 	return true
 }
 
-func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaRequest, span time.Duration, flight *schemaFlight) {
-	wait := time.NewTimer(schemaDeadline)
+// startDiscovery runs flight detached from its callers, under the
+// executor's lifetime; once Close has run, it fails at once. The caller
+// holds e.mu, as Close does to cancel.
+func (e *Executor) startDiscovery(key string, req SchemaRequest, span time.Duration, flight *schemaFlight) {
+	if err := e.life.Err(); err != nil {
+		flight.err = err
+		go e.settle(key, flight)
+		return
+	}
+	e.running.Add(1)
+	go func() {
+		defer e.running.Done()
+		e.discoverFlight(req, span, flight)
+		e.settle(key, flight)
+	}()
+}
+
+func (e *Executor) discoverFlight(req SchemaRequest, span time.Duration, flight *schemaFlight) {
+	wait := time.NewTimer(e.discoverWait)
 	select {
-	case schemaSlots <- struct{}{}:
+	case e.discoveries <- struct{}{}:
 		wait.Stop()
-		ctx, cancel := context.WithTimeout(ctx, schemaDeadline)
+		ctx, cancel := context.WithTimeout(e.life, e.discoverRun)
 		flight.schema, flight.err = e.discover(ctx, req, span)
 		cancel()
-		<-schemaSlots
+		<-e.discoveries
 	case <-wait.C:
 		flight.err = ErrSchemaBusy
+	case <-e.life.Done():
+		wait.Stop()
+		flight.err = e.life.Err()
 	}
+}
+
+// settle caches flight's schema, or drops or keeps the stale entry on
+// failure, and releases its waiters.
+func (e *Executor) settle(key string, flight *schemaFlight) {
 	e.mu.Lock()
 	if entry := e.schemas[key]; entry.flight == flight {
 		switch {
