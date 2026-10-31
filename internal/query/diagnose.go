@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/fanout/internal/queryrows"
@@ -17,7 +18,31 @@ const maxDiagnosedFilters = 8
 // filters removed in turn. The filter whose removal recovers the most rows is
 // named in the context of the active combination, with the values seen for its
 // field when it was an equality. Ties keep the author's filter order.
+//
+// The diagnosis shares the panel's deadline, so after a slow query it may not
+// finish; the panel then says only what the query showed.
 func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
+	if message := e.explain(ctx, p, filters, scope); message != "" {
+		return message
+	}
+	for _, f := range filters {
+		if !scope.dropped(f) {
+			return fmt.Sprintf("No %s match these filters in this time range.", rowNoun(p))
+		}
+	}
+	return fmt.Sprintf("No %s match this query in this time range.", rowNoun(p))
+}
+
+// rowNoun names what a structured panel lists: traces on the traces viz,
+// otherwise the rows of its signal.
+func rowNoun(p *Panel) string {
+	if p.Viz == "traces" {
+		return "traces"
+	}
+	return p.Query.From
+}
+
+func (e *Executor) explain(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
 	if p.Query == nil {
 		return "The query returned no rows for this time range."
 	}
@@ -79,7 +104,7 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 		others := append(append([]Filter{}, active[:best]...), active[best+1:]...)
 		selection := "one filter"
 		if f.DisplayField != "" {
-			value := f.DisplayLiteral
+			value := spoken(sig, f.EqField, f.DisplayLiteral)
 			if f.DisplayParam != "" {
 				value = strings.Join(scope.Vars[f.DisplayParam].Values, ", ")
 			}
@@ -89,24 +114,55 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 				selection = f.DisplayField + " filter"
 			}
 		}
-		message := fmt.Sprintf("No %s match the selected filters in this time range. Without %s, %d match.", sig.name, selection, recovered)
+		// Counts are of the signal's rows; the traces viz lists traces of spans.
+		noun, matched := rowNoun(p), grouped(recovered)
+		if noun != sig.name {
+			matched += " " + sig.name
+		}
+		message := fmt.Sprintf("No %s match the selected filters in this time range. Without %s, %s match.", noun, selection, matched)
 		if f.DisplayField != "" && (f.DisplayLiteral != "" || f.DisplayParam != "") {
-			message = fmt.Sprintf("No %s for %s in this time range. Without that filter, %d match.", sig.name, selection, recovered)
+			message = fmt.Sprintf("No %s for %s in this time range. Without that filter, %s match.", noun, selection, matched)
 		}
 		if len(active) > 1 {
-			message = fmt.Sprintf("No %s match this combination of filters in this time range. Without %s, %d match the remaining filters.", sig.name, selection, recovered)
+			message = fmt.Sprintf("No %s match this combination of filters in this time range. Without %s, %s match the remaining filters.", noun, selection, matched)
 		}
 		if f.EqField != "" {
 			if seen := e.topValues(ctx, sig, f.EqField, others, scope); seen != "" {
 				message += " Values seen: " + seen + "."
 			}
 			if n := e.otherTypeMatches(ctx, sig, f, others, scope); n > 0 {
-				message += fmt.Sprintf(" %d %s store %s %s as a different type (text or number), and the filter matches one type only.", n, sig.name, f.DisplayField, f.DisplayLiteral)
+				message += fmt.Sprintf(" %s %s store %s %s as a different type (text or number), and the filter matches one type only.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral)
 			}
 		}
 		return message
 	}
-	return fmt.Sprintf("%d %s are in this time range, but the filters together match none of them.", total, sig.name)
+	return fmt.Sprintf("%s %s are in this time range, but the filters together match none of them.", grouped(total), sig.name)
+}
+
+// grouped writes a count, which is never negative, with thousands separators.
+func grouped(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, d := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(d)
+	}
+	return b.String()
+}
+
+// spoken writes a stored enum value as FanQL spells it: STATUS_CODE_ERROR is
+// error. Other values are unchanged.
+func spoken(sig *signal, field, value string) string {
+	if v := fieldVocabularies[field]; v.Signal == sig.name {
+		for alias, stored := range v.Aliases {
+			if stored == value {
+				return alias
+			}
+		}
+	}
+	return value
 }
 
 func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, scope Scope) (int64, error) {
@@ -242,7 +298,7 @@ func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string,
 		var value string
 		var n int64
 		if rows.Scan(&value, &n) == nil {
-			parts = append(parts, fmt.Sprintf("%s (%d)", value, n))
+			parts = append(parts, fmt.Sprintf("%s (%s)", spoken(sig, fieldText, value), grouped(n)))
 		}
 	}
 	return strings.Join(parts, ", ")
