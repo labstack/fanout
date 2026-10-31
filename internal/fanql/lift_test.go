@@ -437,3 +437,17 @@ func TestCompileAndFormatReturnNonNilEmptyNotices(t *testing.T) {
 		t.Fatalf("format notices: %+v, %+v, %v", f, ps, err)
 	}
 }
+
+func TestFormatLabelsEachEntryAsFanQL(t *testing.T) {
+	stored := query.Spec{From: "spans", Where: []string{`contains(lower(operation), lower('se'))`, `status = 'STATUS_CODE_ERROR'`, `duration_ms > 100`}, Measures: []string{`count_if(status = 'STATUS_CODE_ERROR')`, `count()`}}
+	f, problems, err := Format(t.Context(), &countingParser{fail: true}, stored, Options{})
+	if err != nil || len(problems) != 0 {
+		t.Fatalf("format: %+v %v", problems, err)
+	}
+	if want := []string{`se`, `status:error`, `duration>100ms`}; !reflect.DeepEqual(f.Where, want) {
+		t.Fatalf("where = %q, want %q", f.Where, want)
+	}
+	if want := []string{`count_if(status:error)`, `count()`}; !reflect.DeepEqual(f.Measures, want) {
+		t.Fatalf("measures = %q, want %q", f.Measures, want)
+	}
+}
