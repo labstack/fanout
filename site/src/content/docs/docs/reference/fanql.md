@@ -212,7 +212,7 @@ On normalized log rows, `error_rate()` counts exactly `severity>=error`. Its bac
 | Duration | `us`, `ms`, `s`, `m`, `h`, only on `duration`; converted to milliseconds. Examples: `500ms`, `1.5s`, `250us`, `2m`, `1h`. Negative, compound and overflowing durations are rejected. |
 | Timestamp | Quoted RFC 3339 or `YYYY-MM-DD HH:MM:SS`, optional fraction/offset; no offset means UTC. Time comparisons retain nanoseconds through TIMESTAMPTZ_NS. |
 | Existence | `k:*` is IS NOT NULL; `-k:*` is IS NULL. |
-| Free text | Case-insensitive substring of log body or span operation; explicit field required on metrics. |
+| Free text | Case-insensitive substring of log body or span operation; explicit field required on metrics. A lone `$name` searches for the variable's value and prints as `body ~ $name` or `operation ~ $name`. |
 
 Contains emits `contains(lower(field), lower(value))`; map values first cast to VARCHAR. SQL LIKE/ILIKE require quoted patterns; ESCAPE is not expressible, so use `~` when `%` should be literal.
 
