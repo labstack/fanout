@@ -24,6 +24,7 @@ func newTestEngine(t *testing.T) (*Engine, *Store) {
 	engine := &Engine{
 		store:    store,
 		programs: make(map[string]Program),
+		stopped:  make(map[string]bool),
 		interval: 30 * time.Second,
 	}
 	return engine, store
@@ -283,7 +284,7 @@ func TestEngine_Transition_PendingPromotes(t *testing.T) {
 	}
 	t.Cleanup(func() { sqlite.Close() })
 	store := NewStore(sqlite.DB)
-	eng := &Engine{store: store, programs: make(map[string]Program), interval: 30 * time.Second}
+	eng := &Engine{store: store, programs: make(map[string]Program), stopped: make(map[string]bool), interval: 30 * time.Second}
 	rule := makeTestRule(t, store, "error_rate > 0.1", 60)
 	env := Env{Service: "svc-a", ErrorRate: 0.5}
 	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
@@ -466,5 +467,37 @@ func TestEngineDisableRuleResolvesFiringAlerts(t *testing.T) {
 	eng.mu.RUnlock()
 	if compiled {
 		t.Fatal("disabled rule is still evaluated")
+	}
+}
+
+// A rule disabled after a tick listed it as enabled is not evaluated by that
+// tick: recompiling it there left a firing alert for a disabled rule.
+func TestEngineDisableDuringTickLeavesNoAlert(t *testing.T) {
+	eng, store := newTestEngine(t)
+	rule := makeTestRule(t, store, "error_rate > 0.1", 0)
+	eng.envOverride = map[string]Env{"svc-a": {Service: "svc-a", ErrorRate: 0.5}}
+	eng.afterList = func() {
+		disabled := rule
+		disabled.Enabled = false
+		if _, err := store.ReplaceRule(disabled); err != nil {
+			t.Fatal(err)
+		}
+		eng.DisableRule(disabled)
+	}
+	eng.evaluateOnce(t.Context())
+	if a, err := store.GetAlert(rule.ID, "svc-a"); err == nil {
+		t.Fatalf("disabled rule left alert %+v", a)
+	}
+	// Enabling it again evaluates it.
+	eng.afterList = nil
+	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ReplaceRule(rule); err != nil {
+		t.Fatal(err)
+	}
+	eng.evaluateOnce(t.Context())
+	if a, err := store.GetAlert(rule.ID, "svc-a"); err != nil || a.State != "firing" {
+		t.Fatalf("re-enabled rule: %+v, %v", a, err)
 	}
 }

@@ -20,15 +20,19 @@ const pruneHistDays = 7
 
 // Engine drives the alert evaluation loop.
 type Engine struct {
-	store       *Store
-	duck        *engine.Duck           // may be nil in tests
-	detector    *intelligence.Detector // may be nil in tests
-	mu          sync.RWMutex
-	programs    map[string]Program // rule ID → compiled program
+	store    *Store
+	duck     *engine.Duck           // may be nil in tests
+	detector *intelligence.Detector // may be nil in tests
+	mu       sync.RWMutex
+	programs map[string]Program // rule ID → compiled program
+	// stopped holds rules disabled or deleted since a tick last listed them
+	// as enabled, so a tick that listed one before it stopped skips it.
+	stopped     map[string]bool
 	interval    time.Duration
 	histDays    int
 	lastPrune   time.Time
 	envOverride map[string]Env // for testing — bypasses DuckDB query
+	afterList   func()         // for testing — runs once a tick has listed its rules
 }
 
 // NewEngine creates an Engine ready to Run.
@@ -44,6 +48,7 @@ func NewEngine(
 		duck:     duck,
 		detector: detector,
 		programs: make(map[string]Program),
+		stopped:  make(map[string]bool),
 		interval: interval,
 		histDays: histDays,
 	}
@@ -51,9 +56,12 @@ func NewEngine(
 
 // DisableRule stops evaluating a rule. Its firing alerts resolve, staying in
 // history and notifying as a cleared condition would; pending ones never
-// fired and are dropped.
+// fired and are dropped. Holding the lock waits out a tick's transitions for
+// the rule, and the tick skips it from then on.
 func (e *Engine) DisableRule(rule Rule) {
-	e.RemoveRule(rule.ID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.stop(rule.ID)
 	alerts, err := e.store.ListAlerts("", "", rule.ID)
 	if err != nil {
 		slog.Error("alert: list alerts of disabled rule", "rule", rule.ID, "err", err)
@@ -86,7 +94,14 @@ func (e *Engine) DisableRule(rule Rule) {
 func (e *Engine) RemoveRule(ruleID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.stop(ruleID)
+}
+
+// stop drops a rule's program and keeps a tick from compiling it again until
+// the rule is recompiled. The caller holds e.mu.
+func (e *Engine) stop(ruleID string) {
 	delete(e.programs, ruleID)
+	e.stopped[ruleID] = true
 }
 
 // Run starts the evaluation ticker. It blocks until ctx is cancelled.
@@ -129,6 +144,9 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 		slog.Error("alert: list enabled rules", "err", err)
 		return
 	}
+	if e.afterList != nil {
+		e.afterList()
+	}
 	if len(rules) == 0 {
 		return
 	}
@@ -144,33 +162,48 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 	}
 
 	for _, rule := range rules {
-		e.mu.RLock()
-		prog, ok := e.programs[rule.ID]
-		e.mu.RUnlock()
-		if !ok {
-			// Compilation already logged the error; skip.
-			continue
-		}
-
-		services := e.resolveServices(rule, envs)
-		for _, svc := range services {
-			env := envs[svc]
-			triggered, evalErr := SafeEval(prog, env)
-			if evalErr != nil {
-				slog.Warn("alert: eval error", "rule", rule.ID, "service", svc, "err", evalErr)
-				triggered = false
-			}
-			e.transition(rule, svc, triggered, env, now)
-		}
+		e.evaluateRule(rule, envs, now)
 	}
 }
 
-// compileRules compiles any rules that have not yet been compiled.
+// evaluateRule runs one rule's transitions under the read lock, so a rule
+// disabled meanwhile is either skipped or cleaned up after them.
+func (e *Engine) evaluateRule(rule Rule, envs map[string]Env, now time.Time) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	prog, ok := e.programs[rule.ID]
+	if !ok {
+		// Stopped, or compilation already logged the error.
+		return
+	}
+	for _, svc := range e.resolveServices(rule, envs) {
+		env := envs[svc]
+		triggered, evalErr := SafeEval(prog, env)
+		if evalErr != nil {
+			slog.Warn("alert: eval error", "rule", rule.ID, "service", svc, "err", evalErr)
+			triggered = false
+		}
+		e.transition(rule, svc, triggered, env, now)
+	}
+}
+
+// compileRules compiles any listed rules that have not yet been compiled and
+// were not stopped since. A stopped rule this tick no longer lists is
+// forgotten: later ticks never see it.
 func (e *Engine) compileRules(rules []Rule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	listed := make(map[string]bool, len(rules))
 	for _, r := range rules {
-		if _, ok := e.programs[r.ID]; ok {
+		listed[r.ID] = true
+	}
+	for id := range e.stopped {
+		if !listed[id] {
+			delete(e.stopped, id)
+		}
+	}
+	for _, r := range rules {
+		if _, ok := e.programs[r.ID]; ok || e.stopped[r.ID] {
 			continue
 		}
 		prog, err := CompileExpression(r.Expression)
@@ -600,6 +633,7 @@ func (e *Engine) RecompileRule(ruleID, expression string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.programs[ruleID] = prog
+	delete(e.stopped, ruleID)
 	return nil
 }
 
