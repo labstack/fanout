@@ -112,6 +112,12 @@ func TestPanelQueryRouteStreamsWhenAsked(t *testing.T) {
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/x-ndjson" || rec.Body.String() != `{"id":"a","status":"ok","elapsed_ms":0,"from_ms":0,"to_ms":0}`+"\n" || !rec.Flushed {
 		t.Fatalf("stream %d %q %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body)
 	}
+	// Chrome cancels a fully read no-store fetch body when its end arrives
+	// after the last chunk, reporting the stream as aborted; a POST response is
+	// not cached anyway, so the stream only keeps proxies from transforming it.
+	if got := rec.Header().Get("Cache-Control"); got != "no-cache, no-transform" {
+		t.Fatalf("stream cache control %q", got)
+	}
 	// Spec problems come before any result, so they keep their status.
 	engine.problem = true
 	if rec := post(`{"dashboard":{"name":"x","panels":[]}}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "panels[0].viz") {

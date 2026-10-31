@@ -68,7 +68,11 @@ func (h *QueryHandler) query(c *echo.Context) error {
 	begin := func() {
 		started = true
 		response.Header().Set(echo.HeaderContentType, streamType)
-		response.Header().Set(echo.HeaderCacheControl, "no-store")
+		// Not no-store: Chrome cancels a fully read no-store fetch body whose
+		// end arrives after its last chunk, so the stream shows as aborted.
+		// A POST response is not cached; no-transform keeps proxies from
+		// buffering or compressing the stream.
+		response.Header().Set(echo.HeaderCacheControl, "no-cache, no-transform")
 		response.WriteHeader(http.StatusOK)
 	}
 	err := h.engine.Stream(ctx, req, func(result query.Result) {
