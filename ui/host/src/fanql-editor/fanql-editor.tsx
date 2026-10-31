@@ -1,7 +1,7 @@
 import { Text } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { Annotation, Compartment, EditorState, Prec } from "@codemirror/state";
-import { EditorView, drawSelection, keymap, placeholder } from "@codemirror/view";
+import { EditorView, drawSelection, keymap, placeholder, tooltips } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { acceptCompletion, autocompletion, closeCompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
@@ -16,7 +16,7 @@ const oneLine = EditorView.theme({
   ".cm-scroller": { minHeight: "0", maxHeight: "none", overflow: "hidden", fontSize: "14px" },
   ".cm-content": { padding: "8px 4px" },
   // The list stays clear of the screen edge, and on a phone its descriptions wrap instead of being cut.
-  ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxWidth: "min(700px, calc(100vw - 32px))" },
+  ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxWidth: "min(700px, calc(100vw - 40px))" },
   "@media (max-width: 600px)": { ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { whiteSpace: "normal" } },
 });
 /** Marks a transaction that applies the value prop, so it is not reported back as an edit. */
@@ -109,6 +109,8 @@ export function FanqlEditor(props: FanqlEditorProps) {
         ...["ArrowDown", "ArrowUp", "PageDown", "PageUp"].map(key => ({ key, run: (view: EditorView) => { if (completionStatus(view.state) === "active") navigated.current = true; return false; } })),
       ])),
       autocompletion({ override: [source], activateOnTypingDelay: 120 }),
+      // Tooltips keep a margin from the window's sides, as the page content does.
+      tooltips({ tooltipSpace: view => { const win = view.dom.ownerDocument.defaultView ?? window; return { top: 0, left: 16, bottom: win.innerHeight, right: win.innerWidth - 16 }; } }),
       keymap.of([...defaultKeymap.filter(binding => binding.key !== "Enter"), ...historyKeymap]),
       EditorView.updateListener.of(update => {
         // Typing changes the list, so a choice made with the arrows no longer stands.
