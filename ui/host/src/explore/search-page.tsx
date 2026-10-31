@@ -55,13 +55,17 @@ const rowPage = 100;
 /** The server's busy message tells a dashboard to refresh; this page runs one search. */
 const searchCopy = (result: PanelResult): PanelResult => result.reason === "busy"
   ? { ...result, error: "Not run: other queries kept the server busy. Run the search again." } : result;
+/** The typed filters are grouped so a top-level `or` stays theirs; the fields' terms follow. */
+const combine = (filters: string, picked: string) => filters.trim() && picked ? `(${filters}) ${picked}` : filters.trim() ? filters : picked;
 /** FanQL quotes a value with doubled inner quotes. */
 const quoted = (value: string) => `"${value.replaceAll('"', '""')}"`;
 
 type Ran = { text: string; terms: string; sort: string; window: string; panel: Panel; result: PanelDisplayResult };
 
-export function SearchPage({ preset, search, onSearch, onSaved }: {
+export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   preset: Preset; search: ExploreSearch; onSearch(next: ExploreSearch, replace?: boolean): void; onSaved(dashboardId: string): void;
+  /** Opens a whole FanQL query in Explore. */
+  onExplore?(q: string): void;
 }) {
   const [text, setText] = useState(search.q);
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -95,10 +99,9 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
     const abort = new AbortController(); controller.current = abort;
     setRunning(true); setError(undefined); setProblems([]);
     try {
-      // The typed filters are grouped so a top-level `or` stays theirs; the
-      // fields' terms follow, and problem spans are mapped back to the editor.
+      // Problem spans in the combined text are mapped back to the editor.
       const picked = termsNow.current;
-      const combined = filters.trim() && picked ? `(${filters}) ${picked}` : filters.trim() ? filters : picked;
+      const combined = combine(filters, picked);
       const shift = filters.trim() && picked ? 1 : 0;
       setShifted({ shift, length: Array.from(filters).length });
       const parsed = await parseFanql({ text: combined, source: preset.source, viz: preset.viz }, abort.signal);
@@ -189,6 +192,11 @@ export function SearchPage({ preset, search, onSearch, onSaved }: {
       <Group gap="xs">
         <Button loading={running} onClick={() => void execute(text, sort)}>Search</Button>
         <SegmentedControl size="xs" aria-label="Order" value={sort} data={[...preset.sorts]} onChange={value => onSearch({ ...search, sort: value })} />
+        {preset.viz === "traces" && onExplore && <Button variant="subtle" size="xs" disabled={!ran} onClick={() => {
+          // The last search's spans, one row per service, in Explore where the query stays visible.
+          const filters = ran ? combine(ran.text, ran.terms).trim() : "";
+          onExplore(`spans${filters ? ` where ${filters}` : ""} | count(), error_rate(), p95(duration) by service sort error_rate`);
+        }}>Services by error rate</Button>}
       </Group>
       <Tooltip label="Search for something that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => ran && setSaving(ran.panel)}>Save to dashboard</Button></span></Tooltip>
     </Group>

@@ -11,5 +11,6 @@ function Traces() {
   const search = parseExploreSearch(Route.useSearch() as Record<string, unknown>);
   const navigate = useNavigate();
   return <SearchPage key="traces" preset={tracesPreset} search={search} onSearch={(next, replace) => void navigate({ to: "/traces", search: toExploreParams(next), replace })}
-    onSaved={dashboardId => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId } })} />;
+    onSaved={dashboardId => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId } })}
+    onExplore={q => void navigate({ to: "/explore", search: toExploreParams({ q, viz: "table", range: search.range, from: search.from, to: search.to, tab: "query" }) })} />;
 }

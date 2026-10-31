@@ -34,12 +34,12 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup => cleanup())); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-async function render(preset: Preset, initial: Partial<ExploreSearch> = {}) {
+async function render(preset: Preset, initial: Partial<ExploreSearch> = {}, onExplore?: (q: string) => void) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let search: ExploreSearch = { q: "", range: "1h", tab: "query", ...initial };
   const onSearch = vi.fn((next: ExploreSearch, _replace?: boolean) => { search = next; void draw(); });
-  const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><SearchPage preset={preset} search={search} onSearch={onSearch} onSaved={vi.fn()} /></QueryClientProvider></MantineProvider>));
+  const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><SearchPage preset={preset} search={search} onSearch={onSearch} onSaved={vi.fn()} onExplore={onExplore} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
   await draw();
   const ui = within(host);
@@ -161,6 +161,14 @@ describe("SearchPage", () => {
     await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
     await wait(() => expect(search().q).toBe('(a or b) -operation:"flagd.Service/""EventStream"""'));
     expect(ui.getByRole("button", { name: "Exclude service flagd" })).toBeTruthy();
+  });
+
+  it("opens the searched spans by service in Explore, worst error rate first", async () => {
+    const onExplore = vi.fn();
+    const { ui, wait } = await render(tracesPreset, { q: "a or b", picks: { errors: "1" } }, onExplore);
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await act(async () => ui.getByRole("button", { name: "Services by error rate" }).click());
+    expect(onExplore).toHaveBeenCalledWith("spans where (a or b) status:error | count(), error_rate(), p95(duration) by service sort error_rate");
   });
 
   it("opens the trace drawer named in the URL", async () => {
