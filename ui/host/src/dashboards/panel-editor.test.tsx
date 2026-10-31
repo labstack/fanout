@@ -220,6 +220,34 @@ describe("PanelEditor", () => {
     await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
   });
 
+  it("saves a new title without waiting for the opening run when the query is unchanged", async () => {
+    const run = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((input, init) => String(input) === "/api/queries/run" ? new Promise<Response>(() => {}) : run(input, init));
+    const { ui, onClose, wait } = await render();
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await act(async () => fireEvent.change(ui.getByRole("textbox", { name: "Panel title" }), { target: { value: "Requests by service" } }));
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
+    await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
+    await wait(() => expect(onClose).toHaveBeenCalled());
+    expect(bodies("/api/dashboards/d1", "PATCH")[0]).toEqual({ operations: [{ op: "update_panel", id: "panel", set: { title: "Requests by service" } }], base_version: 7, message: "Edited Requests by service" });
+  });
+
+  it("saves a new title after the opening run failed, and says why a changed query cannot save", async () => {
+    const failure = "The query took longer than 10 seconds. Narrow the time range or add filters.";
+    const run = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "explore", status: "error", elapsed_ms: 10000, error: failure, retryable: true }] }) : run(input, init));
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getByText(failure)).toBeTruthy());
+    const save = () => ui.getByRole("button", { name: "Save panel" });
+    expect(save().getAttribute("aria-disabled")).toBe("false");
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    await act(async () => view.dispatch({ changes: { from: view.state.doc.length, insert: " every 5m" } }));
+    await act(async () => ui.getByRole("button", { name: "Run" }).click());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    await wait(() => expect(save().getAttribute("aria-disabled")).toBe("true"));
+    expect(document.getElementById(save().getAttribute("aria-describedby")!)!.textContent).toBe("The last run failed; saving needs a run that works");
+  });
+
   it("names a new panel after its query unless a title is typed, and shows the variables it runs with", async () => {
     const { ui, wait } = await render({ add: true });
     await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());

@@ -250,8 +250,11 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const stale = run !== undefined && (run.kind !== kind || run.source !== source || run.window !== windowKey);
   const compatible = parsed?.viz.compatible ?? [];
   const editing = context?.panel !== undefined;
-  const canSave = !stale && !running && canKeep(run, editing);
-  const saveReason = running ? "Wait for the run to finish" : stale ? "Run the query as it is now first" : editing ? "Run the query first" : "Run a query that returns rows first";
+  // An edited panel whose query and viz are as it opened saves its other settings, such as the title, without a run.
+  const unchanged = base !== undefined && !dirty && (search.viz ?? base.viz) === base.viz;
+  const ran = !stale && !running && canKeep(run, editing);
+  const canSave = ran || unchanged;
+  const saveReason = running ? "Wait for the run to finish" : stale ? "Run the query as it is now first" : run?.result.status === "error" ? "The last run failed; saving needs a run that works" : editing ? "Run the query first" : "Run a query that returns rows first";
   const saveHelp = useId();
   // Points open what makes makeDrill return a target; otherwise the chart offers no drill.
   const drills = run !== undefined && (run.panel.drill !== undefined || run.panel.viz === "service_map" || (run.result.frame?.columns.some(c => c.name === "trace_id") ?? false));
@@ -313,9 +316,10 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       <Tooltip label={saveReason} disabled={canSave} events={{ hover: true, focus: true, touch: true }}>
         {context
           ? <Button data-disabled={!canSave || undefined} aria-disabled={!canSave} aria-describedby={canSave ? undefined : saveHelp} loading={savingPanel} onClick={() => {
-            if (!run || !canSave) return;
+            const panel = ran ? run?.panel : base;
+            if (!panel || !canSave) return;
             setSavingPanel(true); setSavingError(undefined);
-            context.save.run(run.panel).catch((failure: unknown) => setSavingError(failure instanceof Error ? failure.message : "Save failed")).finally(() => setSavingPanel(false));
+            context.save.run(panel).catch((failure: unknown) => setSavingError(failure instanceof Error ? failure.message : "Save failed")).finally(() => setSavingPanel(false));
           }}>{context.save.label}</Button>
           : <Button variant="default" data-disabled={!canSave || undefined} aria-disabled={!canSave} aria-describedby={canSave ? undefined : saveHelp} onClick={() => run && canSave && setSaving(run.panel)}>Save to dashboard</Button>}
       </Tooltip>
