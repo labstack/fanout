@@ -50,7 +50,7 @@ export function relativeLuminance(hex: string) {
  *  colour light" rather than "which text can be read on it". The two differ in
  *  the middle of the range, and info[7] #1e86bd is in it: below the threshold,
  *  so white, at 4.04:1 — under AA — where black reads 5.20:1. */
-export function filledTextOn(hex: string) {
+function filledTextOn(hex: string) {
   const luminance = relativeLuminance(hex);
   const onWhite = 1.05 / (luminance + 0.05);
   const onBlack = (luminance + 0.05) / 0.05;

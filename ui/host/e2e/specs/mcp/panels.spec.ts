@@ -44,7 +44,7 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
       await tabTo(main.getByRole("button").first());
       if (scenario === "trace") {
         await main.getByRole("button", { name: recordings.trace.result.structuredContent.trace.data.trace_id.slice(0, 16), exact: true }).click();
-        const detail = frame.getByRole("dialog", { name: "Slow or erroring traces · traces" });
+        const detail = frame.getByRole("dialog", { name: "Trace", exact: true });
         await expect(detail.getByRole("button", { name: "Waterfall", exact: true })).toBeVisible();
         await expect(detail.getByRole("alert")).toHaveCount(0);
       }

@@ -27,8 +27,9 @@ import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
 import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
+import { spanExtras } from "./trace/span-details";
 const NewDashboard = lazy(() => import("./new-dashboard").then(module => ({ default: module.NewDashboard })));
-const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
+const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace, span: spanExtras };
 
 const zoomOut: Record<string, string> = { "5m": "15m", "15m": "1h", "1h": "3h", "3h": "6h", "6h": "12h", "12h": "24h", "24h": "2d", "2d": "7d", "7d": "30d", "30d": "30d" };
 
