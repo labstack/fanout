@@ -604,7 +604,10 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 		case "CAST":
 			other = other.Child
 		case "CONSTANT":
-			return field, constantText(other), ""
+			if other.LiteralKind == "NULL" {
+				return field, "", ""
+			}
+			return field, other.LiteralText, ""
 		case "PARAMETER":
 			return field, "", other.Identifier
 		default:
@@ -628,7 +631,14 @@ func displayField(field string) string {
 	case "name":
 		return "metric"
 	}
-	return strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
+	// Attribute keys keep their spelling; only column names read as words.
+	if key, ok := strings.CutPrefix(field, "attributes['"); ok {
+		return "attribute " + strings.TrimSuffix(key, "']")
+	}
+	if key, ok := strings.CutPrefix(field, "resource['"); ok {
+		return "resource " + strings.TrimSuffix(key, "']")
+	}
+	return strings.ReplaceAll(field, "_", " ")
 }
 
 func unwrapLower(v *SQLExpr) *SQLExpr {

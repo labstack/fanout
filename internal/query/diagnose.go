@@ -100,6 +100,9 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 			if seen := e.topValues(ctx, sig, f.EqField, others, scope); seen != "" {
 				message += " Values seen: " + seen + "."
 			}
+			if n := e.otherTypeMatches(ctx, sig, f, others, scope); n > 0 {
+				message += fmt.Sprintf(" %d %s store %s %s as a different type (text or number), and the filter matches one type only.", n, sig.name, f.DisplayField, f.DisplayLiteral)
+			}
 		}
 		return message
 	}
@@ -190,6 +193,33 @@ func (e *Executor) rerunCounts(ctx context.Context, sig *signal, active []Filter
 		without[i], _ = e.count(ctx, sig, others, scope)
 	}
 	return total, without, nil
+}
+
+// otherTypeMatches counts rows whose attribute equals the filter's literal
+// as text. Attribute equality is typed, so 500 misses a stored "500"; in an
+// empty panel the filter itself matches none of these rows.
+func (e *Executor) otherTypeMatches(ctx context.Context, sig *signal, f Filter, others []Filter, scope Scope) int64 {
+	if f.DisplayLiteral == "" || !strings.HasPrefix(f.EqField, "attributes[") && !strings.HasPrefix(f.EqField, "resource[") {
+		return 0
+	}
+	ref, err := sig.field(f.EqField)
+	if err != nil {
+		return 0
+	}
+	where, args, err := buildWhere(sig, others, scope)
+	if err != nil {
+		return 0
+	}
+	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT count(*) FROM %s WHERE %s AND %s = ?", structuredSource(sig.name), where, ref.stringSQL()), append(args, f.DisplayLiteral)...)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	var n int64
+	if !rows.Next() || rows.Scan(&n) != nil {
+		return 0
+	}
+	return n
 }
 
 func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string, filters []Filter, scope Scope) string {
