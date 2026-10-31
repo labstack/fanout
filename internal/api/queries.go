@@ -130,7 +130,11 @@ func (h *QueryHandler) schema(c *echo.Context) error {
 	var problems query.Problems
 	switch {
 	case errors.As(err, &problems):
-		failure := newAPIError(http.StatusBadRequest, "invalid_request", problems[0].Message)
+		message := "The schema request is invalid."
+		if len(problems) > 0 {
+			message = problems[0].Message
+		}
+		failure := newAPIError(http.StatusBadRequest, "bad_request", message)
 		failure.Problems = query.PresentProblems(problems)
 		return failure
 	case errors.Is(err, context.DeadlineExceeded):

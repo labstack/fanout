@@ -78,7 +78,7 @@ Specific conditions use `already_current`, `dashboard_version_not_found`,
 `GET /api/telemetry/schema` returns 503 `schema_busy` with `Retry-After` when a
 new window and namespace cannot start a discovery yet, or when the discovery is
 still running after 15 seconds; it keeps running, so a retry finds it cached.
-Cached ones are always served. An unknown window is 400 `invalid_request`.
+Cached ones are always served. An unknown window is 400 `bad_request`.
 Tool failures carry `error: {code, message}` inside the tool result.
 Panel execution results keep their own status and error fields.
 OAuth, OTLP/gRPC, MCP JSON-RPC and AG-UI run errors keep their protocol spelling.

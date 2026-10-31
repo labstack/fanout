@@ -45,7 +45,21 @@ func (*windowSchema) Schema(context.Context, query.SchemaRequest) (*query.Schema
 
 func TestTelemetrySchemaUnknownWindowNamesTheWindows(t *testing.T) {
 	rec := servePanels(t, &windowSchema{}, http.MethodGet, "/api/telemetry/schema?window=7d", "")
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"message":"window must be one of 5m, 15m, 1h, 3h, 6h, 12h or 24h"`) || strings.Contains(rec.Body.String(), "dashboard") {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"bad_request"`) || !strings.Contains(rec.Body.String(), `"message":"window must be one of 5m, 15m, 1h, 3h, 6h, 12h or 24h"`) || strings.Contains(rec.Body.String(), "dashboard") {
 		t.Fatalf("unknown window: %d %s", rec.Code, rec.Body)
+	}
+}
+
+type emptyProblemsSchema struct{ fakePanels }
+
+func (*emptyProblemsSchema) Schema(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	return nil, query.Problems{}
+}
+
+// An empty problem list is still a bad request, not a panic.
+func TestTelemetrySchemaEmptyProblems(t *testing.T) {
+	rec := servePanels(t, &emptyProblemsSchema{}, http.MethodGet, "/api/telemetry/schema?window=1h", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"bad_request"`) {
+		t.Fatalf("empty problems: %d %s", rec.Code, rec.Body)
 	}
 }
