@@ -10,6 +10,8 @@ import { RuleForm } from "./rule-form";
 import { formatValue, variables } from "./values";
 
 const stateColor: Record<string, string> = { firing: "bad", pending: "warn", resolved: "gray" };
+/** A badge whose label can shrink is cut to "FIR…" when a narrow screen squeezes the table. */
+const whole = { label: { overflow: "visible" } };
 const when = (value?: string) => value ? exactTimestamp(value) : "—";
 
 /** The rollup variables a rule reads, as the FanQL source and measure that chart them. */
@@ -78,7 +80,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
       {rules.data && rules.data.length > 0 && <Text size="xs" c="dimmed">{exploreNote}</Text>}
       {rules.isLoading ? <Loader size="sm" /> : rules.error ? <Alert color="bad">Rules could not be loaded: {rules.error.message}</Alert>
         : rules.data?.length === 0 ? <Text size="sm" c="dimmed" data-alerts-empty>No rules yet.{canManage ? " Create one to get notified when a service misbehaves." : ""}</Text>
-        : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm" highlightOnHover>
+        : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm">
           <Table.Thead><Table.Tr><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Expression</Table.Th><Table.Th>State</Table.Th><Table.Th>Last fired</Table.Th><Table.Th>Enabled</Table.Th><Table.Th w={48} /></Table.Tr></Table.Thead>
           <Table.Tbody>{rules.data?.map(rule => {
             const now = active(rule);
@@ -88,7 +90,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
               <Table.Td><Text size="xs" ff="monospace">{rule.expression}</Text>
                 <Button size="compact-xs" variant="subtle" px={0} onClick={() => onExplore(ruleQuery(rule))}>Open in Explore</Button></Table.Td>
               <Table.Td>{!rule.enabled ? <Text size="xs" c="dimmed">Disabled</Text> : !alerts.isSuccess ? <Text size="xs" c="dimmed">Unknown</Text>
-                : now.length > 0 ? <Group gap={4}>{now.map(a => <Badge key={a.id} color={stateColor[a.state]} variant="light">{a.state} · {a.service}</Badge>)}</Group> : <Text size="xs" c="dimmed">OK</Text>}</Table.Td>
+                : now.length > 0 ? <Group gap={4}>{now.map(a => <Badge key={a.id} color={stateColor[a.state]} variant="light" styles={whole}>{a.state} · {a.service}</Badge>)}</Group> : <Text size="xs" c="dimmed">OK</Text>}</Table.Td>
               <Table.Td><Text size="sm">{alerts.isSuccess ? when(lastFired(rule)) : "—"}</Text></Table.Td>
               <Table.Td><Switch aria-label={`Enable ${rule.name}`} checked={rule.enabled} disabled={!canManage || toggle.isPending} onChange={() => toggle.mutate(rule)} /></Table.Td>
               <Table.Td>{canManage && <Menu position="bottom-end"><Menu.Target><ActionIcon ref={node => { if (node) menus.current.set(rule.id, node); else menus.current.delete(rule.id); }} variant="subtle" color="gray" aria-label={`${rule.name} actions`}><DotsThree size={18} /></ActionIcon></Menu.Target>
@@ -107,10 +109,10 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
       <Title order={3} fz={18}>History</Title>
       {alerts.isLoading ? <Loader size="sm" /> : alerts.error ? <Alert color="bad">Alert history could not be loaded: {alerts.error.message}</Alert>
         : history.length === 0 ? <Text size="sm" c="dimmed">Nothing has fired yet.</Text>
-        : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="xs">
+        : <Table.ScrollContainer minWidth={760} scrollAreaProps={{ viewportProps: { tabIndex: 0, role: "region", "aria-label": "Alert history" } }}><Table verticalSpacing="xs">
           <Table.Thead><Table.Tr><Table.Th>State</Table.Th><Table.Th>Rule</Table.Th><Table.Th>Service</Table.Th><Table.Th>Value</Table.Th><Table.Th>Fired</Table.Th><Table.Th>Resolved</Table.Th><Table.Th>Delivery</Table.Th></Table.Tr></Table.Thead>
           <Table.Tbody>{history.map(a => <Table.Tr key={a.id}>
-            <Table.Td><Badge color={stateColor[a.state] ?? "gray"} variant="light">{a.state}</Badge></Table.Td>
+            <Table.Td><Badge color={stateColor[a.state] ?? "gray"} variant="light" styles={whole}>{a.state}</Badge></Table.Td>
             <Table.Td><Text size="sm">{byId.get(a.rule_id)?.name ?? a.rule_id}</Text></Table.Td>
             <Table.Td><Text size="sm">{a.service}</Text></Table.Td>
             <Table.Td><Text size="sm" ff="monospace">{a.value === undefined ? "—" : formatValue(variables(byId.get(a.rule_id)?.expression ?? "")[0], a.value)}</Text></Table.Td>

@@ -76,6 +76,18 @@ describe("AlertsPage", () => {
     expect(ui.getByText("9%")).toBeTruthy();
   });
 
+  it("keeps state badges whole, lets the keyboard scroll the history, and does not tint rows under dimmed text", async () => {
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getByText("firing · checkout")).toBeTruthy());
+    // A narrow screen squeezes the table's columns; a badge must not shrink to "FIR…".
+    for (const label of document.querySelectorAll<HTMLElement>(".mantine-Badge-label")) expect(label.style.overflow).toBe("visible");
+    const history = ui.getByRole("region", { name: "Alert history" });
+    expect(history.tabIndex).toBe(0);
+    expect(history.querySelector("table")).not.toBeNull();
+    // Hover tinted the row under dimmed descriptions to 4.3:1; rows do nothing on hover.
+    for (const table of document.querySelectorAll("table")) expect(table.hasAttribute("data-hover")).toBe(false);
+  });
+
   it("shows a disabled rule as disabled and a zero value as zero, in the watched variable's unit", async () => {
     rules = [{ ...rule, enabled: false, expression: "service == \"p95\" && log_count > 1000" }];
     const base = fetchMock.getMockImplementation()!;
