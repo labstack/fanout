@@ -27,6 +27,9 @@ type Filter struct {
 	DisplayLiteral string `json:"-"`
 	DisplayParam   string `json:"-"`
 	NameInAnd      bool   `json:"-"`
+	// Negated is a whole entry that is one negated term as FanQL lowers it
+	// (proposal 0004, section 0.7); on the traces viz it excludes traces.
+	Negated bool `json:"-"`
 }
 
 var (
@@ -78,6 +81,7 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(typed)
 	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(typed)
 	f.NameInAnd = nameEqualityInAnd(typed)
+	f.Negated = negatedTerm(typed)
 	if f.EqValue {
 		f.EqField = "name"
 	}
@@ -275,6 +279,61 @@ func checkAttributeExpr(v *SQLExpr) error {
 		return errors.New("attribute keys must be literal strings such as attributes['http.route']")
 	}
 	return nil
+}
+
+// negatedTerm reports whether an expression is one negated term in either of
+// FanQL's lowerings: NOT coalesce((p), FALSE), or (k IS NULL OR q) where q
+// reads only k. SQL's own k != v is not one.
+func negatedTerm(v *SQLExpr) bool {
+	if v == nil {
+		return false
+	}
+	if v.Class == "OPERATOR" && v.Type == "OPERATOR_NOT" && len(v.Children) == 1 {
+		c := v.Children[0]
+		if c == nil || c.Type != "OPERATOR_COALESCE" || len(c.Children) != 2 {
+			return false
+		}
+		last := c.Children[1]
+		return last != nil && last.Class == "CONSTANT" && strings.EqualFold(last.LiteralText, "false")
+	}
+	if v.Class != "CONJUNCTION" || v.Type != "CONJUNCTION_OR" || len(v.Children) != 2 {
+		return false
+	}
+	isNull := v.Children[0]
+	if isNull == nil || isNull.Type != "OPERATOR_IS_NULL" || len(isNull.Children) != 1 {
+		return false
+	}
+	field := fieldText(isNull.Children[0])
+	return field != "" && readsOnly(v.Children[1], field)
+}
+
+// readsOnly reports whether an expression reads one field and no other.
+func readsOnly(v *SQLExpr, field string) bool {
+	found := false
+	var visit func(*SQLExpr) bool
+	visit = func(n *SQLExpr) bool {
+		if n == nil {
+			return true
+		}
+		if n.Class == "COLUMN_REF" || n.Class == "OPERATOR" && n.Type == "ARRAY_EXTRACT" {
+			found = true
+			return fieldText(n) == field
+		}
+		for _, child := range []*SQLExpr{n.Left, n.Right, n.Child, n.Input, n.Lower, n.Upper} {
+			if !visit(child) {
+				return false
+			}
+		}
+		for _, children := range [][]*SQLExpr{n.Children, n.Arguments} {
+			for _, child := range children {
+				if !visit(child) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return visit(v) && found
 }
 
 func equalityField(v *SQLExpr) string {

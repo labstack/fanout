@@ -238,15 +238,11 @@ ORDER BY %s`, candidateOrder, source, where, traceRootsSQL(), startProjection, o
 
 // Bound matching trace candidates before the root window functions. Like
 // exemplars, ranking is approximate when filters exclude the root span.
-func checkedTraceRowsSQL(where string, limit int, order string) string {
-	limit = min(limit, 1001)
-	candidateOrder := "max(duration_ms) DESC,namespace,trace_id"
-	if strings.HasPrefix(order, "start_time ASC") {
-		candidateOrder = "min(start_time) ASC,namespace,trace_id"
-	}
-	return fmt.Sprintf(`WITH candidates AS (SELECT namespace,trace_id FROM spans WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY %s LIMIT %d), roots AS (%s)
+// checkedTraceRowsSQL returns the root of each candidate trace, at most limit.
+func checkedTraceRowsSQL(candidates, order string, limit int) string {
+	return fmt.Sprintf(`WITH candidates AS (%s), roots AS (%s)
 SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),epoch_ms(start_time::TIMESTAMP_NS)::BIGINT AS start
-FROM roots WHERE n=1 ORDER BY %s LIMIT %d`, where, candidateOrder, limit, traceRootsSQL(), order, limit)
+FROM roots WHERE n=1 ORDER BY %s LIMIT %d`, candidates, traceRootsSQL(), order, limit)
 }
 
 func exemplarError(ctx context.Context, err error) error {

@@ -24,6 +24,9 @@ func compileRows(p *Panel, filters []Filter, scope Scope) (Compiled, error) {
 	if !ok {
 		return Compiled{}, fmt.Errorf("unknown signal %q", p.Query.From)
 	}
+	if p.Viz == "traces" {
+		return compileTraceRows(p, sig, filters, scope)
+	}
 	where, args, err := buildWhere(sig, filters, scope)
 	if err != nil {
 		return Compiled{}, err
@@ -31,19 +34,62 @@ func compileRows(p *Panel, filters []Filter, scope Scope) (Compiled, error) {
 	return compileRowsWhere(p, where, args, scope)
 }
 
-func compileRowsWhere(p *Panel, where string, args []any, scope Scope) (Compiled, error) {
-	if p.Viz == "traces" {
-		order := "duration_ms DESC,trace_id,namespace"
-		if p.Query.Sort == "errors" {
-			where += " AND status = 'STATUS_CODE_ERROR'"
-		}
-		if p.Query.Sort == "+start" {
-			order = "start_time ASC,trace_id,namespace"
-		}
-		text := checkedTraceRowsSQL(where, rowLimitForPanel(p)+1, order)
-		args = append(args, scope.Start.UTC(), scope.End.UTC())
-		return Compiled{SQL: text, Args: args, Columns: []Column{{Name: "trace_id", Type: "string", Role: "dimension"}, {Name: "namespace", Type: "string", Role: "dimension"}, {Name: "service", Type: "string", Role: "dimension"}, {Name: "operation", Type: "string", Role: "dimension"}, {Name: "duration_ms", Type: "number", Role: "measure", Unit: "ms"}, {Name: "status", Type: "string", Role: "dimension"}, {Name: "start", Type: "time", Role: "time"}}}, nil
+// compileTraceRows lists traces with a span in the window that matches every
+// filter. A negated term (Filter.Negated) instead drops each trace with a span
+// in the window that the term excludes, so excluding a row's service removes
+// that row.
+func compileTraceRows(p *Panel, sig *signal, filters []Filter, scope Scope) (Compiled, error) {
+	window, windowArgs, err := buildWhere(sig, nil, scope)
+	if err != nil {
+		return Compiled{}, err
 	}
+	var hits, misses []string
+	var hitArgs, missArgs []any
+	for _, f := range filters {
+		if scope.dropped(f) {
+			continue
+		}
+		clause, values, err := filterClause(f, scope)
+		if err != nil {
+			return Compiled{}, err
+		}
+		if f.Negated {
+			misses, missArgs = append(misses, clause+" IS NOT TRUE"), append(missArgs, values...)
+		} else {
+			hits, hitArgs = append(hits, clause), append(hitArgs, values...)
+		}
+	}
+	if p.Query.Sort == "errors" {
+		hits = append(hits, "status = 'STATUS_CODE_ERROR'")
+	}
+	order, rank := "duration_ms DESC,trace_id,namespace", "max(duration_ms) DESC"
+	if p.Query.Sort == "+start" {
+		order, rank = "start_time ASC,trace_id,namespace", "min(start_time) ASC"
+	}
+	limit := min(rowLimitForPanel(p)+1, 1001)
+	var candidates string
+	var args []any
+	if len(misses) == 0 {
+		candidates = fmt.Sprintf("SELECT namespace,trace_id FROM spans WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY %s,namespace,trace_id LIMIT %d", strings.Join(append([]string{window}, hits...), " AND "), rank, limit)
+		args = append(windowArgs, hitArgs...)
+	} else {
+		// One scan flags each span as a hit and as a miss; a trace qualifies
+		// with a hit and no miss, ranked by its hits alone.
+		hit := "TRUE"
+		if len(hits) > 0 {
+			hit = "coalesce(" + strings.Join(hits, " AND ") + ", FALSE)"
+		}
+		rank = strings.Replace(rank, ")", ") FILTER (WHERE hit)", 1)
+		candidates = fmt.Sprintf("SELECT namespace,trace_id FROM (SELECT namespace,trace_id,duration_ms,start_time,%s AS hit,%s AS miss FROM spans WHERE %s AND trace_id<>'') WHERE hit OR miss GROUP BY namespace,trace_id HAVING bool_or(hit) AND NOT bool_or(miss) ORDER BY %s,namespace,trace_id LIMIT %d",
+			hit, strings.Join(misses, " OR "), window, rank, limit)
+		args = append(append(hitArgs, missArgs...), windowArgs...)
+	}
+	text := checkedTraceRowsSQL(candidates, order, limit)
+	args = append(args, scope.Start.UTC(), scope.End.UTC())
+	return Compiled{SQL: text, Args: args, Columns: []Column{{Name: "trace_id", Type: "string", Role: "dimension"}, {Name: "namespace", Type: "string", Role: "dimension"}, {Name: "service", Type: "string", Role: "dimension"}, {Name: "operation", Type: "string", Role: "dimension"}, {Name: "duration_ms", Type: "number", Role: "measure", Unit: "ms"}, {Name: "status", Type: "string", Role: "dimension"}, {Name: "start", Type: "time", Role: "time"}}}, nil
+}
+
+func compileRowsWhere(p *Panel, where string, args []any, scope Scope) (Compiled, error) {
 	redacted := redactedLogSource()
 	if p.Options != nil && p.Options.Highlight != "" {
 		where += " AND contains(lower(body),lower(?))"
