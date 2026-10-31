@@ -65,7 +65,7 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
     : panel.viz === "traces" || (panel.drill === "traces" || result?.frame?.columns.some(c => c.name === "trace_id")) && panel.viz === "table" ? "click to open trace"
     : panel.drill === "logs" ? "click for matching logs"
-    : panel.drill === "traces" && ["timeseries", "heatmap", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
+    : panel.drill === "traces" && ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
   const bodyHeight = Math.max(40, height - 88);
   const constants = [...new Set(logConstants(panel, result?.frame).map(c => c.value))];
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")}${constants.length ? ` · ${constants.join(" · ")}` : ""}${hint ? ` · ${hint}` : ""}`;

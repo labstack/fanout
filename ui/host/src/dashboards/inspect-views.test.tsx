@@ -70,6 +70,8 @@ it.each([
  {viz:"timeseries",drill:"logs",hint:"click for matching logs"},
  {viz:"timeseries",drill:"traces",hint:"click for exemplar traces"},
  {viz:"heatmap",drill:"traces",hint:"click for exemplar traces"},
+ {viz:"bar",drill:"traces",hint:"click for exemplar traces"},
+ {viz:"scatter",drill:"traces",hint:"click for exemplar traces"},
  {viz:"bar",click:{set_variable:"service"},hint:"click to filter by service"},
  {viz:"scatter",click:{set_variable:"operation"},hint:"click to filter by operation"},
  {viz:"table",drill:"traces",hint:"click to open trace"},
