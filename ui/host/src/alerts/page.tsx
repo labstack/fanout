@@ -21,6 +21,9 @@ function ruleQuery(rule: Pick<Rule, "service" | "expression">): string {
   return rule.service ? `${source} where service:"${rule.service.replaceAll("\"", "\"\"")}" | ${measure} every auto` : `${source} | ${measure} by service every auto`;
 }
 
+/** Rules read per-service rollups with error_rate from 0 to 1; Explore reads raw telemetry and shows percent. */
+const exploreNote = "Open in Explore charts raw telemetry, so values can differ slightly from a rule's rollups. Explore shows error rate as a percent: a rule's 0.05 is 5 there.";
+
 /** Alert rules and their history (proposal 0004, section 4); works without chat. */
 export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
   const client = useQueryClient();
@@ -64,6 +67,7 @@ export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
 
     <Stack gap="xs">
       <Title order={3} fz={18}>Rules</Title>
+      {rules.data && rules.data.length > 0 && <Text size="xs" c="dimmed">{exploreNote}</Text>}
       {rules.isLoading ? <Loader size="sm" /> : rules.error ? <Alert color="bad">Rules could not be loaded: {rules.error.message}</Alert>
         : rules.data?.length === 0 ? <Text size="sm" c="dimmed" data-alerts-empty>No rules yet.{canManage ? " Create one to get notified when a service misbehaves." : ""}</Text>
         : <Table.ScrollContainer minWidth={760}><Table verticalSpacing="sm" highlightOnHover>

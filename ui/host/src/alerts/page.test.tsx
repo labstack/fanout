@@ -58,6 +58,7 @@ describe("AlertsPage", () => {
     rules = [rule, { ...rule, id: "r3", name: "Log flood", service: "", expression: "service == \"error_rate\" && [1].exists(p95x, p95x > 0) && log_count_delta > 50" }, { ...rule, id: "r4", name: "Slow \"api\"", service: "a\"b", expression: "p95 > 500" }];
     const { ui, wait } = await render();
     await wait(() => expect(ui.getAllByRole("button", { name: "Open in Explore" })).toHaveLength(3));
+    expect(ui.getByText(/a rule's 0\.05 is 5 there/)).toBeTruthy();
     for (const button of ui.getAllByRole("button", { name: "Open in Explore" })) await act(async () => button.click());
     expect(onExplore.mock.calls.map(([q]) => q)).toEqual([
       'spans where service:"checkout" | error_rate() every auto',
