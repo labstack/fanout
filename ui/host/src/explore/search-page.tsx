@@ -52,9 +52,9 @@ function pickTerms(preset: Preset, picks: Picks): string {
 const resultHeight = 560;
 /** Rows rendered before "Show more": the search returns up to 1,000. */
 const rowPage = 100;
-/** The batch deadline names dashboards; this page runs one search. */
-const searchCopy = (result: PanelResult): PanelResult => result.error?.startsWith("Not run: the dashboard ran out of time.")
-  ? { ...result, error: "Not run: the search ran out of time. Narrow the time range or add filters." } : result;
+/** The server's busy message tells a dashboard to refresh; this page runs one search. */
+const searchCopy = (result: PanelResult): PanelResult => result.reason === "busy"
+  ? { ...result, error: "Not run: other queries kept the server busy. Run the search again." } : result;
 /** FanQL quotes a value with doubled inner quotes. */
 const quoted = (value: string) => `"${value.replaceAll('"', '""')}"`;
 

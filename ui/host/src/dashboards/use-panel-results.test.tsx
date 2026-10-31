@@ -117,6 +117,37 @@ it("loads only missing visible panels after visibility changes during an in-flig
   } finally { await host.dispose(); }
 });
 
+// The whole batch used to arrive at once, so a dashboard showed nothing until
+// its slowest panel finished.
+it("shows each streamed panel as soon as it arrives and keeps loading only the rest", async () => {
+  const slow = deferred<void>();
+  wire.panels.mockImplementation(async (body: QueryBody, _signal: AbortSignal, onResult: (r: PanelResult) => void) => {
+    onResult(resultFor("loaded")); onResult(resultFor("a"));
+    await slow.promise;
+    return body.panels!.map(resultFor);
+  });
+  const host = await mountVisibility(["loaded", "a", "b", "c"]);
+  try {
+    await waitForHook(() => {
+      expect(host.current.results.get("a")?.status).toBe("ok");
+      expect(host.current.fetching).toBe(true);
+      expect(host.current.fetchingIds).toEqual(["b", "c"]);
+    });
+    await act(async () => slow.resolve());
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.size).toBe(4); });
+    // A refresh's earlier data never overwrites results streamed since.
+    const again = deferred<void>();
+    const fresh = { ...resultFor("a"), elapsed_ms: 99 };
+    wire.panels.mockImplementation(async (body: QueryBody, _signal: AbortSignal, onResult: (r: PanelResult) => void) => {
+      onResult(fresh); await again.promise; return body.panels!.map(id => id === "a" ? fresh : resultFor(id));
+    });
+    await act(async () => host.current.refetch());
+    await waitForHook(() => expect(host.current.results.get("a")?.elapsed_ms).toBe(99));
+    await act(async () => again.resolve());
+    await waitForHook(() => { expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.elapsed_ms).toBe(99); });
+  } finally { await host.dispose(); }
+});
+
 it("keeps one batch in flight when manual refresh is repeated during a fetch", async () => {
   const pending = deferred<PanelResult[]>();
   wire.panels.mockResolvedValueOnce([resultFor("loaded")]).mockImplementation(() => pending.promise);
@@ -390,7 +421,7 @@ const failureCases = [
   {name: "unintentional abort", failure: new DOMException("Request aborted", "AbortError"), retryable: true},
   ...[408, 429, 500, 504].map(status => ({name: "HTTP " + status, failure: new ApiError("Request failed", status), retryable: true})),
   {name: "missing result", message: undefined, retryable: true},
-  {name: "dashboard execution timeout", message: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard.", retryable: true},
+  {name: "server busy", message: "Not run: other queries kept the server busy for 20 seconds. Refresh to try again.", retryable: true},
   {name: "query execution timeout", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: true},
   {name: "server retryable failure", message: "Transient failure with new wording", retryable: true},
   {name: "timeout explicitly not retryable", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: false},

@@ -37,9 +37,12 @@ export async function request<T>(url: string, init?: RequestInit & { json?: unkn
   }
   const response = await authorizedFetch(url, { ...rest, headers, body });
   const payload = await response.json().catch(() => ({})) as { code?: string; message?: string; problems?: Problem[] };
-  if (!response.ok) throw new ApiError(payload.message ?? `Request failed (${response.status})`, response.status, payload.problems ?? [], payload.code ?? "");
+  if (!response.ok) throw failure(response, payload);
   return payload as T;
 }
+
+const failure = (response: Response, payload: { code?: string; message?: string; problems?: Problem[] }) =>
+  new ApiError(payload.message ?? `Request failed (${response.status})`, response.status, payload.problems ?? [], payload.code ?? "");
 
 const path = (id: string) => `/api/dashboards/${encodeURIComponent(id)}`;
 
@@ -52,7 +55,31 @@ export const replaceDashboard = (id: string, spec: DashboardSpec, baseVersion: n
   request<DashboardRecord>(path(id), { method: "PUT", json: { spec, base_version: baseVersion, message } });
 export const patchDashboard = (id: string, operations: Operation[], baseVersion: number, message?: string) =>
   request<DashboardRecord>(path(id), { method: "PATCH", json: { operations, base_version: baseVersion, message } });
-export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/queries/run", { method: "POST", json: body, signal }).then((r) => r.results);
+/** Runs panels. With onResult the server streams one result per line as each
+ *  panel finishes, so fast panels are seen before the slowest is done; the
+ *  promise still resolves with every result. */
+export async function queryPanels(body: QueryBody, signal?: AbortSignal, onResult?: (result: PanelResult) => void): Promise<PanelResult[]> {
+  if (!onResult) return request<{ results: PanelResult[] }>("/api/queries/run", { method: "POST", json: body, signal }).then((r) => r.results);
+  const response = await authorizedFetch("/api/queries/run", { method: "POST", headers: { "content-type": "application/json", accept: "application/x-ndjson" }, body: JSON.stringify(body), signal });
+  if (!response.ok) throw failure(response, await response.json().catch(() => ({})));
+  const results: PanelResult[] = [];
+  const lines = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = "";
+  for (;;) {
+    const { done, value } = await lines.read();
+    pending += value ?? "";
+    let end: number;
+    while ((end = pending.indexOf("\n")) >= 0) {
+      const line = pending.slice(0, end);
+      pending = pending.slice(end + 1);
+      if (!line.trim()) continue;
+      const result = JSON.parse(line) as PanelResult;
+      results.push(result);
+      onResult(result);
+    }
+    if (done) return results;
+  }
+}
 export const createDashboard = (spec: DashboardSpec) => request<DashboardRecord>("/api/dashboards", { method: "POST", json: { spec } });
 export const getTelemetrySchema = (signal?: AbortSignal) => request<TelemetrySchema>("/api/telemetry/schema", { signal });
 export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
@@ -64,6 +91,6 @@ export type Exemplar = { trace_id: string; namespace: string; service: string; o
 export type ExemplarResponse = { traces: Exemplar[]; logs?: Frame; truncated?: boolean };
 export const queryExemplars = (body: ExemplarBody, signal?: AbortSignal) => request<ExemplarResponse>("/api/queries/exemplars", { method: "POST", json: body, signal });
 export function getTrace(target: DrillTarget, signal?: AbortSignal): Promise<Result<TraceDetail>> {
-  const params = new URLSearchParams({ namespace: target.namespace ?? "", from: target.window_from, to: target.window_to, limit: "200" });
+  const params = new URLSearchParams({ namespace: target.namespace ?? "", from: target.window_from, to: target.window_to, limit: "500" });
   return request<Result<TraceDetail>>(`/api/traces/${encodeURIComponent(target.trace_id ?? "")}?${params}`, { signal });
 }

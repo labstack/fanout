@@ -102,12 +102,12 @@ describe("SearchPage", () => {
     await wait(() => expect(ui.queryByText(/Services did not load/)).toBeNull());
   });
 
-  it("names the search, not a dashboard, when the batch runs out of time", async () => {
+  it("words a search the server was too busy to start for this page", async () => {
     const base = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "error", retryable: true, elapsed_ms: 1, error: "Not run: the dashboard ran out of time. Narrow the time range or split the dashboard." }] }) : base(input, init));
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "error", reason: "busy", retryable: true, elapsed_ms: 0, error: "Not run: other queries kept the server busy for 20 seconds. Refresh to try again." }] }) : base(input, init));
     const { wait } = await render(tracesPreset);
-    await wait(() => expect(document.body.textContent).toContain("Not run: the search ran out of time. Narrow the time range or add filters."));
-    expect(document.body.textContent).not.toContain("dashboard ran out of time");
+    await wait(() => expect(document.body.textContent).toContain("Not run: other queries kept the server busy. Run the search again."));
+    expect(document.body.textContent).not.toContain("Refresh to try again");
   });
 
   it("explains that body:x is exact while bare words match any part", async () => {

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DashboardSpec, DashboardTime, VarValue } from "../../../panels/types";
+import type { DashboardSpec, DashboardTime, PanelResult, VarValue } from "../../../panels/types";
 import { classifyPanelResult, type PanelDisplayResult } from "./panel-result";
 import { ApiError } from "./api";
 import { retryPanelQuery } from "./query-policy";
@@ -19,7 +19,8 @@ export function panelResultsForDashboard(query: { queryKey: readonly unknown[] }
   try { return JSON.parse(scope)[0] === id; } catch { return false; }
 }
 
-/** One panel batch plus one annotation request per refresh for every visible panel. Results
+/** One streamed panel batch plus one annotation request per refresh for every visible panel.
+ *  Each panel shows as soon as its own result arrives. Results
  *  of panels scrolled out of view are kept from their last fetch. Widths are
  *  rounded for the next refresh. Layout and width changes do not refetch. */
 export function usePanelResults({ dashboardId, spec, time, vars, compare, widths, visible, refresh, enabled = true }: {
@@ -33,6 +34,8 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   const key = queryKey[1];
   const ids = visible.filter((id) => spec.panels.some((panel) => panel.id === id));
   const inFlight = useRef<string[]>([]);
+  // Panels of the in-flight batch whose results have already streamed in.
+  const arrived = useRef(new Set<string>());
   const failedBatch = useRef<{key: string; ids: string[]; error: string; retryable: boolean} | undefined>(undefined);
   const lazyBatch = useRef<{ key: string; ids: string[] } | null>(null);
   // A manual refresh pressed while a partial lazy batch is in flight runs once
@@ -57,13 +60,20 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
       if (requested.current.key !== key) requested.current = { key, ids: new Set() };
       for (const id of inFlight.current) requested.current.ids.add(id);
       const sent = [...inFlight.current];
-      return refreshDashboard({ dashboard: spec, panels: sent, time, vars, widths: rounded, compare }, signal).then(data => {
+      const landed = arrived.current = new Set<string>();
+      const partial = (result: PanelResult) => {
+        if (signal.aborted) return;
+        landed.add(result.id);
+        const at = Date.now(), batch = ++completedBatch;
+        setKept(previous => merge(previous, key, [classifyPanelResult(result, sent)], at, batch));
+      };
+      return refreshDashboard({ dashboard: spec, panels: sent, time, vars, widths: rounded, compare }, signal, partial).then(data => {
         const returned = new Set(data.results.map(result => result.id));
         const missing: PanelDisplayResult[] = sent.filter(id => !returned.has(id) && spec.panels.find(p => p.id === id)?.viz !== "text")
           .map(id => ({id,status:"error",elapsed_ms:0,error:"No result was returned for this panel; refresh to retry.",request_error:sent}));
         return {...data,batch:++completedBatch,results:[...data.results.map(result => classifyPanelResult(result, sent)),...missing],hasTimePanels:spec.panels.some(p => sent.includes(p.id) && ["timeseries","heatmap","state_timeline"].includes(p.viz))};
       }).catch(error => {
-        if (!signal.aborted) failedBatch.current = {key, ids: sent.filter(id => spec.panels.find(panel => panel.id === id)?.viz !== "text"), error: error instanceof Error ? error.message : String(error), retryable: !(error instanceof ApiError) || error.status === 408 || error.status === 429 || error.status >= 500};
+        if (!signal.aborted) failedBatch.current = {key, ids: sent.filter(id => !landed.has(id) && spec.panels.find(panel => panel.id === id)?.viz !== "text"), error: error instanceof Error ? error.message : String(error), retryable: !(error instanceof ApiError) || error.status === 408 || error.status === 429 || error.status >= 500};
         throw error;
       });
     },
@@ -130,7 +140,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     }
     sendRetry(failed);
   };
-  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
+  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current.filter(id => !arrived.current.has(id)) : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
 }
 
 type Snapshot = { key: string; results: Map<string, PanelDisplayResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number; receivedBatch?: number };
@@ -138,14 +148,17 @@ function merge(previous: Snapshot, key: string, data: PanelDisplayResult[] | und
   const next: Snapshot = previous.key === key
     ? { key, results: new Map(previous.results), updated: new Map(previous.updated), stale: new Set(previous.stale), receivedAt: previous.receivedAt, receivedBatch: previous.receivedBatch }
     : { key, results: new Map(), updated: new Map(), stale: new Set(), receivedAt: 0 };
-  for (const result of data && batch !== next.receivedBatch ? data : []) {
+  // Batches are numbered as they land, so a refetch's previous data cannot
+  // overwrite results that have streamed in since.
+  const fresh = data && batch !== undefined && (next.receivedBatch === undefined || batch > next.receivedBatch);
+  for (const result of fresh ? data : []) {
     if (result.status === "error" && next.results.get(result.id)?.frame) {
       next.stale.add(result.id);
       next.results.set(result.id, {...next.results.get(result.id)!, error: result.error, request_error: result.request_error});
     }
     else { next.results.set(result.id, result); next.updated.set(result.id, at); next.stale.delete(result.id); }
   }
-  if (data) { next.receivedAt = at; next.receivedBatch = batch; }
+  if (fresh) { next.receivedAt = at; next.receivedBatch = batch; }
   for (const id of failed?.ids ?? []) {
     const previous = next.results.get(id);
     if (previous?.frame) {

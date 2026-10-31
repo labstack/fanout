@@ -1,8 +1,10 @@
 import { queryAnnotations, queryPanels, type QueryBody } from "./api";
 import type { AnnotationsResponse } from "../../../panels/annotations";
+import type { PanelResult } from "../../../panels/types";
 
-export async function refreshDashboard(body: QueryBody, signal?: AbortSignal) {
-  const results = await queryPanels(body, signal);
+/** onResult sees each panel as it finishes; annotations follow the last one. */
+export async function refreshDashboard(body: QueryBody, signal?: AbortSignal, onResult?: (result: PanelResult) => void) {
+  const results = await queryPanels(body, signal, onResult);
   const timePanels = new Set(body.dashboard.panels.filter(p => ["timeseries", "heatmap", "state_timeline"].includes(p.viz)).map(p => p.id));
   const windows = results.filter(r => timePanels.has(r.id) && r.from_ms !== undefined && r.to_ms !== undefined && r.from_ms < r.to_ms);
   if (windows.length === 0 || body.dashboard.annotations?.deploys === false && body.dashboard.annotations?.anomalies === false) return { results };
