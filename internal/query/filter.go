@@ -571,8 +571,21 @@ func nameEqualityInAnd(v *SQLExpr) bool {
 
 // filterDisplay derives product wording from the checked AST, never SQL text.
 func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
-	if node == nil || node.Class != "COMPARISON" {
+	if node == nil {
 		return "", "", ""
+	}
+	if node.Class == "FUNCTION" && node.Function == "contains" && len(node.Arguments) == 2 {
+		// FanQL free text and `~` lower to contains(lower(field), lower('text')).
+		if field := displayField(fieldText(unwrapLower(node.Arguments[0]))); field != "" {
+			if text := constantText(unwrapLower(node.Arguments[1])); text != "" {
+				return field, `containing "` + text + `"`, ""
+			}
+			return field, "", ""
+		}
+	}
+	if node.Class != "COMPARISON" {
+		// Negations and other compound filters are named by their first field.
+		return displayField(firstField(node)), "", ""
 	}
 	other := node.Right
 	field = fieldText(node.Left)
@@ -582,18 +595,7 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 	if field == "" {
 		return "", "", ""
 	}
-	switch field {
-	case "http_route":
-		field = "HTTP route"
-	case "http_method":
-		field = "HTTP method"
-	case "http_status_code":
-		field = "HTTP status code"
-	case "name":
-		field = "metric"
-	default:
-		field = strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
-	}
+	field = displayField(field)
 	if node.Type != "COMPARE_EQUAL" {
 		return field, "", ""
 	}
@@ -610,4 +612,46 @@ func filterDisplay(node *SQLExpr) (field, literal, parameter string) {
 		}
 	}
 	return field, "", ""
+}
+
+// displayField names a filtered field for people.
+func displayField(field string) string {
+	switch field {
+	case "":
+		return ""
+	case "http_route":
+		return "HTTP route"
+	case "http_method":
+		return "HTTP method"
+	case "http_status_code":
+		return "HTTP status code"
+	case "name":
+		return "metric"
+	}
+	return strings.NewReplacer("attributes['", "attribute ", "resource['", "resource ", "']", "", "_", " ").Replace(field)
+}
+
+func unwrapLower(v *SQLExpr) *SQLExpr {
+	if v != nil && v.Class == "FUNCTION" && v.Function == "lower" && len(v.Arguments) == 1 {
+		return v.Arguments[0]
+	}
+	return v
+}
+
+// firstField is the first field a filter reads, depth first.
+func firstField(v *SQLExpr) string {
+	if v == nil {
+		return ""
+	}
+	if field := fieldText(v); field != "" {
+		return field
+	}
+	for _, list := range [][]*SQLExpr{{v.Left, v.Right, v.Child, v.Input, v.Lower, v.Upper}, v.Children, v.Arguments} {
+		for _, child := range list {
+			if field := firstField(child); field != "" {
+				return field
+			}
+		}
+	}
+	return ""
 }

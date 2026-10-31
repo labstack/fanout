@@ -183,3 +183,23 @@ func TestDiagnosisBoundsReruns(t *testing.T) {
 		t.Fatalf("diagnosis ran %d queries, want at most 2", counting.queries)
 	}
 }
+
+func TestDiagnosisNamesTextAndNegatedFilters(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := Dashboard{Name: "Diagnosis", Time: Time{Range: "1h"}, Panels: []Panel{
+		{ID: "text", Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = 'checkout'", "contains(lower(operation), lower('zzqxnomatch'))"}}},
+		{ID: "negated", Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = 'checkout'", "(service IS NULL OR service != 'checkout')"}}},
+	}}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// FanQL free text lowers to contains() and negation to an OR; the diagnosis
+	// names their field instead of "one filter".
+	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, `Without operation containing "zzqxnomatch", 120 match the remaining filters.`) {
+		t.Fatalf("text result = %+v", r)
+	}
+	if r := results[1]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without service filter, 120 match") {
+		t.Fatalf("negated result = %+v", r)
+	}
+}
