@@ -12,6 +12,8 @@ export const sqlTheme = EditorView.theme({
   ".cm-gutters": { backgroundColor: "var(--mantine-color-default)", color: "var(--mantine-color-dimmed)", borderColor: "var(--mantine-color-default-border)", borderRadius: "var(--mantine-radius-sm) 0 0 var(--mantine-radius-sm)" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": { backgroundColor: "var(--mantine-primary-color-light-hover)" },
   ".cm-activeLine": { backgroundColor: "var(--mantine-primary-color-light)" },
+  // CodeMirror's own placeholder grey is 3.5:1 on white; comments' grey clears AA on both lines.
+  ".cm-placeholder": { color: "var(--mantine-color-gray-text)" },
   ".cm-tooltip": { color: "var(--mantine-color-text)", backgroundColor: "var(--mantine-color-body)", border: "1px solid var(--mantine-color-default-border)", borderRadius: "var(--mantine-radius-sm)" },
   ".cm-tooltip-autocomplete > ul > li[aria-selected]": { color: "var(--mantine-primary-color-light-color)", backgroundColor: "var(--mantine-primary-color-light-hover)" },
   ".cm-diagnostic-error": { borderLeftColor: "var(--mantine-color-bad-text)" },
