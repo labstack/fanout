@@ -93,3 +93,16 @@ it("lists every span of a large trace in one list, children under their parents 
     for (const row of rows) { const operation = row.querySelector("p")!.textContent!; expect(seen.has(parentOf.get(operation) ?? "root")).toBe(true); seen.add(spans.find(span => span.operation === operation)!.span_id); }
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });
+
+it("sizes the flame graph to its container instead of a fixed minimum width", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={traceFixture} dark={false} /></QueryClientProvider></MantineProvider>));
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    // A fixed minimum (760 px) overflowed the 682 px drawer at 1440 px and forced a horizontal scroll.
+    expect(node.querySelector("[data-flame-graph]")).not.toBeNull();
+    expect(node.querySelector("[data-flame-graph] .mantine-ScrollArea-root")).toBeNull();
+    expect([...node.querySelectorAll<HTMLElement>("[data-flame-graph] *")].some(el => el.style.minWidth.includes("rem"))).toBe(false);
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});

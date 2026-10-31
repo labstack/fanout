@@ -1,4 +1,4 @@
-import { Alert, Badge, Box, Button, Group, Paper, ScrollArea, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Box, Button, Group, Paper, Stack, Text } from "@mantine/core";
 import { Tooltip } from "@mantine/core";
 import { useMemo, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
@@ -39,26 +39,22 @@ function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean
   const services = [...new Set(spans.map((span) => span.service))];
   return <Stack px={{ base: "md", sm: "lg" }} pb="md" gap="xs">
     <Group justify="space-between"><Group gap="md">{services.map((service) => <Group gap={5} key={service}><Box w={8} h={8} bg={seriesSlot(services.indexOf(service), dark)} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{service}</Text></Group>)}</Group><Badge variant="light">{duration(model.total)}</Badge></Group>
-    <Paper withBorder radius="md" p="sm">
-      <ScrollArea type="auto" offsetScrollbars>
-        <Box miw={760}>
-          <Box pos="relative" h={22} mb={4}>{[0, 25, 50, 75, 100].map((position) => <Text key={position} pos="absolute" left={`${position}%`} c="dimmed" size="xs" style={{ transform: position === 100 ? "translateX(-100%)" : position ? "translateX(-50%)" : undefined }}>{duration(model.total * position / 100)}</Text>)}</Box>
-          <Box pos="relative" h={Math.max(150, model.laneCount * 36 + 12)} bg="var(--mantine-color-default-hover)" style={{ overflow: "hidden", borderRadius: "var(--mantine-radius-md)" }}>
-            {[0, 25, 50, 75, 100].map((position) => <Box key={position} pos="absolute" left={`${position}%`} top={0} bottom={0} style={{ borderLeft: "1px solid var(--mantine-color-default-border)" }} />)}
-            {model.frames.map(({ span, lane, left, width }) => {
-              const failed = span.status === "STATUS_CODE_ERROR";
-              const compact = width < 7;
-              const color = failed ? statusHex(dark).bad : seriesSlot(services.indexOf(span.service), dark);
-              const label = `${span.operation} · ${duration(span.duration_ms)} · ${span.service}`;
-              const content = <Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text>;
-              const geometry = { position: "absolute" as const, left: `${left}%`, top: lane * 36 + 6, width: `${Math.max(width, .35)}%`, height: 30, overflow: "hidden", minWidth: 3 };
-              return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow events={{ hover: true, focus: true, touch: false }}>
-                <Button variant="filled" color={color} c={filledTextOn(color)} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
-              </Tooltip>;
-            })}
-          </Box>
-        </Box>
-      </ScrollArea>
+    <Paper withBorder radius="md" p="sm" data-flame-graph>
+      <Box pos="relative" h={22} mb={4}>{[0, 25, 50, 75, 100].map((position) => <Text key={position} pos="absolute" left={`${position}%`} c="dimmed" size="xs" style={{ transform: position === 100 ? "translateX(-100%)" : position ? "translateX(-50%)" : undefined }}>{duration(model.total * position / 100)}</Text>)}</Box>
+      <Box pos="relative" h={Math.max(150, model.laneCount * 36 + 12)} bg="var(--mantine-color-default-hover)" style={{ overflow: "hidden", borderRadius: "var(--mantine-radius-md)" }}>
+        {[0, 25, 50, 75, 100].map((position) => <Box key={position} pos="absolute" left={`${position}%`} top={0} bottom={0} style={{ borderLeft: "1px solid var(--mantine-color-default-border)" }} />)}
+        {model.frames.map(({ span, lane, left, width }) => {
+          const failed = span.status === "STATUS_CODE_ERROR";
+          const compact = width < 7;
+          const color = failed ? statusHex(dark).bad : seriesSlot(services.indexOf(span.service), dark);
+          const label = `${span.operation} · ${duration(span.duration_ms)} · ${span.service}`;
+          const content = <Text component="span" size="xs" fw={700} truncate>{compact ? "" : span.operation}{width >= 12 ? ` · ${duration(span.duration_ms)}` : ""}</Text>;
+          const geometry = { position: "absolute" as const, left: `${left}%`, top: lane * 36 + 6, width: `${Math.max(width, .35)}%`, height: 30, overflow: "hidden", minWidth: 3 };
+          return <Tooltip key={span.span_id} label={`${span.service} · ${span.operation} · ${duration(span.duration_ms)}`} withArrow events={{ hover: true, focus: true, touch: false }}>
+            <Button variant="filled" color={color} c={filledTextOn(color)} aria-label={label} px={compact ? 2 : "xs"} size="compact-xs" onClick={() => onSpan(span)} style={geometry}>{content}</Button>
+          </Tooltip>;
+        })}
+      </Box>
     </Paper>
     <Text c="dimmed" size="xs">Width represents wall-clock duration; lanes preserve span hierarchy without overlap.</Text>
   </Stack>;
