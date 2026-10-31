@@ -94,7 +94,7 @@ type ParquetStore struct {
 	generation0Batches int
 	// Published after each catalog mutation; scrapes never take mu.
 	generation0Snapshot atomic.Int64
-	generation0ByDay    map[int64]int
+	generation0ByWindow map[int64]int
 	compactionDebt      int
 	debtChanged         chan struct{}
 	debtLimitReached    chan struct{}

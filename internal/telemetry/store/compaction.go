@@ -116,7 +116,7 @@ func clearCompactionAttempt(root string) error {
 }
 
 type compactionKey struct {
-	day        int64
+	window     int64
 	generation uint32
 }
 
@@ -127,7 +127,7 @@ type ParquetPublisher interface {
 	PublishParquetReplacement(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error
 }
 
-// CompactParquet combines one same-day, same-generation group. The output is
+// CompactParquet combines one same-window, same-generation group. The output is
 // prepared outside the query gate and swapped as one batch directory.
 func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublisher, maxBatches int) (int, error) {
 	if publisher == nil || maxBatches < minCompactionInputs {
@@ -327,20 +327,19 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 		if batch.MaxIngestedNanos <= 0 {
 			continue
 		}
-		key := compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}
+		key := compactionKey{window: batch.MaxIngestedNanos / int64(telemetry.CompactionWindow), generation: batch.Generation}
 		groups[key] = append(groups[key], batch)
 	}
 	// Under writer pressure, reclaim generation-0 debt before starting a
-	// potentially long higher-generation merge, even on an older day. Within
-	// that priority keep the normal order: oldest day, then highest generation.
-	// Below pressure, higher generations run first within each day so continuous
+	// potentially long higher-generation merge, even in an older window. Within
+	// that priority keep the normal order: oldest window, then highest
+	// generation. Below pressure, higher generations run first within each
+	// window so continuous
 	// ingest cannot starve them.
 	pressure := debt >= telemetry.CompactionDebtLimit/2
-	newestDay := int64(math.MinInt64)
+	newest := int64(math.MinInt64)
 	for key := range groups {
-		if key.day > newestDay {
-			newestDay = key.day
-		}
+		newest = max(newest, key.window)
 	}
 	var chosen compactionKey
 	var selected []telemetry.BatchMetadata
@@ -354,15 +353,15 @@ func selectCompactionBatchesWithHigherCap(batches []telemetry.BatchMetadata, max
 		if pressure && key.generation == 0 {
 			rowLimit = telemetry.CompactionPressureMaxRows
 		}
-		candidate := selectBoundedCompactionGroup(group, batchCap, rowLimit, key.day < newestDay)
+		candidate := selectBoundedCompactionGroup(group, batchCap, rowLimit, key.window < newest)
 		if len(candidate) < 2 {
 			continue
 		}
 		priority := pressure && key.generation == 0
 		chosenPriority := pressure && chosen.generation == 0
 		better := !found || priority && !chosenPriority ||
-			priority == chosenPriority && (key.day < chosen.day ||
-				key.day == chosen.day && key.generation > chosen.generation)
+			priority == chosenPriority && (key.window < chosen.window ||
+				key.window == chosen.window && key.generation > chosen.generation)
 		if better {
 			chosen, selected, found = key, candidate, true
 		}
@@ -433,12 +432,13 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 		saturated = true
 	}
 	// A group is worth merging when it is full, when a ceiling stopped it, or
-	// when it belongs to a day that has finished and already holds enough files
-	// to be worth the merge.
+	// when it belongs to a window that has finished and holds at least a pair.
 	//
-	// Holding out for a full group is right while a day is still being written:
-	// more batches are coming, and merging early wastes the work. It is wrong
-	// once the day is over, because the group will never grow again. On the
+	// Holding out for a full group is right while a window is still being
+	// written: more batches are coming, and merging early wastes the work. It
+	// is wrong once the window is over, because the group will never grow
+	// again. A finished hour merges even a pair, so a quiet install keeps at
+	// most one file per hour rather than up to seven. On the
 	// live box that stranded almost everything -- 1,243 batches in 69
 	// (day, generation) groups across 25 days, not one of them a candidate,
 	// because only the current day ever reached 128 files. Every compaction
@@ -448,7 +448,7 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 	if len(candidate) == maxBatches || saturated && len(candidate) >= 2 {
 		return candidate
 	}
-	if finished && len(candidate) >= minCompactionInputs {
+	if finished && len(candidate) >= minCompactionMergeInputs {
 		return candidate
 	}
 	return nil
