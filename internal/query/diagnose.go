@@ -131,7 +131,12 @@ func (e *Executor) explain(ctx context.Context, p *Panel, filters []Filter, scop
 				message += " Values seen: " + seen + "."
 			}
 			if n := e.otherTypeMatches(ctx, sig, f, others, scope); n > 0 {
-				message += fmt.Sprintf(" %s %s store %s %s as a different type (text or number), and the filter matches one type only.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral)
+				// The filter matches one type only; say which form finds the rest.
+				if strings.Contains(f.Expr, "'"+strings.ReplaceAll(f.DisplayLiteral, "'", "''")+"'") {
+					message += fmt.Sprintf(" %s %s store %s %s as a number; write the value without quotes, %s, to match them.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral, f.DisplayLiteral)
+				} else {
+					message += fmt.Sprintf(" %s %s store %s %s as text; quote the value, \"%s\", to match them.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral, f.DisplayLiteral)
+				}
 			}
 		}
 		return message
