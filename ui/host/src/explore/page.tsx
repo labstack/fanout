@@ -37,7 +37,9 @@ type ExploreRun = { kind: Kind; source: string; window: string; panel: Panel; re
 
 /** New panels must return rows; an edited panel may be legitimately empty now, so a clean run is enough. */
 function canKeep(run: ExploreRun | undefined, editing: boolean): boolean {
-  return run?.result.status === "ok" && (editing || (run.result.frame?.rows ?? 0) > 0);
+  // A run with no rows reports "empty", not "ok".
+  if (editing) return run?.result.status === "ok" || run?.result.status === "empty";
+  return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
 }
 
 /** Explore inside a dashboard: its variables resolve, and saving writes the panel there. */

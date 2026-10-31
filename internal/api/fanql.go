@@ -56,7 +56,7 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 	compiled, problems := fanql.Compile(req.Text, req.Options)
 	if len(problems) != 0 {
 		failure := &fanqlFailure{apiError: newAPIError(http.StatusBadRequest, "invalid_fanql", "The query has problems.")}
-		failure.Problems = query.PresentProblems(problems)
+		failure.Problems = query.Diagnoses(problems)
 		if req.Preview {
 			failure.Preview = &fanqlPreview{Text: req.Text, Note: "not executable"}
 		}

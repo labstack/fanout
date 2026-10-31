@@ -388,3 +388,23 @@ func TestFanQLFormatReportsPanelRequirements(t *testing.T) {
 		}
 	}
 }
+
+// FanQL problems quote the user's own text, which is often a URL path; the
+// engine-error scrubber must not mistake them for filesystem paths.
+func TestFanQLParseProblemsKeepURLPaths(t *testing.T) {
+	for _, tc := range []struct{ text, message, hint string }{
+		{"spans where http.target:/a:b", "unexpected : after /a", `quote the value: http.target:"/a:b"`},
+		{"logs where http://x:8080/y", "unexpected : after http", `quote the value: "http://x:8080/y"`},
+		{"spans where url.path:/a/b:c", "unexpected : after /a/b", `quote the value: url.path:"/a/b:c"`},
+	} {
+		body, _ := json.Marshal(map[string]string{"text": tc.text})
+		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", string(body))
+		var got struct {
+			Problems query.Problems `json:"problems"`
+		}
+		fanqlResponse(t, rec, http.StatusBadRequest, &got)
+		if len(got.Problems) == 0 || got.Problems[0].Message != tc.message || got.Problems[0].Hint != tc.hint {
+			t.Errorf("%s: %s", tc.text, rec.Body)
+		}
+	}
+}

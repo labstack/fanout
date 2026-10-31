@@ -32,7 +32,7 @@ beforeEach(() => {
     const url = String(input);
     if (url === "/api/fanql/format") return json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] });
     if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible, edits: [] }, notices: [] });
-    if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: "ok", elapsed_ms: 2, frame: ranFrame }] });
+    if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: ranFrame.rows ? "ok" : "empty", elapsed_ms: 2, frame: ranFrame }] });
     if (url === "/api/dashboards/d1" && (init?.method === "PATCH" || init?.method === "PUT")) return patch();
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });

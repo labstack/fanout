@@ -269,3 +269,32 @@ func TestEngineRunReturnsForNonPositiveInterval(t *testing.T) {
 	engine := NewEngine(nil, nil, nil, 0, 0)
 	engine.Run(context.Background())
 }
+
+// TestEngine_Transition_PendingPromotes verifies that a pending alert fires once
+// its hold time has passed. SQLite writes created_at as "2006-01-02 15:04:05".
+func TestEngine_Transition_PendingPromotes(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+	store := NewStore(sqlite.DB)
+	eng := &Engine{store: store, programs: make(map[string]Program), interval: 30 * time.Second}
+	rule := makeTestRule(t, store, "error_rate > 0.1", 60)
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
+		t.Fatalf("RecompileRule: %v", err)
+	}
+	eng.transition(rule, "svc-a", true, env)
+	if _, err := sqlite.DB.Exec(`UPDATE alerts SET created_at = datetime('now', '-2 minutes') WHERE rule_id = ?`, rule.ID); err != nil {
+		t.Fatal(err)
+	}
+	eng.transition(rule, "svc-a", true, env)
+	a, err := store.GetAlert(rule.ID, "svc-a")
+	if err != nil {
+		t.Fatalf("GetAlert: %v", err)
+	}
+	if a.State != "firing" || a.FiredAt == "" {
+		t.Fatalf("alert = %+v, want firing", a)
+	}
+}

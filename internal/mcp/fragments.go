@@ -194,7 +194,7 @@ func (s *Server) queryTelemetry(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if input.Text != "" {
 		compiled, problems := fanql.Compile(input.Text, fanql.Options{Viz: input.Panel.Viz, Variables: input.Variables})
 		if len(problems) != 0 {
-			return fanqlToolFailure(fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}, query.PresentProblems(problems))
+			return fanqlToolFailure(fanql.Failure{Code: "invalid_fanql", Message: "The query has problems."}, query.Diagnoses(problems))
 		}
 		input.Panel.Query = &compiled.Query
 		notices = append(notices, compiled.Notices...)

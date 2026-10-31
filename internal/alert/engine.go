@@ -222,7 +222,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 
 	case !noAlert && existing.State == "pending" && triggered:
 		// Check whether the for-duration has elapsed.
-		createdAt, parseErr := time.Parse(time.RFC3339, existing.CreatedAt)
+		createdAt, parseErr := parseStoredTime(existing.CreatedAt)
 		if parseErr != nil {
 			slog.Error("alert: invalid created_at, skipping", "rule", rule.ID, "service", svc, "created_at", existing.CreatedAt, "err", parseErr)
 			return
@@ -534,4 +534,13 @@ func (e *Engine) RecompileRule(ruleID, expression string) error {
 	defer e.mu.Unlock()
 	e.programs[ruleID] = prog
 	return nil
+}
+
+// parseStoredTime reads a time the engine wrote (RFC 3339) or one SQLite's
+// datetime('now') column default wrote ("2006-01-02 15:04:05", UTC).
+func parseStoredTime(value string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	return time.ParseInLocation(time.DateTime, value, time.UTC)
 }
