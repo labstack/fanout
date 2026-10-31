@@ -1,6 +1,7 @@
 import { Alert, Autocomplete, Button, Group, Menu, Modal, NumberInput, Stack, Switch, Text, TextInput, Textarea } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useDiscard } from "../dashboards/discard";
 import { listServices, type Rule, type RuleDraft } from "./api";
 import { percentMistake } from "./values";
 
@@ -43,6 +44,7 @@ function headersProblem(headers: string | undefined): string | undefined {
 export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): void; onSave(draft: RuleDraft): Promise<void> }) {
   const [draft, setDraft] = useState<RuleDraft>(() => draftOf(rule));
   const [saving, setSaving] = useState(false);
+  const discard = useDiscard(JSON.stringify(draft) !== JSON.stringify(draftOf(rule)), onClose, rule ? "this rule" : "the new rule");
   const [error, setError] = useState<string>();
   const set = (patch: Partial<RuleDraft>) => { setDraft(current => ({ ...current, ...patch })); setError(undefined); };
   // Like the server, check headers only when they change, so other edits still save.
@@ -63,7 +65,8 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
     finally { setSaving(false); }
   };
 
-  return <Modal opened onClose={() => { if (!saving) onClose(); }} title={rule ? `Edit rule · ${rule.name}` : "New alert rule"} size="lg">
+  return <Modal opened onClose={() => { if (!saving) discard.request(); }} closeOnEscape={false} onKeyDown={saving ? undefined : discard.onKeyDown} title={rule ? `Edit rule · ${rule.name}` : "New alert rule"} size="lg">
+    {discard.prompt}
     <Stack gap="sm">
       <TextInput label="Name" required value={draft.name} onChange={event => set({ name: event.currentTarget.value })} data-autofocus />
       <TextInput label="Description" value={draft.description ?? ""} onChange={event => set({ description: event.currentTarget.value })} />
@@ -82,7 +85,7 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
         {mistake && <Text size="xs" c="warn" role="status">{mistake}</Text>}
       </Stack>
       <Group grow align="flex-start">
-        {seconds("Hold for (s)", "for_seconds", "Condition must hold this long")}
+        {seconds("Hold for (s)", "for_seconds", "Condition must hold this long, from the first check that sees it")}
         {seconds("Cooldown (s)", "cooldown_s", "Quiet period after resolving")}
         {seconds("Repeat every (s)", "repeat_interval_s", "0 delivers once")}
       </Group>
@@ -95,7 +98,7 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
       </Group>
       {error && <Alert color="bad" title="Not saved">{error}</Alert>}
       <Group justify="flex-end" gap="xs">
-        <Button variant="default" disabled={saving} onClick={onClose}>Cancel</Button>
+        <Button variant="default" disabled={saving} onClick={discard.request}>Cancel</Button>
         <Button loading={saving} disabled={!ready} onClick={() => void save()}>{rule ? "Save rule" : "Create rule"}</Button>
       </Group>
     </Stack>

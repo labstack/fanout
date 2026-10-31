@@ -173,6 +173,44 @@ describe("AlertsPage", () => {
     await wait(() => expect(document.activeElement).toBe(ui.getByRole("button", { name: "Checkout errors actions" })));
   });
 
+  it("asks before discarding a filled rule draft on Cancel or Escape", async () => {
+    const { ui, wait, input } = await render();
+    await wait(() => expect(ui.getByRole("button", { name: "New rule" })).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "New rule" }).click());
+    const form = () => ui.queryByRole("dialog", { name: "New alert rule" });
+    // An untouched draft closes at once.
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    await wait(() => expect(form()).toBeNull());
+    await act(async () => ui.getByRole("button", { name: "New rule" }).click());
+    await input("Name", "Errors");
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "Keep editing" }).click());
+    expect(ui.queryByText("Discard changes?")).toBeNull();
+    const name = ui.getByLabelText(/^Name/, { selector: "input" }) as HTMLInputElement;
+    expect(name.value).toBe("Errors");
+    await act(async () => fireEvent.keyDown(name, { key: "Escape" }));
+    await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
+    expect(form()).not.toBeNull();
+    await act(async () => ui.getByRole("button", { name: "Discard changes" }).click());
+    await wait(() => expect(form()).toBeNull());
+  });
+
+  it("closes the service suggestions on Escape without asking to discard", async () => {
+    const { ui, wait, input } = await render();
+    await wait(() => expect(ui.getByRole("button", { name: "New rule" })).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "New rule" }).click());
+    await input("Name", "Errors");
+    const service = ui.getByLabelText(/^Service/, { selector: "input" });
+    await act(async () => { service.focus(); fireEvent.click(service); });
+    await input("Service", "che");
+    await wait(() => expect(service.getAttribute("aria-expanded")).toBe("true"));
+    await act(async () => fireEvent.keyDown(service, { key: "Escape" }));
+    await wait(() => expect(service.getAttribute("aria-expanded")).toBe("false"));
+    expect(ui.queryByText("Discard changes?")).toBeNull();
+    expect(ui.queryByRole("dialog", { name: "New alert rule" })).not.toBeNull();
+  });
+
   it("warns about a service without recent telemetry, in the form and in a test, but still saves", async () => {
     const base = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => String(input) === "/api/alerting/rules/r1/test"
