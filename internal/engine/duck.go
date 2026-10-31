@@ -67,6 +67,12 @@ type Duck struct {
 	publicationBounds func() (horizon, published, minimum int64)
 	// Cached under writeGate so an idle pass executes no SQL at all.
 	rollupWatermarks map[string]int64
+	// serviceChunk narrows the service rollup's ingest window after it runs
+	// out of memory; zero is the full rollupChunkNanos. Guarded by writeGate.
+	serviceChunk int64
+	// servicePending reports that the last service pass stopped short of
+	// the horizon, so a tick drains further passes.
+	servicePending bool
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.Gate
 	cacheGate writegate.Gate
@@ -610,7 +616,7 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 	var errs []error
 	affected := int64(0)
 
-	if n, err := d.refreshServiceRollup(ctx); err != nil {
+	if n, err := d.drainServiceRollup(ctx, d.cfg.RollupInterval/2); err != nil {
 		errs = append(errs, fmt.Errorf("service rollup: %w", err))
 	} else {
 		affected += n
@@ -837,7 +843,53 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	return err
 }
 
-func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
+// nextServiceRollupChunk halves the service rollup's ingest window after it
+// runs out of memory, down to a second, and doubles it back after a success.
+// A backfill packs days of event time into minutes of ingest, and every
+// affected bucket is recomputed whole, so a full window failed on every
+// retry and the rollup never advanced.
+func nextServiceRollupChunk(chunk int64, err error) int64 {
+	var engineError *duckdb.Error
+	switch {
+	case err == nil:
+		if chunk == 0 || 2*chunk >= rollupChunkNanos {
+			return 0
+		}
+		return 2 * chunk
+	case errors.As(err, &engineError) && engineError.Type == duckdb.ErrorTypeOutOfMemory:
+		if chunk == 0 {
+			chunk = rollupChunkNanos
+		}
+		return max(chunk/2, int64(time.Second))
+	default:
+		return chunk
+	}
+}
+
+// drainServiceRollup repeats service passes within a tick budget, retrying a
+// pass that ran out of memory at the narrower window at once, so a window
+// shrunk by memory pressure still keeps up with ingest.
+func (d *Duck) drainServiceRollup(ctx context.Context, budget time.Duration) (int64, error) {
+	deadline := time.Now().Add(budget)
+	var total int64
+	for {
+		before := d.serviceChunk
+		n, err := d.refreshServiceRollup(ctx)
+		total += n
+		retry := err != nil && d.serviceChunk != before
+		if err != nil && !retry || !retry && !d.servicePending || !time.Now().Before(deadline) {
+			return total, err
+		}
+	}
+}
+
+func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err error) {
+	d.servicePending = false
+	defer func() {
+		if ctx.Err() == nil {
+			d.serviceChunk = nextServiceRollupChunk(d.serviceChunk, err)
+		}
+	}()
 	start := time.Now()
 	result := metrics.RollupError
 	var recordedRows int64
@@ -891,6 +943,10 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	windowStart, windowEnd, _ := rollupWindow(lastWatermark, minimum, horizon)
+	if d.serviceChunk > 0 && windowEnd > windowStart+d.serviceChunk {
+		windowEnd = windowStart + d.serviceChunk
+	}
+	d.servicePending = windowEnd < horizon
 	newWatermark := windowEnd
 
 	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
