@@ -1,9 +1,9 @@
 import { Text } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
-import { Compartment, EditorState, Prec } from "@codemirror/state";
-import { EditorView, drawSelection, keymap } from "@codemirror/view";
+import { Annotation, Compartment, EditorState, Prec } from "@codemirror/state";
+import { EditorView, drawSelection, keymap, placeholder } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { autocompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
 import type { Problem } from "../api-error";
 import type { Completion } from "../explore/api";
@@ -11,12 +11,13 @@ import { sqlTheme } from "../sql-editor/theme";
 import { pointOffset, unitSpan } from "./spans";
 
 const noProblems: readonly Problem[] = [];
-// The shared SQL theme sizes a multi-line editor; FanQL is one line.
+// The shared SQL theme sizes a multi-line editor; FanQL is one logical line that wraps on screen.
 const oneLine = EditorView.theme({
-  ".cm-scroller": { minHeight: "0", maxHeight: "none", overflowX: "auto", overflowY: "hidden", fontSize: "14px" },
+  ".cm-scroller": { minHeight: "0", maxHeight: "none", overflow: "hidden", fontSize: "14px" },
   ".cm-content": { padding: "8px 4px" },
-  ".cm-line": { whiteSpace: "pre" },
 });
+/** Marks a transaction that applies the value prop, so it is not reported back as an edit. */
+const fromProp = Annotation.define<boolean>();
 
 export type FanqlEditorProps = {
   value: string; onChange(value: string): void; onRun(): void;
@@ -54,6 +55,10 @@ export function FanqlEditor(props: FanqlEditorProps) {
   const failures = useRef(0);
   // The note describes the open suggestion list, so it shows only with one.
   const [listOpen, setListOpen] = useState(false);
+  const open = useRef(false);
+  // Text reported through onChange that has not rendered back yet. A render
+  // that lags behind typing echoes one of these and must not rewind the editor.
+  const echoes = useRef<string[]>([]);
   const compartments = useRef({ editable: new Compartment(), attributes: new Compartment() });
   useEffect(() => {
     const { editable, attributes } = compartments.current;
@@ -76,7 +81,7 @@ export function FanqlEditor(props: FanqlEditorProps) {
       } catch { return null; }
     };
     const instance = new EditorView({ parent: host.current!, state: EditorState.create({ doc: latest.current.value, extensions: [
-      history(), drawSelection(), sqlTheme, Prec.highest(oneLine),
+      history(), drawSelection(), sqlTheme, Prec.highest(oneLine), EditorView.lineWrapping,
       // One line: newlines from typing or pasting become spaces.
       EditorState.transactionFilter.of(tr => {
         if (!tr.docChanged || !/[\r\n]/.test(tr.newDoc.toString())) return tr;
@@ -86,14 +91,20 @@ export function FanqlEditor(props: FanqlEditorProps) {
       }),
       editable.of([]), attributes.of([]),
       autocompletion({ override: [source], activateOnTypingDelay: 120 }),
-      Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => { latest.current.onRun(); return true; }, stopPropagation: true }])),
+      // Tab accepts an open suggestion; with no list it keeps the page's focus order.
+      Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => { latest.current.onRun(); return true; }, stopPropagation: true }, { key: "Tab", run: acceptCompletion }])),
       // autocompletion() binds its own keys at high precedence, so an open
       // list accepts on Enter; otherwise Enter runs the query.
       keymap.of([{ key: "Enter", run: () => { latest.current.onRun(); return true; } }]),
       keymap.of([...defaultKeymap.filter(binding => binding.key !== "Enter"), ...historyKeymap]),
       EditorView.updateListener.of(update => {
-        if (update.docChanged) latest.current.onChange(update.state.doc.toString());
-        setListOpen(completionStatus(update.state) !== null);
+        if (update.docChanged && !update.transactions.some(tr => tr.annotation(fromProp))) {
+          const text = update.state.doc.toString();
+          echoes.current.push(text);
+          latest.current.onChange(text);
+        }
+        const listed = completionStatus(update.state) !== null;
+        if (listed !== open.current) { open.current = listed; setListOpen(listed); }
       }),
     ] }) });
     view.current = instance;
@@ -101,10 +112,16 @@ export function FanqlEditor(props: FanqlEditorProps) {
   }, []);
   useEffect(() => {
     const instance = view.current!;
-    if (instance.state.doc.toString() !== value) instance.dispatch({ changes: { from: 0, to: instance.state.doc.length, insert: value } });
+    const echo = echoes.current.indexOf(value);
+    if (echo >= 0) { echoes.current.splice(0, echo + 1); return; }
+    echoes.current = [];
+    if (instance.state.doc.toString() !== value) instance.dispatch({ changes: { from: 0, to: instance.state.doc.length, insert: value }, annotations: fromProp.of(true) });
   }, [value]);
   useEffect(() => { view.current!.dispatch({ effects: compartments.current.editable.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) }); }, [readOnly]);
-  useEffect(() => { view.current!.dispatch({ effects: compartments.current.attributes.reconfigure(EditorView.contentAttributes.of({ role: "textbox", "aria-label": label, "aria-multiline": "false", "aria-describedby": describedBy ?? "", "aria-invalid": problems.length ? "true" : "false", spellcheck: "false" })) }); }, [label, describedBy, problems.length]);
+  useEffect(() => { view.current!.dispatch({ effects: compartments.current.attributes.reconfigure([
+    EditorView.contentAttributes.of({ role: "textbox", "aria-label": label, "aria-multiline": "false", "aria-describedby": describedBy ?? "", "aria-invalid": problems.length ? "true" : "false", spellcheck: "false" }),
+    props.placeholder ? placeholder(props.placeholder) : [],
+  ]) }); }, [label, describedBy, problems.length, props.placeholder]);
   useEffect(() => { const instance = view.current!; instance.dispatch(setDiagnostics(instance.state, fanqlDiagnostics(instance.state.doc.toString(), problems))); }, [value, problems]);
   return <div data-fanql-editor>
     <div ref={host} />

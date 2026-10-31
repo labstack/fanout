@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorView } from "@codemirror/view";
 import { forEachDiagnostic, type Diagnostic } from "@codemirror/lint";
@@ -99,6 +99,43 @@ describe("FanqlEditor", () => {
     await act(async () => { closeCompletion(view); });
     await ask();
     expect(document.querySelector("[data-completion-note]")?.textContent).toMatch(/schema could not be read/);
+  });
+
+  it("keeps fast typing when renders lag behind the editor", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const errors = vi.spyOn(console, "error");
+    function Controlled() {
+      const [text, setText] = useState("");
+      return <FanqlEditor value={text} onChange={setText} onRun={() => undefined} />;
+    }
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    cleanups.push(() => root.unmount());
+    await act(async () => root.render(<MantineProvider><Controlled /></MantineProvider>));
+    const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('[role="textbox"]')!)!;
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+    const text = "spans where service:checkout | count() by http_route";
+    // Keystrokes land between React's scheduled renders, as with fast typing.
+    for (const char of text) { view.dispatch({ changes: { from: view.state.doc.length, insert: char }, userEvent: "input.type" }); await new Promise(resolve => setTimeout(resolve, 0)); }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(view.state.doc.toString()).toBe(text);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
+  it("accepts a suggestion with Tab and leaves Tab alone without a list", async () => {
+    const complete = vi.fn().mockResolvedValue({ replace: { start: 0, end: 2 }, items: [{ label: "spans", insert: "spans ", kind: "keyword", detail: "source" }], schema: { window: "1h", sampled: false, warm: true, recent: true } });
+    const { view, key } = await renderEditor({ value: "sp", complete });
+    expect((await key("Tab")).defaultPrevented).toBe(false);
+    await act(async () => { view.dispatch({ selection: { anchor: 2 } }); startCompletion(view); await new Promise(resolve => setTimeout(resolve, 200)); });
+    expect((await key("Tab")).defaultPrevented).toBe(true);
+    expect(view.state.doc.toString()).toBe("spans ");
+  });
+
+  it("wraps long text on screen and shows the placeholder when empty", async () => {
+    const { view, editor } = await renderEditor({ value: "", placeholder: "spans | count() by service" });
+    expect(view.lineWrapping).toBe(true);
+    expect(editor.parentElement?.textContent).toContain("spans | count() by service");
   });
 
   it("refuses edits when read-only", async () => {
