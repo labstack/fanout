@@ -1127,7 +1127,7 @@ func (p *parser) foreignTerm() bool {
 		p.skipRun()
 		return true
 	}
-	if word == "facet" || (word == "order" || word == "group") && grammarText(p.ahead(1)) == "by" {
+	if word == "facet" || (word == "order" || word == "group") && grammarText(p.ahead(1)) == "by" || (word == "take" || word == "head") && rowCount(p.ahead(1)) {
 		p.foreignStage(t.Span.Start)
 		return true
 	}
@@ -1158,13 +1158,19 @@ func (p *parser) foreignStage(start int) {
 		}
 		p.fix(at, diagnostic(diagForeignSort, word, key), "", query.FixIt{Label: "sort", Span: fixAt, Text: "sort"})
 	case "head", "take":
-		if n := p.peek(); n.Kind == tokenNumber || n.Kind == tokenWord && strings.IndexFunc(n.Text, func(r rune) bool { return !digit(r) }) < 0 {
+		if n := p.peek(); rowCount(n) {
 			p.take()
 			p.fix(at, diagnostic(diagForeignLimit, word, n.Text), "", query.FixIt{Label: "limit", Span: fixAt, Text: "limit"})
 			return
 		}
 		p.issue(at, diagnostic(diagForeignLimit, word, "10"), "")
 	case "group by", "facet":
+		if word == "group by" && start < t.Span.Start {
+			// Only a second stage starts before its word, at its |, and
+			// that stage follows measures: | group by becomes by.
+			p.fix(at, diagnostic(diagForeignClause, word), "", query.FixIt{Label: "by", Span: fixAt, Text: "by"})
+			return
+		}
 		p.report(at, diagForeignClause, word)
 		if word == "facet" {
 			p.skipRun()
@@ -1172,6 +1178,16 @@ func (p *parser) foreignStage(start int) {
 	default:
 		p.report(at, diagForeignStage, word)
 	}
+}
+
+// rowCount reports whether t is a row count, as after head or take.
+func rowCount(t lexToken) bool {
+	return t.Kind == tokenNumber || t.Kind == tokenWord && t.Text != "" && strings.IndexFunc(t.Text, func(r rune) bool { return !digit(r) }) < 0
+}
+
+// groupBy reports whether the next words are SQL's group by.
+func (p *parser) groupBy() bool {
+	return p.is("group") && grammarText(p.ahead(1)) == "by"
 }
 
 var foreignPercentile = regexp.MustCompile(`(?i)^(percentile|pct|perc([0-9]{1,2})|median|mean|dc|distinct_count|cardinality)\(\s*([^\s,()]+)\s*(?:,\s*([0-9.]+)\s*)?\)$`)
@@ -1199,7 +1215,13 @@ func (p *parser) foreignCall() {
 				percent = m[4]
 			}
 			if n, err := strconv.ParseFloat(percent, 64); err == nil && n > 0 && n < 100 {
-				suggestion = "quantile(" + field + ", " + strconv.FormatFloat(n/100, 'f', -1, 64) + ")"
+				// A value below 1 is already a fraction; quantile excludes 1,
+				// so 1 is the first percentile. Round away binary artifacts
+				// so 99.9 reads 0.999, not 0.9990000000000001.
+				if n >= 1 {
+					n, _ = strconv.ParseFloat(strconv.FormatFloat(n/100, 'g', 12, 64), 64)
+				}
+				suggestion = "quantile(" + field + ", " + strconv.FormatFloat(n, 'f', -1, 64) + ")"
 				for _, q := range []string{"50", "75", "90", "95", "99"} {
 					if percent == q {
 						suggestion = "p" + q + "(" + field + ")"
@@ -1309,14 +1331,25 @@ func (p *parser) stage(start int) *aggregation {
 		p.completionQuery.Stage = s
 	}
 	p.expectNext(expect{Class: "measure"})
+	// foreign marks a measure already reported as foreign, so a following by
+	// or every is not also told that measures come first.
+	foreign := false
 	for p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] {
 		before := p.i
+		if p.groupBy() {
+			// Leave by for the clause below, so its fields still parse.
+			g := p.take()
+			at := span{g.Span.Start, p.peek().Span.End}
+			p.fix(at, diagnostic(diagForeignClause, "group by"), "", query.FixIt{Label: "by", Span: query.TextSpan{Start: at.Start, End: at.End}, Text: "by"})
+			continue
+		}
 		if p.peek().Kind == tokenIdent && foreignStages[p.lower()] {
 			stageStart := p.peek().Span.Start
 			if len(s.Measures) == 0 && s.Histogram == nil {
 				stageStart = start
 			}
 			p.foreignStage(stageStart)
+			foreign = true
 			for p.peek().Kind != eof && !p.is("|") && !p.is(",") && !clauses[p.lower()] && !foreignStages[p.lower()] && grammarText(p.ahead(1)) != "(" {
 				p.take()
 			}
@@ -1324,6 +1357,7 @@ func (p *parser) stage(start int) *aggregation {
 		}
 		if p.peek().Kind == tokenIdent && foreignCalls[p.lower()] && grammarText(p.ahead(1)) == "(" {
 			p.foreignCall()
+			foreign = true
 			continue
 		}
 		expr := p.measureExpression(0)
@@ -1382,7 +1416,7 @@ func (p *parser) stage(start int) *aggregation {
 			}
 			continue
 		}
-		if expr != nil && p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] && !foreignStages[p.lower()] {
+		if expr != nil && p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] && !foreignStages[p.lower()] && !p.groupBy() {
 			p.report(p.peek().Span, diagMeasureComma)
 		}
 		if p.i == before {
@@ -1399,7 +1433,7 @@ func (p *parser) stage(start int) *aggregation {
 			if s.Bucket != "" {
 				p.report(p.tokens[p.i-1].Span, diagOrder, "by")
 			}
-			if len(s.Measures) == 0 && s.Histogram == nil {
+			if len(s.Measures) == 0 && s.Histogram == nil && !foreign {
 				p.report(p.tokens[p.i-1].Span, diagByFirst)
 			}
 			for {
@@ -1426,7 +1460,7 @@ func (p *parser) stage(start int) *aggregation {
 			at := p.take().Span
 			p.beginClause()
 			p.expectNext(expect{Class: "bucket"})
-			if len(s.Measures) == 0 && s.Histogram == nil {
+			if len(s.Measures) == 0 && s.Histogram == nil && !foreign {
 				p.report(at, diagEveryFirst)
 			}
 			if s.Bucket != "" {
