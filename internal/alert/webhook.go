@@ -3,10 +3,12 @@ package alert
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
@@ -37,6 +39,29 @@ func RenderTemplate(tmplStr string, ctx ActionContext) (string, error) {
 		return "", fmt.Errorf("webhook: render template: %w", err)
 	}
 	return buf.String(), nil
+}
+
+// CheckHeaders reports whether headers is empty or a JSON object of string
+// values, naming the first header that is not a string.
+func CheckHeaders(headers string) error {
+	if headers == "" {
+		return nil
+	}
+	var values map[string]any
+	if err := json.Unmarshal([]byte(headers), &values); err != nil || values == nil {
+		return errors.New("webhook headers must be a JSON object")
+	}
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if _, ok := values[name].(string); !ok {
+			return fmt.Errorf("webhook header %s must be a string", name)
+		}
+	}
+	return nil
 }
 
 // FireWebhook sends the webhook for the given rule. Returns "skipped" if no

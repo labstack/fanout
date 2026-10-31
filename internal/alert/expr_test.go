@@ -2,6 +2,7 @@ package alert
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -186,5 +187,27 @@ func TestEvalExpression_StringVar(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCompileExpression_ReadableErrors(t *testing.T) {
+	cases := []struct{ expr, want string }{
+		{"error_rate > ", "Syntax error at column 14"},
+		{"error_rat > 0.05", "Unknown variable error_rat at column 1"},
+	}
+	for _, tc := range cases {
+		_, err := CompileExpression(tc.expr)
+		if err == nil {
+			t.Fatalf("CompileExpression(%q): expected error", tc.expr)
+		}
+		got := err.Error()
+		if !strings.HasPrefix(got, tc.want) {
+			t.Errorf("CompileExpression(%q) = %q, want prefix %q", tc.expr, got, tc.want)
+		}
+		for _, raw := range []string{"<input>", "ERROR:", "expecting {", "container"} {
+			if strings.Contains(got, raw) {
+				t.Errorf("CompileExpression(%q) = %q, contains %q", tc.expr, got, raw)
+			}
+		}
 	}
 }

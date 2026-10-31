@@ -2,6 +2,8 @@ package alert
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,5 +298,60 @@ func TestEngine_Transition_PendingPromotes(t *testing.T) {
 	}
 	if a.State != "firing" || a.FiredAt == "" {
 		t.Fatalf("alert = %+v, want firing", a)
+	}
+}
+
+// The alert value is the first variable the expression reads, ignoring string literals.
+func TestPrimaryValue(t *testing.T) {
+	env := Env{ErrorRate: 0.2, P95: 300, Throughput: 40, LogCount: 1200, ThroughputDelta: -60, ZScore: 3}
+	cases := []struct {
+		expr string
+		want float64
+	}{
+		{"log_count > 1000", 1200},
+		{"throughput_delta < -50", -60},
+		{"p95 > 200 && error_rate > 0.1", 300},
+		{"service == \"p95\" && error_rate > 0.1", 0.2},
+		{"throughput > 10 && error_rate > 0.1", 40},
+		{"z_score > 2", 3},
+	}
+	for _, tc := range cases {
+		if got := primaryValue(Rule{Expression: tc.expr}, env); got != tc.want {
+			t.Errorf("primaryValue(%q) = %v, want %v", tc.expr, got, tc.want)
+		}
+	}
+}
+
+// A zero value is a measurement, not a missing one.
+func TestAlertJSONKeepsZeroValue(t *testing.T) {
+	data, err := json.Marshal(Alert{State: "firing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"value":0`) {
+		t.Errorf("Alert JSON = %s, want value 0", data)
+	}
+}
+
+// A test reports which services have no recent telemetry, with the measured values of the rest.
+func TestEngineTestMarksServicesWithoutData(t *testing.T) {
+	eng, _ := newTestEngine(t)
+	eng.envOverride = map[string]Env{"checkout": {Service: "checkout", ErrorRate: 0.2}}
+	results, err := eng.Test(context.Background(), Rule{Service: "checkuot", Expression: "error_rate > 0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || !results[0].NoData || results[0].Triggered {
+		t.Fatalf("misspelled service = %+v, want one result without data", results)
+	}
+	results, err = eng.Test(context.Background(), Rule{Expression: "error_rate > 0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].NoData || !results[0].Triggered || results[0].Env.ErrorRate != 0.2 {
+		t.Fatalf("all services = %+v, want checkout firing with its values", results)
+	}
+	if data, _ := json.Marshal(results[0]); !strings.Contains(string(data), `"env":{"error_rate":0.2,`) {
+		t.Errorf("result JSON = %s, want env keyed by variable name", data)
 	}
 }

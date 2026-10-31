@@ -3,11 +3,13 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/auth"
 )
 
@@ -65,5 +67,29 @@ func TestRetiredAlertRoutesReturn404WithSPACatchAll(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAlertRulesRejectNonStringWebhookHeaders(t *testing.T) {
+	s := newTestAuthServer(t)
+	RegisterAlertRoutes(s.e, alert.NewStore(s.db.DB), nil)
+	admin, err := s.users.CreateWithAudit("alert-admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, admin)
+	create := func(headers string) *httptest.ResponseRecorder {
+		body := `{"name":"Errors","enabled":true,"expression":"error_rate > 0.05","webhook_headers":` + strconv.Quote(headers) + `}`
+		req := sessionRequest(http.MethodPost, "/api/alerting/rules", strings.NewReader(body), cookie)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := create(`{"X-Test": 5}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "X-Test") {
+		t.Fatalf("numeric header = %d %s, want 400 naming X-Test", rec.Code, rec.Body)
+	}
+	if rec := create(`{"X-Test": "5"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("string header = %d %s, want 201", rec.Code, rec.Body)
 	}
 }

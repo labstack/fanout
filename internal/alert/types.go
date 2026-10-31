@@ -28,7 +28,7 @@ type Alert struct {
 	RuleID             string  `json:"rule_id"`
 	Service            string  `json:"service"`
 	State              string  `json:"state"`
-	Value              float64 `json:"value,omitempty"` // Primary metric snapshot (error_rate) at time of evaluation
+	Value              float64 `json:"value"` // The first variable the rule reads, at the last evaluation
 	FiredAt            string  `json:"fired_at,omitempty"`
 	ResolvedAt         string  `json:"resolved_at,omitempty"`
 	RepeatedAt         string  `json:"repeated_at,omitempty"`
@@ -47,38 +47,38 @@ type Alert struct {
 type Env struct {
 	// Mean of minute-rollup span error proportions over the evaluation window,
 	// from 0 to 1; not a request-weighted whole-window error rate.
-	ErrorRate float64 `expr:"error_rate"`
+	ErrorRate float64 `expr:"error_rate" json:"error_rate"`
 	// Mean of approximate minute-rollup median span latencies in milliseconds.
-	P50 float64 `expr:"p50"`
+	P50 float64 `expr:"p50" json:"p50"`
 	// Mean of approximate minute-rollup 95th-percentile span latencies in
 	// milliseconds; not the whole-window p95. Latency prefers served work,
 	// falling back to outbound spans when no served work is available.
-	P95 float64 `expr:"p95"`
+	P95 float64 `expr:"p95" json:"p95"`
 	// Total span count over the current rollup window, not requests per second.
 	// Pair it with an error threshold to avoid firing on very little traffic.
-	Throughput float64 `expr:"throughput"`
+	Throughput float64 `expr:"throughput" json:"throughput"`
 	// Log records recorded for the service over the window.
-	LogCount float64 `expr:"log_count"`
+	LogCount float64 `expr:"log_count" json:"log_count"`
 	// How far the service's current behaviour sits from its own recent baseline,
 	// in standard deviations. Use it to catch a service that has changed without
 	// committing to an absolute threshold that fits every service.
-	ZScore float64 `expr:"z_score"`
+	ZScore float64 `expr:"z_score" json:"z_score"`
 	// The detector's instance-wide composite 0-100 health score. Every service
 	// receives the same score; it is not a per-service value.
-	HealthScore float64 `expr:"health_score"`
+	HealthScore float64 `expr:"health_score" json:"health_score"`
 	// Relative change in error rate against the preceding rollup window, as a
 	// percentage; zero when the baseline is missing or zero.
-	ErrorRateDelta float64 `expr:"error_rate_delta"`
+	ErrorRateDelta float64 `expr:"error_rate_delta" json:"error_rate_delta"`
 	// Relative change in p95 latency against the preceding rollup window, as a
 	// percentage; zero when the baseline is missing or zero.
-	P95Delta float64 `expr:"p95_delta"`
+	P95Delta float64 `expr:"p95_delta" json:"p95_delta"`
 	// Relative change in span count against the preceding rollup window, as a
 	// percentage. Negative when traffic drops; zero when the baseline is missing
 	// or zero.
-	ThroughputDelta float64 `expr:"throughput_delta"`
+	ThroughputDelta float64 `expr:"throughput_delta" json:"throughput_delta"`
 	// The service name being evaluated, as a string. Compare it when one rule
 	// needs to behave differently for one service.
-	Service string `expr:"service"`
+	Service string `expr:"service" json:"service"`
 }
 
 // Summary aggregates alert state counts.

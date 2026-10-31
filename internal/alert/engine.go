@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
 	"runtime/debug"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -77,15 +77,6 @@ func (e *Engine) Run(ctx context.Context) {
 			return
 		}
 	}
-}
-
-// BuildAllEnvs returns all current Envs keyed by service name.
-func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]Env {
-	envs := e.buildEnvs(ctx)
-	if envs == nil {
-		return map[string]Env{}
-	}
-	return envs
 }
 
 // ---- internal ----
@@ -336,24 +327,54 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 	}
 }
 
-// primaryValue picks the most relevant metric value based on the rule expression.
-// If the expression mentions p95, use P95. If it mentions throughput, use that.
-// Default to error_rate as the most common alert metric.
+var (
+	quoted   = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
+	variable = regexp.MustCompile(`\b(error_rate_delta|p95_delta|throughput_delta|error_rate|p50|p95|throughput|log_count|z_score|health_score)\b`)
+)
+
+// primaryValue is the first numeric variable the expression reads, outside
+// string literals; the UI names and formats the value by the same rule.
 func primaryValue(rule Rule, env Env) float64 {
-	expr := rule.Expression
-	if strings.Contains(expr, "p95") {
-		return env.P95
+	name := variable.FindString(quoted.ReplaceAllString(rule.Expression, `""`))
+	value, _ := celActivation(env)[name].(float64)
+	return value
+}
+
+// TestResult is one service's dry run of a rule.
+type TestResult struct {
+	Service   string `json:"service"`
+	Triggered bool   `json:"triggered"`
+	Error     string `json:"error,omitempty"`
+	// NoData is set when the service has no recent telemetry, which usually
+	// means its name is misspelled.
+	NoData bool `json:"no_data,omitempty"`
+	Env    Env  `json:"env"`
+}
+
+var errCurrentData = errors.New("current data could not be read")
+
+// Test evaluates a rule against current data without changing any alert.
+func (e *Engine) Test(ctx context.Context, rule Rule) ([]TestResult, error) {
+	prog, err := CompileExpression(rule.Expression)
+	if err != nil {
+		return nil, err
 	}
-	if strings.Contains(expr, "p50") {
-		return env.P50
+	envs := e.buildEnvs(ctx)
+	if envs == nil {
+		return nil, errCurrentData
 	}
-	if strings.Contains(expr, "throughput") {
-		return env.Throughput
+	results := []TestResult{}
+	for _, svc := range e.resolveServices(rule, envs) {
+		env, seen := envs[svc]
+		// A service without data is evaluated with zeros, as the engine does.
+		result := TestResult{Service: svc, NoData: !seen, Env: env}
+		result.Triggered, err = SafeEval(prog, env)
+		if err != nil {
+			result.Error = err.Error()
+		}
+		results = append(results, result)
 	}
-	if strings.Contains(expr, "z_score") {
-		return env.ZScore
-	}
-	return env.ErrorRate
+	return results, nil
 }
 
 // fireWebhookAsync fires the webhook for an alert in a goroutine and updates delivery status.

@@ -1,9 +1,12 @@
 package alert
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"runtime/debug"
+	"strings"
 
 	"cel.dev/cel-go/cel"
 	"cel.dev/cel-go/common/types"
@@ -50,16 +53,40 @@ func CompileExpression(expression string) (Program, error) {
 	}
 	ast, iss := alertCELEnv.Compile(expression)
 	if iss != nil && iss.Err() != nil {
-		return nil, fmt.Errorf("compile expression: %w", iss.Err())
+		return nil, errors.New(issueMessage(iss.Errors()[0]))
 	}
 	if ast.OutputType().Kind() != types.BoolKind {
-		return nil, fmt.Errorf("expression must evaluate to bool, got %s", ast.OutputType())
+		return nil, fmt.Errorf("expression must be a condition that is true or false, not a %s", ast.OutputType())
 	}
 	prog, err := alertCELEnv.Program(ast)
 	if err != nil {
 		return nil, fmt.Errorf("build program: %w", err)
 	}
 	return prog, nil
+}
+
+var (
+	undeclared = regexp.MustCompile(`^undeclared reference to '([^']*)'.*$`)
+	overload   = regexp.MustCompile(`^found no matching overload for '_?([^']*?)_?' applied to '\((.*)\)'.*$`)
+	expecting  = regexp.MustCompile(` expecting .*$`)
+)
+
+// issueMessage turns a CEL issue into one short sentence with its position,
+// without the parser's token lists.
+func issueMessage(e *cel.Error) string {
+	message := expecting.ReplaceAllString(e.Message, "")
+	message = strings.ReplaceAll(message, "mismatched input '<EOF>'", "the expression ends too early")
+	message = undeclared.ReplaceAllString(message, "Unknown variable $1")
+	message = overload.ReplaceAllString(message, "Operator $1 does not apply to $2")
+	message, detail, found := strings.Cut(message, ": ")
+	position := fmt.Sprintf(" at column %d", e.Location.Column()+1)
+	if e.Location.Line() > 1 {
+		position = fmt.Sprintf(" at line %d, column %d", e.Location.Line(), e.Location.Column()+1)
+	}
+	if found {
+		return message + position + ": " + detail
+	}
+	return message + position
 }
 
 // celActivation binds the CEL variables to an Env's values. The keys must

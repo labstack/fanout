@@ -93,9 +93,8 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name and expression are required")
 	}
 
-	// Validate expression compiles
-	if _, err := alert.CompileExpression(req.Expression); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
+	if err := checkRule(req); err != nil {
+		return err
 	}
 
 	created, err := h.store.CreateRule(req)
@@ -127,10 +126,8 @@ func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 	}
 	req.ID = id
 
-	if strings.TrimSpace(req.Expression) != "" {
-		if _, err := alert.CompileExpression(req.Expression); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
-		}
+	if err := checkRule(req); err != nil {
+		return err
 	}
 
 	updated, err := h.store.ReplaceRule(req)
@@ -201,49 +198,29 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get rule")
 	}
 
-	prog, compileErr := alert.CompileExpression(rule.Expression)
-	if compileErr != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "expression compile error: "+compileErr.Error())
+	if _, err := alert.CompileExpression(rule.Expression); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
 	}
-
-	envs := h.engine.BuildAllEnvs(c.Request().Context())
-
-	type testResult struct {
-		Service   string    `json:"service"`
-		Triggered bool      `json:"triggered"`
-		Error     string    `json:"error,omitempty"`
-		Env       alert.Env `json:"env"`
+	results, err := h.engine.Test(c.Request().Context(), rule)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "The rule could not be tested: "+err.Error()).Wrap(err)
 	}
-
-	var results []testResult
-	services := resolveTestServices(rule, envs)
-	for _, svc := range services {
-		env := envs[svc]
-		triggered, evalErr := alert.SafeEval(prog, env)
-		tr := testResult{
-			Service:   svc,
-			Triggered: triggered,
-			Env:       env,
-		}
-		if evalErr != nil {
-			tr.Error = evalErr.Error()
-		}
-		results = append(results, tr)
-	}
-
 	return c.JSON(200, map[string]any{
 		"rule":    rule,
 		"results": results,
 	})
 }
 
-func resolveTestServices(rule alert.Rule, envs map[string]alert.Env) []string {
-	if rule.Service == "" || rule.Service == "*" {
-		svcs := make([]string, 0, len(envs))
-		for svc := range envs {
-			svcs = append(svcs, svc)
+// checkRule rejects an expression that does not compile and webhook headers
+// that are not a JSON object of strings. A replace may omit the expression.
+func checkRule(rule alert.Rule) error {
+	if strings.TrimSpace(rule.Expression) != "" {
+		if _, err := alert.CompileExpression(rule.Expression); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
 		}
-		return svcs
 	}
-	return []string{rule.Service}
+	if err := alert.CheckHeaders(rule.WebhookHeaders); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return nil
 }
