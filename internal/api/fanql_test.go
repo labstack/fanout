@@ -345,11 +345,12 @@ func TestFanQLResponsesHaveNoLanguageVersion(t *testing.T) {
 }
 
 func TestFanQLCompletionAbsoluteAndLongWindowsDiscloseRecentSchema(t *testing.T) {
-	for _, window := range []string{
-		`"from":"2026-10-20T10:00:00Z","to":"2026-10-20T11:00:00Z"`,
-		`"window":"7d"`,
+	for _, tt := range []struct{ window, want string }{
+		// A past absolute range keeps its length; schema windows end now.
+		{`"from":"2026-10-20T10:00:00Z","to":"2026-10-20T11:00:00Z"`, "1h"},
+		{`"window":"7d"`, "24h"},
 	} {
-		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14,`+window+`}`)
+		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", `{"text":"logs where sev","cursor":14,`+tt.window+`}`)
 		var body struct {
 			Schema struct {
 				Window string `json:"window"`
@@ -358,8 +359,21 @@ func TestFanQLCompletionAbsoluteAndLongWindowsDiscloseRecentSchema(t *testing.T)
 			} `json:"schema"`
 		}
 		fanqlResponse(t, rec, http.StatusOK, &body)
-		if body.Schema.Window != "24h" || !body.Schema.Recent || body.Schema.Notice != "keys seen in the last 24h (recent), not in the selected interval" {
+		if body.Schema.Window != tt.want || !body.Schema.Recent || body.Schema.Notice != "keys seen in the last "+tt.want+" (recent), not in the selected interval" {
 			t.Fatalf("disclosure: %s", rec.Body)
+		}
+	}
+}
+
+func TestFanQLCompletionRejectsBadCursorAndWindow(t *testing.T) {
+	for _, body := range []string{
+		`{"text":"spans","cursor":999}`,
+		`{"text":"spans","cursor":-1}`,
+		`{"text":"spans","cursor":5,"window":"bogus"}`,
+	} {
+		rec := serveFanQL(t, nil, &fakeFanQLPanels{}, http.MethodPost, "/api/fanql/complete", body)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_input") {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
 		}
 	}
 }

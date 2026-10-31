@@ -358,10 +358,8 @@ func TestCompleteColdCacheCoalesces(t *testing.T) {
 		t.Fatalf("negative cache %+v calls %d", r.Schema, failed.Load())
 	}
 	now = now.Add(10 * time.Second)
-	waitCompletion(t, bad, CompleteRequest{Window: "1h"}, func(r CompleteResponse) bool { return r.Schema.Error })
-	if failed.Load() != 2 {
-		t.Fatalf("negative expiry calls %d", failed.Load())
-	}
+	// The error stays reported while the retry runs.
+	waitCompletion(t, bad, CompleteRequest{Window: "1h"}, func(r CompleteResponse) bool { return r.Schema.Error && failed.Load() == 2 })
 }
 
 func TestCompleteItemsRankByPrefixThenSubstringThenCount(t *testing.T) {
@@ -561,4 +559,184 @@ func TestCompleteInsertedAttributeFieldsPreserveScope(t *testing.T) {
 func applyCompletion(text string, replace query.TextSpan, insert string) string {
 	runes := []rune(text)
 	return string(runes[:replace.Start]) + insert + string(runes[replace.End:])
+}
+
+func TestCompleteTermStartAfterWordsCaseAndNegation(t *testing.T) {
+	schema := completionFixtureSchema()
+	spans := schema.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "rpc.grpc.status_code", Scope: "attributes", Type: "number", Count: 2000, Services: "checkout"})
+	spans.Attributes[1].Values = []query.Option{{Value: "GET", Count: 9}, {Value: "POST", Count: 3}}
+	spans.Attributes[2].Values = []query.Option{{Value: "7", Count: 4}}
+	spans.Columns = []query.ColumnSchema{{Field: query.Field{Name: "service"}, Values: []query.Option{{Value: "checkout", Count: 5}}}}
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	waitCompletion(t, c, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
+	labels := func(marked string, vars ...query.Variable) []string {
+		req := completionRequest(marked)
+		req.Variables = vars
+		return completionLabels(c.Complete(context.Background(), req))
+	}
+	before := func(got []string, a, b string) bool {
+		i, j := slices.Index(got, a), slices.Index(got, b)
+		return i >= 0 && (j < 0 || i < j)
+	}
+	for _, text := range []string{"spans where foo ¦", "spans where ¦", "spans where -¦", "spans where not ¦"} {
+		got := labels(text)
+		if len(got) == 0 || got[0] != "namespace" || !before(got, "service", ":") || !before(got, "service", "sort") || slices.Contains(got, "where") {
+			t.Errorf("%s: fields first and no second where: %v", text, got)
+		}
+		if strings.Contains(text, "-") || strings.Contains(text, "not") {
+			if slices.Contains(got, "sort") || slices.Contains(got, "|") {
+				t.Errorf("%s: clause words after negation: %v", text, got)
+			}
+		}
+	}
+	for _, text := range []string{"logs where timeout serv¦", "spans where café serv¦"} {
+		if !slices.Contains(labels(text), "service") {
+			t.Errorf("%s: %v", text, labels(text))
+		}
+	}
+	if got := labels("SPANS WHERE SERVICE:¦"); !slices.Contains(got, "checkout") {
+		t.Errorf("uppercase field values: %v", got)
+	}
+	if got := labels("SPANS WHERE KIND:¦"); !slices.Contains(got, "server") {
+		t.Errorf("uppercase vocabulary: %v", got)
+	}
+	r := c.Complete(context.Background(), CompleteRequest{Text: "spans where $", Cursor: 13, Variables: []query.Variable{{Name: "service"}}})
+	if got := completionLabels(r); !slices.Equal(got, []string{"$service"}) || r.Replace != (query.TextSpan{Start: 12, End: 13}) {
+		t.Errorf("variable after $: %v %+v", got, r.Replace)
+	}
+	if got := labels("spans where service:checkout | count() by ¦"); !before(got, "operation", "rpc.grpc.status_code") {
+		t.Errorf("columns before boosted attributes after by: %v", got)
+	}
+	if got := labels("spans where service:checkout | count_if(¦"); !before(got, "operation", "rpc.grpc.status_code") {
+		t.Errorf("columns before boosted attributes in count_if: %v", got)
+	}
+	if got := labels("spans where service:checkout | p95(¦"); len(got) == 0 || got[0] != "duration" {
+		t.Errorf("duration first in a numeric slot: %v", got)
+	}
+	if got := labels("spans where http.method:¦"); !before(got, "GET", "POST") || !slices.Contains(got, "*") {
+		t.Errorf("attribute values: %v", got)
+	}
+	r = c.Complete(context.Background(), completionRequest("spans where user.score:¦"))
+	if i := slices.IndexFunc(r.Items, func(i Item) bool { return i.Label == "7" }); i < 0 || r.Items[i].Insert != "7" {
+		t.Errorf("number attribute values insert bare: %+v", r.Items)
+	}
+	if got := labels("logs where body~¦"); slices.Contains(got, "*") {
+		t.Errorf("* offered under ~: %v", got)
+	}
+	r = c.Complete(context.Background(), completionRequest("metrics sort ¦"))
+	if len(r.Items) != 1 || r.Items[0].Detail == "" {
+		t.Errorf("metrics sort explains itself: %+v", r.Items)
+	}
+}
+
+func TestCheckCompleteRequest(t *testing.T) {
+	for _, tt := range []struct {
+		req  CompleteRequest
+		want string
+	}{
+		{CompleteRequest{Text: "spans", Cursor: 5, Window: "1h"}, ""},
+		{CompleteRequest{Text: "spans", Cursor: 0, Window: "7d"}, ""},
+		{CompleteRequest{Text: "日本", Cursor: 2}, ""},
+		{CompleteRequest{Text: "spans", Cursor: 999}, "cursor must be from 0 to 5"},
+		{CompleteRequest{Text: "spans", Cursor: -1}, "cursor must be from 0 to 5"},
+		{CompleteRequest{Text: "spans", Cursor: 1, Window: "bogus"}, `unknown window "bogus"`},
+		{CompleteRequest{Text: "spans", Cursor: 1, Window: "-1h"}, `unknown window "-1h"`},
+	} {
+		err := CheckCompleteRequest(tt.req)
+		if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.HasPrefix(err.Error(), tt.want)) {
+			t.Errorf("%+v: %v, want %q", tt.req, err, tt.want)
+		}
+	}
+}
+
+func TestCompleteAbsoluteRangeUsesItsLength(t *testing.T) {
+	requests := make(chan query.SchemaRequest, 2)
+	c := NewCompleter(completionSchemaFunc(func(_ context.Context, r query.SchemaRequest) (*query.Schema, error) {
+		requests <- r
+		return completionFixtureSchema(), nil
+	}))
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+	from, to := now.Add(-3*time.Hour), now
+	r := c.Complete(context.Background(), CompleteRequest{From: &from, To: &to})
+	if r.Schema.Window != "3h" || r.Schema.Recent {
+		t.Errorf("range ending now: %+v", r.Schema)
+	}
+	<-requests
+	from, to = now.Add(-50*time.Hour), now.Add(-48*time.Hour)
+	if r := c.Complete(context.Background(), CompleteRequest{From: &from, To: &to}); r.Schema.Window != "3h" || !r.Schema.Recent {
+		t.Errorf("past range: %+v", r.Schema)
+	}
+}
+
+func TestCompleteServesStaleWhileOneFetchRefreshes(t *testing.T) {
+	var calls atomic.Int32
+	var fail atomic.Bool
+	gate := make(chan struct{}, 1)
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
+		calls.Add(1)
+		<-gate
+		if fail.Load() {
+			return nil, context.DeadlineExceeded
+		}
+		return completionFixtureSchema(), nil
+	}))
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	req := CompleteRequest{Text: "spans where http.", Cursor: 17, Window: "1h"}
+	gate <- struct{}{}
+	waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Warm })
+
+	// Past the TTL a burst stays warm on the stale schema and starts one fetch.
+	advance(61 * time.Second)
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Go(func() {
+			if r := c.Complete(context.Background(), req); !r.Schema.Warm || len(r.Items) == 0 {
+				t.Error("stale schema not served")
+			}
+		})
+	}
+	wg.Wait()
+	gate <- struct{}{}
+	waitCompletion(t, c, req, func(CompleteResponse) bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return len(c.inflight) == 0
+	})
+	if calls.Load() != 2 {
+		t.Fatalf("refresh fetches %d, want 2 in total", calls.Load())
+	}
+
+	// A failed refresh (a timeout) keeps the stale schema and reports the error
+	// until a later fetch succeeds.
+	advance(61 * time.Second)
+	fail.Store(true)
+	gate <- struct{}{}
+	r := waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Error })
+	if !r.Schema.Warm {
+		t.Fatalf("stale schema dropped on failure: %+v", r.Schema)
+	}
+	advance(11 * time.Second)
+	fail.Store(false)
+	if r := c.Complete(context.Background(), req); !r.Schema.Error || !r.Schema.Warm {
+		t.Fatalf("error cleared before a successful fetch: %+v", r.Schema)
+	}
+	gate <- struct{}{}
+	waitCompletion(t, c, req, func(r CompleteResponse) bool { return !r.Schema.Error && r.Schema.Warm })
+
+	// A cold key that keeps failing reports the error while it retries.
+	cold := CompleteRequest{Text: "spans ", Cursor: 6, Window: "6h"}
+	fail.Store(true)
+	gate <- struct{}{}
+	waitCompletion(t, c, cold, func(r CompleteResponse) bool { return r.Schema.Error })
+	advance(11 * time.Second)
+	if r := c.Complete(context.Background(), cold); !r.Schema.Error || r.Schema.Warm {
+		t.Fatalf("retrying cold key: %+v", r.Schema)
+	}
+	gate <- struct{}{}
 }

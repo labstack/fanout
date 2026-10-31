@@ -131,12 +131,16 @@ func (h *FanQLHandler) complete(c *echo.Context) error {
 	if req.Window != nil {
 		window = *req.Window
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
-	defer cancel()
-	out := h.completer.Complete(ctx, fanql.CompleteRequest{
+	creq := fanql.CompleteRequest{
 		Text: req.Text, Cursor: req.Cursor, Options: req.Options,
 		Window: window, From: req.From, To: req.To, Namespace: req.Namespace,
-	})
+	}
+	if err := fanql.CheckCompleteRequest(creq); err != nil {
+		return newAPIError(http.StatusBadRequest, "invalid_input", err.Error())
+	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), panelDeadline)
+	defer cancel()
+	out := h.completer.Complete(ctx, creq)
 	return c.JSON(http.StatusOK, out)
 }
 

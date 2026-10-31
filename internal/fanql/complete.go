@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -34,6 +35,11 @@ func completionPrefix(text string, cursor int, source string) (token lexToken, p
 			switch candidate.Kind {
 			case tokenWord, tokenIdent, tokenPath, tokenString, tokenRaw, tokenBracketKey, tokenNumber:
 				token = candidate
+			case tokenBad:
+				// A lone $ starts a variable; it is replaced with the name.
+				if candidate.Text == "$" {
+					token = candidate
+				}
 			}
 		}
 	}
@@ -94,11 +100,22 @@ type CompleteResponse struct {
 const maxCompletionItems = 50
 
 type completionKey struct{ window, namespace string }
+
+// An entry is fresh until expires and then served stale until stale while one
+// background fetch refreshes it, so completion stays warm across the TTL. A
+// failure keeps the last schema, reports the error until a fetch succeeds,
+// and waits until expires (10 s) before the next attempt.
 type completionSchemaEntry struct {
-	schema  *query.Schema
-	expires time.Time
-	failed  bool
+	schema         *query.Schema
+	expires, stale time.Time
+	failed         bool
 }
+
+const (
+	completionSchemaTTL   = time.Minute
+	completionSchemaStale = 10 * time.Minute
+	completionRetry       = 10 * time.Second
+)
 
 // Schema work is admitted before spawning across all Completers. No request
 // waits or queues work when the slots are full; a later completion can retry.
@@ -116,36 +133,49 @@ func NewCompleter(source schemaSource) *Completer {
 	return &Completer{source: source, inflight: make(map[completionKey]chan struct{}), cache: make(map[completionKey]completionSchemaEntry), now: time.Now}
 }
 
-func completionWindow(window string) (string, bool) {
-	if window == "" {
-		return "24h", true
-	}
+// windowLength reads an Explore range such as 15m, 1h or 7d.
+func windowLength(window string) (time.Duration, bool) {
 	d, err := time.ParseDuration(window)
 	if strings.HasSuffix(window, "d") {
 		var days float64
 		days, err = strconv.ParseFloat(strings.TrimSuffix(window, "d"), 64)
 		d = time.Duration(days * float64(24*time.Hour))
 	}
-	if err != nil || d <= 0 {
-		return "24h", true
-	}
-	if d > 24*time.Hour {
-		return "24h", true
-	}
+	return d, err == nil && d > 0
+}
+
+// completionWindow is the smallest schema window covering d, clamped to 24h;
+// recent reports the clamp.
+func completionWindow(d time.Duration) (string, bool) {
 	for _, name := range []string{"5m", "15m", "1h", "3h", "6h", "12h", "24h"} {
 		n, _ := time.ParseDuration(name)
 		if d <= n {
 			return name, false
 		}
 	}
-	return "24h", false
+	return "24h", true
+}
+
+// CheckCompleteRequest rejects a cursor outside the text and a window that is
+// not a duration, so a client bug is a 400 rather than silent defaults.
+func CheckCompleteRequest(req CompleteRequest) error {
+	if n := utf8.RuneCountInString(req.Text); req.Cursor < 0 || req.Cursor > n {
+		return fmt.Errorf("cursor must be from 0 to %d, the text length in characters", n)
+	}
+	if req.Window != "" {
+		if _, ok := windowLength(req.Window); !ok {
+			return fmt.Errorf("unknown window %q; use a duration such as 15m, 1h or 7d", req.Window)
+		}
+	}
+	return nil
 }
 
 func (c *Completer) schema(ctx context.Context, key completionKey) (*query.Schema, bool, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
-	if entry, ok := c.cache[key]; ok && now.Before(entry.expires) {
+	entry, ok := c.cache[key]
+	if ok && now.Before(entry.expires) {
 		return entry.schema, entry.schema != nil, entry.failed
 	}
 	if c.source == nil {
@@ -154,14 +184,16 @@ func (c *Completer) schema(ctx context.Context, key completionKey) (*query.Schem
 	if _, ok := c.inflight[key]; !ok {
 		select {
 		case completionSchemaSlots <- struct{}{}:
+			done := make(chan struct{})
+			c.inflight[key] = done
+			go c.fetch(context.WithoutCancel(ctx), key, done)
 		default:
-			return nil, false, false
 		}
-		done := make(chan struct{})
-		c.inflight[key] = done
-		go c.fetch(context.WithoutCancel(ctx), key, done)
 	}
-	return nil, false, false
+	if ok && entry.schema != nil && now.Before(entry.stale) {
+		return entry.schema, true, entry.failed
+	}
+	return nil, false, ok && entry.failed
 }
 
 func (c *Completer) fetch(parent context.Context, key completionKey, done chan struct{}) {
@@ -172,21 +204,21 @@ func (c *Completer) fetch(parent context.Context, key completionKey, done chan s
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
-	ttl := time.Minute
-	failed := err != nil || schema == nil
-	if failed {
-		ttl = 10 * time.Second
-		schema = nil
-	}
 	for k, entry := range c.cache {
-		if !now.Before(entry.expires) {
+		if !now.Before(entry.stale) && !now.Before(entry.expires) {
 			delete(c.cache, k)
 		}
 	}
 	if len(c.cache) >= 64 {
 		clear(c.cache)
 	}
-	c.cache[key] = completionSchemaEntry{schema: schema, expires: now.Add(ttl), failed: failed}
+	if err != nil || schema == nil {
+		entry := c.cache[key]
+		entry.expires, entry.failed = now.Add(completionRetry), true
+		c.cache[key] = entry
+	} else {
+		c.cache[key] = completionSchemaEntry{schema: schema, expires: now.Add(completionSchemaTTL), stale: now.Add(completionSchemaTTL + completionSchemaStale)}
+	}
 	delete(c.inflight, key)
 	close(done)
 }
@@ -195,7 +227,7 @@ type completionCandidate struct {
 	item                Item
 	class, match, boost int
 	count               int64
-	used                bool
+	used, service       bool
 }
 
 type completionCandidates struct {
@@ -209,15 +241,21 @@ type completionCandidates struct {
 }
 
 func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteResponse {
-	window, recent := completionWindow(req.Window)
-	if req.From != nil || req.To != nil {
-		window, recent = "24h", true
+	window, recent := "24h", true
+	if d, ok := windowLength(req.Window); ok {
+		window, recent = completionWindow(d)
+	}
+	if req.From != nil && req.To != nil {
+		// Schema windows end now: an absolute range takes the window of its
+		// length and is recent unless it also ends now.
+		window, recent = completionWindow(req.To.Sub(*req.From))
+		recent = recent || c.now().Sub(*req.To) > time.Minute
 	}
 	schema, warm, failed := c.schema(ctx, completionKey{window, req.Namespace})
 	token, p := completionPrefix(req.Text, req.Cursor, req.Source)
 	r := CompleteResponse{Replace: query.TextSpan{Start: token.Span.Start, End: token.Span.End}, Items: []Item{}, Schema: SchemaStatus{Window: window, Sampled: true, Warm: warm, Recent: recent, Error: failed}}
 	if recent {
-		r.Schema.Notice = "keys seen in the last 24h (recent), not in the selected interval"
+		r.Schema.Notice = "keys seen in the last " + window + " (recent), not in the selected interval"
 	}
 	if token.Kind == tokenString || token.Kind == tokenRaw {
 		return r
@@ -260,6 +298,10 @@ func (c *Completer) Complete(ctx context.Context, req CompleteRequest) CompleteR
 		}
 		if a.class != b.class {
 			return a.class < b.class
+		}
+		// Service metadata ranks keys within their class; columns stay first.
+		if a.service != b.service {
+			return a.service
 		}
 		return a.count > b.count
 	})
@@ -392,7 +434,10 @@ func (s *completionCandidates) candidates(e expect) {
 			s.words("keyword", "sort", "limit")
 		default:
 			if s.req.Source == "" {
-				s.words("keyword", "where", "|", "sort", "limit")
+				if q := s.p.completionQuery; q == nil || !q.WhereWord && len(q.Where) == 0 {
+					s.words("keyword", "where")
+				}
+				s.words("keyword", "|", "sort", "limit")
 			}
 		}
 	}
@@ -459,10 +504,11 @@ func (s *completionCandidates) fields(e expect, numeric bool, scope string) {
 		if numeric && attribute.Type == "number" {
 			boost = 2
 		}
-		if s.serviceBoost(attribute.Services) {
-			boost++
-		}
+		before := len(s.items)
 		s.add(label, insert, "attribute", attribute.Type, attribute.Count, boost)
+		if len(s.items) > before {
+			s.items[before].service = s.serviceBoost(attribute.Services)
+		}
 	}
 }
 
@@ -509,7 +555,7 @@ func (s *completionCandidates) operators(field *fieldName) {
 		}
 		fields, _ := query.SignalColumns(s.source)
 		for _, f := range fields {
-			if f.Name == field.Key && f.Type == query.TypeTime {
+			if strings.EqualFold(f.Name, field.Key) && f.Type == query.TypeTime {
 				s.words("operator", "=", "!=", ">", ">=", "<", "<=")
 				return
 			}
@@ -537,11 +583,13 @@ func (s *completionCandidates) values(e expect) {
 		s.add(label, insert, "value", "", count, boost)
 	}
 	value := func(label, stored string, count int64) { addValue(label, stored, label, count) }
-	sampledValue := func(label string, count int64) {
-		addValue(label, label, printValue(literalValue{Kind: stringValue, Text: label}, *f, false), count)
+	sampledValue := func(label string, kind valueKind, count int64) {
+		addValue(label, label, printValue(literalValue{Kind: kind, Text: label}, *f, false), count)
 	}
-	if f.Scope == "" {
-		if f.Key == "severity" {
+	if f.Scope == "" && !f.Bracket {
+		// Column names fold case (section 0.3 rule 16); attribute keys do not.
+		key := strings.ToLower(f.Key)
+		if key == "severity" {
 			for _, band := range telemetry.SeverityBands {
 				value(strings.ToLower(band), band, 0)
 			}
@@ -549,27 +597,27 @@ func (s *completionCandidates) values(e expect) {
 				return
 			}
 		} else {
-			aliases := query.FieldAliases(f.Key)
+			aliases := query.FieldAliases(key)
 			for _, label := range sortedCompletionKeys(aliases) {
 				value(label, aliases[label], 0)
 			}
 		}
 		vocabulary = false
-		if f.Key == "duration" {
+		if key == "duration" {
 			for _, v := range []string{"500ms", "1s", "5s"} {
 				value(v, v, 0)
 			}
 		}
 		for _, column := range s.signal.Columns {
-			if column.Name == f.Key {
+			if column.Name == key {
 				for _, v := range column.Values {
-					sampledValue(v.Value, v.Count)
+					sampledValue(v.Value, stringValue, v.Count)
 				}
 			}
 		}
-		if f.Key == "name" {
+		if key == "name" {
 			for _, metric := range s.signal.Metrics {
-				sampledValue(metric.Name, metric.Count)
+				sampledValue(metric.Name, stringValue, metric.Count)
 			}
 		}
 	}
@@ -579,15 +627,28 @@ func (s *completionCandidates) values(e expect) {
 		if scope == "" {
 			scope = "attributes"
 		}
-		if attribute.Key == f.Key && (attribute.Scope == scope || attribute.Scope == "" && scope == "attributes") && attribute.Type == "boolean" {
+		if attribute.Key != f.Key || !(attribute.Scope == scope || attribute.Scope == "" && scope == "attributes") {
+			continue
+		}
+		if attribute.Type == "boolean" {
 			value("true", "true", 0)
 			value("false", "false", 0)
+		}
+		// Sampled values keep their stored type: equality on attributes is typed.
+		kind := stringValue
+		if attribute.Type == "number" {
+			kind = numberValue
+		}
+		for _, v := range attribute.Values {
+			sampledValue(v.Value, kind, v.Count)
 		}
 	}
 	if e.Scope != "in" {
 		for _, v := range s.req.Variables {
 			s.add("$"+v.Name, "", "variable", "", 0, 0)
 		}
+	}
+	if e.Scope == ":" {
 		value("*", "*", 0)
 	}
 }
@@ -648,11 +709,14 @@ func (s *completionCandidates) sortKeys() {
 	case "log_patterns":
 		s.words("field", "count")
 	default:
-		if s.source == "logs" {
+		switch s.source {
+		case "logs":
 			s.words("field", "time", "+time")
-		} else if s.source == "spans" {
+		case "spans":
 			s.words("field", "duration", "+start")
 			s.add("errors", "errors", "field", "filters to errors, orders by duration", 0, 0)
+		case "metrics":
+			s.add("", "", "keyword", "metrics sort by a measure; add one first, e.g. | avg(value) by name", 0, 0)
 		}
 	}
 }
