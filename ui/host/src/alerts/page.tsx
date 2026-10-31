@@ -10,8 +10,19 @@ import { RuleForm } from "./rule-form";
 const stateColor: Record<string, string> = { firing: "bad", pending: "warn", resolved: "gray" };
 const when = (value?: string) => value ? exactTimestamp(value) : "—";
 
+/** The rollup variables a rule reads, as the FanQL source and measure that chart them. */
+const charts: Record<string, string> = { error_rate: "spans | error_rate()", p95: "spans | p95(duration)", throughput: "spans | count()", log_count: "logs | count()" };
+
+/** A FanQL time series of what the rule watches, named by the first variable outside string literals. */
+function ruleQuery(rule: Pick<Rule, "service" | "expression">): string {
+  const code = rule.expression.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "\"\"");
+  const watched = /\b(error_rate|p95|throughput|log_count)(?:_delta)?\b/.exec(code)?.[1] ?? "throughput";
+  const [source, measure] = charts[watched].split(" | ");
+  return rule.service ? `${source} where service:"${rule.service.replaceAll("\"", "\"\"")}" | ${measure} every auto` : `${source} | ${measure} by service every auto`;
+}
+
 /** Alert rules and their history (proposal 0004, section 4); works without chat. */
-export function AlertsPage() {
+export function AlertsPage({ onExplore }: { onExplore(query: string): void }) {
   const client = useQueryClient();
   // Viewers read; operators and admins hold alerts:manage.
   const canManage = useViewer().role !== "viewer";
@@ -62,7 +73,8 @@ export function AlertsPage() {
             return <Table.Tr key={rule.id}>
               <Table.Td><Text size="sm" fw={500}>{rule.name}</Text>{rule.description && <Text size="xs" c="dimmed">{rule.description}</Text>}</Table.Td>
               <Table.Td><Text size="sm">{rule.service || "All services"}</Text></Table.Td>
-              <Table.Td><Text size="xs" ff="monospace">{rule.expression}</Text></Table.Td>
+              <Table.Td><Text size="xs" ff="monospace">{rule.expression}</Text>
+                <Button size="compact-xs" variant="subtle" px={0} onClick={() => onExplore(ruleQuery(rule))}>Open in Explore</Button></Table.Td>
               <Table.Td>{!alerts.isSuccess ? <Text size="xs" c="dimmed">Unknown</Text>
                 : now.length > 0 ? <Group gap={4}>{now.map(a => <Badge key={a.id} color={stateColor[a.state]} variant="light">{a.state} · {a.service}</Badge>)}</Group> : <Text size="xs" c="dimmed">OK</Text>}</Table.Td>
               <Table.Td><Text size="sm">{alerts.isSuccess ? when(lastFired(rule)) : "—"}</Text></Table.Td>

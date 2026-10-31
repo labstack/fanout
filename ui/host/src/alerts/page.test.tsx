@@ -16,6 +16,8 @@ const json = (body: unknown, status = 200) => Response.json(body, { status });
 const cleanups: (() => void)[] = [];
 const calls = (method: string, url: string) => fetchMock.mock.calls.filter(([input, init]) => String(input) === url && (init?.method ?? "GET") === method).map(([, init]) => init?.body ? JSON.parse(String(init.body)) : undefined);
 let create: () => Promise<Response>;
+let rules: Rule[];
+const onExplore = vi.fn();
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -24,9 +26,11 @@ beforeEach(() => {
   fetchMock.mockReset();
   viewer.role = "operator";
   create = async () => json({ ...rule, id: "r2" }, 201);
+  rules = [rule];
+  onExplore.mockReset();
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input), method = init?.method ?? "GET";
-    if (url === "/api/alerting/rules" && method === "GET") return json([rule]);
+    if (url === "/api/alerting/rules" && method === "GET") return json(rules);
     if (url === "/api/alerting/alerts") return json([{ id: "a1", rule_id: "r1", service: "checkout", state: "firing", value: 0.09, fired_at: "2026-10-30T10:00:00Z", created_at: "2026-10-30T10:00:00Z" }]);
     if (url === "/api/alerting/rules" && method === "POST") return create();
     if (url === "/api/alerting/rules/r1" && method === "PUT") return json({ ...rule, enabled: false });
@@ -40,7 +44,7 @@ afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup
 async function render() {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><AlertsPage /></QueryClientProvider></MantineProvider>));
+  await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><AlertsPage onExplore={onExplore} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
   const ui = within(document.body);
   const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
@@ -50,6 +54,18 @@ async function render() {
 }
 
 describe("AlertsPage", () => {
+  it("opens what each rule watches in Explore", async () => {
+    rules = [rule, { ...rule, id: "r3", name: "Log flood", service: "", expression: "service == \"error_rate\" && [1].exists(p95x, p95x > 0) && log_count_delta > 50" }, { ...rule, id: "r4", name: "Slow \"api\"", service: "a\"b", expression: "p95 > 500" }];
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getAllByRole("button", { name: "Open in Explore" })).toHaveLength(3));
+    for (const button of ui.getAllByRole("button", { name: "Open in Explore" })) await act(async () => button.click());
+    expect(onExplore.mock.calls.map(([q]) => q)).toEqual([
+      'spans where service:"checkout" | error_rate() every auto',
+      "logs | count() by service every auto",
+      'spans where service:"a""b" | p95(duration) every auto',
+    ]);
+  });
+
   it("lists rules with their firing alerts and the history", async () => {
     const { ui, wait } = await render();
     await wait(() => expect(ui.getAllByText("Checkout errors").length).toBeGreaterThan(0));

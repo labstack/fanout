@@ -1,7 +1,7 @@
 import { ActionIcon, Alert, Box, Button, Center, Group, Loader, Stack, Text, Title, Tooltip } from "@mantine/core";
 import { Copy, WarningCircle } from "@phosphor-icons/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp, type TurnOptions } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards, queryExemplars, getTrace, resolveVariables } from "./api";
@@ -27,12 +27,14 @@ import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
 import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
+const NewDashboard = lazy(() => import("./new-dashboard").then(module => ({ default: module.NewDashboard })));
 const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace };
 
 const zoomOut: Record<string, string> = { "5m": "15m", "15m": "1h", "1h": "3h", "3h": "6h", "6h": "12h", "12h": "24h", "24h": "2d", "2d": "7d", "7d": "30d", "30d": "30d" };
 
 export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashboardId?: string; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; onOpen(id: string, replace?: boolean): void }) {
   const { agentAvailable, openChat } = useFanoutApp();
+  const [creating, setCreating] = useState(false);
   const list = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, staleTime: 15_000 });
   useEffect(() => {
     if (dashboardId || !list.data?.length) return;
@@ -44,7 +46,11 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
   if (!dashboardId && list.data?.length === 0) return <Center mih="50vh"><Stack align="center" gap="xs">
     <Title order={1} fz={24}>No dashboards yet</Title>
     <Text c="dimmed" size="sm" ta="center">Create a dashboard to explore your services.</Text>
-    {agentAvailable && <Button mt="sm" size="sm" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
+    <Group mt="sm" gap="xs">
+      <Button size="sm" onClick={() => setCreating(true)}>New dashboard</Button>
+      {agentAvailable && <Button size="sm" variant="default" onClick={() => openChat(createDashboardPrompt)}>Create with AI</Button>}
+    </Group>
+    {creating && <Suspense fallback={null}><NewDashboard onClose={() => setCreating(false)} onCreated={id => { setCreating(false); onOpen(id); }} /></Suspense>}
   </Stack></Center>;
   if (!dashboardId || record.isLoading) return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading your dashboard…</Text></Center>;
   if (record.error instanceof ApiError && record.error.code === "not_found") {

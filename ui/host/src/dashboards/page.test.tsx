@@ -395,17 +395,20 @@ describe("DashboardPage", () => {
     const { host, onOpen } = await render({}, "");
     await vi.waitFor(() => expect(host.textContent).toContain("No dashboards yet"), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(host.textContent).not.toContain("Loading your dashboard"), { interval: 5, timeout: 3000 });
-    await act(async () => { host.querySelector("button")!.click(); });
+    const byText = (label: string) => [...host.querySelectorAll("button")].find(b => b.textContent === label);
+    await act(async () => { byText("Create with AI")!.click(); });
     expect(app.openChat).toHaveBeenCalledWith(expect.stringMatching(/^Build me a dashboard for /));
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("hides the empty-state chat action when the agent is unavailable", async () => {
+  it("offers New dashboard without chat and hides the chat action", async () => {
     app.agentAvailable = false;
     listResponse = async () => json({ dashboards: [] });
     const { host } = await render({}, "");
     await vi.waitFor(() => expect(host.textContent).toContain("No dashboards yet"), { interval: 5, timeout: 3000 });
-    expect(host.querySelector("button")).toBeNull();
+    expect([...host.querySelectorAll("button")].map(b => b.textContent)).toEqual(["New dashboard"]);
+    await act(async () => { host.querySelector("button")!.click(); });
+    await vi.waitFor(() => expect(document.body.querySelector("[role=dialog]")?.textContent).toContain("Dashboard name"), { interval: 5, timeout: 3000 });
   });
 
   it("shows a dashboard list error", async () => {
