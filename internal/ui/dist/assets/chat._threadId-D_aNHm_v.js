@@ -1,0 +1,1 @@
+import{t as e}from"./chat-Cp3vP-H9.js";var t=e;export{t as component};
