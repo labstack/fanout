@@ -1,7 +1,8 @@
 import { test, expect, type Browser, type Page, type Request, type Response } from "../../fixtures/test";
 import { createHash } from "node:crypto";
-import type { PanelResult, Frame } from "../../../../panels/types";
+import type { Frame } from "../../../../panels/types";
 import spec from "../../data/performance.json" with { type: "json" };
+import { panelResults } from "../../support/query-results";
 import { allPanelsPainted, assertRefreshRequests, CI_RENDER_CEILING_MS, p95 } from "../../support/performance-support";
 
 const viewport = { width: 1440, height: 3000 };
@@ -63,8 +64,10 @@ async function evidence(observed: ReturnType<typeof observe>, start = 0): Promis
   for (const event of events) {
     expect(event.finished, `Complete body: ${event.path}`).toBe(true);
     expect(event.response?.ok(), `HTTP success: ${event.path}`).toBe(true);
+    expect(event.request.failure(), `Not aborted: ${event.path}`).toBeNull();
     if (event.path !== "/api/queries/run") continue;
-    const body = await event.response!.json() as { results: PanelResult[] };
+    // Panel results stream as NDJSON; the helper also reads plain JSON.
+    const body = { results: await panelResults(event.response!) };
     const selected = (event.request.postDataJSON() as { panels?: string[] }).panels ?? panelIds;
     const returned = body.results.map(result => result.id).sort();
     // Array equality catches duplicate IDs that a Map would silently overwrite.
