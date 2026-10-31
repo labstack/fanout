@@ -1,12 +1,12 @@
 import { ActionIcon, Badge, Button, Group, NumberInput, Select, Stack, Text, TextInput } from "@mantine/core";
 import { Plus, X } from "@phosphor-icons/react";
+import { useState } from "react";
 import type { Query } from "../../../panels/types";
 import type { TelemetrySchema } from "../sql-editor/schema";
 import { fieldPattern, operators, parseWhere, printWhere, type Condition } from "./where";
 
 
 const sources = ["spans", "logs", "metrics"] as const;
-const buckets = ["auto", "1m", "5m", "15m", "1h"];
 // Measures without a field argument; every other builder measure takes one field.
 const fieldless = new Set(["count", "rate", "error_rate", "share"]);
 // Measures with extra arguments stay in the query text, not the builder.
@@ -41,28 +41,39 @@ export function Builder({ query, schema, variables = [], onChange }: { query: Qu
   const names = new Set(fields.map(f => f.name));
   const numeric = new Set(fields.filter(f => f.type === "number" || f.type === "int" || f.type === "float").map(f => f.name));
   const fieldData = fields.map(f => f.name);
-  const set = (patch: Partial<Query>) => onChange({ ...query, ...patch });
   const known = schema.measures ?? [];
   const where = query.where ?? [];
   const measures = query.measures ?? [];
   const by = query.by ?? [];
+  const buckets = schema.buckets ?? [];
+  // A filter row without a value stays here, at its place among the rows, so the query never filters on an empty value.
+  const [draft, setDraft] = useState<{ at: number; condition: Condition }>();
+  // What the last source switch removed.
+  const [removed, setRemoved] = useState<string>();
+  const set = (patch: Partial<Query>) => { setRemoved(undefined); onChange({ ...query, ...patch }); };
 
   const switchSource = (from: Query["from"]) => {
     const next = new Set(fieldsOf(schema, from).map(f => f.name));
     const keep = (name: string) => next.has(name) || name.startsWith("attributes[") || name.startsWith("resource[");
-    onChange({
-      ...query, from,
+    const kept = {
       where: where.filter(entry => { const c = parseWhere(entry); return !c || keep(c.field); }),
       measures: measures.filter(entry => { const m = parseMeasure(entry, known); return !m || !m.field || keep(m.field); }),
       by: by.filter(keep),
-    });
+    };
+    const dropped = [...measures.filter(m => !kept.measures.includes(m)), ...where.filter(w => !kept.where.includes(w)), ...by.filter(b => !kept.by.includes(b))];
+    // Every source counts rows, so an aggregate keeps a measure.
+    if (kept.measures.length === 0 && measures.length > 0) kept.measures = ["count()"];
+    setDraft(undefined);
+    setRemoved(dropped.length > 0 ? `Removed what ${from} does not have: ${dropped.join(", ")}.` : undefined);
+    onChange({ ...query, from, ...kept });
   };
   const replace = <T,>(list: T[], index: number, value: T) => list.map((item, i) => i === index ? value : item);
   const remove = <T,>(list: T[], index: number) => list.filter((_, i) => i !== index);
   const rowField = (name: string) => names.has(name) ? fieldData : [name, ...fieldData];
 
   return <Stack gap="sm" data-builder>
-    <Select label="Source" w={200} allowDeselect={false} value={query.from} data={[...sources]} onChange={value => value && switchSource(value as Query["from"])} />
+    <Select label="Source" w={200} allowDeselect={false} value={query.from} data={[...sources]} onChange={value => value && value !== query.from && switchSource(value as Query["from"])} />
+    {removed && <Text size="xs" c="dimmed" role="status" data-builder-removed>{removed}</Text>}
 
     <Stack gap={6}>
       <Text size="sm" fw={500}>Measures</Text>
@@ -82,20 +93,37 @@ export function Builder({ query, schema, variables = [], onChange }: { query: Qu
 
     <Stack gap={6}>
       <Text size="sm" fw={500}>Filters</Text>
-      {where.map((entry, index) => {
-        const c = parseWhere(entry);
-        if (!c) return <Group key={index}><Chip text={entry} onRemove={() => set({ where: remove(where, index) })} /></Group>;
-        const update = (patch: Partial<Condition>) => set({ where: replace(where, index, printWhere({ ...c, ...patch }, variables)) });
+      {(draft ? [...where.slice(0, draft.at), draft.condition, ...where.slice(draft.at)] : where).map((entry, index) => {
+        const isDraft = draft?.at === index;
+        // The row's place in the query; rows after the draft sit one earlier there.
+        const at = draft && index > draft.at ? index - 1 : index;
+        const drop = () => { if (draft && at < draft.at) setDraft({ ...draft, at: draft.at - 1 }); set({ where: remove(where, at) }); };
+        const c = typeof entry === "string" ? parseWhere(entry) : entry;
+        if (!c) return <Group key={index}><Chip text={entry as string} onRemove={drop} /></Group>;
+        const update = (patch: Partial<Condition>) => {
+          const next = { ...c, ...patch };
+          // A schema field's type decides quoting; an attribute keeps how it was typed.
+          if (names.has(next.field)) next.quoted = !numeric.has(next.field);
+          if (!next.value.trim()) {
+            // A cleared value takes the row out of the query until it has one again.
+            setDraft({ at, condition: next });
+            if (!isDraft) set({ where: remove(where, at) });
+            return;
+          }
+          if (isDraft) setDraft(undefined);
+          const printed = printWhere(next, variables);
+          set({ where: isDraft ? [...where.slice(0, at), printed, ...where.slice(at)] : replace(where, at, printed) });
+        };
         return <Group key={index} gap="xs" wrap="nowrap">
-          <Select aria-label={`Filter ${index + 1} field`} w={260} searchable allowDeselect={false} value={c.field} data={rowField(c.field)} onChange={field => field && update({ field, quoted: names.has(field) ? !numeric.has(field) : c.quoted })} />
+          <Select aria-label={`Filter ${index + 1} field`} w={260} searchable allowDeselect={false} value={c.field} data={rowField(c.field)} onChange={field => field && update({ field })} />
           <Select aria-label={`Filter ${index + 1} operator`} w={90} allowDeselect={false} value={c.op} data={[...operators]} onChange={op => op && update({ op: op as Condition["op"] })} />
           {c.field === "service" && schema.services?.length
             ? <Select aria-label={`Filter ${index + 1} value`} w={220} searchable value={c.value || null} data={[...variables.map(name => `$${name}`), ...schema.services.map(s => s.value)]} onChange={value => update({ value: value ?? "" })} />
-            : <TextInput aria-label={`Filter ${index + 1} value`} w={220} value={c.value} onChange={event => update({ value: event.currentTarget.value })} />}
-          <ActionIcon variant="subtle" color="gray" aria-label={`Remove filter ${index + 1}`} onClick={() => set({ where: remove(where, index) })}><X size={14} /></ActionIcon>
+            : <TextInput aria-label={`Filter ${index + 1} value`} w={220} placeholder={isDraft ? "Value" : undefined} value={c.value} onChange={event => update({ value: event.currentTarget.value })} />}
+          <ActionIcon variant="subtle" color="gray" aria-label={`Remove filter ${index + 1}`} onClick={() => isDraft ? setDraft(undefined) : drop()}><X size={14} /></ActionIcon>
         </Group>;
       })}
-      <Group><Button size="compact-sm" variant="subtle" leftSection={<Plus size={12} />} onClick={() => set({ where: [...where, printWhere({ field: "service", op: "=", value: "", quoted: true })] })}>Add filter</Button></Group>
+      <Group><Button size="compact-sm" variant="subtle" leftSection={<Plus size={12} />} disabled={draft !== undefined} onClick={() => setDraft({ at: where.length, condition: { field: "service", op: "=", value: "", quoted: true } })}>Add filter</Button></Group>
     </Stack>
 
     <Group gap="md" align="flex-end">
@@ -106,7 +134,7 @@ export function Builder({ query, schema, variables = [], onChange }: { query: Qu
           <Select aria-label="Add group by field" placeholder="Add field" w={220} searchable value={null} data={fieldData.filter(name => !by.includes(name))} onChange={name => name && set({ by: [...by, name] })} />
         </Group>
       </Stack>
-      <Select label="Every" w={120} clearable placeholder="No time buckets" value={query.bucket ?? null} data={buckets} onChange={bucket => set({ bucket: bucket ?? undefined })} />
+      <Select label="Every" w={120} clearable placeholder="No time buckets" value={query.bucket ?? null} data={query.bucket && !buckets.includes(query.bucket) ? [...buckets, query.bucket] : buckets} onChange={bucket => set({ bucket: bucket ?? undefined })} />
       <NumberInput label="Limit" w={120} min={1} max={1000} value={query.limit ?? ""} onChange={value => set({ limit: typeof value === "number" ? value : undefined })} />
     </Group>
   </Stack>;

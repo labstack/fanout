@@ -4,6 +4,8 @@ export type TelemetrySchema = {
   sql_relations: Record<string, { description?: string; columns: SchemaColumn[] }>;
   services?: { value: string; count?: number }[];
   measures?: string[];
+  /** auto, then every bucket FanQL accepts, shortest first. */
+  buckets?: string[];
 };
 
 type SchemaColumn = { name: string; type: string; description?: string; sql_type?: string };

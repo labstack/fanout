@@ -15,6 +15,7 @@ const schema: TelemetrySchema = {
   },
   services: [{ value: "checkout" }, { value: "frontend" }],
   measures: ["count", "p95", "avg", "count_distinct", "count_if", "quantile", "share", "last"],
+  buckets: ["auto", "10s", "30s", "1m", "5m", "10m", "15m", "30m", "1h", "3h", "6h", "12h", "1d"],
 };
 const cleanups: (() => void)[] = [];
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
@@ -23,8 +24,10 @@ afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup
 async function render(query: Query) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
-  const onChange = vi.fn<(next: Query) => void>();
-  await act(async () => root.render(<MantineProvider><Builder query={query} schema={schema} onChange={onChange} /></MantineProvider>));
+  // The page feeds each change back, as the Builder's owner does.
+  const draw = (current: Query) => root.render(<MantineProvider><Builder query={current} schema={schema} onChange={onChange} /></MantineProvider>);
+  const onChange = vi.fn<(next: Query) => void>(next => draw(next));
+  await act(async () => draw(query));
   cleanups.push(() => root.unmount());
   const ui = within(document.body);
   const choose = async (label: string, option: string) => {
@@ -48,24 +51,44 @@ describe("Builder", () => {
 
   it("drops the field for count and offers only numeric fields to statistics", async () => {
     const { ui, choose, last } = await render(base);
-    await choose("Measure 1 function", "count");
-    expect(last().measures).toEqual(["count()"]);
     const field = ui.getByLabelText("Measure 1 field", { selector: "input" });
     await act(async () => { fireEvent.focus(field); fireEvent.click(field); fireEvent.keyDown(field, { key: "ArrowDown" }); });
     const list = () => within(document.getElementById(field.getAttribute("aria-controls") ?? "")!);
     await vi.waitFor(() => list().getByRole("option", { name: "duration_ms", hidden: true }));
     expect(list().queryByRole("option", { name: "service", hidden: true })).toBeNull();
+    await act(async () => { fireEvent.keyDown(field, { key: "Escape" }); });
+    await choose("Measure 1 function", "count");
+    expect(last().measures).toEqual(["count()"]);
+    expect(ui.queryByLabelText("Measure 1 field", { selector: "input" })).toBeNull();
   });
 
   it("edits a filter value with escaping and adds and removes rows", async () => {
     const { ui, onChange, last } = await render({ ...base, where: ["operation = 'GET'"] });
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "O'Brien" } }); });
     expect(last().where).toEqual(["operation = 'O''Brien'"]);
-    await act(async () => ui.getByRole("button", { name: "Add filter" }).click());
-    expect(last().where).toEqual(["operation = 'GET'", "service = ''"]);
     await act(async () => ui.getByRole("button", { name: "Remove filter 1" }).click());
     expect(last().where).toEqual([]);
-    expect(onChange).toHaveBeenCalledTimes(3);
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds a filter to the query only once it has a value, and numeric fields compare numbers", async () => {
+    const { ui, onChange, choose, last } = await render({ ...base, where: [] });
+    await act(async () => ui.getByRole("button", { name: "Add filter" }).click());
+    expect(onChange).not.toHaveBeenCalled();
+    await choose("Filter 1 field", "duration_ms");
+    await choose("Filter 1 operator", ">");
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "100" } }); });
+    expect(last().where).toEqual(["duration_ms > 100"]);
+  });
+
+  it("keeps a cleared filter in its place but out of the query", async () => {
+    const { ui, last } = await render({ ...base, where: ["operation = 'GET'", "service = 'checkout'"] });
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "" } }); });
+    expect(last().where).toEqual(["service = 'checkout'"]);
+    expect(ui.getByLabelText("Filter 1 field", { selector: "input" })).toHaveProperty("value", "operation");
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "POST" } }); });
+    expect(last().where).toEqual(["operation = 'POST'", "service = 'checkout'"]);
   });
 
   it("writes numeric comparisons unquoted", async () => {
@@ -88,6 +111,18 @@ describe("Builder", () => {
     expect(last()).toEqual({ from: "logs", measures: ["count()"], where: ["service = 'checkout'", "service IN ('a')"], by: ["service", "attributes['http.route']"] });
   });
 
+  it("carries over what the new source has, counts rows when no measure fits, and says what it removed", async () => {
+    const { ui, choose, last } = await render({ from: "spans", measures: ["p95(duration_ms)"], where: ["kind = 'server'"], bucket: "5m" });
+    await choose("Source", "logs");
+    expect(last()).toEqual({ from: "logs", measures: ["count()"], where: [], by: [], bucket: "5m" });
+    expect(ui.getByRole("status").textContent).toBe("Removed what logs does not have: p95(duration_ms), kind = 'server'.");
+  });
+
+  it("lists every bucket, including short ones", async () => {
+    const { ui } = await render({ ...base, bucket: "10s" });
+    expect(ui.getByLabelText("Every", { selector: "input" })).toHaveProperty("value", "10s");
+  });
+
   it("keeps conditional measures as chips across a source switch", async () => {
     const { ui, choose, last } = await render({ from: "spans", measures: ["count_if(service = 'checkout')", "share()"] });
     expect(ui.getByText("count_if(service = 'checkout')")).toBeTruthy();
@@ -97,12 +132,13 @@ describe("Builder", () => {
     expect(last().measures).toEqual(["count_if(service = 'checkout')", "share()"]);
   });
 
-  it("keeps a quoted number quoted and an unquoted number numeric when editing", async () => {
+  it("keeps how an attribute value was typed and compares schema numbers as numbers", async () => {
     const { ui, last } = await render({ ...base, where: ["attributes['code'] = 200", "duration_ms > '7'"] });
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "404" } }); });
     expect(last().where?.[0]).toBe("attributes['code'] = 404");
+    // A schema field's type decides: a number compares as a number.
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 2 value" }), { target: { value: "9" } }); });
-    expect(last().where?.[1]).toBe("duration_ms > '9'");
+    expect(last().where?.[1]).toBe("duration_ms > 9");
   });
 
   it("groups by attribute keys, sets the bucket and the limit", async () => {

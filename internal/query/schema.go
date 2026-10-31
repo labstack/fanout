@@ -21,6 +21,7 @@ type Schema struct {
 	Signals      map[string]SignalSchema      `json:"signals"`
 	Services     []Option                     `json:"services"`
 	Measures     []string                     `json:"measures"`
+	Buckets      []string                     `json:"buckets"`
 	Units        []string                     `json:"units"`
 }
 
@@ -37,11 +38,12 @@ type ColumnSchema struct {
 }
 
 type AttributeSchema struct {
-	Key      string `json:"key"`
-	Scope    string `json:"scope"`
-	Type     string `json:"type"`
-	Count    int64  `json:"count"`
-	Services string `json:"services,omitempty"`
+	Key      string   `json:"key"`
+	Scope    string   `json:"scope"`
+	Type     string   `json:"type"`
+	Count    int64    `json:"count"`
+	Services string   `json:"services,omitempty"`
+	Values   []Option `json:"values,omitempty"`
 }
 
 type MetricSchema struct {
@@ -83,7 +85,7 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 	end := e.now().UTC()
 	start := end.Add(-span)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: req.Namespace})
-	out := &Schema{Window: req.Window, Signals: map[string]SignalSchema{}, SQLRelations: SQLRelations(), Measures: measureNames(), Units: unitNames()}
+	out := &Schema{Window: req.Window, Signals: map[string]SignalSchema{}, SQLRelations: SQLRelations(), Measures: measureNames(), Buckets: BucketNames(), Units: unitNames()}
 	for _, name := range SignalNames() {
 		sig := signals[name]
 		values, err := e.lowCardinality(ctx, sig, start, end, req.Namespace)

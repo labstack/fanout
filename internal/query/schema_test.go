@@ -50,8 +50,8 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 	if len(schema.Services) != 2 || schema.Services[0].Value != "checkout" {
 		t.Fatalf("services = %+v", schema.Services)
 	}
-	if !slices.Contains(schema.Measures, "p95") || !slices.Contains(schema.Units, "ms") {
-		t.Fatalf("measures %v units %v", schema.Measures, schema.Units)
+	if !slices.Contains(schema.Measures, "p95") || !slices.Contains(schema.Units, "ms") || !slices.Equal(schema.Buckets, BucketNames()) {
+		t.Fatalf("measures %v units %v buckets %v", schema.Measures, schema.Units, schema.Buckets)
 	}
 	again, err := e.Schema(t.Context(), SchemaRequest{Window: "1h"})
 	if err != nil || again != schema {
