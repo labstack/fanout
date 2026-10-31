@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { within } from "@testing-library/dom";
+import { fireEvent, within } from "@testing-library/dom";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -25,6 +25,7 @@ beforeEach(() => {
     const url = String(input);
     if (url === "/api/fanql/parse") return parse(JSON.parse(String(init?.body)));
     if (url === "/api/queries/run") return json({ results: [{ id: "search", status: "ok", elapsed_ms: 3, frame }] });
+    if (url === "/api/telemetry/schema") return json({ signals: {}, sql_relations: {}, services: [{ value: "checkout" }, { value: "frontend" }] });
     if (url.startsWith("/api/traces/")) return json({ summary: "", provenance: { window: "1h", generated_at: "", complete: true }, data: { trace_id: "abc", duration_ms: 5, has_error: false, services: ["checkout"], spans: [{ span_id: "s1", service: "checkout", operation: "GET /", kind: "server", start: "2026-10-30T10:00:00Z", duration_ms: 5, status: "ok" }], logs: [], span_count: 1, service_count: 1, truncated: false } });
     if (url === "/api/fanql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
     throw new Error(`Unexpected request: ${url}`);
@@ -86,6 +87,21 @@ describe("SearchPage", () => {
     await act(async () => onSearch({ ...search(), q: "service:a" }));
     await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "service:a", source: "logs", viz: "logs" }));
     expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!.state.doc.toString()).toBe("service:a");
+  });
+
+  it("adds the filter fields after the typed filters", async () => {
+    const { ui, wait, search } = await render(tracesPreset, { q: "operation:GET" });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await act(async () => ui.getByRole("switch", { name: "Errors only" }).click());
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "operation:GET status:error", source: "spans", viz: "traces" }));
+    expect(search().picks).toEqual({ errors: "1" });
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Slower than (ms)" }), { target: { value: "500" } }); });
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1).text).toBe("operation:GET status:error duration>500ms"));
+  });
+
+  it("filters logs by service and severity from the URL", async () => {
+    const { wait } = await render(logsPreset, { picks: { service: "checkout", severity: "warn" } });
+    await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"checkout\" severity>=warn", source: "logs", viz: "logs" }));
   });
 
   it("shows the problem when a where is typed", async () => {
