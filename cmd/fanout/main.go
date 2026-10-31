@@ -120,6 +120,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A failed run exits nonzero after every deferred close has run, so a
+	// supervisor restarts it.
+	failed := false
+	defer func() {
+		if failed {
+			os.Exit(1)
+		}
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -415,7 +423,13 @@ func main() {
 	case <-stop:
 		slog.Info("shutting down")
 	case err := <-errCh:
+		failed = true
 		slog.Error("fatal error, shutting down", "err", err)
+	case err := <-q.Fatal():
+		// DuckDB invalidated its database. Flush ingest and exit nonzero so the
+		// supervisor restarts Fanout, which rebuilds the query cache from Parquet.
+		failed = true
+		slog.Error("query engine failed, shutting down for a restart", "err", err)
 	}
 
 	// Stop every surface and finish in-flight exports before stopping the writer.

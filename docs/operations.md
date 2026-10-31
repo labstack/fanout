@@ -191,6 +191,12 @@ certificate verification behaviour.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
+Run Fanout under a supervisor that restarts it, such as a container restart
+policy. If the query engine fails beyond recovery, for example when it runs out
+of memory while writing its cache, Fanout finishes writing received telemetry
+and exits with status 1; the restart rebuilds the query cache from stored
+telemetry.
+
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention
 is controlled by `FANOUT_RETENTION_DAYS`; maintenance removes expired data on

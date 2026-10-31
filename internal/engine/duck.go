@@ -25,6 +25,10 @@ import (
 )
 
 type Duck struct {
+	// fatal carries the first error after which DuckDB refuses all work until
+	// the process restarts. The query cache is rebuildable from Parquet.
+	fatal           chan error
+	fatalOnce       sync.Once
 	cachePublishMu  sync.Mutex
 	cachePublishing map[string]bool
 	snapshotMu      sync.Mutex
@@ -258,7 +262,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
-	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, parseDB: parseDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds}
+	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, parseDB: parseDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds, fatal: make(chan error, 1)}
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
@@ -567,6 +571,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			rows, err := d.rollupOnce(ctx)
 			metrics.RecordRollup(rows, time.Since(start).Seconds(), err == nil)
 			if err != nil {
+				d.noteFailure(err)
 				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
 			}
 			d.updateParquetStats(ctx)
@@ -629,7 +634,35 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 // Completed-file caches do not inherit the minute-based analytical watermark.
 // Drain bounded transactions promptly, yielding to other writers between passes.
 func (d *Duck) runReadCacheLoop(ctx context.Context) {
+	runBackgroundLoop(ctx, func(ctx context.Context) (bool, error) {
+		rows, err := d.RefreshReadCaches(ctx)
+		return rows > 0, err
+	}, func(err error) {
+		d.noteFailure(err)
+		slog.Warn("completed batch read cache failed", "err", err)
+	})
+}
+
+// Fatal delivers the first fatal engine error a background pass saw. DuckDB
+// has invalidated the database by then and fails every later statement, so
+// the process must restart; nothing in it can recover the instance.
+func (d *Duck) Fatal() <-chan error { return d.fatal }
+
+func (d *Duck) noteFailure(err error) {
+	var engineError *duckdb.Error
+	if !errors.As(err, &engineError) || engineError.Type != duckdb.ErrorTypeFatal {
+		return
+	}
+	d.fatalOnce.Do(func() { d.fatal <- err })
+}
+
+// runBackgroundLoop repeats a pass promptly while it makes progress and each
+// second while idle. Consecutive failures double the wait up to a minute: a
+// pass that failed out of memory would otherwise reclaim the memory limit
+// every second and starve the queries that need it.
+func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, error), failed func(error)) {
 	delay := time.Second
+	failures := 0
 	for {
 		timer := time.NewTimer(delay)
 		select {
@@ -638,11 +671,16 @@ func (d *Duck) runReadCacheLoop(ctx context.Context) {
 			return
 		case <-timer.C:
 		}
-		rows, err := d.RefreshReadCaches(ctx)
+		progress, err := pass(ctx)
 		delay = time.Second
 		if err != nil && ctx.Err() == nil {
-			slog.Warn("completed batch read cache failed", "err", err)
-		} else if rows > 0 {
+			failed(err)
+			failures++
+			delay = min(time.Second<<min(failures-1, 6), time.Minute)
+			continue
+		}
+		failures = 0
+		if progress {
 			delay = 100 * time.Millisecond
 		}
 	}
@@ -651,22 +689,13 @@ func (d *Duck) runReadCacheLoop(ctx context.Context) {
 // Version history uses the analytical gate and its own cadence. Its gate wait
 // must never delay complete-file caching on the independent cache gate.
 func (d *Duck) runVersionRollupLoop(ctx context.Context) {
-	delay := time.Second
-	for {
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-		delay = time.Second
-		if batches, err := d.DrainVersionRollup(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("version rollup failed", "err", err)
-		} else if batches > 0 {
-			delay = 100 * time.Millisecond
-		}
-	}
+	runBackgroundLoop(ctx, func(ctx context.Context) (bool, error) {
+		batches, err := d.DrainVersionRollup(ctx)
+		return batches > 0, err
+	}, func(err error) {
+		d.noteFailure(err)
+		slog.Warn("version rollup failed", "err", err)
+	})
 }
 
 func (d *Duck) runMaintenanceLoop(ctx context.Context) {
@@ -676,6 +705,7 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 	}
 	run := func() {
 		if err := d.runRepositoryMaintenance(ctx); err != nil && ctx.Err() == nil {
+			d.noteFailure(err)
 			slog.Warn("telemetry maintenance failed", "err", err)
 		}
 		d.updateParquetStats(ctx)
