@@ -14,7 +14,7 @@ import { RangeMenu } from "../dashboards/toolbar";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
 import { SqlEditor } from "../sql-editor/sql-editor";
 import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice, type Parsed, type VizCompat } from "./api";
-import { Builder } from "./builder";
+import { Builder, querySchema } from "./builder";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, type ExploreSearch } from "./search";
 
@@ -37,6 +37,12 @@ function drillFor(query: Query, viz: Viz): Panel["drill"] {
   if (query.from === "logs") return "logs";
   if (query.from === "spans" && viz !== "health" && viz !== "service_map") return "traces";
   return undefined;
+}
+
+/** Stored filters and measures keyed to their FanQL text, for entries the Builder shows as chips. */
+function labelsOf(query: Query, formatted: Formatted): Record<string, string> {
+  const pairs = (stored: string[] | undefined, printed: string[]) => (stored ?? []).flatMap((entry, i) => i < printed.length ? [[entry, printed[i]] as const] : []);
+  return Object.fromEntries([...pairs(query.where, formatted.where), ...pairs(query.measures, formatted.measures)]);
 }
 
 /** What the last run sent, so later edits can be shown as stale and not saved. */
@@ -91,6 +97,10 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const [built, setBuilt] = useState<Query | undefined>(context?.initial?.query);
   const [formatted, setFormatted] = useState<Formatted | undefined>(context?.initial?.formatted);
   const [formatProblems, setFormatProblems] = useState<Problem[]>([]);
+  // Stored filters and measures as FanQL, from every print so far, for the Builder's chips.
+  const [labels, setLabels] = useState<Record<string, string>>(() => context?.initial ? labelsOf(context.initial.query, context.initial.formatted) : {});
+  // A Builder filter value that cannot be used holds the run.
+  const [builderInvalid, setBuilderInvalid] = useState(false);
   const formatter = useRef<{ abort?: AbortController; timer?: ReturnType<typeof setTimeout> }>({});
   const [problems, setProblems] = useState<Problem[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
@@ -178,14 +188,15 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
 
   // Builder edits print through the server so the text stays the one query.
   const cancelFormat = () => { clearTimeout(formatter.current.timer); formatter.current.timer = undefined; formatter.current.abort?.abort(); };
-  const format = async (query: Query): Promise<Formatted | undefined> => {
+  /** `adopt` makes the print the query text; opening the Builder only shows it, so the user's text is not replaced. */
+  const format = async (query: Query, adopt = true): Promise<Formatted | undefined> => {
     cancelFormat();
     const abort = new AbortController(); formatter.current.abort = abort;
     try {
       const next = await formatFanql({ query }, abort.signal);
       if (abort.signal.aborted) return undefined;
-      setFormatted(next); setFormatProblems([]); setNotices(next.notices); setProblems([]);
-      setText(next.text);
+      setFormatted(next); setFormatProblems([]); setLabels(known => ({ ...known, ...labelsOf(query, next) }));
+      if (adopt) { setNotices(next.notices); setProblems([]); setText(next.text); }
       return next;
     } catch (failure) {
       if (abort.signal.aborted) return undefined;
@@ -211,13 +222,16 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       if (search.tab === "builder" && built && formatter.current.timer) void format(built);
       onSearch({ ...search, tab }); return;
     }
+    // A link that opens on the Builder is already there; showing it again would add a history entry.
+    const show = () => { if (searchNow.current.tab !== tab) onSearch({ ...searchNow.current, tab }); };
     // Text the server would not print as editable is never reparsed (section 0.11).
-    if (formatted?.editable === false && built) { onSearch({ ...search, tab }); return; }
-    if (parsed && parsed.text === text) { setBuilt(parsed.query); onSearch({ ...search, tab }); return; }
-    if (!text.trim()) { setBuilt(starter); onSearch({ ...search, tab }); void format(starter); return; }
+    if (formatted?.editable === false && built) { show(); return; }
+    if (parsed && parsed.text === text) { setBuilt(parsed.query); show(); void format(parsed.query, false); return; }
+    // An empty editor starts the Builder from an example; the text stays empty until the user edits or runs it.
+    if (!text.trim()) { setBuilt(starter); show(); void format(starter, false); return; }
     try {
       const next = await parseFanql({ text, variables });
-      setParsed({ ...next, text }); setBuilt(next.query); onSearch({ ...search, tab });
+      setParsed({ ...next, text }); setBuilt(next.query); show(); void format(next.query, false);
     } catch (failure) {
       if (failure instanceof ApiError && failure.problems.length > 0) setProblems(failure.problems);
       else setError(failure instanceof Error ? failure.message : "Request failed");
@@ -285,8 +299,17 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       </Tabs.Panel>
       <Tabs.Panel value="builder" pt="sm">
         <Stack gap="xs">
-          {schema.error ? <Alert color="warn" title="Fields could not be loaded">{schema.error.message} <Button size="compact-xs" variant="default" ml="xs" onClick={() => void schema.refetch()}>Retry</Button></Alert>
-            : built && schema.data ? <Builder query={built} schema={schema.data} variables={(variables ?? []).map(v => v.name)} onChange={edit} /> : <Text size="sm" c="dimmed">Loading fields…</Text>}
+          {!built && (problems.length > 0 || error) ? <Alert color="bad" title="This query cannot open in the Builder" data-builder-blocked>
+            {problems.length > 0 ? <Stack gap={2} mb="xs">{problems.map((problem, index) => <Text key={index} size="sm">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack> : <Text size="sm" mb="xs">{error}</Text>}
+            <Button size="compact-sm" variant="default" onClick={() => void openTab("query")}>Fix it in the Query tab</Button>
+          </Alert> : <>
+            {schema.error && <Alert color="warn" title="Fields could not be loaded">
+              {built ? "Only the fields this query uses are offered until the field list loads. " : ""}{schema.error.message}
+              <Button size="compact-xs" variant="default" ml="xs" loading={schema.isFetching} onClick={() => void schema.refetch()}>Retry</Button>
+            </Alert>}
+            {built && (schema.data ?? schema.error) ? <Builder query={built} schema={schema.data ?? querySchema(built)} variables={(variables ?? []).map(v => v.name)} labels={labels} onChange={edit} onInvalid={setBuilderInvalid} />
+              : !schema.error && <Text size="sm" c="dimmed">Loading fields…</Text>}
+          </>}
           {formatProblems.length > 0 && <Stack gap={2} role="alert" data-builder-problems>{formatProblems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
           {formatted && formatProblems.length === 0 && <Text size="xs" c="dimmed" data-builder-text>As FanQL: <code>{formatted.text}</code></Text>}
         </Stack>
@@ -299,7 +322,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     </Tabs>
     <Group justify="space-between">
       <Group gap="xs">
-        <Button ref={runButton} loading={running} disabled={search.tab === "builder" ? !built || formatProblems.length > 0 : !source.trim()}
+        <Button ref={runButton} loading={running} disabled={search.tab === "builder" ? !built || formatProblems.length > 0 || builderInvalid : !source.trim()}
           onClick={() => void (search.tab === "builder" ? runBuilder(search.viz) : execute(kind, source, search.viz, readOnlyText ? built : undefined))}>Run</Button>
         {kind === "query" && compatible.length > 0 && <SegmentedControl size="xs" aria-label="Visualization" value={run?.panel.viz ?? search.viz ?? ""}
           onChange={value => void (search.tab === "builder" ? runBuilder(value as Viz) : execute("query", text, value as Viz, readOnlyText ? built : undefined))}
@@ -336,7 +359,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
             range={time.range} onRetry={() => void execute(run.kind, run.source, run.panel.viz, readOnlyText ? built : undefined)} traceLinks="button"
             onPoint={drills ? selection => { const selected = drillSelection(run.panel, run.result, selection, vars); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); } : undefined} />
         </Box>
-      </Stack> : <Text c="dimmed" size="sm" data-explore-empty>{search.tab === "builder" ? "Build a query above and press Run." : search.tab === "sql" ? "Write a query above and press Run." : "Type a query above and press Enter."}</Text>}
+      </Stack> : running ? <Text c="dimmed" size="sm" role="status" data-explore-running>Running the query…</Text> : <Text c="dimmed" size="sm" data-explore-empty>{search.tab === "builder" ? "Build a query above and press Run." : search.tab === "sql" ? "Write a query above and press Run." : "Type a query above and press Enter."}</Text>}
     </Box>
     {run && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: context?.spec.name ?? "Explore", time, variables, panels: [run.panel] }} time={time} vars={vars} target={parseDrill(search.drill)}
       onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}

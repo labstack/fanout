@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Query } from "../../../panels/types";
 import type { TelemetrySchema } from "../sql-editor/schema";
-import { Builder } from "./builder";
+import { Builder, querySchema } from "./builder";
 
 const schema: TelemetrySchema = {
   sql_relations: {},
@@ -21,12 +21,13 @@ const cleanups: (() => void)[] = [];
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup => cleanup())); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-async function render(query: Query) {
+async function render(query: Query, labels: Record<string, string> = {}) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host);
   // The page feeds each change back, as the Builder's owner does.
-  const draw = (current: Query) => root.render(<MantineProvider><Builder query={current} schema={schema} onChange={onChange} /></MantineProvider>);
+  const draw = (current: Query) => root.render(<MantineProvider><Builder query={current} schema={schema} labels={labels} onChange={onChange} onInvalid={onInvalid} /></MantineProvider>);
   const onChange = vi.fn<(next: Query) => void>(next => draw(next));
+  const onInvalid = vi.fn<(invalid: boolean) => void>();
   await act(async () => draw(query));
   cleanups.push(() => root.unmount());
   const ui = within(document.body);
@@ -37,7 +38,7 @@ async function render(query: Query) {
     await vi.waitFor(() => list().getByRole("option", { name: option, hidden: true }), { timeout: 2000 });
     await act(async () => { fireEvent.click(list().getByRole("option", { name: option, hidden: true })); });
   };
-  return { ui, onChange, choose, last: () => onChange.mock.calls.at(-1)![0] };
+  return { ui, onChange, onInvalid, choose, last: () => onChange.mock.calls.at(-1)![0] };
 }
 
 const base: Query = { from: "spans", measures: ["p95(duration_ms)"], where: ["service = 'checkout'"], by: ["operation"], bucket: "5m" };
@@ -149,5 +150,45 @@ describe("Builder", () => {
     expect(last().bucket).toBe("1h");
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Limit" }), { target: { value: "20" } }); });
     expect(last().limit).toBe(20);
+  });
+
+  it("takes durations with units for duration_ms and shows them in their unit", async () => {
+    const { ui, last } = await render({ ...base, where: ["duration_ms > 1500"] });
+    const value = () => ui.getByRole<HTMLInputElement>("textbox", { name: "Filter 1 value" });
+    expect(value().value).toBe("1.5s");
+    await act(async () => { fireEvent.change(value(), { target: { value: "100ms" } }); });
+    expect(last().where).toEqual(["duration_ms > 100"]);
+    expect(value().value).toBe("100ms");
+    await act(async () => { fireEvent.change(value(), { target: { value: "2s" } }); fireEvent.blur(value()); });
+    expect(last().where).toEqual(["duration_ms > 2000"]);
+    expect(value().value).toBe("2s");
+  });
+
+  it("marks a value a numeric field cannot use and keeps it out of the query", async () => {
+    const { ui, last, onInvalid } = await render({ ...base, where: ["duration_ms > 100", "service = 'checkout'"] });
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "fast" } }); });
+    expect(last().where).toEqual(["service = 'checkout'"]);
+    expect(ui.getByText("Enter a duration such as 100ms or 1.5s")).toBeTruthy();
+    expect(onInvalid).toHaveBeenLastCalledWith(true);
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "250ms" } }); });
+    expect(last().where).toEqual(["duration_ms > 250", "service = 'checkout'"]);
+    expect(ui.queryByText("Enter a duration such as 100ms or 1.5s")).toBeNull();
+    expect(onInvalid).toHaveBeenLastCalledWith(false);
+  });
+
+  it("shows entries it cannot edit as FanQL, also when a source switch removes them", async () => {
+    const labels = { "contains(lower(operation), lower('se'))": "se", "status = 'STATUS_CODE_ERROR'": "status:error" };
+    const { ui, choose } = await render({ from: "spans", measures: ["count()"], where: ["contains(lower(operation), lower('se'))", "status = 'STATUS_CODE_ERROR'"] }, labels);
+    expect(ui.getByText("se")).toBeTruthy();
+    expect(ui.queryByText(/contains\(lower/)).toBeNull();
+    await choose("Source", "logs");
+    expect(ui.getByRole("status").textContent).toBe("Removed what logs does not have: status:error.");
+  });
+
+  it("offers the query's own fields and measures when the schema is unavailable", () => {
+    expect(querySchema({ from: "spans", measures: ["p95(duration_ms)", "count_distinct(trace_id)"], where: ["operation = 'GET'", "duration_ms > 5"], by: ["operation"], bucket: "5m" })).toEqual({
+      signals: { spans: { columns: [{ name: "duration_ms", type: "number" }, { name: "trace_id", type: "string" }, { name: "operation", type: "string" }, { name: "service", type: "string" }] } },
+      sql_relations: {}, measures: ["count", "p95", "count_distinct"], buckets: ["auto", "5m"],
+    });
   });
 });

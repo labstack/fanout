@@ -21,21 +21,23 @@ const bodies = (url: string) => fetchMock.mock.calls.filter(([input]) => String(
 let parse: (body: { text: string; viz?: string }) => Promise<Response>;
 let runQuery: () => Promise<Response>;
 let format: (body: { query: unknown }) => Promise<Response>;
+let schemaFailure: boolean;
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   fetchMock.mockReset();
+  schemaFailure = false;
   parse = async body => json(parsed(body.text));
   runQuery = async () => json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] });
-  format = async () => json({ text: "spans | p95(duration) by service", exactness: "exact", editable: true, requires: [], notices: [] });
+  format = async () => json({ text: "spans | p95(duration) by service", exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: [] });
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/fanql/parse") return parse(JSON.parse(String(init?.body)));
     if (url === "/api/fanql/complete") return json({ replace: { start: 0, end: 0 }, items: [], schema: { window: "1h", sampled: false, warm: true, recent: true } });
     if (url === "/api/queries/run") return runQuery();
-    if (url === "/api/telemetry/schema") return json({ signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] } }, sql_relations: {}, measures: ["count", "p95"], services: [{ value: "checkout" }] });
+    if (url === "/api/telemetry/schema") return schemaFailure ? json({ code: "schema_unavailable", message: "schema unavailable" }, 500) : json({ signals: { spans: { columns: [{ name: "service", type: "string" }, { name: "duration_ms", type: "number" }] } }, sql_relations: {}, measures: ["count", "p95"], services: [{ value: "checkout" }] });
     if (url === "/api/fanql/format") return format(JSON.parse(String(init?.body)));
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -315,7 +317,7 @@ describe("ExplorePage", () => {
   });
 
   it("keeps a query the text cannot hold in the Builder and runs it directly", async () => {
-    format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "it has more than 64 filters", requires: [], notices: [] });
+    format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "it has more than 64 filters", requires: [], notices: [], where: [], measures: [] });
     const { ui, wait, click } = await render({ tab: "builder" });
     await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
     await click("Run");
@@ -343,13 +345,13 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(2));
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
     await type("logs | count()");
-    await act(async () => answer(json({ text: "spans | count(), count() by service", exactness: "exact", editable: true, requires: [], notices: [] })));
+    await act(async () => answer(json({ text: "spans | count(), count() by service", exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: [] })));
     await act(async () => {});
     expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("logs | count()");
   });
 
   it("reopens the Builder for an oversized query without reparsing it", async () => {
-    format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "too long", requires: [], notices: [] });
+    format = async () => json({ text: "spans where …", exactness: "exact", editable: false, reason: "too long", requires: [], notices: [], where: [], measures: [] });
     const { ui, wait, search } = await render({ tab: "builder" });
     await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
@@ -365,7 +367,7 @@ describe("ExplorePage", () => {
     format = () => new Promise(resolve => { answer = resolve; });
     await click("Run");
     await act(async () => ui.getByRole("tab", { name: "SQL" }).click());
-    await act(async () => answer(json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [] })));
+    await act(async () => answer(json({ text: "spans | count() by service", exactness: "exact", editable: true, requires: [], notices: [], where: [], measures: [] })));
     await act(async () => {});
     expect(search().tab).toBe("sql");
     expect(bodies("/api/queries/run")).toHaveLength(0);
@@ -377,5 +379,76 @@ describe("ExplorePage", () => {
     expect(ui.getByRole("tab", { name: "SQL" }).getAttribute("aria-selected")).toBe("true");
     await type("SELECT 2");
     expect(ui.getByRole("status").textContent).toBe("Result of the last run · query has changed");
+  });
+
+  it("shows a running state, not the empty prompt, while a link's first run is in flight", async () => {
+    let answer: (response: Response) => void = () => {};
+    runQuery = () => new Promise(resolve => { answer = resolve; });
+    const { ui, wait } = await render({ q: "spans | count() by service" });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(ui.getByText("Running the query…")).toBeTruthy();
+    expect(ui.queryByText("Type a query above and press Enter.")).toBeNull();
+    await act(async () => answer(json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] })));
+    await wait(() => expect(ui.queryByText("Running the query…")).toBeNull());
+  });
+
+  it("opens a Builder link without adding a history entry for the tab it is already on", async () => {
+    const { ui, wait, onSearch } = await render({ tab: "builder", q: "spans | count() by service" });
+    await wait(() => expect(ui.getByLabelText("Measure 1 function", { selector: "input" })).toBeTruthy());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(onSearch.mock.calls.filter(([next, replace]) => next.tab === "builder" && !replace)).toEqual([]);
+  });
+
+  it("shows why a linked query cannot open in the Builder and offers the Query tab", async () => {
+    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "a time series groups by one field" }] }, 400);
+    const { ui, wait, search } = await render({ tab: "builder", q: "spans | count() by service, operation every 5m" });
+    await wait(() => expect(document.querySelector("[data-builder-blocked]")?.textContent).toContain("a time series groups by one field"));
+    expect(ui.queryByText("Loading fields…")).toBeNull();
+    await act(async () => ui.getByRole("button", { name: "Fix it in the Query tab" }).click());
+    await wait(() => expect(search().tab).toBe("query"));
+  });
+
+  it("shows a linked query as FanQL in the Builder, labels its chips, and keeps the typed text", async () => {
+    const query = { from: "spans", measures: ["count()"], where: ["contains(lower(operation), lower('se'))"] };
+    parse = async body => json({ ...parsed(body.text), query });
+    format = async () => json({ text: "spans where se | count()", exactness: "exact", editable: true, requires: [], notices: [], where: ["se"], measures: ["count()"] });
+    const { ui, wait } = await render({ tab: "builder", q: "spans se | count()" });
+    await wait(() => expect(document.querySelector("[data-builder-text]")?.textContent).toBe("As FanQL: spans where se | count()"));
+    expect(ui.getByText("se")).toBeTruthy();
+    expect(ui.queryByText(/contains\(lower/)).toBeNull();
+    await act(async () => ui.getByRole("tab", { name: "Query" }).click());
+    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans se | count()"));
+  });
+
+  it("starts an empty Builder from an example without writing it into the query text", async () => {
+    const { ui, wait } = await render({ tab: "builder" });
+    await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
+    await act(async () => ui.getByRole("tab", { name: "SQL" }).click());
+    await wait(() => expect(document.querySelector("[data-sql-hint]")).toBeTruthy());
+    expect(document.querySelector("[data-sql-hint]")?.textContent).not.toContain("not converted");
+    await act(async () => ui.getByRole("tab", { name: "Query" }).click());
+    expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("");
+  });
+
+  it("holds Run while a Builder filter value cannot be used", async () => {
+    parse = async body => json({ ...parsed(body.text), query: { from: "spans", measures: ["count()"], where: ["duration_ms > 100"] } });
+    const { ui, wait } = await render({ tab: "builder", q: "spans duration>100ms | count()" });
+    await wait(() => expect(ui.getByRole("textbox", { name: "Filter 1 value" })).toBeTruthy());
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "100 ms please" } }); });
+    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true));
+    await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Filter 1 value" }), { target: { value: "100ms" } }); });
+    await new Promise(r => setTimeout(r, 400)); await act(async () => {}); const input = ui.getByRole<HTMLInputElement>("textbox", { name: "Filter 1 value" }); const btn = ui.getByRole<HTMLButtonElement>("button", { name: "Run" }); console.log("DBG", document.querySelector("[data-builder-problems]")?.textContent, document.querySelector("[data-builder-text]")?.textContent, input.value, input.getAttribute("aria-invalid"), btn.outerHTML.slice(0, 300), JSON.stringify(bodies("/api/fanql/format")));
+    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false));
+  });
+
+  it("keeps the Builder usable with the query's own fields when the schema fails, and retries", async () => {
+    schemaFailure = true;
+    parse = async body => json({ ...parsed(body.text), query: { from: "spans", measures: ["p95(duration_ms)"], by: ["service"] } });
+    const { ui, wait } = await render({ tab: "builder", q: "spans | p95(duration) by service" });
+    await wait(() => expect(ui.getByText("Fields could not be loaded")).toBeTruthy());
+    await wait(() => expect(ui.getByLabelText("Measure 1 field", { selector: "input" })).toHaveProperty("value", "duration_ms"));
+    const before = fetchMock.mock.calls.filter(([input]) => String(input) === "/api/telemetry/schema").length;
+    await act(async () => ui.getByRole("button", { name: "Retry" }).click());
+    await wait(() => expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/telemetry/schema").length).toBe(before + 1));
   });
 });

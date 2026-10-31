@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { operators, parseWhere, printWhere } from "./where";
+import { durationMs, durationText, operators, parseWhere, printWhere } from "./where";
 
 describe("where entries", () => {
   it("round-trips each operator", () => {
@@ -35,5 +35,11 @@ describe("where entries", () => {
     expect(parseWhere("service = 'a' OR service = 'b'")).toBeUndefined();
     expect(parseWhere("contains(body, 'timeout')")).toBeUndefined();
     expect(parseWhere("service IN ('a', 'b')")).toBeUndefined();
+  });
+
+  it("reads durations as milliseconds and prints them in the largest exact unit", () => {
+    expect(["100", "100ms", "1.5s", "1.1s", "2m", "1h", "250us", "100 MS"].map(durationMs)).toEqual([100, 100, 1500, 1100, 120000, 3600000, 0.25, 100]);
+    expect(["100ms!", "fast", "1.5", "-1s"].map(durationMs)).toEqual([undefined, undefined, 1.5, undefined]);
+    expect([100, 1500, 1100, 120000, 3600000, 0.25, 1001].map(durationText)).toEqual(["100ms", "1.5s", "1.1s", "2m", "1h", "250us", "1.001s"]);
   });
 });
