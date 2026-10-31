@@ -2,7 +2,7 @@ import type { PanelResult } from "../../../panels/types";
 
 /** The dashboard asks /api/queries/run for NDJSON (one result per line, written
  *  as each panel finishes); plain JSON requests still get `{results: [...]}`. */
-export const streamType = "application/x-ndjson";
+const streamType = "application/x-ndjson";
 
 type Body = { text(): Promise<string>; headers(): Record<string, string> };
 
