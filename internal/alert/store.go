@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/labstack/fanout/internal/db/generated"
 	appid "github.com/labstack/fanout/internal/id"
@@ -129,6 +130,7 @@ func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
 		LastEvaluatedAt:    nullString(a.LastEvaluatedAt),
 		LastDeliveryStatus: nullString(a.LastDeliveryStatus),
 		LastDeliveryAt:     nullString(a.LastDeliveryAt),
+		CreatedAt:          a.CreatedAt,
 	}
 }
 
@@ -220,6 +222,9 @@ func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 			return Alert{}, err
 		}
 		a.ID = id
+	}
+	if a.CreatedAt == "" {
+		a.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	ga, err := s.q.UpsertAlert(context.Background(), alertToUpsertParams(a))
 	if err != nil {

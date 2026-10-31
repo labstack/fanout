@@ -288,8 +288,8 @@ func (q *Queries) UpdateDeliveryStatus(ctx context.Context, arg UpdateDeliverySt
 const upsertAlert = `-- name: UpsertAlert :one
 INSERT INTO alerts (
     id, rule_id, service, state, value, fired_at, resolved_at,
-    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(rule_id, service) DO UPDATE SET
     state = excluded.state,
     value = excluded.value,
@@ -298,7 +298,8 @@ ON CONFLICT(rule_id, service) DO UPDATE SET
     repeated_at = excluded.repeated_at,
     last_evaluated_at = excluded.last_evaluated_at,
     last_delivery_status = excluded.last_delivery_status,
-    last_delivery_at = excluded.last_delivery_at
+    last_delivery_at = excluded.last_delivery_at,
+    created_at = excluded.created_at
 RETURNING id, rule_id, service, state, value, fired_at, resolved_at, repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
 `
 
@@ -314,6 +315,7 @@ type UpsertAlertParams struct {
 	LastEvaluatedAt    sql.NullString  `json:"last_evaluated_at"`
 	LastDeliveryStatus sql.NullString  `json:"last_delivery_status"`
 	LastDeliveryAt     sql.NullString  `json:"last_delivery_at"`
+	CreatedAt          string          `json:"created_at"`
 }
 
 func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) (Alert, error) {
@@ -329,6 +331,7 @@ func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) (Alert
 		arg.LastEvaluatedAt,
 		arg.LastDeliveryStatus,
 		arg.LastDeliveryAt,
+		arg.CreatedAt,
 	)
 	var i Alert
 	err := row.Scan(

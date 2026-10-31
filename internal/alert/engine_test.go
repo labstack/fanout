@@ -3,6 +3,8 @@ package alert
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +60,7 @@ func TestEngine_Transition_NoneToFiring(t *testing.T) {
 		t.Fatalf("RecompileRule: %v", err)
 	}
 
-	eng.transition(rule, "svc-a", true, env)
+	eng.transition(rule, "svc-a", true, env, time.Now())
 
 	a, err := store.GetAlert(rule.ID, "svc-a")
 	if err != nil {
@@ -85,7 +87,7 @@ func TestEngine_Transition_NoneToPending(t *testing.T) {
 		t.Fatalf("RecompileRule: %v", err)
 	}
 
-	eng.transition(rule, "svc-a", true, env)
+	eng.transition(rule, "svc-a", true, env, time.Now())
 
 	a, err := store.GetAlert(rule.ID, "svc-a")
 	if err != nil {
@@ -114,7 +116,7 @@ func TestEngine_Transition_PendingClears(t *testing.T) {
 	}
 
 	// First transition: condition true → pending.
-	eng.transition(rule, "svc-a", true, env)
+	eng.transition(rule, "svc-a", true, env, time.Now())
 
 	a, err := store.GetAlert(rule.ID, "svc-a")
 	if err != nil {
@@ -125,7 +127,7 @@ func TestEngine_Transition_PendingClears(t *testing.T) {
 	}
 
 	// Second transition: condition clears → alert should be deleted.
-	eng.transition(rule, "svc-a", false, env)
+	eng.transition(rule, "svc-a", false, env, time.Now())
 
 	_, err = store.GetAlert(rule.ID, "svc-a")
 	if err == nil {
@@ -148,7 +150,7 @@ func TestEngine_Transition_FiringToResolved(t *testing.T) {
 	}
 
 	// Fire it.
-	eng.transition(rule, "svc-a", true, env)
+	eng.transition(rule, "svc-a", true, env, time.Now())
 
 	a, err := store.GetAlert(rule.ID, "svc-a")
 	if err != nil {
@@ -160,7 +162,7 @@ func TestEngine_Transition_FiringToResolved(t *testing.T) {
 
 	// Resolve it.
 	envClear := Env{Service: "svc-a", ErrorRate: 0.01}
-	eng.transition(rule, "svc-a", false, envClear)
+	eng.transition(rule, "svc-a", false, envClear, time.Now())
 
 	a, err = store.GetAlert(rule.ID, "svc-a")
 	if err != nil {
@@ -287,11 +289,11 @@ func TestEngine_Transition_PendingPromotes(t *testing.T) {
 	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
 		t.Fatalf("RecompileRule: %v", err)
 	}
-	eng.transition(rule, "svc-a", true, env)
+	eng.transition(rule, "svc-a", true, env, time.Now())
 	if _, err := sqlite.DB.Exec(`UPDATE alerts SET created_at = datetime('now', '-2 minutes') WHERE rule_id = ?`, rule.ID); err != nil {
 		t.Fatal(err)
 	}
-	eng.transition(rule, "svc-a", true, env)
+	eng.transition(rule, "svc-a", true, env, time.Now())
 	a, err := store.GetAlert(rule.ID, "svc-a")
 	if err != nil {
 		t.Fatalf("GetAlert: %v", err)
@@ -353,5 +355,116 @@ func TestEngineTestMarksServicesWithoutData(t *testing.T) {
 	}
 	if data, _ := json.Marshal(results[0]); !strings.Contains(string(data), `"env":{"error_rate":0.2,`) {
 		t.Errorf("result JSON = %s, want env keyed by variable name", data)
+	}
+}
+
+// A hold is measured between evaluation ticks, not from when SQLite stored
+// the pending row: a slow evaluation must not push firing to the next tick.
+func TestEngineHoldFiresOnTheTickItEnds(t *testing.T) {
+	eng, store := newTestEngine(t)
+	rule := makeTestRule(t, store, "error_rate > 0.1", 90)
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	start := time.Now().Add(-time.Hour)
+	state := func(at time.Time) string {
+		t.Helper()
+		eng.transition(rule, "svc-a", true, env, at)
+		a, err := store.GetAlert(rule.ID, "svc-a")
+		if err != nil {
+			t.Fatalf("GetAlert: %v", err)
+		}
+		return a.State
+	}
+	for i, want := range []string{"pending", "pending", "pending", "firing"} {
+		// The ticker delivers the last tick a little earlier than the first.
+		at := start.Add(time.Duration(i) * 30 * time.Second)
+		if i == 3 {
+			at = at.Add(-time.Millisecond)
+		}
+		if got := state(at); got != want {
+			t.Fatalf("tick %d: state = %q, want %q", i, got, want)
+		}
+	}
+}
+
+// A resolved alert that triggers again holds for the whole hold time anew.
+func TestEngineRepeatedPendingHoldsAgain(t *testing.T) {
+	eng, store := newTestEngine(t)
+	rule := makeTestRule(t, store, "error_rate > 0.1", 60)
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	start := time.Now().Add(-time.Hour)
+	at := func(s int) time.Time { return start.Add(time.Duration(s) * time.Second) }
+	eng.transition(rule, "svc-a", true, env, at(0))
+	eng.transition(rule, "svc-a", true, env, at(60))
+	eng.transition(rule, "svc-a", false, env, at(90))
+	eng.transition(rule, "svc-a", true, env, at(900))
+	eng.transition(rule, "svc-a", true, env, at(930))
+	a, err := store.GetAlert(rule.ID, "svc-a")
+	if err != nil {
+		t.Fatalf("GetAlert: %v", err)
+	}
+	if a.State != "pending" {
+		t.Fatalf("state 30 s into a new hold = %q, want pending", a.State)
+	}
+	eng.transition(rule, "svc-a", true, env, at(960))
+	if a, _ = store.GetAlert(rule.ID, "svc-a"); a.State != "firing" {
+		t.Fatalf("state when the new hold ends = %q, want firing", a.State)
+	}
+}
+
+// Disabling a rule resolves its firing alerts, keeps them in history, sends
+// the resolve notification, and drops pending ones.
+func TestEngineDisableRuleResolvesFiringAlerts(t *testing.T) {
+	events := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Event string `json:"event"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		events <- body.Event
+	}))
+	defer srv.Close()
+	eng, store := newTestEngine(t)
+	rule, err := store.CreateRule(Rule{Name: "errors", Enabled: true, Expression: "error_rate > 0.1", WebhookURL: srv.URL, NotifyOnResolve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.RecompileRule(rule.ID, rule.Expression); err != nil {
+		t.Fatal(err)
+	}
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	eng.transition(rule, "svc-a", true, env, time.Now())
+	if got := <-events; got != "firing" {
+		t.Fatalf("first event = %q, want firing", got)
+	}
+	pending := rule
+	pending.ForSeconds = 60
+	eng.transition(pending, "svc-b", true, env, time.Now())
+
+	rule.Enabled = false
+	eng.DisableRule(rule)
+
+	a, err := store.GetAlert(rule.ID, "svc-a")
+	if err != nil {
+		t.Fatalf("firing alert was deleted: %v", err)
+	}
+	if a.State != "resolved" || a.ResolvedAt == "" || a.FiredAt == "" {
+		t.Fatalf("alert = %+v, want resolved with fired_at and resolved_at", a)
+	}
+	select {
+	case got := <-events:
+		if got != "resolved" {
+			t.Fatalf("event = %q, want resolved", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no resolve notification")
+	}
+	if _, err := store.GetAlert(rule.ID, "svc-b"); err == nil {
+		t.Fatal("pending alert of a disabled rule was kept")
+	}
+	eng.mu.RLock()
+	_, compiled := eng.programs[rule.ID]
+	eng.mu.RUnlock()
+	if compiled {
+		t.Fatal("disabled rule is still evaluated")
 	}
 }

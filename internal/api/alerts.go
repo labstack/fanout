@@ -149,15 +149,7 @@ func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 				slog.Error("alert rule updated but failed to compile in engine", "rule", updated.ID, "err", err)
 			}
 		} else {
-			h.engine.RemoveRule(updated.ID)
-			// Clear active alerts so they don't linger indefinitely
-			if activeAlerts, err := h.store.ListAlerts("", "", updated.ID); err == nil {
-				for _, a := range activeAlerts {
-					if a.State == "firing" || a.State == "pending" {
-						_ = h.store.DeleteAlert(a.ID)
-					}
-				}
-			}
+			h.engine.DisableRule(updated)
 		}
 	}
 

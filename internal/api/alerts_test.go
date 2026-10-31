@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -122,5 +123,38 @@ func TestAlertRuleReplaceChecksOnlyChangedHeaders(t *testing.T) {
 	}
 	if rec := replace(`{"Other Bad":"x"}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Other Bad") {
 		t.Fatalf("changed invalid headers = %d %s, want 400", rec.Code, rec.Body)
+	}
+}
+
+// Disabling a rule resolves its firing alerts instead of deleting them.
+func TestAlertRuleDisableResolvesFiringAlerts(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := alert.NewStore(s.db.DB)
+	RegisterAlertRoutes(s.e, store, alert.NewEngine(store, nil, nil, 30*time.Second, 7))
+	admin, err := s.users.CreateWithAudit("alert-admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, admin)
+	rule, err := store.CreateRule(alert.Rule{Name: "Errors", Enabled: true, Expression: "error_rate > 0.05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAlert(alert.Alert{RuleID: rule.ID, Service: "checkout", State: "firing", FiredAt: time.Now().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	req := sessionRequest(http.MethodPut, "/api/alerting/rules/"+rule.ID, strings.NewReader(`{"name":"Errors","enabled":false,"expression":"error_rate > 0.05"}`), cookie)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable = %d %s", rec.Code, rec.Body)
+	}
+	a, err := store.GetAlert(rule.ID, "checkout")
+	if err != nil {
+		t.Fatalf("firing alert was deleted: %v", err)
+	}
+	if a.State != "resolved" || a.ResolvedAt == "" {
+		t.Fatalf("alert = %+v, want resolved", a)
 	}
 }

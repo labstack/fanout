@@ -49,6 +49,39 @@ func NewEngine(
 	}
 }
 
+// DisableRule stops evaluating a rule. Its firing alerts resolve, staying in
+// history and notifying as a cleared condition would; pending ones never
+// fired and are dropped.
+func (e *Engine) DisableRule(rule Rule) {
+	e.RemoveRule(rule.ID)
+	alerts, err := e.store.ListAlerts("", "", rule.ID)
+	if err != nil {
+		slog.Error("alert: list alerts of disabled rule", "rule", rule.ID, "err", err)
+		return
+	}
+	now := time.Now().Format(time.RFC3339)
+	for _, a := range alerts {
+		switch a.State {
+		case "pending":
+			if err := e.store.DeleteAlert(a.ID); err != nil {
+				slog.Error("alert: drop pending of disabled rule", "rule", rule.ID, "service", a.Service, "err", err)
+			}
+		case "firing":
+			a.State = "resolved"
+			a.ResolvedAt = now
+			a.LastEvaluatedAt = now
+			saved, err := e.store.UpsertAlert(a)
+			if err != nil {
+				slog.Error("alert: resolve alert of disabled rule", "rule", rule.ID, "service", a.Service, "err", err)
+				continue
+			}
+			if rule.NotifyOnResolve {
+				e.fireWebhookAsync(rule, saved, Env{Service: a.Service}, "resolved")
+			}
+		}
+	}
+}
+
 // RemoveRule removes a compiled program so it is not evaluated on future ticks.
 func (e *Engine) RemoveRule(ruleID string) {
 	e.mu.Lock()
@@ -102,6 +135,9 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 
 	e.compileRules(rules)
 
+	// Every transition of a tick happens at the tick's start, so holds are
+	// measured between ticks however long reading the data takes.
+	now := time.Now()
 	envs := e.buildEnvs(ctx)
 	if envs == nil {
 		return // DuckDB error — skip evaluation entirely, don't false-fire
@@ -124,7 +160,7 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 				slog.Warn("alert: eval error", "rule", rule.ID, "service", svc, "err", evalErr)
 				triggered = false
 			}
-			e.transition(rule, svc, triggered, env)
+			e.transition(rule, svc, triggered, env, now)
 		}
 	}
 }
@@ -165,10 +201,16 @@ func (e *Engine) resolveServices(rule Rule, envs map[string]Env) []string {
 	return []string{rule.Service}
 }
 
-// transition implements the alert state machine for a (rule, service) pair.
-func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
-	now := time.Now()
+// holdSlack absorbs ticker delivery jitter, so a hold that ends on a tick
+// fires on that tick.
+const holdSlack = time.Second
+
+// transition implements the alert state machine for a (rule, service) pair at
+// the evaluation time now. created_at marks when the current pending or firing
+// episode began.
+func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now time.Time) {
 	nowStr := now.Format(time.RFC3339)
+	began := now.UTC().Format(time.RFC3339Nano)
 
 	existing, err := e.store.GetAlert(rule.ID, svc)
 	noAlert := errors.Is(err, ErrNotFound)
@@ -187,6 +229,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			Value:           primaryValue(rule, env),
 			FiredAt:         nowStr,
 			LastEvaluatedAt: nowStr,
+			CreatedAt:       began,
 		}
 		saved, upsertErr := e.store.UpsertAlert(a)
 		if upsertErr != nil {
@@ -203,6 +246,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			State:           "pending",
 			Value:           primaryValue(rule, env),
 			LastEvaluatedAt: nowStr,
+			CreatedAt:       began,
 		}
 		if _, upsertErr := e.store.UpsertAlert(a); upsertErr != nil {
 			slog.Error("alert: upsert pending", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -219,7 +263,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			return
 		}
 		forDuration := time.Duration(rule.ForSeconds) * time.Second
-		if now.Sub(createdAt) >= forDuration {
+		if now.Sub(createdAt)+holdSlack >= forDuration {
 			// Promote to firing.
 			existing.State = "firing"
 			existing.FiredAt = nowStr
@@ -307,6 +351,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			existing.ResolvedAt = ""
 			existing.LastEvaluatedAt = nowStr
 			existing.Value = primaryValue(rule, env)
+			existing.CreatedAt = began
 			saved, upsertErr := e.store.UpsertAlert(existing)
 			if upsertErr != nil {
 				slog.Error("alert: re-fire from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -320,6 +365,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env) {
 			existing.ResolvedAt = ""
 			existing.LastEvaluatedAt = nowStr
 			existing.Value = primaryValue(rule, env)
+			existing.CreatedAt = began
 			if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
 				slog.Error("alert: re-pend from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 			}
