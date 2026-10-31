@@ -74,6 +74,9 @@ func (s *Server) telemetrySchema(ctx context.Context, _ *mcp.CallToolRequest, in
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	schema, err := s.panels.Schema(ctx, query.SchemaRequest{Window: input.Window, Namespace: input.Namespace})
+	if errors.Is(err, query.ErrSchemaBusy) {
+		return nil, nil, guidanceError("schema_busy", "Schema discovery is busy. Try again in a few seconds.")
+	}
 	if err != nil {
 		return nil, nil, safePanelToolError(err)
 	}

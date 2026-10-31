@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/fanout/internal/toolerror"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -202,5 +204,22 @@ func TestRankingGuide(t *testing.T) {
 func TestConfidenceGuide(t *testing.T) {
 	if !strings.Contains(specGuide, "series are chosen worst-first by confidence (Wilson lower bound for error rates; at least 20 samples for latency)") {
 		t.Fatal("missing confidence semantics")
+	}
+}
+
+type busySchema struct{ panelExecutor }
+
+func (busySchema) Schema(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	return nil, query.ErrSchemaBusy
+}
+
+// Busy discovery is retryable, like HTTP's 503, not a generic read failure.
+func TestTelemetrySchemaReportsBusy(t *testing.T) {
+	s := newPanelServer(t)
+	s.panels = busySchema{s.panels}
+	_, _, err := s.telemetrySchema(t.Context(), nil, SchemaInput{})
+	var failure toolerror.Result
+	if err == nil || json.Unmarshal([]byte(err.Error()), &failure) != nil || failure.Error == nil || failure.Error.Code != "schema_busy" || !strings.Contains(failure.Error.Message, "Try again") {
+		t.Fatalf("err=%v", err)
 	}
 }
