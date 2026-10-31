@@ -68,6 +68,14 @@ async function key(target: HTMLElement, key: string, extra: KeyboardEventInit = 
 }
 const closed = async () => vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull());
 
+// The dashboard asks /api/queries/run for a stream; tests describe its results
+// as one JSON body, sent here one result per line.
+async function streamed(init: RequestInit | undefined, response: Response): Promise<Response> {
+  if (new Headers(init?.headers).get("accept") !== "application/x-ndjson" || !response.ok) return response;
+  const { results } = await response.json() as { results: unknown[] };
+  return new Response(results.map((result) => JSON.stringify(result) + "\n").join(""), { headers: { "content-type": "application/x-ndjson" } });
+}
+
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   viewer.role = "viewer";
@@ -93,7 +101,7 @@ beforeEach(() => {
       const body = JSON.parse(String(init?.body)) as { panels: string[]; dashboard: { panels: { id: string }[] } };
       queryBodies.push(body);
       if (body.panels.some((id) => !body.dashboard.panels.some((panel) => panel.id === id))) return json({ message: "no panel has id" }, 400);
-      return panelResponse();
+      return streamed(init, await panelResponse());
     }
     return json({}, 404);
   });
