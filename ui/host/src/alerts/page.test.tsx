@@ -35,7 +35,8 @@ beforeEach(() => {
     if (url === "/api/alerting/rules" && method === "POST") return create();
     if (url === "/api/alerting/rules/r1" && method === "PUT") return json({ ...rule, enabled: false });
     if (url === "/api/alerting/rules/r1" && method === "DELETE") return new Response(null, { status: 204 });
-    if (url === "/api/alerting/rules/r1/test") return json({ rule, results: [{ service: "checkout", triggered: true, env: {} }] });
+    if (url === "/api/alerting/rules/r1/test") return json({ rule, results: [{ service: "checkout", triggered: true, env: { error_rate: 0.0925, throughput: 1204 } }] });
+    if (url === "/api/telemetry/schema?window=1h") return json({ services: [{ value: "checkout" }, { value: "cart" }] });
     throw new Error(`Unexpected request: ${method} ${url}`);
   });
 });
@@ -72,7 +73,20 @@ describe("AlertsPage", () => {
     await wait(() => expect(ui.getAllByText("Checkout errors").length).toBeGreaterThan(0));
     expect(ui.getByText("firing · checkout")).toBeTruthy();
     expect(ui.getByText("error_rate > 0.05")).toBeTruthy();
-    expect(ui.getByText("0.09")).toBeTruthy();
+    expect(ui.getByText("9%")).toBeTruthy();
+  });
+
+  it("shows a disabled rule as disabled and a zero value as zero, in the watched variable's unit", async () => {
+    rules = [{ ...rule, enabled: false, expression: "service == \"p95\" && log_count > 1000" }];
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/alerting/alerts"
+      ? json([{ id: "a2", rule_id: "r1", service: "checkout", state: "resolved", value: 0, fired_at: "2026-10-30T10:00:00Z", created_at: "2026-10-30T10:00:00Z" }, { id: "a3", rule_id: "r1", service: "cart", state: "resolved", value: 35712, fired_at: "2026-10-30T09:00:00Z", created_at: "2026-10-30T09:00:00Z" }])
+      : base(input, init));
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getByText("Disabled")).toBeTruthy());
+    expect(ui.queryByText("OK")).toBeNull();
+    expect(ui.getByText("0")).toBeTruthy();
+    expect(ui.getByText("35,712")).toBeTruthy();
   });
 
   it("creates a rule from a template and shows the server's reason when it is rejected", async () => {
@@ -97,6 +111,9 @@ describe("AlertsPage", () => {
     await input("Expression", "p95 > 500");
     await input("Webhook headers", "[1]");
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(true);
+    await input("Webhook headers", "{\"X-Test\": 5}");
+    expect(ui.getByText("Header X-Test must be a string")).toBeTruthy();
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(true);
     await input("Webhook headers", "{\"X-Team\": \"core\"}");
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(false);
   });
@@ -116,11 +133,48 @@ describe("AlertsPage", () => {
     await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
     await act(async () => ui.getByRole("menuitem", { name: "Test against current data", hidden: true }).click());
     await wait(() => expect(ui.getByText("Would fire")).toBeTruthy());
+    expect(ui.getByText("error_rate 9.25%")).toBeTruthy();
     await act(async () => fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" }));
+    await wait(() => expect(document.activeElement).toBe(ui.getByRole("button", { name: "Checkout errors actions" })));
     await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
     await act(async () => ui.getByRole("menuitem", { name: "Delete", hidden: true }).click());
     await act(async () => ui.getByRole("button", { name: "Delete rule" }).click());
     await wait(() => expect(calls("DELETE", "/api/alerting/rules/r1")).toHaveLength(1));
+  });
+
+  it("returns focus to the opener when a dialog closes", async () => {
+    const { ui, wait } = await render();
+    await wait(() => expect(ui.getByRole("button", { name: "New rule" })).toBeTruthy());
+    const opener = ui.getByRole("button", { name: "New rule" });
+    opener.focus();
+    await act(async () => opener.click());
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    await wait(() => expect(document.activeElement).toBe(opener));
+    await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
+    await act(async () => ui.getByRole("menuitem", { name: "Delete", hidden: true }).click());
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    await wait(() => expect(document.activeElement).toBe(ui.getByRole("button", { name: "Checkout errors actions" })));
+  });
+
+  it("warns about a service without recent telemetry, in the form and in a test, but still saves", async () => {
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/alerting/rules/r1/test"
+      ? json({ rule, results: [{ service: "checkuot", triggered: false, no_data: true, env: {} }] })
+      : base(input, init));
+    const { ui, wait, input } = await render();
+    await wait(() => expect(ui.getByRole("button", { name: "Checkout errors actions" })).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
+    await act(async () => ui.getByRole("menuitem", { name: "Test against current data", hidden: true }).click());
+    await wait(() => expect(ui.getByText("No recent data")).toBeTruthy());
+    expect(ui.queryByText("Quiet")).toBeNull();
+    await act(async () => ui.getByRole("button", { name: "Close test" }).click());
+    await act(async () => ui.getByRole("button", { name: "New rule" }).click());
+    await input("Name", "Errors");
+    await input("Service", "checkuot");
+    await input("Expression", "error_rate > 5");
+    await wait(() => expect(ui.getByText(/No telemetry from checkuot in the last hour/)).toBeTruthy());
+    expect(ui.getByText(/error_rate runs from 0 to 1/)).toBeTruthy();
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(false);
   });
 
   it("shows the last fired time and an unknown state when history cannot load", async () => {
