@@ -281,16 +281,21 @@ func checkAttributeExpr(v *SQLExpr) error {
 	return nil
 }
 
-// negatedTerm reports whether an expression is one negated term in either of
-// FanQL's lowerings: NOT coalesce((p), FALSE), or (k IS NULL OR q) where q
-// reads only k. SQL's own k != v is not one.
+// negatedTerm reports whether an expression is one prefix-negated term in a
+// shape FanQL lowers it to and lifts back as one: k IS NULL (-k:*), NOT
+// coalesce((p), FALSE) over one leaf, or (k IS NULL OR q) where q is one
+// comparison, IN, BETWEEN, LIKE or negated contains that reads only k. SQL's
+// own k != v is not one, nor is a hand-written q that FanQL keeps raw.
 func negatedTerm(v *SQLExpr) bool {
 	if v == nil {
 		return false
 	}
+	if v.Type == "OPERATOR_IS_NULL" && len(v.Children) == 1 {
+		return fieldText(v.Children[0]) != ""
+	}
 	if v.Class == "OPERATOR" && v.Type == "OPERATOR_NOT" && len(v.Children) == 1 {
 		c := v.Children[0]
-		if c == nil || c.Type != "OPERATOR_COALESCE" || len(c.Children) != 2 {
+		if c == nil || c.Type != "OPERATOR_COALESCE" || len(c.Children) != 2 || c.Children[0] == nil || c.Children[0].Class == "CONJUNCTION" {
 			return false
 		}
 		last := c.Children[1]
@@ -304,7 +309,31 @@ func negatedTerm(v *SQLExpr) bool {
 		return false
 	}
 	field := fieldText(isNull.Children[0])
-	return field != "" && readsOnly(v.Children[1], field)
+	return field != "" && negatedLeaf(v.Children[1]) && readsOnly(v.Children[1], field)
+}
+
+// negatedLeaf reports whether q is one of the leaves FanQL writes after
+// k IS NULL OR in a negated term: a predicate on the field itself, or a
+// negated contains.
+func negatedLeaf(q *SQLExpr) bool {
+	if q == nil {
+		return false
+	}
+	var operand *SQLExpr
+	switch {
+	case q.Class == "COMPARISON":
+		operand = q.Left
+	case q.Class == "BETWEEN":
+		operand = q.Input
+	case (q.Type == "COMPARE_IN" || q.Type == "COMPARE_NOT_IN") && len(q.Children) > 0:
+		operand = q.Children[0]
+	case q.Class == "FUNCTION" && (q.Function == "~~" || q.Function == "!~~" || q.Function == "~~*" || q.Function == "!~~*") && len(q.Arguments) > 0:
+		operand = q.Arguments[0]
+	case q.Type == "OPERATOR_NOT" && len(q.Children) == 1:
+		c := q.Children[0]
+		return c != nil && c.Class == "FUNCTION" && c.Function == "contains"
+	}
+	return fieldText(operand) != ""
 }
 
 // readsOnly reports whether an expression reads one field and no other.

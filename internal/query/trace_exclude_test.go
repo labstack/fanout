@@ -19,10 +19,13 @@ func TestTracesNegatedTermExcludesWholeTraces(t *testing.T) {
 		return telemetry.Span{Namespace: "shop", ServiceName: service, TraceID: trace, SpanID: id, ParentSpanID: parent, Name: "GET /" + id, Kind: "SPAN_KIND_SERVER",
 			StartUnixNanos: n, EndUnixNanos: n + int64(ms*1e6), DurationMS: ms, StatusCode: status, IngestedAt: n}
 	}
+	// Only the frontend child of "mixed" carries a user.
+	child := span("mixed", "m2", "m1", "frontend", 40, "STATUS_CODE_ERROR")
+	child.Attributes = map[string]any{"app.user.id": "u1"}
 	commit(t, repo, []telemetry.Span{
 		// Rooted at the load generator, with a slower frontend child.
 		span("mixed", "m1", "", "load-generator", 50, "STATUS_CODE_OK"),
-		span("mixed", "m2", "m1", "frontend", 40, "STATUS_CODE_ERROR"),
+		child,
 		span("front", "f1", "", "frontend", 30, "STATUS_CODE_OK"),
 		span("front", "f2", "f1", "cart", 10, "STATUS_CODE_ERROR"),
 		span("load", "l1", "", "load-generator", 20, "STATUS_CODE_OK"),
@@ -43,6 +46,12 @@ func TestTracesNegatedTermExcludesWholeTraces(t *testing.T) {
 		{"sql inequality", "", []string{"service != 'load-generator'"}, []string{"mixed", "front"}},
 		// Only a whole negated entry excludes traces; a negation inside `or` stays per span.
 		{"negation in or", "", []string{"(service = 'cart' OR (service IS NULL OR service != 'frontend'))"}, []string{"mixed", "front", "load"}},
+		// -app.user.id:* lowers to a bare IS NULL: traces where no span has the key.
+		{"missing attribute", "", []string{"attributes['app.user.id'] IS NULL"}, []string{"front", "load"}},
+		// A hand-written null-inclusive entry that is not one negated term
+		// stays a span condition.
+		{"raw null-inclusive", "", []string{"(service IS NULL OR (service != 'frontend' AND service != 'cart'))"}, []string{"mixed", "load"}},
+		{"raw null-inclusive call", "", []string{"(service IS NULL OR lower(service) != 'frontend')"}, []string{"mixed", "front", "load"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := Dashboard{Name: "Traces", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Traces", Viz: "traces", Query: &Spec{From: "spans", Where: tc.where, Sort: tc.sort}}}}
