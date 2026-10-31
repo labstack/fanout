@@ -64,6 +64,7 @@ type MetricSchema struct {
 type schemaEntry struct {
 	schema         *Schema
 	expires, stale time.Time
+	used           time.Time
 	flight         *schemaFlight
 	namespaces     []string
 }
@@ -119,6 +120,8 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 	entry, ok := e.schemas[key]
 	now := e.now()
 	if ok && entry.schema != nil && now.Before(entry.stale) {
+		entry.used = now
+		e.schemas[key] = entry
 		if !now.Before(entry.expires) && entry.flight == nil {
 			work, cancel := context.WithCancel(context.WithoutCancel(ctx))
 			entry.flight = &schemaFlight{done: make(chan struct{}), refresh: true, cancel: cancel}
@@ -213,8 +216,9 @@ func (e *Executor) checkNamespace(ctx context.Context, namespace string) error {
 		Hint: "use one of " + strings.Join(entry.namespaces[:min(len(entry.namespaces), 20)], ", ")}}
 }
 
-// makeSchemaRoom removes entries past their stale horizon. In-flight and
-// cached entries are never evicted for a new key; it reports whether one fits.
+// makeSchemaRoom removes entries past their stale horizon, then, while the
+// table is full, the least recently used finished entry. In-flight entries
+// are never evicted, so a new key is refused only when every slot is one.
 func (e *Executor) makeSchemaRoom() bool {
 	now := e.now()
 	for k, v := range e.schemas {
@@ -222,7 +226,19 @@ func (e *Executor) makeSchemaRoom() bool {
 			delete(e.schemas, k)
 		}
 	}
-	return len(e.schemas) < maxSchemaEntries
+	for len(e.schemas) >= maxSchemaEntries {
+		oldest := ""
+		for k, v := range e.schemas {
+			if v.flight == nil && k != namespacesKey && (oldest == "" || v.used.Before(e.schemas[oldest].used)) {
+				oldest = k
+			}
+		}
+		if oldest == "" {
+			return false
+		}
+		delete(e.schemas, oldest)
+	}
+	return true
 }
 
 func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaRequest, span time.Duration, flight *schemaFlight) {
@@ -241,7 +257,7 @@ func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaReq
 		switch {
 		case flight.err == nil:
 			now := e.now()
-			e.schemas[key] = schemaEntry{schema: flight.schema, expires: now.Add(schemaTTL), stale: now.Add(schemaTTL + schemaStale)}
+			e.schemas[key] = schemaEntry{schema: flight.schema, expires: now.Add(schemaTTL), stale: now.Add(schemaTTL + schemaStale), used: now}
 		case entry.schema != nil:
 			// A failed refresh keeps serving the stale schema until its
 			// horizon and retries ten seconds later.

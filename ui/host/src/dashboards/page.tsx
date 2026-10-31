@@ -27,7 +27,7 @@ import { resolvedVariables } from "../../../panels/variables";
 import { drillSelection } from "./panel-handlers";
 import { retryQuery } from "./query-policy";
 import type { DrillClient } from "./drill-client";
-import { spanExtras } from "./trace/span-details";
+import { spanExtras } from "./trace/span-extras";
 const NewDashboard = lazy(() => import("./new-dashboard").then(module => ({ default: module.NewDashboard })));
 const drillClient: DrillClient = { exemplars: queryExemplars, trace: getTrace, span: spanExtras };
 

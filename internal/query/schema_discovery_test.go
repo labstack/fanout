@@ -165,7 +165,10 @@ func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 	if s, err := e.Schema(t.Context(), SchemaRequest{Window: "5m"}); err != nil || s != cached {
 		t.Fatalf("stale key not served while busy: %v", err)
 	}
+	// Only a table of in-flight discoveries refuses a new key.
 	e.mu.Lock()
+	cachedEntry := e.schemas["5m|"]
+	delete(e.schemas, "5m|")
 	for i := len(e.schemas); i < maxSchemaEntries; i++ {
 		e.schemas[fmt.Sprintf("full%d", i)] = schemaEntry{flight: &schemaFlight{done: make(chan struct{}), waiters: 1, cancel: func() {}}}
 	}
@@ -174,16 +177,13 @@ func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 		t.Fatalf("new key past the cap: %v", err)
 	}
 	e.mu.Lock()
-	_, kept := e.schemas["5m|"]
 	for k := range e.schemas {
 		if strings.HasPrefix(k, "full") {
 			delete(e.schemas, k)
 		}
 	}
+	e.schemas["5m|"] = cachedEntry
 	e.mu.Unlock()
-	if !kept {
-		t.Fatal("a new key evicted a cached entry")
-	}
 	cancel()
 	wg.Wait()
 	close(engine.gate)
@@ -201,4 +201,23 @@ func TestSchemaDetachedDiscoveriesAreBounded(t *testing.T) {
 		}
 	}
 	t.Fatal("abandoned discoveries kept running")
+}
+
+// A full table of finished entries makes room by dropping the least recently
+// used one, so new keys are never locked out by cached ones.
+func TestSchemaRoomEvictsLeastRecentlyUsed(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	e := &Executor{schemas: map[string]schemaEntry{}, now: func() time.Time { return now }}
+	for i := 0; i < maxSchemaEntries; i++ {
+		e.schemas[fmt.Sprintf("k%d", i)] = schemaEntry{schema: &Schema{}, expires: now.Add(time.Minute), stale: now.Add(time.Hour), used: now.Add(time.Duration(i) * time.Second)}
+	}
+	if !e.makeSchemaRoom() {
+		t.Fatal("finished entries refused a new key")
+	}
+	if _, ok := e.schemas["k0"]; ok {
+		t.Fatal("least recently used entry kept")
+	}
+	if _, ok := e.schemas["k1"]; !ok || len(e.schemas) != maxSchemaEntries-1 {
+		t.Fatalf("evicted more than one entry: %d left", len(e.schemas))
+	}
 }
