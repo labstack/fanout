@@ -65,6 +65,16 @@ func termAlternatives(nested bool) []expect {
 	return alternatives
 }
 
+// After a complete term, joining or ending the filter list is likelier than
+// starting another term, so and, or and the clause words lead.
+func afterTermAlternatives(nested bool) []expect {
+	alternatives := []expect{{Class: "connector"}}
+	if !nested {
+		alternatives = append(alternatives, expect{Class: "clause"})
+	}
+	return append(alternatives, termAlternatives(true)...)
+}
+
 func (p *parser) expectTerm(nested bool) {
 	alternatives := termAlternatives(nested)
 	if !nested && p.i == 1 && p.completionQuery != nil && !p.completionQuery.WhereWord {
@@ -427,6 +437,9 @@ func (p *parser) filters(nested bool) []filterExpr {
 	}
 	if p.completion && !nested {
 		p.completionQuery.Where = terms
+	}
+	if len(terms) > 0 {
+		p.expectNext(afterTermAlternatives(nested)...)
 	}
 	p.expectTerm(nested)
 	if !p.completion && p.structural[p.clauseID] == groupingReports && mixed >= 0 && len(terms) >= 3 && len(ops) == len(terms)-1 {

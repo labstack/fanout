@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,6 +142,44 @@ func TestSchemaAttributeValuesAndServices(t *testing.T) {
 			if a.Services != "checkout, frontend" {
 				t.Errorf("customer.tier services = %q", a.Services)
 			}
+		}
+	}
+}
+
+// Columns copied from attributes take the attribute's sampled values, the
+// span name is listed too, and a key whose rows disagree on the type says so.
+func TestSchemaColumnValuesAndMixedTypes(t *testing.T) {
+	d, repo := newTestEngine(t)
+	spans := shopSpans()
+	n := fixtureStart.UnixNano()
+	for i, code := range []any{int64(308), "308"} {
+		id := fmt.Sprint("mixed", i)
+		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "frontend", TraceID: id, SpanID: id, Name: "GET", Kind: "SPAN_KIND_SERVER",
+			StartUnixNanos: n, EndUnixNanos: n + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Attributes: map[string]any{"http.status_code": code}, IngestedAt: n})
+	}
+	commit(t, repo, spans, nil)
+	e := NewExecutor(d, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	schema, err := e.Schema(t.Context(), SchemaRequest{Window: "1h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string][]Option{}
+	for _, c := range schema.Signals["spans"].Columns {
+		values[c.Name] = c.Values
+	}
+	if v := values["http_route"]; len(v) != 3 || v[0].Value != "/api/cart" || v[0].Count != 60 {
+		t.Errorf("http_route values = %+v", v)
+	}
+	if len(values["operation"]) == 0 {
+		t.Error("operation has no values")
+	}
+	for _, a := range schema.Signals["spans"].Attributes {
+		if a.Key == "http.status_code" && !slices.Equal(a.Types, []string{"number", "string"}) {
+			t.Errorf("http.status_code types = %v", a.Types)
+		}
+		if a.Key == "http.route" && a.Types != nil {
+			t.Errorf("http.route types = %v", a.Types)
 		}
 	}
 }

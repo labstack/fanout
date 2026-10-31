@@ -333,6 +333,8 @@ func (s *completionCandidates) candidates(e expect) {
 		s.fields(e, false, "")
 	case "bracket_key":
 		s.fields(e, false, e.Scope)
+	case "connector":
+		s.words("keyword", "and", "or")
 	case "variable":
 		for _, v := range s.req.Variables {
 			s.add("$"+v.Name, "", "variable", "", 0, 0)
@@ -457,7 +459,12 @@ func (s *completionCandidates) fields(e expect, numeric bool, scope string) {
 			if numeric && field.Type == query.TypeNumber {
 				boost = 2
 			}
-			s.add(name, name, "field", field.Description, 0, boost)
+			detail := field.Description
+			if aliases := query.FieldAliases(name); len(aliases) > 0 {
+				// Name the values people type, not the stored enums.
+				detail = strings.Join(sortedCompletionKeys(aliases), ", ")
+			}
+			s.add(name, name, "field", detail, 0, boost)
 		}
 	}
 	for _, attribute := range s.signal.Attributes {
@@ -618,6 +625,23 @@ func (s *completionCandidates) values(e expect) {
 		kind := stringValue
 		if attribute.Type == "number" {
 			kind = numberValue
+		}
+		if slices.Contains(attribute.Types, "number") && slices.Contains(attribute.Types, "string") {
+			// Rows disagree on the type, so each form matches only some of
+			// them: offer both, saying which rows each matches.
+			for _, v := range attribute.Values {
+				for _, form := range []struct {
+					kind   valueKind
+					detail string
+				}{{numberValue, "matches numbers"}, {stringValue, "matches text"}} {
+					if form.kind == numberValue && !numberPattern.MatchString(v.Value) {
+						continue
+					}
+					text := printValue(literalValue{Kind: form.kind, Text: v.Value}, *f, false)
+					s.add(text, text, "value", form.detail, v.Count, 0)
+				}
+			}
+			continue
 		}
 		for _, v := range attribute.Values {
 			sampledValue(v.Value, kind, v.Count)

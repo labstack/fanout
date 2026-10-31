@@ -50,6 +50,9 @@ type AttributeSchema struct {
 	Count    int64    `json:"count"`
 	Services string   `json:"services,omitempty"`
 	Values   []Option `json:"values,omitempty"`
+	// Types lists every scalar type seen when rows disagree, e.g. a status
+	// code stored as a number by one service and as text by another.
+	Types []string `json:"types,omitempty"`
 }
 
 type MetricSchema struct {
@@ -292,11 +295,9 @@ func (e *Executor) discover(ctx context.Context, req SchemaRequest, span time.Du
 		if schema.Attributes, err = e.attributes(ctx, sig, start, end, req.Namespace); err != nil {
 			return nil, err
 		}
-		for _, a := range schema.Attributes {
-			for column, key := range derivedColumns {
-				if a.Scope == "attributes" && a.Key == key && slices.Contains(sig.lowCard, column) {
-					values[column] = a.Values
-				}
+		for column, keys := range derivedColumns {
+			if _, ok := sig.index[column]; ok {
+				values[column] = derivedValues(schema.Attributes, keys)
 			}
 		}
 		for _, f := range sig.fields {
@@ -326,17 +327,51 @@ func windowWhere(sig *signal, start, end time.Time, namespace string) (string, [
 	return where, args
 }
 
-// derivedColumns are read from the attributes map by the spans view, so a
-// full scan extracts every row's VARIANT, which dominated a 24h discovery.
-// Their values come from the attribute sample instead (see Schema).
-var derivedColumns = map[string]string{"messaging_system": "messaging.system"}
+// derivedColumns hold an attribute's value: ingest copies it into a span
+// column, or the spans view reads it from the attributes map, where a full
+// scan extracts every row's VARIANT. Their values come from the attribute
+// sample instead, so completion offers them like the attribute's.
+var derivedColumns = map[string][]string{
+	"messaging_system": {"messaging.system"},
+	"http_route":       {"http.route"},
+	"rpc_service":      {"rpc.service"},
+	"http_status_code": {"http.response.status_code", "http.status_code"},
+}
+
+// valueColumns are scanned for their common values without being low
+// cardinality, so completion can offer them.
+var valueColumns = map[string][]string{"spans": {"operation"}}
+
+// derivedValues merges the sampled values of keys, most common first.
+func derivedValues(attributes []AttributeSchema, keys []string) []Option {
+	counts := map[string]int64{}
+	for _, a := range attributes {
+		if a.Scope == "attributes" && slices.Contains(keys, a.Key) {
+			for _, v := range a.Values {
+				counts[v.Value] += v.Count
+			}
+		}
+	}
+	var out []Option
+	for v, n := range counts {
+		out = append(out, Option{Value: v, Count: n})
+	}
+	sortOptions(out)
+	return out[:min(len(out), 12)]
+}
+
+func sortOptions(opts []Option) {
+	sort.Slice(opts, func(i, j int) bool {
+		return opts[i].Count > opts[j].Count || opts[i].Count == opts[j].Count && opts[i].Value < opts[j].Value
+	})
+}
 
 func (e *Executor) lowCardinality(ctx context.Context, sig *signal, start, end time.Time, namespace string) (map[string][]Option, error) {
 	where, args := windowWhere(sig, start, end, namespace)
 	// UNPIVOT counts every listed column in one scan and drops NULLs.
 	var projection []string
-	for _, column := range sig.lowCard {
-		if derivedColumns[column] == "" {
+	for _, column := range append(slices.Clone(sig.lowCard), valueColumns[sig.name]...) {
+		if derivedColumns[column] == nil {
 			projection = append(projection, fmt.Sprintf("CAST(%s AS VARCHAR) AS %s", quoteIdent(column), quoteIdent(column)))
 		}
 	}
@@ -360,9 +395,7 @@ func (e *Executor) lowCardinality(ctx context.Context, sig *signal, start, end t
 		out[column] = append(out[column], o)
 	}
 	for column, opts := range out {
-		sort.Slice(opts, func(i, j int) bool {
-			return opts[i].Count > opts[j].Count || opts[i].Count == opts[j].Count && opts[i].Value < opts[j].Value
-		})
+		sortOptions(opts)
 		limit := 12
 		if column == "service" {
 			limit = 200
@@ -387,7 +420,8 @@ func (e *Executor) attributes(ctx context.Context, sig *signal, start, end time.
   SELECT service, 'resource' AS scope, e.key AS k, e.type AS t, e.value ->> '$' AS v FROM sample, json_each(r) AS e
 ), keys AS (
   SELECT scope, k, any_value(t) AS t, count(*) AS n,
-         coalesce(array_to_string(list(DISTINCT service ORDER BY service) FILTER (WHERE service <> '')[1:3], ', '), '') AS services
+         coalesce(array_to_string(list(DISTINCT service ORDER BY service) FILTER (WHERE service <> '')[1:3], ', '), '') AS services,
+         array_to_string(list(DISTINCT t ORDER BY t) FILTER (WHERE t NOT IN ('OBJECT', 'ARRAY', 'NULL')), ',') AS ts
   FROM typed GROUP BY scope, k ORDER BY n DESC, k LIMIT 200
 ), counted AS (
   SELECT scope, k, v, count(*) AS c FROM typed
@@ -395,7 +429,7 @@ func (e *Executor) attributes(ctx context.Context, sig *signal, start, end time.
 ), top AS (
   SELECT scope, k, CAST(to_json(list({'value': v, 'count': c} ORDER BY c DESC, v)[1:12]) AS VARCHAR) AS vals FROM counted GROUP BY scope, k
 )
-SELECT keys.scope, keys.k, keys.t, keys.n, keys.services, top.vals
+SELECT keys.scope, keys.k, keys.t, keys.n, keys.services, keys.ts, top.vals
 FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 	rows, err := e.engine.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -408,8 +442,8 @@ FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 	var out []AttributeSchema
 	for rows.Next() {
 		var a AttributeSchema
-		var jsonType, values *string
-		if err := rows.Scan(&a.Scope, &a.Key, &jsonType, &a.Count, &a.Services, &values); err != nil {
+		var jsonType, types, values *string
+		if err := rows.Scan(&a.Scope, &a.Key, &jsonType, &a.Count, &a.Services, &types, &values); err != nil {
 			return nil, err
 		}
 		if values != nil {
@@ -417,20 +451,37 @@ FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 				return nil, fmt.Errorf("discover %s attribute values: %w", sig.name, err)
 			}
 		}
-		a.Type = "string"
 		if jsonType != nil {
-			switch *jsonType {
-			case "BIGINT", "UBIGINT", "DOUBLE":
-				a.Type = "number"
-			case "BOOLEAN":
-				a.Type = "boolean"
-			case "OBJECT", "ARRAY":
-				a.Type = "object"
+			a.Type = attributeType(*jsonType)
+		} else {
+			a.Type = "string"
+		}
+		if types != nil {
+			for t := range strings.SplitSeq(*types, ",") {
+				if t := attributeType(t); !slices.Contains(a.Types, t) {
+					a.Types = append(a.Types, t)
+				}
+			}
+			if len(a.Types) < 2 {
+				a.Types = nil
 			}
 		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// attributeType names a JSON type as the schema reports it.
+func attributeType(jsonType string) string {
+	switch jsonType {
+	case "BIGINT", "UBIGINT", "DOUBLE":
+		return "number"
+	case "BOOLEAN":
+		return "boolean"
+	case "OBJECT", "ARRAY":
+		return "object"
+	}
+	return "string"
 }
 
 func (e *Executor) metricNames(ctx context.Context, start, end time.Time, namespace string) ([]MetricSchema, error) {

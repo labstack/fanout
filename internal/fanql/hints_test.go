@@ -1,9 +1,12 @@
 package fanql
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 // Foreign forms get one problem with a fix-it that makes the query valid.
@@ -83,6 +86,53 @@ func TestCompileMapPathAloneSaysHowToFilter(t *testing.T) {
 		c, ps := Compile(text, Options{})
 		if len(ps) != 0 || len(c.Notices) != 1 || c.Notices[0].Message != want {
 			t.Errorf("%q: %+v %+v", text, ps, c)
+		}
+	}
+}
+
+func TestCompleteAfterATermOffersConnectorsAndClausesFirst(t *testing.T) {
+	schema := completionFixtureSchema()
+	spans := schema.Signals["spans"]
+	for i := range 80 {
+		spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "app.k" + string(rune('a'+i%26)) + string(rune('a'+i/26)), Scope: "attributes", Type: "string", Count: 100})
+	}
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	waitCompletion(t, c, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
+	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where service:cart "))); !slices.Equal(got[:5], []string{"and", "or", "|", "sort", "limit"}) {
+		t.Errorf("after a term: %v", got)
+	}
+	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where service:cart o"))); len(got) == 0 || got[0] != "or" {
+		t.Errorf("after a term, o: %v", got)
+	}
+	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where (service:cart "))); !slices.Equal(got[:2], []string{"and", "or"}) || slices.Contains(got, "sort") {
+		t.Errorf("inside a group: %v", got)
+	}
+}
+
+func TestCompleteValuesNameTheirForm(t *testing.T) {
+	schema := completionFixtureSchema()
+	spans := schema.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.status_code", Scope: "attributes", Type: "string", Types: []string{"number", "string"}, Count: 50,
+		Values: []query.Option{{Value: "200", Count: 40}, {Value: "308", Count: 3}}})
+	spans.Columns = []query.ColumnSchema{{Field: query.Field{Name: "http_route"}, Values: []query.Option{{Value: "/api/cart", Count: 9}}}}
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	waitCompletion(t, c, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
+	r := c.Complete(context.Background(), completionRequest("spans where http.status_code:"))
+	var got []string
+	for _, item := range r.Items {
+		got = append(got, item.Label+" "+item.Detail)
+	}
+	if want := []string{"200 matches numbers", `"200" matches text`, "308 matches numbers", `"308" matches text`, "* "}; !slices.Equal(got, want) {
+		t.Errorf("mixed values = %q", got)
+	}
+	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where http_route:"))); !slices.Contains(got, `"/api/cart"`) && !slices.Contains(got, "/api/cart") {
+		t.Errorf("column values = %v", got)
+	}
+	for _, item := range c.Complete(context.Background(), completionRequest("spans where ki")).Items {
+		if item.Label == "kind" && item.Detail != "client, consumer, internal, producer, server, unspecified" {
+			t.Errorf("kind detail = %q", item.Detail)
 		}
 	}
 }
