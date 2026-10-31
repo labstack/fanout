@@ -32,6 +32,13 @@ type Kind = "query" | "sql";
 const kindOf = (tab: ExploreSearch["tab"]): Kind => tab === "sql" ? "sql" : "query";
 const starter: Query = { from: "spans", measures: ["count()"], by: ["service"] };
 
+/** The drill dashboards give a source: exemplar traces for spans, matching logs for logs. Metrics have none. */
+function drillFor(query: Query, viz: Viz): Panel["drill"] {
+  if (query.from === "logs") return "logs";
+  if (query.from === "spans" && viz !== "health" && viz !== "service_map") return "traces";
+  return undefined;
+}
+
 /** What the last run sent, so later edits can be shown as stale and not saved. */
 type ExploreRun = { kind: Kind; source: string; window: string; panel: Panel; result: PanelDisplayResult; canonical?: string };
 
@@ -96,6 +103,15 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const time = exploreTime(search);
   // Async continuations read the navigation as it is when they finish.
   const searchNow = useRef(search); searchNow.current = search;
+  // The entry the last run wrote, so Back and Forward can tell another entry apart.
+  const shown = useRef({ q: search.q, sql: search.sql ?? "", viz: search.viz });
+  /** A run that changes the query adds a history entry; running it again replaces the entry. */
+  const record = (next: ExploreSearch) => {
+    const now = searchNow.current;
+    shown.current = { q: next.q, sql: next.sql ?? "", viz: next.viz };
+    // A viz chosen for an entry that named none refines that entry.
+    onSearch(next, next.q === now.q && next.sql === now.sql && (now.viz === undefined || next.viz === now.viz));
+  };
   const windowKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
   // Responses compare against what is in the editors now, not when they were sent.
   const current = useRef({ text, sql }); current.current = { text, sql };
@@ -113,9 +129,9 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       let canonical: string | undefined;
       if (kind === "query" && direct) {
         setParsed(undefined);
-        panel = compose({ id: explorePanelID, title: defaultTitle(source), viz: viz ?? "table", query: direct });
+        panel = compose({ id: explorePanelID, title: defaultTitle(source), viz: viz ?? "table", query: direct, drill: drillFor(direct, viz ?? "table") });
         canonical = source;
-        onSearch({ ...searchNow.current, q: source, viz: panel.viz }, true);
+        record({ ...searchNow.current, q: source, viz: panel.viz });
       } else if (kind === "query") {
         // Parse without the previous viz: a new query shape may not fit it.
         const next = await parseFanql({ text: source, variables }, abort.signal);
@@ -124,14 +140,14 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         // An accepted viz edit changes the query; the Builder follows it.
         if (searchNow.current.tab === "builder") setBuilt(next.query);
         const chosen = viz && next.viz.compatible.some(c => c.viz === viz && satisfied(c)) ? viz : next.viz.compatible.find(satisfied)?.viz ?? "table";
-        panel = compose({ id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query });
+        panel = compose({ id: explorePanelID, title: defaultTitle(next.canonical), viz: chosen, query: next.query, drill: drillFor(next.query, chosen) });
         canonical = next.canonical;
-        onSearch({ ...searchNow.current, q: source, viz: chosen, ...(source !== searchNow.current.q ? { drill: undefined } : {}) }, true);
+        record({ ...searchNow.current, q: source, viz: chosen, ...(source !== searchNow.current.q ? { drill: undefined } : {}) });
       } else {
         // SQL has no viz analysis; an edited panel keeps its own viz.
         panel = compose({ id: explorePanelID, title: "SQL", viz: base?.viz ?? "table", sql: source });
         setNotices([]);
-        onSearch({ ...searchNow.current, sql: source }, true);
+        record({ ...searchNow.current, sql: source });
       }
       const dashboard: DashboardSpec = { version: 1, name: context?.spec.name ?? "Explore", time, variables, panels: [panel] };
       const width = resultBox.current?.clientWidth || 960;
@@ -214,6 +230,17 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     else void execute(kind, current.current[kind === "query" ? "text" : "sql"], viz, direct);
   };
 
+  // Back and Forward bring another run's entry: show and run what it holds.
+  useEffect(() => {
+    const entry = { q: search.q, sql: search.sql ?? "", viz: search.viz };
+    if (entry.q === shown.current.q && entry.sql === shown.current.sql && entry.viz === shown.current.viz) return;
+    shown.current = entry;
+    cancelFormat(); setFormatted(undefined); setProblems([]);
+    setText(entry.q); setSql(entry.sql);
+    const kind = kindOf(search.tab);
+    void execute(kind, kind === "query" ? entry.q : entry.sql, entry.viz);
+  }, [search.q, search.sql, search.viz]);
+
   // A link that opens on the Builder seeds it like a tab switch would.
   useEffect(() => { if (search.tab === "builder") void openTab("builder"); }, []);
 
@@ -224,6 +251,10 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const compatible = parsed?.viz.compatible ?? [];
   const editing = context?.panel !== undefined;
   const canSave = !stale && !running && canKeep(run, editing);
+  const saveReason = running ? "Wait for the run to finish" : stale ? "Run the query as it is now first" : editing ? "Run the query first" : "Run a query that returns rows first";
+  const saveHelp = useId();
+  // Points open what makes makeDrill return a target; otherwise the chart offers no drill.
+  const drills = run !== undefined && (run.panel.drill !== undefined || run.panel.viz === "service_map" || (run.result.frame?.columns.some(c => c.name === "trace_id") ?? false));
 
   return <Stack gap="md" p="lg" maw={1400} data-explore>
     <Group justify={context ? "flex-end" : "space-between"} align="flex-end">
@@ -243,7 +274,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         <Stack gap="xs">
           <Text id={help} size="xs" c="dimmed">Press Enter to run. For example <code>spans | p95(duration) by service every 5m</code>.</Text>
           {readOnlyText && <Text size="xs" c="dimmed" data-fanql-readonly>This query is edited in the Builder: {formatted?.reason ?? "it is too large for the text editor"}.</Text>}
-          <FanqlEditor value={text} readOnly={readOnlyText} onChange={value => { cancelFormat(); setText(value); setProblems([]); setFormatted(undefined); }} onRun={() => void execute("query", text, search.viz, readOnlyText ? built : undefined)} problems={problems} describedBy={help}
+          <FanqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={value => { cancelFormat(); setText(value); setProblems([]); setFormatted(undefined); }} onRun={() => void execute("query", text, search.viz, readOnlyText ? built : undefined)} problems={problems} describedBy={help}
             complete={(value, cursor, signal) => completeFanql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
           {problems.length > 0 && <Stack gap={2} role="alert" data-fanql-problems>{problems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
           {notices.length > 0 && <Stack gap={2} data-fanql-notices>{notices.map((notice, index) => <Text key={index} size="xs" c="dimmed">{notice.message}</Text>)}</Stack>}
@@ -258,6 +289,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="sql" pt="sm">
+        {!sql.trim() && <Text size="xs" c="dimmed" mb="xs" data-sql-hint>{text.trim() ? "SQL runs on its own; the FanQL query is not converted. " : ""}Write one SELECT over spans, logs or metrics that filters time with <code>$__window(time_column)</code>, for example <code>SELECT service, count(*) AS spans FROM spans WHERE $__window(start_time) GROUP BY service</code>.</Text>}
         <SqlEditor value={sql} onChange={value => { setSql(value); setProblems([]); }} onRun={() => void execute("sql", sql)} onEscape={() => runButton.current?.focus()} schema={schema.data} problems={search.tab === "sql" ? problems : []} label={context ? "Panel SQL" : "Explore SQL"} />
         {search.tab === "sql" && problems.length > 0 && <Alert color="bad" mt="xs" title="The SQL has problems"><ul>{problems.map((problem, index) => <li className="sql-problem" key={index}>{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul></Alert>}
       </Tabs.Panel>
@@ -277,28 +309,30 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       </Group>
       <Group gap="xs">
       {context?.cancel && <Button variant="default" disabled={savingPanel} onClick={context.cancel}>Cancel</Button>}
-      <Tooltip label={editing ? "Run the query first" : "Run a query that returns rows first"} disabled={canSave}><span>
+      {/* aria-disabled keeps the button focusable, so its reason is reachable by keyboard and read with it. */}
+      <Tooltip label={saveReason} disabled={canSave} events={{ hover: true, focus: true, touch: true }}>
         {context
-          ? <Button disabled={!canSave} loading={savingPanel} onClick={() => {
-            if (!run) return;
+          ? <Button data-disabled={!canSave || undefined} aria-disabled={!canSave} aria-describedby={canSave ? undefined : saveHelp} loading={savingPanel} onClick={() => {
+            if (!run || !canSave) return;
             setSavingPanel(true); setSavingError(undefined);
             context.save.run(run.panel).catch((failure: unknown) => setSavingError(failure instanceof Error ? failure.message : "Save failed")).finally(() => setSavingPanel(false));
           }}>{context.save.label}</Button>
-          : <Button variant="default" disabled={!canSave} onClick={() => run && setSaving(run.panel)}>Save to dashboard</Button>}
-      </span></Tooltip>
+          : <Button variant="default" data-disabled={!canSave || undefined} aria-disabled={!canSave} aria-describedby={canSave ? undefined : saveHelp} onClick={() => run && canSave && setSaving(run.panel)}>Save to dashboard</Button>}
+      </Tooltip>
+      {!canSave && <span id={saveHelp} hidden>{saveReason}</span>}
       </Group>
     </Group>
     {error && <Alert color="bad" title="The query could not run">{error}</Alert>}
     {savingError && <Alert color="bad" title="Not saved">{savingError}</Alert>}
     <Box ref={resultBox}>
       {run ? <Stack gap="xs">
-        <Text size="sm" fw={600} role="status">{stale ? "Result of the last run · query has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>
+        <Text size="sm" fw={600} role="status">{run.kind !== kind ? `Result of the last ${run.kind === "sql" ? "SQL" : "FanQL"} run` : stale ? "Result of the last run · query has changed" : run.canonical ? <>Ran as <code>{run.canonical}</code></> : "Result"}</Text>
         <Box h={resultHeight}>
           <PanelCard panel={run.panel} title={run.panel.title} result={run.result} loading={running} height={resultHeight} group="explore" editing={false} agentAvailable={false}
             range={time.range} onRetry={() => void execute(run.kind, run.source, run.panel.viz, readOnlyText ? built : undefined)} traceLinks="button"
-            onPoint={selection => { const selected = drillSelection(run.panel, run.result, selection, vars); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); }} />
+            onPoint={drills ? selection => { const selected = drillSelection(run.panel, run.result, selection, vars); if (selected) onSearch({ ...search, drill: JSON.stringify(selected.target) }); } : undefined} />
         </Box>
-      </Stack> : <Text c="dimmed" size="sm" data-explore-empty>Type a query, for example <code>spans | count() by service</code>, and press Enter.</Text>}
+      </Stack> : <Text c="dimmed" size="sm" data-explore-empty>{search.tab === "builder" ? "Build a query above and press Run." : search.tab === "sql" ? "Write a query above and press Run." : "Type a query above and press Enter."}</Text>}
     </Box>
     {run && <DrillDrawer client={exploreDrillClient} spec={{ version: 1, name: context?.spec.name ?? "Explore", time, variables, panels: [run.panel] }} time={time} vars={vars} target={parseDrill(search.drill)}
       onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined })} />}

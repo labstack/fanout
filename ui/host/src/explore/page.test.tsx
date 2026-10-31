@@ -46,7 +46,7 @@ async function render(initial: Partial<ExploreSearch> = {}) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let search: ExploreSearch = { q: "", range: "1h", tab: "query", ...initial };
-  const onSearch = vi.fn((next: ExploreSearch) => { search = next; void draw(); });
+  const onSearch = vi.fn((next: ExploreSearch, _replace?: boolean) => { search = next; void draw(); });
   const onSaved = vi.fn<(id: string) => void>();
   const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><ExplorePage search={search} onSearch={onSearch} onSaved={onSaved} /></QueryClientProvider></MantineProvider>));
   cleanups.push(() => { root.unmount(); client.clear(); });
@@ -60,9 +60,10 @@ async function render(initial: Partial<ExploreSearch> = {}) {
 }
 
 describe("ExplorePage", () => {
-  it("shows an example before the first run and disables Run on empty text", async () => {
+  it("shows an example in the empty editor and disables Run on empty text", async () => {
     const { ui } = await render();
-    expect(ui.getByText(/Type a query, for example/)).toBeTruthy();
+    expect(ui.getByText("Type a query above and press Enter.")).toBeTruthy();
+    expect(document.querySelector(".cm-placeholder")?.textContent).toBe("spans | count() by service");
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true);
     expect(fetchMock).not.toHaveBeenCalledWith("/api/fanql/parse", expect.anything());
   });
@@ -75,10 +76,69 @@ describe("ExplorePage", () => {
     await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as spans | count() by service"));
     const [body] = bodies("/api/queries/run");
     expect(body.panels).toEqual(["explore"]);
-    expect(body.dashboard.panels).toEqual([{ id: "explore", title: "spans | count() by service", viz: "table", query: { from: "spans", measures: ["count()"], by: ["service"] } }]);
+    // Explore panels drill like dashboard panels of the same source.
+    expect(body.dashboard.panels).toEqual([{ id: "explore", title: "spans | count() by service", viz: "table", query: { from: "spans", measures: ["count()"], by: ["service"] }, drill: "traces" }]);
     expect(body.time).toEqual({ range: "1h", refresh: "off" });
-    expect(onSearch).toHaveBeenCalledWith(expect.objectContaining({ q: "spans | count() by service", viz: "table" }), true);
+    // A run of a new query is a history entry of its own.
+    expect(onSearch).toHaveBeenCalledWith(expect.objectContaining({ q: "spans | count() by service", viz: "table" }), false);
     expect(ui.getByText("Grouped by service")).toBeTruthy();
+  });
+
+  it("adds a history entry per new query and shows an entry Back returns to", async () => {
+    const { ui, type, click, wait, onSearch, search } = await render();
+    await type("spans | count()");
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await type("spans | count() by service");
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(3));
+    expect(onSearch.mock.calls.map(([next, replace]) => [next.q, replace])).toEqual([["spans | count()", false], ["spans | count() by service", false], ["spans | count() by service", true]]);
+    // The router hands back the earlier entry.
+    await act(async () => onSearch({ ...search(), q: "spans | count()" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" }));
+    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(4));
+  });
+
+  it("gives logs panels the logs drill and offers no drill on metrics", async () => {
+    parse = async body => json({ ...parsed(body.text), query: body.text.startsWith("logs") ? { from: "logs", measures: ["count()"], by: ["service"] } : { from: "metrics", measures: ["avg(value)"], by: ["service"] } });
+    const { type, click, wait } = await render();
+    await type("logs | count() by service");
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(bodies("/api/queries/run")[0].dashboard.panels[0].drill).toBe("logs");
+    await type("metrics | avg(value) by service");
+    await click("Run");
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    expect(bodies("/api/queries/run")[1].dashboard.panels[0]).not.toHaveProperty("drill");
+  });
+
+  it("explains the SQL tab and labels the FanQL result there", async () => {
+    const { ui, type, click, wait } = await render();
+    await type("spans | count() by service");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
+    await act(async () => ui.getByRole("tab", { name: "SQL" }).click());
+    await wait(() => expect(document.querySelector("[data-sql-hint]")?.textContent).toMatch(/the FanQL query is not converted.*\$__window\(time_column\)/));
+    expect(ui.getByRole("status").textContent).toBe("Result of the last FanQL run");
+  });
+
+  it("fits the empty state to the tab", async () => {
+    const { ui } = await render({ tab: "builder" });
+    await vi.waitFor(() => expect(ui.getByText("Build a query above and press Run.")).toBeTruthy());
+    expect(ui.queryByText("Type a query above and press Enter.")).toBeNull();
+  });
+
+  it("keeps the save button focusable and tells why it cannot save yet", async () => {
+    const { ui } = await render();
+    const save = ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" });
+    expect(save.disabled).toBe(false);
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById(save.getAttribute("aria-describedby")!)?.textContent).toBe("Run a query that returns rows first");
+    await act(async () => save.click());
+    expect(ui.queryByRole("dialog")).toBeNull();
   });
 
   it("shows problems and does not run a query that has them", async () => {
@@ -111,14 +171,14 @@ describe("ExplorePage", () => {
 
   it("marks the result stale after an edit and only saves a fresh run with rows", async () => {
     const { ui, type, click, wait } = await render();
-    const save = () => ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" });
-    expect(save().disabled).toBe(true);
+    const save = () => ui.getByRole("button", { name: "Save to dashboard" });
+    expect(save().getAttribute("aria-disabled")).toBe("true");
     await type("spans | count() by service");
     await click("Run");
-    await wait(() => expect(save().disabled).toBe(false));
+    await wait(() => expect(save().getAttribute("aria-disabled")).toBe("false"));
     await type("spans | count() by operation");
     expect(ui.getByRole("status").textContent).toBe("Result of the last run · query has changed");
-    expect(save().disabled).toBe(true);
+    expect(save().getAttribute("aria-disabled")).toBe("true");
   });
 
   it("refuses to save a run without rows", async () => {
@@ -127,7 +187,7 @@ describe("ExplorePage", () => {
     await type("spans | count()");
     await click("Run");
     await wait(() => expect(ui.getByRole("status")).toBeTruthy());
-    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" }).disabled).toBe(true);
+    expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("true");
   });
 
   it("aborts the previous run when another starts", async () => {
@@ -188,12 +248,12 @@ describe("ExplorePage", () => {
     const { ui, type, click, wait, onSearch, search } = await render();
     await type("spans | count() by service");
     await click("Run");
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("false"));
     runQuery = async () => json({ code: "unavailable", message: "engine busy" }, 503);
     await act(async () => onSearch({ ...search(), range: "24h" }));
     await wait(() => expect(ui.getByText("engine busy")).toBeTruthy());
     expect(ui.getByRole("status").textContent).toBe("Result of the last run · query has changed");
-    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save to dashboard" }).disabled).toBe(true);
+    expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("true");
   });
 
   it("drops problems that arrive after the text was edited", async () => {
@@ -279,11 +339,11 @@ describe("ExplorePage", () => {
     const { ui, wait, type } = await render({ tab: "builder" });
     await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
     format = () => new Promise(resolve => { answer = resolve; });
-    await act(async () => ui.getByRole("button", { name: "Add filter" }).click());
+    await act(async () => ui.getByRole("button", { name: "Add measure" }).click());
     await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(2));
     await act(async () => ui.getByRole("tab", { name: "Query" }).click());
     await type("logs | count()");
-    await act(async () => answer(json({ text: "spans where service:'' | count() by service", exactness: "exact", editable: true, requires: [], notices: [] })));
+    await act(async () => answer(json({ text: "spans | count(), count() by service", exactness: "exact", editable: true, requires: [], notices: [] })));
     await act(async () => {});
     expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!.state.doc.toString()).toBe("logs | count()");
   });
