@@ -67,9 +67,11 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
         const at = Date.now(), batch = ++completedBatch;
         setKept(previous => merge(previous, key, [classifyPanelResult(result, sent)], at, batch));
       };
-      return refreshDashboard({ dashboard: spec, panels: sent, time, vars, widths: rounded, compare }, signal, partial).then(data => {
+      // Panels the server last turned away rerun after the rest, a few at a time.
+      const busy = kept.key === key ? sent.filter(id => kept.results.get(id)?.reason === "busy") : [];
+      return refreshDashboard({ dashboard: spec, panels: sent, time, vars, widths: rounded, compare }, signal, partial, busy).then(data => {
         const returned = new Set(data.results.map(result => result.id));
-        const missing: PanelDisplayResult[] = sent.filter(id => !returned.has(id) && spec.panels.find(p => p.id === id)?.viz !== "text")
+        const missing: PanelDisplayResult[] = sent.filter(id => !returned.has(id) && !busy.includes(id) && spec.panels.find(p => p.id === id)?.viz !== "text")
           .map(id => ({id,status:"error",elapsed_ms:0,error:"No result was returned for this panel; refresh to retry.",request_error:sent}));
         return {...data,batch:++completedBatch,results:[...data.results.map(result => classifyPanelResult(result, sent)),...missing],hasTimePanels:spec.panels.some(p => sent.includes(p.id) && ["timeseries","heatmap","state_timeline"].includes(p.viz))};
       }).catch(error => {
@@ -128,17 +130,16 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     const ids = [...queued.ids].filter(id => spec.panels.some(panel => panel.id === id && panel.viz !== "text") && results.get(id)?.request_error).sort();
     if (ids.length) sendRetry(ids);
   }, [query.isFetching, key, canQuery, results, spec.panels]);
-  const retry = (panelId?: string) => {
-    if (!canQuery) return;
-    const batchIds = panelId ? results.get(panelId)?.request_error ?? [] : [...results.values()].flatMap(result => result.request_error ?? []);
-    const failed = [...new Set(batchIds)].filter(id => spec.panels.some(panel => panel.id === id && panel.viz !== "text") && results.get(id)?.request_error).sort();
-    if (!failed.length) return;
+  /** Retries one panel alone: rerunning the rest of its failed batch with it
+   *  would ask a busy server for the same work that failed. */
+  const retry = (panelId: string) => {
+    if (!canQuery || !spec.panels.some(panel => panel.id === panelId && panel.viz !== "text") || !results.get(panelId)?.request_error) return;
     if (query.isFetching) {
       if (queuedRetry.current?.key !== key) queuedRetry.current = {key, ids: new Set()};
-      for (const id of failed) queuedRetry.current.ids.add(id);
+      queuedRetry.current.ids.add(panelId);
       return;
     }
-    sendRetry(failed);
+    sendRetry([panelId]);
   };
   return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current.filter(id => !arrived.current.has(id)) : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
 }
@@ -154,7 +155,7 @@ function merge(previous: Snapshot, key: string, data: PanelDisplayResult[] | und
   for (const result of fresh ? data : []) {
     if (result.status === "error" && next.results.get(result.id)?.frame) {
       next.stale.add(result.id);
-      next.results.set(result.id, {...next.results.get(result.id)!, error: result.error, request_error: result.request_error});
+      next.results.set(result.id, {...next.results.get(result.id)!, error: result.error, reason: result.reason, request_error: result.request_error});
     }
     else { next.results.set(result.id, result); next.updated.set(result.id, at); next.stale.delete(result.id); }
   }
@@ -162,7 +163,7 @@ function merge(previous: Snapshot, key: string, data: PanelDisplayResult[] | und
   for (const id of failed?.ids ?? []) {
     const previous = next.results.get(id);
     if (previous?.frame) {
-      next.stale.add(id); next.results.set(id, {...previous, error: failed!.error, request_error: failed!.retryable ? failed!.ids : undefined});
+      next.stale.add(id); next.results.set(id, {...previous, error: failed!.error, reason: undefined, request_error: failed!.retryable ? failed!.ids : undefined});
     } else next.results.set(id, {id, status: "error", elapsed_ms: 0, error: failed!.error, request_error: failed!.retryable ? failed!.ids : undefined});
   }
   return next;
