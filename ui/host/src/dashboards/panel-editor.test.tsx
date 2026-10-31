@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { within } from "@testing-library/dom";
+import { fireEvent, within } from "@testing-library/dom";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -34,6 +34,7 @@ beforeEach(() => {
     if (url === "/api/fanql/parse") return json({ query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] }, canonical: "spans where service:$service | count() by service", viz: { compatible, edits: [] }, notices: [] });
     if (url === "/api/queries/run") return json({ results: [{ id: "explore", status: ranFrame.rows ? "ok" : "empty", elapsed_ms: 2, frame: ranFrame }] });
     if (url === "/api/dashboards/d1" && (init?.method === "PATCH" || init?.method === "PUT")) return patch();
+    if (url === "/api/dashboards/d1" && !init?.method) return json({ id: "d1", version: 9, spec: { ...spec, panels: [{ ...spec.panels[0], title: "Requests by service" }] } });
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });
 });
@@ -59,7 +60,7 @@ describe("PanelEditor", () => {
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     expect(bodies("/api/fanql/parse")[0].variables).toEqual(spec.variables);
     expect(bodies("/api/queries/run")[0]).toMatchObject({ vars: { service: "checkout" }, dashboard: { variables: spec.variables } });
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(onClose).toHaveBeenCalled());
     expect(bodies("/api/dashboards/d1", "PATCH")[0]).toEqual({ operations: [{ op: "update_panel", id: "panel", set: { query: { from: "spans", measures: ["count()"], by: ["service"], where: ["service = $service"] } } }], base_version: 7, message: "Edited Requests" });
@@ -71,7 +72,7 @@ describe("PanelEditor", () => {
     const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Add panel" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Add panel" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => ui.getByRole("button", { name: "Add panel" }).click());
     await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
     expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0]).toMatchObject({ op: "add_panel", panel: { id: "panel_2", viz: "table" } });
@@ -80,7 +81,7 @@ describe("PanelEditor", () => {
   it("drops settings tied to the old viz or columns when the query changes them", async () => {
     const stat = { id: "panel", title: "Requests", viz: "stat" as const, reduce: "last" as const, unit: "count" as const, options: { columns: [{ field: "count", format: "bar" as const }] }, click: { set_variable: "service" }, query: { from: "spans" as const, measures: ["count()"] } };
     const { ui, wait } = await render({ panel: stat });
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
     const ran = bodies("/api/queries/run")[0].dashboard.panels[0];
     expect(ran).toMatchObject({ viz: "table", unit: "count" });
     expect(ran.reduce).toBeUndefined();
@@ -92,15 +93,25 @@ describe("PanelEditor", () => {
 
   it("keeps a gauge a gauge when the panel has its minimum and maximum", async () => {
     compatible = [{ viz: "stat", requires: [] }, { viz: "gauge", requires: ["min_max"] }];
-    const gauge = { id: "panel", title: "Errors", viz: "gauge" as const, min: 0, max: 100, query: { from: "spans" as const, measures: ["error_rate()"] } };
+    const gauge = { id: "panel", title: "Requests", viz: "gauge" as const, min: 0, max: 100, query: { from: "spans" as const, measures: ["count()"] } };
     const { wait } = await render({ panel: gauge });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ viz: "gauge", min: 0, max: 100 });
   });
 
+  it("shows a gauge whose measures changed as a stat, as its bounds no longer apply", async () => {
+    compatible = [{ viz: "stat", requires: [] }, { viz: "gauge", requires: ["min_max"] }];
+    const gauge = { id: "panel", title: "Errors", viz: "gauge" as const, min: 0, max: 1, query: { from: "spans" as const, measures: ["error_rate()"] } };
+    const { wait } = await render({ panel: gauge });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    const ran = bodies("/api/queries/run")[0].dashboard.panels[0];
+    expect(ran.viz).toBe("stat");
+    expect(ran.min).toBeUndefined();
+  });
+
   it("saves unsaved layout changes with the panel", async () => {
     const { ui, wait } = await render({ layoutChanged: true });
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(bodies("/api/dashboards/d1", "PUT")).toHaveLength(1));
     expect(bodies("/api/dashboards/d1", "PUT")[0]).toMatchObject({ base_version: 7, message: "Edited Requests and saved layout", spec: { panels: [{ id: "panel", title: "Requests", query: { where: ["service = $service"] } }] } });
@@ -115,7 +126,7 @@ describe("PanelEditor", () => {
     const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Panel SQL" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
     expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0]).toEqual({ op: "update_panel", id: "panel", set: { sql: "SELECT count(*) + 1 AS total FROM spans WHERE $__window(start_time)" } });
@@ -125,7 +136,7 @@ describe("PanelEditor", () => {
     ranFrame = { ...frame, values: [[], []], rows: 0 };
     const edited = await render();
     await edited.wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    await edited.wait(() => expect(edited.ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await edited.wait(() => expect(edited.ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => cleanups.splice(0).forEach(cleanup => cleanup()));
     document.body.innerHTML = "";
     const added = await render({ add: true });
@@ -134,7 +145,7 @@ describe("PanelEditor", () => {
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => added.ui.getByRole("button", { name: "Run" }).click());
     await added.wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
-    expect(added.ui.getByRole<HTMLButtonElement>("button", { name: "Add panel" }).disabled).toBe(true);
+    expect(added.ui.getByRole("button", { name: "Add panel" }).getAttribute("aria-disabled")).toBe("true");
   });
 
   it("asks before discarding a draft", async () => {
@@ -154,12 +165,72 @@ describe("PanelEditor", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it("explains a version conflict and stays open", async () => {
-    patch = async () => json({ code: "dashboard_version_conflict", message: "conflict" }, 409);
+  it("keeps a version conflict's draft and saves it over the latest version", async () => {
+    let conflicts = 1;
+    patch = async () => conflicts-- > 0 ? json({ code: "dashboard_version_conflict", message: "conflict" }, 409) : json({ id: "d1", version: 10, spec });
     const { ui, onClose, wait } = await render();
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save panel" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
+    await act(async () => fireEvent.change(ui.getByRole("textbox", { name: "Panel title" }), { target: { value: "Checkout requests" } }));
     await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
     await wait(() => expect(ui.getByText(/Someone saved this dashboard since you opened it/)).toBeTruthy());
     expect(onClose).not.toHaveBeenCalled();
+    await wait(() => expect(document.activeElement).toBe(ui.getByRole("button", { name: "Load latest" })));
+    await act(async () => ui.getByRole("button", { name: "Load latest" }).click());
+    await wait(() => expect(ui.queryByRole("button", { name: "Load latest" })).toBeNull());
+    expect(ui.getByRole<HTMLInputElement>("textbox", { name: "Panel title" }).value).toBe("Checkout requests");
+    await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
+    await wait(() => expect(onClose).toHaveBeenCalled());
+    expect(bodies("/api/dashboards/d1", "PATCH")[1]).toMatchObject({ base_version: 9, message: "Edited Checkout requests", operations: [{ op: "update_panel", id: "panel", set: { title: "Checkout requests" } }] });
+  });
+
+  it("drops the unit, thresholds and bounds when the measures change", async () => {
+    const errors = { id: "panel", title: "Error rate", viz: "stat" as const, unit: "percent" as const, thresholds: [{ value: 1, status: "warn" as const }, { value: 5, status: "bad" as const }], better: "lower" as const, min: 0, max: 1, query: { from: "spans" as const, measures: ["error_rate()"] } };
+    compatible = [{ viz: "stat", requires: [] }];
+    const { ui, wait } = await render({ panel: errors });
+    await wait(() => expect(ui.getByRole("button", { name: "Save panel" }).getAttribute("aria-disabled")).toBe("false"));
+    const ran = bodies("/api/queries/run")[0].dashboard.panels[0];
+    for (const field of ["unit", "thresholds", "better", "min", "max"]) expect(ran[field]).toBeUndefined();
+    await act(async () => ui.getByRole("button", { name: "Save panel" }).click());
+    await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
+    expect(bodies("/api/dashboards/d1", "PATCH")[0].operations[0].set).toMatchObject({ unit: null, thresholds: null, better: null, min: null, max: null });
+  });
+
+  it("keeps the unit, thresholds and bounds when the measures stay", async () => {
+    const counted = { ...spec.panels[0], viz: "table" as const, unit: "count" as const, thresholds: [{ value: 10, status: "warn" as const }], better: "higher" as const, query: { from: "spans" as const, measures: ["count()"], by: ["service"] } };
+    const { wait } = await render({ panel: counted });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ unit: "count", thresholds: [{ value: 10 }], better: "higher" });
+  });
+
+  it("asks before discarding a viz change or a new title, and Escape on the prompt keeps the dialog's keys", async () => {
+    compatible = [{ viz: "table", requires: [] }, { viz: "stat", requires: [] }];
+    const { ui, onClose, wait } = await render();
+    await wait(() => expect(ui.getByRole("radio", { name: "Stat", hidden: true })).toBeTruthy());
+    await act(async () => ui.getByRole("radio", { name: "Stat", hidden: true }).click());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    const field = ui.getByRole("textbox", { name: "Panel title" });
+    field.focus();
+    await act(async () => fireEvent.keyDown(field, { key: "Escape" }));
+    await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => fireEvent.keyDown(document.activeElement!, { key: "Escape" }));
+    expect(ui.queryByText("Discard changes?")).toBeNull();
+    await wait(() => expect(document.activeElement).toBe(field));
+    await act(async () => fireEvent.keyDown(field, { key: "Escape" }));
+    await wait(() => expect(ui.getByText("Discard changes?")).toBeTruthy());
+  });
+
+  it("names a new panel after its query unless a title is typed, and shows the variables it runs with", async () => {
+    const { ui, wait } = await render({ add: true });
+    await wait(() => expect(ui.getByRole("textbox", { name: "FanQL query" })).toBeTruthy());
+    expect(ui.getByText((_, node) => node?.hasAttribute("data-editor-variables") === true && node.textContent === "Runs with the dashboard's variables: $service = checkout")).toBeTruthy();
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
+    await act(async () => ui.getByRole("button", { name: "Run" }).click());
+    await wait(() => expect(ui.getByRole("button", { name: "Add panel" }).getAttribute("aria-disabled")).toBe("false"));
+    await act(async () => fireEvent.change(ui.getByRole("textbox", { name: "Panel title" }), { target: { value: "Requests per service" } }));
+    await act(async () => ui.getByRole("button", { name: "Add panel" }).click());
+    await wait(() => expect(bodies("/api/dashboards/d1", "PATCH")).toHaveLength(1));
+    expect(bodies("/api/dashboards/d1", "PATCH")[0]).toMatchObject({ message: "Added Requests per service", operations: [{ panel: { title: "Requests per service" } }] });
   });
 });

@@ -6,13 +6,16 @@ import { ApiError } from "../api-error";
 import { ExplorePage } from "../explore/page";
 import { defaultRange, type ExploreSearch } from "../explore/search";
 import { createDashboard, dashboardsKey } from "./api";
+import { useDiscard } from "./discard";
 
 /** A dashboard holds at least one panel, so it is created together with its first one (proposal 0004, Decision 1). */
 export function NewDashboard({ onClose, onCreated }: { onClose(): void; onCreated(dashboardId: string): void }) {
   const client = useQueryClient();
   const [name, setName] = useState("");
   const [search, setSearch] = useState<ExploreSearch>({ q: "", tab: "query", range: defaultRange });
+  const [queryDirty, setQueryDirty] = useState(false);
   const named = name.trim();
+  const discard = useDiscard(named !== "" || queryDirty, onClose, "this dashboard");
 
   const create = async (panel: Panel) => {
     if (!named) throw new Error("Name the dashboard first.");
@@ -27,13 +30,12 @@ export function NewDashboard({ onClose, onCreated }: { onClose(): void; onCreate
     }
   };
 
-  // Escape first reaches the editor, which closes its completion list; only an unhandled Escape closes the dialog.
-  return <Modal opened onClose={onClose} closeOnEscape={false} title="New dashboard" size="min(1280px, 100vw - 32px)"
-    onKeyDown={event => { if (event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) onClose(); }}>
+  return <Modal opened onClose={discard.request} closeOnEscape={false} title="New dashboard" size="min(1280px, 100vw - 32px)" onKeyDown={discard.onKeyDown}>
+    {discard.prompt}
     <Stack gap={0}>
       <TextInput label="Dashboard name" px="lg" value={name} onChange={event => setName(event.currentTarget.value)} data-autofocus required />
       <ExplorePage search={search} onSearch={setSearch}
-        context={{ spec: { version: 1, name: named || "New dashboard", time: { range: search.range }, panels: [] }, vars: {}, save: { label: "Create dashboard", run: create } }} />
+        context={{ spec: { version: 1, name: named || "New dashboard", time: { range: search.range }, panels: [] }, vars: {}, onDirtyChange: setQueryDirty, cancel: discard.request, save: { label: "Create dashboard", run: create } }} />
     </Stack>
   </Modal>;
 }

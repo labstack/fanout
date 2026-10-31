@@ -102,6 +102,16 @@ describe("dashboard layout editing", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Structured menu"]')!.click());
     expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === "Edit panel")).toBe(canManage);
   });
+  it("returns focus to Add panel when the editor closes", async () => {
+    fetchMock.mockImplementation(async () => Response.json({ signals: {}, sql_relations: {} }));
+    const { host } = await render(true, spec, true);
+    const add = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Add panel")!;
+    add.focus();
+    await act(async () => add.click());
+    const cancel = await vi.waitFor(() => { const el = [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Cancel"); expect(el).toBeTruthy(); return el!; });
+    await act(async () => cancel.click());
+    await vi.waitFor(() => expect(document.activeElement).toBe(add));
+  });
   it.each([true, false])("offers Add panel while editing the layout only to dashboard editors (%s)", async canManage => {
     const { host } = await render(true, spec, canManage);
     expect([...host.querySelectorAll("button")].some(button => button.textContent === "Add panel")).toBe(canManage);

@@ -40,10 +40,29 @@ describe("NewDashboard", () => {
     const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "FanQL query" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, insert: "spans | count() by service" } }));
     await act(async () => ui.getByRole("button", { name: "Run" }).click());
-    await wait(() => expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create dashboard" }).disabled).toBe(false));
+    await wait(() => expect(ui.getByRole("button", { name: "Create dashboard" }).getAttribute("aria-disabled")).toBe("false"));
     await act(async () => ui.getByRole("button", { name: "Create dashboard" }).click());
     await wait(() => expect(onCreated).toHaveBeenCalledWith("d9"));
     const post = fetchMock.mock.calls.find(([input, init]) => String(input) === "/api/dashboards" && init?.method === "POST")!;
-    expect(JSON.parse(String(post[1]?.body))).toEqual({ spec: { version: 1, name: "Checkout", time: { range: "1h" }, panels: [{ id: "panel", title: "spans | count() by service", viz: "table", query: { from: "spans", measures: ["count()"], by: ["service"] } }] } });
+    expect(JSON.parse(String(post[1]?.body))).toEqual({ spec: { version: 1, name: "Checkout", time: { range: "1h" }, panels: [{ id: "panel", title: "spans | count() by service", viz: "table", query: { from: "spans", measures: ["count()"], by: ["service"] }, drill: "traces" }] } });
+  });
+
+  it("cancels at once when nothing was entered, and asks before discarding a name or query", async () => {
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host), client = new QueryClient();
+    const onClose = vi.fn();
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><NewDashboard onClose={onClose} onCreated={vi.fn()} /></QueryClientProvider></MantineProvider>));
+    cleanups.push(() => { root.unmount(); client.clear(); });
+    const ui = within(document.body);
+    await act(async () => ui.getByRole("button", { name: "Cancel" }).click());
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const field = ui.getByRole("textbox", { name: "Dashboard name" });
+    await act(async () => { fireEvent.change(field, { target: { value: "Checkout" } }); });
+    field.focus();
+    await act(async () => { fireEvent.keyDown(field, { key: "Escape" }); });
+    expect(ui.getByText("Discard changes?")).toBeTruthy();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await act(async () => ui.getByRole("button", { name: "Discard changes" }).click());
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

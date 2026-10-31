@@ -179,7 +179,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     {editing && <Group justify="space-between" mb="sm" p="xs" style={{ border: "1px dashed var(--mantine-color-default-border)", borderRadius: 8 }}>
       <Text size="sm" c="dimmed">{canEdit ? "Drag a panel by its title and resize it from the corner. Changes are saved as a new version." : "The layout can be edited only on a wider screen."}</Text>
       <Group gap="xs">
-        {canManage && dashboardId && <Button size="compact-sm" variant="default" onClick={() => { editReturnFocus.current = null; setPanelEdit({ spec, version }); }}>Add panel</Button>}
+        {canManage && dashboardId && <Button size="compact-sm" variant="default" onClick={event => { editReturnFocus.current = event.currentTarget; setPanelEdit({ spec, version }); }}>Add panel</Button>}
         <Button size="compact-sm" disabled={!dirty || !canEdit} loading={save.isPending} onClick={() => save.mutate()}>Save layout</Button>
       </Group>
     </Group>}
@@ -195,7 +195,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
     <PanelFullscreen shortcutScope={shortcutScope} onShortcuts={onShortcuts} escapeEnabled={!overlayOpen && !panelEdit} opened={Boolean(view)} onClose={() => onView(undefined)} title={viewed ? interpolate(viewed.title, vars) : "Missing panel"} returnFocusTo={() => returnViewFocus?.(focusedPanel.current) ?? menus.current.get(focusedPanel.current ?? "") ?? menus.current.values().next().value}>
       {viewed ? <div style={{ height: "calc(100vh - 120px)" }}>{card(viewed, Math.max(40, windowHeight - 140), true)}</div> : <Alert color="warn">This panel is missing from the dashboard. The shared link may be out of date.</Alert>}
     </PanelFullscreen>
-    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Loader size="sm" aria-label="Loading the panel editor" /></Modal>}>
+    {panelEdit && dashboardId && <Suspense fallback={<Modal opened onClose={closePanelEdit} title="Loading the panel editor"><Loader size="sm" role="status" aria-label="Loading the panel editor" /></Modal>}>
       <PanelEditor dashboardId={dashboardId} version={panelEdit.version} spec={withLayout(panelEdit.spec.panels)} layoutChanged={canEdit && dirty} panel={panelEdit.panel} time={time} vars={vars} onClose={closePanelEdit} />
     </Suspense>}
   </div>;
