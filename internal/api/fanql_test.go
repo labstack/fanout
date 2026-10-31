@@ -44,6 +44,9 @@ func (*fakeFanQLParser) RenderSQL(context.Context, map[string]any) (string, erro
 type fakeFanQLPanels struct{ fakePanels }
 
 func (*fakeFanQLPanels) Schema(_ context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	if req.Cached {
+		return nil, query.ErrSchemaNotCached
+	}
 	return &query.Schema{Window: req.Window, Signals: map[string]query.SignalSchema{
 		"logs": {Columns: []query.ColumnSchema{{Field: query.Field{Name: "severity", Type: query.TypeString}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}}}},
 	}}, nil

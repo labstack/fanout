@@ -17,6 +17,8 @@ import (
 type SchemaRequest struct {
 	Window    string
 	Namespace string
+	// Cached answers only from the cache, never waiting for a discovery.
+	Cached bool
 }
 
 type Schema struct {
@@ -97,13 +99,16 @@ var namespaceMu sync.Mutex
 // fresh and in-flight entries. Cached keys are always served.
 var ErrSchemaBusy = errors.New("schema discovery is busy; try again shortly")
 
+// ErrSchemaNotCached answers a Cached request for a key with no schema yet.
+var ErrSchemaNotCached = errors.New("schema is not cached")
+
 // Schema describes what telemetry exists: columns with their common values,
 // attribute keys and values sampled from recent rows, metric names and
 // services. It is the agent's map before it drafts panels. An entry is fresh
 // for a minute and then served stale while one background refresh runs.
 // Concurrent callers of a new key share one discovery, cancelled when its last
 // caller leaves. Keys are bounded: windows are the fixed set and a namespace
-// must have data in the last 24h.
+// must have data in the last 24h. A Cached request is answered at once.
 func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, error) {
 	if req.Window == "" {
 		req.Window = "1h"
@@ -132,6 +137,9 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 		return entry.schema, nil
 	}
 	e.mu.Unlock()
+	if req.Cached {
+		return nil, ErrSchemaNotCached
+	}
 	if req.Namespace != "" {
 		if err := e.checkNamespace(ctx, req.Namespace); err != nil {
 			return nil, err

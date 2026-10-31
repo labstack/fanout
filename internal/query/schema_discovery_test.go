@@ -221,3 +221,25 @@ func TestSchemaRoomEvictsLeastRecentlyUsed(t *testing.T) {
 		t.Fatalf("evicted more than one entry: %d left", len(e.schemas))
 	}
 }
+
+// A cached lookup answers at once: the cached schema, or ErrSchemaNotCached
+// without starting a discovery.
+func TestSchemaCachedLookupNeverWaits(t *testing.T) {
+	e := newFixtureExecutor(t)
+	if _, err := e.Schema(t.Context(), SchemaRequest{Window: "5m", Cached: true}); !errors.Is(err, ErrSchemaNotCached) {
+		t.Fatalf("cold cached lookup err=%v", err)
+	}
+	e.mu.Lock()
+	_, started := e.schemas["5m|"]
+	e.mu.Unlock()
+	if started {
+		t.Fatal("cached lookup started a discovery")
+	}
+	want, err := e.Schema(t.Context(), SchemaRequest{Window: "5m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e.Schema(t.Context(), SchemaRequest{Window: "5m", Cached: true}); err != nil || got != want {
+		t.Fatalf("warm cached lookup err=%v", err)
+	}
+}

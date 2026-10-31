@@ -101,21 +101,11 @@ const maxCompletionItems = 50
 
 type completionKey struct{ window, namespace string }
 
-// An entry is fresh until expires and then served stale until stale while one
-// background fetch refreshes it, so completion stays warm across the TTL. A
-// failure keeps the last schema, reports the error until a fetch succeeds,
-// and waits until expires (10 s) before the next attempt.
-type completionSchemaEntry struct {
-	schema         *query.Schema
-	expires, stale time.Time
-	failed         bool
-}
-
-const (
-	completionSchemaTTL   = time.Minute
-	completionSchemaStale = 10 * time.Minute
-	completionRetry       = 10 * time.Second
-)
+// The source caches schemas, serving them stale while it refreshes, so a
+// completion only looks one up and never waits for a discovery. A key that
+// is not cached starts one background fetch. A failed fetch is reported
+// until one succeeds and retried after completionRetry.
+const completionRetry = 10 * time.Second
 
 // Schema work is admitted before spawning across all Completers. No request
 // waits or queues work when the slots are full; a later completion can retry.
@@ -125,12 +115,12 @@ type Completer struct {
 	source   schemaSource
 	mu       sync.Mutex
 	inflight map[completionKey]chan struct{}
-	cache    map[completionKey]completionSchemaEntry
+	failed   map[completionKey]time.Time
 	now      func() time.Time
 }
 
 func NewCompleter(source schemaSource) *Completer {
-	return &Completer{source: source, inflight: make(map[completionKey]chan struct{}), cache: make(map[completionKey]completionSchemaEntry), now: time.Now}
+	return &Completer{source: source, inflight: make(map[completionKey]chan struct{}), failed: make(map[completionKey]time.Time), now: time.Now}
 }
 
 // windowLength reads an Explore range such as 15m, 1h or 7d.
@@ -171,17 +161,18 @@ func CheckCompleteRequest(req CompleteRequest) error {
 }
 
 func (c *Completer) schema(ctx context.Context, key completionKey) (*query.Schema, bool, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := c.now()
-	entry, ok := c.cache[key]
-	if ok && now.Before(entry.expires) {
-		return entry.schema, entry.schema != nil, entry.failed
-	}
 	if c.source == nil {
 		return nil, false, false
 	}
-	if _, ok := c.inflight[key]; !ok {
+	schema, err := c.source.Schema(ctx, query.SchemaRequest{Window: key.window, Namespace: key.namespace, Cached: true})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err == nil && schema != nil {
+		delete(c.failed, key)
+		return schema, true, false
+	}
+	retry, failed := c.failed[key]
+	if _, ok := c.inflight[key]; !ok && (!failed || !c.now().Before(retry)) {
 		select {
 		case completionSchemaSlots <- struct{}{}:
 			done := make(chan struct{})
@@ -190,10 +181,7 @@ func (c *Completer) schema(ctx context.Context, key completionKey) (*query.Schem
 		default:
 		}
 	}
-	if ok && entry.schema != nil && now.Before(entry.stale) {
-		return entry.schema, true, entry.failed
-	}
-	return nil, false, ok && entry.failed
+	return nil, false, failed
 }
 
 func (c *Completer) fetch(parent context.Context, key completionKey, done chan struct{}) {
@@ -203,21 +191,13 @@ func (c *Completer) fetch(parent context.Context, key completionKey, done chan s
 	schema, err := c.source.Schema(ctx, query.SchemaRequest{Window: key.window, Namespace: key.namespace})
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := c.now()
-	for k, entry := range c.cache {
-		if !now.Before(entry.stale) && !now.Before(entry.expires) {
-			delete(c.cache, k)
-		}
-	}
-	if len(c.cache) >= 64 {
-		clear(c.cache)
-	}
 	if err != nil || schema == nil {
-		entry := c.cache[key]
-		entry.expires, entry.failed = now.Add(completionRetry), true
-		c.cache[key] = entry
+		if len(c.failed) >= 64 {
+			clear(c.failed)
+		}
+		c.failed[key] = c.now().Add(completionRetry)
 	} else {
-		c.cache[key] = completionSchemaEntry{schema: schema, expires: now.Add(completionSchemaTTL), stale: now.Add(completionSchemaTTL + completionSchemaStale)}
+		delete(c.failed, key)
 	}
 	delete(c.inflight, key)
 	close(done)

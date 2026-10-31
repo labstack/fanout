@@ -15,7 +15,17 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-type completionSchemaFunc func(context.Context, query.SchemaRequest) (*query.Schema, error)
+// fakeSchemas fetches with fetch and, like the executor, answers cached
+// lookups from the fetches that succeeded.
+type fakeSchemas struct {
+	fetch  func(context.Context, query.SchemaRequest) (*query.Schema, error)
+	mu     sync.Mutex
+	cached map[[2]string]*query.Schema
+}
+
+func completionSchemaFunc(fetch func(context.Context, query.SchemaRequest) (*query.Schema, error)) *fakeSchemas {
+	return &fakeSchemas{fetch: fetch, cached: map[[2]string]*query.Schema{}}
+}
 
 // expectAt replaces a whole lexical token even when the cursor is in its middle.
 // Punctuation is consumed by the grammar: a cursor after ':' expects a value.
@@ -61,8 +71,23 @@ func TestCompleteBoundsDistinctNamespaceFetchAdmission(t *testing.T) {
 	}
 }
 
-func (f completionSchemaFunc) Schema(ctx context.Context, req query.SchemaRequest) (*query.Schema, error) {
-	return f(ctx, req)
+func (f *fakeSchemas) Schema(ctx context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	key := [2]string{req.Window, req.Namespace}
+	if req.Cached {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if schema := f.cached[key]; schema != nil {
+			return schema, nil
+		}
+		return nil, query.ErrSchemaNotCached
+	}
+	schema, err := f.fetch(ctx, req)
+	if err == nil && schema != nil {
+		f.mu.Lock()
+		f.cached[key] = schema
+		f.mu.Unlock()
+	}
+	return schema, err
 }
 
 func completionFixtureSchema() *query.Schema {
@@ -435,7 +460,7 @@ func TestCompleteSchemaConcurrencyIsProcessWide(t *testing.T) {
 	gate := make(chan struct{})
 	started := make(chan struct{}, 12)
 	var active, maximum, calls atomic.Int32
-	source := completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	fetch := func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		calls.Add(1)
 		n := active.Add(1)
 		defer active.Add(-1)
@@ -444,8 +469,8 @@ func TestCompleteSchemaConcurrencyIsProcessWide(t *testing.T) {
 		started <- struct{}{}
 		<-gate
 		return completionFixtureSchema(), nil
-	})
-	a, b := NewCompleter(source), NewCompleter(source)
+	}
+	a, b := NewCompleter(completionSchemaFunc(fetch)), NewCompleter(completionSchemaFunc(fetch))
 	for i := 0; i < 6; i++ {
 		a.Complete(context.Background(), CompleteRequest{Window: "1h", Namespace: string(rune('a' + i))})
 		b.Complete(context.Background(), CompleteRequest{Window: "1h", Namespace: string(rune('a' + i))})
@@ -671,72 +696,26 @@ func TestCompleteAbsoluteRangeUsesItsLength(t *testing.T) {
 	}
 }
 
-func TestCompleteServesStaleWhileOneFetchRefreshes(t *testing.T) {
+// The completer keeps no schema of its own: each completion reads the
+// source's cache, which serves stale entries while it refreshes them.
+func TestCompleteReadsTheSourceCache(t *testing.T) {
 	var calls atomic.Int32
-	var fail atomic.Bool
-	gate := make(chan struct{}, 1)
-	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
+	source := completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) {
 		calls.Add(1)
-		<-gate
-		if fail.Load() {
-			return nil, context.DeadlineExceeded
-		}
 		return completionFixtureSchema(), nil
-	}))
-	var mu sync.Mutex
-	now := time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC)
-	c.now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
-	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
-	req := CompleteRequest{Text: "spans where http.", Cursor: 17, Window: "1h"}
-	gate <- struct{}{}
-	waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Warm })
-
-	// Past the TTL a burst stays warm on the stale schema and starts one fetch.
-	advance(61 * time.Second)
-	var wg sync.WaitGroup
-	for range 50 {
-		wg.Go(func() {
-			if r := c.Complete(context.Background(), req); !r.Schema.Warm || len(r.Items) == 0 {
-				t.Error("stale schema not served")
-			}
-		})
-	}
-	wg.Wait()
-	gate <- struct{}{}
-	waitCompletion(t, c, req, func(CompleteResponse) bool {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return len(c.inflight) == 0
 	})
-	if calls.Load() != 2 {
-		t.Fatalf("refresh fetches %d, want 2 in total", calls.Load())
+	c := NewCompleter(source)
+	req := CompleteRequest{Text: "spans where http.", Cursor: 17, Window: "1h"}
+	waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Warm })
+	refreshed := completionFixtureSchema()
+	spans := refreshed.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.route", Scope: "attributes", Type: "string", Count: 1})
+	refreshed.Signals["spans"] = spans
+	source.mu.Lock()
+	source.cached[[2]string{"1h", ""}] = refreshed
+	source.mu.Unlock()
+	r := c.Complete(context.Background(), req)
+	if !slices.Contains(completionLabels(r), "http.route") || calls.Load() != 1 {
+		t.Fatalf("labels %v after %d fetches", completionLabels(r), calls.Load())
 	}
-
-	// A failed refresh (a timeout) keeps the stale schema and reports the error
-	// until a later fetch succeeds.
-	advance(61 * time.Second)
-	fail.Store(true)
-	gate <- struct{}{}
-	r := waitCompletion(t, c, req, func(r CompleteResponse) bool { return r.Schema.Error })
-	if !r.Schema.Warm {
-		t.Fatalf("stale schema dropped on failure: %+v", r.Schema)
-	}
-	advance(11 * time.Second)
-	fail.Store(false)
-	if r := c.Complete(context.Background(), req); !r.Schema.Error || !r.Schema.Warm {
-		t.Fatalf("error cleared before a successful fetch: %+v", r.Schema)
-	}
-	gate <- struct{}{}
-	waitCompletion(t, c, req, func(r CompleteResponse) bool { return !r.Schema.Error && r.Schema.Warm })
-
-	// A cold key that keeps failing reports the error while it retries.
-	cold := CompleteRequest{Text: "spans ", Cursor: 6, Window: "6h"}
-	fail.Store(true)
-	gate <- struct{}{}
-	waitCompletion(t, c, cold, func(r CompleteResponse) bool { return r.Schema.Error })
-	advance(11 * time.Second)
-	if r := c.Complete(context.Background(), cold); !r.Schema.Error || r.Schema.Warm {
-		t.Fatalf("retrying cold key: %+v", r.Schema)
-	}
-	gate <- struct{}{}
 }
