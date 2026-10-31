@@ -5789,7 +5789,17 @@
       "span": {
         "start": 12,
         "end": 17
-      }
+      },
+      "fix_its": [
+        {
+          "label": "attributes['x-y.z']",
+          "span": {
+            "start": 12,
+            "end": 17
+          },
+          "text": "attributes['x-y.z']"
+        }
+      ]
     }
   ]
 }
@@ -7682,7 +7692,25 @@
       "span": {
         "start": 12,
         "end": 21
-      }
+      },
+      "fix_its": [
+        {
+          "label": "operation",
+          "span": {
+            "start": 12,
+            "end": 21
+          },
+          "text": "operation"
+        },
+        {
+          "label": "attributes['opération']",
+          "span": {
+            "start": 12,
+            "end": 21
+          },
+          "text": "attributes['opération']"
+        }
+      ]
     }
   ]
 }

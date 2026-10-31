@@ -19,6 +19,7 @@ type Notice struct {
 	Path    string          `json:"path"`
 	Message string          `json:"message"`
 	Span    *query.TextSpan `json:"span,omitempty"`
+	FixIts  []query.FixIt   `json:"fix_its,omitempty"`
 }
 
 type resolved struct {
@@ -210,8 +211,8 @@ func textSpan(s span) *query.TextSpan { return &query.TextSpan{Start: s.Start, E
 func (r *resolver) issue(at span, message string) {
 	r.problems = append(r.problems, query.Problem{Path: r.path, Message: message, Span: textSpan(at)})
 }
-func (r *resolver) notice(at span, message string) {
-	r.out.Notices = append(r.out.Notices, Notice{Path: r.path, Message: message, Span: textSpan(at)})
+func (r *resolver) notice(at span, message string, fixes ...query.FixIt) {
+	r.out.Notices = append(r.out.Notices, Notice{Path: r.path, Message: message, Span: textSpan(at), FixIts: fixes})
 }
 
 func (r *resolver) field(f *fieldName) {
@@ -244,8 +245,27 @@ func (r *resolver) field(f *fieldName) {
 	if scope == "" {
 		scope = "attributes"
 	}
-	if !f.Bracket && !identifierPath.MatchString(key) {
-		r.issue(f.At, fmt.Sprintf("%q needs brackets", key))
+	if !f.Bracket && strings.HasPrefix(key, "$") && !strings.HasPrefix(key, "$__") {
+		// A variable stands for values, never for a field.
+		if strings.HasPrefix(r.path, "by") {
+			r.issue(f.At, fmt.Sprintf("by cannot use the variable %s; group by a field, e.g. by service", key))
+		} else {
+			r.issue(f.At, fmt.Sprintf("the variable %s cannot name a field; use it as a value, e.g. service:%s", key, key))
+		}
+	} else if !f.Bracket && !identifierPath.MatchString(key) && !strings.HasPrefix(key, "$__") {
+		bracketed := scope + "['" + strings.ReplaceAll(key, "'", "''") + "']"
+		fixes := []query.FixIt{{Label: bracketed, Span: *textSpan(f.At), Text: bracketed}}
+		var names []string
+		for _, c := range columns {
+			if c.Type != query.TypeMap {
+				names = append(names, c.Name)
+			}
+		}
+		if hint := suggest.Spelling(strings.ToLower(key), names); hint != "" {
+			name := strings.TrimSuffix(strings.TrimPrefix(hint, "did you mean "), "?")
+			fixes = append([]query.FixIt{{Label: name, Span: *textSpan(f.At), Text: name}}, fixes...)
+		}
+		r.problems = append(r.problems, query.Problem{Path: r.path, Message: fmt.Sprintf("%q needs brackets", key), Span: textSpan(f.At), FixIts: fixes})
 	}
 	f.Ref = &fieldRef{Column: scope, Key: key, Type: query.TypeString, Unit: "none"}
 	if f.Scope == "" && !f.Bracket && !strings.Contains(key, ".") {
@@ -257,11 +277,22 @@ func (r *resolver) field(f *fieldName) {
 			}
 		}
 		var names []string
+		maps := map[string]bool{}
 		for _, c := range columns {
 			names = append(names, c.Name)
+			maps[c.Name] = c.Type == query.TypeMap
+			if c.Name == "duration_ms" {
+				names = append(names, "duration")
+			}
 		}
+		// A near miss of a column is most likely a typo: offer the column as
+		// a fix, while the query still reads the attribute.
 		if hint := suggest.Spelling(strings.ToLower(key), names); hint != "" {
 			message += "; " + hint
+			if name := strings.TrimSuffix(strings.TrimPrefix(hint, "did you mean "), "?"); !maps[name] {
+				r.notice(f.At, message, query.FixIt{Label: name, Span: *textSpan(f.At), Text: name})
+				return
+			}
 		}
 		r.notice(f.At, message)
 	}
@@ -344,6 +375,15 @@ func (r *resolver) expr(e filterExpr) {
 				r.notice(x.At, fmt.Sprintf("%q is a field; did you mean %s:<value>?", x.Value.Text, c.Name))
 				break
 			}
+		}
+		// A map path alone is still free text (a word is a field only before
+		// an operator), but it reads as a field, as attributes['k'] does.
+		if lower := strings.ToLower(x.Value.Text); x.Value.Kind == wordValue && (strings.HasPrefix(lower, "attributes.") || strings.HasPrefix(lower, "resource.")) {
+			path := x.Value.Text
+			if strings.HasSuffix(path, ".") {
+				path += "key"
+			}
+			r.notice(x.At, fmt.Sprintf("%q is searched as text; for the field, write %s:<value>, or %s:* for any value", x.Value.Text, path, path))
 		}
 	case *rawEntry:
 		for _, name := range sqlscan.Parameters(x.Text) {
