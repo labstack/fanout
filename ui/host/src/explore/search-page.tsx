@@ -15,7 +15,7 @@ import { RangeMenu } from "../dashboards/toolbar";
 import type { RowControls } from "../dashboards/viz/table";
 import { LogDetails } from "./log-details";
 import { FanqlEditor } from "../fanql-editor/fanql-editor";
-import { completeFanql, parseFanql, type Notice } from "./api";
+import { completeFanql, formatFanql, parseFanql, type Notice } from "./api";
 import { SaveDialog, defaultTitle } from "./save-dialog";
 import { exploreTime, maxSlower, type ExploreSearch, type Picks } from "./search";
 import type { TextSpan } from "../api-error";
@@ -59,6 +59,24 @@ const searchCopy = (result: PanelResult): PanelResult => result.reason === "busy
 const combine = (filters: string, picked: string) => filters.trim() && picked ? `(${filters}) ${picked}` : filters.trim() ? filters : picked;
 /** FanQL quotes a value with doubled inner quotes. */
 const quoted = (value: string) => `"${value.replaceAll('"', '""')}"`;
+/** A stored filter that reads the span status column, ignoring quoted text such as attribute keys. */
+const readsStatus = (sql: string) => /\bstatus\b/i.test(sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"/g, "''"));
+
+/**
+ * The searched spans grouped by service, as a FanQL query. Status terms would
+ * make every rate 0 or 100%, and an excluded term drops whole traces here but
+ * only single spans there, so both are left out.
+ */
+async function servicesQuery(query: Panel["query"]): Promise<string> {
+  const where = query?.where ?? [];
+  let filters = "";
+  if (where.length > 0) {
+    const formatted = await formatFanql({ query: { from: "spans", where }, viz: "traces" });
+    filters = formatted.where.filter((entry, i) => !entry.startsWith("-") && !readsStatus(where[i] ?? ""))
+      .map(entry => /\bor\b/i.test(entry) ? `(${entry})` : entry).join(" ");
+  }
+  return `spans${filters ? ` where ${filters}` : ""} | count(), error_rate(), p95(duration) by service sort error_rate`;
+}
 
 type Ran = { text: string; terms: string; sort: string; window: string; panel: Panel; result: PanelDisplayResult };
 
@@ -192,11 +210,12 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       <Group gap="xs">
         <Button loading={running} onClick={() => void execute(text, sort)}>Search</Button>
         <SegmentedControl size="xs" aria-label="Order" value={sort} data={[...preset.sorts]} onChange={value => onSearch({ ...search, sort: value })} />
-        {preset.viz === "traces" && onExplore && <Button variant="subtle" size="xs" disabled={!ran} onClick={() => {
-          // The last search's spans, one row per service, in Explore where the query stays visible.
-          const filters = ran ? combine(ran.text, ran.terms).trim() : "";
-          onExplore(`spans${filters ? ` where ${filters}` : ""} | count(), error_rate(), p95(duration) by service sort error_rate`);
-        }}>Services by error rate</Button>}
+        {preset.viz === "traces" && onExplore && <Tooltip label="Error rate of the matching spans in each service, in Explore. Status and excluded terms are left out.">
+          <Button variant="subtle" size="xs" disabled={!ran} onClick={() => {
+            // The last search's spans, one row per service, in Explore where the query stays visible.
+            if (ran) servicesQuery(ran.panel.query).then(onExplore, (failure: unknown) => setError(failure instanceof Error ? failure.message : "Request failed"));
+          }}>Span error rates by service</Button>
+        </Tooltip>}
       </Group>
       <Tooltip label="Search for something that returns rows first" disabled={canSave}><span><Button variant="default" disabled={!canSave} onClick={() => ran && setSaving(ran.panel)}>Save to dashboard</Button></span></Tooltip>
     </Group>

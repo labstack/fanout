@@ -163,12 +163,28 @@ describe("SearchPage", () => {
     expect(ui.getByRole("button", { name: "Exclude service flagd" })).toBeTruthy();
   });
 
-  it("opens the searched spans by service in Explore, worst error rate first", async () => {
+  it("opens the searched spans by service in Explore without status or excluded terms", async () => {
     const onExplore = vi.fn();
-    const { ui, wait } = await render(tracesPreset, { q: "a or b", picks: { errors: "1" } }, onExplore);
+    const where = ["(service = 'a' OR service = 'b')", "(service IS NULL OR service != 'cart')", "status = 'STATUS_CODE_ERROR'", "duration_ms > 500"];
+    parse = async body => json({ query: { from: body.source, where }, canonical: body.text, viz: { compatible: [], edits: [] }, notices: [] });
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/fanql/format"
+      ? json({ text: "", exactness: "exact", editable: true, requires: [], notices: [], where: ["service:a or service:b", "-service:cart", "status:error", "duration>500ms"], measures: [] })
+      : base(input, init));
+    const { ui, wait } = await render(tracesPreset, { q: "(service:a or service:b) -service:cart", picks: { errors: "1", slower: "500" } }, onExplore);
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    await act(async () => ui.getByRole("button", { name: "Services by error rate" }).click());
-    expect(onExplore).toHaveBeenCalledWith("spans where (a or b) status:error | count(), error_rate(), p95(duration) by service sort error_rate");
+    await act(async () => ui.getByRole("button", { name: "Span error rates by service" }).click());
+    await wait(() => expect(onExplore).toHaveBeenCalledWith("spans where (service:a or service:b) duration>500ms | count(), error_rate(), p95(duration) by service sort error_rate"));
+    expect(bodies("/api/fanql/format")[0]).toEqual({ query: { from: "spans", where }, viz: "traces" });
+  });
+
+  it("opens every span by service when nothing filters the traces", async () => {
+    const onExplore = vi.fn();
+    const { ui, wait } = await render(tracesPreset, {}, onExplore);
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await act(async () => ui.getByRole("button", { name: "Span error rates by service" }).click());
+    await wait(() => expect(onExplore).toHaveBeenCalledWith("spans | count(), error_rate(), p95(duration) by service sort error_rate"));
+    expect(bodies("/api/fanql/format")).toHaveLength(0);
   });
 
   it("opens the trace drawer named in the URL", async () => {
