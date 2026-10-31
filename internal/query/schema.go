@@ -2,7 +2,9 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -54,19 +56,31 @@ type MetricSchema struct {
 	Count       int64  `json:"count"`
 }
 
+// A schemaEntry holds a discovered schema until expires, or the one
+// discovery in flight for its key, which every concurrent caller joins.
 type schemaEntry struct {
 	schema  *Schema
 	expires time.Time
+	flight  *schemaFlight
+}
+
+type schemaFlight struct {
+	done   chan struct{}
+	schema *Schema
+	err    error
 }
 
 const (
 	schemaTTL        = time.Minute
 	maxSchemaEntries = 64
+	schemaDeadline   = 20 * time.Second
 )
 
 // Schema describes what telemetry exists: columns with their common values,
-// attribute keys sampled from recent rows, metric names and services. It is
-// the agent's map before it drafts panels, and is cached for a minute.
+// attribute keys and values sampled from recent rows, metric names and
+// services. It is the agent's map before it drafts panels, and is cached for a
+// minute. Concurrent callers for one window and namespace share one
+// discovery, which outlives a caller that gives up.
 func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, error) {
 	if req.Window == "" {
 		req.Window = "1h"
@@ -75,13 +89,59 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 	if !ok || span > 24*time.Hour {
 		return nil, Problems{{Path: "window", Message: "window must be one of 5m, 15m, 1h, 3h, 6h, 12h or 24h"}}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	key := req.Window + "|" + req.Namespace
 	e.mu.Lock()
 	entry, ok := e.schemas[key]
-	e.mu.Unlock()
-	if ok && e.now().Before(entry.expires) {
+	if ok && entry.flight == nil && e.now().Before(entry.expires) {
+		e.mu.Unlock()
 		return entry.schema, nil
 	}
+	flight := entry.flight
+	if !ok || flight == nil {
+		flight = &schemaFlight{done: make(chan struct{})}
+		e.schemas[key] = schemaEntry{flight: flight}
+		go e.discoverFlight(context.WithoutCancel(ctx), key, req, span, flight)
+	}
+	e.mu.Unlock()
+	select {
+	case <-flight.done:
+		return flight.schema, flight.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (e *Executor) discoverFlight(ctx context.Context, key string, req SchemaRequest, span time.Duration, flight *schemaFlight) {
+	ctx, cancel := context.WithTimeout(ctx, schemaDeadline)
+	defer cancel()
+	flight.schema, flight.err = e.discover(ctx, req, span)
+	e.mu.Lock()
+	now := e.now()
+	for k, v := range e.schemas {
+		if v.flight == nil && !now.Before(v.expires) {
+			delete(e.schemas, k)
+		}
+	}
+	if len(e.schemas) >= maxSchemaEntries {
+		for k, v := range e.schemas {
+			if v.flight == nil {
+				delete(e.schemas, k)
+			}
+		}
+	}
+	if flight.err != nil {
+		delete(e.schemas, key)
+	} else {
+		e.schemas[key] = schemaEntry{schema: flight.schema, expires: now.Add(schemaTTL)}
+	}
+	e.mu.Unlock()
+	close(flight.done)
+}
+
+func (e *Executor) discover(ctx context.Context, req SchemaRequest, span time.Duration) (*Schema, error) {
 	end := e.now().UTC()
 	start := end.Add(-span)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: req.Namespace})
@@ -93,11 +153,18 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 			return nil, err
 		}
 		schema := SignalSchema{TimeColumn: sig.time}
-		for _, f := range sig.fields {
-			schema.Columns = append(schema.Columns, ColumnSchema{Field: f, Values: values[f.Name]})
-		}
 		if schema.Attributes, err = e.attributes(ctx, sig, start, end, req.Namespace); err != nil {
 			return nil, err
+		}
+		for _, a := range schema.Attributes {
+			for column, key := range derivedColumns {
+				if a.Scope == "attributes" && a.Key == key && slices.Contains(sig.lowCard, column) {
+					values[column] = a.Values
+				}
+			}
+		}
+		for _, f := range sig.fields {
+			schema.Columns = append(schema.Columns, ColumnSchema{Field: f, Values: values[f.Name]})
 		}
 		if name == "metrics" {
 			if schema.Metrics, err = e.metricNames(ctx, start, end, req.Namespace); err != nil {
@@ -109,18 +176,6 @@ func (e *Executor) Schema(ctx context.Context, req SchemaRequest) (*Schema, erro
 		}
 		out.Signals[name] = schema
 	}
-	e.mu.Lock()
-	now := e.now()
-	for k, v := range e.schemas {
-		if !now.Before(v.expires) {
-			delete(e.schemas, k)
-		}
-	}
-	if len(e.schemas) >= maxSchemaEntries {
-		clear(e.schemas)
-	}
-	e.schemas[key] = schemaEntry{schema: out, expires: now.Add(schemaTTL)}
-	e.mu.Unlock()
 	return out, nil
 }
 
@@ -135,14 +190,22 @@ func windowWhere(sig *signal, start, end time.Time, namespace string) (string, [
 	return where, args
 }
 
+// derivedColumns are read from the attributes map by the spans view, so a
+// full scan extracts every row's VARIANT, which dominated a 24h discovery.
+// Their values come from the attribute sample instead (see Schema).
+var derivedColumns = map[string]string{"messaging_system": "messaging.system"}
+
 func (e *Executor) lowCardinality(ctx context.Context, sig *signal, start, end time.Time, namespace string) (map[string][]Option, error) {
 	where, args := windowWhere(sig, start, end, namespace)
-	parts := make([]string, 0, len(sig.lowCard))
+	// UNPIVOT counts every listed column in one scan and drops NULLs.
+	var projection []string
 	for _, column := range sig.lowCard {
-		parts = append(parts, fmt.Sprintf("SELECT %s AS c, CAST(%s AS VARCHAR) AS v, count(*) AS n FROM base WHERE %s IS NOT NULL AND CAST(%s AS VARCHAR) <> '' GROUP BY 2",
-			sqlString(column), quoteIdent(column), quoteIdent(column), quoteIdent(column)))
+		if derivedColumns[column] == "" {
+			projection = append(projection, fmt.Sprintf("CAST(%s AS VARCHAR) AS %s", quoteIdent(column), quoteIdent(column)))
+		}
 	}
-	query := "WITH base AS (SELECT * FROM " + sig.name + " WHERE " + where + ") " + strings.Join(parts, " UNION ALL ")
+	query := "SELECT c, v, count(*) AS n FROM (UNPIVOT (SELECT " + strings.Join(projection, ", ") + " FROM " + sig.name + " WHERE " + where +
+		") ON COLUMNS(*) INTO NAME c VALUE v) WHERE v <> '' GROUP BY c, v"
 	rows, err := e.engine.QueryContext(ctx, query, args...)
 	if err != nil {
 		if isOperational(err) {
@@ -175,16 +238,28 @@ func (e *Executor) lowCardinality(ctx context.Context, sig *signal, start, end t
 
 func (e *Executor) attributes(ctx context.Context, sig *signal, start, end time.Time, namespace string) ([]AttributeSchema, error) {
 	where, args := windowWhere(sig, start, end, namespace)
+	// Values come from the same sample: the most common 12 scalar values of
+	// each key, as text, for completion.
 	query := `WITH sample AS (
   SELECT service, to_json(attributes) AS a, to_json(resource) AS r FROM ` + sig.name + ` WHERE ` + where + ` LIMIT 5000
 ), keyed AS (
   SELECT service, 'attributes' AS scope, unnest(json_keys(a)) AS k, a AS j FROM sample
   UNION ALL
   SELECT service, 'resource' AS scope, unnest(json_keys(r)) AS k, r AS j FROM sample
+), typed AS (
+  SELECT service, scope, k, json_type(j, '$."' || replace(k, '"', '\"') || '"') AS t, json_extract_string(j, '$."' || replace(k, '"', '\"') || '"') AS v FROM keyed
+), keys AS (
+  SELECT scope, k, any_value(t) AS t, count(*) AS n,
+         coalesce(array_to_string(list(DISTINCT service ORDER BY service) FILTER (WHERE service <> '')[1:3], ', '), '') AS services
+  FROM typed GROUP BY scope, k ORDER BY n DESC, k LIMIT 200
+), counted AS (
+  SELECT scope, k, v, count(*) AS c FROM typed
+  WHERE v IS NOT NULL AND v <> '' AND length(v) <= 100 AND t NOT IN ('OBJECT', 'ARRAY') GROUP BY scope, k, v
+), top AS (
+  SELECT scope, k, CAST(to_json(list({'value': v, 'count': c} ORDER BY c DESC, v)[1:12]) AS VARCHAR) AS vals FROM counted GROUP BY scope, k
 )
-SELECT scope, k, any_value(json_type(j, '$."' || replace(k, '"', '\"') || '"')) AS t, count(*) AS n,
-       array_to_string(list(DISTINCT service ORDER BY service)[1:3], ', ') AS services
-FROM keyed GROUP BY scope, k ORDER BY n DESC, k LIMIT 200`
+SELECT keys.scope, keys.k, keys.t, keys.n, keys.services, top.vals
+FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 	rows, err := e.engine.QueryContext(ctx, query, args...)
 	if err != nil {
 		if isOperational(err) {
@@ -196,9 +271,14 @@ FROM keyed GROUP BY scope, k ORDER BY n DESC, k LIMIT 200`
 	var out []AttributeSchema
 	for rows.Next() {
 		var a AttributeSchema
-		var jsonType *string
-		if err := rows.Scan(&a.Scope, &a.Key, &jsonType, &a.Count, &a.Services); err != nil {
+		var jsonType, values *string
+		if err := rows.Scan(&a.Scope, &a.Key, &jsonType, &a.Count, &a.Services, &values); err != nil {
 			return nil, err
+		}
+		if values != nil {
+			if err := json.Unmarshal([]byte(*values), &a.Values); err != nil {
+				return nil, fmt.Errorf("discover %s attribute values: %w", sig.name, err)
+			}
 		}
 		a.Type = "string"
 		if jsonType != nil {
