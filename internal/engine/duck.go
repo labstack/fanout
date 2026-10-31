@@ -68,8 +68,8 @@ type Duck struct {
 	// Cached under writeGate so an idle pass executes no SQL at all.
 	rollupWatermarks map[string]int64
 	// serviceChunk narrows the service rollup's ingest window after it runs
-	// out of memory; zero is the full rollupChunkNanos. Guarded by writeGate.
-	serviceChunk int64
+	// out of memory. Guarded by writeGate.
+	serviceChunk rollupChunk
 	// servicePending reports that the last service pass stopped short of
 	// the horizon, so a tick drains further passes.
 	servicePending bool
@@ -543,6 +543,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	rows, err := d.rollupOnce(ctx)
 	metrics.RecordRollup(rows, time.Since(start).Seconds(), err == nil)
 	if err != nil {
+		d.noteFailure(err)
 		slog.Error("startup rollup failed", "rows", rows, "err", err)
 	} else if rows > 0 {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
@@ -843,26 +844,45 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	return err
 }
 
-// nextServiceRollupChunk halves the service rollup's ingest window after it
-// runs out of memory, down to a second, and doubles it back after a success.
-// A backfill packs days of event time into minutes of ingest, and every
-// affected bucket is recomputed whole, so a full window failed on every
-// retry and the rollup never advanced.
-func nextServiceRollupChunk(chunk int64, err error) int64 {
+// rollupChunkWins is how many committed passes in a row grow a narrowed
+// service rollup window.
+const rollupChunkWins = 3
+
+// A rollupChunk is the service rollup's ingest window. It halves after a
+// pass runs out of memory, down to a second, and doubles back towards the
+// full rollupChunkNanos (size zero) after rollupChunkWins committed passes
+// in a row. A backfill packs days of event time into minutes of ingest, and
+// every affected bucket is recomputed whole, so a full window failed on
+// every retry and the rollup never advanced. A pass that did no work leaves
+// it unchanged: growing on those made it halve, grow and fail again.
+type rollupChunk struct {
+	size int64
+	wins int
+}
+
+func (c *rollupChunk) next(committed bool, err error) {
 	var engineError *duckdb.Error
 	switch {
+	case err == nil && !committed:
 	case err == nil:
-		if chunk == 0 || 2*chunk >= rollupChunkNanos {
-			return 0
+		if c.size == 0 {
+			return
 		}
-		return 2 * chunk
+		if c.wins++; c.wins < rollupChunkWins {
+			return
+		}
+		c.wins = 0
+		if c.size *= 2; c.size >= rollupChunkNanos {
+			c.size = 0
+		}
 	case errors.As(err, &engineError) && engineError.Type == duckdb.ErrorTypeOutOfMemory:
-		if chunk == 0 {
-			chunk = rollupChunkNanos
+		if c.size == 0 {
+			c.size = rollupChunkNanos
 		}
-		return max(chunk/2, int64(time.Second))
+		c.size = max(c.size/2, int64(time.Second))
+		c.wins = 0
 	default:
-		return chunk
+		c.wins = 0
 	}
 }
 
@@ -873,10 +893,10 @@ func (d *Duck) drainServiceRollup(ctx context.Context, budget time.Duration) (in
 	deadline := time.Now().Add(budget)
 	var total int64
 	for {
-		before := d.serviceChunk
+		before := d.serviceChunk.size
 		n, err := d.refreshServiceRollup(ctx)
 		total += n
-		retry := err != nil && d.serviceChunk != before
+		retry := err != nil && d.serviceChunk.size != before
 		if err != nil && !retry || !retry && !d.servicePending || !time.Now().Before(deadline) {
 			return total, err
 		}
@@ -885,13 +905,13 @@ func (d *Duck) drainServiceRollup(ctx context.Context, budget time.Duration) (in
 
 func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err error) {
 	d.servicePending = false
-	defer func() {
-		if ctx.Err() == nil {
-			d.serviceChunk = nextServiceRollupChunk(d.serviceChunk, err)
-		}
-	}()
 	start := time.Now()
 	result := metrics.RollupError
+	defer func() {
+		if ctx.Err() == nil {
+			d.serviceChunk.next(result == metrics.RollupSuccess, err)
+		}
+	}()
 	var recordedRows int64
 	// Progress is reported even when the rollup fails. Otherwise the lag gauge
 	// freezes at its last healthy value during exactly the outage it exists to
@@ -943,8 +963,8 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 	}
 	defer func() { _ = tx.Rollback() }()
 	windowStart, windowEnd, _ := rollupWindow(lastWatermark, minimum, horizon)
-	if d.serviceChunk > 0 && windowEnd > windowStart+d.serviceChunk {
-		windowEnd = windowStart + d.serviceChunk
+	if chunk := d.serviceChunk.size; chunk > 0 && windowEnd > windowStart+chunk {
+		windowEnd = windowStart + chunk
 	}
 	d.servicePending = windowEnd < horizon
 	newWatermark := windowEnd
