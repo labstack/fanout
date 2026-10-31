@@ -62,12 +62,21 @@ func withRecoveredProblems(q *queryTree, problems query.Problems, opts Options, 
 		}
 		problems = append(problems, p)
 	}
-	sort.SliceStable(problems, func(i, j int) bool {
-		return problems[i].Span != nil && problems[j].Span != nil && problems[i].Span.Start < problems[j].Span.Start
-	})
+	sortProblems(problems)
 	problems = presentProblems(problems)
 	if len(problems) > maxProblems {
 		problems = append(problems[:maxProblems], query.Problem{Path: "text", Message: message(diagMore), Span: problems[maxProblems].Span})
 	}
 	return problems
+}
+
+// sortProblems orders problems by where they start, unlocated ones last.
+func sortProblems(problems query.Problems) {
+	sort.SliceStable(problems, func(i, j int) bool {
+		a, b := problems[i].Span, problems[j].Span
+		if a == nil || b == nil {
+			return a != nil && b == nil
+		}
+		return a.Start < b.Start
+	})
 }

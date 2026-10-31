@@ -174,3 +174,20 @@ func TestCompileNoticesWithoutViz(t *testing.T) {
 		t.Fatalf("undeclared variable free text: %+v", ps)
 	}
 }
+
+// Problems without a span sort after every located problem.
+func TestSortProblemsPutsUnlocatedLast(t *testing.T) {
+	problems := query.Problems{
+		{Message: "five", Span: &query.TextSpan{Start: 5, End: 6}},
+		{Message: "none"},
+		{Message: "one", Span: &query.TextSpan{Start: 1, End: 2}},
+	}
+	sortProblems(problems)
+	var got []string
+	for _, p := range problems {
+		got = append(got, p.Message)
+	}
+	if strings.Join(got, ",") != "one,five,none" {
+		t.Fatalf("order %v", got)
+	}
+}
