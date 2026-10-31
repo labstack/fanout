@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -70,9 +71,65 @@ func TestHandlerServesRobotsAndRefusesMissingAssets(t *testing.T) {
 	}
 }
 
-func request(t *testing.T, handler http.Handler, target string) *httptest.ResponseRecorder {
+// Hashed bundles were served uncompressed with no validator or lifetime, so
+// every navigation downloaded about 2.4 MB of JavaScript again.
+func TestHandlerCachesHashedAssetsAndCompressesThem(t *testing.T) {
+	handler := Handler()
+	index := request(t, handler, "/")
+	if got := index.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("index.html Cache-Control = %q, want no-cache", got)
+	}
+	if index.Header().Get("ETag") == "" {
+		t.Fatal("index.html has no ETag")
+	}
+	if got := request(t, handler, "/dashboards/x").Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("SPA fallback Cache-Control = %q, want no-cache", got)
+	}
+	script := regexp.MustCompile(`src="([^"]+\.js)"`).FindStringSubmatch(index.Body.String())[1]
+
+	plain := request(t, handler, script)
+	if got := plain.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("hashed asset Cache-Control = %q", got)
+	}
+	if plain.Header().Get("Content-Encoding") != "" || !strings.HasPrefix(plain.Header().Get("Content-Type"), "text/javascript") {
+		t.Fatalf("identity response headers = %v", plain.Header())
+	}
+
+	zipped := request(t, handler, script, "Accept-Encoding", "gzip, deflate, br")
+	if zipped.Header().Get("Content-Encoding") != "gzip" || zipped.Header().Get("Vary") != "Accept-Encoding" {
+		t.Fatalf("gzip response headers = %v", zipped.Header())
+	}
+	if zipped.Body.Len() >= plain.Body.Len()/2 {
+		t.Fatalf("gzip body is %d bytes for %d", zipped.Body.Len(), plain.Body.Len())
+	}
+	reader, err := gzip.NewReader(zipped.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unzipped, err := io.ReadAll(reader)
+	if err != nil || string(unzipped) != plain.Body.String() {
+		t.Fatalf("gzip body does not decode to the asset: %v", err)
+	}
+	if zipped.Header().Get("ETag") == plain.Header().Get("ETag") {
+		t.Fatal("both encodings share one ETag")
+	}
+	if refused := request(t, handler, script, "Accept-Encoding", "gzip;q=0"); refused.Header().Get("Content-Encoding") != "" {
+		t.Fatal("gzip;q=0 still got gzip")
+	}
+
+	revalidated := request(t, handler, script, "Accept-Encoding", "gzip", "If-None-Match", zipped.Header().Get("ETag"))
+	if revalidated.Code != http.StatusNotModified || revalidated.Body.Len() != 0 {
+		t.Fatalf("If-None-Match = %d with %d bytes, want 304", revalidated.Code, revalidated.Body.Len())
+	}
+}
+
+func request(t *testing.T, handler http.Handler, target string, headers ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
+	handler.ServeHTTP(recorder, req)
 	return recorder
 }
