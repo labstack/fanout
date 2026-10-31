@@ -93,3 +93,34 @@ func TestAlertRulesRejectNonStringWebhookHeaders(t *testing.T) {
 		t.Fatalf("string header = %d %s, want 201", rec.Code, rec.Body)
 	}
 }
+
+// A rule saved before the header check tightened can still be toggled: a
+// replace checks headers only when it changes them.
+func TestAlertRuleReplaceChecksOnlyChangedHeaders(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := alert.NewStore(s.db.DB)
+	RegisterAlertRoutes(s.e, store, nil)
+	admin, err := s.users.CreateWithAudit("alert-admin@example.com", "", "admin", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, admin)
+	stored, err := store.CreateRule(alert.Rule{Name: "Errors", Enabled: true, Expression: "error_rate > 0.05", WebhookHeaders: `{"Bad Name":"x"}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(headers string) *httptest.ResponseRecorder {
+		body := `{"name":"Errors","enabled":false,"expression":"error_rate > 0.05","webhook_headers":` + strconv.Quote(headers) + `}`
+		req := sessionRequest(http.MethodPut, "/api/alerting/rules/"+stored.ID, strings.NewReader(body), cookie)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := replace(stored.WebhookHeaders); rec.Code != http.StatusOK {
+		t.Fatalf("toggle with stored headers = %d %s, want 200", rec.Code, rec.Body)
+	}
+	if rec := replace(`{"Other Bad":"x"}`); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Other Bad") {
+		t.Fatalf("changed invalid headers = %d %s, want 400", rec.Code, rec.Body)
+	}
+}

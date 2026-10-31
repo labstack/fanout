@@ -93,7 +93,7 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name and expression are required")
 	}
 
-	if err := checkRule(req); err != nil {
+	if err := checkRule(req, true); err != nil {
 		return err
 	}
 
@@ -126,7 +126,11 @@ func (h *alertHandler) ReplaceRule(c *echo.Context) error {
 	}
 	req.ID = id
 
-	if err := checkRule(req); err != nil {
+	// Headers are checked only when the replace changes them, so a rule saved
+	// before the check tightened can still be toggled or edited elsewhere.
+	stored, err := h.store.GetRule(id)
+	changed := err != nil || stored.WebhookHeaders != req.WebhookHeaders
+	if err := checkRule(req, changed); err != nil {
 		return err
 	}
 
@@ -211,16 +215,19 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 	})
 }
 
-// checkRule rejects an expression that does not compile and webhook headers
-// that are not a JSON object of strings. A replace may omit the expression.
-func checkRule(rule alert.Rule) error {
+// checkRule rejects an expression that does not compile and, when headers is
+// set, webhook headers that are not a JSON object of valid HTTP headers. A
+// replace may omit the expression.
+func checkRule(rule alert.Rule, headers bool) error {
 	if strings.TrimSpace(rule.Expression) != "" {
 		if _, err := alert.CompileExpression(rule.Expression); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid expression: "+err.Error())
 		}
 	}
-	if err := alert.CheckHeaders(rule.WebhookHeaders); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if headers {
+		if err := alert.CheckHeaders(rule.WebhookHeaders); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 	}
 	return nil
 }

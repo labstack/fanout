@@ -20,14 +20,23 @@ function draftOf(rule?: Rule): RuleDraft {
   return { ...blank, ...draft };
 }
 
-/** Why webhook headers are invalid: they must be a JSON object of strings. */
+/** An HTTP header name: one or more token characters (RFC 9110). */
+const headerName = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+/** A header value may not hold control characters other than tab, so no line breaks. */
+const controlIn = (value: string) => [...value].some(c => { const code = c.charCodeAt(0); return (code < 0x20 && code !== 0x09) || code === 0x7f; });
+
+/** Why webhook headers are invalid, as internal/alert/webhook.go CheckHeaders: a JSON object of valid HTTP header names and string values. */
 function headersProblem(headers: string | undefined): string | undefined {
   if (!headers?.trim()) return undefined;
   let value: unknown;
   try { value = JSON.parse(headers); } catch { return "Enter a JSON object"; }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return "Enter a JSON object";
-  const name = Object.keys(value).find(key => typeof (value as Record<string, unknown>)[key] !== "string");
-  return name === undefined ? undefined : `Header ${name} must be a string`;
+  for (const [name, header] of Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    if (!headerName.test(name)) return `"${name}" is not a valid header name`;
+    if (typeof header !== "string") return `Header ${name} must be a string`;
+    if (controlIn(header)) return `Header ${name} has a line break or control character`;
+  }
+  return undefined;
 }
 
 /** Creates or replaces a rule; the server checks the expression and returns why it is invalid. */
@@ -36,7 +45,8 @@ export function RuleForm({ rule, onClose, onSave }: { rule?: Rule; onClose(): vo
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const set = (patch: Partial<RuleDraft>) => { setDraft(current => ({ ...current, ...patch })); setError(undefined); };
-  const headers = headersProblem(draft.webhook_headers);
+  // Like the server, check headers only when they change, so other edits still save.
+  const headers = draft.webhook_headers === rule?.webhook_headers ? undefined : headersProblem(draft.webhook_headers);
   const ready = draft.name.trim() !== "" && draft.expression.trim() !== "" && !headers;
   // A misspelled service saves, but would never fire; say so without blocking.
   const services = useQuery({ queryKey: ["alerting", "services"], queryFn: ({ signal }) => listServices(signal), staleTime: 60_000, retry: false });

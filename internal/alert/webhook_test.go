@@ -210,7 +210,7 @@ func TestCheckHeaders(t *testing.T) {
 			t.Errorf("CheckHeaders(%q) = %v, want nil", ok, err)
 		}
 	}
-	for _, bad := range []string{`{"X-Test": 5}`, `[]`, `"x"`, `{`} {
+	for _, bad := range []string{`{"X-Test": 5}`, `[]`, `"x"`, `{`, `{"":"x"}`, `{"Bad Name":"x"}`, `{"X-Test":"a\r\nInjected: y"}`, `{"X-Test":"a\u0000b"}`} {
 		if err := CheckHeaders(bad); err == nil {
 			t.Errorf("CheckHeaders(%q) = nil, want error", bad)
 		}

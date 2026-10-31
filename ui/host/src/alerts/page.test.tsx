@@ -114,8 +114,25 @@ describe("AlertsPage", () => {
     await input("Webhook headers", "{\"X-Test\": 5}");
     expect(ui.getByText("Header X-Test must be a string")).toBeTruthy();
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(true);
-    await input("Webhook headers", "{\"X-Team\": \"core\"}");
+    await input("Webhook headers", "{\"Bad Name\": \"x\"}");
+    expect(ui.getByText("\"Bad Name\" is not a valid header name")).toBeTruthy();
+    await input("Webhook headers", "{\"X-Test\": \"a\\r\\nInjected: y\"}");
+    expect(ui.getByText("Header X-Test has a line break or control character")).toBeTruthy();
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(true);
+    await input("Webhook headers", "{\"X-Team\": \"core\\tops\"}");
     expect(ui.getByRole<HTMLButtonElement>("button", { name: "Create rule" }).disabled).toBe(false);
+  });
+
+  it("saves other edits to a rule whose stored headers are invalid", async () => {
+    rules = [{ ...rule, webhook_headers: "{\"Bad Name\": \"x\"}" }];
+    const { ui, wait, input } = await render();
+    await wait(() => expect(ui.getByRole("button", { name: "Checkout errors actions" })).toBeTruthy());
+    await act(async () => ui.getByRole("button", { name: "Checkout errors actions" }).click());
+    await act(async () => ui.getByRole("menuitem", { name: "Edit", hidden: true }).click());
+    await input("Description", "Paged");
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save rule" }).disabled).toBe(false);
+    await input("Webhook headers", "{\"Other Bad\": \"x\"}");
+    expect(ui.getByRole<HTMLButtonElement>("button", { name: "Save rule" }).disabled).toBe(true);
   });
 
   it("disables a rule by replacing it with every field kept", async () => {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // webhookClient is shared across all webhook deliveries.
@@ -41,8 +43,9 @@ func RenderTemplate(tmplStr string, ctx ActionContext) (string, error) {
 	return buf.String(), nil
 }
 
-// CheckHeaders reports whether headers is empty or a JSON object of string
-// values, naming the first header that is not a string.
+// CheckHeaders reports whether headers is empty or a JSON object of valid
+// HTTP header names and string values, naming the first header that is not.
+// A value is never echoed, since it may hold a credential.
 func CheckHeaders(headers string) error {
 	if headers == "" {
 		return nil
@@ -57,8 +60,15 @@ func CheckHeaders(headers string) error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if _, ok := values[name].(string); !ok {
+		if !httpguts.ValidHeaderFieldName(name) {
+			return fmt.Errorf("webhook header name %q is not a valid HTTP header name", name)
+		}
+		value, ok := values[name].(string)
+		if !ok {
 			return fmt.Errorf("webhook header %s must be a string", name)
+		}
+		if !httpguts.ValidHeaderFieldValue(value) {
+			return fmt.Errorf("webhook header %s has a line break or control character in its value", name)
 		}
 	}
 	return nil
