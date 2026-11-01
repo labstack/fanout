@@ -15,6 +15,11 @@ import (
 // window, and each new encoder then allocates 8 MiB of match history. Pooled
 // encoders are dropped at every garbage collection, so ingest rebuilt them
 // often enough that their history was most of what a commit allocated.
+//
+// The fastest level also stores a block's literals raw when it finds few
+// matches. Random trace and span IDs are mostly literals, so their hex text
+// would be stored at its full width; entropy-coding every literal block halves
+// it.
 var parquetCodec compress.Codec = &pageCodec{}
 
 const pageCodecWindow = 1 << 20
@@ -37,6 +42,7 @@ func (c *pageCodec) Encode(dst, src []byte) ([]byte, error) {
 			zstd.WithWindowSize(pageCodecWindow),
 			zstd.WithLowerEncoderMem(true),
 			zstd.WithZeroFrames(true),
+			zstd.WithAllLitEntropyCompression(true),
 			zstd.WithEncoderCRC(false),
 		)
 		if err != nil {
