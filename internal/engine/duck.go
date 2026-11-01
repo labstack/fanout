@@ -1891,18 +1891,31 @@ func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
 	return d.DB.Conn(ctx)
 }
 
+// readConn takes a read-pool connection, then admits it to the Parquet
+// snapshot. A reader queued for a connection reads no Parquet yet, so holding
+// the gate there would make a publisher wait out the pool's queue as well.
+// The caller closes conn, then releases the gate with parquetMu.RUnlock. No
+// gate holder waits for a read-pool connection, so the order cannot deadlock.
+func (d *Duck) readConn(ctx context.Context) (*sql.Conn, error) {
+	conn, err := d.acquireRead(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
 // QueryContext executes a read against immutable Parquet files and DuckDB's
 // local rollup cache.
 func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, err
-	}
-	// The connection is taken first and timed separately: DB.QueryContext would
-	// fold the wait for a free connection into the statement's duration, and
-	// telling queueing from execution is the whole reason this is measured.
-	conn, err := d.acquireRead(ctx)
+	// The connection is taken explicitly and timed separately: DB.QueryContext
+	// would fold the wait for a free connection into the statement's duration,
+	// and telling queueing from execution is the whole reason this is measured.
+	conn, err := d.readConn(ctx)
 	if err != nil {
-		d.parquetMu.RUnlock()
 		return nil, err
 	}
 	var tx *sql.Tx
@@ -2030,15 +2043,11 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 		return sql.ErrNoRows
 	}
 
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return err
-	}
-	defer d.parquetMu.RUnlock()
-	conn, err := d.acquireRead(ctx)
+	conn, err := d.readConn(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	defer func() { _ = conn.Close(); d.parquetMu.RUnlock() }()
 	// This one covers the scan as well as the statement: a single row cannot
 	// be fetched separately from being read. Both are DuckDB's time rather
 	// than the pool's, which is the distinction the histogram is drawing.

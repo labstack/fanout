@@ -344,7 +344,7 @@ func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
 }
 
 func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
-	d := &Duck{}
+	d := &Duck{DB: openTestDuck(t)}
 	mustLock(&d.parquetMu)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()

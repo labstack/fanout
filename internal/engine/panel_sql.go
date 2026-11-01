@@ -20,15 +20,11 @@ func (d *Duck) ParseSQL(ctx context.Context, query string) (map[string]any, erro
 // by NULL, which DESCRIBE can bind; the returned statement keeps query's
 // placeholders and is run with QueryContext under the panel's read window.
 func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, maxRows int) (string, []bool, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return "", nil, err
-	}
-	defer d.parquetMu.RUnlock()
-	conn, err := d.acquireRead(ctx)
+	conn, err := d.readConn(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close(); d.parquetMu.RUnlock() }()
 	if err := validateSQLAST(ctx, conn, query, true); err != nil {
 		return "", nil, err
 	}

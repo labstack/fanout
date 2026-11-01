@@ -136,12 +136,8 @@ func checkPattern(node map[string]any, name string) error {
 }
 
 func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain bool) (queryrows.Rows, []bool, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, nil, err
-	}
-	conn, err := d.acquireRead(ctx)
+	conn, err := d.readConn(ctx)
 	if err != nil {
-		d.parquetMu.RUnlock()
 		return nil, nil, err
 	}
 	release := func() { _ = conn.Close(); d.parquetMu.RUnlock() }
