@@ -74,13 +74,18 @@ describe("frames", () => {
     const time = { name: "time", type: "time" as const, role: "time" as const }, service = { name: "service", type: "string" as const, role: "dimension" as const }, count = { name: "count", type: "number" as const, role: "measure" as const };
     expect(toSeries({ columns: [time, service, count], values: [[1], [null], [3]], rows: 1 }).map(s => s.name)).toEqual(["(none)"]);
     const frame: Frame = { columns: [service, count], values: [["", "cart"], [3, 4]], rows: 2 };
-    expect(toCategories(frame).categories).toEqual(["(none)", "cart"]);
     const option = barOption({ id: "b", title: "b", viz: "bar", query: { from: "spans", measures: ["count()"], by: ["service"] } }, frame, chartThemeFor(false), { width: 500, height: 248, measureText: text => text.length * 7 }) as unknown as { yAxis: { data: string[]; axisLabel: { width: number } }; series: { data: { selection?: { dimensions: Record<string, string> } }[] }[] };
     expect(option.yAxis.data).toEqual(["(none)", "cart"]);
     // The label width leaves the chart's own text measure some room.
     expect(option.yAxis.axisLabel.width).toBeGreaterThan("(none)".length * 7);
     // The drill still selects the stored value.
     expect(option.series[0].data[0].selection?.dimensions).toEqual({ service: "" });
+    // A stored "(none)" stays its own group with its own drill.
+    const both: Frame = { columns: [service, count], values: [["", "(none)"], [3, 4]], rows: 2 };
+    expect(toSeries({ columns: [time, service, count], values: [[1, 1], ["", "(none)"], [3, 4]], rows: 2 })).toHaveLength(2);
+    const split = barOption({ id: "b", title: "b", viz: "bar", query: { from: "spans", measures: ["count()"], by: ["service"] } }, both, chartThemeFor(false)) as unknown as typeof option;
+    expect(split.yAxis.data).toEqual(["(none)", "(none)"]);
+    expect(split.series[0].data.map(d => d.selection?.dimensions.service)).toEqual(["", "(none)"]);
   });
   it("pivots a grouped series by dimension value", () => {
     const out = toSeries(series);

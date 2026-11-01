@@ -230,8 +230,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
       if (frame.periods && frame.columns[index].name === "period") window = frame.periods[value];
       else dimensions[panel.query?.by?.[groupIndex++] ?? frame.columns[index].name] = value;
     }
-    // Keyed by the names the chart shows; the selection keeps the stored values.
-    selections.set(JSON.stringify(dims.map(index => groupName(frame.values[index][row]))), { dimensions, ...window });
+    selections.set(JSON.stringify(dims.map(index => String(frame.values[index][row] ?? ""))), { dimensions, ...window });
   }
   const unit = series[0]?.unit ?? panel.unit;
   const units = [...new Set(series.map((s) => s.unit ?? panel.unit))];
@@ -240,18 +239,18 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
   const split = Boolean(frame.periods?.["Before deploy"] || frame.periods?.["Since deploy"]);
   const measure = (text: string) => size.measureText?.(text, `11px ${theme.font}`) ?? Array.from(text).length * 6.6;
   // A few pixels over the widest label, so the chart's own measure does not cut a label that fits ours.
-  const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(measure)) + 4);
-  const legendLayout = wrappingLegend(series.map(s => s.name), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
+  const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(c => measure(groupName(c)))) + 4);
+  const legendLayout = wrappingLegend(series.map(s => groupName(s.name)), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
   const axes = units.map((axisUnit, i) => { const values = series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null)); const bounds = valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, size.width - categoryWidth - 80); return { ...bounds, type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: formatAxis(axisUnit, bounds), hideOverlap: true } }; });
   return {
     ...baseOption(theme, unit),
-    tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => s.name === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },
+    tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => groupName(s.name) === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },
     legend: legendLayout.option,
     grid: { left: 8, right: 56, top: (multi ? legendLayout.top : 8) + Math.max(0, units.length - 1) * 36, bottom: hidden ? 24 : 8, containLabel: true },
-    yAxis: { type: "category", inverse: true, data: categories, splitLine: {show:false}, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, width: categoryWidth, overflow: "truncate", formatter: (text: string) => middleEllipsis(text,categoryWidth,measure) } },
+    yAxis: { type: "category", inverse: true, data: categories.map(groupName), splitLine: {show:false}, axisLine: { lineStyle: { color: theme.grid } }, axisTick: { show: false }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, width: categoryWidth, overflow: "truncate", formatter: (text: string) => middleEllipsis(text,categoryWidth,measure) } },
     xAxis: axes.length === 1 ? axes[0] : axes,
     series: series.map((s, i) => ({
-      name: s.name,
+      name: groupName(s.name),
       interactive: true,
       xAxisIndex: units.indexOf(s.unit ?? panel.unit),
       tooltip: { valueFormatter: (value: number) => formatValue(s.unit ?? panel.unit, value) },
