@@ -401,8 +401,8 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 
 func newestBatchEvent(b telemetry.BatchMetadata) int64 {
 	newest := int64(-1 << 63)
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		bounds, count := batchTime(b, signal)
+	for _, s := range telemetry.Signals {
+		bounds, count := batchTime(b, s.Name)
 		if count > 0 {
 			if !bounds.Known {
 				return b.MaxIngestedNanos

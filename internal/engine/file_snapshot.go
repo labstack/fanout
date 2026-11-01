@@ -20,14 +20,8 @@ type snapshotSQL interface {
 }
 
 func batchTime(b telemetry.BatchMetadata, signal string) (telemetry.TimeRange, int) {
-	switch signal {
-	case "spans":
-		return b.SpanTime, b.Spans
-	case "logs":
-		return b.LogTime, b.Logs
-	default:
-		return b.MetricTime, b.Metrics
-	}
+	s, _ := telemetry.LookupSignal(signal)
+	return b.Signal(s)
 }
 func overlapping(b telemetry.BatchMetadata, signal string, w queryrows.Window) bool {
 	bounds, count := batchTime(b, signal)
@@ -95,7 +89,8 @@ func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w
 	}
 	batches := d.repository.Parquet.BatchMetadata()
 	sources := map[string]string{}
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		if _, raw := compiled.names["telemetry."+signal]; !raw {
 			if _, clean := compiled.names[signal]; !clean {
 				continue
@@ -277,7 +272,11 @@ func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string
 	d.snapshotMu.Unlock()
 	if !ok {
 		aliases := map[string]string{}
-		for _, name := range []string{"telemetry.spans", "telemetry.logs", "telemetry.metrics", "spans", "logs", "metrics", "trace_candidates", "trace_tail", "resource_inventory"} {
+		names := []string{"trace_candidates", "trace_tail", "resource_inventory"}
+		for _, s := range telemetry.Signals {
+			names = append(names, "telemetry."+s.Name, s.Name)
+		}
+		for _, name := range names {
 			alias := "__fanout_snapshot_" + strings.ReplaceAll(name, ".", "_")
 			aliases[name] = "SELECT * FROM " + alias
 		}

@@ -81,21 +81,14 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 	if err != nil {
 		return batchDataError(err)
 	}
-	signals := []struct {
-		name  string
-		count int
-	}{
-		{"spans", batch.metadata.Spans},
-		{"logs", batch.metadata.Logs},
-		{"metrics", batch.metadata.Metrics},
-	}
-	for _, signal := range signals {
-		if signal.count == 0 {
+	for _, signal := range Signals {
+		_, count := batch.metadata.Signal(signal)
+		if count == 0 {
 			continue
 		}
-		path := filepath.Join(dir, signal.name+".parquet")
-		if err := v.decode(ctx, path, signal.count); err != nil {
-			return fmt.Errorf("verify %s Parquet: %w", signal.name, err)
+		path := filepath.Join(dir, signal.Name+".parquet")
+		if err := v.decode(ctx, path, count); err != nil {
+			return fmt.Errorf("verify %s Parquet: %w", signal.Name, err)
 		}
 	}
 	if batch.metadata.Spans > 0 {

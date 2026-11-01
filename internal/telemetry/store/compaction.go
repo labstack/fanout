@@ -67,8 +67,6 @@ const (
 	maxDayCompactionRows int64 = 250_000
 )
 
-var parquetSignals = [...]string{"spans", "logs", "metrics"}
-
 type compactionMarker struct {
 	Output telemetry.BatchMetadata `json:"output"`
 	Inputs []string                `json:"inputs"`
@@ -233,8 +231,9 @@ func (r *Repository) compactParquet(ctx context.Context, publisher ParquetPublis
 		inputs []string
 		output string
 	}
-	plans := make([]mergePlan, 0, len(parquetSignals))
-	for _, signal := range parquetSignals {
+	plans := make([]mergePlan, 0, len(telemetry.Signals))
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		inputs := make([]string, 0, len(selected))
 		for _, batch := range selected {
 			path := filepath.Join(r.Parquet.BatchPath(batch.ID), signal+".parquet")

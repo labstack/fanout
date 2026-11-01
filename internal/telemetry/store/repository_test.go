@@ -621,7 +621,8 @@ func TestRepositoryRecoversInterruptedCompactionSwap(t *testing.T) {
 	if err := os.MkdirAll(stage, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, signal := range parquetSignals {
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		paths := make([]string, minCompactionInputs)
 		for i := range paths {
 			paths[i] = filepath.Join(repository.Parquet.BatchPath(fmt.Sprintf("recover-%d", i)), signal+".parquet")

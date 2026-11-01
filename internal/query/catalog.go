@@ -19,6 +19,7 @@ const (
 	TypeNumber FieldType = "number"
 	TypeTime   FieldType = "time"
 	TypeMap    FieldType = "map"
+	TypeBool   FieldType = "bool"
 )
 
 type Field struct {
@@ -46,7 +47,7 @@ func (c column) in(unit string) column { c.unit = unit; return c }
 
 var fieldTypes = map[telemetry.Type]FieldType{
 	telemetry.String: TypeString, telemetry.Int64: TypeNumber, telemetry.Uint64: TypeNumber,
-	telemetry.Float64: TypeNumber, telemetry.Time: TypeTime, telemetry.Variant: TypeMap,
+	telemetry.Float64: TypeNumber, telemetry.Bool: TypeBool, telemetry.Time: TypeTime, telemetry.Variant: TypeMap,
 }
 
 func newSignal(source *telemetry.Signal, lowCard []string, columns ...column) *signal {

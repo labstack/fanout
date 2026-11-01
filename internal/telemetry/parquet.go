@@ -66,6 +66,24 @@ type BatchMetadata struct {
 	MetricTime TimeRange `json:"-"`
 }
 
+// Signal returns the signal's event-time bounds and row count.
+func (m BatchMetadata) Signal(s *Signal) (TimeRange, int) {
+	count, bounds := m.signal(s)
+	return *bounds, *count
+}
+
+func (m *BatchMetadata) signal(s *Signal) (*int, *TimeRange) {
+	switch s {
+	case Spans:
+		return &m.Spans, &m.SpanTime
+	case Logs:
+		return &m.Logs, &m.LogTime
+	case Metrics:
+		return &m.Metrics, &m.MetricTime
+	}
+	panic("unknown signal " + s.Name)
+}
+
 type TimeRange struct {
 	MinNanos, MaxNanos int64
 	Known              bool
@@ -753,7 +771,10 @@ func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
 		dirs = append(dirs, batch.dir)
 	}
 	p.mu.RUnlock()
-	stats := map[string]ParquetStats{"spans": {}, "logs": {}, "metrics": {}}
+	stats := map[string]ParquetStats{}
+	for _, s := range Signals {
+		stats[s.Name] = ParquetStats{}
+	}
 	for _, dir := range dirs {
 		for signal := range stats {
 			info, err := os.Stat(filepath.Join(dir, signal+".parquet"))
@@ -1130,18 +1151,10 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	signals := [...]struct {
-		*Signal
-		count  int
-		bounds *TimeRange
-	}{
-		{Spans, metadata.Spans, &metadata.SpanTime},
-		{Logs, metadata.Logs, &metadata.LogTime},
-		{Metrics, metadata.Metrics, &metadata.MetricTime},
-	}
-	for _, signal := range signals {
+	for _, signal := range Signals {
+		count, bounds := metadata.signal(signal)
 		path := filepath.Join(dir, signal.Name+".parquet")
-		if signal.count == 0 {
+		if *count == 0 {
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 				if err != nil {
 					return nil, err
@@ -1173,10 +1186,10 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if !parquet.EqualNodes(parquetFile.Schema(), signal.schema) {
 			return nil, fmt.Errorf("%w: %s parquet schema does not match telemetry format %d", ErrUnsupportedBatchFormat, signal.Name, batchMetadataVersion)
 		}
-		if rows := parquetFile.NumRows(); rows != int64(signal.count) {
-			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, signal.count)
+		if rows := parquetFile.NumRows(); rows != int64(*count) {
+			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, *count)
 		}
-		*signal.bounds = parquetTimeRange(parquetFile, signal.Time)
+		*bounds = parquetTimeRange(parquetFile, signal.Time)
 	}
 	var traces traceIndex
 	if metadata.Spans > 0 {
