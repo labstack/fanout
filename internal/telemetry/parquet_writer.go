@@ -489,8 +489,13 @@ func (c *spills) footer(writer *parquet.GenericWriter[any], s *Signal) {
 // variant metadata dictionary interns names in first-use order, so sorting
 // makes equal rows encode to equal bytes, whatever Go's map order.
 type variantEncoder struct {
-	keys [][]string
-	err  error // the first error of a list fill, which cannot return one
+	fields [][]field // by depth: a map's entries, gathered in one pass
+	err    error     // the first error of a list fill, which cannot return one
+}
+
+type field struct {
+	key   string
+	value any
 }
 
 func (e *variantEncoder) fail(err error) {
@@ -520,24 +525,26 @@ func (e *variantEncoder) value(writer variant.ValueBuilder, value any, depth int
 	case []byte:
 		writer.Binary(value)
 	case map[string]any:
-		for depth >= len(e.keys) {
-			e.keys = append(e.keys, nil)
+		for depth >= len(e.fields) {
+			e.fields = append(e.fields, nil)
 		}
-		keys := e.keys[depth][:0]
-		for key := range value {
-			keys = append(keys, key)
+		fields := e.fields[depth][:0]
+		for key, v := range value {
+			fields = append(fields, field{key, v})
 		}
-		slices.Sort(keys)
-		e.keys[depth] = keys
+		if len(fields) > 1 {
+			slices.SortFunc(fields, func(a, b field) int { return strings.Compare(a.key, b.key) })
+		}
+		e.fields[depth] = fields
 		writer.BeginObject()
-		for _, key := range keys {
-			writer.Field(key)
-			if err := e.value(writer, value[key], depth+1); err != nil {
+		for _, f := range fields {
+			writer.Field(f.key)
+			if err := e.value(writer, f.value, depth+1); err != nil {
 				return err
 			}
 		}
 		writer.EndObject()
-		clear(keys)
+		clear(fields)
 	case []any:
 		writer.BeginArray()
 		for _, child := range value {
