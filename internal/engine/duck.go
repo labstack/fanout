@@ -41,6 +41,8 @@ type Duck struct {
 	// nanoseconds, and statements are those in flight; see Live.
 	progress   atomic.Int64
 	statements statements
+	// pings counts read connections pings hold; see held.
+	pings atomic.Int64
 	// publishing is when a Parquet publication took the exclusive read
 	// gate, in Unix nanoseconds, or zero; see Stalled.
 	publishing atomic.Int64

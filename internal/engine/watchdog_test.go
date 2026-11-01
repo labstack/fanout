@@ -111,3 +111,19 @@ func TestWatchExitsWhenAnIdleEngineCannotAnswer(t *testing.T) {
 		t.Fatalf("fatal = %v, want ErrStalled", err)
 	}
 }
+
+// A ping still waiting for a connection holds none. With a one-connection
+// pool held by a caller reading rows, the wait is no stall.
+func TestWatchIgnoresAPingWaitingForAHeldPool(t *testing.T) {
+	d, _ := mockDuck(t)
+	d.DB.SetMaxOpenConns(1)
+	held, err := d.DB.Conn(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	d.progress.Store(time.Now().Add(-idleLimit - time.Second).UnixNano())
+	if err := watchFor(t, d, 2*watchTicks); err != nil {
+		t.Fatalf("a ping waiting for a held pool fired the watchdog: %v", err)
+	}
+}

@@ -49,12 +49,13 @@ type statements struct {
 type statement struct {
 	// due is the deadline, or zero for a read without one.
 	due time.Time
-	// print identifies the query text without revealing it.
-	print    string
+	// query is hashed only if it overruns, so logs never carry its text.
+	query    string
 	reported bool
 }
 
-// fingerprint is a short hash of a query, for logs that must not carry its text.
+// fingerprint is a short hash of a query, for logs that must not carry its
+// text. It is computed only for an overrun, off the read path.
 func fingerprint(query string) string {
 	sum := sha256.Sum256([]byte(query))
 	return hex.EncodeToString(sum[:6])
@@ -71,7 +72,7 @@ func (d *Duck) begin(ctx context.Context, query string) func(error) {
 	}
 	id := s.next
 	s.next++
-	s.runs[id] = &statement{due: due, print: fingerprint(query)}
+	s.runs[id] = &statement{due: due, query: query}
 	s.mu.Unlock()
 	var once sync.Once
 	return func(err error) {
@@ -99,10 +100,10 @@ func (d *Duck) inFlight() int {
 	return len(d.statements.runs)
 }
 
-// held reports whether reads, or more than own connections, hold the read
-// pool. A ping that fails then may only have waited for them.
-func (d *Duck) held(own int) bool {
-	return d.inFlight() > 0 || d.DB.Stats().InUse > own
+// held reports whether reads, or connections other than pings', hold the
+// read pool. A ping that fails then may only have waited for them.
+func (d *Duck) held() bool {
+	return d.inFlight() > 0 || int64(d.DB.Stats().InUse) > d.pings.Load()
 }
 
 // noteProgress records that the engine answered.
@@ -137,7 +138,7 @@ func (d *Duck) reportOverruns() {
 		}
 		run.reported = true
 		metrics.DuckDBStatementOverruns.Inc()
-		slog.Warn("query running past its deadline", "query", run.print, "overrun", time.Since(run.due).Round(time.Second))
+		slog.Warn("query running past its deadline", "query", fingerprint(run.query), "overrun", time.Since(run.due).Round(time.Second))
 	}
 }
 
@@ -170,20 +171,22 @@ func (d *Duck) idle(ctx context.Context) error {
 	if last := d.progress.Load(); last != 0 && time.Since(time.Unix(0, last)) <= idleLimit {
 		return nil
 	}
-	if err := d.Ping(ctx); err != nil && !d.held(0) {
+	if err := d.Ping(ctx); err != nil && !d.held() {
 		return err
 	}
 	return nil
 }
 
 // Ping runs a trivial statement on the read pool, recording progress when it
-// answers. It is not tracked as a statement in flight.
+// answers. It is not tracked as a statement in flight; the connection it
+// holds is counted in pings.
 func (d *Duck) Ping(ctx context.Context) error {
 	conn, err := d.acquireRead(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	d.pings.Add(1)
+	defer func() { _ = conn.Close(); d.pings.Add(-1) }()
 	var one int
 	if err := conn.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
 		return err
@@ -247,7 +250,7 @@ func (d *Duck) watch(ctx context.Context, ticks <-chan time.Time) {
 		case now := <-ticks:
 			d.reportOverruns()
 			stall := d.stall()
-			if stall == "" && !pinged.IsZero() && now.Sub(pinged) >= pingWait && !d.held(1) {
+			if stall == "" && !pinged.IsZero() && now.Sub(pinged) >= pingWait && !d.held() {
 				stall = "the idle engine did not answer a ping"
 			}
 			if stall == "" {

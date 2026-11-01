@@ -248,8 +248,9 @@ var readinessTimeout = 800 * time.Millisecond
 // waited behind long reads holding the engine's connections: the instance
 // still serves, so it is degraded rather than unready, and /readyz does not
 // flap out of rotation under load. A stalled Parquet publication times out
-// the same way but does not recover, so it fails readiness, as /healthz does. Any other error is a failing engine. The deadline is checked on ctx as well: a driver
-// may report the cancelled statement in its own words.
+// the same way but does not recover, so it fails readiness, as /healthz
+// does. Any other error is a failing engine. The deadline is checked on ctx
+// as well: a driver may report the cancelled statement in its own words.
 func (h *HealthHandler) failedCheck(ctx context.Context, start time.Time, err error) CheckResult {
 	res := CheckResult{Status: "unhealthy", LatencyMs: time.Since(start).Milliseconds(), Error: err.Error()}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
