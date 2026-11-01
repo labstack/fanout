@@ -5,7 +5,7 @@ import { EditorView, drawSelection, keymap, placeholder, tooltips } from "@codem
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { acceptCompletion, autocompletion, closeCompletion, completionStatus, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { setDiagnostics, type Diagnostic } from "@codemirror/lint";
-import type { FixIt, Problem } from "../api-error";
+import type { FixIt, Problem, TextSpan } from "../api-error";
 import type { Completion, Notice } from "../explore/api";
 import { sqlTheme } from "../sql-editor/theme";
 import { pointOffset, unitSpan } from "./spans";
@@ -18,6 +18,9 @@ const oneLine = EditorView.theme({
   ".cm-content": { padding: "8px 4px" },
   // The list stays clear of the screen edge, and on a phone its descriptions wrap instead of being cut.
   ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxWidth: "min(700px, calc(100vw - 40px))" },
+  // Messages and fix-its are listed under the editor; the lint tooltip over a mark would repeat them
+  // and cover the page, and the lint package has no switch for it.
+  ".cm-tooltip:has(.cm-tooltip-lint)": { display: "none" },
   // A wrapped description hangs under the label, past the type icon.
   "@media (max-width: 600px)": {
     ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { whiteSpace: "normal", paddingLeft: "calc(3px + 1.4em)", textIndent: "-1.4em" },
@@ -26,9 +29,14 @@ const oneLine = EditorView.theme({
 });
 /** Marks a transaction that applies the value prop, so it is not reported back as an edit. */
 const fromProp = Annotation.define<boolean>();
+/** Problems and notices that still hold after a fix-it, in the edited text's coordinates. */
+type Kept = { problems: Problem[]; notices: Notice[] };
+/** Marks a transaction that applies a fix-it, with what it leaves standing. */
+const fixed = Annotation.define<Kept>();
 
 export type FanqlEditorProps = {
-  value: string; onChange(value: string): void; onRun(): void;
+  /** `kept` comes only with a fix-it; any other edit leaves nothing standing. */
+  value: string; onChange(value: string, kept?: Kept): void; onRun(): void;
   problems?: readonly Problem[];
   /** Guidance that never blocks a run (section 0.12). */
   notices?: readonly Notice[];
@@ -38,17 +46,31 @@ export type FanqlEditorProps = {
 
 const describe = (item: Problem | Notice) => item.message + ("hint" in item && item.hint ? ` (${item.hint})` : "");
 
+/**
+ * What a fix-it leaves standing: items it touches go, the rest move by its
+ * length change. Spans that meet the edit at an end count as touching.
+ */
+function keep(fix: FixIt, problems: readonly Problem[], notices: readonly Notice[]): Kept {
+  const { start, end } = fix.span, delta = Array.from(fix.text).length - (end - start);
+  const touches = (span: TextSpan) => span.start <= end && start <= span.end;
+  const move = (span: TextSpan): TextSpan => span.start >= end ? { start: span.start + delta, end: span.end + delta } : span;
+  const shift = <T extends Problem | Notice>(items: readonly T[]) => items.flatMap(item =>
+    (item.span && touches(item.span)) || item.fix_its?.some(other => touches(other.span)) ? []
+      : [{ ...item, ...(item.span && { span: move(item.span) }), ...(item.fix_its && { fix_its: item.fix_its.map(other => ({ ...other, span: move(other.span) })) }) }]);
+  return { problems: shift(problems), notices: shift(notices) };
+}
+
 /** Applies a fix-it to the text it was computed for and returns the cursor to the editor, after the replacement. */
-function applyFix(view: EditorView, fix: FixIt) {
+function applyFix(view: EditorView, fix: FixIt, problems: readonly Problem[], notices: readonly Notice[]) {
   const { from, to } = unitSpan(view.state.doc.toString(), fix.span);
-  view.dispatch({ changes: { from, to, insert: fix.text }, selection: { anchor: from + fix.text.length } });
+  view.dispatch({ changes: { from, to, insert: fix.text }, selection: { anchor: from + fix.text.length }, annotations: fixed.of(keep(fix, problems, notices)) });
   view.focus();
 }
 
 function fanqlDiagnostics(text: string, problems: readonly Problem[], notices: readonly Notice[]): Diagnostic[] {
   const mark = (item: Problem | Notice, severity: "error" | "info"): Diagnostic => {
     const { from, to } = item.span ? unitSpan(text, item.span) : { from: 0, to: text.length };
-    return { from, to, severity, message: describe(item), actions: (item.fix_its ?? []).map(fix => ({ name: `Replace with ${fix.label || fix.text}`, apply: (view: EditorView) => applyFix(view, fix) })) };
+    return { from, to, severity, message: describe(item), actions: (item.fix_its ?? []).map(fix => ({ name: `Replace with ${fix.label || fix.text}`, apply: (view: EditorView) => applyFix(view, fix, problems, notices) })) };
   };
   // A notice without a span says something about the whole query; it is listed, not marked.
   return [...problems.map(problem => mark(problem, "error")), ...notices.filter(notice => notice.span).map(notice => mark(notice, "info"))];
@@ -127,7 +149,8 @@ export function FanqlEditor(props: FanqlEditorProps) {
         if (update.docChanged && !update.transactions.some(tr => tr.annotation(fromProp))) {
           const text = update.state.doc.toString();
           echoes.current.push(text);
-          latest.current.onChange(text);
+          const kept = update.transactions.find(tr => tr.annotation(fixed))?.annotation(fixed);
+          if (kept) latest.current.onChange(text, kept); else latest.current.onChange(text);
         }
         const listed = completionStatus(update.state) !== null;
         if (listed !== open.current) { open.current = listed; setListOpen(listed); }
@@ -151,7 +174,7 @@ export function FanqlEditor(props: FanqlEditorProps) {
   useEffect(() => { const instance = view.current!; instance.dispatch(setDiagnostics(instance.state, fanqlDiagnostics(instance.state.doc.toString(), problems, notices))); }, [problems, notices]);
   // Each button is described by its message, which it sits beside rather than inside, so an alert reads the message alone.
   const fixes = (item: Problem | Notice, message: string) => !readOnly && item.fix_its?.map((fix, index) =>
-    <Button key={index} size="compact-xs" variant="default" fw={400} aria-describedby={message} onClick={() => applyFix(view.current!, fix)} data-fix-it><span>Replace with <code>{fix.label || fix.text}</code></span></Button>);
+    <Button key={index} size="compact-xs" variant="default" fw={400} aria-describedby={message} onClick={() => applyFix(view.current!, fix, problems, notices)} data-fix-it><span>Replace with <code>{fix.label || fix.text}</code></span></Button>);
   return <div data-fanql-editor>
     <div ref={host} />
     {schemaNote && listOpen && <Text size="xs" c="dimmed" mt={4} data-completion-note>Suggestions: {schemaNote}</Text>}

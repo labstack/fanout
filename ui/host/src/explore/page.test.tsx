@@ -214,6 +214,27 @@ describe("ExplorePage", () => {
     expect(ui.queryByRole("alert")).toBeNull();
   });
 
+  it("keeps the other fix-its after one is applied, until the text is typed in", async () => {
+    const cuont = { start: 8, end: 13 }, p59 = { start: 17, end: 20 };
+    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [
+      { path: "text", message: "unknown function cuont", span: cuont, fix_its: [{ label: "count", span: cuont, text: "count" }] },
+      { path: "text", message: "unknown function p59", span: p59, fix_its: [{ label: "p95", span: p59, text: "p95" }] },
+    ] }, 400);
+    const { ui, type, click, wait } = await render();
+    await type("spans | cuont(), p59(duration) by service");
+    await click("Run");
+    await wait(() => expect(ui.getAllByRole("alert")).toHaveLength(2));
+    await click("Replace with count");
+    expect(ui.getAllByRole("alert").map(alert => alert.textContent)).toEqual(["unknown function p59"]);
+    await click("Replace with p95");
+    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count(), p95(duration) by service");
+    expect(ui.queryByRole("alert")).toBeNull();
+    await click("Run");
+    await wait(() => expect(ui.getAllByRole("alert")).toHaveLength(2));
+    await type("spans | cuont(), p59(duration) by service ");
+    expect(ui.queryByRole("alert")).toBeNull();
+  });
+
   it("shows a notice's fix-it after a run", async () => {
     const at = { start: 19, end: 28 };
     parse = async body => json({ ...parsed(body.text), notices: [{ path: "text", message: "host.name is usually a resource attribute", span: at, fix_its: [{ label: "resource.host.name", span: at, text: "resource.host.name" }] }] });
