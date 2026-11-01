@@ -254,7 +254,12 @@ describe("DashboardPage", () => {
     await settle(client);
     expect(queryBodies).toHaveLength(count);
     expect(client.getQueryData(["dashboard", "d1"])).toEqual(record);
-    await act(async () => [...document.querySelectorAll("button")].find(button => button.textContent === "Restore version 2")!.click());
+    const restore = await vi.waitFor(() => {
+      const button = [...document.querySelectorAll("button")].find(button => button.textContent === "Restore version 2");
+      if (!button) throw new Error("Restore version 2 is not shown yet");
+      return button;
+    });
+    await act(async () => restore.click());
     await settle(client);
     expect(client.getQueryData(["dashboard", "d1"])).toEqual(restored);
     expect(document.body.textContent).toContain("Restored v2 as v5");
