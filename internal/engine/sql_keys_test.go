@@ -304,3 +304,79 @@ func TestPatternsAndPivotsHideDedicatedColumns(t *testing.T) {
 		t.Fatalf("pattern of a dedicated column: %v", err)
 	}
 }
+
+// Every known way to reach a dedicated column either leaves it out or is
+// rejected, and no dedicated value surfaces under another name: the values
+// below reach a result only inside the attributes and resource maps.
+func TestDedicatedColumnsNeverLeak(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	n := at.UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "leak",
+		Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", TraceID: "t", SpanID: "s", Name: "GET",
+			StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n, Events: []telemetry.Event{{Name: "ev", TimeUnixNanos: n}},
+			Attributes: map[string]any{"http.route": "/zz-route", "http.response.status_code": "418"}, Resource: map[string]any{"k8s.pod.name": "pod-zz"}}},
+		Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", EventUnixNanos: n, TimeUnixNanos: n, ObservedTimeNanos: n,
+			Body: "hi", IngestedAt: n, Resource: map[string]any{"k8s.pod.name": "pod-zz"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at, End: at.Add(time.Hour)})
+	for _, query := range []string{
+		`SELECT * FROM spans`,
+		`SELECT s.* FROM spans s`,
+		`SELECT COLUMNS(*) FROM spans`,
+		`SELECT COLUMNS('.*') FROM spans`,
+		`SELECT COLUMNS(lambda c: c LIKE '%') FROM logs`,
+		`SELECT * FROM (SELECT * FROM spans) AS t(a)`,
+		`SELECT * FROM (SELECT * FROM spans UNION ALL SELECT * FROM spans)`,
+		`SELECT * FROM (SELECT * FROM spans UNION ALL SELECT * FROM (SELECT * FROM spans) AS t(a))`,
+		`SELECT * FROM (SELECT 1 AS x UNION ALL BY NAME SELECT * FROM spans)`,
+		`SELECT * FROM (SELECT * FROM logs UNION BY NAME SELECT * FROM spans)`,
+		`WITH RECURSIVE t AS (SELECT * FROM spans UNION ALL SELECT * FROM t WHERE false) SELECT * FROM t`,
+		`SELECT * FROM (UNPIVOT logs ON body, service INTO NAME k VALUE v)`,
+		`SELECT * FROM (UNPIVOT (SELECT * FROM spans) ON operation, service INTO NAME k VALUE v)`,
+	} {
+		rows := mustRunTelemetrySQL(t, ctx, d, query, 100)
+		if len(rows) == 0 {
+			t.Fatalf("%s returned no rows", query)
+		}
+		for _, row := range rows {
+			for name, v := range row {
+				if _, internal := internalColumn(name); internal {
+					t.Fatalf("%s returns %s", query, name)
+				}
+				switch v {
+				case "/zz-route", "pod-zz", int64(418), float64(418), "418":
+					t.Fatalf("%s returns dedicated value %v as %s", query, v, name)
+				}
+			}
+		}
+	}
+	for query, want := range map[string]string{
+		`SELECT #1, #36 FROM spans`:                                         "positional column references",
+		`SELECT count(*) FROM spans WHERE #60 IS NOT NULL`:                  "positional column references",
+		`SELECT * RENAME (_a_http_route AS x) FROM spans`:                   `column "_a_http_route" is internal`,
+		`SELECT p FROM (SELECT * RENAME (_r_k8s_pod_name AS p) FROM spans)`: `column "_r_k8s_pod_name" is internal`,
+		`SELECT * REPLACE ('q' AS _a_http_route) FROM spans`:                `column "_a_http_route" is internal`,
+		`SELECT s FROM spans s`:                                             `row reference "s"`,
+		`SELECT struct_extract(s, '_a_http_route') FROM spans s`:            `row reference "s"`,
+		`SELECT COLUMNS('(.*route)') AS '\1' FROM spans`:                    `matches internal column "_a_http_route"`,
+	} {
+		if _, _, err := d.PrepareTelemetrySQL(ctx, query, query, 1); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: %v, want %q", query, err, want)
+		}
+	}
+	// Lambda parameters shadow relations and maps: no rewrite and no row
+	// reference under them.
+	for query, want := range map[string]string{
+		`SELECT list_transform([MAP {'http.route': 'z'}], lambda attributes: attributes['http.route'])[1] AS x FROM spans`: "z",
+		`SELECT list_transform(event_names, lambda s: upper(s))[1] AS x FROM spans s`:                                      "EV",
+		`SELECT list_transform(event_names, lambda e: upper(e))[1] AS x FROM spans AS e`:                                   "EV",
+	} {
+		var got string
+		if err := d.QueryRowScan(ctx, []any{&got}, query); err != nil || got != want {
+			t.Fatalf("%s: %q, %v; want %q", query, got, err, want)
+		}
+	}
+}

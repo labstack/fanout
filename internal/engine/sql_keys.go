@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -89,6 +91,13 @@ type keyScope struct {
 	ctes      map[string]*keyRelation
 	relations map[string]*keyRelation // FROM bindings by name; nil is ambiguous
 	order     []*keyRelation
+	shadow    map[string]bool // lambda parameters, which bind before columns and relations
+}
+
+// shadowed reports whether a lambda parameter in s or an enclosing scope
+// below the binding scope hides name.
+func (s *keyScope) shadowed(name string) bool {
+	return s.shadow[strings.ToLower(name)]
 }
 
 func (s *keyScope) bind(name string, r *keyRelation) {
@@ -119,6 +128,9 @@ func (s *keyScope) lookup(qualifier []string, column string) (keyMapSource, bool
 		}
 		name := strings.ToLower(qualifier[len(qualifier)-1])
 		for scope := s; scope != nil; scope = scope.parent {
+			if len(qualifier) == 1 && scope.shadowed(name) {
+				return keyMapSource{}, false
+			}
 			if r, ok := scope.relations[name]; ok {
 				if r == nil {
 					return keyMapSource{}, false
@@ -130,6 +142,9 @@ func (s *keyScope) lookup(qualifier []string, column string) (keyMapSource, bool
 		return keyMapSource{}, false
 	}
 	for scope := s; scope != nil; scope = scope.parent {
+		if scope.shadowed(column) {
+			return keyMapSource{}, false
+		}
 		var found keyMapSource
 		count := 0
 		for _, r := range scope.order {
@@ -155,6 +170,7 @@ type keyRewriter struct {
 	rewrites int
 	named    []namedItem
 	err      error
+	selects  map[uintptr]*keyScope // each SELECT node's FROM scope
 }
 
 // namedItem keeps a rewritten select item's original expression: DuckDB names
@@ -166,7 +182,7 @@ type namedItem struct {
 
 // rewriteKeys rewrites the subscripts of one parsed statement in place.
 func rewriteKeys(ctx context.Context, db snapshotSQL, statement map[string]any) error {
-	r := &keyRewriter{}
+	r := &keyRewriter{selects: map[uintptr]*keyScope{}}
 	r.queryAt(statement, nil, true)
 	if r.err != nil {
 		return r.err
@@ -224,7 +240,25 @@ func (r *keyRewriter) queryAt(node map[string]any, outer *keyScope, outermost bo
 			}
 		}
 		r.expr(node["modifiers"], &keyScope{parent: scope})
-		return unionRelation(parts)
+		byName, _ := node["setop_type"].(string)
+		out := unionRelation(parts, strings.HasSuffix(byName, "BY_NAME"))
+		if out == nil {
+			// Branches pass different dedicated columns at the same
+			// positions, so none of them passes any on.
+			r.hideBranches(node)
+			out = unionRelation(parts, true)
+			out.hidden = nil
+		}
+		return out
+	case "RECURSIVE_CTE_NODE":
+		// The anchor names the columns; the recursive step reads the CTE.
+		left, _ := node["left"].(map[string]any)
+		anchor := r.queryAt(left, scope, outermost)
+		if right, ok := node["right"].(map[string]any); ok {
+			r.queryAt(right, scope, outermost)
+		}
+		r.expr(node["modifiers"], &keyScope{parent: scope})
+		return anchor
 	}
 	for key, child := range node {
 		if key == "cte_map" {
@@ -256,14 +290,21 @@ func (r *keyRewriter) walk(value any, scope *keyScope) {
 }
 
 // unionRelation keeps the maps every branch of a set operation agrees on;
-// DuckDB names the result after the first branch.
-func unionRelation(parts []*keyRelation) *keyRelation {
+// DuckDB names the result after the first branch, or by name, where it
+// carries every branch's dedicated columns. A positional union whose
+// branches pass different dedicated columns returns nil.
+func unionRelation(parts []*keyRelation, byName bool) *keyRelation {
 	out := &keyRelation{maps: map[string]keyMapSource{}}
 	if len(parts) == 0 {
 		out.open = true
 		return out
 	}
-	out.hide(parts[0].hidden, nil)
+	for _, p := range parts {
+		if !byName && !maps.Equal(p.hidden, parts[0].hidden) {
+			return nil
+		}
+		out.hide(p.hidden, nil)
+	}
 	for name, m := range parts[0].maps {
 		for _, p := range parts[1:] {
 			if p.maps[name] != m {
@@ -278,8 +319,33 @@ func unionRelation(parts []*keyRelation) *keyRelation {
 	return out
 }
 
+// hideBranches excludes the dedicated columns from the stars of every
+// branch of a set operation.
+func (r *keyRewriter) hideBranches(node map[string]any) {
+	switch node["type"] {
+	case "SELECT_NODE":
+		if scope := r.selects[reflect.ValueOf(node).Pointer()]; scope != nil {
+			excludeHidden(node["select_list"], scope)
+		}
+	case "SET_OPERATION_NODE", "RECURSIVE_CTE_NODE":
+		for _, key := range []string{"left", "right", "children"} {
+			switch child := node[key].(type) {
+			case map[string]any:
+				r.hideBranches(child)
+			case []any:
+				for _, c := range child {
+					if c, ok := c.(map[string]any); ok {
+						r.hideBranches(c)
+					}
+				}
+			}
+		}
+	}
+}
+
 func (r *keyRewriter) selectNode(node map[string]any, outer *keyScope, outermost bool) *keyRelation {
 	scope := &keyScope{parent: outer, relations: map[string]*keyRelation{}}
+	r.selects[reflect.ValueOf(node).Pointer()] = scope
 	r.from(node["from_table"], scope)
 	for key, child := range node {
 		switch key {
@@ -449,6 +515,9 @@ func (r *keyRewriter) rowReference(node map[string]any, scope *keyScope) {
 	}
 	name := strings.ToLower(names[0])
 	for s := scope; s != nil; s = s.parent {
+		if s.shadowed(name) {
+			return
+		}
 		if rel, ok := s.relations[name]; ok {
 			if rel != nil && len(rel.hidden) > 0 {
 				r.err = fmt.Errorf("row reference %q is not available to telemetry SQL; select its columns", names[0])
@@ -704,6 +773,29 @@ func (r *keyRewriter) expr(value any, scope *keyScope) {
 			r.expressionStar(v, selectScope(scope))
 		case "COLUMN_REF":
 			r.rowReference(v, scope)
+		case "LAMBDA":
+			// Parameters shadow columns and relations in the body.
+			lambda := &keyScope{parent: scope, shadow: map[string]bool{}}
+			var params func(any)
+			params = func(value any) {
+				switch p := value.(type) {
+				case []any:
+					for _, c := range p {
+						params(c)
+					}
+				case map[string]any:
+					if names := stringList(p["column_names"]); p["class"] == "COLUMN_REF" && len(names) == 1 {
+						lambda.shadow[strings.ToLower(names[0])] = true
+						return
+					}
+					for _, c := range p {
+						params(c)
+					}
+				}
+			}
+			params(v["lhs"])
+			r.expr(v["expr"], lambda)
+			return
 		}
 		for _, child := range v {
 			r.expr(child, scope)

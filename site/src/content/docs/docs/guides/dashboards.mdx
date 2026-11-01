@@ -109,7 +109,9 @@ return timestamp `time`, a string item, one numeric measure and optional string
 Standard OpenTelemetry keys that the schema marks indexed, such as
 `http.response.status_code` and `k8s.pod.name`, read typed from their own
 columns in SQL and structured queries alike: ingest converts a value sent in
-another type, so `"200"` reads as the number 200, and they need no cast. Other
+another type, so `"200"` reads as the number 200, and they need no cast. A
+subquery or CTE that projects only the map, such as
+`WITH s AS (SELECT attributes FROM spans)`, reads values as sent there. Other
 keys read as sent, and `SELECT *` returns the `attributes` and `resource` maps.
 SQL is an authoring escape hatch. **Spec** is a read-only inspection view;
 there is no SQL or chart-style editor there.

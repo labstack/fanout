@@ -310,6 +310,34 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 				return fmt.Errorf("table function %q is not available to telemetry SQL", name)
 			}
 		}
+		if node["class"] == "POSITIONAL_REFERENCE" {
+			return fmt.Errorf("positional column references such as #1 are not available to telemetry SQL; name the column")
+		}
+		if node["class"] == "STAR" {
+			// RENAME and REPLACE name a star's columns.
+			var names []string
+			for _, list := range []string{"rename_list", "replace_list"} {
+				entries, _ := node[list].([]any)
+				for _, entry := range entries {
+					entry, _ := entry.(map[string]any)
+					switch key := entry["key"].(type) {
+					case string:
+						names = append(names, key)
+					case map[string]any:
+						column, _ := key["column"].(string)
+						names = append(names, column)
+					}
+				}
+			}
+			for _, name := range names {
+				if k, internal := internalColumn(name); internal {
+					if k.Name != "" {
+						return fmt.Errorf("column %q is internal; write %s['%s']", name, keyMap(k), k.Name)
+					}
+					return fmt.Errorf("column %q is internal to telemetry storage", name)
+				}
+			}
+		}
 		if node["class"] == "COLUMN_REF" {
 			names, _ := node["column_names"].([]any)
 			if len(names) > 0 {
