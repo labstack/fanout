@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	driver "github.com/duckdb/duckdb-go/v2"
 	"github.com/parquet-go/parquet-go"
@@ -29,7 +30,11 @@ func verificationFixture(t *testing.T) (string, []Span) {
 		t.Fatal(err)
 	}
 	dir := store.BatchPath("verify")
-	rows, _ := orderSpans(spans)
+	perm, _ := sortRows(Spans, spans)
+	rows := make([]Span, len(perm))
+	for i, row := range perm {
+		rows[i] = spans[row]
+	}
 	// Multiple tiny row groups make a late-page failure observable cheaply.
 	path := filepath.Join(dir, "spans.parquet")
 	if err := os.Remove(path); err != nil {
@@ -41,7 +46,7 @@ func verificationFixture(t *testing.T) (string, []Span) {
 	}
 	writer := parquet.NewGenericWriter[any](f, parquetWriterOptions(1024, Spans.writerOptions()...)...)
 	for i := 0; i < len(rows); i += 2 {
-		if err := writeColumns(writer, Spans, rows[i:i+2]); err != nil {
+		if err := writeColumns(writer, Spans, rows[i:i+2], []int32{0, 1}); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Flush(); err != nil {
@@ -127,7 +132,7 @@ func TestNativeVerifierRejectsWrongSchemaAndTraceOrdering(t *testing.T) {
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
-				if err := writeParquet(path, Spans, rows, 1024); err != nil {
+				if err := writeUnsorted(path, Spans, rows, 1024); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -181,5 +186,62 @@ func TestNativeVerifierRejectsUnexpectedZeroCountSignal(t *testing.T) {
 	}
 	if err := ValidatePublishedBatch(dir); !IsBatchCorrupt(err) || !strings.Contains(err.Error(), "metadata declares zero") {
 		t.Fatalf("zero-count file = %v", err)
+	}
+}
+
+// writeUnsorted writes rows in the order given, which may break the
+// signal's order.
+func writeUnsorted[R any](path string, s *Signal, rows []R, pageSize int) error {
+	perm := make([]int32, len(rows))
+	for i := range perm {
+		perm[i] = int32(i)
+	}
+	return writeOrdered(path, s, rows, perm, pageSize)
+}
+
+// Log and metric files follow their signal's order, which names time buckets
+// no column stores; verification decodes the key columns and rejects a file
+// out of that order. Both fixtures are listed out of order.
+func TestNativeVerifierRejectsLogAndMetricOrder(t *testing.T) {
+	minute := int64(time.Minute)
+	logs := []Log{
+		{Namespace: "a", ServiceName: "y", EventUnixNanos: 1 * minute},
+		{Namespace: "a", ServiceName: "x", EventUnixNanos: 2 * minute},
+		{Namespace: "a", ServiceName: "x", EventUnixNanos: 6 * minute},
+	}
+	metrics := []Metric{
+		{Namespace: "a", ServiceName: "x", Name: "m", SeriesID: 2, EventUnixNanos: 1 * minute},
+		{Namespace: "a", ServiceName: "x", Name: "m", SeriesID: 1, EventUnixNanos: 2 * minute},
+		{Namespace: "a", ServiceName: "x", Name: "m", SeriesID: 1, EventUnixNanos: 61 * minute},
+	}
+	for _, s := range []*Signal{Logs, Metrics} {
+		t.Run(s.Name, func(t *testing.T) {
+			store, err := OpenParquetStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "order"}, nil, logs, metrics); err != nil {
+				t.Fatal(err)
+			}
+			dir := store.BatchPath("order")
+			if err := ValidatePublishedBatch(dir); err != nil {
+				t.Fatalf("committed batch: %v", err)
+			}
+			path := filepath.Join(dir, s.Name+".parquet")
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if s == Logs {
+				err = writeUnsorted(path, s, logs, 1024)
+			} else {
+				err = writeUnsorted(path, s, metrics, 1024)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidatePublishedBatch(dir); !IsBatchCorrupt(err) {
+				t.Fatalf("unsorted %s error = %v", s.Name, err)
+			}
+		})
 	}
 }

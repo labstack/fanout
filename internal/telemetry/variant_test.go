@@ -108,8 +108,10 @@ func TestVariantEncodingIsDeterministic(t *testing.T) {
 	}
 }
 
+// checkVariantRows compares a file with rows in the signal's order.
 func checkVariantRows(t *testing.T, path string, want []Log) {
 	t.Helper()
+	want = inOrder(Logs, want)
 	got := fileRows(t, path, Logs)
 	if len(got) != len(want) {
 		t.Fatalf("read %d rows, want %d", len(got), len(want))
@@ -175,4 +177,14 @@ func testUnsupportedFormatLeavesStoreUntouched(t *testing.T, suffix string) {
 			t.Fatalf("startup changed %s: %v", path, err)
 		}
 	}
+}
+
+// inOrder returns rows in the signal's order, ties in input order.
+func inOrder[R any](s *Signal, rows []R) []R {
+	perm, _ := sortRows(s, rows)
+	out := make([]R, len(rows))
+	for i, row := range perm {
+		out[i] = rows[row]
+	}
+	return out
 }

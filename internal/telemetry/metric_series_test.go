@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/parquet-go/parquet-go"
@@ -55,6 +56,7 @@ func TestMetricSeriesIDSurvivesParquetCompaction(t *testing.T) {
 	if len(rows) != len(want) {
 		t.Fatalf("compacted rows=%d", len(rows))
 	}
+	slices.Sort(want)
 	for i, row := range rows {
 		if row.SeriesID != want[i] {
 			t.Fatalf("compacted series id=%d want %d", row.SeriesID, want[i])

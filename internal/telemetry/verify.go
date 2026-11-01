@@ -90,10 +90,13 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 		if err := v.decode(ctx, path, count); err != nil {
 			return fmt.Errorf("verify %s Parquet: %w", signal.Name, err)
 		}
-	}
-	if batch.metadata.Spans > 0 {
-		if err := verifySpanParquet(filepath.Join(dir, "spans.parquet"), batch.metadata.Spans, batch.traces); err != nil {
+		if err := verifyOrder(path, signal, count); err != nil {
 			return batchDataError(err)
+		}
+		if signal.Traces {
+			if err := verifyTraces(path, count, batch.traces); err != nil {
+				return batchDataError(err)
+			}
 		}
 	}
 	return nil
@@ -156,8 +159,6 @@ func nativeVerificationError(err error) error {
 }
 
 type verificationSpanRow struct {
-	TraceHash     uint64 `parquet:"_trace_hash"`
-	TraceID       string `parquet:"trace_id"`
-	StartUnixNano int64  `parquet:"start_unix_nano"`
-	SpanID        string `parquet:"span_id"`
+	TraceHash uint64 `parquet:"_trace_hash"`
+	TraceID   string `parquet:"trace_id"`
 }

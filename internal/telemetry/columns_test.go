@@ -73,12 +73,13 @@ func TestRegistryMatchesWrittenSchema(t *testing.T) {
 				if got := field.Type().Kind(); got != parquet.Kind(want) {
 					t.Errorf("%s physical type = %v, want %v", c.Name, got, want)
 				}
-				dict := false
+				dict, delta := false, false
 				for _, encoding := range chunks[c.Name].Encoding {
 					dict = dict || encoding == format.RLEDictionary
+					delta = delta || encoding == format.DeltaBinaryPacked
 				}
-				if dict != c.Dict {
-					t.Errorf("%s dictionary encoded = %v, registry says %v", c.Name, dict, c.Dict)
+				if dict != c.Dict || delta != c.Delta {
+					t.Errorf("%s dictionary, delta encoded = %v, %v; registry says %v, %v", c.Name, dict, delta, c.Dict, c.Delta)
 				}
 			}
 			for name := range stored {
@@ -89,8 +90,8 @@ func TestRegistryMatchesWrittenSchema(t *testing.T) {
 			for _, column := range file.Metadata().RowGroups[0].SortingColumns {
 				sorting = append(sorting, file.Schema().Columns()[column.ColumnIdx][0])
 			}
-			if fmt.Sprint(sorting) != fmt.Sprint(s.Sort) {
-				t.Errorf("footer sort = %v, registry says %v", sorting, s.Sort)
+			if fmt.Sprint(sorting) != fmt.Sprint(s.Order.claim()) {
+				t.Errorf("footer sort = %v, registry claims %v", sorting, s.Order.claim())
 			}
 			if _, ok := s.Column(s.Time); !ok {
 				t.Errorf("time column %s is not a registry column", s.Time)
@@ -163,9 +164,9 @@ func TestRegistryColumnsAreConsistent(t *testing.T) {
 				t.Errorf("%s.%s: only VARIANT columns shred keys", s.Name, c.Name)
 			}
 		}
-		for _, name := range s.Sort {
-			if c, ok := s.Column(name); !ok || !c.Stored() {
-				t.Errorf("%s sort column %s is not stored", s.Name, name)
+		for _, part := range s.Order {
+			if c, ok := s.Column(part.Column); !ok || !c.Stored() {
+				t.Errorf("%s order column %s is not stored", s.Name, part.Column)
 			}
 		}
 	}

@@ -1,7 +1,6 @@
 package telemetry
 
 import (
-	"bytes"
 	"container/heap"
 	"context"
 	"errors"
@@ -17,8 +16,9 @@ import (
 
 // Format 4 has one physical value per leaf column per row, including nulls:
 // nested attributes live in VARIANT, not repeated Parquet lists. Merge the
-// narrow span sort keys once, then apply the same input-row schedule to every
-// physical column. No VARIANT reconstruction or wide-row conversion is needed.
+// narrow sort keys of the signal's order once, then apply the same input-row
+// schedule to every physical column. No VARIANT reconstruction or wide-row
+// conversion is needed.
 // Columns own their input cursors and output buffers; only footer publication
 // is serial. At most eight columns decode/encode at once, sharing the existing
 // compression pool and preserving the ingest writer's row-group ceiling.
@@ -36,9 +36,6 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 	}()
 	schema := s.schema
-	// A sorted signal is merged on its sort key; the key cursor reads the
-	// span order, the only one Signal.Sort declares.
-	sorted := len(s.Sort) > 0
 	var groups []parquet.RowGroup
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
@@ -87,8 +84,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 	}()
 	var index *traceIndexWriter
-	var keys mergeKeyHeap
-	if sorted {
+	if s.Traces {
 		index, err = newTraceIndexWriter(filepath.Join(filepath.Dir(output), "trace.fidx"))
 		if err != nil {
 			return err
@@ -98,36 +94,30 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 				index.Abort()
 			}
 		}()
-		for i, group := range groups {
-			c := &mergeKeyCursor{input: i, remaining: group.NumRows()}
-			for k, name := range s.Sort {
-				leaf, _ := schema.Lookup(name)
-				c.readers[k] = parquet.NewColumnChunkValueReader(group.ColumnChunks()[leaf.ColumnIndex])
-			}
-			// Keep empty/exhausted cursors in a separate lifetime list below.
+	}
+	cursors := make([]*keyCursor, len(groups))
+	for i, group := range groups {
+		cursors[i] = newKeyCursor(s, i, group)
+	}
+	defer func() {
+		for _, c := range cursors {
+			err = errors.Join(err, c.close())
+		}
+	}()
+	keys := make(keyHeap, 0, len(cursors))
+	for _, c := range cursors {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		has, e := c.next()
+		if e != nil {
+			return e
+		}
+		if has {
 			keys = append(keys, c)
 		}
-		allKeys := append(mergeKeyHeap(nil), keys...)
-		defer func() {
-			for _, c := range allKeys {
-				err = errors.Join(err, c.close())
-			}
-		}()
-		keys = keys[:0]
-		for _, c := range allKeys {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			has, e := c.next()
-			if e != nil {
-				return e
-			}
-			if has {
-				keys = append(keys, c)
-			}
-		}
-		heap.Init(&keys)
 	}
+	heap.Init(&keys)
 	columns := make([]mergeColumn, len(schema.Columns()))
 	for i := range columns {
 		columns[i] = mergeColumn{column: i, groups: groups, readers: make([]parquet.ColumnChunkValueReader, len(groups)), remaining: make([]int64, len(groups))}
@@ -142,51 +132,35 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	runs := make([]mergeRun, 0, parquetRowGroupRows)
-	input := 0
-	var consumed int64
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		runs = runs[:0]
 		count := 0
-		for count < parquetRowGroupRows {
-			if sorted {
-				if len(keys) == 0 {
-					break
+		for count < parquetRowGroupRows && len(keys) > 0 {
+			c := keys[0]
+			if s.Traces {
+				// The span order leads with the trace hash, then start time.
+				hash, start := c.key.n[0], int64(c.key.n[1]^1<<63)
+				if start > 0 && (stats.MinSpanStartNanos == 0 || start < stats.MinSpanStartNanos) {
+					stats.MinSpanStartNanos = start
 				}
-				c := keys[0]
-				key := c.current()
-				if key.Start > 0 && (stats.MinSpanStartNanos == 0 || key.Start < stats.MinSpanStartNanos) {
-					stats.MinSpanStartNanos = key.Start
-				}
-				stats.MaxSpanStartNanos = max(stats.MaxSpanStartNanos, key.Start)
-				if e := index.Append(key.Hash); e != nil {
+				stats.MaxSpanStartNanos = max(stats.MaxSpanStartNanos, start)
+				if e := index.Append(hash); e != nil {
 					return e
 				}
-				runs = appendMergeRun(runs, c.input, 1)
-				count++
-				has, e := c.next()
-				if e != nil {
-					return e
-				}
-				if has {
-					heap.Fix(&keys, 0)
-				} else {
-					heap.Pop(&keys)
-				}
+			}
+			runs = appendMergeRun(runs, c.input, 1)
+			count++
+			has, e := c.next()
+			if e != nil {
+				return e
+			}
+			if has {
+				heap.Fix(&keys, 0)
 			} else {
-				for input < len(groups) && consumed == groups[input].NumRows() {
-					input++
-					consumed = 0
-				}
-				if input == len(groups) {
-					break
-				}
-				n := int(min(int64(parquetRowGroupRows-count), groups[input].NumRows()-consumed))
-				runs = appendMergeRun(runs, input, n)
-				count += n
-				consumed += int64(n)
+				heap.Pop(&keys)
 			}
 		}
 		if count == 0 {
@@ -294,80 +268,3 @@ func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, r
 	// counts are observed without racing any column writer.
 	return writer.Flush()
 }
-
-// Key values borrow their column reader's current page. Each reader advances
-// only after its current key has been consumed; no per-span string or row copy
-// is needed, and the three columns may have independent page boundaries.
-type mergeSpanKey struct {
-	Hash   uint64
-	Start  int64
-	SpanID []byte
-}
-type mergeKeyCursor struct {
-	input     int
-	readers   [3]parquet.ColumnChunkValueReader
-	buffer    [3][256]parquet.Value
-	pos, n    [3]int
-	remaining int64
-	key       mergeSpanKey
-}
-
-func (c *mergeKeyCursor) close() (err error) {
-	for i, r := range c.readers {
-		if r != nil {
-			err = errors.Join(err, r.Close())
-			c.readers[i] = nil
-		}
-	}
-	clear(c.buffer[:])
-	c.key = mergeSpanKey{}
-	return err
-}
-func (c *mergeKeyCursor) current() mergeSpanKey { return c.key }
-func (c *mergeKeyCursor) next() (bool, error) {
-	if c.remaining == 0 {
-		return false, c.close()
-	}
-	var values [3]parquet.Value
-	for k, r := range c.readers {
-		if c.pos[k] == c.n[k] {
-			clear(c.buffer[k][:])
-			n, e := r.ReadValues(c.buffer[k][:])
-			c.pos[k], c.n[k] = 0, n
-			if e != nil && e != io.EOF {
-				return false, e
-			}
-			if n == 0 {
-				if e == io.EOF {
-					return false, io.ErrUnexpectedEOF
-				}
-				return false, io.ErrNoProgress
-			}
-		}
-		values[k] = c.buffer[k][c.pos[k]]
-		c.pos[k]++
-	}
-	c.key = mergeSpanKey{Hash: values[0].Uint64(), Start: values[1].Int64(), SpanID: values[2].ByteArray()}
-	c.remaining--
-	return true, nil
-}
-
-type mergeKeyHeap []*mergeKeyCursor
-
-func (h mergeKeyHeap) Len() int { return len(h) }
-func (h mergeKeyHeap) Less(i, j int) bool {
-	a, b := h[i].current(), h[j].current()
-	if a.Hash != b.Hash {
-		return a.Hash < b.Hash
-	}
-	if a.Start != b.Start {
-		return a.Start < b.Start
-	}
-	if order := bytes.Compare(a.SpanID, b.SpanID); order != 0 {
-		return order < 0
-	}
-	return h[i].input < h[j].input
-}
-func (h mergeKeyHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h *mergeKeyHeap) Push(x any)   { *h = append(*h, x.(*mergeKeyCursor)) }
-func (h *mergeKeyHeap) Pop() any     { old := *h; x := old[len(old)-1]; *h = old[:len(old)-1]; return x }

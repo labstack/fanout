@@ -69,10 +69,16 @@ func TestMetricIngestKeepsKindTemporalityAndStart(t *testing.T) {
 	if len(physical) != len(captured) {
 		t.Fatalf("physical rows=%d", len(physical))
 	}
-	for i, row := range physical {
-		if row.SeriesID != captured[i].SeriesID {
-			t.Fatalf("physical series id=%d want %d", row.SeriesID, captured[i].SeriesID)
+	// Metric files are in the signal's order, not arrival order.
+	want := map[uint64]bool{}
+	for _, m := range captured {
+		want[m.SeriesID] = true
+	}
+	for _, row := range physical {
+		if !want[row.SeriesID] {
+			t.Fatalf("physical series id=%d was not ingested", row.SeriesID)
 		}
+		delete(want, row.SeriesID)
 	}
 }
 

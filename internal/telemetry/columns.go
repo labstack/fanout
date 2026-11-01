@@ -3,6 +3,7 @@ package telemetry
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/zeebo/xxh3"
@@ -27,6 +28,7 @@ type Column struct {
 	Name    string
 	Type    Type
 	Dict    bool     // dictionary-encoded; see the encoding note below
+	Delta   bool     // DELTA_BINARY_PACKED: an integer instant or count of nanoseconds
 	Shred   []string // VARIANT object keys also stored as typed columns
 	Expr    string   // raw-relation expression over stored columns
 	Private bool     // part of the file layout only; no relation exposes it
@@ -43,11 +45,13 @@ type Field struct {
 
 // Signal is the layout of one signal's Parquet files and its relations.
 type Signal struct {
-	Name    string   // file stem and relation name
-	Time    string   // event-time column whose footer statistics bound a file
-	Sort    []string // footer sorting columns; empty keeps arrival order
+	Name    string // file stem and relation name
+	Time    string // event-time column whose footer statistics bound a file
+	Order   Order  // row order of every file
+	Traces  bool   // files carry trace.fidx, built from an order led by _trace_hash
 	Columns []Column
 	schema  *parquet.Schema
+	order   keyOrder
 }
 
 // Stored reports whether the files hold the column.
@@ -108,6 +112,13 @@ func LookupSignal(name string) (*Signal, bool) {
 // allocation ratio. Dashboard scans filter and group on the low-cardinality
 // span columns, and the engine evaluates those predicates against a
 // dictionary instead of decoding one string per row.
+//
+// Instants and nanosecond counts are DELTA_BINARY_PACKED. Log and metric rows
+// are sorted by service before time, so neighbouring plain values share fewer
+// leading bytes than in arrival order and compressed worse; deltas within a
+// sorted run are small. On 50,000 sorted log rows the four time columns took
+// 8 bytes a row plain and under 2 delta-encoded; span times, in trace order,
+// shrank too.
 
 // The read views project the messaging keys from these shredded fields.
 var (
@@ -115,10 +126,16 @@ var (
 	resourceShred  = []string{"service.name", "service.namespace", "service.version", "deployment.environment.name"}
 )
 
+// Spans keep trace locality, which the trace index depends on. Logs and
+// metrics follow the OpenTelemetry Collector's ClickHouse exporter, with
+// namespace before service: a coarse time bucket or the series identity
+// first, and time last, so row-group statistics separate time ranges,
+// services and metric names.
 var Spans = &Signal{
-	Name: "spans",
-	Time: "start_time",
-	Sort: []string{"_trace_hash", "start_unix_nano", "span_id"},
+	Name:   "spans",
+	Time:   "start_time",
+	Order:  Order{{Column: "_trace_hash"}, {Column: "start_unix_nano"}, {Column: "span_id"}},
+	Traces: true,
 	Columns: []Column{
 		str("namespace", func(r *Span) string { return r.Namespace }),
 		str("trace_id", func(r *Span) string { return r.TraceID }),
@@ -130,8 +147,8 @@ var Spans = &Signal{
 		str("kind", func(r *Span) string { return r.Kind }).dict(),
 		ts("start_time", func(r *Span) int64 { return r.StartUnixNanos }),
 		ts("end_time", func(r *Span) int64 { return r.EndUnixNanos }),
-		i64("start_unix_nano", func(r *Span) int64 { return r.StartUnixNanos }),
-		i64("end_unix_nano", func(r *Span) int64 { return r.EndUnixNanos }),
+		nanos("start_unix_nano", func(r *Span) int64 { return r.StartUnixNanos }),
+		nanos("end_unix_nano", func(r *Span) int64 { return r.EndUnixNanos }),
 		f64("duration_ms", func(r *Span) float64 { return r.DurationMS }),
 		str("status", func(r *Span) string { return r.StatusCode }).dict(),
 		str("status_message", func(r *Span) string { return r.StatusMsg }),
@@ -144,7 +161,7 @@ var Spans = &Signal{
 		str("scope_name", func(r *Span) string { return r.ScopeName }).dict(),
 		str("scope_version", func(r *Span) string { return r.ScopeVersion }).dict(),
 		ts("ingested_at", func(r *Span) int64 { return r.IngestedAt }),
-		i64("ingested_unix_nano", func(r *Span) int64 { return r.IngestedAt }),
+		nanos("ingested_unix_nano", func(r *Span) int64 { return r.IngestedAt }),
 		str("http_method", func(r *Span) string { return r.HTTPMethod }).dict(),
 		str("http_status_code", func(r *Span) string { return r.HTTPStatusCode }).dict(),
 		str("http_route", func(r *Span) string { return r.HTTPRoute }).dict(),
@@ -162,8 +179,9 @@ var Spans = &Signal{
 }
 
 var Logs = &Signal{
-	Name: "logs",
-	Time: "log_time",
+	Name:  "logs",
+	Time:  "log_time",
+	Order: Order{{Column: "log_time", Bucket: int64(5 * time.Minute)}, {Column: "namespace"}, {Column: "service"}, {Column: "log_time"}},
 	Columns: []Column{
 		str("namespace", func(r *Log) string { return r.Namespace }).dict(),
 		ts("log_time", func(r *Log) int64 {
@@ -172,8 +190,8 @@ var Logs = &Signal{
 		ts("observed_time", func(r *Log) int64 {
 			return FirstPositiveNanos(r.ObservedTimeNanos, r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt)
 		}),
-		i64("time_unix_nano", func(r *Log) int64 { return r.TimeUnixNanos }),
-		i64("observed_time_unix_nano", func(r *Log) int64 { return r.ObservedTimeNanos }),
+		nanos("time_unix_nano", func(r *Log) int64 { return r.TimeUnixNanos }),
+		nanos("observed_time_unix_nano", func(r *Log) int64 { return r.ObservedTimeNanos }),
 		str("severity", func(r *Log) string { return r.Severity }).dict(),
 		i64("severity_number", func(r *Log) int64 { return int64(r.SeverityNumber) }),
 		str("body", func(r *Log) string { return r.Body }),
@@ -186,7 +204,7 @@ var Logs = &Signal{
 		str("scope_name", func(r *Log) string { return r.ScopeName }).dict(),
 		str("scope_version", func(r *Log) string { return r.ScopeVersion }).dict(),
 		ts("ingested_at", func(r *Log) int64 { return r.IngestedAt }),
-		i64("ingested_unix_nano", func(r *Log) int64 { return r.IngestedAt }),
+		nanos("ingested_unix_nano", func(r *Log) int64 { return r.IngestedAt }),
 		str("body_template", func(r *Log) string { return r.BodyTemplate }).dict(),
 	},
 }
@@ -194,13 +212,15 @@ var Logs = &Signal{
 var Metrics = &Signal{
 	Name: "metrics",
 	Time: "metric_time",
+	Order: Order{{Column: "namespace"}, {Column: "service"}, {Column: "name"},
+		{Column: "metric_time", Bucket: int64(time.Hour)}, {Column: "series_id"}, {Column: "metric_time"}},
 	Columns: []Column{
 		u64("series_id", func(r *Metric) uint64 { return r.SeriesID }),
 		str("namespace", func(r *Metric) string { return r.Namespace }).dict(),
 		ts("metric_time", func(r *Metric) int64 {
 			return FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt)
 		}).as("time"),
-		i64("time_unix_nano", func(r *Metric) int64 { return r.TimeUnixNanos }),
+		nanos("time_unix_nano", func(r *Metric) int64 { return r.TimeUnixNanos }),
 		str("name", func(r *Metric) string { return r.Name }).dict(),
 		str("description", func(r *Metric) string { return r.Description }).dict(),
 		str("unit", func(r *Metric) string { return r.Unit }).dict(),
@@ -213,7 +233,7 @@ var Metrics = &Signal{
 		// The int64 extremes are the engine's infinity sentinels and do not
 		// convert; TRY keeps one such client-supplied point from failing every
 		// query.
-		i64("start_time_unix_nano", func(r *Metric) int64 { return r.StartTimeUnixNanos }).view(Field{Name: "start_time", Type: Time, Expr: `CASE WHEN start_time_unix_nano=0 THEN NULL
+		nanos("start_time_unix_nano", func(r *Metric) int64 { return r.StartTimeUnixNanos }).view(Field{Name: "start_time", Type: Time, Expr: `CASE WHEN start_time_unix_nano=0 THEN NULL
        ELSE TRY(make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS) END`}),
 		str("service", func(r *Metric) string { return r.ServiceName }).dict(),
 		f64("value", func(r *Metric) float64 { return r.Value }),
@@ -227,7 +247,7 @@ var Metrics = &Signal{
 		str("scope_name", func(r *Metric) string { return r.ScopeName }).dict(),
 		str("scope_version", func(r *Metric) string { return r.ScopeVersion }).dict(),
 		ts("ingested_at", func(r *Metric) int64 { return r.IngestedAt }),
-		i64("ingested_unix_nano", func(r *Metric) int64 { return r.IngestedAt }),
+		nanos("ingested_unix_nano", func(r *Metric) int64 { return r.IngestedAt }),
 	},
 }
 
@@ -240,7 +260,10 @@ func i64[R any](name string, get func(*R) int64) Column    { return column(name,
 func u64[R any](name string, get func(*R) uint64) Column   { return column(name, Uint64, get) }
 func f64[R any](name string, get func(*R) float64) Column  { return column(name, Float64, get) }
 func boolean[R any](name string, get func(*R) bool) Column { return column(name, Bool, get) }
-func ts[R any](name string, get func(*R) int64) Column     { return column(name, Time, get).as(name) }
+func ts[R any](name string, get func(*R) int64) Column {
+	return column(name, Time, get).delta().as(name)
+}
+func nanos[R any](name string, get func(*R) int64) Column { return column(name, Int64, get).delta() }
 func derived(name string, t Type, expr string) Column {
 	return Column{Name: name, Type: t, Expr: expr, View: Field{Name: name, Type: t}}
 }
@@ -251,6 +274,7 @@ func object[R any](name string, get func(*R) map[string]any, shred []string) Col
 }
 
 func (c Column) dict() Column    { c.Dict = true; return c }
+func (c Column) delta() Column   { c.Delta = true; return c }
 func (c Column) private() Column { c.Private, c.View = true, Field{}; return c }
 
 func (c Column) view(f Field) Column { c.View = f; return c }
@@ -263,6 +287,7 @@ func (c Column) as(name string) Column {
 func init() {
 	for _, s := range Signals {
 		s.schema = buildSchema(s)
+		s.order = compileOrder(s)
 	}
 }
 
@@ -303,6 +328,9 @@ func buildSchema(s *Signal) *parquet.Schema {
 		}
 		if c.Dict {
 			node = parquet.Encoded(node, &parquet.RLEDictionary)
+		}
+		if c.Delta {
+			node = parquet.Encoded(node, &parquet.DeltaBinaryPacked)
 		}
 		fields[c.Name] = node
 	}

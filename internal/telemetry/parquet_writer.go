@@ -12,7 +12,7 @@ import (
 // writeColumns streams variant events straight into shredded columns.
 // The generic map encoder builds a second object tree for every row; keeping
 // the canonical OTel maps as the event source bounds the ingest working set.
-func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R) error {
+func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32) error {
 	type scalarColumn struct {
 		get    any
 		column int
@@ -70,12 +70,20 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 	}
 
 	columns := writer.ColumnWriters()
-	for start := 0; start < len(rows); {
-		end := min(start+256, len(rows), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
+	// Each chunk's rows are gathered once into a contiguous buffer: every
+	// column then reads them in sequence instead of chasing the permutation
+	// across the whole batch once per column.
+	buffer := make([]R, 256)
+	defer clear(buffer)
+	for start := 0; start < len(perm); {
+		end := min(start+256, len(perm), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
 		// Dispatch once per column and chunk, rather than once per cell, so
 		// the scalar encoding loops are homogeneous and reuse their byte and
 		// value buffers.
-		chunk := rows[start:end]
+		chunk := buffer[:end-start]
+		for i, row := range perm[start:end] {
+			chunk[i] = rows[row]
+		}
 		for c := range scalars {
 			column := &scalars[c]
 			switch get := column.get.(type) {
