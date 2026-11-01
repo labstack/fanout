@@ -491,8 +491,12 @@ func (s *completionCandidates) fields(e expect, numeric bool, scope string) {
 		if numeric && attribute.Type == "number" {
 			boost = 2
 		}
+		detail := attribute.Type
+		if attribute.Indexed {
+			detail += ", indexed"
+		}
 		before := len(s.items)
-		s.add(label, insert, "attribute", attribute.Type, attribute.Count, boost)
+		s.add(label, insert, "attribute", detail, attribute.Count, boost)
 		if len(s.items) > before {
 			s.items[before].service = s.serviceBoost(attribute.Services)
 		}

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 type SchemaRequest struct {
@@ -56,6 +58,9 @@ type AttributeSchema struct {
 	// Numbers lists the sampled values some rows store as numbers, with
 	// those rows' counts, when rows disagree on the type.
 	Numbers []Option `json:"numbers,omitempty"`
+	// Indexed marks a standard key stored in a typed column (batch format
+	// 5): it reads as Type whatever type rows sent.
+	Indexed bool `json:"indexed,omitempty"`
 }
 
 type MetricSchema struct {
@@ -499,7 +504,41 @@ FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return indexAttributes(sig.source, out), nil
+}
+
+// indexAttributes lists every standard key of the signal, sampled or not,
+// with its column's type: ingest converts the values rows send, so the
+// map's mixed types never reach a query.
+func indexAttributes(source *telemetry.Signal, attributes []AttributeSchema) []AttributeSchema {
+	seen := map[string]bool{}
+	for i := range attributes {
+		a := &attributes[i]
+		if k, ok := source.Dedicated(a.Scope, a.Key); ok {
+			a.Indexed, a.Type, a.Types, a.Numbers = true, keyTypeName(k), nil, nil
+			seen[a.Scope+"\x00"+a.Key] = true
+		}
+	}
+	for _, k := range source.Keys() {
+		scope := "attributes"
+		if k.Scope == semconv.Resource {
+			scope = "resource"
+		}
+		if !seen[scope+"\x00"+k.Name] {
+			attributes = append(attributes, AttributeSchema{Key: k.Name, Scope: scope, Type: keyTypeName(k), Indexed: true})
+		}
+	}
+	return attributes
+}
+
+func keyTypeName(k semconv.Key) string {
+	if k.Type == semconv.Int {
+		return "number"
+	}
+	return "string"
 }
 
 // attributeType names a JSON type as the schema reports it.

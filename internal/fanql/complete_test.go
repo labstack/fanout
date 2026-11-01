@@ -736,3 +736,22 @@ func TestCompleteSeverityOncePerLevel(t *testing.T) {
 		t.Fatalf("labels %v", completionLabels(r))
 	}
 }
+
+// A standard key completes with its column's type and an indexed mark.
+func TestCompleteMarksIndexedKeys(t *testing.T) {
+	schema := completionFixtureSchema()
+	spans := schema.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.response.status_code", Scope: "attributes", Type: "number", Count: 4, Indexed: true})
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	r := waitCompletion(t, c, completionRequest("spans where http.response.¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
+	for _, item := range r.Items {
+		if item.Label == "http.response.status_code" {
+			if item.Detail != "number, indexed" {
+				t.Fatalf("detail %q", item.Detail)
+			}
+			return
+		}
+	}
+	t.Fatalf("labels %v", completionLabels(r))
+}

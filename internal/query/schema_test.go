@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+
+	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
@@ -34,6 +37,27 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 	}
 	if !slices.Contains(keys, "attributes:http.route:string") || !slices.Contains(keys, "attributes:customer.tier:string") {
 		t.Fatalf("attributes = %v", keys)
+	}
+	indexed := map[string]bool{}
+	for _, a := range spans.Attributes {
+		if a.Indexed {
+			indexed[a.Scope+":"+a.Key+":"+a.Type] = true
+		}
+	}
+	if len(indexed) != len(semconv.Keys) || !indexed["attributes:http.route:string"] || !indexed["attributes:http.response.status_code:number"] || !indexed["resource:k8s.pod.name:string"] {
+		t.Fatalf("indexed span keys = %v", indexed)
+	}
+	logKeys := 0
+	for _, a := range schema.Signals["logs"].Attributes {
+		if a.Indexed {
+			logKeys++
+			if a.Scope != "resource" {
+				t.Fatalf("log attribute %s indexed", a.Key)
+			}
+		}
+	}
+	if logKeys != len(telemetry.Logs.Keys()) {
+		t.Fatalf("indexed log keys = %d", logKeys)
 	}
 	var kinds []string
 	for _, c := range spans.Columns {
@@ -119,5 +143,23 @@ func TestSchemaCacheIsBounded(t *testing.T) {
 	// The namespace listing and the one real key: junk took no entries.
 	if len(e.schemas) != 2 {
 		t.Fatalf("cache holds %d entries", len(e.schemas))
+	}
+}
+
+// A standard key reads as its column's type whatever the map's sampled rows
+// sent, so the schema reports no mixed types for it.
+func TestSchemaReportsStandardKeysTyped(t *testing.T) {
+	got := indexAttributes(telemetry.Spans, []AttributeSchema{
+		{Key: "http.response.status_code", Scope: "attributes", Type: "string", Count: 9, Types: []string{"string", "number"}, Numbers: []Option{{Value: "200", Count: 4}}},
+		{Key: "http.status_code", Scope: "attributes", Type: "string", Types: []string{"string", "number"}},
+	})
+	if a := got[0]; !a.Indexed || a.Type != "number" || a.Types != nil || a.Numbers != nil || a.Count != 9 {
+		t.Fatalf("standard key: %+v", a)
+	}
+	if a := got[1]; a.Indexed || a.Types == nil {
+		t.Fatalf("other key: %+v", a)
+	}
+	if len(got) != len(semconv.Keys)+1 {
+		t.Fatalf("%d attributes", len(got))
 	}
 }
