@@ -147,8 +147,14 @@ func digestRows() ([]Span, []Log, []Metric) {
 
 // digestMap holds a sparse sample of the scope's dedicated keys, most with
 // their semconv type, some with another type or NULL, and keys that have no
-// column.
+// column. A few maps are empty or absent.
 func digestMap(r *rand.Rand, scope semconv.Scope, i int) map[string]any {
+	switch i % 31 {
+	case 7:
+		return nil
+	case 8:
+		return map[string]any{}
+	}
 	m := map[string]any{"user.id": fmt.Sprintf("u-%d", r.Intn(50))}
 	if i%9 == 0 {
 		m["nested"] = map[string]any{"b": []any{int64(1), "two", 3.5}, "a": map[string]any{"z": nil, "y": false}}
