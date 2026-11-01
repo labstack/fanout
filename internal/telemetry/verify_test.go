@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	driver "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 )
 
@@ -245,5 +247,51 @@ func TestNativeVerifierRejectsLogAndMetricOrder(t *testing.T) {
 				t.Fatalf("unsorted %s error = %v", s.Name, err)
 			}
 		})
+	}
+}
+
+// Field-name churn makes every row carry a variant metadata dictionary of up
+// to 4 KiB, as compacted files of high-cardinality attributes do. Each
+// extract of a standard key decodes that dictionary for every row, so the
+// verifier must still decode every column and check every key and row within
+// its fixed, non-spilling memory limit.
+func TestNativeVerifierFitsChurnedVariantMetadata(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes and verifies a batch of wide variant metadata")
+	}
+	const rows = 6_000
+	spans := make([]Span, rows)
+	for i := range spans {
+		attributes, resource := map[string]any{}, map[string]any{}
+		for _, key := range Spans.Keys() {
+			var value any = fmt.Sprintf("%s-%d", key.Name, i%97)
+			if key.Type == semconv.Int {
+				value = int64(i % 1013)
+			}
+			if i%10 == 0 {
+				value = fmt.Sprint(value) // converted at ingest
+			}
+			if key.Scope == semconv.Resource {
+				resource[key.Name] = value
+			} else {
+				attributes[key.Name] = value
+			}
+		}
+		for j := range 24 {
+			attributes[fmt.Sprintf("app.generated.attribute.k%05d", (i*31+j*7919)%50_000)] = int64(j)
+		}
+		resource[fmt.Sprintf("host.generated.label.k%04d", i%2000)] = "x"
+		spans[i] = Span{TraceID: fmt.Sprintf("%032x", i/4), SpanID: fmt.Sprintf("%016x", i), ServiceName: "api",
+			Name: "op", StartUnixNanos: int64(i) * 1000, EndUnixNanos: int64(i)*1000 + 500, Resource: resource, Attributes: attributes}
+	}
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "churn"}, spans, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublishedBatch(store.BatchPath("churn")); err != nil {
+		t.Fatal(err)
 	}
 }

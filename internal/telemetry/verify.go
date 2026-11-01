@@ -89,7 +89,7 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 			continue
 		}
 		path := filepath.Join(dir, signal.Name+".parquet")
-		if err := v.decode(ctx, path, count); err != nil {
+		if err := v.decode(ctx, path, signal, count); err != nil {
 			return fmt.Errorf("verify %s Parquet: %w", signal.Name, err)
 		}
 		if err := v.values(ctx, path, signal); err != nil {
@@ -107,44 +107,45 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 	return nil
 }
 
-func (v *BatchVerifier) decode(ctx context.Context, path string, expected int) error {
-	// COUNT alone can use footer metadata. Hash every column to force vector
-	// decoding of all pages, including shredded and residual VARIANT values.
-	// The XOR is discarded: this is readability validation, not a checksum.
-	query := "SELECT COUNT(*), bit_xor(hash(COLUMNS(*))) FROM read_parquet(" + sqlString(filepath.ToSlash(path)) + ", hive_partitioning=false)"
-	rows, err := v.db.QueryContext(ctx, query)
-	if err != nil {
-		return nativeVerificationError(err)
+// decode forces native decoding of every page of every column. COUNT alone
+// can use footer metadata, so the queries hash every column, including
+// shredded and residual VARIANT values; the XORs are discarded: this is
+// readability validation, not a checksum. A query buffers the row-group
+// chunks of every column it reads, and a variant column of wide metadata
+// alone can approach the verifier's memory limit, so each variant column has
+// its own query and the remaining columns share one.
+func (v *BatchVerifier) decode(ctx context.Context, path string, s *Signal, expected int) error {
+	var scalars []string
+	var queries [][]string
+	for _, field := range s.schema.Fields() {
+		name := sqlIdentifier(field.Name())
+		if c, ok := s.Column(field.Name()); ok && c.Type == Variant {
+			queries = append(queries, []string{name})
+		} else {
+			scalars = append(scalars, name)
+		}
 	}
-	defer rows.Close()
-	columns, err := rows.Columns()
-	if err != nil {
-		return err
+	if len(scalars) > 0 {
+		queries = append(queries, scalars)
 	}
-	values := make([]any, len(columns))
-	dest := make([]any, len(columns))
-	var count int64
-	dest[0] = &count
-	for i := 1; i < len(dest); i++ {
-		dest[i] = &values[i]
-	}
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
+	source := parquetSource(path)
+	for _, columns := range queries {
+		selects := []string{"COUNT(*)"}
+		for _, c := range columns {
+			selects = append(selects, "bit_xor(hash("+c+"))")
+		}
+		var count int64
+		dest := make([]any, len(selects))
+		dest[0] = &count
+		for i := 1; i < len(dest); i++ {
+			dest[i] = new(any)
+		}
+		if err := v.db.QueryRowContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+source).Scan(dest...); err != nil {
 			return nativeVerificationError(err)
 		}
-		return errors.New("batch verifier returned no row")
-	}
-	if err := rows.Scan(dest...); err != nil {
-		return nativeVerificationError(err)
-	}
-	if rows.Next() {
-		return errors.New("batch verifier returned multiple rows")
-	}
-	if err := rows.Err(); err != nil {
-		return nativeVerificationError(err)
-	}
-	if count != int64(expected) {
-		return batchDataError(fmt.Errorf("decoded %d rows; metadata declares %d", count, expected))
+		if count != int64(expected) {
+			return batchDataError(fmt.Errorf("decoded %d rows; metadata declares %d", count, expected))
+		}
 	}
 	return nil
 }
@@ -154,16 +155,39 @@ func (v *BatchVerifier) decode(ctx context.Context, path string, expected int) e
 // when the value has no conversion; the footer counts each key's non-null
 // values without one; the parallel lists of a row have equal lengths; and
 // metric points carry exactly the columns of their kind.
+//
+// Every row is checked. Each key has its own query: extracting a key decodes
+// the row's whole variant metadata, and a query holds one decoded vector per
+// extract, so checking every key at once outgrows the verifier's memory
+// limit on files with wide metadata. The list and kind checks read no
+// variant and share one query.
 func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) error {
+	source := parquetSource(path)
+	counts, err := fileSpills(path, s)
+	if err != nil {
+		return batchDataError(err)
+	}
+	for _, key := range s.Keys() {
+		// An absent key and a null value both read as VARIANT_NULL: no value,
+		// so no spill.
+		query := fmt.Sprintf("SELECT count(*) FILTER (WHERE NOT coalesce(%s, false)), count(*) FILTER (WHERE %s IS NULL AND variant_typeof(%s)<>'VARIANT_NULL')::UBIGINT FROM %s",
+			coercedSQL(key), key.Column, keyValueSQL(key), source)
+		var broken, spilled uint64
+		if err := v.db.QueryRowContext(ctx, query).Scan(&broken, &spilled); err != nil {
+			return nativeVerificationError(err)
+		}
+		if broken > 0 {
+			return &CorruptBatchError{fmt.Errorf("%d rows break the %s check", broken, key.Column)}
+		}
+		if spilled != counts[key.Bit] {
+			return &CorruptBatchError{fmt.Errorf("%d rows spill %s; the footer counts %d", spilled, key.Name, counts[key.Bit])}
+		}
+	}
 	type check struct {
 		name string
 		sql  string
 	}
 	var checks []check
-	keys := s.Keys()
-	for _, key := range keys {
-		checks = append(checks, check{key.Column, coercedSQL(key)})
-	}
 	groups := map[string][]string{}
 	var names []string
 	for _, c := range s.Columns {
@@ -190,18 +214,12 @@ func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) erro
 	for _, c := range checks {
 		selects = append(selects, "count(*) FILTER (WHERE NOT coalesce("+c.sql+", false))")
 	}
-	// An absent key and a null value both read as VARIANT_NULL: no value,
-	// so no spill.
-	for _, key := range keys {
-		selects = append(selects, fmt.Sprintf("count(*) FILTER (WHERE %s IS NULL AND variant_typeof(%s)<>'VARIANT_NULL')::UBIGINT", key.Column, keyValueSQL(key)))
-	}
-	query := "SELECT " + strings.Join(selects, ", ") + " FROM read_parquet(" + sqlString(filepath.ToSlash(path)) + ", hive_partitioning=false)"
 	results := make([]uint64, len(selects))
 	dest := make([]any, len(results))
 	for i := range results {
 		dest[i] = &results[i]
 	}
-	if err := v.db.QueryRowContext(ctx, query).Scan(dest...); err != nil {
+	if err := v.db.QueryRowContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+source).Scan(dest...); err != nil {
 		return nativeVerificationError(err)
 	}
 	for i, c := range checks {
@@ -209,17 +227,14 @@ func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) erro
 			return &CorruptBatchError{fmt.Errorf("%d rows break the %s check", results[i], c.name)}
 		}
 	}
-	counts, err := fileSpills(path, s)
-	if err != nil {
-		return batchDataError(err)
-	}
-	for i, key := range keys {
-		if got := results[len(checks)+i]; got != counts[key.Bit] {
-			return &CorruptBatchError{fmt.Errorf("%d rows spill %s; the footer counts %d", got, key.Name, counts[key.Bit])}
-		}
-	}
 	return nil
 }
+
+func parquetSource(path string) string {
+	return "read_parquet(" + sqlString(filepath.ToSlash(path)) + ", hive_partitioning=false)"
+}
+
+func sqlIdentifier(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 
 func keyValueSQL(key semconv.Key) string {
 	source := "attributes"
