@@ -30,6 +30,10 @@ func TestStandardKeySubscriptsReadTheirRelationsColumns(t *testing.T) {
 		{"shadowed", `WITH spans AS (SELECT {'http.route': 1}::VARIANT AS attributes) SELECT attributes['http.route'] AS r FROM spans`, `attributes['http.route'] AS r`, "_a_"},
 		{"inventory", `SELECT resource['service.version'] AS v FROM resource_inventory`, `"resource"['service.version'] AS v`, "_r_"},
 		{"union", `SELECT attributes['http.route'] AS r FROM (SELECT * FROM spans UNION ALL SELECT * FROM spans)`, `SELECT _a_http_route AS r`, "attributes["},
+		{"lateral sibling", `SELECT (SELECT max(r) FROM logs, LATERAL (SELECT attributes['http.route'] AS r)) AS x FROM spans`, `(SELECT attributes['http.route'] AS r)`, "_a_"},
+		{"implicit lateral", `SELECT (SELECT max(r) FROM logs, (SELECT attributes['http.route'] AS r)) AS x FROM spans`, `(SELECT attributes['http.route'] AS r)`, "_a_"},
+		{"table function", `SELECT (SELECT max(v) FROM logs, unnest([attributes['http.route']]) AS t(v)) AS x FROM spans`, `unnest(list_value(attributes['http.route']))`, "_a_"},
+		{"unnested struct", `SELECT (SELECT max(attributes['http.route']::VARCHAR) FROM (SELECT unnest({'attributes': {'http.route': 'z'}::VARIANT}))) AS x FROM spans`, `max(CAST(attributes['http.route'] AS VARCHAR))`, "_a_"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := compileRelations(t.Context(), d.DB, test.query, nil, map[string]string{})
@@ -186,5 +190,33 @@ func TestStarsHideDedicatedColumns(t *testing.T) {
 	compiled, err := compileRelations(t.Context(), d.DB, `WITH s AS (SELECT * FROM spans) SELECT attributes['http.route'] AS r, * FROM s`, nil, map[string]string{})
 	if err != nil || !strings.Contains(compiled, `SELECT _a_http_route AS r, * EXCLUDE (`) {
 		t.Fatalf("%s: %v", compiled, err)
+	}
+}
+
+// A FROM subquery or table function binds its left siblings before the
+// enclosing query, so a subscript there reads the sibling's map.
+func TestLateralSubscriptsReadTheirSiblings(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	n := at.UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "lateral",
+		Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", TraceID: "t", SpanID: "s", Name: "GET",
+			StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n, Attributes: map[string]any{"http.route": "/cart"}}},
+		Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", EventUnixNanos: n, TimeUnixNanos: n, ObservedTimeNanos: n,
+			Body: "hi", IngestedAt: n, Attributes: map[string]any{"http.route": "/log"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at, End: at.Add(time.Hour)})
+	for query, want := range map[string]string{
+		`SELECT (SELECT max(r) FROM logs, LATERAL (SELECT attributes['http.route']::VARCHAR AS r)) FROM spans`:                                 "/log",
+		`SELECT (SELECT max(r) FROM logs, (SELECT attributes['http.route']::VARCHAR AS r)) FROM spans`:                                         "/log",
+		`SELECT (SELECT max(v) FROM logs, unnest([attributes['http.route']::VARCHAR]) AS t(v)) FROM spans`:                                     "/log",
+		`SELECT (SELECT max(attributes['http.route']::VARCHAR) FROM (SELECT unnest({'attributes': {'http.route': 'z'}::VARIANT}))) FROM spans`: "z",
+	} {
+		var got string
+		if err := d.QueryRowScan(ctx, []any{&got}, query); err != nil || got != want {
+			t.Fatalf("%s: %q, %v; want %q", query, got, err, want)
+		}
 	}
 }

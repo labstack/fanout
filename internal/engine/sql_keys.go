@@ -369,11 +369,13 @@ func (r *keyRewriter) from(value any, scope *keyScope) {
 		catalog, _ := ref["catalog_name"].(string)
 		bind(name, r.table(name, schema, catalog, scope.parent))
 	case "SUBQUERY":
-		// Renamed columns cannot pass the dedicated columns on, so its stars
-		// leave them out, as a statement's result does.
+		// DuckDB binds a FROM subquery laterally: it sees the bindings to
+		// its left before the enclosing query's. Renamed columns cannot pass
+		// the dedicated columns on, so its stars leave them out, as a
+		// statement's result does.
 		subquery, _ := ref["subquery"].(map[string]any)
 		node, _ := subquery["node"].(map[string]any)
-		bind("", r.queryAt(node, scope.parent, renamed))
+		bind("", r.queryAt(node, scope, renamed))
 	case "JOIN":
 		r.from(ref["left"], scope)
 		r.from(ref["right"], scope)
@@ -381,7 +383,7 @@ func (r *keyRewriter) from(value any, scope *keyScope) {
 	default:
 		for key, child := range ref {
 			if key != "alias" {
-				r.walk(child, scope.parent)
+				r.walk(child, scope)
 			}
 		}
 		bind("", &keyRelation{open: true})
@@ -440,6 +442,13 @@ func (r *keyRewriter) output(value any, scope *keyScope) *keyRelation {
 				}
 			}
 		default:
+			// unnest and unpack of a struct produce columns named after its
+			// fields, which may include a map name.
+			if function, _ := item["function_name"].(string); item["class"] == "FUNCTION" &&
+				(alias == "" || strings.EqualFold(function, "unnest") || strings.EqualFold(function, "unpack")) {
+				out.open = true
+				continue
+			}
 			name := alias
 			if names := stringList(item["column_names"]); name == "" && item["class"] == "COLUMN_REF" && len(names) > 0 {
 				name = names[len(names)-1]
