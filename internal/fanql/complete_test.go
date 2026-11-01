@@ -719,3 +719,20 @@ func TestCompleteReadsTheSourceCache(t *testing.T) {
 		t.Fatalf("labels %v after %d fetches", completionLabels(r), calls.Load())
 	}
 }
+
+// Levels stored in two cases complete once, in lowercase.
+func TestCompleteSeverityOncePerLevel(t *testing.T) {
+	schema := completionFixtureSchema()
+	logs := schema.Signals["logs"]
+	logs.Columns[0].Values = append(logs.Columns[0].Values, query.Option{Value: "error", Count: 5}, query.Option{Value: "Custom", Count: 3}, query.Option{Value: "CUSTOM", Count: 2})
+	schema.Signals["logs"] = logs
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	r := waitCompletion(t, c, completionRequest("logs where severity:¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
+	seen := map[string]int{}
+	for _, label := range completionLabels(r) {
+		seen[label]++
+	}
+	if seen["error"] != 1 || seen["custom"] != 1 {
+		t.Fatalf("labels %v", completionLabels(r))
+	}
+}
