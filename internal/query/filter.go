@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // Filter is one checked filter expression.
@@ -17,6 +19,9 @@ type Filter struct {
 	Source   string          `json:"source"`
 	Params   []string        `json:"params,omitempty"`
 	InParams map[string]bool `json:"-"`
+	// PatternParams are variables used as patterns; their values are bounded
+	// when bound.
+	PatternParams map[string]bool `json:"-"`
 	// EqField is the field compared when the filter is `field = value`; the
 	// empty-panel diagnosis lists values seen for it.
 	EqField        string `json:"-"`
@@ -259,6 +264,9 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 		if v.HasFilter {
 			return errors.New("FILTER is not allowed in a filter")
 		}
+		if err := checkFilterPattern(v, f); err != nil {
+			return err
+		}
 		if v.Function == "contains" && len(v.Arguments) == 2 && v.Arguments[0] != nil && v.Arguments[0].Class == "PARAMETER" {
 			f.InParams[v.Arguments[0].Identifier] = true
 		}
@@ -267,6 +275,35 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 		return fmt.Errorf("%s is not allowed in a filter", strings.ToLower(strings.TrimPrefix(v.Type, "VALUE_")))
 	}
 }
+
+// filterPatterns names the filter functions whose second argument is a
+// pattern. A pattern costs its length times the text's per row, and DuckDB
+// stops a statement only between chunks, so it is a literal or a variable of
+// at most engine.MaxPatternBytes, never a column.
+var filterPatterns = map[string]string{"~~": "LIKE", "!~~": "NOT LIKE", "~~*": "ILIKE", "!~~*": "NOT ILIKE", "regexp_matches": "regexp_matches"}
+
+func checkFilterPattern(v *SQLExpr, f *Filter) error {
+	label, ok := filterPatterns[v.Function]
+	if !ok || len(v.Arguments) < 2 {
+		return nil
+	}
+	pattern := v.Arguments[1]
+	for pattern != nil && pattern.Class == "CAST" {
+		pattern = pattern.Child
+	}
+	switch {
+	case pattern != nil && pattern.Class == "PARAMETER":
+		if f.PatternParams == nil {
+			f.PatternParams = map[string]bool{}
+		}
+		f.PatternParams[pattern.Identifier] = true
+		return nil
+	case pattern != nil && pattern.Class == "CONSTANT" && len(pattern.LiteralText) <= engine.MaxPatternBytes:
+		return nil
+	}
+	return fmt.Errorf("the pattern of %s must be a literal or a variable of at most %d bytes", label, engine.MaxPatternBytes)
+}
+
 func checkAttributeExpr(v *SQLExpr) error {
 	if len(v.Children) != 2 {
 		return errors.New("attribute lookups take one key")

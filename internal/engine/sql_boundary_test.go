@@ -138,10 +138,12 @@ func TestSQLBoundaryRejectsQuadraticRowCosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	long := "'" + strings.Repeat("a", maxPatternBytes+1) + "'"
+	long := "'" + strings.Repeat("a", MaxPatternBytes+1) + "'"
 	for query, want := range map[string]string{
 		"SELECT max(levenshtein(repeat('a',20000), repeat('b',20000)||x::varchar)) FROM range(2048) t(x)": `function "levenshtein" is not available to telemetry SQL`,
 		"SELECT damerau_levenshtein(service_name, 'x') FROM spans":                                        `function "damerau_levenshtein" is not available`,
+		"SELECT jaro_similarity(service_name, 'x') FROM spans":                                            `function "jaro_similarity" is not available`,
+		"SELECT jaro_winkler_similarity(service_name, 'x') FROM spans":                                    `function "jaro_winkler_similarity" is not available`,
 		"SELECT editdist3(service_name, 'x') FROM spans":                                                  `function "editdist3" is not available`,
 		"SELECT * FROM spans WHERE service_name LIKE '%' || repeat('a', 10000)":                           "pattern of LIKE must be a literal",
 		"SELECT * FROM spans WHERE service_name ILIKE name":                                               "pattern of ILIKE must be a literal",
@@ -164,7 +166,8 @@ func TestSQLBoundaryRejectsQuadraticRowCosts(t *testing.T) {
 		"SELECT * FROM spans WHERE regexp_matches(name, 'error.*') OR name SIMILAR TO 'a.*'",
 		"SELECT regexp_extract(name, '([a-z]+)', 1), string_split_regex(name, '[/ ]') FROM spans",
 		"SELECT * FROM spans WHERE name LIKE 'x%'::VARCHAR",
-		"SELECT jaro_winkler_similarity(name, 'checkout'), contains(name, service_name) FROM spans",
+		"SELECT contains(name, service_name), jaccard(name, 'checkout') FROM spans",
+		"SELECT * FROM spans WHERE name LIKE ?::VARCHAR AND regexp_matches(name, ?)",
 	} {
 		if err := validateSQLAST(ctx, conn, query, false); err != nil {
 			t.Errorf("rejected %s: %v", query, err)

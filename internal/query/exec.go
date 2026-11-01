@@ -12,6 +12,7 @@ import (
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -639,6 +640,11 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 	if err != nil {
 		return nil, "", err
 	}
+	node, err := e.engine.ParseSQL(ctx, canonical)
+	if err != nil {
+		return nil, "", err
+	}
+	patterns := engine.PatternParams(node)
 	query, describe, args, err := bindParams(canonical, func(name string) ([]any, bool, error) {
 		switch name {
 		case "__from":
@@ -652,6 +658,9 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		}
 		if v.All || len(v.Values) == 0 {
 			return []any{nil}, false, nil
+		}
+		if patterns[name] && len(v.Values[0]) > engine.MaxPatternBytes {
+			return nil, false, patternTooLong(name)
 		}
 		return []any{v.Values[0]}, false, nil
 	})

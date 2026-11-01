@@ -90,9 +90,10 @@ the cause of a change.
 
 For queries that need it, a panel can use guarded SQL: one read-only `SELECT`
 over approved telemetry relations, with a required time-window filter. It
-cannot call edit distances such as `levenshtein`, and the pattern of `LIKE`,
-`ILIKE`, `GLOB`, `SIMILAR TO` and the `regexp_` functions must be a literal of
-at most 256 bytes: DuckDB stops a query only between batches of rows, and
+cannot call edit distances such as `levenshtein` or the Jaro similarities,
+and the pattern of `LIKE`, `ILIKE`, `GLOB`, `SIMILAR TO` and the `regexp_`
+functions, in SQL or a filter, must be a literal or a variable, never a
+column, and at most 256 bytes: DuckDB stops a query only between batches of rows, and
 these are the functions whose cost per row could keep one batch running long
 past its deadline. Logs,
 log patterns, traces and scatter use structured queries. SQL state timelines

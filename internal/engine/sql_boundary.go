@@ -28,9 +28,10 @@ var blockedSQLFunctions = map[string]bool{
 	"glob": true, "http_get": true, "write_file": true, "write_log": true,
 	"current_query": true, "current_query_id": true,
 	"pg_get_viewdef": true, "pg_get_constraintdef": true, "format_type": true, "get_block_size": true,
-	// Edit distances cost the product of their inputs' lengths per row; see
-	// patternFunctions.
+	// Edit distances and Jaro similarities cost the product of their inputs'
+	// lengths per row; see patternFunctions.
 	"levenshtein": true, "editdist3": true, "damerau_levenshtein": true,
+	"jaro_similarity": true, "jaro_winkler_similarity": true,
 }
 
 // DuckDB checks for interrupts only between chunks of up to 2,048 rows, so
@@ -38,13 +39,16 @@ var blockedSQLFunctions = map[string]bool{
 // bounded by the memory the chunk's values occupy, which the memory limit
 // caps; work that grows with the product of two input sizes is not. Measured
 // per chunk of 20,000-character values: levenshtein 21 minutes and
-// damerau_levenshtein 60 (blocked: every argument is a value); a computed
+// damerau_levenshtein 60; jaro_similarity, linear on varied text, took
+// 146 s on 200,000-character repeated values (all blocked: every argument is
+// a value). A computed
 // 10,000-character LIKE pattern, compiled per row, 2.5 minutes and a computed
 // SIMILAR TO pattern 25; a literal 10,000-byte regular expression 13 to 27
 // minutes, a 1 KiB one about a second, a 256-byte one 0.06 s. Patterns must
-// therefore be literals of at most maxPatternBytes. Linear functions (jaro,
-// jaccard, hamming, contains, list set operations) took 4 to 27 s a chunk of
-// 20,000 to 40,000 elements.
+// therefore be literals of at most MaxPatternBytes, or bound values whose
+// callers check that length when binding. Linear functions (jaccard,
+// hamming, contains, list set operations) took 4 to 20 s a chunk of 20,000
+// to 40,000 elements.
 //
 // patternFunctions maps each pattern match to its name in errors.
 var patternFunctions = map[string]string{
@@ -57,29 +61,54 @@ var patternFunctions = map[string]string{
 	"string_split_regex": "string_split_regex", "str_split_regex": "str_split_regex",
 }
 
-const maxPatternBytes = 256
+// MaxPatternBytes bounds a pattern's length.
+const MaxPatternBytes = 256
 
-// literalPattern reports whether a pattern argument is a string literal, cast
-// or not, of at most maxPatternBytes.
-func literalPattern(node map[string]any) bool {
-	for node["class"] == "CAST" {
-		child, ok := node["child"].(map[string]any)
-		if !ok {
-			return false
-		}
-		node = child
+// boundedPattern reports whether a pattern is a string literal of at most
+// MaxPatternBytes or a bound value. Telemetry SQL binds only values its
+// callers checked: panel windows and variables, bounded by PatternParams.
+func boundedPattern(node map[string]any) bool {
+	switch node["class"] {
+	case "PARAMETER":
+		return true
+	case "CONSTANT":
+		literal, _ := node["literal"].(map[string]any)
+		text, _ := literal["text"].(string)
+		return len(text) <= MaxPatternBytes
 	}
-	if node["class"] != "CONSTANT" {
-		return false
-	}
-	literal, _ := node["literal"].(map[string]any)
-	text, _ := literal["text"].(string)
-	return len(text) <= maxPatternBytes
+	return false
 }
 
-func checkPattern(node map[string]any, name string) error {
-	label, ok := patternFunctions[strings.ToLower(name)]
-	if !ok {
+// PatternParams names the parameters a statement uses as patterns, so a
+// caller can bound their values when it binds them.
+func PatternParams(value any) map[string]bool {
+	names := map[string]bool{}
+	var walk func(any)
+	walk = func(value any) {
+		switch node := value.(type) {
+		case map[string]any:
+			if name, ok := node["function_name"].(string); ok {
+				if parameter := patternArgument(node, name); parameter != nil && parameter["class"] == "PARAMETER" {
+					identifier, _ := parameter["identifier"].(string)
+					names[identifier] = true
+				}
+			}
+			for _, child := range node {
+				walk(child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	walk(value)
+	return names
+}
+
+// patternArgument returns a pattern function's pattern, under any casts.
+func patternArgument(node map[string]any, name string) map[string]any {
+	if _, ok := patternFunctions[strings.ToLower(name)]; !ok {
 		return nil
 	}
 	arguments, _ := node["arguments"].([]any)
@@ -88,10 +117,22 @@ func checkPattern(node map[string]any, name string) error {
 	}
 	argument, _ := arguments[1].(map[string]any)
 	expression, _ := argument["expression"].(map[string]any)
-	if !literalPattern(expression) {
-		return fmt.Errorf("the pattern of %s must be a literal of at most %d bytes", label, maxPatternBytes)
+	for expression["class"] == "CAST" {
+		child, _ := expression["child"].(map[string]any)
+		expression = child
 	}
-	return nil
+	if expression == nil {
+		return map[string]any{}
+	}
+	return expression
+}
+
+func checkPattern(node map[string]any, name string) error {
+	pattern := patternArgument(node, name)
+	if pattern == nil || boundedPattern(pattern) {
+		return nil
+	}
+	return fmt.Errorf("the pattern of %s must be a literal of at most %d bytes", patternFunctions[strings.ToLower(name)], MaxPatternBytes)
 }
 
 func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain bool) (queryrows.Rows, []bool, error) {

@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/labstack/fanout/internal/engine"
 )
 
 func TestRunResolvesOneInstantForAllPanelWindows(t *testing.T) {
@@ -286,5 +288,36 @@ func TestEmptyVariableOptionsWire(t *testing.T) {
 	}
 	if string(raw) != `{"route":[],"service":[]}` {
 		t.Fatalf("empty wire options: %s", raw)
+	}
+}
+
+// A variable used as a pattern in panel SQL or a filter is bounded when bound:
+// its length times the text's is a statement's cost per row.
+func TestRunBoundsVariablePatterns(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := shopDashboard()
+	d.Variables = append(d.Variables, Variable{Name: "q", Kind: "text"})
+	d.Panels = []Panel{
+		{ID: "sql", Title: "SQL", Viz: "table", SQL: "SELECT count(*) AS n FROM spans WHERE $__window(start_time) AND regexp_matches(operation, $q)"},
+		{ID: "filter", Title: "Filter", Viz: "stat", Query: &Spec{From: "spans", Where: []string{"operation ILIKE $q"}, Measures: []string{"count()"}}},
+	}
+	long := map[string]Value{"q": {Values: []string{strings.Repeat("a", engine.MaxPatternBytes+1)}}}
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: d, Vars: long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if !strings.Contains(r.Error, "$q is a pattern of at most 256 bytes") {
+			t.Errorf("%s: %+v", r.ID, r)
+		}
+	}
+	results, err = e.Run(t.Context(), RunRequest{Dashboard: d, Vars: map[string]Value{"q": {Values: []string{"GET.*"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range results {
+		if r.Error != "" {
+			t.Errorf("%s: %s", r.ID, r.Error)
+		}
 	}
 }

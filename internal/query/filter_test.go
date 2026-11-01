@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
@@ -235,5 +236,43 @@ func TestTypedFilterFieldsPreserveDisplay(t *testing.T) {
 		if got := constantText(expr.Right); got != tc.literal {
 			t.Errorf("%s literal = %q, want %q", tc.text, got, tc.literal)
 		}
+	}
+}
+
+// A pattern costs its length times the text's per row, and DuckDB stops a
+// statement only between chunks, so a filter's pattern is a literal or a
+// variable of at most engine.MaxPatternBytes, never a column.
+func TestCheckFilterBoundsPatterns(t *testing.T) {
+	d, _ := newTestEngine(t)
+	spans, _ := lookupSignal("spans")
+	vars := map[string]Variable{"text": {Name: "text", Kind: "text"}}
+	long := "'" + strings.Repeat("a", engine.MaxPatternBytes+1) + "'"
+	for expr, want := range map[string]string{
+		"regexp_matches(operation, operation)":  "the pattern of regexp_matches must be a literal or a variable",
+		"operation LIKE http_route":             "the pattern of LIKE must be a literal or a variable",
+		"operation NOT ILIKE lower(http_route)": "the pattern of NOT ILIKE must be a literal or a variable",
+		"operation LIKE " + long:                "at most 256 bytes",
+	} {
+		if _, err := checkFilter(t.Context(), d, spans, vars, expr); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", expr, err, want)
+		}
+	}
+	short := "'%" + strings.Repeat("a", engine.MaxPatternBytes-2) + "'"
+	for _, expr := range []string{"operation LIKE " + short, "regexp_matches(operation, 'GET .*')", "operation ILIKE $text", "regexp_matches(operation, $text)"} {
+		if _, err := checkFilter(t.Context(), d, spans, vars, expr); err != nil {
+			t.Errorf("%s: %v", expr, err)
+		}
+	}
+	f, err := checkFilter(t.Context(), d, spans, vars, "regexp_matches(operation, $text)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Vars: map[string]Value{"text": {Values: []string{strings.Repeat("a", engine.MaxPatternBytes+1)}}}}
+	if _, _, err := filterClause(f, scope); err == nil || !strings.Contains(err.Error(), "$text is a pattern of at most 256 bytes") {
+		t.Fatalf("long variable pattern: err = %v", err)
+	}
+	scope.Vars["text"] = Value{Values: []string{"GET .*"}}
+	if _, _, err := filterClause(f, scope); err != nil {
+		t.Fatal(err)
 	}
 }

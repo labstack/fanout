@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/engine"
 )
 
 // Value is a variable's current value. JSON: a string, a list of strings, or
@@ -101,10 +103,19 @@ func (s Scope) lookup(f Filter) func(string) ([]any, bool, error) {
 		}
 		values := make([]any, len(v.Values))
 		for i, value := range v.Values {
+			if f.PatternParams[name] && len(value) > engine.MaxPatternBytes {
+				return nil, false, patternTooLong(name)
+			}
 			values[i] = value
 		}
 		return values, f.InParams[name], nil
 	}
+}
+
+// patternTooLong reports a variable whose value is too long for the pattern
+// it fills: a pattern costs its length times the text's per row.
+func patternTooLong(name string) error {
+	return Problems{{Path: "vars." + name, Message: fmt.Sprintf("$%s is a pattern of at most %d bytes", name, engine.MaxPatternBytes)}}
 }
 
 // buildWhere renders the read window and the active filters. The window is
