@@ -2,7 +2,8 @@ import { Alert, Badge, Box, Button, Group, Paper, Stack, Text } from "@mantine/c
 import { Tooltip } from "@mantine/core";
 import { useMemo, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
-import { seriesSlot, statusHex } from "../../../../chart";
+import { chartTheme, seriesSlot, statusHex } from "../../../../chart";
+import { series } from "../../../../tokens";
 import { duration } from "../../../../format";
 import { filledTextOn } from "../../../../theme";
 import { EmptyState } from "./components";
@@ -37,10 +38,14 @@ export function TraceDetailView({ result, dark, onSpan, loadSpan }: { result: Re
 function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean; onSpan: (span: TraceSpan) => void }) {
   const model = useMemo(() => flameModel(spans), [spans]);
   const services = [...new Set(spans.map((span) => span.service))];
+  // Services past the fixed palette share the muted colour, so the legend names them as one entry.
+  const named = services.slice(0, series.light.length), others = services.slice(series.light.length);
   return <Stack px={{ base: "md", sm: "lg" }} pb="md" gap="xs">
-    <Group justify="space-between"><Group gap="md">{services.map((service) => <Group gap={5} key={service}><Box w={8} h={8} bg={seriesSlot(services.indexOf(service), dark)} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{service}</Text></Group>)}</Group><Badge variant="light">{duration(model.total)}</Badge></Group>
+    <Group justify="space-between"><Group gap="md" data-flame-legend>{named.map((service, index) => <Group gap={5} key={service}><Box w={8} h={8} bg={seriesSlot(index, dark)} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{service}</Text></Group>)}
+      {others.length > 0 && <Group gap={5} title={others.join(", ")}><Box w={8} h={8} bg={chartTheme(dark).muted} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{others.length === 1 ? others[0] : `${others.length} other services`}</Text></Group>}
+    </Group><Badge variant="light">{duration(model.total)}</Badge></Group>
     <Paper withBorder radius="md" p="sm" data-flame-graph>
-      <Box pos="relative" h={22} mb={4}>{[0, 25, 50, 75, 100].map((position) => <Text key={position} pos="absolute" left={`${position}%`} c="dimmed" size="xs" style={{ transform: position === 100 ? "translateX(-100%)" : position ? "translateX(-50%)" : undefined }}>{duration(model.total * position / 100)}</Text>)}</Box>
+      <Box pos="relative" h={22} mb={4}>{[0, 25, 50, 75, 100].map((position) => <Text key={position} pos="absolute" left={`${position}%`} c="dimmed" size="xs" style={{ whiteSpace: "nowrap", transform: position === 100 ? "translateX(-100%)" : position ? "translateX(-50%)" : undefined }}>{duration(model.total * position / 100)}</Text>)}</Box>
       <Box pos="relative" h={Math.max(150, model.laneCount * 36 + 12)} bg="var(--mantine-color-default-hover)" style={{ overflow: "hidden", borderRadius: "var(--mantine-radius-md)" }}>
         {[0, 25, 50, 75, 100].map((position) => <Box key={position} pos="absolute" left={`${position}%`} top={0} bottom={0} style={{ borderLeft: "1px solid var(--mantine-color-default-border)" }} />)}
         {model.frames.map(({ span, lane, left, width }) => {
