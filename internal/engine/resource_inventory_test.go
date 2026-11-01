@@ -272,7 +272,7 @@ func TestResourceInventoryAtomicSignalAndMarkerFailures(t *testing.T) {
 			if _, err := d.DB.Exec(`DROP TABLE read_batches; DROP TABLE read_resource_inventory`); err != nil {
 				t.Fatal(err)
 			}
-			if err := createBatchCaches(d.DB); err != nil {
+			if err := CreateCacheTables(d.DB); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
@@ -565,7 +565,7 @@ func TestResourceInventoryTransferFailureKeepsPublishedOutputRaw(t *testing.T) {
 	if _, err := d.DB.Exec(`DROP TABLE read_resource_inventory`); err != nil {
 		t.Fatal(err)
 	}
-	if err := createBatchCaches(d.DB); err != nil {
+	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {

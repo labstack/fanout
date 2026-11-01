@@ -353,41 +353,6 @@ func TestAnomalyCoalescesOpenEpisode(t *testing.T) {
 	}
 }
 
-func TestVersionSchemaRebuildClearsPair(t *testing.T) {
-	for _, table := range []string{"version_rollup", "version_rollup_batches"} {
-		t.Run(table, func(t *testing.T) {
-			d, repo := versionEngine(t)
-			commitVersionLogs(t, repo, "rebuild", time.Now().UTC().Add(-time.Hour), 3)
-			if _, err := d.RefreshVersionRollup(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			column := "last_seen"
-			if table == "version_rollup_batches" {
-				column = "max_ingested"
-			}
-			if _, err := d.DB.Exec("ALTER TABLE " + table + " DROP COLUMN " + column); err != nil {
-				t.Fatal(err)
-			}
-			if err := createAnnotationTables(d.DB); err != nil {
-				t.Fatal(err)
-			}
-			for _, q := range []string{"SELECT count(*) FROM version_rollup", "SELECT count(*) FROM version_rollup_batches", "SELECT count(*) FROM rollup_state WHERE cache_key LIKE 'version_rollup%'"} {
-				var n int
-				if err := d.DB.QueryRow(q).Scan(&n); err != nil || n != 0 {
-					t.Fatalf("stale paired state: %s count=%d err=%v", q, n, err)
-				}
-			}
-			if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != 1 {
-				t.Fatalf("history not reread: %d %v", n, err)
-			}
-			var n int
-			if err := d.DB.QueryRow("SELECT count(*) FROM version_rollup").Scan(&n); err != nil || n == 0 {
-				t.Fatalf("missing rebuilt history: %d %v", n, err)
-			}
-		})
-	}
-}
-
 type annotationCountingReader struct {
 	queryrows.Queryer
 	engine *annotationCountingEngine

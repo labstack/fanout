@@ -116,14 +116,9 @@ func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, consecutiveFailure
 }
 
 const (
-	// v3: service_rollup gained served_spans, and its p50/p95 stopped counting
-	// the calls a service waits on. ensureCacheTable drops the table when the
-	// new column is missing, but the watermark decides what gets rebuilt — left
-	// at v2 it would point past every historical bucket, so the dropped rows
-	// would never come back and the whole window would read as empty. A new key
-	// has no watermark, which is what makes the next pass a full backfill.
-	// Bump this whenever the table's shape or the meaning of its columns
-	// changes.
+	// Rollup progress keys in rollup_state. readCacheVersion drops that table
+	// with the rollups, so a version change also restarts their backfill; the
+	// keys need no version of their own.
 	serviceRollupStateKey         = "service_rollup_v3"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"

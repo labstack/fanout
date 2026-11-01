@@ -4,11 +4,10 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 const createServiceRollupTable = `
-CREATE TABLE service_rollup (
+CREATE TABLE IF NOT EXISTS service_rollup (
   namespace TEXT,
   bucket TIMESTAMP,
   service TEXT,
@@ -26,7 +25,7 @@ CREATE TABLE service_rollup (
 );`
 
 const createEdgeRollupTable = `
-CREATE TABLE edge_rollup (
+CREATE TABLE IF NOT EXISTS edge_rollup (
   namespace TEXT,
   bucket TIMESTAMP,
   caller TEXT,
@@ -39,7 +38,7 @@ CREATE TABLE edge_rollup (
 );`
 
 const createRollupStateTable = `
-CREATE TABLE rollup_state (
+CREATE TABLE IF NOT EXISTS rollup_state (
   cache_key TEXT PRIMARY KEY,
   last_ingested_unix_nano BIGINT,
   updated_at TIMESTAMP
@@ -152,27 +151,6 @@ CREATE OR REPLACE MACRO attr(attributes, key) AS
 // A binding descriptor for panel validation, never the execution source.
 const emptyResourceInventory = `SELECT NULL::VARCHAR AS signal,NULL::VARCHAR AS namespace,NULL::VARCHAR AS service,NULL::VARIANT AS resource,NULL::TIMESTAMPTZ_NS AS first_seen,NULL::TIMESTAMPTZ_NS AS last_seen WHERE false`
 
-// CreateCacheTables creates only DuckDB's rebuildable query accelerators. The
-// production telemetry rows themselves live in immutable Parquet batches.
-func CreateCacheTables(db *sql.DB) error {
-	if err := ensureCacheTable(db, "service_rollup", createServiceRollupTable,
-		"namespace", "bucket", "service", "spans", "served_spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
-		return err
-	}
-	if err := ensureCacheTable(db, "edge_rollup", createEdgeRollupTable,
-		"namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
-		return err
-	}
-	if err := ensureCacheTable(db, "rollup_state", createRollupStateTable,
-		"cache_key", "last_ingested_unix_nano", "updated_at"); err != nil {
-		return err
-	}
-	if err := createAnnotationTables(db); err != nil {
-		return err
-	}
-	return createBatchCaches(db)
-}
-
 // CreateParquetViews exposes the fixed format-4 schema. Binding one file
 // rather than unioning every footer bounds binder memory. Supplying a schema
 // MAP suppresses DuckDB 2's VARIANT extraction pushdown, so read the physical
@@ -203,71 +181,4 @@ func CreateViews(db *sql.DB) error {
 		}
 	}
 	return nil
-}
-
-func ensureCacheTable(db *sql.DB, table, createStmt string, requiredColumns ...string) error {
-	columns, err := cacheTableColumns(db, table)
-	if err != nil {
-		return fmt.Errorf("inspect %s schema: %w", table, err)
-	}
-	if len(columns) == 0 {
-		if _, err := db.Exec(createStmt); err != nil {
-			return fmt.Errorf("create %s: %w", table, err)
-		}
-		return nil
-	}
-	for _, column := range requiredColumns {
-		if _, ok := columns[column]; !ok {
-			if _, err := db.Exec("DROP TABLE " + table); err != nil {
-				return fmt.Errorf("drop stale %s: %w", table, err)
-			}
-			if _, err := db.Exec(createStmt); err != nil {
-				return fmt.Errorf("recreate %s: %w", table, err)
-			}
-			return forgetRollupProgress(db, table)
-		}
-	}
-	return nil
-}
-
-// forgetRollupProgress discards the watermarks belonging to a cache table that
-// has just been emptied.
-//
-// A rollup only rebuilds what its watermark says is missing. Recreating the
-// table without clearing that watermark leaves it pointing past every bucket
-// that was just dropped, so the history never comes back and every query over
-// it reports an empty window — a silent, permanent data loss on upgrade rather
-// than a rebuild. Progress keys are named for their table, which is what lets
-// this find them.
-func forgetRollupProgress(db *sql.DB, table string) error {
-	if table == "rollup_state" {
-		return nil
-	}
-	if _, err := db.Exec("DELETE FROM rollup_state WHERE cache_key LIKE ? || '%'", table); err != nil {
-		// A fresh database has no rollup_state yet; it is created alongside
-		// these tables and has nothing to forget.
-		if strings.Contains(err.Error(), "rollup_state") {
-			return nil
-		}
-		return fmt.Errorf("clear %s rollup progress: %w", table, err)
-	}
-	return nil
-}
-
-func cacheTableColumns(db *sql.DB, table string) (map[string]struct{}, error) {
-	rows, err := db.Query(`SELECT column_name FROM duckdb_columns() WHERE table_name = ?`, table)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	columns := make(map[string]struct{})
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, err
-		}
-		columns[name] = struct{}{}
-	}
-	return columns, rows.Err()
 }

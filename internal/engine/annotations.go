@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +16,12 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-const createVersionRollupTable = `CREATE TABLE version_rollup (
+const createVersionRollupTable = `CREATE TABLE IF NOT EXISTS version_rollup (
  namespace VARCHAR, service VARCHAR, service_version VARCHAR,
  first_seen TIMESTAMPTZ_NS, last_seen TIMESTAMPTZ_NS,
  PRIMARY KEY(namespace,service,service_version))`
-const createVersionBatchesTable = `CREATE TABLE version_rollup_batches (batch_id VARCHAR PRIMARY KEY,max_ingested BIGINT)`
-const createAnomalyLogTable = `CREATE TABLE anomaly_log (
+const createVersionBatchesTable = `CREATE TABLE IF NOT EXISTS version_rollup_batches (batch_id VARCHAR PRIMARY KEY,max_ingested BIGINT)`
+const createAnomalyLogTable = `CREATE TABLE IF NOT EXISTS anomaly_log (
  namespace VARCHAR,service VARCHAR,kind VARCHAR,start_time TIMESTAMPTZ_NS,end_time TIMESTAMPTZ_NS,
  title VARCHAR,severity VARCHAR,PRIMARY KEY(namespace,service,kind,start_time))`
 
@@ -37,46 +36,6 @@ func nextVersionRollupFailure(previous versionRollupFailure, now time.Time) vers
 	delay := min(time.Minute<<min(previous.failures-1, 5), 30*time.Minute)
 	previous.nextAttempt = now.Add(delay)
 	return previous
-}
-
-func createAnnotationTables(db *sql.DB) error {
-	// The rows and immutable-batch markers describe the same disposable cache.
-	// Rebuild both atomically if either schema is absent or incompatible.
-	rebuild := false
-	for table, required := range map[string][]string{
-		"version_rollup":         {"namespace", "service", "service_version", "first_seen", "last_seen"},
-		"version_rollup_batches": {"batch_id", "max_ingested"},
-	} {
-		columns, err := cacheTableColumns(db, table)
-		if err != nil {
-			return err
-		}
-		for _, column := range required {
-			if _, ok := columns[column]; !ok {
-				rebuild = true
-			}
-		}
-	}
-	if rebuild {
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-		defer func() { _ = tx.Rollback() }()
-		for _, statement := range []string{"DROP TABLE IF EXISTS version_rollup_batches", "DROP TABLE IF EXISTS version_rollup", createVersionRollupTable, createVersionBatchesTable} {
-			if _, err := tx.Exec(statement); err != nil {
-				return err
-			}
-		}
-		if _, err := tx.Exec("DELETE FROM rollup_state WHERE cache_key LIKE 'version_rollup%'"); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return ensureCacheTable(db, "anomaly_log", createAnomalyLogTable,
-		"namespace", "service", "kind", "start_time", "end_time", "title", "severity")
 }
 
 const (

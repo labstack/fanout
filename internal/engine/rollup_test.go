@@ -711,7 +711,7 @@ func nullIfEmpty(v string) any {
 	return v
 }
 
-// A cache table that is dropped for a schema change has to be rebuilt, and a
+// A cache table that is dropped for a version change has to be rebuilt, and a
 // rollup only rebuilds what its watermark says is missing. Leaving the
 // watermark in place after emptying the table loses every historical bucket
 // permanently, and every query over that window then reports no data.
@@ -737,15 +737,16 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
 
-	// Stand in for the upgrade: the stored table is missing a column this
-	// build requires, so ensureCacheTable empties it.
-	if _, err := db.Exec(`ALTER TABLE service_rollup DROP COLUMN served_spans`); err != nil {
-		t.Fatalf("simulate an older table: %v", err)
+	// Stand in for the upgrade: the stored caches carry an older version, so
+	// the rollup and its progress are dropped together.
+	if _, err := db.Exec(`UPDATE read_cache_version SET version=version-1`); err != nil {
+		t.Fatalf("simulate an older cache: %v", err)
 	}
 	if err := CreateTables(db); err != nil {
-		t.Fatalf("CreateTables after the schema change: %v", err)
+		t.Fatalf("CreateTables after the version change: %v", err)
 	}
 	requireRowCount(t, db, `SELECT count(*) FROM service_rollup`, nil, 0)
+	requireRowCount(t, db, `SELECT count(*) FROM rollup_state`, nil, 0)
 	d.rollupWatermarks = nil
 
 	if _, err := d.rollupOnce(ctx); err != nil {

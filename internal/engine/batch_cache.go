@@ -15,16 +15,21 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-// readCacheVersion covers both schema and aggregation semantics. These tables
-// are disposable; a mismatch rebuilds them together from immutable Parquet.
-const readCacheVersion = 7
+// readCacheVersion covers the schema and semantics of every table DuckDB
+// keeps: the rollups and their progress, version and anomaly history, and the
+// per-batch read caches. All of them are disposable; a mismatch drops them
+// together and they rebuild from immutable Parquet. Bump it whenever a table's
+// shape or the meaning of its rows changes.
+const readCacheVersion = 8
 
 const (
 	readCacheBatchLimit = 64
 	readCacheRowBudget  = 64000
 )
 
-func createBatchCaches(db *sql.DB) error {
+// CreateCacheTables creates DuckDB's rebuildable query accelerators. The
+// telemetry rows themselves live in immutable Parquet batches.
+func CreateCacheTables(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -39,7 +44,7 @@ func createBatchCaches(db *sql.DB) error {
 		return err
 	}
 	if version != readCacheVersion {
-		rows, err := tx.Query(`SELECT table_name FROM duckdb_tables() WHERE schema_name='main' AND starts_with(table_name,'read_') AND table_name<>'read_cache_version'`)
+		rows, err := tx.Query(`SELECT table_name FROM duckdb_tables() WHERE database_name=current_database() AND schema_name='main' AND NOT temporary AND table_name<>'read_cache_version'`)
 		if err != nil {
 			return err
 		}
@@ -62,12 +67,6 @@ func createBatchCaches(db *sql.DB) error {
 				return err
 			}
 		}
-		// Bucket counts and the unfinished edge window are one disposable
-		// unit. Restart that window from its unchanged ingestion watermark
-		// when upgrading from a cache without these counts (or new semantics).
-		if _, err := tx.Exec(`DELETE FROM rollup_state WHERE cache_key IN (?, ?)`, edgeRollupSubCursorKey, edgeRollupSubWindowKey); err != nil {
-			return err
-		}
 		if _, err := tx.Exec(`DELETE FROM read_cache_version`); err != nil {
 			return err
 		}
@@ -76,6 +75,12 @@ func createBatchCaches(db *sql.DB) error {
 		}
 	}
 	for _, stmt := range []string{
+		createServiceRollupTable,
+		createEdgeRollupTable,
+		createRollupStateTable,
+		createVersionRollupTable,
+		createVersionBatchesTable,
+		createAnomalyLogTable,
 		`CREATE TABLE IF NOT EXISTS read_edge_buckets (namespace VARCHAR, bucket TIMESTAMPTZ_NS, spans BIGINT)`,
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
 		`CREATE TABLE IF NOT EXISTS read_resource_inventory (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,

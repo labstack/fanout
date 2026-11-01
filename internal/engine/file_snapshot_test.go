@@ -251,7 +251,7 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
 		}
 	}
-	if err := createBatchCaches(d.DB); err != nil {
+	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
@@ -322,7 +322,10 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`} {
+	for _, stmt := range []string{`UPDATE read_trace_candidates SET min_start=0`, `UPDATE read_resource_inventory SET first_seen=make_timestamp_ns(0)::TIMESTAMPTZ_NS`, `UPDATE read_cache_version SET version=5`, `INSERT INTO read_edge_buckets VALUES ('ns',now(),10)`, `INSERT INTO rollup_state VALUES ('edge_rollup_v2_substart',1,now()),('edge_rollup_v2_subwindow_end',2,now())`, `CREATE TABLE read_endpoints (value INTEGER)`, `CREATE TABLE read_logs (value INTEGER)`, `CREATE TABLE read_obsolete (value INTEGER)`,
+		`INSERT INTO service_rollup (namespace,bucket,service,spans) VALUES ('ns',now(),'svc',1)`, `INSERT INTO edge_rollup (namespace,bucket,caller,callee,calls) VALUES ('ns',now(),'a','b',1)`,
+		`INSERT INTO version_rollup VALUES ('ns','svc','v1',now(),now())`, `INSERT INTO version_rollup_batches VALUES ('semantic',1)`,
+		`INSERT INTO anomaly_log VALUES ('ns','svc','latency',now(),now(),'slow','bad')`, `INSERT INTO rollup_state VALUES ('service_rollup_v3',1,now())`} {
 		if _, err := d.DB.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
@@ -330,7 +333,8 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 	if err := CreateCacheTables(d.DB); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates", "read_edge_buckets"} {
+	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates", "read_edge_buckets",
+		"service_rollup", "edge_rollup", "rollup_state", "version_rollup", "version_rollup_batches", "anomaly_log"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
