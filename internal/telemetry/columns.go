@@ -531,11 +531,9 @@ func leaf(t Type) parquet.Node {
 // dictMetadata dictionary-encodes a VARIANT group's metadata leaf. The variant
 // writer shares one growing name dictionary across a file's rows, so a file
 // holds a few distinct metadata blobs of up to 4 KiB each. Written plain, each
-// row repeats its blob; after compaction interleaves the blobs of many input
-// batches, the compressor no longer finds them adjacent. Measured on 50
-// merged span batches with mixed attribute sets, plain metadata grew 3.3x in
-// compaction and was the largest column; dictionary-encoded it is a few
-// bytes a row.
+// row repeats its blob. Compaction re-encodes a row group's rows with a few
+// shared dictionaries (variant_merge.go), so dictionary-encoded the column is
+// a few bytes a row.
 type dictMetadata struct{ parquet.Node }
 
 func (n dictMetadata) Fields() []parquet.Field {

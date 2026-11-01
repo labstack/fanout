@@ -136,6 +136,24 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			err = errors.Join(err, columns[i].close())
 		}
 	}()
+	// Shredded VARIANT groups are merged as units, re-encoding their values
+	// with shared metadata (variant_merge.go).
+	var variants []*variantMerge
+	for _, c := range s.Columns {
+		if c.Stored() && c.Type == Variant && !c.List {
+			v, e := newVariantMerge(schema, c.Name, columns, len(groups))
+			if e != nil {
+				return e
+			}
+			variants = append(variants, v)
+		}
+	}
+	owned := make([]bool, len(columns))
+	for _, v := range variants {
+		for _, c := range v.columns {
+			owned[c.column] = true
+		}
+	}
 	// Give workers a standard, concurrency-safe context even when a caller wraps
 	// Context.Err for instrumentation. Cancellation never leaves workers behind.
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -178,8 +196,13 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		writers := writer.ColumnWriters()
 		var work errgroup.Group
 		work.SetLimit(min(8, runtime.GOMAXPROCS(0)))
+		for _, v := range variants {
+			work.Go(func() error { return v.write(workerCtx, writers, runs) })
+		}
 		for i := range columns {
-			work.Go(func() error { return columns[i].write(workerCtx, writers[i], runs) })
+			if !owned[i] {
+				work.Go(func() error { return columns[i].write(workerCtx, writers[i], runs) })
+			}
 		}
 		if e := work.Wait(); e != nil {
 			return e
@@ -246,30 +269,23 @@ func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, r
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		r := c.readers[run.input]
-		if r == nil {
-			r = parquet.NewColumnChunkValueReader(c.groups[run.input].ColumnChunks()[c.column])
-			c.readers[run.input] = r
-			c.remaining[run.input] = c.groups[run.input].NumRows()
-		}
 		var err error
 		if c.repeated {
-			err = c.copyRows(writer, run)
+			c.open(run.input)
+			if err = c.copyRows(writer, run); err == nil {
+				err = c.advance(run)
+			}
 		} else {
-			err = c.copyValues(writer, r, run.rows)
+			err = c.read(run, func(values []parquet.Value) error {
+				written, err := writer.WriteRowValues(values)
+				if err == nil && written != len(values) {
+					err = io.ErrShortWrite
+				}
+				return err
+			})
 		}
 		if err != nil {
 			return err
-		}
-		c.remaining[run.input] -= int64(run.rows)
-		if c.remaining[run.input] == 0 {
-			if err := r.Close(); err != nil {
-				return err
-			}
-			c.readers[run.input] = nil
-			if c.repeated {
-				c.pending[run.input], c.buffers[run.input] = nil, nil
-			}
 		}
 	}
 	// Flush the final partial page concurrently too. Flush on the parent is
@@ -278,17 +294,59 @@ func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, r
 	return writer.Flush()
 }
 
-func (c *mergeColumn) copyValues(writer *parquet.ColumnWriter, r parquet.ColumnChunkValueReader, rows int) error {
-	for remaining := rows; remaining > 0; {
+// open starts reading an input's column chunk on its first run.
+func (c *mergeColumn) open(input int) parquet.ColumnChunkValueReader {
+	r := c.readers[input]
+	if r == nil {
+		r = parquet.NewColumnChunkValueReader(c.groups[input].ColumnChunks()[c.column])
+		c.readers[input] = r
+		c.remaining[input] = c.groups[input].NumRows()
+	}
+	return r
+}
+
+// advance accounts for a run's rows, closing the input's reader after its
+// last.
+func (c *mergeColumn) advance(run mergeRun) error {
+	c.remaining[run.input] -= int64(run.rows)
+	if c.remaining[run.input] > 0 {
+		return nil
+	}
+	err := c.readers[run.input].Close()
+	c.readers[run.input] = nil
+	if c.repeated {
+		c.pending[run.input], c.buffers[run.input] = nil, nil
+	}
+	return err
+}
+
+// readSome reads at most len(dst) values of an input's non-repeated leaf in
+// one read; the caller accounts for them with advance.
+func (c *mergeColumn) readSome(input int, dst []parquet.Value) (int, error) {
+	n, err := c.open(input).ReadValues(dst)
+	if n > 0 && (err == nil || err == io.EOF) {
+		return n, nil
+	}
+	if err == io.EOF {
+		return 0, io.ErrUnexpectedEOF
+	}
+	if err != nil {
+		return 0, err
+	}
+	return 0, io.ErrNoProgress
+}
+
+// read passes a run's values of a non-repeated leaf, one per row, to fn in
+// order. The values borrow the reader's page and must not be retained.
+func (c *mergeColumn) read(run mergeRun, fn func([]parquet.Value) error) error {
+	r := c.open(run.input)
+	for remaining := run.rows; remaining > 0; {
 		n, e := r.ReadValues(c.values[:min(remaining, len(c.values))])
 		if n > 0 {
-			written, err := writer.WriteRowValues(c.values[:n])
+			err := fn(c.values[:n])
 			clear(c.values[:n])
 			if err != nil {
 				return err
-			}
-			if written != n {
-				return io.ErrShortWrite
 			}
 			remaining -= n
 		}
@@ -302,7 +360,7 @@ func (c *mergeColumn) copyValues(writer *parquet.ColumnWriter, r parquet.ColumnC
 			return io.ErrNoProgress
 		}
 	}
-	return nil
+	return c.advance(run)
 }
 
 // copyRows writes a run's rows of a repeated leaf. Values borrow their
