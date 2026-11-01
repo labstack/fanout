@@ -289,7 +289,9 @@ func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others
 			query += " UNION ALL SELECT * FROM (SELECT v, n, 'near' FROM (SELECT v, n, levenshtein(v, ?) AS d FROM (SELECT v, n FROM g WHERE v <> ? AND abs(length(v) - length(?)) <= ? ORDER BY n DESC, v LIMIT 1000)) WHERE d <= ? ORDER BY d, n DESC, v LIMIT 1)"
 			args = append(args, literal, literal, literal, k, k)
 		}
-		if strings.HasPrefix(f.EqField, "attributes[") || strings.HasPrefix(f.EqField, "resource[") {
+		// A standard key reads typed: ingest converted its values, so no
+		// other form of the literal matches more rows.
+		if _, dedicated := sig.source.Dedicated(ref.Column, ref.Key); ref.Key != "" && !dedicated {
 			query += " UNION ALL SELECT v, n, 'literal' FROM g WHERE v = ?"
 			args = append(args, literal)
 		}
