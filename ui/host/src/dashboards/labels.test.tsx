@@ -27,7 +27,9 @@ it("uses shared labels for tables, legends, axes, tooltips and accessible descri
   const result: PanelResult = {id:"p",status:"ok",elapsed_ms:1,frame:{columns:[{name:"time",type:"time",role:"time"},column],values:[[0],[42]],rows:1}};
   const original = JSON.stringify(result);
   const table = renderToStaticMarkup(<MantineProvider><TableViz panel={panel} result={result} height={240}/></MantineProvider>);
-  expect(table).toContain("P95 duration (ms)");
+  // Table cells print durations in their own unit, so the header names none.
+  expect(table).toContain(">P95 duration<");
+  expect(table).not.toContain("P95 duration (ms)");
   expect(table).toContain('data-field="p95_duration_ms"');
   const theme = chartThemeFor(false);
   const line = timeseriesOption({...panel,viz:"timeseries"},result,theme) as any;
@@ -42,4 +44,17 @@ it("uses shared labels for tables, legends, axes, tooltips and accessible descri
   expect(bar.series.map((s:any)=>s.name)).toEqual(["Avg (ms)","P95 duration (ms)"]);
   expect(bar.yAxis.data).toEqual(["checkout_service"]);
   expect(JSON.stringify(result)).toBe(original);
+});
+
+it("heads a table duration column without the unit its cells already print", () => {
+  // A max_ms column of 600014 ms printed "10m" under "Max (ms)".
+  const panel: Panel = {id:"p",title:"Slowest",viz:"table",unit:"ms"};
+  const result: PanelResult = {id:"p",status:"ok",elapsed_ms:1,frame:{columns:[{name:"service",type:"string",role:"dimension"},{name:"max_ms",type:"number",role:"measure"},{name:"calls",type:"number",role:"measure",unit:"count"}],values:[["checkout"],[600014],[3]],rows:1}};
+  const table = renderToStaticMarkup(<MantineProvider><TableViz panel={panel} result={result} height={240}/></MantineProvider>);
+  expect(table).toContain(">Max<");
+  expect(table).not.toContain("Max (ms)");
+  expect(table).toContain(">10m<");
+  // Without a duration unit the cell is a bare number and the header keeps the name's unit.
+  const bare = renderToStaticMarkup(<MantineProvider><TableViz panel={{...panel,unit:undefined}} result={result} height={240}/></MantineProvider>);
+  expect(bare).toContain("Max (ms)");
 });
