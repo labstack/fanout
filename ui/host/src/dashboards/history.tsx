@@ -12,7 +12,8 @@ type HistoryProps = { id: string; currentVersion: number; opened: boolean; onClo
 export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored }: HistoryProps) {
   const client = useQueryClient();
   const [selected, setSelected] = useState<number>();
-  const [success, setSuccess] = useState("");
+  // Each confirmation is a new object, so the same text twice still takes focus.
+  const [success, setSuccess] = useState<{ text: string }>();
   const [pending, setPending] = useState(false);
   const [contentMounted, setContentMounted] = useState(opened);
   const feedbackGeneration = useRef(0);
@@ -38,7 +39,7 @@ export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored 
       // mounted keys after the committed record renders.
       void client.invalidateQueries({ predicate: dashboardDataPredicate(id), refetchType: "none" });
       if (mounted.current) {
-        if (isOpen.current && generation === feedbackGeneration.current) setSuccess(`Restored v${version} as v${record.version}`);
+        if (isOpen.current && generation === feedbackGeneration.current) setSuccess({ text: `Restored v${version} as v${record.version}` });
         restoredCallback.current(record);
       }
       void client.invalidateQueries({ queryKey: dashboardsKey });
@@ -51,11 +52,11 @@ export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored 
     },
     onSettled: () => { submitting.current = false; if (mounted.current) setPending(false); },
   });
-  const resetFeedback = () => { feedbackGeneration.current++; restore.reset(); setSuccess(""); };
+  const resetFeedback = () => { feedbackGeneration.current++; restore.reset(); setSuccess(undefined); };
   useEffect(() => {
     if (opened) { setContentMounted(true); return; }
     feedbackGeneration.current++;
-    restore.reset(); setSuccess("");
+    restore.reset(); setSuccess(undefined);
     void client.cancelQueries({ queryKey: ["dashboard-versions", id] });
     void client.cancelQueries({ queryKey: ["dashboard-version", id] });
   }, [opened, id, client, restore.reset]);
@@ -69,7 +70,7 @@ export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored 
     if (submitting.current) return;
     submitting.current = true;
     setPending(true);
-    setSuccess("");
+    setSuccess(undefined);
     restore.mutate({ version, generation: feedbackGeneration.current });
   };
   return <Drawer opened={opened} onClose={() => { resetFeedback(); onClose(); }} onExitTransitionEnd={() => setContentMounted(false)} title="Version history" position="right" size="xl">
@@ -79,7 +80,7 @@ export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored 
 
 function HistoryContent({ id, opened, currentVersion, selected, onSelect, pending, error, failedVersion, success, onRestore }: {
   id: string; opened: boolean; currentVersion: number; selected?: number; onSelect(version: number): void;
-  pending: boolean; error: Error | null; failedVersion?: number; success: string; onRestore(version: number): void;
+  pending: boolean; error: Error | null; failedVersion?: number; success?: { text: string }; onRestore(version: number): void;
 }) {
   const list = useQuery({ queryKey: ["dashboard-versions", id], queryFn: ({ signal }) => listVersions(id, signal), enabled: opened, retry: false });
   const version = selected ?? list.data?.[0]?.version;
@@ -89,7 +90,8 @@ function HistoryContent({ id, opened, currentVersion, selected, onSelect, pendin
   useEffect(() => { if (success) confirmation.current?.focus(); }, [success]);
   return <Stack gap="md" data-version-history>
     <Text size="sm" c="dimmed">Inspect saved specs and changes. Restoring adds a new version.</Text>
-    {success && <Alert ref={confirmation} tabIndex={-1} color="ok" role="status">{success}</Alert>}
+    {/* Focus reads it out; a live region as well would announce it twice. */}
+    {success && <Alert ref={confirmation} tabIndex={-1} color="ok" role="note">{success.text}</Alert>}
     {error && failedVersion === version && <RestoreError error={error} version={version!} />}
     <Box mih={160}>
       {list.isPending && <Group gap="xs" role="status"><Loader size="sm" /><Text size="sm">Loading history…</Text></Group>}

@@ -197,6 +197,12 @@ it("moves focus to the restore confirmation", async () => {
   await render(); await act(async () => button("Version 1").click()); await settle();
   await act(async () => { button("Restore version 1").focus(); button("Restore version 1").click(); }); await settle();
   expect(document.activeElement?.textContent).toContain("Restored v1 as v4");
+  // Focus says it, so a live region would announce it twice.
+  expect(document.activeElement?.getAttribute("role")).toBe("note");
+  // A second restore with the same confirmation takes focus again.
+  await act(async () => { button("Restore version 1").focus(); }); expect(document.activeElement?.textContent).not.toContain("Restored v1 as v4");
+  await act(async () => { button("Restore version 1").click(); }); await settle();
+  expect(document.activeElement?.textContent).toContain("Restored v1 as v4");
 });
 
 it("releases restore pending when the POST responds without waiting for or refetching the old panel batch", async () => {
