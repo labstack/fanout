@@ -16,7 +16,7 @@ import { SqlEditor } from "../sql-editor/sql-editor";
 import { completeFanql, formatFanql, parseFanql, type Formatted, type Notice, type Parsed, type VizCompat } from "./api";
 import { Builder, querySchema } from "./builder";
 import { SaveDialog, defaultTitle } from "./save-dialog";
-import { exploreTime, type ExploreSearch } from "./search";
+import { exploreTime, parseExploreSearch, toExploreParams, type ExploreSearch } from "./search";
 
 const explorePanelID = "explore";
 const resultHeight = 420;
@@ -130,7 +130,12 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const windowKey = windowOf(search);
   // The window the range menu asked for: reaching it reruns the editor; reaching any other is navigation.
   const asked = useRef<string | undefined>(undefined);
-  const pickWindow = (next: ExploreSearch) => { if (windowOf(next) !== windowKey) asked.current = windowOf(next); onSearch(next); };
+  const pickWindow = (next: ExploreSearch) => {
+    // Compared as the URL will hold it: an absolute window drops the range.
+    const key = windowOf(parseExploreSearch(toExploreParams(next)));
+    if (key !== windowKey) asked.current = key;
+    onSearch(next);
+  };
   // The window last shown; unset until the page has opened.
   const seen = useRef<string | undefined>(undefined);
   // Responses compare against what is in the editors now, not when they were sent.

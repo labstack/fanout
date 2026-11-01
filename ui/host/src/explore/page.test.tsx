@@ -6,7 +6,7 @@ import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExplorePage } from "./page";
-import type { ExploreSearch } from "./search";
+import { parseExploreSearch, toExploreParams, type ExploreSearch } from "./search";
 
 const frame = { columns: [{ name: "service", type: "string" as const, role: "dimension" as const }, { name: "count", type: "number" as const, role: "measure" as const }], values: [["checkout"], [42]], rows: 1 };
 const parsed = (text: string, canonical = text) => ({
@@ -44,11 +44,12 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup => cleanup())); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-async function render(initial: Partial<ExploreSearch> = {}, strict = false) {
+/** `route` passes each navigation through the URL, as the router does. */
+async function render(initial: Partial<ExploreSearch> = {}, strict = false, route = false) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let search: ExploreSearch = { q: "", range: "1h", tab: "query", ...initial };
-  const onSearch = vi.fn((next: ExploreSearch, _replace?: boolean) => { search = next; void draw(); });
+  const onSearch = vi.fn((next: ExploreSearch, _replace?: boolean) => { search = route ? parseExploreSearch(toExploreParams(next)) : next; void draw(); });
   const onSaved = vi.fn<(id: string) => void>();
   const draw = async () => act(async () => { const page = <MantineProvider><QueryClientProvider client={client}><ExplorePage search={search} onSearch={onSearch} onSaved={onSaved} /></QueryClientProvider></MantineProvider>; root.render(strict ? <StrictMode>{page}</StrictMode> : page); });
   cleanups.push(() => { root.unmount(); client.clear(); });
@@ -136,6 +137,19 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" }));
     expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(4));
+  });
+
+  it("reruns the unrun draft when an absolute range is applied over a relative one", async () => {
+    const { ui, type, click, wait } = await render({ q: "spans | count() by service", range: "6h" }, false, true);
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    await type("spans | count()");
+    await click(/Last 6 hours/);
+    const field = (name: string) => [...document.querySelectorAll<HTMLInputElement>(`input[aria-label="${name}"]`)][0];
+    await act(async () => { fireEvent.change(field("From"), { target: { value: "2026-10-30T10:00" } }); fireEvent.change(field("To"), { target: { value: "2026-10-30T11:00" } }); });
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Apply range")!.click());
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" });
+    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
   });
 
   it("runs a shared link on open under StrictMode's remount", async () => {
