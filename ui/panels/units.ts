@@ -18,15 +18,16 @@ function panelDuration(value: number, unit: string): string {
   return ms !== 0 && Math.abs(ms) < 1 ? `${small(ms)}ms` : duration(ms);
 }
 
+const byteUnits = ["B", "KiB", "MiB", "GiB", "TiB"];
+
 function bytes(value: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let v = value;
   let i = 0;
-  while (Math.abs(v) >= 1024 && i < units.length - 1) {
+  while (Math.abs(v) >= 1024 && i < byteUnits.length - 1) {
     v /= 1024;
     i += 1;
   }
-  return `${i === 0 ? (v !== 0 && Math.abs(v) < 1 ? small(v) : Math.round(v)) : v.toFixed(1)} ${units[i]}`;
+  return `${i === 0 ? (v !== 0 && Math.abs(v) < 1 ? small(v) : Math.round(v)) : v.toFixed(1)} ${byteUnits[i]}`;
 }
 
 /** One value in its unit. Durations always read in the largest unit that is
@@ -54,6 +55,12 @@ const durationScales = [[3_600_000, "h"], [60_000, "m"], [1000, "s"], [1, "ms"]]
  *  axis reads in one unit, so 0, 5s and 10s are not printed as 0ms, 5s, 10s. */
 export function formatAxis(unit?: string, axis?: { min: number; max: number; interval: number }): (value: number) => string {
   const factor = unit === undefined ? undefined : durationFactor[unit];
+  if (unit === "bytes" && axis && axis.interval > 0) {
+    const extent = Math.max(Math.abs(axis.min), Math.abs(axis.max));
+    // The largest binary unit the axis reaches whose ticks still read in two decimals.
+    const power = [4, 3, 2, 1].find(p => extent >= 1024 ** p && Math.abs(axis.interval / 1024 ** p * 100 - Math.round(axis.interval / 1024 ** p * 100)) < 1e-6) ?? 0;
+    return (value: number) => Number.isFinite(value) ? `${number(value / 1024 ** power)} ${byteUnits[power]}` : "—";
+  }
   if (factor !== undefined && axis && axis.interval > 0) {
     const extent = Math.max(Math.abs(axis.min), Math.abs(axis.max)) * factor, step = axis.interval * factor;
     // The largest unit the axis reaches whose ticks still read in two decimals.
@@ -81,6 +88,12 @@ function niceStep(target: number, unit?: string): number {
     const base = 10 ** Math.floor(Math.log10(n));
     return [1, 2, 5, 10].map(k => k * base).find(step => step >= n)!;
   };
+  if (unit === "bytes") {
+    // Steps of 1, 2 or 5 in the binary unit the ticks print in; 1000 of one unit is 1 of the next.
+    const power = Math.min(4, Math.max(0, Math.floor(Math.log(target) / Math.log(1024))));
+    const step = ceil125(target / 1024 ** power);
+    return (step >= 1000 ? 1024 : step) * 1024 ** power;
+  }
   if (factor === undefined) return ceil125(target);
   const ms = target * factor;
   const steps = [1, 10, 100, 1000, 10000, 60000, 600000, 3600000, 36000000].flatMap(base => [1, 2, 5].map(n => base * n)).sort((a, b) => a - b);
@@ -102,8 +115,8 @@ export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): R
   if (axis.type !== "value" || typeof axis.min !== "number" || typeof axis.max !== "number") return { ...axis, splitNumber: valueAxisTicks(pixels) };
   const unit = typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined;
   const next = valueAxis(axis.min, axis.max, unit, pixels);
-  // New ticks may need another duration unit.
-  return { ...axis, ...next, ...(unit && unit in durationFactor ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
+  // New ticks may need another duration or binary unit.
+  return { ...axis, ...next, ...(unit && (unit in durationFactor || unit === "bytes") ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
 }
 
 /** Use one duration scale for both ends of a bucket. */

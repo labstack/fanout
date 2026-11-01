@@ -3,6 +3,9 @@ import type { Cell, Frame, Panel } from "./types";
 export type Series = { name: string; unit?: string; points: [number, number | null][] };
 export type Categories = { categories: string[]; series: { name: string; unit?: string; values: (number | null)[] }[] };
 
+/** A group's name on a chart; a missing value reads the same in every chart. */
+export const groupName = (cell: Cell | undefined): string => String(cell ?? "") || "(none)";
+
 const num = (cell: Cell | undefined): number | null => (typeof cell === "number" && Number.isFinite(cell) ? cell : null);
 
 function measureColumns(frame: Frame): number[] {
@@ -20,10 +23,10 @@ export function toSeries(frame: Frame): Series[] {
     const m = measures[0];
     const byName = new Map<string, Series>();
     for (let row = 0; row < frame.rows; row += 1) {
-      const name = String(frame.values[dim][row] ?? "");
+      const name = groupName(frame.values[dim][row]);
       let s = byName.get(name);
       if (!s) {
-        s = { name: name || "(none)", unit: frame.columns[m].unit, points: [] };
+        s = { name, unit: frame.columns[m].unit, points: [] };
         byName.set(name, s);
       }
       s.points.push([Number(frame.values[time][row]), num(frame.values[m][row])]);
@@ -46,7 +49,7 @@ export function toCategories(frame: Frame): Categories {
   const cat = dims[0];
   const categories: string[] = [];
   for (let row = 0; row < frame.rows; row += 1) {
-    const value = String(frame.values[cat][row] ?? "");
+    const value = groupName(frame.values[cat][row]);
     if (!categories.includes(value)) categories.push(value);
   }
   if (dims.length > 1) {
@@ -54,9 +57,9 @@ export function toCategories(frame: Frame): Categories {
     const m = measures[0];
     const groups = new Map<string, (number | null)[]>();
     for (let row = 0; row < frame.rows; row += 1) {
-      const group = String(frame.values[split][row] ?? "");
+      const group = groupName(frame.values[split][row]);
       if (!groups.has(group)) groups.set(group, categories.map(() => null));
-      groups.get(group)![categories.indexOf(String(frame.values[cat][row] ?? ""))] = num(frame.values[m][row]);
+      groups.get(group)![categories.indexOf(groupName(frame.values[cat][row]))] = num(frame.values[m][row]);
     }
     return { categories, series: [...groups.entries()].map(([name, values]) => ({ name, unit: frame.columns[m].unit, values })) };
   }

@@ -4,7 +4,7 @@ import { barOption, chartThemeFor, gaugeOption, timeseriesOption } from "../../.
 import { statValue, toCategories, toSeries } from "../../../panels/frame";
 import { statusFor } from "../../../panels/thresholds";
 import type { Frame, Panel, PanelResult } from "../../../panels/types";
-import { formatAxis, formatValue } from "../../../panels/units";
+import { formatAxis, formatValue, valueAxis } from "../../../panels/units";
 
 const series: Frame = {
   columns: [{ name: "time", type: "time", role: "time" }, { name: "service", type: "string", role: "dimension" }, { name: "p95", type: "number", role: "measure", unit: "ms" }],
@@ -43,6 +43,14 @@ describe("units", () => {
     expect(ticks("s", { min: 0, max: 600, interval: 300 })).toEqual(["0m", "5m", "10m"]);
     expect(ticks("ns", { min: 0, max: 2e6, interval: 1e6 })).toEqual(["0ms", "1ms", "2ms"]);
   });
+  it("steps a bytes axis in whole binary units and reads it in one", () => {
+    const axis = valueAxis(0, 300 * 2 ** 20, "bytes", 280);
+    const ticks = Array.from({ length: Math.round((axis.max - axis.min) / axis.interval) + 1 }, (_, i) => formatAxis("bytes", axis)(axis.min + i * axis.interval));
+    expect(ticks).toEqual(["0 MiB", "100 MiB", "200 MiB", "300 MiB"]);
+    const wide = valueAxis(0, 1.1 * 2 ** 30, "bytes", 280);
+    expect(Array.from({ length: Math.round(wide.max / wide.interval) + 1 }, (_, i) => formatAxis("bytes", wide)(i * wide.interval))).toEqual(["0 MiB", "500 MiB", "1,000 MiB", "1,500 MiB"]);
+    expect(valueAxis(0, 2000, "bytes", 280).interval).toBe(1024);
+  });
   type Axis = { min: number; max: number; interval: number; axisLabel: { formatter(v: number): string } };
   it("keeps a duration time-series axis in one unit", () => {
     const frame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "p95", type: "number", role: "measure", unit: "ms" }], values: [[1000, 2000], [400, 9000]], rows: 2 };
@@ -54,6 +62,18 @@ describe("units", () => {
 });
 
 describe("frames", () => {
+  it("labels a missing group value the same in time series and bars", () => {
+    const time = { name: "time", type: "time" as const, role: "time" as const }, service = { name: "service", type: "string" as const, role: "dimension" as const }, count = { name: "count", type: "number" as const, role: "measure" as const };
+    expect(toSeries({ columns: [time, service, count], values: [[1], [null], [3]], rows: 1 }).map(s => s.name)).toEqual(["(none)"]);
+    const frame: Frame = { columns: [service, count], values: [["", "cart"], [3, 4]], rows: 2 };
+    expect(toCategories(frame).categories).toEqual(["(none)", "cart"]);
+    const option = barOption({ id: "b", title: "b", viz: "bar", query: { from: "spans", measures: ["count()"], by: ["service"] } }, frame, chartThemeFor(false), { width: 500, height: 248, measureText: text => text.length * 7 }) as unknown as { yAxis: { data: string[]; axisLabel: { width: number } }; series: { data: { selection?: { dimensions: Record<string, string> } }[] }[] };
+    expect(option.yAxis.data).toEqual(["(none)", "cart"]);
+    // The label width leaves the chart's own text measure some room.
+    expect(option.yAxis.axisLabel.width).toBeGreaterThan("(none)".length * 7);
+    // The drill still selects the stored value.
+    expect(option.series[0].data[0].selection?.dimensions).toEqual({ service: "" });
+  });
   it("pivots a grouped series by dimension value", () => {
     const out = toSeries(series);
     expect(out.map((s) => s.name)).toEqual(["checkout", "cart"]);
