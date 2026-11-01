@@ -56,3 +56,16 @@ func SQLRelations() map[string]SQLRelationSchema {
 		},
 	}
 }
+
+func str(name, description string) Field {
+	return Field{Name: name, Type: TypeString, Description: description}
+}
+func num(name, unit, description string) Field {
+	return Field{Name: name, Type: TypeNumber, Unit: unit, Description: description}
+}
+func ts(name, description string) Field {
+	return Field{Name: name, Type: TypeTime, Description: description}
+}
+func dict(name, description string) Field {
+	return Field{Name: name, Type: TypeMap, Description: description}
+}

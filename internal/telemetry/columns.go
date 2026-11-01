@@ -62,6 +62,16 @@ func (s *Signal) Column(name string) (Column, bool) {
 	return Column{}, false
 }
 
+// Field returns the clean-view column with this name.
+func (s *Signal) Field(name string) (Field, bool) {
+	for _, c := range s.Columns {
+		if c.View.Name == name {
+			return c.View, true
+		}
+	}
+	return Field{}, false
+}
+
 // Signals lists every signal in file order.
 var Signals = []*Signal{Spans, Logs, Metrics}
 
