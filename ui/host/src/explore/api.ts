@@ -1,8 +1,8 @@
 import type { Query, Variable, Viz } from "../../../panels/types";
-import type { TextSpan } from "../api-error";
+import type { FixIt, TextSpan } from "../api-error";
 import { request } from "../dashboards/api";
 
-export type Notice = { path: string; message: string; span?: TextSpan };
+export type Notice = { path: string; message: string; span?: TextSpan; fix_its?: FixIt[] };
 export type VizCompat = { viz: Viz; requires: ("min_max" | "thresholds")[] };
 export type VizEdit = { viz: Viz; text: string };
 export type Parsed = { query: Query; canonical: string; viz: { requested?: string; compatible: VizCompat[]; edits: VizEdit[] }; notices: Notice[] };

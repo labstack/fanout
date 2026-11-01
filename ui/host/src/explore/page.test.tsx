@@ -162,6 +162,28 @@ describe("ExplorePage", () => {
     expect(bodies("/api/queries/run")).toHaveLength(0);
   });
 
+  it("applies a problem's fix-it to the query text", async () => {
+    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 }, fix_its: [{ label: "count", span: { start: 8, end: 13 }, text: "count" }] }] }, 400);
+    const { ui, type, click, wait } = await render();
+    await type("spans | cuont()");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("alert").textContent).toContain("unknown function cuont"));
+    await click("Replace with count");
+    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
+    expect(ui.queryByRole("alert")).toBeNull();
+  });
+
+  it("shows a notice's fix-it after a run", async () => {
+    const at = { start: 19, end: 28 };
+    parse = async body => json({ ...parsed(body.text), notices: [{ path: "text", message: "host.name is usually a resource attribute", span: at, fix_its: [{ label: "resource.host.name", span: at, text: "resource.host.name" }] }] });
+    const { ui, type, click, wait } = await render();
+    await type("spans | count() by host.name");
+    await click("Run");
+    await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
+    await click("Replace with resource.host.name");
+    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count() by resource.host.name");
+  });
+
   it("renders an execution error in the panel card", async () => {
     runQuery = async () => json({ results: [{ id: "explore", status: "error", error: "Query timed out", elapsed_ms: 3 }] });
     const { ui, type, click, wait } = await render();

@@ -158,11 +158,12 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
     written.current = search.q; setText(search.q); void execute(search.q, sort);
   }, [search.q]);
 
-  // Problems from the combined text, in the editor's coordinates; generated terms are not the author's to fix.
-  const local = problems.map(problem => {
+  // Problems and notices from the combined text, in the editor's coordinates; generated terms are not the author's to fix.
+  const local = useMemo(() => {
     const inText = (span?: TextSpan) => span && span.start >= shifted.shift && span.end - shifted.shift <= shifted.length ? { start: span.start - shifted.shift, end: span.end - shifted.shift } : undefined;
-    return { ...problem, span: inText(problem.span), fix_its: problem.fix_its?.flatMap(fix => { const span = inText(fix.span); return span ? [{ ...fix, span }] : []; }) };
-  });
+    const map = <T extends Problem | Notice>(item: T): T => ({ ...item, span: inText(item.span), fix_its: item.fix_its?.flatMap(fix => { const span = inText(fix.span); return span ? [{ ...fix, span }] : []; }) });
+    return { problems: problems.map(map), notices: notices.map(map) };
+  }, [problems, notices, shifted]);
   // Stable row callbacks keep the table's cells mounted while the URL changes, so
   // the drawer can return focus to the trace button that opened it.
   const ranNow = useRef(ran); ranNow.current = ran;
@@ -192,11 +193,9 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
     </Group>
     <Stack gap="xs">
       <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. {preset.matching} Press Enter to search.</Text>
-      <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local}
+      <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local.problems} notices={local.notices}
         onChange={value => { setText(value); setProblems([]); }} onRun={() => void execute(text, sort)}
         complete={(value, cursor, signal) => completeFanql({ text: value, cursor, source: preset.source, viz: preset.viz, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
-      {local.length > 0 && <Stack gap={2} role="alert">{local.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
-      {notices.length > 0 && <Stack gap={2}>{notices.map((notice, index) => <Text key={index} size="xs" c="dimmed">{notice.message}</Text>)}</Stack>}
     </Stack>
     <Group gap="sm" align="flex-end" data-search-fields>
       {preset.fields.includes("service") && <Select label="Service" placeholder={services.isPending ? "Loading services…" : "All services"} w={220} clearable searchable value={search.picks?.service ?? null}

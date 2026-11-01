@@ -297,11 +297,9 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         <Stack gap="xs">
           <Text id={help} size="xs" c="dimmed">Press Enter to run. For example <code>spans | p95(duration) by service every 5m</code>.</Text>
           {readOnlyText && <Text size="xs" c="dimmed" data-fanql-readonly>This query is edited in the Builder: {formatted?.reason ?? "it is too large for the text editor"}.</Text>}
-          <FanqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={value => { cancelFormat(); setText(value); setProblems([]); setFormatted(undefined); setEmptyRun(false); }} onRun={() => { setEmptyRun(!text.trim()); void execute("query", text, search.viz, readOnlyText ? built : undefined); }} problems={problems} describedBy={help}
+          <FanqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={value => { cancelFormat(); setText(value); setProblems([]); setFormatted(undefined); setEmptyRun(false); }} onRun={() => { setEmptyRun(!text.trim()); void execute("query", text, search.viz, readOnlyText ? built : undefined); }} problems={problems} notices={notices} describedBy={help}
             complete={(value, cursor, signal) => completeFanql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
           {emptyRun && <Text size="xs" c="dimmed" aria-live="polite" data-fanql-empty>Type a query to run, for example <code>spans | count() by service</code>.</Text>}
-          {problems.length > 0 && <Stack gap={2} role="alert" data-fanql-problems>{problems.map((problem, index) => <Text key={index} size="sm" c="bad">{problem.message}{problem.hint ? ` (${problem.hint})` : ""}</Text>)}</Stack>}
-          {notices.length > 0 && <Stack gap={2} data-fanql-notices>{notices.map((notice, index) => <Text key={index} size="xs" c="dimmed">{notice.message}</Text>)}</Stack>}
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="builder" pt="sm">

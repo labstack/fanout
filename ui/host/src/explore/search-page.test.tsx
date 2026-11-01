@@ -226,6 +226,18 @@ describe("SearchPage", () => {
     await wait(() => expect(ui.getByLabelText<HTMLInputElement>("Service", { selector: "input" }).value).toBe("billing"));
   });
 
+  it("maps notice fix-its back to the editor and drops those on page terms", async () => {
+    parse = async body => json({ query: { from: "logs" }, canonical: body.text, viz: { compatible: [], edits: [] }, notices: [
+      { path: "text", message: "host.name is usually a resource attribute", span: { start: 1, end: 10 }, fix_its: [{ label: "resource.host.name", span: { start: 1, end: 10 }, text: "resource.host.name" }] },
+      { path: "text", message: "about the page's term", span: { start: 20, end: 30 }, fix_its: [{ label: "x", span: { start: 20, end: 30 }, text: "x" }] },
+    ] });
+    const { ui, wait } = await render(logsPreset, { q: "host.name:a", picks: { severity: "warn" } });
+    await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
+    expect(ui.getAllByRole("button", { name: /^Replace with/ }).map(b => b.textContent)).toEqual(["Replace with resource.host.name"]);
+    await act(async () => ui.getByRole("button", { name: "Replace with resource.host.name" }).click());
+    expect(ui.getByRole("textbox", { name: "Search logs" }).textContent).toBe("resource.host.name:a");
+  });
+
   it("groups typed filters before the fields and maps problem spans back to the editor", async () => {
     parse = async body => body.text.startsWith("(") && body.text.includes("where")
       ? json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 1, end: 6 }, fix_its: [{ label: "Remove where", span: { start: 1, end: 7 }, text: "" }] }, { path: "text", message: "about the field", span: { start: 20, end: 30 } }] }, 400)
