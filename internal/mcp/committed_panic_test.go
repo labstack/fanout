@@ -39,7 +39,7 @@ func TestMCPPanicDistinguishesCommittedSave(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := s.dashboards.Replace(t.Context(), "owner", record.ID, record.Spec, 1, agentAuthor("owner"), "Saved again"); err != nil {
+					if _, err := s.dashboards.Replace(t.Context(), "owner", record.ID, changedText(record.Spec), 1, agentAuthor("owner"), "Saved again"); err != nil {
 						t.Fatal(err)
 					}
 					args = map[string]any{"id": record.ID, "version": 1}

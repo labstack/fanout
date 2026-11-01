@@ -179,7 +179,7 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
       }} />
     <DrillDrawer client={drillClient} spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
     {duplicating && <DuplicateDialog spec={spec} onClose={() => setDuplicating(false)} onCreated={next => { setDuplicating(false); onOpen(next); }} />}
-    <HistoryDrawer id={id} currentVersion={version} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
+    <HistoryDrawer id={id} currentVersion={version} currentSpec={spec} opened={historyOpen} onClose={() => setHistoryOpen(false)} onRestored={record => {
       setRestoreRefresh(record.version);
       const ids = new Set(record.spec.panels.map(panel => panel.id));
       const drill = parseDrill(search.drill);

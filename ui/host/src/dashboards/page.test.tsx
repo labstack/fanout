@@ -241,7 +241,7 @@ describe("DashboardPage", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const path = new URL(String(input), "http://localhost").pathname;
       if (path === "/api/dashboards/d1/versions") return json({ versions: [{ version: 2, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z" }] });
-      if (path === "/api/dashboards/d1/versions/2") return json({ dashboard: { ...restored, version: 2, name: "Historical" }, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z", changes: [], layout_changed: false, dashboard_fields: [], changes_available: true });
+      if (path === "/api/dashboards/d1/versions/2") return json({ dashboard: { ...restored, version: 2, name: "Historical", spec: { ...restored.spec, name: "Historical" } }, author_kind: "agent", message: "Earlier edit", created_at: "2026-10-01T12:00:00Z", changes: [], layout_changed: false, dashboard_fields: [], changes_available: true });
       if (path === "/api/dashboards/d1/versions/2/restore") { servedRecord = restored; return json(restored); }
       if (path === "/api/queries/exemplars") return json({ traces: [] });
       return existing(input, init);

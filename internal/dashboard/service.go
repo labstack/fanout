@@ -409,6 +409,15 @@ func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion, r
 		if err != nil {
 			return Mutation{}, err
 		}
+		// A restore of the spec the dashboard already has would only add a
+		// duplicate version.
+		if restoreVersion > 0 {
+			if same, err := json.Marshal(before); err != nil {
+				return Mutation{}, err
+			} else if string(same) == string(raw) {
+				return Mutation{}, ErrAlreadyCurrent
+			}
+		}
 		record, written, err := s.write(ctx, ownerID, id, current.Version, next, string(raw), author, message)
 		if err != nil {
 			return Mutation{}, err

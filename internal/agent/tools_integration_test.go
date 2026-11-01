@@ -120,7 +120,8 @@ func TestRuntimeDashboardHistoryUsesAuthenticatedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	server := fanoutmcp.NewWithIntelligence(registryQueries{}, service, executor, nil, "test")
-	if _, err := service.Replace(t.Context(), "owner", created.ID, created.Spec, 1, dashboard.Author{Kind: "user", ID: "owner"}, "Saved again"); err != nil {
+	// Restoring a spec the dashboard already has is rejected, so the save changes it.
+	if _, err := service.Replace(t.Context(), "owner", created.ID, query.Dashboard{Name: "History", Panels: []query.Panel{{ID: "note", Title: "Note", Viz: "text", Content: "second"}}}, 1, dashboard.Author{Kind: "user", ID: "owner"}, "Saved again"); err != nil {
 		t.Fatal(err)
 	}
 	registry, err := NewToolRegistry(t.Context(), server.MCP())

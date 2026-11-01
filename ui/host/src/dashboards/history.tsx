@@ -7,9 +7,9 @@ import { DashboardChangeChips } from "../dashboard-change-chips";
 import { dashboardDataPredicate } from "./cache";
 import { ApiError, dashboardsKey, getVersion, listVersions, restoreVersion, type DashboardRecord, type VersionInfo, type VersionRecord } from "./api";
 
-type HistoryProps = { id: string; currentVersion: number; opened: boolean; onClose(): void; onRestored(record: DashboardRecord): void };
+type HistoryProps = { id: string; currentVersion: number; currentSpec: DashboardRecord["spec"]; opened: boolean; onClose(): void; onRestored(record: DashboardRecord): void };
 
-export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored }: HistoryProps) {
+export function HistoryDrawer({ id, currentVersion, currentSpec, opened, onClose, onRestored }: HistoryProps) {
   const client = useQueryClient();
   const [selected, setSelected] = useState<number>();
   // Each confirmation is a new object, so the same text twice still takes focus.
@@ -74,12 +74,12 @@ export function HistoryDrawer({ id, currentVersion, opened, onClose, onRestored 
     restore.mutate({ version, generation: feedbackGeneration.current });
   };
   return <Drawer opened={opened} onClose={() => { resetFeedback(); onClose(); }} onExitTransitionEnd={() => setContentMounted(false)} title="Version history" position="right" size="xl">
-    {(opened || contentMounted) && <HistoryContent id={id} opened={opened} currentVersion={currentVersion} selected={selected} onSelect={version => { resetFeedback(); setSelected(version); }} pending={pending} error={restore.error} failedVersion={restore.variables?.version} success={success} onRestore={submit} />}
+    {(opened || contentMounted) && <HistoryContent id={id} opened={opened} currentVersion={currentVersion} currentSpec={currentSpec} selected={selected} onSelect={version => { resetFeedback(); setSelected(version); }} pending={pending} error={restore.error} failedVersion={restore.variables?.version} success={success} onRestore={submit} />}
   </Drawer>;
 }
 
-function HistoryContent({ id, opened, currentVersion, selected, onSelect, pending, error, failedVersion, success, onRestore }: {
-  id: string; opened: boolean; currentVersion: number; selected?: number; onSelect(version: number): void;
+function HistoryContent({ id, opened, currentVersion, currentSpec, selected, onSelect, pending, error, failedVersion, success, onRestore }: {
+  id: string; opened: boolean; currentVersion: number; currentSpec: DashboardRecord["spec"]; selected?: number; onSelect(version: number): void;
   pending: boolean; error: Error | null; failedVersion?: number; success?: { text: string }; onRestore(version: number): void;
 }) {
   const list = useQuery({ queryKey: ["dashboard-versions", id], queryFn: ({ signal }) => listVersions(id, signal), enabled: opened, retry: false });
@@ -116,7 +116,7 @@ function HistoryContent({ id, opened, currentVersion, selected, onSelect, pendin
       {detail.error && <Alert color="bad" title={detail.error instanceof ApiError && detail.error.code === "dashboard_version_not_found" ? "This version is no longer available" : "Version unavailable"}>
         {detail.error.message}<Button mt="xs" variant="default" size="xs" onClick={() => void detail.refetch()}>Retry version</Button>
       </Alert>}
-      {detail.data && !detail.error && <VersionDetails record={detail.data} currentVersion={currentVersion} pending={pending} onRestore={() => onRestore(detail.data.dashboard.version)} />}
+      {detail.data && !detail.error && <VersionDetails record={detail.data} currentVersion={currentVersion} current={JSON.stringify(detail.data.dashboard.spec) === JSON.stringify(currentSpec)} pending={pending} onRestore={() => onRestore(detail.data.dashboard.version)} />}
     </Box>
   </Stack>;
 }
@@ -131,13 +131,14 @@ function VersionTime({ at }: { at: string }) {
   return <Text component="time" dateTime={at} title={exactTimestamp(at)} size="xs" c="dimmed">{new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(Math.round(seconds / divisor), unit)}</Text>;
 }
 
-function VersionDetails({ record, currentVersion, pending, onRestore }: { record: VersionRecord; currentVersion: number; pending: boolean; onRestore(): void }) {
+/** current: the version's spec is the dashboard's, so restoring it would only add a duplicate. */
+function VersionDetails({ record, currentVersion, current, pending, onRestore }: { record: VersionRecord; currentVersion: number; current: boolean; pending: boolean; onRestore(): void }) {
   const { dashboard } = record;
   const labels = changeChips(record);
   return <Stack gap="sm" data-history-version={dashboard.version}>
     <Group justify="space-between" align="flex-start">
       <Box miw={0}><Title order={2} fz="lg">{dashboard.name} · v{dashboard.version}</Title><Text size="sm" c="dimmed">{authorLabel(record)} · {record.message || "No edit message"}</Text><VersionTime at={record.created_at} /></Box>
-      {dashboard.version === currentVersion ? <Button size="sm" variant="default" disabled>Current version</Button> : <Button size="sm" disabled={pending} loading={pending} onClick={onRestore}>Restore version {dashboard.version}</Button>}
+      {dashboard.version === currentVersion ? <Button size="sm" variant="default" disabled>Current version</Button> : current ? <Button size="sm" variant="default" disabled>Same as current</Button> : <Button size="sm" disabled={pending} loading={pending} onClick={onRestore}>Restore version {dashboard.version}</Button>}
     </Group>
     {dashboard.description && <Text size="sm">{dashboard.description}</Text>}
     {record.changes_available ? <>
@@ -154,7 +155,7 @@ function VersionDetails({ record, currentVersion, pending, onRestore }: { record
 
 function RestoreError({ error, version }: { error: Error; version: number }) {
   const code = error instanceof ApiError ? error.code : undefined;
-  const advice = !(error instanceof ApiError) || error.status >= 500 ? "Try again with the restore button." : code === "invalid_spec" ? "This saved spec is invalid. Review the fields below and choose another version." : code === "dashboard_version_not_found" ? "Reload history and choose a retained version." : ["already_current", "dashboard_version_conflict", "conflict"].includes(code ?? "") ? "This dashboard changed or its name conflicts. Reload history and choose another version." : "Check your access and reload history.";
+  const advice = !(error instanceof ApiError) || error.status >= 500 ? "Try again with the restore button." : code === "invalid_spec" ? "This saved spec is invalid. Review the fields below and choose another version." : code === "dashboard_version_not_found" ? "Reload history and choose a retained version." : code === "already_current" ? "The dashboard already has this version's contents, so there is nothing to restore." : ["dashboard_version_conflict", "conflict"].includes(code ?? "") ? "This dashboard changed or its name conflicts. Reload history and choose another version." : "Check your access and reload history.";
   return <Alert color="bad" title={`Restore of version ${version} failed`}>
     <Text size="sm">{error.message}</Text>
     {error instanceof ApiError && error.problems.length > 0 && <ul>{error.problems.map((problem, index) => <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
