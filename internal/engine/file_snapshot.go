@@ -49,11 +49,7 @@ func (d *Duck) physicalSource(signal string, batches []telemetry.BatchMetadata) 
 	if len(files) == 0 {
 		files = append(files, sqlLiteral(filepath.ToSlash(filepath.Join(d.repository.Parquet.Dir(), "batches", "_schema.batch", signal+".parquet"))))
 	}
-	projection := "*"
-	if signal == "spans" {
-		projection += " EXCLUDE (_trace_hash), TRY_CAST(attributes['messaging.system'] AS VARCHAR) AS messaging_system, TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR) AS messaging_destination"
-	}
-	return "SELECT " + projection + " FROM read_parquet([" + strings.Join(files, ",") + "], union_by_name=false, hive_partitioning=false)"
+	return "SELECT " + rawProjection(signal) + " FROM read_parquet([" + strings.Join(files, ",") + "], union_by_name=false, hive_partitioning=false)"
 }
 
 // snapshotSource uses a glob when pruning saves little. The filename predicate
@@ -75,11 +71,7 @@ func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchM
 		ids = append(ids, b.ID)
 	}
 	batchID := d.batchIDColumn(signal, "filename")
-	projection := "*"
-	if signal == "spans" {
-		projection += " EXCLUDE (_trace_hash), TRY_CAST(attributes['messaging.system'] AS VARCHAR) AS messaging_system, TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR) AS messaging_destination"
-	}
-	return "SELECT " + projection + " FROM read_parquet(" + sqlLiteral(d.repository.Parquet.Pattern(signal)) + ", union_by_name=false, hive_partitioning=false) WHERE " + batchID + " IN (" + idsSQL(ids) + ")"
+	return "SELECT " + rawProjection(signal) + " FROM read_parquet(" + sqlLiteral(d.repository.Parquet.Pattern(signal)) + ", union_by_name=false, hive_partitioning=false) WHERE " + batchID + " IN (" + idsSQL(ids) + ")"
 }
 
 func (d *Duck) batchIDColumn(signal, filename string) string {
@@ -89,9 +81,7 @@ func (d *Duck) batchIDColumn(signal, filename string) string {
 }
 
 func cleanSource(signal, physical string) string {
-	view := map[string]string{"spans": viewSpans, "logs": viewLogs, "metrics": viewMetrics}[signal]
-	body := strings.SplitN(view, " AS\n", 2)[1]
-	return strings.TrimSuffix(strings.Replace(body, "FROM telemetry."+signal, "FROM ("+physical+")", 1), ";")
+	return cleanSelect(signal, "("+physical+")")
 }
 
 // bindSnapshot rewrites table references through DuckDB's own AST. The caller
