@@ -449,3 +449,23 @@ func TestWriterGroupDropsOnlyAbandonedSubmissions(t *testing.T) {
 type committerFunc func(context.Context, Batch) error
 
 func (f committerFunc) Commit(ctx context.Context, batch Batch) error { return f(ctx, batch) }
+
+// A grouped batch holds every request's rows in request order, each signal
+// allocated once at its final size.
+func TestCommitJobBatchMergesRequestsInOrder(t *testing.T) {
+	job := commitJob{requests: []*submission{
+		newSubmission(context.Background(), Batch{Spans: []telemetry.Span{{SpanID: "a"}}, Logs: []telemetry.Log{{Body: "a"}}}),
+		newSubmission(context.Background(), Batch{Metrics: []telemetry.Metric{{Name: "b"}}, Spans: []telemetry.Span{{SpanID: "b"}, {SpanID: "c"}}}),
+	}}
+	batch := job.batch()
+	var spans []string
+	for _, span := range batch.Spans {
+		spans = append(spans, span.SpanID)
+	}
+	if fmt.Sprint(spans) != "[a b c]" || len(batch.Logs) != 1 || len(batch.Metrics) != 1 || batch.ID == "" {
+		t.Fatalf("merged batch = %#v", batch)
+	}
+	if cap(batch.Spans) != 3 || cap(batch.Logs) != 1 || cap(batch.Metrics) != 1 {
+		t.Fatalf("capacities %d, %d, %d; want each signal's row count", cap(batch.Spans), cap(batch.Logs), cap(batch.Metrics))
+	}
+}

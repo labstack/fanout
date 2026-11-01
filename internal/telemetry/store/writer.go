@@ -452,15 +452,22 @@ func (w *Writer) claim(job commitJob) commitJob {
 	return job
 }
 
-// batch merges the job's requests into one atomic batch with a fresh ID. A
-// lone request commits without copying its rows.
+// batch merges the job's requests into one atomic batch with a fresh ID,
+// copying each row once. A lone request commits without copying its rows.
 func (job commitJob) batch() Batch {
 	if len(job.requests) == 1 {
 		batch := job.requests[0].batch
 		batch.ID = uuid.NewString()
 		return batch
 	}
-	batch := Batch{ID: uuid.NewString()}
+	var spans, logs, metrics int
+	for _, request := range job.requests {
+		spans += len(request.batch.Spans)
+		logs += len(request.batch.Logs)
+		metrics += len(request.batch.Metrics)
+	}
+	batch := Batch{ID: uuid.NewString(), Spans: make([]telemetry.Span, 0, spans),
+		Logs: make([]telemetry.Log, 0, logs), Metrics: make([]telemetry.Metric, 0, metrics)}
 	for _, request := range job.requests {
 		batch.Spans = append(batch.Spans, request.batch.Spans...)
 		batch.Logs = append(batch.Logs, request.batch.Logs...)
