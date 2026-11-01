@@ -37,7 +37,7 @@ func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, marker
 			if !retained {
 				predicate = windowPredicate(clock, window)
 			}
-			contributions = append(contributions, `SELECT `+sqlLiteral(signal)+` AS signal,namespace,service,resource,min(`+clock+`) AS first_seen,max(`+clock+`) AS last_seen FROM (`+cleanSource(signal, d.snapshotSource(signal, raw, batches))+`) WHERE `+predicate+` GROUP BY namespace,service,resource`)
+			contributions = append(contributions, `SELECT `+sqlLiteral(signal)+` AS signal,namespace,service,resource,min(`+clock+`) AS first_seen,max(`+clock+`) AS last_seen FROM (`+cleanSource(signal, d.snapshotSource(signal, raw, batches, 0))+`) WHERE `+predicate+` GROUP BY namespace,service,resource`)
 		}
 	}
 	if len(contributions) == 0 {

@@ -310,6 +310,18 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 				return fmt.Errorf("table function %q is not available to telemetry SQL", name)
 			}
 		}
+		if node["class"] == "COLUMN_REF" {
+			names, _ := node["column_names"].([]any)
+			if len(names) > 0 {
+				name, _ := names[len(names)-1].(string)
+				if k, internal := internalColumn(name); internal {
+					if k.Name != "" {
+						return fmt.Errorf("column %q is internal; write %s['%s']", name, keyMap(k), k.Name)
+					}
+					return fmt.Errorf("column %q is internal to telemetry storage", name)
+				}
+			}
+		}
 		if name, ok := node["function_name"].(string); ok {
 			if blockedSQLFunctions[strings.ToLower(name)] {
 				return fmt.Errorf("function %q is not available to telemetry SQL", name)

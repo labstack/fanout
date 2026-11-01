@@ -14,6 +14,7 @@ import (
 	"github.com/labstack/fanout/internal/engine/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 const createVersionRollupTable = `CREATE TABLE IF NOT EXISTS version_rollup (
@@ -24,6 +25,10 @@ const createVersionBatchesTable = `CREATE TABLE IF NOT EXISTS version_rollup_bat
 const createAnomalyLogTable = `CREATE TABLE IF NOT EXISTS anomaly_log (
  namespace VARCHAR,service VARCHAR,kind VARCHAR,start_time TIMESTAMPTZ_NS,end_time TIMESTAMPTZ_NS,
  title VARCHAR,severity VARCHAR,PRIMARY KEY(namespace,service,kind,start_time))`
+
+// serviceVersion is read through the spill path, so a version sent as a
+// number is still a version.
+var serviceVersion, _ = semconv.Lookup(semconv.Resource, "service.version")
 
 type versionRollupFailure struct {
 	failures    int
@@ -217,7 +222,7 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		if len(selected) == 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf(`SELECT coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,_r_service_version AS service_version,%s AS t FROM (%s)`, s.Clock(), cleanSource(signal, d.physicalSource(signal, selected))))
+		parts = append(parts, fmt.Sprintf(`SELECT coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,%s AS service_version,%s AS t FROM (%s)`, serviceVersion.Column, s.Clock(), cleanSource(signal, d.physicalSource(signal, selected, 1<<serviceVersion.Bit))))
 	}
 	if len(parts) > 0 {
 		statement := `INSERT INTO version_rollup SELECT namespace,service,service_version,min(t),max(t) FROM (` + strings.Join(parts, " UNION ALL ") + `) WHERE service<>'' AND service_version IS NOT NULL AND service_version<>'' GROUP BY 1,2,3

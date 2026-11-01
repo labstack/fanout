@@ -27,7 +27,42 @@ func overlapping(b telemetry.BatchMetadata, signal string, w queryrows.Window) b
 	bounds, count := batchTime(b, signal)
 	return count > 0 && (!bounds.Known || bounds.MaxNanos >= w.Start.UnixNano() && bounds.MinNanos < w.End.UnixNano())
 }
-func (d *Duck) physicalSource(signal string, batches []telemetry.BatchMetadata) string {
+
+// physicalSource reads these files' raw relation. A dedicated column lacks
+// the values its key spilled, so the files whose footers count spills of a key
+// in used read it through rawProjection's coalesce. The other files read the
+// columns alone, which keeps their statistics and filter pushdown.
+func (d *Duck) physicalSource(signal string, batches []telemetry.BatchMetadata, used uint64) string {
+	return d.spillSources(signal, batches, used, func(files []telemetry.BatchMetadata, spilled uint64) string {
+		return d.filesSource(signal, files, spilled)
+	})
+}
+
+// spillSources splits files into those that spilled none of the used keys and
+// those that did, and unions their sources.
+func (d *Duck) spillSources(signal string, batches []telemetry.BatchMetadata, used uint64, source func([]telemetry.BatchMetadata, uint64) string) string {
+	s, _ := telemetry.LookupSignal(signal)
+	var clean, spilled []telemetry.BatchMetadata
+	var mask uint64
+	for _, b := range batches {
+		if m := b.Spilled(s) & used; m != 0 {
+			spilled = append(spilled, b)
+			mask |= m
+		} else {
+			clean = append(clean, b)
+		}
+	}
+	switch {
+	case len(spilled) == 0:
+		return source(clean, 0)
+	case len(clean) == 0:
+		return source(spilled, mask)
+	}
+	return source(clean, 0) + " UNION ALL " + source(spilled, mask)
+}
+
+func (d *Duck) filesSource(signal string, batches []telemetry.BatchMetadata, spilled uint64) string {
+	s, _ := telemetry.LookupSignal(signal)
 	sort.SliceStable(batches, func(i, j int) bool {
 		a, _ := batchTime(batches[i], signal)
 		b, _ := batchTime(batches[j], signal)
@@ -43,13 +78,13 @@ func (d *Duck) physicalSource(signal string, batches []telemetry.BatchMetadata) 
 	if len(files) == 0 {
 		files = append(files, sqlLiteral(filepath.ToSlash(filepath.Join(d.repository.Parquet.Dir(), "batches", "_schema.batch", signal+".parquet"))))
 	}
-	return "SELECT " + rawProjection(signal) + " FROM read_parquet([" + strings.Join(files, ",") + "], union_by_name=false, hive_partitioning=false)"
+	return "SELECT " + rawProjection(s, spilled) + " FROM read_parquet([" + strings.Join(files, ",") + "], union_by_name=false, hive_partitioning=false)"
 }
 
 // snapshotSource uses a glob when pruning saves little. The filename predicate
 // admits exactly the captured IDs, including when ingest publishes a new file
 // after metadata capture. Narrow subsets keep explicit lists and footer pruning.
-func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchMetadata) string {
+func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchMetadata, used uint64) string {
 	count := 0
 	for _, b := range active {
 		_, n := batchTime(b, signal)
@@ -57,15 +92,18 @@ func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchM
 			count++
 		}
 	}
-	if len(selected) < 64 || len(selected)*5 < count*4 {
-		return d.physicalSource(signal, selected)
-	}
-	var ids []string
-	for _, b := range selected {
-		ids = append(ids, b.ID)
-	}
-	batchID := d.batchIDColumn(signal, "filename")
-	return "SELECT " + rawProjection(signal) + " FROM read_parquet(" + sqlLiteral(d.repository.Parquet.Pattern(signal)) + ", union_by_name=false, hive_partitioning=false) WHERE " + batchID + " IN (" + idsSQL(ids) + ")"
+	return d.spillSources(signal, selected, used, func(files []telemetry.BatchMetadata, spilled uint64) string {
+		if len(files) < 64 || len(files)*5 < count*4 {
+			return d.filesSource(signal, files, spilled)
+		}
+		var ids []string
+		for _, b := range files {
+			ids = append(ids, b.ID)
+		}
+		s, _ := telemetry.LookupSignal(signal)
+		batchID := d.batchIDColumn(signal, "filename")
+		return "SELECT " + rawProjection(s, spilled) + " FROM read_parquet(" + sqlLiteral(d.repository.Parquet.Pattern(signal)) + ", union_by_name=false, hive_partitioning=false) WHERE " + batchID + " IN (" + idsSQL(ids) + ")"
+	})
 }
 
 func (d *Duck) batchIDColumn(signal, filename string) string {
@@ -102,7 +140,7 @@ func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w
 				selected = append(selected, b)
 			}
 		}
-		physical := d.snapshotSource(signal, selected, batches)
+		physical := d.snapshotSource(signal, selected, batches, compiled.keys[signal])
 		sources["telemetry."+signal] = physical
 		sources[signal] = cleanSource(signal, physical)
 	}
@@ -130,10 +168,14 @@ func parseSQLTree(ctx context.Context, db snapshotSQL, query string) (map[string
 	}
 	return root, nil
 }
-func compileRelations(ctx context.Context, db snapshotSQL, query string, sources map[string]string, used map[string]string) (string, error) {
+
+// compileRelations replaces the relations in sources and rewrites standard
+// key subscripts (rewriteKeys), returning the statement and, per signal, the
+// dedicated columns it reads.
+func compileRelations(ctx context.Context, db snapshotSQL, query string, sources map[string]string, used map[string]string) (string, map[string]uint64, error) {
 	root, err := parseSQLTree(ctx, db, query)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	// Conservatively retain unqualified references shadowed anywhere by a CTE.
 	// Qualified telemetry references always refer to the physical relation.
@@ -165,7 +207,7 @@ func compileRelations(ctx context.Context, db snapshotSQL, query string, sources
 	ctes(root)
 	for name := range shadowed {
 		if strings.HasPrefix(name, "__fanout_snapshot_") {
-			return "", fmt.Errorf("reserved snapshot CTE name %s", name)
+			return "", nil, fmt.Errorf("reserved snapshot CTE name %s", name)
 		}
 	}
 	// Resolve qualifiers in their original lexical scopes before table replacement.
@@ -178,6 +220,19 @@ func compileRelations(ctx context.Context, db snapshotSQL, query string, sources
 		}
 	}
 	normalizeRelationQualifiers(root, physical)
+	statements, _ := root["statements"].([]any)
+	keys := map[string]uint64{}
+	for _, statement := range statements {
+		statement, _ := statement.(map[string]any)
+		node, _ := statement["node"].(map[string]any)
+		read, err := rewriteKeys(ctx, db, node)
+		if err != nil {
+			return "", nil, err
+		}
+		for signal, bits := range read {
+			keys[signal] |= bits
+		}
+	}
 	templates := map[string]map[string]any{}
 	var walk func(any) error
 	walk = func(value any) error {
@@ -248,20 +303,21 @@ func compileRelations(ctx context.Context, db snapshotSQL, query string, sources
 		return nil
 	}
 	if err := walk(root); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	encoded, err := json.Marshal(root)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var rewritten string
 	err = db.QueryRowContext(ctx, "SELECT json_deserialize_sql(?::JSON)::VARCHAR", string(encoded)).Scan(&rewritten)
-	return rewritten, err
+	return rewritten, keys, err
 }
 
 type compiledSnapshot struct {
 	query string
 	names map[string]string
+	keys  map[string]uint64 // per signal, the dedicated columns read
 }
 
 // compileSnapshot compiles relation aliases once with the native parser. Per-read
@@ -281,12 +337,12 @@ func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string
 			aliases[name] = "SELECT * FROM " + alias
 		}
 		used := map[string]string{}
-		rewritten, err := compileRelations(ctx, db, query, aliases, used)
+		rewritten, keys, err := compileRelations(ctx, db, query, aliases, used)
 		if err != nil {
 			return compiledSnapshot{}, err
 		}
 		// The AST records only rewritten table references, never SQL literals.
-		compiled = compiledSnapshot{query: rewritten, names: used}
+		compiled = compiledSnapshot{query: rewritten, names: used, keys: keys}
 		d.snapshotMu.Lock()
 		if d.snapshotQueries == nil || len(d.snapshotQueries) >= 128 {
 			d.snapshotQueries = map[string]compiledSnapshot{}

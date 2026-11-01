@@ -24,7 +24,7 @@ import (
 // anomaly_log is not one of them: it holds detector output that nothing can
 // rebuild, so the drop keeps it. Its table is created once; any change to its
 // schema must be a separate, explicit migration step.
-const readCacheVersion = 9
+const readCacheVersion = 10
 
 const (
 	readCacheBatchLimit = 64
@@ -271,7 +271,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		}
 		// One Parquet scan binds the pass's files. The virtual filename column
 		// identifies each contribution without a separate UNION branch per file.
-		physical := strings.Replace(d.physicalSource(signal, selected), "SELECT ", "SELECT filename AS __fanout_filename,", 1)
+		physical := strings.Replace(d.filesSource(signal, selected, 0), "SELECT ", "SELECT filename AS __fanout_filename,", 1)
 		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__fanout_filename")+" AS batch_id,\n", 1)
 	}
 	for _, s := range telemetry.Signals {
@@ -371,7 +371,7 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 	full := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
 	partial := "SELECT * FROM (" + index + ") WHERE NOT (" + full + ") AND " + fmt.Sprintf("max_start>=%d AND min_start<%d", w.Start.UnixNano(), w.End.UnixNano())
 	projection := "namespace,service,trace_id,start_time,start_unix_nano,end_unix_nano,status"
-	tail := "SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", uncached, batches)) + ") WHERE " + windowPredicate("start_time", w)
+	tail := "SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", uncached, batches, 0)) + ") WHERE " + windowPredicate("start_time", w)
 	// Only files whose scoped trace parts straddle a boundary require raw rows.
 	var partialFiles []telemetry.BatchMetadata
 	for _, b := range cached {
@@ -382,7 +382,7 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 	}
 	interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
 	if len(partialFiles) > 0 {
-		tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
+		tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches, 0)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
 		// A partial trace may also have in-window contributions in other batches.
 		// Include these parts as candidates; boundary rows merge them in the kernel.
 		sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`

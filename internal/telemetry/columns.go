@@ -108,6 +108,27 @@ func (s *Signal) Keys() []semconv.Key {
 	return keys
 }
 
+// Dedicated returns the standard key whose dedicated column holds the typed
+// values of key in this signal's attributes or resource map.
+func (s *Signal) Dedicated(column, key string) (semconv.Key, bool) {
+	scope := semconv.Span
+	switch column {
+	case "attributes":
+	case "resource":
+		scope = semconv.Resource
+	default:
+		return semconv.Key{}, false
+	}
+	k, ok := semconv.Lookup(scope, key)
+	if !ok {
+		return semconv.Key{}, false
+	}
+	if _, ok := s.Column(k.Column); !ok {
+		return semconv.Key{}, false
+	}
+	return k, true
+}
+
 // Signals lists every signal in file order.
 var Signals = []*Signal{Spans, Logs, Metrics}
 
