@@ -63,12 +63,12 @@ func shopDashboard() Dashboard {
 		Time: Time{Range: "1h"},
 		Variables: []Variable{
 			{Name: "service", Kind: "query", From: "spans", Field: "service", Default: "checkout"},
-			{Name: "route", Kind: "query", From: "spans", Field: "http_route", Where: []string{"service = $service"}, IncludeAll: true, Default: AllValue},
+			{Name: "route", Kind: "query", From: "spans", Field: "attributes['http.route']", Where: []string{"service = $service"}, IncludeAll: true, Default: AllValue},
 		},
 		Panels: []Panel{
-			{ID: "latency", Title: "Latency", Viz: "timeseries", Query: &Spec{From: "spans", Where: []string{"service = $service", "http_route = $route"}, Measures: []string{"p95(duration_ms)"}, Bucket: "5m"}},
+			{ID: "latency", Title: "Latency", Viz: "timeseries", Query: &Spec{From: "spans", Where: []string{"service = $service", "attributes['http.route'] = $route"}, Measures: []string{"p95(duration_ms)"}, Bucket: "5m"}},
 			{ID: "requests", Title: "Requests", Viz: "stat", Query: &Spec{From: "spans", Where: []string{"service = $service"}, Measures: []string{"count()"}}},
-			{ID: "by_route", Title: "By route", Viz: "bar", Query: &Spec{From: "spans", Where: []string{"service = $service"}, Measures: []string{"count()"}, By: []string{"http_route"}}},
+			{ID: "by_route", Title: "By route", Viz: "bar", Query: &Spec{From: "spans", Where: []string{"service = $service"}, Measures: []string{"count()"}, By: []string{"attributes['http.route']"}}},
 			{ID: "services", Title: "Services", Viz: "table", SQL: "SELECT service, count(*) AS n FROM spans WHERE $__window(start_time) GROUP BY 1 ORDER BY 2 DESC"},
 			{ID: "notes", Title: "Notes", Viz: "text", Content: "Checkout is the money path."},
 		},
@@ -141,7 +141,7 @@ func TestRunComparesWithThePreviousPeriod(t *testing.T) {
 func TestRunExplainsEmptyPanels(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := shopDashboard()
-	d.Panels = []Panel{{ID: "nope", Title: "Nope", Viz: "bar", Query: &Spec{From: "spans", Where: []string{"service = $service", "http_route = '/nope'"}, Measures: []string{"count()"}, By: []string{"http_route"}}}}
+	d.Panels = []Panel{{ID: "nope", Title: "Nope", Viz: "bar", Query: &Spec{From: "spans", Where: []string{"service = $service", "attributes['http.route'] = '/nope'"}, Measures: []string{"count()"}, By: []string{"attributes['http.route']"}}}}
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)

@@ -41,7 +41,7 @@ func TestEventBoundsUsePhysicalNanosecondsAfterReopen(t *testing.T) {
 	if err := json.Unmarshal(metadata, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if fields["version"] != float64(4) || fields["SpanTime"] != nil {
+	if fields["version"] != float64(5) || fields["SpanTime"] != nil || fields["SpanSpill"] != nil {
 		t.Fatalf("format changed: %s", metadata)
 	}
 }

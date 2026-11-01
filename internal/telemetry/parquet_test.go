@@ -183,9 +183,9 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 	}
 	metricRow := Metric{
 		Namespace: "tenant", EventUnixNanos: 21, TimeUnixNanos: 22, Name: "request.duration",
-		Description: "request latency", Unit: "ms", Type: "histogram", Temporality: "cumulative", ServiceName: "checkout", Value: 23.5,
-		HistBoundsJSON: `[1,5,10]`, HistCountsJSON: `[2,3,4,5]`, HistCount: 14, HistSum: 47,
-		ExemplarsJSON: `[{"trace_id":"trace"}]`, Attributes: map[string]any{"route": "/pay"},
+		Description: "request latency", Unit: "ms", Type: "histogram", Temporality: "cumulative", ServiceName: "checkout",
+		Histogram: Histogram{Count: 14, Sum: 47, HasSum: true, Bounds: []float64{1, 5, 10}, Counts: []uint64{2, 3, 4, 5}},
+		Exemplars: []Exemplar{{TraceID: "trace"}}, Attributes: map[string]any{"route": "/pay"},
 		Resource: map[string]any{"host": "one"}, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,
 	}
 	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
@@ -487,12 +487,13 @@ func completeTestSpan() Span {
 		Namespace: "tenant", TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef",
 		ParentSpanID: "fedcba9876543210", ServiceName: "checkout", Name: "POST /orders", Kind: "SERVER",
 		StartUnixNanos: 10, EndUnixNanos: 20, DurationMS: 0.00001, StatusCode: "STATUS_CODE_ERROR", StatusMsg: "declined",
-		Resource: map[string]any{"host": "one"}, Attributes: map[string]any{"http.request.method": "POST"},
-		EventsJSON: `[{"name":"exception"}]`, LinksJSON: `[{"trace_id":"linked"}]`,
+		Resource:   map[string]any{"host": "one", "service.version": "4.5.6", "k8s.container.restart_count": "two"},
+		Attributes: map[string]any{"http.request.method": "POST", "http.response.status_code": int64(500), "server.port": "443"},
+		Events: []Event{{TimeUnixNanos: 15, Name: "exception", Attributes: map[string]any{"exception.type": "CardDeclined", "attempt": int64(2)}},
+			{TimeUnixNanos: 16, Name: "retry"}},
+		Links:      []Link{{TraceID: "linked", SpanID: "parent", TraceState: "a=b", Attributes: map[string]any{"sampled": true}}},
 		TraceState: "vendor=value", Flags: 1, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 30,
-		HTTPMethod: "POST", HTTPStatusCode: "500", HTTPRoute: "/orders", DBSystem: "postgresql",
-		RPCMethod: "Create", RPCService: "orders.v1.Orders", PeerService: "payments", ServiceVersion: "4.5.6",
-		DeploymentEnv: "production", ExceptionType: "CardDeclined", ExceptionMessage: "declined",
+		RPCService: "orders.v1.Orders", PeerService: "payments", ExceptionType: "CardDeclined", ExceptionMessage: "declined",
 	}
 }
 

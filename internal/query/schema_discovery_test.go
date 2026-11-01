@@ -206,7 +206,7 @@ func TestSchemaColumnValuesAndMixedTypes(t *testing.T) {
 	for i, code := range []any{int64(200), "308", "308"} {
 		id := fmt.Sprint("mixed", i)
 		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "frontend", TraceID: id, SpanID: id, Name: "GET", Kind: "SPAN_KIND_SERVER",
-			StartUnixNanos: n, EndUnixNanos: n + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Attributes: map[string]any{"http.status_code": code}, IngestedAt: n})
+			StartUnixNanos: n, EndUnixNanos: n + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Attributes: map[string]any{"http.status_code": code, "messaging.system": "kafka"}, IngestedAt: n})
 	}
 	commit(t, repo, spans, nil)
 	e := NewExecutor(d, 30)
@@ -219,8 +219,8 @@ func TestSchemaColumnValuesAndMixedTypes(t *testing.T) {
 	for _, c := range schema.Signals["spans"].Columns {
 		values[c.Name] = c.Values
 	}
-	if v := values["http_route"]; len(v) != 3 || v[0].Value != "/api/cart" || v[0].Count != 60 {
-		t.Errorf("http_route values = %+v", v)
+	if v := values["messaging_system"]; len(v) != 1 || v[0].Value != "kafka" || v[0].Count != 3 {
+		t.Errorf("messaging_system values = %+v", v)
 	}
 	if len(values["operation"]) == 0 {
 		t.Error("operation has no values")

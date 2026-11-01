@@ -4,11 +4,15 @@ import { useEffect, useRef } from "react";
 import type { TraceSpan } from "../../../../contracts";
 import { duration } from "../../../../format";
 
-export type SpanEvent = { time_unix_nano: number; name: string; attributes?: Record<string, string> };
+/** A span event; offset_ns is its time after the span start. */
+export type SpanEvent = { offset_ns: number; name: string; attributes: Record<string, unknown> };
 /** What the trace read leaves out of each span, read on demand for the selected one. */
 export type SpanExtras = { attributes: Record<string, unknown>; resource: Record<string, unknown>; events: SpanEvent[]; scope: string };
 
 const statuses: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "OK", STATUS_CODE_UNSET: "Unset" };
+
+/** An event attribute as text: strings verbatim, other values as JSON. */
+const text = (value: unknown): string | undefined => value == null ? undefined : typeof value === "string" ? value : JSON.stringify(value);
 
 /** Attributes as a key/value table; nested values print as JSON. */
 export function Attributes({ label, values }: { label: string; values: Record<string, unknown> }) {
@@ -47,17 +51,20 @@ export function SpanDetails({ traceId, span, load, onClose }: { traceId: string;
       {span.status_message && <Text size="sm" c={failed ? "bad" : undefined} style={{ overflowWrap: "anywhere" }}>{span.status_message}</Text>}
       {extras.isFetching && <Loader size="xs" role="status" aria-label="Loading span details" />}
       {extras.error && <Alert color="bad" p="xs">{extras.error.message}</Alert>}
-      {exceptions.map((event, index) => <Alert key={index} color="bad" p="xs" title={event.attributes?.["exception.type"] ?? "Exception"}>
-        {event.attributes?.["exception.message"] && <Text size="sm" style={{ overflowWrap: "anywhere" }}>{event.attributes["exception.message"]}</Text>}
-        {event.attributes?.["exception.stacktrace"] && <Code block mt={4} fz={11} style={{ maxHeight: 220, overflow: "auto" }}>{event.attributes["exception.stacktrace"]}</Code>}
-      </Alert>)}
+      {exceptions.map((event, index) => {
+        const message = text(event.attributes["exception.message"]), stack = text(event.attributes["exception.stacktrace"]);
+        return <Alert key={index} color="bad" p="xs" title={text(event.attributes["exception.type"]) ?? "Exception"}>
+          {message && <Text size="sm" style={{ overflowWrap: "anywhere" }}>{message}</Text>}
+          {stack && <Code block mt={4} fz={11} style={{ maxHeight: 220, overflow: "auto" }}>{stack}</Code>}
+        </Alert>;
+      })}
       {extras.data && <>
         <Attributes label="Attributes" values={extras.data.attributes} />
         {extras.data.events.length > 0 && <Box>
           <Text size="xs" fw={600} c="dimmed" mb={4}>Events</Text>
           <Stack gap={4}>{extras.data.events.map((event, index) => <Box key={index}>
-            <Text size="xs"><Text span ff="monospace" c="dimmed">+{duration((event.time_unix_nano - new Date(span.start).valueOf() * 1e6) / 1e6)}</Text> {event.name}</Text>
-            {event.name !== "exception" && event.attributes && Object.keys(event.attributes).length > 0 && <Box pl="md"><Attributes label="Event attributes" values={event.attributes} /></Box>}
+            <Text size="xs"><Text span ff="monospace" c="dimmed">+{duration(event.offset_ns / 1e6)}</Text> {event.name}</Text>
+            {event.name !== "exception" && Object.keys(event.attributes).length > 0 && <Box pl="md"><Attributes label="Event attributes" values={event.attributes} /></Box>}
           </Box>)}</Stack>
         </Box>}
         <Attributes label="Resource" values={extras.data.resource} />

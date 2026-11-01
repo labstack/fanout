@@ -1,4 +1,34 @@
 message logs {
+	optional binary _r_container_id (STRING);
+	optional binary _r_container_image_name (STRING);
+	optional binary _r_deployment_environment_name (STRING);
+	optional binary _r_k8s_cluster_name (STRING);
+	optional binary _r_k8s_cluster_uid (STRING);
+	optional binary _r_k8s_container_name (STRING);
+	optional int64 _r_k8s_container_restart_count (INT(64,true));
+	optional binary _r_k8s_cronjob_name (STRING);
+	optional binary _r_k8s_cronjob_uid (STRING);
+	optional binary _r_k8s_daemonset_name (STRING);
+	optional binary _r_k8s_daemonset_uid (STRING);
+	optional binary _r_k8s_deployment_name (STRING);
+	optional binary _r_k8s_deployment_uid (STRING);
+	optional binary _r_k8s_job_name (STRING);
+	optional binary _r_k8s_job_uid (STRING);
+	optional binary _r_k8s_namespace_name (STRING);
+	optional binary _r_k8s_node_name (STRING);
+	optional binary _r_k8s_node_uid (STRING);
+	optional binary _r_k8s_pod_hostname (STRING);
+	optional binary _r_k8s_pod_ip (STRING);
+	optional binary _r_k8s_pod_name (STRING);
+	optional binary _r_k8s_pod_start_time (STRING);
+	optional binary _r_k8s_pod_uid (STRING);
+	optional binary _r_k8s_replicaset_name (STRING);
+	optional binary _r_k8s_replicaset_uid (STRING);
+	optional binary _r_k8s_statefulset_name (STRING);
+	optional binary _r_k8s_statefulset_uid (STRING);
+	optional binary _r_service_instance_id (STRING);
+	optional binary _r_service_version (STRING);
+	required int64 _spill (INT(64,false));
 	optional group attributes (VARIANT) {
 		required binary metadata;
 		optional binary value;
@@ -26,19 +56,11 @@ message logs {
 		required binary metadata;
 		optional binary value;
 		optional group typed_value {
-			required group deployment.environment.name {
-				optional binary value;
-				optional binary typed_value (STRING);
-			}
 			required group service.name {
 				optional binary value;
 				optional binary typed_value (STRING);
 			}
 			required group service.namespace {
-				optional binary value;
-				optional binary typed_value (STRING);
-			}
-			required group service.version {
 				optional binary value;
 				optional binary typed_value (STRING);
 			}

@@ -747,12 +747,6 @@ func displayField(field string) string {
 	switch field {
 	case "":
 		return ""
-	case "http_route":
-		return "HTTP route"
-	case "http_method":
-		return "HTTP method"
-	case "http_status_code":
-		return "HTTP status code"
 	case "name":
 		return "metric"
 	case "duration_ms":

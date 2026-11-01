@@ -158,9 +158,9 @@ func commitMixedVersionBatch(t testing.TB, repo *telemetrystore.Repository, id s
 		resource := map[string]any{"service.version": version, "deployment.environment": "production", "host.name": fmt.Sprintf("host-%d", i%31), "count": int64(i), "enabled": true}
 		attrs := map[string]any{"http.method": "GET", "http.status_code": int64(200), "http.route": "/api/items"}
 		stamp := at + int64(i)*1000
-		batch.Spans[i] = telemetry.Span{Namespace: ns, ServiceName: svc, ServiceVersion: version, TraceID: fmt.Sprintf("%s-%d", id, i/2), SpanID: fmt.Sprint(i), Name: "GET /api/items", Kind: "SPAN_KIND_SERVER", StartUnixNanos: stamp, EndUnixNanos: stamp + 1000000, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Resource: resource, Attributes: attrs}
+		batch.Spans[i] = telemetry.Span{Namespace: ns, ServiceName: svc, TraceID: fmt.Sprintf("%s-%d", id, i/2), SpanID: fmt.Sprint(i), Name: "GET /api/items", Kind: "SPAN_KIND_SERVER", StartUnixNanos: stamp, EndUnixNanos: stamp + 1000000, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Resource: resource, Attributes: attrs}
 		batch.Logs[i] = telemetry.Log{Namespace: ns, ServiceName: svc, EventUnixNanos: stamp, Severity: "INFO", Body: fmt.Sprintf("request %d completed successfully", i), Resource: resource, Attributes: attrs}
-		batch.Metrics[i] = telemetry.Metric{Namespace: ns, ServiceName: svc, EventUnixNanos: stamp, Name: "http.requests", Type: "sum", Value: float64(i), Resource: resource, Attributes: attrs}
+		batch.Metrics[i] = telemetry.Metric{Namespace: ns, ServiceName: svc, EventUnixNanos: stamp, Name: "http.requests", Type: "counter", Temporality: "cumulative", Value: float64(i), Resource: resource, Attributes: attrs}
 	}
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)

@@ -73,7 +73,7 @@ func pressureBatch(batch int, base time.Time, live bool) telemetrystore.Batch {
 		}
 		service := fmt.Sprintf("svc%d", i%6)
 		trace := fmt.Sprintf("%s-trace-%d-%d", prefix, batch, i/4)
-		b.Spans = append(b.Spans, telemetry.Span{Namespace: "pressure", ServiceName: service, TraceID: trace, SpanID: fmt.Sprintf("s%d", i), StartUnixNanos: n, EndUnixNanos: n + int64(i%1000+1)*1000000, DurationMS: float64(i%1000 + 1), Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK", ServiceVersion: version, IngestedAt: ingested})
+		b.Spans = append(b.Spans, telemetry.Span{Namespace: "pressure", ServiceName: service, TraceID: trace, SpanID: fmt.Sprintf("s%d", i), StartUnixNanos: n, EndUnixNanos: n + int64(i%1000+1)*1000000, DurationMS: float64(i%1000 + 1), Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK", Resource: map[string]any{"service.version": version}, IngestedAt: ingested})
 		if i < 192 {
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: "pressure", ServiceName: service, TraceID: trace, EventUnixNanos: n, TimeUnixNanos: n, IngestedAt: ingested, Body: "request complete", Severity: "INFO"})
 		}

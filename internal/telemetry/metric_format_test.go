@@ -16,21 +16,21 @@ func TestMetricPhysicalRowKeepsFidelityColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	metric := Metric{Name: "net", Type: "sum", Temporality: "delta", Monotonic: true,
+	metric := Metric{Name: "net", Type: "counter", Temporality: "delta",
 		StartTimeUnixNanos: 1790855940000000017, TimeUnixNanos: 1790856000000000009, IngestedAt: 1790856000000000010}
 	metric.SeriesID = MetricSeriesID(metric)
 	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "fidelity"}, nil, nil, []Metric{metric}); err != nil {
 		t.Fatal(err)
 	}
 	got := fileRows(t, filepath.Join(store.BatchPath("fidelity"), "metrics.parquet"), Metrics)[0]
-	if got["series_id"] != metric.SeriesID || got["metric_type"] != "sum" || got["temporality"] != "delta" || got["monotonic"] != true || got["start_time_unix_nano"] != metric.StartTimeUnixNanos {
+	if got["series_id"] != metric.SeriesID || got["type"] != "counter" || got["start_time_unix_nano"] != metric.StartTimeUnixNanos {
 		t.Fatalf("physical=%+v", got)
 	}
 	if err := ValidatePublishedBatch(store.BatchPath("fidelity")); err != nil {
 		t.Fatal(err)
 	}
-	if store.BatchMetadata()[0].Version != 4 {
-		t.Fatal("metadata is not format 4")
+	if store.BatchMetadata()[0].Version != 5 {
+		t.Fatal("metadata is not format 5")
 	}
 }
 
@@ -110,19 +110,20 @@ func TestFormatThreeIsRefusedBeforeCleanup(t *testing.T) {
 	}
 }
 
-func TestFormatFourRequiresNewMetricPhysicalSchema(t *testing.T) {
+func TestFormatFiveRequiresMetricPhysicalSchema(t *testing.T) {
 	for _, test := range []struct {
 		name  string
 		write func(string) error
 	}{
-		{"format_three_columns", func(path string) error {
-			layout := metricLayout(map[string]*Column{"series_id": nil, "temporality": nil, "monotonic": nil, "start_time_unix_nano": nil})
-			return writeParquet(path, layout, []Metric{{Name: "n", Type: "sum", TimeUnixNanos: 1, IngestedAt: 1}}, 1024)
+		{"format_four_columns", func(path string) error {
+			kind := str("metric_type", func(r *Metric) string { return r.Type }).dict()
+			layout := metricLayout(map[string]*Column{"type": &kind, "hist_bounds": nil, "hist_counts": nil})
+			return writeParquet(path, layout, []Metric{{Name: "n", Type: "counter", TimeUnixNanos: 1, IngestedAt: 1}}, 1024)
 		}},
-		{"temporality_int64", func(path string) error {
-			temporality := i64("temporality", func(*Metric) int64 { return 1 }).dict()
+		{"temporality_required", func(path string) error {
+			temporality := str("temporality", func(r *Metric) string { return r.Temporality }).dict()
 			layout := metricLayout(map[string]*Column{"temporality": &temporality})
-			return writeParquet(path, layout, []Metric{{Name: "n", Type: "sum", Monotonic: true, TimeUnixNanos: 1, IngestedAt: 1}}, 1024)
+			return writeParquet(path, layout, []Metric{{Name: "n", Type: "counter", Temporality: "delta", TimeUnixNanos: 1, IngestedAt: 1}}, 1024)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -132,7 +133,7 @@ func TestFormatFourRequiresNewMetricPhysicalSchema(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "schema"}, nil, nil,
-				[]Metric{{Name: "n", Type: "sum", Monotonic: true, Temporality: "cumulative", TimeUnixNanos: 1, IngestedAt: 1}}); err != nil {
+				[]Metric{{Name: "n", Type: "counter", Temporality: "cumulative", TimeUnixNanos: 1, IngestedAt: 1}}); err != nil {
 				t.Fatal(err)
 			}
 			dir := store.BatchPath("schema")
@@ -204,8 +205,8 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 	defer store.Close()
 	metrics := make([]Metric, 777) // Cross multiple 256-row writer chunks, including a partial chunk.
 	for i := range metrics {
-		m := Metric{Name: "net", Type: "sum", Monotonic: i%2 == 0,
-			Temporality:   []string{"cumulative", "delta", ""}[(i/2)%3],
+		m := Metric{Name: "net", Type: []string{"counter", "updown"}[i%2],
+			Temporality:   []string{"cumulative", "delta"}[(i/2)%2],
 			TimeUnixNanos: 1790856000000000009 + int64(i), IngestedAt: 1790856000000000010 + int64(i)}
 		if (i/6)%2 == 0 {
 			m.StartTimeUnixNanos = 1790855940000000017 + int64(i)
@@ -222,7 +223,7 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer verifier.Close()
-	rows, err := verifier.db.QueryContext(t.Context(), `SELECT series_id, metric_type, temporality, monotonic, start_time_unix_nano, time_unix_nano
+	rows, err := verifier.db.QueryContext(t.Context(), `SELECT series_id, type, temporality, start_time_unix_nano, time_unix_nano
 		FROM read_parquet(?, hive_partitioning=false, union_by_name=false) ORDER BY time_unix_nano`,
 		filepath.ToSlash(filepath.Join(store.BatchPath("readback"), "metrics.parquet")))
 	if err != nil {
@@ -236,15 +237,14 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 		}
 		var seriesID uint64
 		var kind, temporality string
-		var monotonic bool
 		var start, at int64
-		if err := rows.Scan(&seriesID, &kind, &temporality, &monotonic, &start, &at); err != nil {
+		if err := rows.Scan(&seriesID, &kind, &temporality, &start, &at); err != nil {
 			t.Fatal(err)
 		}
 		want := metrics[count]
-		if seriesID != want.SeriesID || kind != want.Type || temporality != want.Temporality || monotonic != want.Monotonic || start != want.StartTimeUnixNanos || at != want.TimeUnixNanos {
-			t.Fatalf("row %d: got (%q, %q, %t, %d, %d), want (%q, %q, %t, %d, %d)",
-				count, kind, temporality, monotonic, start, at, want.Type, want.Temporality, want.Monotonic, want.StartTimeUnixNanos, want.TimeUnixNanos)
+		if seriesID != want.SeriesID || kind != want.Type || temporality != want.Temporality || start != want.StartTimeUnixNanos || at != want.TimeUnixNanos {
+			t.Fatalf("row %d: got (%q, %q, %d, %d), want (%q, %q, %d, %d)",
+				count, kind, temporality, start, at, want.Type, want.Temporality, want.StartTimeUnixNanos, want.TimeUnixNanos)
 		}
 		count++
 	}
@@ -259,7 +259,7 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 // metricLayout is the metric layout with columns replaced or, where the
 // replacement is nil, removed.
 func metricLayout(replace map[string]*Column) *Signal {
-	s := &Signal{Name: Metrics.Name, Time: Metrics.Time}
+	s := &Signal{Name: Metrics.Name, Time: Metrics.Time, Order: Metrics.Order}
 	for _, c := range Metrics.Columns {
 		if r, ok := replace[c.Name]; ok {
 			if r == nil {
@@ -270,5 +270,6 @@ func metricLayout(replace map[string]*Column) *Signal {
 		s.Columns = append(s.Columns, c)
 	}
 	s.schema = buildSchema(s)
+	s.order = compileOrder(s)
 	return s
 }

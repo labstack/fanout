@@ -78,12 +78,22 @@ An export that exceeds this limit is rejected in full with OTLP
 `INVALID_ARGUMENT` (HTTP 400); accepted values retain their original types.
 
 Span, log, and metric attributes and resource attributes use Parquet VARIANT
-columns. Frequently queried resource and messaging fields also have typed
-Parquet columns inside the VARIANT encoding. The span read view exposes
-`messaging_system` and `messaging_destination` directly from those shredded
-fields, so messaging rollups can avoid decoding the whole attributes object.
+columns, and the maps keep every key. Standard OpenTelemetry keys also get a
+typed copy: 18 span attributes, such as `http.route` and
+`http.response.status_code`, and 29 resource attributes, such as
+`service.version` and `k8s.namespace.name`, on every signal. A copy holds a
+value only when its OTLP type matches the semantic conventions; a value of
+another type stays in the map alone. Messaging attributes are shredded inside
+the VARIANT encoding instead, and the span read view exposes
+`messaging_system` and `messaging_destination` directly from those fields, so
+messaging rollups can avoid decoding the whole attributes object.
 Values with different types remain in the residual encoding;
 an integer does not become a string just because another row uses one.
+
+Span events and links, metric exemplars, histogram buckets, and summary
+quantiles are typed parallel lists, one element per item: for example
+`event_times`, `event_names`, and `event_attributes`, whose attribute maps are
+VARIANT values. No stored column holds JSON.
 
 Integers, booleans, binary values, nulls, arrays, and nested objects survive
 ingestion, indexed reads, and compaction. Event timestamps retain nanosecond
@@ -96,8 +106,8 @@ Attribute names such as
 and an explicit cast when a scalar type is needed, for example
 `TRY_CAST(attr(attributes, 'retry.count') AS BIGINT)`. General attribute extracts
 through views retain their types; extraction across view projections does not
-reach the Parquet scan. Prefer the scalar service,
-namespace, version, environment, and messaging columns for those hot queries.
+reach the Parquet scan. Prefer the scalar service, namespace, and messaging
+columns for those hot queries.
 
 The JSON SQL response converts nested values only when returning results.
 Integer tokens retain their full precision; clients that parse JSON numbers as
@@ -124,7 +134,7 @@ a checksum.
 Verification failures such as memory exhaustion or cancellation never authorize
 quarantine.
 
-Telemetry batches use format 4. An unsupported batch format makes startup
+Telemetry batches use format 5. An unsupported batch format makes startup
 fail before cleanup or schema rewriting, leaving the files intact.
 
 ## Small files are bounded by compaction

@@ -266,7 +266,7 @@ INSERT INTO telemetry.metrics (
   metric_time,
   time_unix_nano,
   name,
-  metric_type,
+  type,
   service,
   value,
   ingested_at,
@@ -600,8 +600,6 @@ type rollupTestSpan struct {
 	parentSpanID string
 	service      string
 	operation    string
-	httpMethod   string
-	httpRoute    string
 	status       string
 	kind         string
 	attrs        string
@@ -631,8 +629,6 @@ INSERT INTO telemetry.spans (
   parent_span_id,
   service,
   operation,
-	  http_method,
-	  http_route,
   kind,
   attributes,
   start_time,
@@ -644,15 +640,13 @@ INSERT INTO telemetry.spans (
   ingested_at,
   ingested_unix_nano
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::VARCHAR::JSON::VARIANT, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?::VARCHAR::JSON::VARIANT, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		span.namespace,
 		span.traceID,
 		span.spanID,
 		nullIfEmpty(span.parentSpanID),
 		span.service,
 		span.operation,
-		nullIfEmpty(span.httpMethod),
-		nullIfEmpty(span.httpRoute),
 		kind,
 		nullIfEmpty(span.attrs),
 		span.start,

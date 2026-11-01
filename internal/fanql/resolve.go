@@ -546,9 +546,6 @@ func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 		return
 	}
 	ref := f.Ref
-	if ref.Column == "http_status_code" && ref.Key == "" && isRange(op) {
-		ref.CompareAs = "integer"
-	}
 	if v.Kind == variableValue {
 		r.variable(v.Text, f.Key, v.At, multi)
 		return

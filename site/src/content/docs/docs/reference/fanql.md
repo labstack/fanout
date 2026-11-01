@@ -55,13 +55,13 @@ A word is a field only before a field operator; otherwise it searches log `body`
 | `not like` | SQL spelling, SQL meaning: missing values are excluded; prefix `-` includes them. |
 | `not ilike` | SQL spelling, SQL meaning: missing values are excluded; prefix `-` includes them. |
 
-Prefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. TRY_CAST failures are NULL, so `-http_status_code between 400 and 599` includes uncastable codes.
+Prefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. A missing attribute makes a comparison NULL, so `-http.response.status_code between 400 and 599` includes spans without a status code.
 
 Whitespace and `and` join filters. An `or` chain must occupy its whole filter list or be parenthesized: `a:1 (b:2 or c:3)` and `(a:1 b:2) or c:3` differ. This rule also applies inside groups and `count_if`. Mixing conjunction and `or` without parentheses is a problem with suggested repairs.
 
 ## Fields
 
-A single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `http.target` means `attributes['http.target']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.
+A single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `url.path` means `attributes['url.path']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.
 
 Canonical text brackets single-segment attribute keys, so new columns cannot reinterpret canonical or stored text. Map columns require a key. `duration` denotes `duration_ms` in filters, measure arguments and trace sorts. `duration_ms>500` takes a number; `duration>500ms` requires a unit. A measure alias named duration or duration_ms stays that alias in sort. Time columns accept range comparisons against quoted timestamps, not equality shorthand.
 
@@ -81,15 +81,8 @@ Canonical text brackets single-segment attribute keys, so new columns cannot rei
 | `start_time` | `time` | `none` |  | Span start |
 | `end_time` | `time` | `none` |  | Span end |
 | `duration_ms` | `number` | `ms` |  | Span duration in milliseconds |
-| `http_method` | `string` | `none` | yes | HTTP method |
-| `http_status_code` | `string` | `none` |  | HTTP response status code as text |
-| `http_route` | `string` | `none` |  | HTTP route template |
-| `db_system` | `string` | `none` | yes | Database system, e.g. postgresql, redis |
-| `rpc_method` | `string` | `none` |  | RPC method |
 | `rpc_service` | `string` | `none` |  | RPC service |
 | `peer_service` | `string` | `none` |  | Remote service named by the caller |
-| `service_version` | `string` | `none` | yes | service.version resource attribute |
-| `deployment_env` | `string` | `none` | yes | deployment.environment resource attribute |
 | `exception_type` | `string` | `none` |  | Exception type from the span's exception event |
 | `exception_message` | `string` | `none` |  | Exception message |
 | `messaging_system` | `string` | `none` | yes | messaging.system attribute |
@@ -125,15 +118,13 @@ Canonical text brackets single-segment attribute keys, so new columns cannot rei
 | `name` | `string` | `none` |  | Metric name |
 | `unit` | `string` | `none` |  | Metric unit as reported |
 | `type` | `string` | `none` | yes | counter, gauge, histogram, summary, updown |
-| `temporality` | `string` | `none` | yes | cumulative or delta; empty for gauge and summary |
+| `temporality` | `string` | `none` | yes | cumulative or delta; NULL for gauge and summary |
 | `start_time` | `time` | `none` |  | Data point start time; NULL when absent |
-| `value` | `number` | `none` |  | Gauge or sum value |
+| `value` | `number` | `none` |  | Gauge or sum value; NULL for histogram and summary |
 | `hist_count` | `number` | `count` |  | Histogram point count |
-| `hist_sum` | `number` | `none` |  | Histogram point sum |
+| `hist_sum` | `number` | `none` |  | Histogram point sum; NULL when absent |
 | `attributes` | `map` | `none` |  | Data point attributes; use attributes['key'] |
 | `resource` | `map` | `none` |  | Resource attributes; use resource['key'] |
-
-`http_status_code` is text. `<`, `<=`, `>`, `>=` and `between` use `TRY_CAST(http_status_code AS INTEGER)` for literals and variables alike. Equality and membership stay text, so `http_status_code:500` means `'500'`.
 
 ## Vocabularies and severity
 
@@ -313,11 +304,11 @@ Format returns complete text and exactness `exact` or `normalized`, with notices
 ```fanql
 spans where kind:server | error_rate() by service every 1m
 spans where service:checkout duration>500ms sort duration limit 50
-spans where service:$service (status:error or status:unset) | count() by http_route
-spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route
+spans where service:$service (status:error or status:unset) | count() by http.route
+spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route
 spans where kind:server | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex
 spans | histogram(duration) by service
-spans where service:checkout status:error -http.target:/healthz | count() by http_route
+spans where service:checkout status:error -url.path:/healthz | count() by http.route
 spans where user.id:* | count_distinct(user.id) by service
 logs where service:api severity:error timeout sort time limit 200
 logs where severity>=warn | count() by body_template sort count limit 10

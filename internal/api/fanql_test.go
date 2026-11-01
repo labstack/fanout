@@ -121,7 +121,7 @@ func TestFanQLParseReturnsQueryCanonicalAndVizzes(t *testing.T) {
 
 func TestFanQLParseProblemsHaveNoQuery(t *testing.T) {
 	for _, preview := range []bool{false, true} {
-		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", fmt.Sprintf(`{"text":"spans where a:1 b:2 or c:3 | p99(duration) by http_route every 1m","preview":%t}`, preview))
+		rec := serveFanQL(t, nil, &fakePanels{}, http.MethodPost, "/api/fanql/parse", fmt.Sprintf(`{"text":"spans where a:1 b:2 or c:3 | p99(duration) by http.route every 1m","preview":%t}`, preview))
 		var body struct {
 			Code     string         `json:"code"`
 			Message  string         `json:"message"`

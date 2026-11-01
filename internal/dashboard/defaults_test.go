@@ -116,7 +116,7 @@ func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) 
 						v = 100 + float64(i)*180
 					}
 					m := metric(at, "system.cpu.time", host, v, map[string]any{"state": state})
-					m.Type, m.Monotonic, m.Temporality, m.Unit = "sum", true, "cumulative", "s"
+					m.Type, m.Temporality, m.Unit = "counter", "cumulative", "s"
 					metrics = append(metrics, m)
 				}
 			}
@@ -320,7 +320,7 @@ func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testin
 					}
 				}
 				m := metric("system.cpu.time", value, map[string]any{"state": state})
-				m.Type, m.Monotonic, m.Temporality, m.Unit = "sum", true, "cumulative", "s"
+				m.Type, m.Temporality, m.Unit = "counter", "cumulative", "s"
 				if namespace == "beta" {
 					m.Temporality, m.StartTimeUnixNanos = "delta", at.Add(-time.Minute).UnixNano()
 				}

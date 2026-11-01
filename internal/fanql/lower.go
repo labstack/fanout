@@ -68,13 +68,6 @@ func lowerField(f fieldName) string {
 	}
 	return f.Ref.Column
 }
-func compareField(f fieldName) string {
-	s := lowerField(f)
-	if f.Ref != nil && f.Ref.CompareAs == "integer" {
-		return "TRY_CAST(" + s + " AS INTEGER)"
-	}
-	return s
-}
 func sqlString(text string) string { return "'" + strings.ReplaceAll(text, "'", "''") + "'" }
 func decimal(n float64) string     { return strconv.FormatFloat(n, 'f', -1, 64) }
 func numberText(text string) string {
@@ -106,7 +99,7 @@ func lowerValue(f fieldName, v literalValue) string {
 	if v.Kind == stringValue {
 		return sqlString(text)
 	}
-	if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == query.TypeString && f.Ref.CompareAs == "" {
+	if f.Ref != nil && f.Ref.Key == "" && f.Ref.Type == query.TypeString {
 		return sqlString(text)
 	}
 	if v.Kind == numberValue {
@@ -140,7 +133,7 @@ func lowerNegated(e filterExpr, neg bool) string {
 			copy.Op = "~"
 			return lowerNegated(&copy, !neg)
 		}
-		f := compareField(x.Field)
+		f := lowerField(x.Field)
 		op := x.Op
 		if op == ":" {
 			op = "="
@@ -202,7 +195,7 @@ func lowerNegated(e filterExpr, neg bool) string {
 		if x.Negated {
 			op = "NOT BETWEEN"
 		}
-		p := compareField(x.Field) + " " + op + " " + lowerValue(x.Field, x.Lo) + " AND " + lowerValue(x.Field, x.Hi)
+		p := lowerField(x.Field) + " " + op + " " + lowerValue(x.Field, x.Lo) + " AND " + lowerValue(x.Field, x.Hi)
 		if neg {
 			if simpleOperand(x.Field, "between") {
 				op = "NOT BETWEEN"
@@ -275,7 +268,7 @@ func lowerTerms(terms []filterExpr, or, neg bool) string {
 }
 func nullNegation(p string) string { return "NOT coalesce((" + p + "), FALSE)" }
 func simpleOperand(f fieldName, op string) bool {
-	return f.Ref != nil && f.Ref.CompareAs == "" && !(f.Ref.Key != "" && isRange(op))
+	return f.Ref != nil && !(f.Ref.Key != "" && isRange(op))
 }
 func lowerBands(f fieldName, bands []string, sqlNeg, neg bool) string {
 	var out []string

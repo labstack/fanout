@@ -49,7 +49,6 @@ func TestDiagnosisNamesOnlyEmptyingRouteFilter(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := shopSpans()
 	for i := range spans {
-		spans[i].HTTPRoute = ""
 		spans[i].Attributes["http.route"] = ""
 	}
 	commit(t, repo, spans, nil)
@@ -58,14 +57,14 @@ func TestDiagnosisNamesOnlyEmptyingRouteFilter(t *testing.T) {
 	d := shopDashboard()
 	// The causal filter is deliberately beyond the old six-filter cutoff.
 	d.Panels = []Panel{{ID: "empty", Title: "Empty", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{
-		"service = $service", "kind = 'SPAN_KIND_SERVER'", "http_method = 'GET'", "duration_ms > 0", "status <> 'unknown'", "namespace = 'shop'", "http_route <> ''",
+		"service = $service", "kind = 'SPAN_KIND_SERVER'", "attributes['http.request.method'] = 'GET'", "duration_ms > 0", "status <> 'unknown'", "namespace = 'shop'", "attributes['http.route'] <> ''",
 	}}}}
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := results[0]
-	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without the HTTP route filter, 120 match the remaining filters.") {
+	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without the attribute http.route filter, 120 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
 	if strings.Contains(r.Diagnosis, "Without service = $service") {
@@ -109,12 +108,12 @@ func TestDiagnosisChoosesMostSelectiveQualifyingFilter(t *testing.T) {
 	d := shopDashboard()
 	// Removing service recovers 60 frontend rows; removing route recovers
 	// 120 checkout rows, so route is the more selective conflicting filter.
-	d.Panels = []Panel{{ID: "empty", Title: "Empty", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = $service", "http_route = '/api/cart'"}}}}
+	d.Panels = []Panel{{ID: "empty", Title: "Empty", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = $service", "attributes['http.route'] = '/api/cart'"}}}}
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "No spans match this combination of filters in this time range. Without HTTP route /api/cart, 120 match the remaining filters. Values seen: /cart (60), /quote (60)."
+	want := "No spans match this combination of filters in this time range. Without attribute http.route /api/cart, 120 match the remaining filters. Values seen: /cart (60), /quote (60)."
 	// Each filter alone matches spans: checkout has 120 and /api/cart has
 	// 60. Only their combination is empty; neither filter is absent globally.
 	if r := results[0]; r.Status != StatusEmpty || r.Diagnosis != want {
@@ -126,22 +125,22 @@ func TestDiagnosisSkipsFailingFilterRerun(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	commit(t, repo, []telemetry.Span{
-		{ServiceName: "checkout", HTTPStatusCode: "200", HTTPRoute: "/ok", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
-		{ServiceName: "frontend", HTTPStatusCode: "", HTTPRoute: "/ok", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
+		{ServiceName: "checkout", Attributes: map[string]any{"http.response.status_code": int64(200), "http.route": "/ok"}, StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
+		{ServiceName: "frontend", Attributes: map[string]any{"http.route": "/ok"}, StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n},
 	}, nil)
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := Dashboard{Name: "Diagnosis", Time: Time{Range: "1h"}, Panels: []Panel{{
 		ID: "empty", Title: "Empty", Viz: "table", Query: &Spec{
 			From: "spans", Measures: []string{"count()"}, By: []string{"service"},
-			Where: []string{"service = 'checkout'", "CAST(http_status_code AS BIGINT) > 100", "http_route = '/missing'"},
+			Where: []string{"service = 'checkout'", "CAST(attributes['http.response.status_code'] AS BIGINT) > 100", "attributes['http.route'] = '/missing'"},
 		},
 	}}}
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without HTTP route /missing, 1 match the remaining filters.") {
+	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without attribute http.route /missing, 1 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
 }

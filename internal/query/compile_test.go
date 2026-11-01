@@ -89,12 +89,12 @@ func TestCompileTableDropsAllAndSorts(t *testing.T) {
 
 func TestCompileMultiValueAndEmptySelection(t *testing.T) {
 	p := &Panel{ID: "n", Viz: "stat", Query: &Spec{From: "spans"}}
-	in := Filter{Expr: "(http_route IN (CAST($routes AS VARCHAR)))", Source: "http_route IN $routes", Params: []string{"routes"}, InParams: map[string]bool{"routes": true}}
+	in := Filter{Expr: "(attributes['http.route'] IN (CAST($routes AS VARCHAR)))", Source: "attributes['http.route'] IN $routes", Params: []string{"routes"}, InParams: map[string]bool{"routes": true}}
 	got, err := compileQuery(p, measuresOf(t, "spans", "count()"), []Filter{in}, Scope{Start: compileStart, End: compileEnd, Vars: map[string]Value{"routes": {Values: []string{"/a", "/b"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + ` AND ((http_route IN (CAST(? AS VARCHAR), CAST(? AS VARCHAR))))) SELECT count(*)::DOUBLE AS "count" FROM base ORDER BY "count" DESC NULLS LAST LIMIT 1000`
+	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + ` AND ((attributes['http.route'] IN (CAST(? AS VARCHAR), CAST(? AS VARCHAR))))) SELECT count(*)::DOUBLE AS "count" FROM base ORDER BY "count" DESC NULLS LAST LIMIT 1000`
 	if got.SQL != want || !reflect.DeepEqual(got.Args, []any{compileStart, compileEnd, "/a", "/b"}) {
 		t.Fatalf("sql %s args %v", got.SQL, got.Args)
 	}

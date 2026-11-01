@@ -92,12 +92,12 @@ func TestDiagnosisSuggestsOnlyNamedNearMisses(t *testing.T) {
 	for i, svc := range []string{"ab", "abc"} {
 		id := string(rune('a' + i))
 		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: svc, TraceID: id, SpanID: id, Name: "GET", Kind: "SPAN_KIND_SERVER",
-			StartUnixNanos: n + int64(i), EndUnixNanos: n + int64(i) + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", HTTPStatusCode: "500", IngestedAt: n})
+			StartUnixNanos: n + int64(i), EndUnixNanos: n + int64(i) + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Attributes: map[string]any{"http.response.status_code": int64(500)}, IngestedAt: n})
 	}
 	commit(t, repo, spans, nil)
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	for _, where := range []string{"http_status_code = '503'", "service = 'a'", "service = 'abd'"} {
+	for _, where := range []string{"attributes['http.response.status_code'] = 503", "service = 'a'", "service = 'abd'"} {
 		d := Dashboard{Name: "Near", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "a", Title: "A", Viz: "table",
 			Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{where}}}}}
 		got, err := e.Run(t.Context(), RunRequest{Dashboard: d})

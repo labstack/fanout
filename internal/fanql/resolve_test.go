@@ -131,7 +131,7 @@ func TestResolveSeverityRanges(t *testing.T) {
 			t.Fatal(bands, tt.want)
 		}
 	}
-	r, ps := resolvedText(t, "spans where http_status_code>=warn", Options{})
+	r, ps := resolvedText(t, "spans where http.response.status_code>=warn", Options{})
 	if len(ps) > 0 || r.Query.Where[0].(*comparison).Bands != nil {
 		t.Fatal(r, ps)
 	}
@@ -154,16 +154,10 @@ func TestResolveTypedLiterals(t *testing.T) {
 			t.Fatal(ps)
 		}
 	}
-	for _, tt := range []struct{ text, want string }{{"spans where http_status_code>=500", "integer"}, {"spans where http_status_code:500", ""}} {
-		r, ps := resolvedText(t, tt.text, Options{})
-		if len(ps) > 0 || r.Query.Where[0].(*comparison).Field.Ref.CompareAs != tt.want {
-			t.Fatal(r, ps)
-		}
-	}
 }
 
 func TestResolveFilterFunctions(t *testing.T) {
-	for _, text := range []string{`logs where length(body)>1000`, `spans where lower(service) = "api"`, `spans where starts_with(http_route, "/api")`, `logs where regexp_matches(body, "error.*")`} {
+	for _, text := range []string{`logs where length(body)>1000`, `spans where lower(service) = "api"`, `spans where starts_with(operation, "/api")`, `logs where regexp_matches(body, "error.*")`} {
 		if _, ps := resolvedText(t, text, Options{}); len(ps) != 0 {
 			t.Fatal(text, ps)
 		}
@@ -191,7 +185,7 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"logs where severity between error and info", "between needs the lower level first: severity between info and error"},
 		{"logs where severity>=custom", `"custom" has no severity rank; use trace, debug, info, warn, error or fatal`},
 		{"logs where severity>=unspecified", `"unspecified" has no severity rank`},
-		{"spans where http_status_code>500ms", "units apply to duration only; write http_status_code>500"},
+		{"spans where operation>500ms", "units apply to duration only; write operation>500"},
 		{"spans where durationn>1s", `"durationn" is not a spans column; did you mean duration?`},
 		{"logs where durationn>1s", "durationn takes a number, not a unit; write durationn>1"},
 		{"spans where duration>500", "duration needs a unit; e.g. duration>500ms"},
@@ -202,10 +196,10 @@ func TestResolveDiagnostics(t *testing.T) {
 		{`spans where start_time>"yesterday"`, "RFC 3339"},
 		{"metrics where timeout", "free text needs a field on metrics; use name:http.server.request.duration"},
 		{"spans where P95(Duration)", "function p95 is not allowed in a filter"},
-		{"spans where starts_with(http_route, /api)", "starts_with needs a quoted string"},
+		{"spans where starts_with(operation, /api)", "starts_with needs a quoted string"},
 		{"logs where length(body)", "length(...) needs a comparison"},
 		{"spans where lower(k)", "lower(...) needs a comparison"},
-		{`spans where starts_with(http_route, "/api") > 1`, "predicates are not compared"},
+		{`spans where starts_with(operation, "/api") > 1`, "predicates are not compared"},
 		{"spans | p95(service)", "p95 needs a numeric field; service is string"},
 		{"spans | p95()", "p95 takes 1 argument(s), got 0; e.g. p95(duration)"},
 		{"spans | count() as P95", `alias "P95" must be lowercase letters, digits and underscores`},
@@ -283,7 +277,7 @@ func TestResolveVariables(t *testing.T) {
 }
 
 func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
-	r, ps := resolvedText(t, "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route", Options{})
+	r, ps := resolvedText(t, "spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route", Options{})
 	if len(ps) > 0 {
 		t.Fatal(ps)
 	}
@@ -294,7 +288,7 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	if !reflect.DeepEqual(names, []string{"bar", "table"}) {
 		t.Fatal(r.Compatible)
 	}
-	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto" {
+	if len(r.Edits) != 1 || r.Edits[0].Viz != "timeseries" || r.Edits[0].Text != "spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route every auto" {
 		t.Fatal(r.Edits)
 	}
 	r, ps = resolvedText(t, "spans where status:error", Options{})

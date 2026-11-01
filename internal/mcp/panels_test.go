@@ -64,11 +64,11 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 		var logs []telemetry.Log
 		for i := range 30 {
 			n := at.Add(time.Duration(i) * time.Second).UnixNano()
-			route := "/cart"
+			route := map[string]any{"http.route": "/cart"}
 			if i == 0 {
-				route = ""
+				route = nil
 			}
-			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, HTTPRoute: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
+			spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "checkout", TraceID: fmt.Sprintf("trace-%d", i), SpanID: fmt.Sprintf("span-%d", i), Name: "GET cart", Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + 100000000, DurationMS: 100, Attributes: route, StatusCode: "STATUS_CODE_ERROR", IngestedAt: n})
 			logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", TimeUnixNanos: n, Severity: "ERROR", Body: "timeout", TraceID: fmt.Sprintf("trace-%d", i), IngestedAt: n})
 		}
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {

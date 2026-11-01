@@ -59,7 +59,7 @@ func TestVersionIncrementalLateBatch(t *testing.T) {
 		t.Helper()
 		n := at.Add(offset).UnixNano()
 		err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{
-			Namespace: "shop", ServiceName: "checkout", ServiceVersion: version,
+			Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": version},
 			TraceID: id, SpanID: id, Name: "checkout", Kind: "SPAN_KIND_SERVER",
 			StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1,
 			IngestedAt: at.UnixNano(),
@@ -128,7 +128,7 @@ func TestAnnotationSourcesNoRawScan(t *testing.T) {
 	at := time.Now().UTC().Add(-time.Hour)
 	for i, version := range []string{"v1", "v2"} {
 		n := at.Add(time.Duration(i) * time.Minute).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("scan-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: version, TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n}}, Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", Body: "real log", EventUnixNanos: n, IngestedAt: n}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("scan-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": version}, TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n}}, Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "checkout", Body: "real log", EventUnixNanos: n, IngestedAt: n}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -164,7 +164,7 @@ func TestVersionPassAndHistoryCaps(t *testing.T) {
 	for i := 0; i < versionRollupBatchBudget+1; i++ {
 		id := fmt.Sprintf("version-%03d", i)
 		n := at.Add(time.Duration(i) * time.Millisecond).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: "v1", TraceID: id, SpanID: id, Name: "root", StartUnixNanos: n, EndUnixNanos: n + 1000, DurationMS: .001, IngestedAt: n}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": "v1"}, TraceID: id, SpanID: id, Name: "root", StartUnixNanos: n, EndUnixNanos: n + 1000, DurationMS: .001, IngestedAt: n}}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -294,7 +294,7 @@ func TestVersionMarkersCompactionRetention(t *testing.T) {
 	at := time.Now().UTC().Truncate(time.Hour)
 	for i := range 8 {
 		n := at.Add(time.Duration(i) * time.Second).UnixNano()
-		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("part-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", ServiceVersion: "v1", TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: at.UnixNano()}}}); err != nil {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("part-", i), Spans: []telemetry.Span{{Namespace: "shop", ServiceName: "checkout", Resource: map[string]any{"service.version": "v1"}, TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: at.UnixNano()}}}); err != nil {
 			t.Fatal(err)
 		}
 	}

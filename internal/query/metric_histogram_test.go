@@ -50,16 +50,12 @@ func TestHistogramQuantileHandlesZeroAndOverflow(t *testing.T) {
 		{"zero_total", "[10,20]", "[0,0,0]", 0, nil},
 		{"no_finite_bound", "[]", "[10]", 10, nil},
 		{"nonpositive_first", "[-10,0,10]", "[10,0,0,0]", 10, -10.0},
-		{"exponential_shape", "[0.5,1,2]", "[4,2,4,0]", 10, 1.875},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			e, db := metricFixture(t)
 			m := metricHistogram(fixtureStart, tc.bounds, tc.counts, tc.count, 10, "a")
 			m.Temporality = "delta"
 			m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano()
-			if tc.label == "exponential_shape" {
-				m.Type = "exponential_histogram"
-			}
 			insertMetrics(t, db, m)
 			r := runMetricMeasure(t, e, []string{"p95(value)"}, "", nil, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))
 			if got := metricValues(t, r, "p95"); len(got) != 1 || got[0] != tc.want {
@@ -71,10 +67,9 @@ func TestHistogramQuantileHandlesZeroAndOverflow(t *testing.T) {
 
 func TestHistogramNegativeOnlyQuantileKeepsSign(t *testing.T) {
 	e, db := metricFixture(t)
-	// Ingest's conversion of scale=0, negative offset=1, counts=[2,6] with no
-	// zero or positive observations, including the fixed zero bucket.
-	m := metricHistogram(fixtureStart, "[-8,-4,-2,-5e-324,0]", "[0,6,2,0,0,0]", 8, -40, "a")
-	m.Type, m.Temporality = "exponential_histogram", "delta"
+	// Scale 0, negative offset 1 and counts [2,6] with no zero or positive
+	// observations: bounds -8,-4,-2 and the fixed zero bucket.
+	m := metricExponential(fixtureStart, telemetry.Histogram{NegativeOffset: 1, NegativeCounts: []uint64{2, 6}}, -40)
 	insertMetrics(t, db, m)
 	r := runMetricMeasure(t, e, []string{"p75(value)"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
 	if got := metricValues(t, r, "p75"); len(got) != 1 || got[0] != -4.0 {
@@ -93,6 +88,23 @@ func TestHistogramDeltaWithoutElapsedHasNoRate(t *testing.T) {
 	}
 	if metricValues(t, r, "sum")[0] != 30.0 || metricValues(t, r, "avg")[0] != 6.0 || metricValues(t, r, "p95")[0] != 10.0 {
 		t.Fatalf("delta without elapsed=%+v", r.Frame)
+	}
+}
+
+// A point without a sum still counts its observations, but sum and avg read
+// only the points that reported one.
+func TestHistogramWithoutSumKeepsCountsAndQuantiles(t *testing.T) {
+	e, db := metricFixture(t)
+	with := metricHistogram(fixtureStart, "[10]", "[3,2]", 5, 30, "a")
+	without := metricHistogram(fixtureStart, "[10]", "[5,0]", 5, 0, "b")
+	without.HasSum = false
+	for _, m := range []telemetry.Metric{with, without} {
+		m.Temporality = "delta"
+		insertMetrics(t, db, m)
+	}
+	r := runMetricMeasure(t, e, []string{"count()", "sum(value)", "avg(value)", "p50(value)"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
+	if metricValues(t, r, "count")[0] != 2.0 || metricValues(t, r, "sum")[0] != 30.0 || metricValues(t, r, "avg")[0] != 6.0 || metricValues(t, r, "p50")[0] != 6.25 {
+		t.Fatalf("absent sum=%+v", r.Frame)
 	}
 }
 
@@ -263,7 +275,8 @@ func TestHistogramUndefinedQuantilesKeepAllGroups(t *testing.T) {
 func TestHistogramSummaryDiagnosisStillSuggestsCount(t *testing.T) {
 	e, db := metricFixture(t)
 	m := metricCounter(fixtureStart, 10)
-	m.Type, m.Temporality, m.Monotonic = "summary", "", false
+	m.Type, m.Temporality = "summary", ""
+	m.Histogram = telemetry.Histogram{Count: 1, Sum: 10, HasSum: true, Quantiles: []float64{0.95}, QuantileValues: []float64{10}}
 	insertMetrics(t, db, m)
 	r := runMetricMeasure(t, e, []string{"p95(value) as tail"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
 	if r.Status != StatusEmpty || r.Diagnosis != "This measure is unavailable for net (summary). Show the number of observations instead." {
@@ -273,11 +286,10 @@ func TestHistogramSummaryDiagnosisStillSuggestsCount(t *testing.T) {
 
 func TestHistogramQuantilesOnConvertedExponentialLayout(t *testing.T) {
 	e, db := metricFixture(t)
-	// Ingest's conversion of scale=0, zero count 2, positive offset -1 and
-	// counts [4,2,4]: an empty underflow bucket, the fixed zero bucket, an
-	// empty gap and the positive buckets.
-	m := metricHistogram(fixtureStart, "[-5e-324,0,0.5,1,2,4]", "[0,2,0,4,2,4,0]", 12, 20, "a")
-	m.Type, m.Temporality = "exponential_histogram", "delta"
+	// Scale 0, zero count 2, positive offset -1 and counts [4,2,4]: an empty
+	// underflow bucket, the fixed zero bucket, an empty gap and the positive
+	// buckets (0.5,1], (1,2] and (2,4].
+	m := metricExponential(fixtureStart, telemetry.Histogram{ZeroCount: 2, PositiveOffset: -1, PositiveCounts: []uint64{4, 2, 4}}, 20)
 	m.StartTimeUnixNanos = fixtureStart.Add(-time.Minute).UnixNano()
 	insertMetrics(t, db, m)
 	r := runMetricMeasure(t, e, []string{"quantile(value, 0.25) as q25", "p50(value)", "p75(value)"}, "", nil, fixtureStart.Add(-time.Minute), fixtureStart.Add(time.Nanosecond))

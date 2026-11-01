@@ -34,8 +34,8 @@ func TestExportedRegistriesMatchInternalTables(t *testing.T) {
 		t.Errorf("filter functions = %v", got)
 	}
 	cols, ok := SignalColumns("spans")
-	if !ok || !slices.ContainsFunc(cols, func(f Field) bool { return f.Name == "http_status_code" && f.Type == TypeString }) {
-		t.Fatal("missing string http_status_code")
+	if !ok || !slices.ContainsFunc(cols, func(f Field) bool { return f.Name == "operation" && f.Type == TypeString }) {
+		t.Fatal("missing string operation")
 	}
 	if !slices.ContainsFunc(cols, func(f Field) bool { return f.Name == "attributes" && f.Type == TypeMap }) {
 		t.Fatal("missing attributes map")

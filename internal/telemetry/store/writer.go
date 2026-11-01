@@ -546,7 +546,7 @@ func batchBytes(batch Batch) int {
 	}
 	for i := range batch.Spans {
 		span := &batch.Spans[i]
-		total += resourceBytes(span.Resource) + telemetry.ValueBytes(span.Attributes) + len(span.EventsJSON) + len(span.LinksJSON) +
+		total += resourceBytes(span.Resource) + telemetry.ValueBytes(span.Attributes) + span.ListBytes() +
 			len(span.Name) + len(span.StatusMsg) + len(span.TraceID) + len(span.SpanID)
 	}
 	for i := range batch.Logs {
@@ -555,8 +555,8 @@ func batchBytes(batch Batch) int {
 	}
 	for i := range batch.Metrics {
 		metric := &batch.Metrics[i]
-		total += resourceBytes(metric.Resource) + telemetry.ValueBytes(metric.Attributes) + len(metric.ExemplarsJSON) +
-			len(metric.HistBoundsJSON) + len(metric.HistCountsJSON) + len(metric.Name) + len(metric.Description)
+		total += resourceBytes(metric.Resource) + telemetry.ValueBytes(metric.Attributes) + metric.ListBytes() +
+			len(metric.Name) + len(metric.Description)
 	}
 	return total
 }

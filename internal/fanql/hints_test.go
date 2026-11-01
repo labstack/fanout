@@ -115,7 +115,7 @@ func TestCompleteValuesNameTheirForm(t *testing.T) {
 	spans := schema.Signals["spans"]
 	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.status_code", Scope: "attributes", Type: "string", Types: []string{"number", "string"}, Count: 50,
 		Values: []query.Option{{Value: "200", Count: 40}, {Value: "308", Count: 3}}, Numbers: []query.Option{{Value: "200", Count: 30}}})
-	spans.Columns = []query.ColumnSchema{{Field: query.Field{Name: "http_route"}, Values: []query.Option{{Value: "/api/cart", Count: 9}}}}
+	spans.Columns = []query.ColumnSchema{{Field: query.Field{Name: "operation"}, Values: []query.Option{{Value: "/api/cart", Count: 9}}}}
 	schema.Signals["spans"] = spans
 	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	waitCompletion(t, c, completionRequest("spans "), func(r CompleteResponse) bool { return r.Schema.Warm })
@@ -128,7 +128,7 @@ func TestCompleteValuesNameTheirForm(t *testing.T) {
 	if want := []string{"200 matches numbers", `"200" matches text`, `"308" matches text`, "* "}; !slices.Equal(got, want) {
 		t.Errorf("mixed values = %q", got)
 	}
-	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where http_route:"))); !slices.Contains(got, `"/api/cart"`) && !slices.Contains(got, "/api/cart") {
+	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where operation:"))); !slices.Contains(got, `"/api/cart"`) && !slices.Contains(got, "/api/cart") {
 		t.Errorf("column values = %v", got)
 	}
 	for _, item := range c.Complete(context.Background(), completionRequest("spans where ki")).Items {

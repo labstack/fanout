@@ -34,8 +34,8 @@ func Reference() string {
 	} {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", row[0], row[1])
 	}
-	b.WriteString("\nPrefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. TRY_CAST failures are NULL, so `-http_status_code between 400 and 599` includes uncastable codes.\n\nWhitespace and `and` join filters. An `or` chain must occupy its whole filter list or be parenthesized: `a:1 (b:2 or c:3)` and `(a:1 b:2) or c:3` differ. This rule also applies inside groups and `count_if`. Mixing conjunction and `or` without parentheses is a problem with suggested repairs.\n\n")
-	b.WriteString("## Fields\n\nA single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `http.target` means `attributes['http.target']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.\n\nCanonical text brackets single-segment attribute keys, so new columns cannot reinterpret canonical or stored text. Map columns require a key. `duration` denotes `duration_ms` in filters, measure arguments and trace sorts. `duration_ms>500` takes a number; `duration>500ms` requires a unit. A measure alias named duration or duration_ms stays that alias in sort. Time columns accept range comparisons against quoted timestamps, not equality shorthand.\n\n")
+	b.WriteString("\nPrefix `-` or `not` excludes a term and includes rows where its predicate is NULL. Repeated negation cancels in pairs. SQL operators retain SQL null behavior. Compound negation follows De Morgan's law. A missing attribute makes a comparison NULL, so `-http.response.status_code between 400 and 599` includes spans without a status code.\n\nWhitespace and `and` join filters. An `or` chain must occupy its whole filter list or be parenthesized: `a:1 (b:2 or c:3)` and `(a:1 b:2) or c:3` differ. This rule also applies inside groups and `count_if`. Mixing conjunction and `or` without parentheses is a problem with suggested repairs.\n\n")
+	b.WriteString("## Fields\n\nA single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `url.path` means `attributes['url.path']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.\n\nCanonical text brackets single-segment attribute keys, so new columns cannot reinterpret canonical or stored text. Map columns require a key. `duration` denotes `duration_ms` in filters, measure arguments and trace sorts. `duration_ms>500` takes a number; `duration>500ms` requires a unit. A measure alias named duration or duration_ms stays that alias in sort. Time columns accept range comparisons against quoted timestamps, not equality shorthand.\n\n")
 	for _, signal := range query.SignalNames() {
 		fmt.Fprintf(&b, "### %s\n\n| Name | Type | Unit | Low cardinality | Description |\n|---|---|---|---|---|\n", signal)
 		columns, _ := query.SignalColumns(signal)
@@ -52,7 +52,6 @@ func Reference() string {
 		}
 		b.WriteByte('\n')
 	}
-	b.WriteString("`http_status_code` is text. `<`, `<=`, `>`, `>=` and `between` use `TRY_CAST(http_status_code AS INTEGER)` for literals and variables alike. Equality and membership stay text, so `http_status_code:500` means `'500'`.\n\n")
 	b.WriteString("## Vocabularies and severity\n\nAliases apply under equality, inequality and membership, including prefix negation. Quoted values, contains, SQL patterns and function arguments are literal. Stored spellings are also accepted bare.\n\n")
 	for _, vocabulary := range []struct {
 		name    string
@@ -166,11 +165,11 @@ func referenceMeasureMeaning(name string) string {
 var referenceExamples = []string{
 	"spans where kind:server | error_rate() by service every 1m",
 	"spans where service:checkout duration>500ms sort duration limit 50",
-	"spans where service:$service (status:error or status:unset) | count() by http_route",
-	"spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route",
+	"spans where service:$service (status:error or status:unset) | count() by http.route",
+	"spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route",
 	"spans where kind:server | (count_if(duration<=500ms) + count_if(duration>500ms duration<=2s) / 2) / count() as apdex",
 	"spans | histogram(duration) by service",
-	"spans where service:checkout status:error -http.target:/healthz | count() by http_route",
+	"spans where service:checkout status:error -url.path:/healthz | count() by http.route",
 	"spans where user.id:* | count_distinct(user.id) by service",
 	"logs where service:api severity:error timeout sort time limit 200",
 	"logs where severity>=warn | count() by body_template sort count limit 10",

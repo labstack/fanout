@@ -211,7 +211,7 @@ func TestBatchCellBudget(t *testing.T) {
 	d := Dashboard{Name: "Budget"}
 	// Wide SQL frames test the shared budget independently of the row cap.
 	for i := range 40 {
-		d.Panels = append(d.Panels, Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.http_route, a.status, a.duration_ms FROM spans a, spans b WHERE $__window(a.start_time)"})
+		d.Panels = append(d.Panels, Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.attributes['http.route'], a.status, a.duration_ms FROM spans a, spans b WHERE $__window(a.start_time)"})
 	}
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {

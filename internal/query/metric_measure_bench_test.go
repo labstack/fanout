@@ -50,11 +50,11 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 			m.Attributes = map[string]any{"series": int64(series), "nested": map[string]any{"enabled": true, "labels": []any{"a", "b"}}}
 			m.Resource = map[string]any{"host.index": int64(series / 50), "container.index": int64(series)}
 			if kind == "gauge" {
-				m.Type, m.Temporality, m.Monotonic = "gauge", "", false
+				m.Type, m.Temporality = "gauge", ""
 			}
 			if kind == "histogram" {
-				m.Type, m.Monotonic = "histogram", false
-				m.HistBoundsJSON = "[10,20]"
+				m.Type = "histogram"
+				m.Bounds = []float64{10, 20}
 			}
 			m.SeriesID = telemetry.MetricSeriesID(m)
 			base[series] = m
@@ -68,8 +68,8 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 					m.Value = float64((minute+10)*60 + step*10 + series%11)
 					if kind == "histogram" {
 						n := int64((minute+10)*6 + step + 1)
-						m.HistCount, m.HistSum = 10*n, float64(100*n)
-						m.HistCountsJSON = fmt.Sprintf("[%d,%d,%d]", 2*n, 3*n, 5*n)
+						m.Count, m.Sum, m.HasSum = uint64(10*n), float64(100*n), true
+						m.Counts = []uint64{uint64(2 * n), uint64(3 * n), uint64(5 * n)}
 					}
 					points = append(points, m)
 				}

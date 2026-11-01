@@ -214,8 +214,8 @@ func TestParseOperatorsAfterField(t *testing.T) {
 }
 
 func TestParseCalls(t *testing.T) {
-	x := mustParse(t, `spans where starts_with(http_route, "/api")`).Where[0].(*filterCall)
-	if x.Name != "starts_with" || len(x.Args) != 2 || x.Args[0].Field == nil || x.Args[0].Field.Key != "http_route" || x.Args[1].Value == nil || x.Args[1].Value.Text != "/api" {
+	x := mustParse(t, `spans where starts_with(operation, "/api")`).Where[0].(*filterCall)
+	if x.Name != "starts_with" || len(x.Args) != 2 || x.Args[0].Field == nil || x.Args[0].Field.Key != "operation" || x.Args[1].Value == nil || x.Args[1].Value.Text != "/api" {
 		t.Fatal(x)
 	}
 	x = mustParse(t, "logs where length(body) > 1000").Where[0].(*filterCall)
@@ -230,7 +230,7 @@ func TestParseCalls(t *testing.T) {
 }
 
 func TestParseStageMeasuresAndArithmetic(t *testing.T) {
-	q := mustParse(t, "spans | count_if(status:error) / count() * 100 as err_pct by http_route every 1m sort err_pct limit 10")
+	q := mustParse(t, "spans | count_if(status:error) / count() * 100 as err_pct by http.route every 1m sort err_pct limit 10")
 	m := q.Stage.Measures[0]
 	mul, ok := m.Parsed.Expr.(query.MeasureBinary)
 	if !ok || mul.Op != '*' || m.Alias != "err_pct" {
@@ -246,7 +246,7 @@ func TestParseStageMeasuresAndArithmetic(t *testing.T) {
 	if div.R.(query.MeasureCall).Func != "count" || mul.R.(query.MeasureConst).Value != 100 {
 		t.Fatal(mul)
 	}
-	if q.Stage.By[0].Key != "http_route" || q.Stage.Bucket != "1m" || q.Sort.Key != "err_pct" || q.Sort.Ascending || q.Limit.N != 10 {
+	if q.Stage.By[0].Key != "http.route" || q.Stage.Bucket != "1m" || q.Sort.Key != "err_pct" || q.Sort.Ascending || q.Limit.N != 10 {
 		t.Fatal(q)
 	}
 	x := mustParse(t, "spans | p95(duration)-p50(duration) as spread").Stage.Measures[0].Parsed.Expr.(query.MeasureBinary)

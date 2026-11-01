@@ -35,8 +35,7 @@ func metricOracleSQL(measure string) string {
         ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AS visible_end,?::VARCHAR AS metric_name,
         ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AS visible_start),
       decoded AS (
-        SELECT m.*,TRY(from_json(hist_bounds_json,'["DOUBLE"]')) AS bounds,
-          TRY(from_json(hist_counts_json,'["UBIGINT"]')) AS counts
+        SELECT m.*,hist_bounds AS bounds,hist_counts AS counts
         FROM metrics m,settings s
         WHERE time>=s.read_start AND time<s.visible_end AND name=s.metric_name AND `
 	switch measure {
@@ -45,12 +44,9 @@ func metricOracleSQL(measure string) string {
 	case "last(value)":
 		base += `type IN ('gauge','updown','counter') AND isfinite(value))`
 	case "p95(value)":
-		base += `type='histogram' AND isfinite(hist_sum) AND hist_count>=0),
+		base += `type='histogram' AND exp_scale IS NULL),
       valid_histograms AS (
-        SELECT * FROM decoded WHERE bounds IS NOT NULL AND counts IS NOT NULL
-          AND len(counts)=len(bounds)+1
-          AND coalesce(list_bool_and(list_transform(bounds,lambda b: isfinite(b))),true)
-          AND coalesce(list_bool_and(list_transform(range(2,len(bounds)+1),lambda i: bounds[i]>bounds[i-1])),true))`
+        SELECT * FROM decoded WHERE (hist_sum IS NULL OR isfinite(hist_sum)) AND len(counts)=len(bounds)+1)`
 	default:
 		panic("unsupported cross-check measure")
 	}
@@ -62,7 +58,7 @@ func metricOracleSQL(measure string) string {
         SELECT * EXCLUDE (retry) FROM (
           SELECT *,row_number() OVER (PARTITION BY series_id,time ORDER BY
             ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
-            hist_counts_json DESC,hist_bounds_json DESC,start_time DESC NULLS LAST) AS retry
+            hist_counts DESC,hist_bounds DESC,start_time DESC NULLS LAST) AS retry
           FROM ` + source + `) WHERE retry=1)`
 	if measure == "last(value)" {
 		// Enumerate bucket ends and rank eligible points with a normal join and
@@ -308,7 +304,7 @@ func TestMetricOracleMatchesKnownFixture(t *testing.T) {
 		h := metricHistogram(at, "[10,20]", fmt.Sprintf("[%d,%d,0]", 10*(i+2), 10*(i+2)), int64(20*(i+2)), float64(300*(i+2)), "a")
 		h.Name = "latency"
 		insertMetrics(t, db, h)
-		m.Name, m.Monotonic, m.Value = "memory", false, float64(10+i)
+		m.Name, m.Type, m.Value = "memory", "updown", float64(10+i)
 		m.Attributes = map[string]any{"state": "used"}
 		insertMetrics(t, db, m)
 	}
@@ -372,7 +368,7 @@ func TestMetricOracleMatchesResetsRebinningRetriesAndStaleness(t *testing.T) {
 		{-60, 10, "old"}, {60, 20, "new"}, {360, 30, "new"},
 	} {
 		m := metricCounter(fixtureStart.Add(time.Duration(p.seconds)*time.Second), p.value)
-		m.Name, m.Monotonic = "memory", false
+		m.Name, m.Type = "memory", "updown"
 		m.Attributes = map[string]any{"state": "used"}
 		m.Resource = map[string]any{"container.id": p.id}
 		insertMetrics(t, db, m)

@@ -2,71 +2,104 @@ package telemetry
 
 import (
 	"fmt"
+	"math/bits"
 	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/variant"
 )
 
-// writeColumns streams variant events straight into shredded columns.
-// The generic map encoder builds a second object tree for every row; keeping
-// the canonical OTel maps as the event source bounds the ingest working set.
+// writeColumns writes rows[perm[0]], rows[perm[1]] and so on. Scalar and list
+// columns are filled per chunk of rows from the registry's accessors, and
+// variant events stream straight into shredded columns: the generic map
+// encoder builds a second object tree for every row, and keeping the
+// canonical OTel maps as the event source bounds the ingest working set.
 func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32) error {
-	type scalarColumn struct {
-		get    any
-		column int
-		values []parquet.Value
-		bytes  []byte
-	}
 	type variantColumn struct {
 		get    func(*R) map[string]any
 		writer *parquet.VariantColumnWriter
 	}
-	var encoder variantEncoder
-	var scalars []scalarColumn
-	for column, path := range writer.Schema().Columns() {
+	leaves := map[string]int{}
+	for i, path := range writer.Schema().Columns() {
 		c, ok := s.Column(path[0])
 		if !ok || !c.Stored() {
 			return fmt.Errorf("parquet column %q is not a %s column", path[0], s.Name)
 		}
-		if len(path) != 1 {
-			if c.Type != Variant {
-				return fmt.Errorf("unsupported nested Parquet column %q", path)
-			}
-			continue
-		}
-		switch c.get.(type) {
-		case func(*R) string, func(*R) int64, func(*R) uint64, func(*R) float64, func(*R) bool:
-		default:
-			return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
-		}
-		scalars = append(scalars, scalarColumn{get: c.get, column: column, values: make([]parquet.Value, 256)})
+		leaves[strings.Join(path, ".")] = i
+	}
+	var encoder variantEncoder
+	var cells []*cellWriter
+	var fills []func([]R)
+	keys := keyWriter[R]{byName: [2]map[string]int{{}, {}}, resources: map[reflect.Value]*keyRow{}}
+	cell := func(path string) *cellWriter {
+		w := &cellWriter{column: leaves[path]}
+		cells = append(cells, w)
+		return w
 	}
 	var variants []variantColumn
 	var resources *resourceColumns
 	for _, c := range s.Columns {
-		if c.Type != Variant {
-			continue
+		switch {
+		case !c.Stored():
+		case c.Key != nil:
+			keys.add(c, cell(c.Name))
+		case c.Name == "_spill":
+			keys.spill = cell(c.Name)
+		case c.List && c.Type == Variant:
+			get, ok := c.get.(func(*R, []map[string]any) ([]map[string]any, bool))
+			if !ok {
+				return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
+			}
+			element := c.Name + ".list.element."
+			fills = append(fills, variantList(&encoder, cell(element+"metadata"), cell(element+"value"), get))
+		case c.List:
+			fill, err := listFill[R](c, cell(c.Name+".list.element"))
+			if err != nil {
+				return fmt.Errorf("%s: %w", s.Name, err)
+			}
+			fills = append(fills, fill)
+		case c.Type == Variant:
+			get, ok := c.get.(func(*R) map[string]any)
+			if !ok {
+				return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
+			}
+			switch c.Name {
+			case "attributes":
+				keys.attributes = get
+			case "resource":
+				keys.resource = get
+			}
+			stream, err := parquet.NewVariantColumnWriter(writer, c.Name)
+			if err != nil {
+				return err
+			}
+			if c.Name != "resource" {
+				variants = append(variants, variantColumn{get: get, writer: stream})
+				continue
+			}
+			if resources, err = newResourceColumns(writer.Schema()); err != nil {
+				return err
+			}
+			resources.stream = stream
+			selectSharedResources(resources, rows, get)
+			variants = append(variants, variantColumn{get: get})
+		default:
+			fill, err := scalarFill[R](c, cell(c.Name))
+			if err != nil {
+				return fmt.Errorf("%s: %w", s.Name, err)
+			}
+			fills = append(fills, fill)
 		}
-		get, ok := c.get.(func(*R) map[string]any)
-		if !ok {
-			return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
+	}
+	if len(keys.columns) > 0 {
+		if keys.spill == nil || keys.attributes == nil || keys.resource == nil {
+			return fmt.Errorf("%s has dedicated columns without _spill, attributes and resource", s.Name)
 		}
-		stream, err := parquet.NewVariantColumnWriter(writer, c.Name)
-		if err != nil {
-			return err
-		}
-		if c.Name != "resource" {
-			variants = append(variants, variantColumn{get: get, writer: stream})
-			continue
-		}
-		if resources, err = newResourceColumns(writer.Schema()); err != nil {
-			return err
-		}
-		resources.stream = stream
-		selectSharedResources(resources, rows, get)
-		variants = append(variants, variantColumn{get: get})
+		fills = append(fills, keys.fill)
 	}
 
 	columns := writer.ColumnWriters()
@@ -77,39 +110,14 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 	defer clear(buffer)
 	for start := 0; start < len(perm); {
 		end := min(start+256, len(perm), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
-		// Dispatch once per column and chunk, rather than once per cell, so
-		// the scalar encoding loops are homogeneous and reuse their byte and
-		// value buffers.
 		chunk := buffer[:end-start]
 		for i, row := range perm[start:end] {
 			chunk[i] = rows[row]
 		}
-		for c := range scalars {
-			column := &scalars[c]
-			switch get := column.get.(type) {
-			case func(*R) string:
-				for i := range chunk {
-					offset := len(column.bytes)
-					column.bytes = append(column.bytes, get(&chunk[i])...)
-					column.values[i] = parquet.ByteArrayValue(column.bytes[offset:]).Level(0, 0, column.column)
-				}
-			case func(*R) int64:
-				for i := range chunk {
-					column.values[i] = parquet.Int64Value(get(&chunk[i])).Level(0, 0, column.column)
-				}
-			case func(*R) uint64:
-				for i := range chunk {
-					column.values[i] = parquet.Int64Value(int64(get(&chunk[i]))).Level(0, 0, column.column)
-				}
-			case func(*R) float64:
-				for i := range chunk {
-					column.values[i] = parquet.DoubleValue(get(&chunk[i])).Level(0, 0, column.column)
-				}
-			case func(*R) bool:
-				for i := range chunk {
-					column.values[i] = parquet.BooleanValue(get(&chunk[i])).Level(0, 0, column.column)
-				}
-			}
+		// Dispatch once per column and chunk, rather than once per cell, so
+		// the encoding loops are homogeneous and reuse their buffers.
+		for _, fill := range fills {
+			fill(chunk)
 		}
 		for i := range chunk {
 			for _, column := range variants {
@@ -137,13 +145,13 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 				}
 			}
 		}
-		for c := range scalars {
-			column := &scalars[c]
-			if _, err := columns[column.column].WriteRowValues(column.values[:len(chunk)]); err != nil {
+		if err := encoder.err; err != nil {
+			return err
+		}
+		for _, w := range cells {
+			if err := w.flush(columns[w.column]); err != nil {
 				return err
 			}
-			clear(column.values[:len(chunk)])
-			column.bytes = column.bytes[:0]
 		}
 		if resources != nil {
 			if err := resources.flush(columns); err != nil {
@@ -157,13 +165,306 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 			}
 		}
 	}
+	keys.footer(writer)
 	return nil
+}
+
+// cellWriter buffers one leaf column's values for a chunk of rows. Byte
+// values reference its byte buffer, which is reused once they are written.
+type cellWriter struct {
+	column int
+	values []parquet.Value
+	bytes  []byte
+}
+
+func (w *cellWriter) put(v parquet.Value, rep, def int) {
+	w.values = append(w.values, v.Level(rep, def, w.column))
+}
+
+func (w *cellWriter) null(rep, def int) { w.put(parquet.NullValue(), rep, def) }
+
+func (w *cellWriter) text(v []byte, rep, def int) {
+	offset := len(w.bytes)
+	w.bytes = append(w.bytes, v...)
+	w.put(parquet.ByteArrayValue(w.bytes[offset:]), rep, def)
+}
+
+func (w *cellWriter) flush(column *parquet.ColumnWriter) error {
+	if len(w.values) == 0 {
+		return nil
+	}
+	_, err := column.WriteRowValues(w.values)
+	clear(w.values)
+	w.values, w.bytes = w.values[:0], w.bytes[:0]
+	return err
+}
+
+// Value writers by Go type: put one value at the given levels.
+func putString(w *cellWriter, v string, rep, def int) {
+	offset := len(w.bytes)
+	w.bytes = append(w.bytes, v...)
+	w.put(parquet.ByteArrayValue(w.bytes[offset:]), rep, def)
+}
+func putInt32(w *cellWriter, v int32, rep, def int)   { w.put(parquet.Int32Value(v), rep, def) }
+func putUint32(w *cellWriter, v uint32, rep, def int) { w.put(parquet.Int32Value(int32(v)), rep, def) }
+func putInt64(w *cellWriter, v int64, rep, def int)   { w.put(parquet.Int64Value(v), rep, def) }
+func putUint64(w *cellWriter, v uint64, rep, def int) { w.put(parquet.Int64Value(int64(v)), rep, def) }
+func putDouble(w *cellWriter, v float64, rep, def int) {
+	w.put(parquet.DoubleValue(v), rep, def)
+}
+func putBool(w *cellWriter, v bool, rep, def int) { w.put(parquet.BooleanValue(v), rep, def) }
+
+// scalarFill compiles a scalar column's accessor into a chunk filler.
+func scalarFill[R any](c Column, w *cellWriter) (func([]R), error) {
+	switch get := c.get.(type) {
+	case func(*R) string:
+		return required(w, get, putString), nil
+	case func(*R) int32:
+		return required(w, get, putInt32), nil
+	case func(*R) uint32:
+		return required(w, get, putUint32), nil
+	case func(*R) int64:
+		return required(w, get, putInt64), nil
+	case func(*R) uint64:
+		return required(w, get, putUint64), nil
+	case func(*R) float64:
+		return required(w, get, putDouble), nil
+	case func(*R) bool:
+		return required(w, get, putBool), nil
+	case func(*R) (string, bool):
+		return optional(w, get, putString), nil
+	case func(*R) (int32, bool):
+		return optional(w, get, putInt32), nil
+	case func(*R) (uint64, bool):
+		return optional(w, get, putUint64), nil
+	case func(*R) (float64, bool):
+		return optional(w, get, putDouble), nil
+	}
+	return nil, fmt.Errorf("column %q has no accessor for %T", c.Name, *new(R))
+}
+
+// listFill compiles a list column's accessor into a chunk filler.
+func listFill[R any](c Column, w *cellWriter) (func([]R), error) {
+	switch get := c.get.(type) {
+	case func(*R, []string) ([]string, bool):
+		return listed(w, get, putString), nil
+	case func(*R, []int64) ([]int64, bool):
+		return listed(w, get, putInt64), nil
+	case func(*R, []uint64) ([]uint64, bool):
+		return listed(w, get, putUint64), nil
+	case func(*R, []float64) ([]float64, bool):
+		return listed(w, get, putDouble), nil
+	}
+	return nil, fmt.Errorf("list column %q has no accessor for %T", c.Name, *new(R))
+}
+
+func required[R, T any](w *cellWriter, get func(*R) T, put func(*cellWriter, T, int, int)) func([]R) {
+	return func(chunk []R) {
+		for i := range chunk {
+			put(w, get(&chunk[i]), 0, 0)
+		}
+	}
+}
+
+func optional[R, T any](w *cellWriter, get func(*R) (T, bool), put func(*cellWriter, T, int, int)) func([]R) {
+	return func(chunk []R) {
+		for i := range chunk {
+			if v, ok := get(&chunk[i]); ok {
+				put(w, v, 0, 1)
+			} else {
+				w.null(0, 0)
+			}
+		}
+	}
+}
+
+// Lists are nullable with required elements: definition level 0 is a NULL
+// list, 1 an empty one and 2 an element; repetition level 1 continues a row.
+func listed[R, T any](w *cellWriter, get func(*R, []T) ([]T, bool), put func(*cellWriter, T, int, int)) func([]R) {
+	var buffer []T
+	return func(chunk []R) {
+		for i := range chunk {
+			values, ok := get(&chunk[i], buffer[:0])
+			buffer = values
+			switch {
+			case !ok:
+				w.null(0, 0)
+			case len(values) == 0:
+				w.null(0, 1)
+			default:
+				for j, v := range values {
+					put(w, v, min(j, 1), 2)
+				}
+			}
+		}
+		clear(buffer)
+	}
+}
+
+// variantList writes a list of unshredded VARIANT elements, each with its own
+// metadata. A nil map is a NULL element at definition level 2.
+func variantList[R any](encoder *variantEncoder, metadata, value *cellWriter, get func(*R, []map[string]any) ([]map[string]any, bool)) func([]R) {
+	var buffer []map[string]any
+	var names variant.MetadataBuilder
+	var encoded []byte
+	builder := variant.NewBuilderWithMetadata(&names)
+	return func(chunk []R) {
+		for i := range chunk {
+			elements, ok := get(&chunk[i], buffer[:0])
+			buffer = elements
+			switch {
+			case !ok:
+				metadata.null(0, 0)
+				value.null(0, 0)
+			case len(elements) == 0:
+				metadata.null(0, 1)
+				value.null(0, 1)
+			}
+			if !ok {
+				continue
+			}
+			for j, element := range elements {
+				rep := min(j, 1)
+				if element == nil {
+					metadata.null(rep, 2)
+					value.null(rep, 2)
+					continue
+				}
+				// Each element carries only its own names.
+				names.Reset()
+				builder.Reset()
+				if err := encoder.write(builder, element); err != nil {
+					encoder.fail(err)
+					return
+				}
+				v, err := builder.Bytes()
+				if err != nil {
+					encoder.fail(err)
+					return
+				}
+				encoded = names.AppendTo(encoded[:0])
+				metadata.text(encoded, rep, 3)
+				value.text(v, rep, 3)
+			}
+		}
+		clear(buffer)
+	}
+}
+
+// keyWriter fills the dedicated columns and _spill from each row's
+// attributes and resource. A resource map is shared by the rows of its OTLP
+// block, so its part of the projection is computed once per map.
+type keyWriter[R any] struct {
+	attributes, resource func(*R) map[string]any
+	columns              []*cellWriter
+	keys                 []semconv.Key
+	byName               [2]map[string]int // by scope: key name to column position
+	spill                *cellWriter
+	counts               [64]uint64
+	resources            map[reflect.Value]*keyRow
+}
+
+// keyRow is a map's projection: the values of the keys it holds with their
+// semconv types, and the spill bits of those it holds with other types.
+type keyRow struct {
+	values [64]any
+	has    uint64 // by column position
+	spill  uint64 // by key bit
+}
+
+func (k *keyWriter[R]) add(c Column, w *cellWriter) {
+	k.byName[c.Key.Scope][c.Key.Name] = len(k.columns)
+	k.columns = append(k.columns, w)
+	k.keys = append(k.keys, *c.Key)
+}
+
+func (k *keyWriter[R]) project(row *keyRow, scope semconv.Scope, values map[string]any) {
+	names := k.byName[scope]
+	for name, v := range values {
+		position, ok := names[name]
+		if !ok {
+			continue
+		}
+		if !typed(v, k.keys[position].Type) {
+			row.spill |= 1 << k.keys[position].Bit
+			continue
+		}
+		row.values[position] = v
+		row.has |= 1 << position
+	}
+}
+
+// typed reports whether an attribute value has the key's semconv type exactly.
+func typed(v any, t semconv.Type) bool {
+	switch v.(type) {
+	case string:
+		return t == semconv.String
+	case int64:
+		return t == semconv.Int
+	}
+	return false
+}
+
+func (k *keyWriter[R]) fill(chunk []R) {
+	var row keyRow
+	for i := range chunk {
+		row = keyRow{}
+		if resource := k.resource(&chunk[i]); resource != nil {
+			id := reflect.ValueOf(resource)
+			if cached, ok := k.resources[id]; ok {
+				row = *cached
+			} else {
+				k.project(&row, semconv.Resource, resource)
+				if len(k.resources) < 64 {
+					cached := row
+					k.resources[id] = &cached
+				}
+			}
+		}
+		if len(k.byName[semconv.Span]) > 0 {
+			k.project(&row, semconv.Span, k.attributes(&chunk[i]))
+		}
+		for position, w := range k.columns {
+			if row.has&(1<<position) == 0 {
+				w.null(0, 0)
+				continue
+			}
+			switch v := row.values[position].(type) {
+			case string:
+				putString(w, v, 0, 1)
+			case int64:
+				putInt64(w, v, 0, 1)
+			}
+		}
+		putUint64(k.spill, row.spill, 0, 0)
+		for spill := row.spill; spill != 0; spill &= spill - 1 {
+			k.counts[bits.TrailingZeros64(spill)]++
+		}
+	}
+}
+
+// footer records each key's count of spilled rows in the file footer.
+func (k *keyWriter[R]) footer(writer *parquet.GenericWriter[any]) {
+	for _, key := range k.keys {
+		if n := k.counts[key.Bit]; n > 0 {
+			writer.SetKeyValueMetadata(spillPrefix+key.Name, strconv.FormatUint(n, 10))
+		}
+	}
 }
 
 // variantEncoder writes canonical maps with their keys in sorted order. A
 // variant metadata dictionary interns names in first-use order, so sorting
 // makes equal rows encode to equal bytes, whatever Go's map order.
-type variantEncoder struct{ keys [][]string }
+type variantEncoder struct {
+	keys [][]string
+	err  error // the first error of a list fill, which cannot return one
+}
+
+func (e *variantEncoder) fail(err error) {
+	if e.err == nil {
+		e.err = err
+	}
+}
 
 func (e *variantEncoder) write(writer variant.ValueBuilder, value any) error {
 	return e.value(writer, value, 0)

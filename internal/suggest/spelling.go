@@ -5,7 +5,7 @@ import "strings"
 // Spelling returns "did you mean X?" for the closest candidate within a small
 // edit distance, or "" when nothing is close.
 func Spelling(word string, candidates []string) string {
-	// A candidate that contains the word ("route" in "http_route") is the
+	// A candidate that contains the word ("message" in "status_message") is the
 	// strongest hint; prefer the shortest such candidate.
 	contained := ""
 	for _, candidate := range candidates {

@@ -269,7 +269,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			selects = append(selects, "count("+sample+") AS _n")
 		}
 		if m.Func == "avg" && metricValueMeasure(m) {
-			selects = append(selects, "CASE WHEN type='histogram' THEN sum(count_increase) ELSE 1 END AS _weight")
+			selects = append(selects, "CASE WHEN type='histogram' THEN sum(count_increase) FILTER (WHERE sum_increase IS NOT NULL) ELSE 1 END AS _weight")
 		}
 		if m.Func == "last" && !metricValueMeasure(m) {
 			selects = append(selects, "max((time,ingested_unix_nano)) FILTER (WHERE _value IS NOT NULL) AS _last_order")

@@ -222,7 +222,7 @@ func TestNoDataRouteGuidanceSurvivesMCPMiddleware(t *testing.T) {
 		Name: "query_telemetry",
 		Arguments: map[string]any{"panel": query.Panel{
 			ID: "calls", Title: "Calls", Viz: "table",
-			Query: &query.Spec{From: "spans", Where: []string{"http_route = '/api/cart'"}},
+			Query: &query.Spec{From: "spans", Where: []string{"attributes['http.route'] = '/api/cart'"}},
 		}},
 	})
 	if err != nil || !result.IsError {

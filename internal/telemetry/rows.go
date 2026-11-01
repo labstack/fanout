@@ -17,24 +17,32 @@ type Span struct {
 	StatusMsg        string
 	Resource         map[string]any
 	Attributes       map[string]any
-	EventsJSON       string
-	LinksJSON        string
+	Events           []Event
+	Links            []Link
 	TraceState       string
 	Flags            uint32
 	ScopeName        string
 	ScopeVersion     string
 	IngestedAt       int64
-	HTTPMethod       string
-	HTTPStatusCode   string
-	HTTPRoute        string
-	DBSystem         string
-	RPCMethod        string
 	RPCService       string
 	PeerService      string
-	ServiceVersion   string
-	DeploymentEnv    string
 	ExceptionType    string
 	ExceptionMessage string
+}
+
+// Event is a span event with its typed attributes.
+type Event struct {
+	TimeUnixNanos int64
+	Name          string
+	Attributes    map[string]any
+}
+
+// Link is a span link with its typed attributes.
+type Link struct {
+	TraceID    string
+	SpanID     string
+	TraceState string
+	Attributes map[string]any
 }
 
 // IndexedSpan is the narrow projection needed by trace-detail queries. The
@@ -74,6 +82,8 @@ type Log struct {
 	BodyTemplate      string
 }
 
+// Metric is one OTLP data point. Type is the user-visible kind: gauge,
+// counter, updown, histogram (explicit or exponential) or summary.
 type Metric struct {
 	SeriesID           uint64
 	Namespace          string
@@ -83,21 +93,50 @@ type Metric struct {
 	Description        string
 	Unit               string
 	Type               string
-	Temporality        string
-	Monotonic          bool
+	Temporality        string // cumulative or delta; empty for gauges and summaries
 	StartTimeUnixNanos int64
 	ServiceName        string
-	Value              float64
-	HistBoundsJSON     string
-	HistCountsJSON     string
-	HistCount          int64
-	HistSum            float64
-	ExemplarsJSON      string
-	Attributes         map[string]any
-	Resource           map[string]any
-	ScopeName          string
-	ScopeVersion       string
-	IngestedAt         int64
+	Flags              uint32
+	Value              float64 // gauge and sum points; integers become doubles
+	Histogram
+	Exemplars    []Exemplar
+	Attributes   map[string]any
+	Resource     map[string]any
+	ScopeName    string
+	ScopeVersion string
+	IngestedAt   int64
+}
+
+// Histogram holds the aggregate of a histogram or summary point.
+type Histogram struct {
+	Count          uint64
+	Sum            float64
+	Min            float64
+	Max            float64
+	HasSum         bool
+	HasMin         bool
+	HasMax         bool
+	Bounds         []float64 // explicit bucket upper bounds
+	Counts         []uint64  // explicit bucket counts, one more than Bounds
+	Exponential    bool
+	Scale          int32
+	ZeroCount      uint64
+	ZeroThreshold  float64
+	PositiveOffset int32
+	PositiveCounts []uint64
+	NegativeOffset int32
+	NegativeCounts []uint64
+	Quantiles      []float64 // summary quantiles in [0, 1]
+	QuantileValues []float64
+}
+
+// Exemplar is a sampled measurement with its typed filtered attributes.
+type Exemplar struct {
+	TimeUnixNanos int64
+	Value         float64 // integers become doubles
+	TraceID       string
+	SpanID        string
+	Attributes    map[string]any
 }
 
 func NormalizeNamespace(namespace string) string {

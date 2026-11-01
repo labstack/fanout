@@ -84,7 +84,7 @@ func TestTableTrendsMultipleMeasuresDimensionsAndWindow(t *testing.T) {
 	d.Panels = d.Panels[2:3]
 	p := &d.Panels[0]
 	p.Viz = "table"
-	p.Query.By = []string{"service", "http_route"}
+	p.Query.By = []string{"service", "attributes['http.route']"}
 	p.Query.Measures = []string{"count()", "avg(duration_ms) as latency"}
 	p.Options = &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}, {Field: "latency", Format: "sparkline"}}}
 	start, end := fixtureStart.Add(30*time.Second), fixtureStart.Add(31*time.Minute+30*time.Second)

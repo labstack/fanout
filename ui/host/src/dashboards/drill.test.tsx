@@ -75,7 +75,7 @@ describe("drill URL", () => {
 });
 
 const hostAPI = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn() }));
-const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn(), span: vi.fn(async () => ({ attributes: { "http.route": "/cart" }, resource: { "service.name": "checkout" }, events: [{ time_unix_nano: 0, name: "exception", attributes: { "exception.type": "Error", "exception.message": "boom" } }], scope: "" })) }));
+const wire = vi.hoisted(() => ({ exemplars: vi.fn(), trace: vi.fn(), span: vi.fn(async () => ({ attributes: { "http.route": "/cart" }, resource: { "service.name": "checkout" }, events: [{ offset_ns: 0, name: "exception", attributes: { "exception.type": "Error", "exception.message": "boom" } }], scope: "" })) }));
 vi.mock("./api", () => ({
   queryExemplars: hostAPI.exemplars,
   getTrace: hostAPI.trace,

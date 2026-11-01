@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 
 	"github.com/parquet-go/parquet-go"
 	"golang.org/x/sync/errgroup"
@@ -36,6 +37,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 	}()
 	schema := s.schema
+	var spilled [64]uint64
 	var groups []parquet.RowGroup
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
@@ -57,13 +59,14 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		if !parquet.EqualNodes(schema, pf.Schema()) {
 			return fmt.Errorf("%w: compaction input schema", ErrUnsupportedBatchFormat)
 		}
-		groups = append(groups, pf.RowGroups()...)
-	}
-	for _, path := range schema.Columns() {
-		leaf, _ := schema.Lookup(path...)
-		if leaf.MaxRepetitionLevel != 0 {
-			return errors.New("compaction requires non-repeated physical columns")
+		counts, e := spillCounts(pf, s)
+		if e != nil {
+			return e
 		}
+		for bit, n := range counts {
+			spilled[bit] += n
+		}
+		groups = append(groups, pf.RowGroups()...)
 	}
 	out, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
 	if err != nil {
@@ -119,8 +122,15 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	}
 	heap.Init(&keys)
 	columns := make([]mergeColumn, len(schema.Columns()))
-	for i := range columns {
-		columns[i] = mergeColumn{column: i, groups: groups, readers: make([]parquet.ColumnChunkValueReader, len(groups)), remaining: make([]int64, len(groups))}
+	for i, path := range schema.Columns() {
+		leaf, _ := schema.Lookup(path...)
+		columns[i] = mergeColumn{column: i, repeated: leaf.MaxRepetitionLevel > 0, groups: groups,
+			readers: make([]parquet.ColumnChunkValueReader, len(groups)), remaining: make([]int64, len(groups))}
+		if columns[i].repeated {
+			columns[i].pending = make([][]parquet.Value, len(groups))
+			columns[i].buffers = make([][]parquet.Value, len(groups))
+			columns[i].eof = make([]bool, len(groups))
+		}
 	}
 	defer func() {
 		for i := range columns {
@@ -180,6 +190,11 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 		stats.Rows += int64(count)
 	}
+	for _, key := range s.Keys() {
+		if n := spilled[key.Bit]; n > 0 {
+			writer.SetKeyValueMetadata(spillPrefix+key.Name, strconv.FormatUint(n, 10))
+		}
+	}
 	if err := writer.Close(); err != nil {
 		return err
 	}
@@ -205,12 +220,21 @@ func appendMergeRun(runs []mergeRun, input, rows int) []mergeRun {
 	return append(runs, mergeRun{input, rows})
 }
 
+// mergeColumn copies one leaf column's values by the merge's row schedule.
+// A non-repeated leaf holds one value per row, nulls included. A list leaf
+// holds a row's elements as consecutive values whose first has repetition
+// level 0, so it advances by whole rows: values read past the rows a run
+// needs wait in pending until that input's next run.
 type mergeColumn struct {
 	column    int
+	repeated  bool
 	groups    []parquet.RowGroup
 	readers   []parquet.ColumnChunkValueReader
 	remaining []int64
 	values    [256]parquet.Value
+	pending   [][]parquet.Value // repeated: read values not yet written, by input
+	buffers   [][]parquet.Value // repeated: the storage pending slices, by input
+	eof       []bool            // repeated: the input's reader is exhausted
 }
 
 func (c *mergeColumn) close() (err error) {
@@ -221,6 +245,7 @@ func (c *mergeColumn) close() (err error) {
 	}
 	return err
 }
+
 func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, runs []mergeRun) error {
 	for _, run := range runs {
 		if err := ctx.Err(); err != nil {
@@ -232,39 +257,114 @@ func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, r
 			c.readers[run.input] = r
 			c.remaining[run.input] = c.groups[run.input].NumRows()
 		}
-		for remaining := run.rows; remaining > 0; {
-			n, e := r.ReadValues(c.values[:min(remaining, len(c.values))])
-			if n > 0 {
-				written, err := writer.WriteRowValues(c.values[:n])
-				clear(c.values[:n])
-				if err != nil {
-					return err
-				}
-				if written != n {
-					return io.ErrShortWrite
-				}
-				remaining -= n
-				c.remaining[run.input] -= int64(n)
-			}
-			if e != nil {
-				if e == io.EOF {
-					return io.ErrUnexpectedEOF
-				}
-				return e
-			}
-			if n == 0 {
-				return io.ErrNoProgress
-			}
+		var err error
+		if c.repeated {
+			err = c.copyRows(writer, run)
+		} else {
+			err = c.copyValues(writer, r, run.rows)
 		}
+		if err != nil {
+			return err
+		}
+		c.remaining[run.input] -= int64(run.rows)
 		if c.remaining[run.input] == 0 {
 			if err := r.Close(); err != nil {
 				return err
 			}
 			c.readers[run.input] = nil
+			if c.repeated {
+				c.pending[run.input], c.buffers[run.input] = nil, nil
+			}
 		}
 	}
 	// Flush the final partial page concurrently too. Flush on the parent is
 	// called only after every column is finished, so footer statistics and row
 	// counts are observed without racing any column writer.
 	return writer.Flush()
+}
+
+func (c *mergeColumn) copyValues(writer *parquet.ColumnWriter, r parquet.ColumnChunkValueReader, rows int) error {
+	for remaining := rows; remaining > 0; {
+		n, e := r.ReadValues(c.values[:min(remaining, len(c.values))])
+		if n > 0 {
+			written, err := writer.WriteRowValues(c.values[:n])
+			clear(c.values[:n])
+			if err != nil {
+				return err
+			}
+			if written != n {
+				return io.ErrShortWrite
+			}
+			remaining -= n
+		}
+		if e != nil {
+			if e == io.EOF {
+				return io.ErrUnexpectedEOF
+			}
+			return e
+		}
+		if n == 0 {
+			return io.ErrNoProgress
+		}
+	}
+	return nil
+}
+
+// copyRows writes a run's rows of a repeated leaf. Values borrow their
+// reader's page; before the reader advances, the only values still pending
+// are the start of an incomplete row, which are cloned.
+func (c *mergeColumn) copyRows(writer *parquet.ColumnWriter, run mergeRun) error {
+	pending := c.pending[run.input]
+	for need := run.rows; need > 0; {
+		// Count the complete rows pending, up to need. A row is complete when
+		// the next row starts or the column chunk has ended.
+		end, rows := 0, 0
+		for i := 1; i <= len(pending) && rows < need; i++ {
+			if i < len(pending) && pending[i].RepetitionLevel() != 0 {
+				continue
+			}
+			if i == len(pending) && !c.eof[run.input] {
+				break
+			}
+			end, rows = i, rows+1
+		}
+		if rows > 0 {
+			written, err := writer.WriteRowValues(pending[:end])
+			if err != nil {
+				return err
+			}
+			if written != rows {
+				return io.ErrShortWrite
+			}
+			clear(pending[:end])
+			pending = pending[end:]
+			need -= rows
+			continue
+		}
+		if c.eof[run.input] {
+			return io.ErrUnexpectedEOF
+		}
+		// pending is a suffix of the input's buffer, so moving it to the
+		// front copies forward over values already written.
+		partial := c.buffers[run.input][:len(pending)]
+		for i, v := range pending {
+			partial[i] = v.Clone()
+		}
+		n, e := c.readers[run.input].ReadValues(c.values[:])
+		if e == io.EOF {
+			c.eof[run.input] = true
+		} else if e != nil {
+			return e
+		} else if n == 0 {
+			return io.ErrNoProgress
+		}
+		if n > 0 && len(partial) == 0 && c.values[0].RepetitionLevel() != 0 {
+			return fmt.Errorf("column %d continues a row past its end", c.column)
+		}
+		pending = append(partial, c.values[:n]...)
+		c.buffers[run.input] = pending[:cap(pending)]
+		clear(c.values[:n])
+	}
+	c.pending[run.input] = pending
+	return nil
 }

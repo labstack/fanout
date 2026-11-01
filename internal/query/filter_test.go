@@ -22,11 +22,11 @@ func TestCheckFilterAcceptsSafeExpressions(t *testing.T) {
 		{"service = $service", []string{"service"}, nil, "service"},
 		{"attributes['http.route'] = '/cart'", nil, nil, "attributes['http.route']"},
 		{"attributes['http.status_code']::INTEGER >= 500", nil, nil, ""},
-		{"http_route IN $routes", []string{"routes"}, []string{"routes"}, ""},
+		{"attributes['http.route'] IN $routes", []string{"routes"}, []string{"routes"}, ""},
 		{"kind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') AND NOT (status = 'STATUS_CODE_OK')", nil, nil, ""},
-		{"lower(operation) LIKE 'get %' OR http_route ILIKE '%cart%'", nil, nil, ""},
-		{"coalesce(http_route, '') = '/cart'", nil, nil, ""},
-		{"contains($routes, http_route)", []string{"routes"}, []string{"routes"}, ""},
+		{"lower(operation) LIKE 'get %' OR attributes['http.route'] ILIKE '%cart%'", nil, nil, ""},
+		{"coalesce(attributes['http.route'], '') = '/cart'", nil, nil, ""},
+		{"contains($routes, attributes['http.route'])", []string{"routes"}, []string{"routes"}, ""},
 		{"parent_span_id IS NULL OR duration_ms BETWEEN 100 AND 2000", nil, nil, ""},
 	}
 	for _, tc := range cases {
@@ -56,7 +56,7 @@ func TestCheckFilterRejectsUnsafeExpressions(t *testing.T) {
 		"read_text('/etc/passwd') <> ''":                      "read_text",
 		"servce = 'checkout'":                                 "service",
 		"service = $svc":                                      "$svc",
-		"http_route = $routes":                                "IN $routes",
+		"attributes['http.route'] = $routes":                  "IN $routes",
 		"service = ?":                                         "variables",
 		"attributes['a'] = 'x' AND attributes[service] = 'y'": "attribute",
 		"service = 'a') GROUP BY (1":                          "single boolean expression",
@@ -158,13 +158,13 @@ func TestCheckedFiltersRunWithListBinds(t *testing.T) {
 	}{
 		{"attributes['http.route'] IN $routes", map[string][]any{"routes": {"/cart", "/quote"}}, 120},
 		{"duration_ms IN $durations", map[string][]any{"durations": {"40", "20"}}, 120},
-		{"http_route IN $routes", map[string][]any{"routes": {"/cart"}}, 60},
-		{"contains($routes, http_route)", map[string][]any{"routes": {"/cart"}}, 60},
+		{"attributes['http.route'] IN $routes", map[string][]any{"routes": {"/cart"}}, 60},
+		{"contains($routes, attributes['http.route'])", map[string][]any{"routes": {"/cart"}}, 60},
 		{"attributes['http.route'] IN $routes", map[string][]any{"routes": {"/cart"}}, 60},
 		{"duration_ms >= $threshold", map[string][]any{"threshold": {"500"}}, 30},
 		{"duration_ms BETWEEN $lo AND $hi", map[string][]any{"lo": {"30"}, "hi": {"50"}}, 60},
 		{"attributes['http.route'] = $route", map[string][]any{"route": {"/cart"}}, 60},
-		{"lower(http_route) = $route", map[string][]any{"route": {"/quote"}}, 60},
+		{"lower(attributes['http.route']) = $route", map[string][]any{"route": {"/quote"}}, 60},
 		// Time columns: spans at or after 12:30 are minutes 30–59 of three
 		// routes. A nanosecond past 12:30 drops minute 30, so the cast keeps
 		// nanoseconds.
@@ -175,7 +175,7 @@ func TestCheckedFiltersRunWithListBinds(t *testing.T) {
 		// the 900 ms /cart span of minute 30 is still running at 12:30:00.05.
 		{"$at BETWEEN start_time AND end_time", map[string][]any{"at": {"2026-10-01T12:30:00.05Z"}}, 1},
 		// length() is numeric: /quote (6) and /api/cart (9) are longer than 5.
-		{"length(http_route) > $n", map[string][]any{"n": {"5"}}, 120},
+		{"length(attributes['http.route']::VARCHAR) > $n", map[string][]any{"n": {"5"}}, 120},
 		// coalesce is numeric when an argument is, and types its parameters.
 		{"coalesce(duration_ms, 0) > $threshold", map[string][]any{"threshold": {"500"}}, 30},
 		{"duration_ms = coalesce($threshold, 0)", map[string][]any{"threshold": {"500"}}, 0},
@@ -248,10 +248,10 @@ func TestCheckFilterBoundsPatterns(t *testing.T) {
 	vars := map[string]Variable{"text": {Name: "text", Kind: "text"}}
 	long := "'" + strings.Repeat("a", engine.MaxPatternBytes+1) + "'"
 	for expr, want := range map[string]string{
-		"regexp_matches(operation, operation)":  "the pattern of regexp_matches must be a literal or a variable",
-		"operation LIKE http_route":             "the pattern of LIKE must be a literal or a variable",
-		"operation NOT ILIKE lower(http_route)": "the pattern of NOT ILIKE must be a literal or a variable",
-		"operation LIKE " + long:                "at most 256 bytes",
+		"regexp_matches(operation, operation)":                "the pattern of regexp_matches must be a literal or a variable",
+		"operation LIKE attributes['http.route']":             "the pattern of LIKE must be a literal or a variable",
+		"operation NOT ILIKE lower(attributes['http.route'])": "the pattern of NOT ILIKE must be a literal or a variable",
+		"operation LIKE " + long:                              "at most 256 bytes",
 	} {
 		if _, err := checkFilter(t.Context(), d, spans, vars, expr); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", expr, err, want)

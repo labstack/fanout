@@ -34,9 +34,9 @@ func TestCheckCountIfFilters(t *testing.T) {
 }
 func TestCompileExpressionSQL(t *testing.T) {
 	duck, _ := newTestEngine(t)
-	text := "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) / count() * 100 as pct_5xx"
+	text := "count_if(attributes['http.response.status_code'] >= 500) / count() * 100 as pct_5xx"
 	d := exprDashboard(text)
-	d.Panels[0].Query.By = []string{"http_route"}
+	d.Panels[0].Query.By = []string{"attributes['http.route']"}
 	d.Panels[0].Query.Where = []string{"kind = 'SPAN_KIND_SERVER'"}
 	checked, problems, err := checkWith(t.Context(), duck, &d, nil)
 	if err != nil || len(problems) != 0 {
@@ -47,7 +47,7 @@ func TestCompileExpressionSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{"count(*) FILTER (WHERE (", "TRY_CAST(http_status_code AS INTEGER)", " / nullif(count(*)::DOUBLE, 0) * 100 AS \"pct_5xx\""} {
+	for _, part := range []string{"count(*) FILTER (WHERE (", "attributes['http.response.status_code'] >= 500", " / nullif(count(*)::DOUBLE, 0) * 100 AS \"pct_5xx\""} {
 		if !strings.Contains(compiled.SQL, part) {
 			t.Fatalf("missing %s: %s", part, compiled.SQL)
 		}

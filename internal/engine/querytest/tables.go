@@ -11,8 +11,9 @@ import (
 
 // types are the engine types the raw relation reads from each physical type.
 var types = map[telemetry.Type]string{
-	telemetry.String: "VARCHAR", telemetry.Int64: "BIGINT", telemetry.Uint64: "UBIGINT", telemetry.Float64: "DOUBLE",
-	telemetry.Bool: "BOOLEAN", telemetry.Time: "TIMESTAMP_NS", telemetry.Variant: "VARIANT",
+	telemetry.String: "VARCHAR", telemetry.Int32: "INTEGER", telemetry.Int64: "BIGINT", telemetry.Uint32: "UINTEGER",
+	telemetry.Uint64: "UBIGINT", telemetry.Float64: "DOUBLE", telemetry.Bool: "BOOLEAN", telemetry.Time: "TIMESTAMP_NS",
+	telemetry.Variant: "VARIANT",
 }
 
 // createTable mirrors a signal's raw relation; derived columns are generated.
@@ -23,6 +24,9 @@ func createTable(s *telemetry.Signal) string {
 			continue
 		}
 		column := "  " + c.Name + " " + types[c.Type]
+		if c.List {
+			column += "[]"
+		}
 		if !c.Stored() {
 			column += " GENERATED ALWAYS AS (" + c.Expr + ")"
 		}

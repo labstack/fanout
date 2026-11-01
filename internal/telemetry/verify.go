@@ -11,6 +11,8 @@ import (
 
 	driver "github.com/duckdb/duckdb-go/v2"
 	engine "github.com/labstack/fanout/internal/duckdb"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
+	"github.com/parquet-go/parquet-go"
 )
 
 var ErrUnsupportedBatchFormat = errors.New("unsupported telemetry batch format")
@@ -75,7 +77,7 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// The shared loader checks the format-4 metadata and complete physical
+	// The shared loader checks the format-5 metadata and complete physical
 	// schema before native decoding; unsupported formats are never corruption.
 	batch, err := loadRegisteredBatch(dir)
 	if err != nil {
@@ -88,6 +90,9 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 		}
 		path := filepath.Join(dir, signal.Name+".parquet")
 		if err := v.decode(ctx, path, count); err != nil {
+			return fmt.Errorf("verify %s Parquet: %w", signal.Name, err)
+		}
+		if err := v.values(ctx, path, signal); err != nil {
 			return fmt.Errorf("verify %s Parquet: %w", signal.Name, err)
 		}
 		if err := verifyOrder(path, signal, count); err != nil {
@@ -106,7 +111,7 @@ func (v *BatchVerifier) decode(ctx context.Context, path string, expected int) e
 	// COUNT alone can use footer metadata. Hash every column to force vector
 	// decoding of all pages, including shredded and residual VARIANT values.
 	// The XOR is discarded: this is readability validation, not a checksum.
-	query := "SELECT COUNT(*), bit_xor(hash(COLUMNS(*))) FROM read_parquet('" + strings.ReplaceAll(filepath.ToSlash(path), "'", "''") + "', hive_partitioning=false)"
+	query := "SELECT COUNT(*), bit_xor(hash(COLUMNS(*))) FROM read_parquet(" + sqlString(filepath.ToSlash(path)) + ", hive_partitioning=false)"
 	rows, err := v.db.QueryContext(ctx, query)
 	if err != nil {
 		return nativeVerificationError(err)
@@ -143,6 +148,128 @@ func (v *BatchVerifier) decode(ctx context.Context, path string, expected int) e
 	}
 	return nil
 }
+
+// values checks what the physical schema cannot state: every dedicated
+// column equals its map value of the key's type, or is NULL with the row's
+// spill bit set and the value left in the map; the footer counts each key's
+// spill bits; the parallel lists of a row have equal lengths; and metric
+// points carry exactly the columns of their kind.
+func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) error {
+	type check struct {
+		name string
+		sql  string
+	}
+	var checks []check
+	keys := s.Keys()
+	for _, key := range keys {
+		column, _ := s.Column(key.Column)
+		source, cast := "attributes", "VARCHAR"
+		if key.Scope == semconv.Resource {
+			source = "resource"
+		}
+		if column.Type == Int64 {
+			cast = "BIGINT"
+		}
+		value := fmt.Sprintf("%s[%s]", source, sqlString(key.Name))
+		checks = append(checks, check{key.Column, fmt.Sprintf(`CASE WHEN (_spill>>%d)&1=1 THEN %s IS NULL AND %s IS NOT NULL
+ELSE %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) AND (%s IS NULL)=(%s IS NULL) END`,
+			key.Bit, key.Column, value, key.Column, value, cast, value, key.Column)})
+	}
+	groups := map[string][]string{}
+	var names []string
+	for _, c := range s.Columns {
+		if c.Parallel != "" {
+			if groups[c.Parallel] == nil {
+				names = append(names, c.Parallel)
+			}
+			groups[c.Parallel] = append(groups[c.Parallel], c.Name)
+		}
+	}
+	for _, name := range names {
+		columns := groups[name]
+		for _, c := range columns[1:] {
+			checks = append(checks, check{name, fmt.Sprintf("len(%s) IS NOT DISTINCT FROM len(%s)", columns[0], c)})
+		}
+	}
+	for _, c := range kindChecks[s] {
+		checks = append(checks, check{"metric kind", c})
+	}
+	if len(checks) == 0 {
+		return nil
+	}
+	var selects []string
+	for _, c := range checks {
+		selects = append(selects, "count(*) FILTER (WHERE NOT coalesce("+c.sql+", false))")
+	}
+	for _, key := range keys {
+		selects = append(selects, fmt.Sprintf("coalesce(sum((_spill>>%d)&1), 0)::UBIGINT", key.Bit))
+	}
+	query := "SELECT " + strings.Join(selects, ", ") + " FROM read_parquet(" + sqlString(filepath.ToSlash(path)) + ", hive_partitioning=false)"
+	results := make([]uint64, len(selects))
+	dest := make([]any, len(results))
+	for i := range results {
+		dest[i] = &results[i]
+	}
+	if err := v.db.QueryRowContext(ctx, query).Scan(dest...); err != nil {
+		return nativeVerificationError(err)
+	}
+	for i, c := range checks {
+		if results[i] > 0 {
+			return &CorruptBatchError{fmt.Errorf("%d rows break the %s check", results[i], c.name)}
+		}
+	}
+	counts, err := fileSpillCounts(path, s)
+	if err != nil {
+		return batchDataError(err)
+	}
+	for i, key := range keys {
+		if got := results[len(checks)+i]; got != counts[key.Bit] {
+			return &CorruptBatchError{fmt.Errorf("%d rows spill %s; the footer counts %d", got, key.Name, counts[key.Bit])}
+		}
+	}
+	return nil
+}
+
+// kindChecks hold for every metric point: the columns of its kind are set and
+// the others NULL, and its lists have the lengths their kind requires.
+var kindChecks = map[*Signal][]string{
+	Metrics: {
+		`(value IS NOT NULL) = (type NOT IN ('histogram','summary'))`,
+		`(hist_count IS NOT NULL) = (type IN ('histogram','summary'))`,
+		`(temporality IS NOT NULL) = (type IN ('counter','updown','histogram'))`,
+		`(hist_bounds IS NOT NULL) = (type='histogram' AND exp_scale IS NULL)`,
+		`(hist_counts IS NOT NULL) = (hist_bounds IS NOT NULL)`,
+		`hist_bounds IS NULL OR len(hist_counts)=len(hist_bounds)+1 OR len(hist_counts)=0 AND len(hist_bounds)=0`,
+		`(exp_scale IS NOT NULL) <= (type='histogram')`,
+		`(exp_zero_count IS NOT NULL) = (exp_scale IS NOT NULL)`,
+		`(exp_zero_threshold IS NOT NULL) = (exp_scale IS NOT NULL)`,
+		`(exp_positive_offset IS NOT NULL) = (exp_scale IS NOT NULL)`,
+		`(exp_positive_counts IS NOT NULL) = (exp_scale IS NOT NULL)`,
+		`(exp_negative_offset IS NOT NULL) = (exp_scale IS NOT NULL)`,
+		`(exp_negative_counts IS NOT NULL) = (exp_scale IS NOT NULL)`,
+		`(quantiles IS NOT NULL) = (type='summary')`,
+		`(exemplar_times IS NOT NULL) = (type<>'summary')`,
+	},
+}
+
+func fileSpillCounts(path string, s *Signal) ([64]uint64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return [64]uint64{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return [64]uint64{}, err
+	}
+	file, err := parquet.OpenFile(f, info.Size())
+	if err != nil {
+		return [64]uint64{}, err
+	}
+	return spillCounts(file, s)
+}
+
+func sqlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
 func nativeVerificationError(err error) error {
 	var e *driver.Error

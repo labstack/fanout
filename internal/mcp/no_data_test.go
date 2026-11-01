@@ -171,7 +171,7 @@ func TestDashboardSaveAcceptsBatchCellBudgetTruncation(t *testing.T) {
 	// 200,000-cell budget. A third span input brings this fixture to the
 	// same 1,000-row per-frame cap before batch truncation.
 	for i := range 40 {
-		d.Panels = append(d.Panels, query.Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.http_route, a.status, a.duration_ms FROM spans a, spans b, spans c WHERE $__window(a.start_time)"})
+		d.Panels = append(d.Panels, query.Panel{ID: fmt.Sprintf("p%d", i), Title: "wide", Viz: "table", SQL: "SELECT a.span_id, a.service, a.operation, a.kind, a.status, a.duration_ms FROM spans a, spans b, spans c WHERE $__window(a.start_time)"})
 	}
 	results, err := s.panels.Run(t.Context(), query.RunRequest{Dashboard: d})
 	if err != nil {

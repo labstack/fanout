@@ -45,7 +45,7 @@ import (
 // ingest-memory issue.
 const commitAllocRatioLimit = 3.0
 
-// syntheticSpan builds a span whose JSON columns look like production: a
+// syntheticSpan builds a span whose payload columns look like production: a
 // resource block shared across the batch, and attributes/events/links that are
 // near-unique per row. That distinction is the whole point — a dictionary over
 // a near-unique column stores every value twice.
@@ -62,11 +62,11 @@ func syntheticSpan(i int, base time.Time) Span {
 		EndUnixNanos:   start.Add(3 * time.Millisecond).UnixNano(),
 		DurationMS:     3,
 		StatusCode:     "OK",
-		Resource:       map[string]any{"service.name": "checkout", "deployment.environment": "prod", "host.name": "cube-10"},
-		Attributes:     map[string]any{"http.method": "POST", "http.route": "/api/orders", "http.status_code": int64(200), "order.id": fmt.Sprint(i), "user.id": fmt.Sprintf("u-%d", i*7), "session": fmt.Sprintf("%032x", i)},
-		EventsJSON: fmt.Sprintf(
-			`[{"name":"validated","time":%d},{"name":"charged","time":%d,"amount":%d}]`, start.UnixNano(), start.UnixNano()+1000, i%9999),
-		LinksJSON: fmt.Sprintf(`[{"trace_id":"%032x","span_id":"%016x"}]`, i+1, i+1),
+		Resource:       map[string]any{"service.name": "checkout", "deployment.environment.name": "prod", "host.name": "cube-10"},
+		Attributes:     map[string]any{"http.request.method": "POST", "http.route": "/api/orders", "http.response.status_code": int64(200), "order.id": fmt.Sprint(i), "user.id": fmt.Sprintf("u-%d", i*7), "session": fmt.Sprintf("%032x", i)},
+		Events: []Event{{Name: "validated", TimeUnixNanos: start.UnixNano()},
+			{Name: "charged", TimeUnixNanos: start.UnixNano() + 1000, Attributes: map[string]any{"amount": int64(i % 9999)}}},
+		Links: []Link{{TraceID: fmt.Sprintf("%032x", i+1), SpanID: fmt.Sprintf("%016x", i+1)}},
 	}
 }
 
@@ -74,7 +74,7 @@ func payloadBytes(spans []Span) int64 {
 	var total int64
 	for i := range spans {
 		total += int64(ValueBytes(spans[i].Resource) + ValueBytes(spans[i].Attributes) +
-			len(spans[i].EventsJSON) + len(spans[i].LinksJSON) +
+			spans[i].ListBytes() +
 			len(spans[i].TraceID) + len(spans[i].SpanID) + len(spans[i].ServiceName) + len(spans[i].Name))
 	}
 	return total

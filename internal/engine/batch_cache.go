@@ -24,7 +24,7 @@ import (
 // anomaly_log is not one of them: it holds detector output that nothing can
 // rebuild, so the drop keeps it. Its table is created once; any change to its
 // schema must be a separate, explicit migration step.
-const readCacheVersion = 8
+const readCacheVersion = 9
 
 const (
 	readCacheBatchLimit = 64

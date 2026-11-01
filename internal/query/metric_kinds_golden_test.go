@@ -3,7 +3,6 @@ package query
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -26,50 +25,60 @@ func metricKindFixture(t *testing.T) *Executor {
 	e, db := metricFixture(t)
 	type kind struct {
 		name, metricType, temporality string
-		monotonic, histogram          bool
+		exponential                   bool
 	}
 	kinds := []kind{
-		{"gauge", "gauge", "", false, false},
-		{"updown", "sum", "cumulative", false, false},
-		{"counter", "sum", "cumulative", true, false},
-		{"delta_counter", "sum", "delta", true, false},
-		{"histogram", "histogram", "cumulative", false, true},
-		{"delta_histogram", "histogram", "delta", false, true},
-		{"exponential", "exponential_histogram", "cumulative", false, true},
-		{"summary", "summary", "", false, false},
+		{"gauge", "gauge", "", false},
+		{"updown", "updown", "cumulative", false},
+		{"counter", "counter", "cumulative", false},
+		{"delta_counter", "counter", "delta", false},
+		{"histogram", "histogram", "cumulative", false},
+		{"delta_histogram", "histogram", "delta", false},
+		{"exponential", "histogram", "cumulative", true},
+		{"summary", "summary", "", false},
 	}
 	write := func(name string, k kind, series string, step int, at time.Time, ingest time.Time) {
 		m := metricCounter(at, 0)
-		m.Name, m.Type, m.Temporality, m.Monotonic = name, k.metricType, k.temporality, k.monotonic
+		m.Name, m.Type, m.Temporality = name, k.metricType, k.temporality
 		m.ServiceName = "svc-" + series
 		m.Attributes = map[string]any{"series": series}
 		n := float64(step)
 		cumulative := k.temporality == "cumulative"
 		switch {
-		case k.histogram:
-			c := []int64{int64(step%3 + 1), int64(step%5 + 1), int64(step%2 + 1)}
+		case k.metricType == "histogram":
+			c := []uint64{uint64(step%3 + 1), uint64(step%5 + 1), uint64(step%2 + 1)}
 			if cumulative {
-				c = []int64{int64(2*step + 1), int64(3*step + 1), int64(step + 1)}
+				c = []uint64{uint64(2*step + 1), uint64(3*step + 1), uint64(step + 1)}
 				if step == 9 {
-					c = []int64{1, 1, 1} // reset
+					c = []uint64{1, 1, 1} // reset
 				}
 			}
-			m.HistBoundsJSON = "[10,50]"
-			if step >= 14 {
-				m.HistBoundsJSON = "[10,20,50]" // rebinned bounds
-				c = append(c[:1], append([]int64{c[1] / 2}, c[1]-c[1]/2, c[2])...)
-			}
-			b, _ := json.Marshal(c)
-			m.HistCountsJSON = string(b)
-			var total int64
+			var total uint64
 			for _, v := range c {
 				total += v
 			}
-			m.HistCount, m.HistSum = total, float64(total)*12.5
+			m.Value = 0
+			m.Histogram = telemetry.Histogram{Count: total, Sum: float64(total) * 12.5, HasSum: true}
+			switch {
+			case k.exponential && step >= 14:
+				// Scale 1 splits every scale-0 bucket in two (rebinned bounds).
+				m.Exponential, m.Scale, m.PositiveOffset = true, 1, 6
+				m.PositiveCounts, m.NegativeCounts = []uint64{c[0], 0, c[1] / 2, c[1] - c[1]/2, c[2], 0}, []uint64{}
+			case k.exponential:
+				// Buckets (8,16], (16,32] and (32,64].
+				m.Exponential, m.Scale, m.PositiveOffset = true, 0, 3
+				m.PositiveCounts, m.NegativeCounts = c, []uint64{}
+			case step >= 14:
+				m.Bounds = []float64{10, 20, 50} // rebinned bounds
+				m.Counts = []uint64{c[0], c[1] / 2, c[1] - c[1]/2, c[2]}
+			default:
+				m.Bounds, m.Counts = []float64{10, 50}, c
+			}
 		case k.metricType == "summary":
-			m.Value = n
-			m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum = "[0.5,0.99]", fmt.Sprintf("[%d,%d]", step, 2*step), int64(step), n*3
-		case cumulative && k.monotonic:
+			m.Value = 0
+			m.Histogram = telemetry.Histogram{Count: uint64(step), Sum: n * 3, HasSum: true,
+				Quantiles: []float64{0.5, 0.99}, QuantileValues: []float64{n, 2 * n}}
+		case cumulative && k.metricType == "counter":
 			m.Value = 7 * n
 			if step == 9 {
 				m.Value = 2 // reset

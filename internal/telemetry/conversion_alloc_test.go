@@ -29,7 +29,7 @@ func TestSpanOrderingDoesNotCopyRows(t *testing.T) {
 	var jsonBytes int64
 	for i := range spans {
 		jsonBytes += int64(ValueBytes(spans[i].Resource) + ValueBytes(spans[i].Attributes) +
-			len(spans[i].EventsJSON) + len(spans[i].LinksJSON))
+			spans[i].ListBytes())
 	}
 
 	var before, after runtime.MemStats

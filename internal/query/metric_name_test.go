@@ -69,7 +69,7 @@ func TestMetricNameRuleUsesCheckedEqualities(t *testing.T) {
 func TestMetricKindMismatchHasActionableDiagnosis(t *testing.T) {
 	e, db := metricFixture(t)
 	m := metricCounter(fixtureStart, 100)
-	m.Monotonic = false
+	m.Type = "updown"
 	m.Name = "system.memory.usage"
 	insertMetrics(t, db, m)
 	r := runMetricPanel(t, e, Panel{Viz: "timeseries", Query: &Spec{From: "metrics", Where: []string{"name='system.memory.usage'"}, Measures: []string{"rate()"}, Bucket: "1m"}}, fixtureStart, fixtureStart.Add(time.Minute))
@@ -112,7 +112,6 @@ func TestMetricNameAllGroupsDifferentMetricsSeparately(t *testing.T) {
 		m := metricCounter(fixtureStart, p.value)
 		m.Name = p.name
 		m.Type = "gauge"
-		m.Monotonic = false
 		m.Temporality = ""
 		insertMetrics(t, db, m)
 	}
@@ -144,7 +143,7 @@ func TestMetricTopNamesNeverCombineDifferentMetricsIntoOther(t *testing.T) {
 	}{{"net", 10}, {"cpu", 100}, {"memory", 20}} {
 		m := metricCounter(fixtureStart, p.value)
 		m.Name = p.name
-		m.Type, m.Monotonic, m.Temporality = "gauge", false, ""
+		m.Type, m.Temporality = "gauge", ""
 		insertMetrics(t, db, m)
 	}
 	r := runMetricPanel(t, e, Panel{Viz: "timeseries", Options: &Options{Top: 1}, Query: &Spec{

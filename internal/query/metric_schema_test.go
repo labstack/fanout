@@ -2,6 +2,7 @@ package query
 
 import (
 	"encoding/json"
+	"github.com/labstack/fanout/internal/telemetry"
 	"strings"
 	"testing"
 	"time"
@@ -11,14 +12,19 @@ func TestMetricSchemaExposesKindsAndTemporality(t *testing.T) {
 	e, db := metricFixture(t)
 	for _, p := range []struct {
 		name, kind, temp string
-		mono             bool
 	}{
-		{"network", "sum", "cumulative", true}, {"network", "sum", "delta", true},
-		{"network", "gauge", "", false}, {"memory", "sum", "cumulative", false}, {"temperature", "gauge", "", false},
-		{"latency", "exponential_histogram", "delta", false}, {"summary", "summary", "", false},
+		{"network", "counter", "cumulative"}, {"network", "counter", "delta"},
+		{"network", "gauge", ""}, {"memory", "updown", "cumulative"}, {"temperature", "gauge", ""},
+		{"latency", "histogram", "delta"}, {"summary", "summary", ""},
 	} {
 		m := metricCounter(fixtureStart, 1)
-		m.Name, m.Type, m.Temporality, m.Monotonic = p.name, p.kind, p.temp, p.mono
+		m.Name, m.Type, m.Temporality = p.name, p.kind, p.temp
+		if p.kind == "histogram" {
+			m.Histogram = telemetry.Histogram{Exponential: true, PositiveCounts: []uint64{1}, NegativeCounts: []uint64{}, Count: 1}
+		}
+		if p.kind == "summary" {
+			m.Histogram = telemetry.Histogram{Quantiles: []float64{}, QuantileValues: []float64{}}
+		}
 		insertMetrics(t, db, m)
 	}
 	// Unit, window and namespace are independent discovery boundaries.

@@ -220,7 +220,7 @@ func TestMetricGaugeAndUpdownTotalsCarryAndExpire(t *testing.T) {
 				}
 				for seconds := -300 + phase; seconds < 900; seconds += period {
 					m := metricCounter(fixtureStart.Add(time.Duration(seconds)*time.Second), 10)
-					m.Monotonic = false
+					m.Type = "updown"
 					if kind == "gauge" {
 						m.Type, m.Temporality = "gauge", ""
 					}
@@ -354,7 +354,7 @@ func TestMetricSpreadClipsNanosecondWindows(t *testing.T) {
 func TestMetricGaugeCarryReadsEarlierParquetBatchWithoutAddingPoints(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	m := metricCounter(fixtureStart.Add(-time.Minute), 10)
-	m.Type, m.Temporality, m.Monotonic = "gauge", "", false
+	m.Type, m.Temporality = "gauge", ""
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "gauge-lookback", Metrics: []telemetry.Metric{m}}); err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +396,7 @@ func TestMetricGaugeCarryUsesLastPointAcrossInternalGaps(t *testing.T) {
 	e, db := metricFixture(t)
 	for i, seconds := range []int{0, 20, 120} {
 		m := metricCounter(fixtureStart.Add(time.Duration(seconds)*time.Second), float64(10+20*i))
-		m.Type, m.Temporality, m.Monotonic = "gauge", "", false
+		m.Type, m.Temporality = "gauge", ""
 		insertMetrics(t, db, m)
 	}
 	r := runMetricMeasure(t, e, []string{"sum(value)", "avg(value)", "count()"}, "1m", nil, fixtureStart, fixtureStart.Add(9*time.Minute))

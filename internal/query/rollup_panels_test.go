@@ -188,7 +188,7 @@ func TestRollupPanelsApplyServiceBeforeLimit(t *testing.T) {
 func TestRollupPanelsRejectUnrepresentableFilters(t *testing.T) {
 	e := newFixtureExecutor(t)
 	cases := []struct{ where, message string }{
-		{"http_route = '/cart'", "rollup panels support equality filters on namespace or service"},
+		{"attributes['http.route'] = '/cart'", "rollup panels support equality filters on namespace or service"},
 		{"service <> 'checkout'", "rollup panels support equality filters on namespace or service"},
 		{"service = operation", "rollup equality needs a literal or variable"},
 	}

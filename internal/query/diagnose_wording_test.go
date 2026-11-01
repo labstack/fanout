@@ -70,13 +70,13 @@ func TestDiagnosisValuesSeen(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	spans := shopSpans()
 	for i := range spans {
-		spans[i].HTTPRoute = ""
+		spans[i].Attributes["http.route"] = ""
 	}
 	commit(t, repo, spans, nil)
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := Dashboard{Name: "Seen", Time: Time{Range: "1h"}}
-	for i, where := range []string{"trace_id = 'nope'", "span_id = 'nope'", "http_route = '/missing'"} {
+	for i, where := range []string{"trace_id = 'nope'", "span_id = 'nope'", "attributes['http.route'] = '/missing'"} {
 		d.Panels = append(d.Panels, Panel{ID: fmt.Sprint("p", i), Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{where}}})
 	}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})

@@ -89,7 +89,7 @@ func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 			if i == 5 {
 				status = "STATUS_CODE_ERROR"
 			}
-			b.Spans = append(b.Spans, telemetry.Span{Namespace: ns, ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(id, i), StartUnixNanos: n, EndUnixNanos: n + int64((i+1)*1000000), DurationMS: float64(i + 1), StatusCode: status, HTTPMethod: "GET", HTTPRoute: "/test", IngestedAt: at.UnixNano()})
+			b.Spans = append(b.Spans, telemetry.Span{Namespace: ns, ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(id, i), StartUnixNanos: n, EndUnixNanos: n + int64((i+1)*1000000), DurationMS: float64(i + 1), StatusCode: status, Attributes: map[string]any{"http.request.method": "GET", "http.route": "/test"}, IngestedAt: at.UnixNano()})
 			sev := []string{"Error", "warn", "", "İ", "i"}[i%5]
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: ns, ServiceName: service, TimeUnixNanos: n, Severity: sev, Body: fmt.Sprint("event", i, " password=secret"), TraceID: trace, IngestedAt: at.UnixNano()})
 			if i%3 == 1 {
@@ -141,7 +141,7 @@ func TestCompletedTraceKeepsTraceWithSpansOutsideWindow(t *testing.T) {
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	span := func(trace, id string, at time.Time, dur time.Duration, status string) telemetry.Span {
 		return telemetry.Span{Namespace: "prod", ServiceName: "api", TraceID: trace, SpanID: id, StartUnixNanos: at.UnixNano(), EndUnixNanos: at.Add(dur).UnixNano(),
-			DurationMS: float64(dur.Milliseconds()), StatusCode: status, HTTPMethod: "GET", HTTPRoute: "/x", IngestedAt: t0.UnixNano()}
+			DurationMS: float64(dur.Milliseconds()), StatusCode: status, Attributes: map[string]any{"http.request.method": "GET", "http.route": "/x"}, IngestedAt: t0.UnixNano()}
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "before", Spans: []telemetry.Span{span("T", "t1", t0.Add(-30*time.Second), time.Second, "OK")}}); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 			dur := time.Duration(rng.Int64N(int64(2 * time.Second)))
 			batch.Spans = append(batch.Spans, telemetry.Span{Namespace: []string{"prod", "dev"}[rng.IntN(2)], ServiceName: []string{"api", "worker"}[rng.IntN(2)],
 				TraceID: fmt.Sprintf("t%03d", k/2+rng.IntN(3)), SpanID: fmt.Sprintf("%s-%d", batch.ID, i), StartUnixNanos: at.UnixNano(), EndUnixNanos: at.Add(dur).UnixNano(),
-				DurationMS: float64(dur) / 1e6, StatusCode: statuses[rng.IntN(len(statuses))], HTTPMethod: "GET", HTTPRoute: "/a"})
+				DurationMS: float64(dur) / 1e6, StatusCode: statuses[rng.IntN(len(statuses))], Attributes: map[string]any{"http.request.method": "GET", "http.route": "/a"}})
 		}
 		if err := repo.Commit(t.Context(), batch); err != nil {
 			t.Fatal(err)

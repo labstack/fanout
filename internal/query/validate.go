@@ -496,7 +496,7 @@ func inferBetterCall(m MeasureCall, p *Panel, sig *signal) string {
 	return ""
 }
 
-var errorCountFilter = regexp.MustCompile(`(?i)^\s*\(*\s*(?:status\s*=\s*'STATUS_CODE_ERROR'|status\s+IN\s*\(\s*'STATUS_CODE_ERROR'(?:\s*,\s*'STATUS_CODE_ERROR')*\s*\)|(?:severity|upper\s*\(\s*severity\s*\))\s*=\s*'(?:ERROR|FATAL|CRITICAL)'|(?:severity|upper\s*\(\s*severity\s*\))\s+IN\s*\(\s*'(?:ERROR|FATAL|CRITICAL)'(?:\s*,\s*'(?:ERROR|FATAL|CRITICAL)')*\s*\)|severity_number\s*>=\s*17|http_status_code\s*>=\s*500)\s*\)*\s*$`)
+var errorCountFilter = regexp.MustCompile(`(?i)^\s*\(*\s*(?:status\s*=\s*'STATUS_CODE_ERROR'|status\s+IN\s*\(\s*'STATUS_CODE_ERROR'(?:\s*,\s*'STATUS_CODE_ERROR')*\s*\)|(?:severity|upper\s*\(\s*severity\s*\))\s*=\s*'(?:ERROR|FATAL|CRITICAL)'|(?:severity|upper\s*\(\s*severity\s*\))\s+IN\s*\(\s*'(?:ERROR|FATAL|CRITICAL)'(?:\s*,\s*'(?:ERROR|FATAL|CRITICAL)')*\s*\)|severity_number\s*>=\s*17|attributes\s*\[\s*'http\.response\.status_code'\s*\](?:\s*::\s*(?:INTEGER|BIGINT))?\s*>=\s*500)\s*\)*\s*$`)
 
 func validateMetricName(p *Panel, filters []Filter, vars map[string]Variable, path string, problems *Problems) {
 	if p.Query == nil || p.Query.From != "metrics" {

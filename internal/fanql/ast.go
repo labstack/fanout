@@ -114,11 +114,10 @@ type fieldName struct {
 
 // FieldRef is populated by resolution; parsing leaves Ref nil.
 type fieldRef struct {
-	Column    string
-	Key       string
-	Type      query.FieldType
-	Unit      string
-	CompareAs string
+	Column string
+	Key    string
+	Type   query.FieldType
+	Unit   string
 }
 
 type valueKind uint8

@@ -39,7 +39,7 @@ func TestMetricIngestKeepsKindTemporalityAndStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kinds := []string{"gauge", "sum", "sum", "sum", "histogram", "exponential_histogram", "summary"}
+	kinds := []string{"gauge", "counter", "counter", "updown", "histogram", "histogram", "summary"}
 	temps := []string{"", "cumulative", "delta", "cumulative", "delta", "cumulative", ""}
 	store, err := telemetry.OpenParquetStore(t.TempDir())
 	if err != nil {
@@ -53,7 +53,7 @@ func TestMetricIngestKeepsKindTemporalityAndStart(t *testing.T) {
 			t.Fatalf("ingest series id=%d", got.SeriesID)
 		}
 		captured = append(captured, got)
-		if got.Type != kinds[i] || got.Temporality != temps[i] || got.Monotonic != (i == 1 || i == 2) || got.StartTimeUnixNanos != int64(start) {
+		if got.Type != kinds[i] || got.Temporality != temps[i] || got.Exponential != (i == 5) || got.StartTimeUnixNanos != int64(start) {
 			t.Fatalf("point %d: %+v", i, got)
 		}
 	}

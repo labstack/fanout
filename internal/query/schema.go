@@ -353,9 +353,7 @@ func windowWhere(sig *signal, start, end time.Time, namespace string) (string, [
 // sample instead, so completion offers them like the attribute's.
 var derivedColumns = map[string][]string{
 	"messaging_system": {"messaging.system"},
-	"http_route":       {"http.route"},
 	"rpc_service":      {"rpc.service"},
-	"http_status_code": {"http.response.status_code", "http.status_code"},
 }
 
 // valueColumns are scanned for their common values without being low

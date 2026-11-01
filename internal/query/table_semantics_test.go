@@ -28,7 +28,7 @@ func TestTableSparklinesShareOneQueryAcrossRowsAndMeasures(t *testing.T) {
 	e := newFixtureExecutor(t)
 	counter := &countingTableTrendEngine{Engine: e.engine}
 	e.engine = counter
-	d := Dashboard{Name: "Three rows", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", By: []string{"service", "http_route"}, Measures: []string{"count()", "avg(duration_ms) as latency"}}, Options: &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}, {Field: "latency", Format: "sparkline"}}}}}}
+	d := Dashboard{Name: "Three rows", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "P", Viz: "table", Query: &Spec{From: "spans", By: []string{"service", "attributes['http.route']"}, Measures: []string{"count()", "avg(duration_ms) as latency"}}, Options: &Options{Columns: []ColumnFormat{{Field: "count", Format: "sparkline"}, {Field: "latency", Format: "sparkline"}}}}}}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil || len(got) != 1 || got[0].Status != StatusOK || got[0].Frame.Rows < 3 {
 		t.Fatalf("table: %+v %v", got, err)

@@ -3,8 +3,10 @@ package query
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -56,8 +58,8 @@ func shopSpans() []telemetry.Span {
 			out = append(out, telemetry.Span{
 				Namespace: "shop", ServiceName: service, TraceID: fmt.Sprintf("%s-%s-%d", service, route, minute), SpanID: fmt.Sprintf("%s-%d", route, minute),
 				Name: "GET " + route, Kind: "SPAN_KIND_SERVER", StartUnixNanos: n, EndUnixNanos: n + int64(ms*1e6), DurationMS: ms,
-				StatusCode: status, HTTPMethod: "GET", HTTPRoute: route, ServiceVersion: "v1",
-				Attributes: map[string]any{"http.route": route, "customer.tier": "gold"}, IngestedAt: n,
+				StatusCode: status, Resource: map[string]any{"service.version": "v1"},
+				Attributes: map[string]any{"http.route": route, "http.request.method": "GET", "customer.tier": "gold"}, IngestedAt: n,
 			})
 		}
 		slow, status := 100.0, "STATUS_CODE_OK"
@@ -145,7 +147,7 @@ func insertMetrics(t *testing.T, s *metricStore, m telemetry.Metric) {
 
 func metricCounter(at time.Time, value float64) telemetry.Metric {
 	m := telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "net", Unit: "By",
-		Type: "sum", Monotonic: true, Temporality: "cumulative", Value: value,
+		Type: "counter", Temporality: "cumulative", Value: value,
 		TimeUnixNanos: at.UnixNano(), EventUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano(),
 		ScopeName: "scope", ScopeVersion: "1"}
 	m.SeriesID = telemetry.MetricSeriesID(m)
@@ -187,12 +189,37 @@ func metricValues(t *testing.T, r Result, column string) []any {
 	return nil
 }
 
+// metricHistogram is an explicit histogram point; bounds and counts are JSON
+// arrays so fixtures read like the buckets they describe.
 func metricHistogram(at time.Time, bounds, counts string, count int64, sum float64, series string) telemetry.Metric {
 	m := metricCounter(at, 0)
-	m.Type, m.Monotonic = "histogram", false
-	m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum = bounds, counts, count, sum
+	m.Type, m.Value = "histogram", 0
+	m.Histogram = telemetry.Histogram{Count: uint64(count), Sum: sum, HasSum: true, Bounds: []float64{}, Counts: []uint64{}}
+	if err := json.Unmarshal([]byte(bounds), &m.Bounds); err != nil {
+		panic(err)
+	}
+	if err := json.Unmarshal([]byte(counts), &m.Counts); err != nil {
+		panic(err)
+	}
 	m.Attributes = map[string]any{"series": series}
 	m.SeriesID = telemetry.MetricSeriesID(m)
+	return m
+}
+
+// metricExponential is a delta exponential histogram point; its count is the
+// sum of its buckets.
+func metricExponential(at time.Time, h telemetry.Histogram, sum float64) telemetry.Metric {
+	m := metricCounter(at, 0)
+	m.Type, m.Temporality, m.Value = "histogram", "delta", 0
+	h.Exponential, h.Sum, h.HasSum = true, sum, true
+	h.PositiveCounts = append([]uint64{}, h.PositiveCounts...)
+	h.NegativeCounts = append([]uint64{}, h.NegativeCounts...)
+	h.Count = h.ZeroCount
+	for _, n := range slices.Concat(h.PositiveCounts, h.NegativeCounts) {
+		h.Count += n
+	}
+	m.Histogram = h
+	m.Attributes = map[string]any{"series": "a"}
 	return m
 }
 

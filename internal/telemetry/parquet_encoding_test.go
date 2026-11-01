@@ -52,12 +52,12 @@ func TestSpanParquetDictionaryEncodesLowCardinalityColumns(t *testing.T) {
 			t.Errorf("%s is not dictionary encoded: %v", column, encodings[column])
 		}
 	}
-	for _, column := range []string{"namespace", "service", "operation", "trace_id", "span_id", "parent_span_id", "events_json", "links_json"} {
+	for _, column := range []string{"namespace", "service", "operation", "trace_id", "span_id", "parent_span_id", "link_trace_ids", "link_span_ids"} {
 		if slices.Contains(encodings[column], format.RLEDictionary) {
 			t.Errorf("%s is dictionary encoded: %v", column, encodings[column])
 		}
 	}
-	// The encoding is physical layout, not schema: the fixed format-4 schema
+	// The encoding is physical layout, not schema: the fixed format-5 schema
 	// still matches, so files written either way remain readable together.
 	if !parquet.EqualNodes(file.Schema(), Spans.schema) {
 		t.Fatal("dictionary encoding changed the physical schema")
@@ -68,7 +68,7 @@ func TestSpanParquetDictionaryEncodesLowCardinalityColumns(t *testing.T) {
 	}
 }
 
-// HTTP routes are client-supplied text. Past parquetDictionaryMaxBytes the
+// HTTP routes are client-supplied text in a dictionary-encoded dedicated column. Past parquetDictionaryMaxBytes the
 // column continues in plain pages, so distinct routes stop growing its
 // dictionary once a page flushes, and every row still reads back.
 func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
@@ -79,7 +79,7 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	spans := make([]Span, 20_000)
 	for i := range spans {
 		spans[i] = Span{Namespace: "prod", TraceID: fmt.Sprintf("%032x", i), SpanID: fmt.Sprintf("%016x", i),
-			ServiceName: "checkout", HTTPRoute: fmt.Sprintf("/%0100d", i), Name: "op", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK",
+			ServiceName: "checkout", Attributes: map[string]any{"http.route": fmt.Sprintf("/%0100d", i)}, Name: "op", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK",
 			StartUnixNanos: int64(i + 1), EndUnixNanos: int64(i + 2), IngestedAt: 999}
 	}
 	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "bounded"}, spans, nil, nil); err != nil {
@@ -97,7 +97,7 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	}
 	var stats []format.PageEncodingStats
 	for _, chunk := range file.Metadata().RowGroups[0].Columns {
-		if chunk.MetaData.PathInSchema[0] == "http_route" {
+		if chunk.MetaData.PathInSchema[0] == "_a_http_route" {
 			stats = chunk.MetaData.EncodingStats
 		}
 	}
@@ -108,11 +108,11 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	if !plainPages {
 		t.Fatalf("http_route stayed dictionary encoded past its bound: %+v", stats)
 	}
-	routes := map[any]bool{}
-	for _, row := range fileRows(t, filepath.Join(store.BatchPath("bounded"), "spans.parquet"), Spans) {
-		routes[row["http_route"]] = true
+	routes := map[string]bool{}
+	for _, row := range engineRows(t, filepath.Join(store.BatchPath("bounded"), "spans.parquet")) {
+		routes[row["_a_http_route"]] = true
 	}
-	if len(routes) != len(spans) || !routes[spans[len(spans)-1].HTTPRoute] {
+	if len(routes) != len(spans) || !routes[spans[len(spans)-1].Attributes["http.route"].(string)] {
 		t.Fatalf("read back %d distinct routes, want %d", len(routes), len(spans))
 	}
 }

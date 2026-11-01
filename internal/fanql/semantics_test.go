@@ -28,7 +28,7 @@ func semanticSpan(namespace string, index int, attributes map[string]any) teleme
 	at := semanticStart.Add(time.Duration(index) * time.Second).UnixNano()
 	return telemetry.Span{
 		Namespace: namespace, ServiceName: "api", TraceID: fmt.Sprintf("%s-trace-%d", namespace, index), SpanID: fmt.Sprintf("span-%d", index),
-		Name: "GET /api", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK", HTTPRoute: "/api", StartUnixNanos: at, EndUnixNanos: at + 1e6,
+		Name: "GET /api", Kind: "SPAN_KIND_SERVER", StatusCode: "STATUS_CODE_OK", StartUnixNanos: at, EndUnixNanos: at + 1e6,
 		DurationMS: 1, Attributes: attributes, IngestedAt: at,
 	}
 }
@@ -89,10 +89,9 @@ func TestTruthTable(t *testing.T) {
 	for i, attributes := range []map[string]any{{"k": "v"}, {"k": "w"}, {}} {
 		spans = append(spans, semanticSpan("values", i, attributes))
 	}
-	for i, code := range []string{"404", "200", "abc", ""} {
-		span := semanticSpan("http", i, nil)
-		span.HTTPStatusCode = code
-		spans = append(spans, span)
+	// Spans without a status code make every range comparison NULL.
+	for i, attributes := range []map[string]any{{"http.response.status_code": int64(404)}, {"http.response.status_code": int64(200)}, {"url.path": "/"}, {}} {
+		spans = append(spans, semanticSpan("http", i, attributes))
 	}
 	for i, attributes := range []map[string]any{{"k": "GET /x"}, {"k": "POST /x"}, {}} {
 		spans = append(spans, semanticSpan("patterns", i, attributes))
@@ -112,9 +111,9 @@ func TestTruthTable(t *testing.T) {
 		{"values", "k ~ v", 1}, {"values", "-k ~ v", 2}, {"values", "k !~ v", 2},
 		{"values", "k in (v, x)", 1}, {"values", "-k in (v, x)", 2}, {"values", "k not in (v, x)", 1}, {"values", "-k not in (v, x)", 2},
 		{"values", "-k:*", 1}, {"values", "k:*", 2}, {"values", "k is null", 1}, {"values", "k is not null", 2},
-		{"http", "http_status_code between 400 and 599", 1}, {"http", "-http_status_code between 400 and 599", 3},
-		{"http", "http_status_code not between 400 and 599", 1}, {"http", "-http_status_code not between 400 and 599", 3},
-		{"http", "http_status_code>=500", 0}, {"http", "-http_status_code>=500", 4},
+		{"http", "http.response.status_code between 400 and 599", 1}, {"http", "-http.response.status_code between 400 and 599", 3},
+		{"http", "http.response.status_code not between 400 and 599", 1}, {"http", "-http.response.status_code not between 400 and 599", 3},
+		{"http", "http.response.status_code>=500", 0}, {"http", "-http.response.status_code>=500", 4},
 		{"patterns", `k like "GET %"`, 1}, {"patterns", `k not like "GET %"`, 1}, {"patterns", `-k like "GET %"`, 2}, {"patterns", `-k not like "GET %"`, 2},
 		{"matrix", "-(a:1 b:2)", 3}, {"matrix", "-(a:1 or b:2)", 1},
 		{"values", "-`attributes['k'] = 'v'`", 2},
@@ -142,28 +141,14 @@ func TestTruthTable(t *testing.T) {
 			t.Fatalf("stored NOT matched %v, want 1", got)
 		}
 	})
-	t.Run("numeric variable uses literal ordering", func(t *testing.T) {
-		variables := []query.Variable{{Name: "code", Kind: "text"}}
-		q := semanticCompile(t, "spans where namespace:http http_status_code>=$code | count()", variables)
-		result := semanticRun(t, executor, q, variables, map[string]query.Value{"code": {Values: []string{"500"}}})
-		if got := semanticValue(t, result, "count"); got != 0 {
-			t.Fatalf("string variable matched %v, want 0", got)
-		}
-	})
-	// Canonical telemetry's body and HTTP columns are non-nullable strings.
+	// Canonical telemetry's body and operation columns are non-nullable strings.
 	// VALUES supplies actual SQL NULLs to exercise the complete leaf rule too.
 	for _, tc := range []struct {
 		text, values, column string
 		want                 int
 	}{
 		{`logs where -length(body)>3`, "('long'), ('x'), (NULL)", "body", 2},
-		{`spans where -starts_with(http_route, "/api")`, "('/api/cart'), ('/other'), (NULL)", "http_route", 2},
-		{`spans where http_status_code between 400 and 599`, "('404'), ('200'), ('abc'), (NULL)", "http_status_code", 1},
-		{`spans where -http_status_code between 400 and 599`, "('404'), ('200'), ('abc'), (NULL)", "http_status_code", 3},
-		{`spans where http_status_code not between 400 and 599`, "('404'), ('200'), ('abc'), (NULL)", "http_status_code", 1},
-		{`spans where -http_status_code not between 400 and 599`, "('404'), ('200'), ('abc'), (NULL)", "http_status_code", 3},
-		{`spans where http_status_code>=500`, "('404'), ('200'), ('abc'), (NULL)", "http_status_code", 0},
-		{`spans where -http_status_code>=500`, "('404'), ('200'), ('abc'), (NULL)", "http_status_code", 4},
+		{`spans where -starts_with(operation, "/api")`, "('/api/cart'), ('/other'), (NULL)", "operation", 2},
 	} {
 		t.Run("actual NULL/"+tc.text, func(t *testing.T) {
 			c, problems := Compile(tc.text, Options{})
@@ -372,21 +357,23 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 		}
 		span := semanticSpan("workloads", minute, attributes)
 		span.StartUnixNanos = semanticStart.Add(time.Duration(minute) * time.Minute).UnixNano()
-		span.ServiceName, span.HTTPRoute, span.TraceID = "checkout", "/cart", fmt.Sprintf("trace-%d", minute)
+		span.ServiceName, span.TraceID = "checkout", fmt.Sprintf("trace-%d", minute)
+		attributes["http.route"] = "/cart"
 		span.DurationMS = 100
 		if minute%2 == 0 {
 			span.DurationMS = 900
 		} else {
-			span.HTTPRoute = "/payment"
+			attributes["http.route"] = "/payment"
 		}
 		span.EndUnixNanos = span.StartUnixNanos + int64(span.DurationMS*1e6)
 		switch minute % 3 {
 		case 0:
-			span.HTTPStatusCode, span.StatusCode, span.DBSystem, span.Name = "500", "STATUS_CODE_ERROR", "postgresql", "SELECT orders"
+			attributes["http.response.status_code"], attributes["db.system.name"] = int64(500), "postgresql"
+			span.StatusCode, span.Name = "STATUS_CODE_ERROR", "SELECT orders"
 		case 1:
-			span.HTTPStatusCode, span.StatusCode = "404", "STATUS_CODE_UNSET"
+			attributes["http.response.status_code"], span.StatusCode = int64(404), "STATUS_CODE_UNSET"
 		default:
-			span.HTTPStatusCode, span.StatusCode = "200", "STATUS_CODE_OK"
+			attributes["http.response.status_code"], span.StatusCode = int64(200), "STATUS_CODE_OK"
 		}
 		batch.Spans = append(batch.Spans, span)
 	}
@@ -405,7 +392,7 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 		base := telemetry.Metric{Namespace: "workloads", ServiceName: "checkout", EventUnixNanos: at, TimeUnixNanos: at, IngestedAt: at,
 			Resource: map[string]any{"k8s.pod.name": "checkout-0"}}
 		counter := base
-		counter.Name, counter.Type, counter.Monotonic, counter.Temporality = "http.server.requests", "sum", true, "cumulative"
+		counter.Name, counter.Type, counter.Temporality = "http.server.requests", "counter", "cumulative"
 		counter.StartTimeUnixNanos, counter.Value = semanticStart.UnixNano(), float64((scrape+1)*10)
 		queue := base
 		queue.Name, queue.Type, queue.Value = "queue.lag", "gauge", float64(4-scrape)
@@ -414,7 +401,7 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 		histogram := base
 		histogram.Name, histogram.Type, histogram.Temporality, histogram.Unit = "http.server.duration", "histogram", "delta", "ms"
 		histogram.StartTimeUnixNanos = semanticStart.Add(time.Duration(scrape+56) * time.Minute).UnixNano()
-		histogram.HistBoundsJSON, histogram.HistCountsJSON, histogram.HistCount, histogram.HistSum = "[100,500]", "[2,3,5]", 10, 1500
+		histogram.Histogram = telemetry.Histogram{Count: 10, Sum: 1500, HasSum: true, Bounds: []float64{100, 500}, Counts: []uint64{2, 3, 5}}
 		for _, metric := range []telemetry.Metric{counter, queue, restarts, histogram} {
 			metric.SeriesID = telemetry.MetricSeriesID(metric)
 			batch.Metrics = append(batch.Metrics, metric)
@@ -432,15 +419,15 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 		cases = append(cases, struct{ text, viz string }{text, vizzes[i]})
 	}
 	cases = append(cases, []struct{ text, viz string }{
-		{`spans where kind:server | p99(duration) by http_route every 1m`, "timeseries"},
+		{`spans where kind:server | p99(duration) by http.route every 1m`, "timeseries"},
 		{`spans | p95(duration) by operation sort p95 limit 10`, "table"},
 		{`logs where trace_id:trace-0`, "logs"},
 		{`metrics where name:http.server.duration | histogram(value)`, "histogram"},
-		{`spans | count_if(http_status_code>=400 http_status_code<500) as client_errors, count_if(http_status_code>=500) as server_errors by http_route`, "table"},
-		{`spans where db_system:postgresql duration>500ms | count() by attributes['db.statement']`, "table"},
+		{`spans | count_if(http.response.status_code>=400 http.response.status_code<500) as client_errors, count_if(http.response.status_code>=500) as server_errors by http.route`, "table"},
+		{`spans where db.system.name:postgresql duration>500ms | count() by attributes['db.statement']`, "table"},
 		{`metrics where name:queue.lag | last(value) by service`, "table"},
-		{`spans | count_if(status:error) / count() * 100 as error_pct by http_route`, "table"},
-		{`spans | count_if(status:error) as errors, count() as total, count_if(status:error) / count() * 100 as error_pct by http_route`, "table"},
+		{`spans | count_if(status:error) / count() * 100 as error_pct by http.route`, "table"},
+		{`spans | count_if(status:error) as errors, count() as total, count_if(status:error) / count() * 100 as error_pct by http.route`, "table"},
 		{`spans where -user.id:* | count()`, "table"},
 	}...)
 	for _, tc := range cases {

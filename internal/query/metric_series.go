@@ -69,6 +69,38 @@ func metricKindList(kinds []string) string {
 	return strings.Join(quoted, ",")
 }
 
+// An exponential histogram point becomes explicit bounds and counts: the
+// negative buckets reversed below zero, the zero bucket (zlo, threshold] with
+// zlo the smallest negative double when the threshold is zero, and the
+// positive buckets above, each bound base^index with base 2^(2^-scale)
+// written as one exponent so powers of two stay exact. Extreme scales and
+// offsets overflow or underflow a bound; a bound that is not finite or not
+// above every earlier finite bound cannot separate observations, so it is
+// dropped and the bucket above it merges into the one below. Each segment
+// ascends, so the earlier maximum is the previous one or two bounds, or the
+// threshold for positive bounds. Every list operation is linear in buckets.
+var (
+	expRawSQL = `CASE WHEN exp_scale IS NOT NULL THEN
+CASE WHEN len(exp_negative_counts)>0 THEN list_transform(range(len(exp_negative_counts),-1,-1),lambda i:-` + expBound("exp_negative_offset") + `) ELSE []::DOUBLE[] END||
+[CASE WHEN exp_zero_threshold=0 THEN -4.9406564584124654e-324 ELSE -exp_zero_threshold END,exp_zero_threshold]||
+CASE WHEN len(exp_positive_counts)>0 THEN list_transform(range(len(exp_positive_counts)+1),lambda i:` + expBound("exp_positive_offset") + `) ELSE []::DOUBLE[] END END AS _eb,
+CASE WHEN exp_scale IS NOT NULL THEN [0]::UBIGINT[]||
+CASE WHEN len(exp_negative_counts)>0 THEN list_reverse(exp_negative_counts)||[0]::UBIGINT[] ELSE [] END||[exp_zero_count,0]||
+CASE WHEN len(exp_positive_counts)>0 THEN exp_positive_counts||[0]::UBIGINT[] ELSE [] END END AS _ec,
+CASE WHEN len(exp_negative_counts)>0 THEN len(exp_negative_counts)+2 ELSE 1 END AS _ez`
+	expKeptSQL = `list_filter(range(1,len(_eb)+1),lambda p:isfinite(_eb[p]) AND NOT coalesce(_eb[p]<=greatest(
+CASE WHEN p>1 AND isfinite(_eb[p-1]) THEN _eb[p-1] END,CASE WHEN p>2 AND isfinite(_eb[p-2]) THEN _eb[p-2] END,
+CASE WHEN p>_ez+1 THEN exp_zero_threshold END),false)) AS _ek`
+	expBoundsSQL = `list_transform(_ek,lambda p:_eb[p])`
+	expCountsSQL = `list_transform(range(1,len(_ek)+2),lambda j:
+list_sum(_ec[CASE WHEN j>1 THEN _ek[j-1] ELSE 0 END+1:coalesce(_ek[j],len(_eb)+1)])::UBIGINT)`
+)
+
+// expBound is bucket offset+i's bound, base^(offset+i) with base 2^(2^-scale).
+func expBound(offset string) string {
+	return "pow(2.0,(" + offset + "+i)*pow(2.0,-exp_scale::DOUBLE))"
+}
+
 // Point-only builders never lag or decode a ten-minute history. Separate SQL
 // scopes let callers share a builder without rewriting authored filter text.
 func metricPointsCTE(source metricRead, scope Scope, kinds []string, lookback time.Duration) (string, []any, error) {
@@ -83,21 +115,19 @@ func metricPointsCTE(source metricRead, scope Scope, kinds []string, lookback ti
 	}
 	where += " AND type IN (" + metricKindList(kinds) + ")"
 	text := `WITH metric_input AS (SELECT * FROM ` + from + ` WHERE ` + where + `),
-      metric_decoded AS (SELECT *,
-        CASE WHEN type='histogram' THEN TRY(from_json(hist_bounds_json,'["DOUBLE"]')) END AS _bounds,
-        CASE WHEN type='histogram' THEN TRY(from_json(hist_counts_json,'["UBIGINT"]')) END AS _counts
-        FROM metric_input),
+      metric_exp_raw AS (SELECT *,` + expRawSQL + ` FROM metric_input),
+      metric_exp_kept AS (SELECT *,` + expKeptSQL + ` FROM metric_exp_raw),
+      metric_decoded AS (SELECT * EXCLUDE (_eb,_ec,_ez,_ek),
+        CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_bounds WHEN type='histogram' THEN ` + expBoundsSQL + ` END AS _bounds,
+        CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_counts WHEN type='histogram' THEN ` + expCountsSQL + ` END AS _counts
+        FROM metric_exp_kept),
       metric_valid AS (SELECT * FROM metric_decoded WHERE
         (type<>'histogram' AND isfinite(value)) OR
-        (type='histogram' AND isfinite(hist_sum) AND hist_count>=0
-         AND _bounds IS NOT NULL AND _counts IS NOT NULL
-         AND len(_counts)=len(_bounds)+1
-         AND coalesce(list_bool_and(list_transform(_bounds,lambda x: isfinite(x))),true)
-         AND coalesce(list_bool_and(list_transform(range(2,len(_bounds)+1),lambda i: _bounds[i-1] < _bounds[i])),true))),
+        (type='histogram' AND (hist_sum IS NULL OR isfinite(hist_sum)) AND len(_counts)=len(_bounds)+1)),
       metric_unique AS (SELECT * EXCLUDE (_retry) FROM (
         SELECT *,row_number() OVER (PARTITION BY ` + metricSeriesKey + `,time ORDER BY
           ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
-          hist_counts_json DESC,hist_bounds_json DESC,start_time DESC NULLS LAST) AS _retry
+          _counts DESC,_bounds DESC,start_time DESC NULLS LAST) AS _retry
         FROM metric_valid) WHERE _retry=1),
       metric_points AS (SELECT *,` + metricBucketSQL(scope.Interval) + ` AS _bucket FROM metric_unique)`
 	return strings.TrimSpace(text), args, nil

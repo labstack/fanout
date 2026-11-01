@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,7 +26,7 @@ import (
 const (
 	BatchSuffix          = ".batch"
 	SchemaBatch          = "_schema" + BatchSuffix
-	batchMetadataVersion = 4
+	batchMetadataVersion = 5
 	parquetPageSize      = 64 << 10
 	// A column whose distinct values outgrow this switches to plain pages for
 	// the rest of its row group, so client-supplied text cannot grow a
@@ -59,26 +60,42 @@ type BatchMetadata struct {
 	// Zero means not measured.
 	Bytes int64 `json:"-"`
 	// Event times come from fixed-schema Parquet footer statistics, not ingest
-	// timestamps. They are derived on publication/load and never change format 4.
+	// timestamps. They are derived on publication/load and never change format 5.
 	SpanTime   TimeRange `json:"-"`
 	LogTime    TimeRange `json:"-"`
 	MetricTime TimeRange `json:"-"`
+	// Spill masks have the bit of each standard key that some row of the
+	// signal's file holds only in its map, from the footer's spill counts.
+	SpanSpill   uint64 `json:"-"`
+	LogSpill    uint64 `json:"-"`
+	MetricSpill uint64 `json:"-"`
 }
 
 // Signal returns the signal's event-time bounds and row count.
 func (m BatchMetadata) Signal(s *Signal) (TimeRange, int) {
-	count, bounds := m.signal(s)
-	return *bounds, *count
+	f := m.signal(s)
+	return *f.time, *f.rows
 }
 
-func (m *BatchMetadata) signal(s *Signal) (*int, *TimeRange) {
+// Spilled returns the mask of standard keys whose values some row of the
+// signal's file holds only in its map; their dedicated columns are
+// incomplete in that file.
+func (m BatchMetadata) Spilled(s *Signal) uint64 { return *m.signal(s).spill }
+
+type signalMetadata struct {
+	rows  *int
+	time  *TimeRange
+	spill *uint64
+}
+
+func (m *BatchMetadata) signal(s *Signal) signalMetadata {
 	switch s {
 	case Spans:
-		return &m.Spans, &m.SpanTime
+		return signalMetadata{&m.Spans, &m.SpanTime, &m.SpanSpill}
 	case Logs:
-		return &m.Logs, &m.LogTime
+		return signalMetadata{&m.Logs, &m.LogTime, &m.LogSpill}
 	case Metrics:
-		return &m.Metrics, &m.MetricTime
+		return signalMetadata{&m.Metrics, &m.MetricTime, &m.MetricSpill}
 	}
 	panic("unknown signal " + s.Name)
 }
@@ -1118,7 +1135,8 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		return nil, err
 	}
 	for _, signal := range Signals {
-		count, bounds := metadata.signal(signal)
+		fields := metadata.signal(signal)
+		count := fields.rows
 		path := filepath.Join(dir, signal.Name+".parquet")
 		if *count == 0 {
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
@@ -1155,7 +1173,16 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if rows := parquetFile.NumRows(); rows != int64(*count) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, *count)
 		}
-		*bounds = parquetTimeRange(parquetFile, signal.Time)
+		*fields.time = parquetTimeRange(parquetFile, signal.Time)
+		counts, err := spillCounts(parquetFile, signal)
+		if err != nil {
+			return nil, fmt.Errorf("%s Parquet: %w", signal.Name, err)
+		}
+		for _, key := range signal.Keys() {
+			if counts[key.Bit] > 0 {
+				*fields.spill |= 1 << key.Bit
+			}
+		}
 	}
 	var traces traceIndex
 	if metadata.Spans > 0 {
@@ -1165,6 +1192,32 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		}
 	}
 	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
+}
+
+// spillCounts reads the footer's count of spilled rows for each of the
+// signal's standard keys, by key bit.
+func spillCounts(file *parquet.File, s *Signal) ([64]uint64, error) {
+	var counts [64]uint64
+	keys := map[string]uint8{}
+	for _, key := range s.Keys() {
+		keys[key.Name] = key.Bit
+	}
+	for _, kv := range file.Metadata().KeyValueMetadata {
+		name, ok := strings.CutPrefix(kv.Key, spillPrefix)
+		if !ok {
+			continue
+		}
+		bit, ok := keys[name]
+		if !ok {
+			return counts, fmt.Errorf("footer counts spills of %q, which has no dedicated column", name)
+		}
+		n, err := strconv.ParseUint(kv.Value, 10, 64)
+		if err != nil || n == 0 {
+			return counts, fmt.Errorf("footer spill count of %q is %q", name, kv.Value)
+		}
+		counts[bit] = n
+	}
+	return counts, nil
 }
 
 // Statistics are optional in Parquet. Without complete bounds, the file stays

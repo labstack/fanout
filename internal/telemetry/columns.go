@@ -5,41 +5,55 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 	"github.com/zeebo/xxh3"
 )
 
-// Type is a column's physical value type.
+// Type is a column's physical value type, or its element type in a list.
 type Type uint8
 
 const (
 	String Type = iota
+	Int32
 	Int64
+	Uint32
 	Uint64
 	Float64
 	Bool
 	Time    // INT64 nanoseconds with the TIMESTAMP(NANOS, UTC) logical type
-	Variant // shredded VARIANT object
+	Variant // VARIANT; shredded as a column, unshredded as a list element
 )
 
 // Column is one column of a signal. The writer fills a stored column from the
 // canonical row; a column with Expr is computed by the raw relation instead.
+//
+// Accessors take the row and return its value: func(*R) T for a required
+// scalar, func(*R) (T, bool) for a nullable one, where false is NULL, and
+// func(*R, []T) ([]T, bool) for a list, which appends the row's elements to
+// the buffer it is given. A dedicated column has no accessor: the writer
+// copies Key's value out of the attributes or resource map.
 type Column struct {
-	Name    string
-	Type    Type
-	Dict    bool     // dictionary-encoded; see the encoding note below
-	Delta   bool     // DELTA_BINARY_PACKED: an integer instant or count of nanoseconds
-	Shred   []string // VARIANT object keys also stored as typed columns
-	Expr    string   // raw-relation expression over stored columns
-	Private bool     // part of the file layout only; no relation exposes it
-	View    Field    // clean-view column; the zero Field leaves it out
-	get     any      // func(*R) for the signal's canonical row type R
+	Name     string
+	Type     Type
+	Null     bool         // nullable; an absent value is NULL
+	List     bool         // a nullable LIST of Type elements
+	Dict     bool         // dictionary-encoded; see the encoding note below
+	Delta    bool         // DELTA_BINARY_PACKED: an integer instant or count of nanoseconds
+	Shred    []string     // VARIANT object keys also stored as typed columns
+	Expr     string       // raw-relation expression over stored columns
+	Private  bool         // part of the file layout only; no relation exposes it
+	Key      *semconv.Key // dedicated column of a standard attribute key
+	Parallel string       // lists of one group hold one element per item: events, links or exemplars
+	View     Field        // clean-view column; the zero Field leaves it out
+	get      any
 }
 
 // Field is a column of a signal's clean view.
 type Field struct {
 	Name string
 	Type Type
+	List bool
 	Expr string // over the raw relation; empty reads the column itself
 }
 
@@ -83,6 +97,17 @@ func (s *Signal) Clock() string {
 	return c.View.Name
 }
 
+// Keys lists the signal's dedicated columns in spill-bit order.
+func (s *Signal) Keys() []semconv.Key {
+	var keys []semconv.Key
+	for _, c := range s.Columns {
+		if c.Key != nil {
+			keys = append(keys, *c.Key)
+		}
+	}
+	return keys
+}
+
 // Signals lists every signal in file order.
 var Signals = []*Signal{Spans, Logs, Metrics}
 
@@ -101,8 +126,10 @@ func LookupSignal(name string) (*Signal, bool) {
 // parquetRowGroupRows. That pays for itself on a column whose values repeat —
 // span kinds and statuses, HTTP methods, scope identifiers, the resource
 // block shared by every span in a ResourceSpans — and costs a full second copy
-// of the payload on a column whose values do not. Per-row IDs, events, links
-// and exemplars are near-unique by construction and are written plain. Span
+// of the payload on a column whose values do not. Per-row IDs, event and link
+// IDs and exemplars are near-unique by construction and are written plain.
+// Dedicated attribute columns, event names, histogram bounds and summary
+// quantiles repeat and are dictionary-encoded. Span
 // namespaces, services and operation names stay plain too: clients bound
 // neither their length nor their count, and parquetDictionaryMaxBytes is only
 // checked when a page flushes. Attributes and resources use shredded VARIANT
@@ -120,11 +147,19 @@ func LookupSignal(name string) (*Signal, bool) {
 // 8 bytes a row plain and under 2 delta-encoded; span times, in trace order,
 // shrank too.
 
-// The read views project the messaging keys from these shredded fields.
+// Dedicated columns copy a standard key's value out of its map when the value
+// has the key's semconv type; the map keeps every key. A value of another
+// type stays only in the map and sets the key's bit in _spill, and the file
+// footer counts each key's spilled rows (spillPrefix). Keys with a column are
+// not shredded, which would store a third copy. The read views project the
+// messaging keys from their shredded fields.
 var (
 	attributeShred = []string{"messaging.system", "messaging.destination.name"}
-	resourceShred  = []string{"service.name", "service.namespace", "service.version", "deployment.environment.name"}
+	resourceShred  = []string{"service.name", "service.namespace"}
 )
+
+// spillPrefix starts the footer key whose value counts a key's spilled rows.
+const spillPrefix = "fanout.spill."
 
 // Spans keep trace locality, which the trace index depends on. Logs and
 // metrics follow the OpenTelemetry Collector's ClickHouse exporter, with
@@ -136,7 +171,7 @@ var Spans = &Signal{
 	Time:   "start_time",
 	Order:  Order{{Column: "_trace_hash"}, {Column: "start_unix_nano"}, {Column: "span_id"}},
 	Traces: true,
-	Columns: []Column{
+	Columns: append([]Column{
 		str("namespace", func(r *Span) string { return r.Namespace }),
 		str("trace_id", func(r *Span) string { return r.TraceID }),
 		u64("_trace_hash", func(r *Span) uint64 { return xxh3.HashString(r.TraceID) }).private(),
@@ -154,35 +189,69 @@ var Spans = &Signal{
 		str("status_message", func(r *Span) string { return r.StatusMsg }),
 		object("resource", func(r *Span) map[string]any { return r.Resource }, resourceShred),
 		object("attributes", func(r *Span) map[string]any { return r.Attributes }, attributeShred),
-		str("events_json", func(r *Span) string { return r.EventsJSON }),
-		str("links_json", func(r *Span) string { return r.LinksJSON }),
+		list("event_times", Time, func(r *Span, b []int64) ([]int64, bool) {
+			for _, e := range r.Events {
+				b = append(b, e.TimeUnixNanos)
+			}
+			return b, true
+		}).parallel("events"),
+		list("event_names", String, func(r *Span, b []string) ([]string, bool) {
+			for _, e := range r.Events {
+				b = append(b, e.Name)
+			}
+			return b, true
+		}).parallel("events").dict(),
+		list("event_attributes", Variant, func(r *Span, b []map[string]any) ([]map[string]any, bool) {
+			for _, e := range r.Events {
+				b = append(b, e.Attributes)
+			}
+			return b, true
+		}).parallel("events"),
+		list("link_trace_ids", String, func(r *Span, b []string) ([]string, bool) {
+			for _, l := range r.Links {
+				b = append(b, l.TraceID)
+			}
+			return b, true
+		}).parallel("links"),
+		list("link_span_ids", String, func(r *Span, b []string) ([]string, bool) {
+			for _, l := range r.Links {
+				b = append(b, l.SpanID)
+			}
+			return b, true
+		}).parallel("links"),
+		list("link_trace_states", String, func(r *Span, b []string) ([]string, bool) {
+			for _, l := range r.Links {
+				b = append(b, l.TraceState)
+			}
+			return b, true
+		}).parallel("links").dict(),
+		list("link_attributes", Variant, func(r *Span, b []map[string]any) ([]map[string]any, bool) {
+			for _, l := range r.Links {
+				b = append(b, l.Attributes)
+			}
+			return b, true
+		}).parallel("links"),
 		str("trace_state", func(r *Span) string { return r.TraceState }).dict(),
 		i64("flags", func(r *Span) int64 { return int64(r.Flags) }),
 		str("scope_name", func(r *Span) string { return r.ScopeName }).dict(),
 		str("scope_version", func(r *Span) string { return r.ScopeVersion }).dict(),
 		ts("ingested_at", func(r *Span) int64 { return r.IngestedAt }),
 		nanos("ingested_unix_nano", func(r *Span) int64 { return r.IngestedAt }),
-		str("http_method", func(r *Span) string { return r.HTTPMethod }).dict(),
-		str("http_status_code", func(r *Span) string { return r.HTTPStatusCode }).dict(),
-		str("http_route", func(r *Span) string { return r.HTTPRoute }).dict(),
-		str("db_system", func(r *Span) string { return r.DBSystem }).dict(),
-		str("rpc_method", func(r *Span) string { return r.RPCMethod }).dict(),
 		str("rpc_service", func(r *Span) string { return r.RPCService }).dict(),
 		str("peer_service", func(r *Span) string { return r.PeerService }).dict(),
-		str("service_version", func(r *Span) string { return r.ServiceVersion }).dict(),
-		str("deployment_env", func(r *Span) string { return r.DeploymentEnv }).dict(),
 		str("exception_type", func(r *Span) string { return r.ExceptionType }).dict(),
 		str("exception_message", func(r *Span) string { return r.ExceptionMessage }),
 		derived("messaging_system", String, "TRY_CAST(attributes['messaging.system'] AS VARCHAR)"),
 		derived("messaging_destination", String, "TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR)"),
-	},
+		spill(),
+	}, dedicated(semconv.Span, semconv.Resource)...),
 }
 
 var Logs = &Signal{
 	Name:  "logs",
 	Time:  "log_time",
 	Order: Order{{Column: "log_time", Bucket: int64(5 * time.Minute)}, {Column: "namespace"}, {Column: "service"}, {Column: "log_time"}},
-	Columns: []Column{
+	Columns: append([]Column{
 		str("namespace", func(r *Log) string { return r.Namespace }).dict(),
 		ts("log_time", func(r *Log) int64 {
 			return FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.ObservedTimeNanos, r.IngestedAt)
@@ -206,15 +275,18 @@ var Logs = &Signal{
 		ts("ingested_at", func(r *Log) int64 { return r.IngestedAt }),
 		nanos("ingested_unix_nano", func(r *Log) int64 { return r.IngestedAt }),
 		str("body_template", func(r *Log) string { return r.BodyTemplate }).dict(),
-	},
+		spill(),
+	}, dedicated(semconv.Resource)...),
 }
 
+// Metric columns follow the ClickHouse exporter's point layout. A column that
+// does not apply to a point's kind is NULL.
 var Metrics = &Signal{
 	Name: "metrics",
 	Time: "metric_time",
 	Order: Order{{Column: "namespace"}, {Column: "service"}, {Column: "name"},
 		{Column: "metric_time", Bucket: int64(time.Hour)}, {Column: "series_id"}, {Column: "metric_time"}},
-	Columns: []Column{
+	Columns: append([]Column{
 		u64("series_id", func(r *Metric) uint64 { return r.SeriesID }),
 		str("namespace", func(r *Metric) string { return r.Namespace }).dict(),
 		ts("metric_time", func(r *Metric) int64 {
@@ -224,58 +296,143 @@ var Metrics = &Signal{
 		str("name", func(r *Metric) string { return r.Name }).dict(),
 		str("description", func(r *Metric) string { return r.Description }).dict(),
 		str("unit", func(r *Metric) string { return r.Unit }).dict(),
-		str("metric_type", func(r *Metric) string { return r.Type }).dict().view(Field{Name: "type", Type: String, Expr: `CASE WHEN metric_type='sum' AND monotonic THEN 'counter'
-       WHEN metric_type='sum' THEN 'updown'
-       WHEN metric_type='exponential_histogram' THEN 'histogram'
-       ELSE metric_type END`}),
-		str("temporality", func(r *Metric) string { return r.Temporality }).dict(),
-		boolean("monotonic", func(r *Metric) bool { return r.Monotonic }).view(Field{}),
+		str("type", func(r *Metric) string { return r.Type }).dict(),
+		nullable("temporality", String, func(r *Metric) (string, bool) { return r.Temporality, r.Temporality != "" }).dict(),
 		// The int64 extremes are the engine's infinity sentinels and do not
 		// convert; TRY keeps one such client-supplied point from failing every
 		// query.
 		nanos("start_time_unix_nano", func(r *Metric) int64 { return r.StartTimeUnixNanos }).view(Field{Name: "start_time", Type: Time, Expr: `CASE WHEN start_time_unix_nano=0 THEN NULL
        ELSE TRY(make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS) END`}),
 		str("service", func(r *Metric) string { return r.ServiceName }).dict(),
-		f64("value", func(r *Metric) float64 { return r.Value }),
-		str("hist_bounds_json", func(r *Metric) string { return r.HistBoundsJSON }).dict(),
-		str("hist_counts_json", func(r *Metric) string { return r.HistCountsJSON }).dict(),
-		i64("hist_count", func(r *Metric) int64 { return r.HistCount }),
-		f64("hist_sum", func(r *Metric) float64 { return r.HistSum }),
-		str("exemplars_json", func(r *Metric) string { return r.ExemplarsJSON }),
+		column("flags", Uint32, func(r *Metric) uint32 { return r.Flags }),
+		nullable("value", Float64, func(r *Metric) (float64, bool) { return r.Value, r.Type != "histogram" && r.Type != "summary" }),
+		nullable("hist_count", Uint64, func(r *Metric) (uint64, bool) { return r.Count, r.Type == "histogram" || r.Type == "summary" }),
+		nullable("hist_sum", Float64, func(r *Metric) (float64, bool) { return r.Sum, r.HasSum }),
+		nullable("hist_min", Float64, func(r *Metric) (float64, bool) { return r.Min, r.HasMin }),
+		nullable("hist_max", Float64, func(r *Metric) (float64, bool) { return r.Max, r.HasMax }),
+		list("hist_bounds", Float64, func(r *Metric, b []float64) ([]float64, bool) {
+			return append(b, r.Bounds...), r.Type == "histogram" && !r.Exponential
+		}).dict(),
+		list("hist_counts", Uint64, func(r *Metric, b []uint64) ([]uint64, bool) {
+			return append(b, r.Counts...), r.Type == "histogram" && !r.Exponential
+		}),
+		nullable("exp_scale", Int32, func(r *Metric) (int32, bool) { return r.Scale, r.Exponential }),
+		nullable("exp_zero_count", Uint64, func(r *Metric) (uint64, bool) { return r.ZeroCount, r.Exponential }),
+		nullable("exp_zero_threshold", Float64, func(r *Metric) (float64, bool) { return r.ZeroThreshold, r.Exponential }),
+		nullable("exp_positive_offset", Int32, func(r *Metric) (int32, bool) { return r.PositiveOffset, r.Exponential }),
+		list("exp_positive_counts", Uint64, func(r *Metric, b []uint64) ([]uint64, bool) {
+			return append(b, r.PositiveCounts...), r.Exponential
+		}),
+		nullable("exp_negative_offset", Int32, func(r *Metric) (int32, bool) { return r.NegativeOffset, r.Exponential }),
+		list("exp_negative_counts", Uint64, func(r *Metric, b []uint64) ([]uint64, bool) {
+			return append(b, r.NegativeCounts...), r.Exponential
+		}),
+		list("quantiles", Float64, func(r *Metric, b []float64) ([]float64, bool) {
+			return append(b, r.Quantiles...), r.Type == "summary"
+		}).parallel("quantiles").dict(),
+		list("quantile_values", Float64, func(r *Metric, b []float64) ([]float64, bool) {
+			return append(b, r.QuantileValues...), r.Type == "summary"
+		}).parallel("quantiles"),
+		list("exemplar_times", Time, func(r *Metric, b []int64) ([]int64, bool) {
+			for _, e := range r.Exemplars {
+				b = append(b, e.TimeUnixNanos)
+			}
+			return b, r.Type != "summary"
+		}).parallel("exemplars"),
+		list("exemplar_values", Float64, func(r *Metric, b []float64) ([]float64, bool) {
+			for _, e := range r.Exemplars {
+				b = append(b, e.Value)
+			}
+			return b, r.Type != "summary"
+		}).parallel("exemplars"),
+		list("exemplar_trace_ids", String, func(r *Metric, b []string) ([]string, bool) {
+			for _, e := range r.Exemplars {
+				b = append(b, e.TraceID)
+			}
+			return b, r.Type != "summary"
+		}).parallel("exemplars"),
+		list("exemplar_span_ids", String, func(r *Metric, b []string) ([]string, bool) {
+			for _, e := range r.Exemplars {
+				b = append(b, e.SpanID)
+			}
+			return b, r.Type != "summary"
+		}).parallel("exemplars"),
+		list("exemplar_attributes", Variant, func(r *Metric, b []map[string]any) ([]map[string]any, bool) {
+			for _, e := range r.Exemplars {
+				b = append(b, e.Attributes)
+			}
+			return b, r.Type != "summary"
+		}).parallel("exemplars"),
 		object("attributes", func(r *Metric) map[string]any { return r.Attributes }, attributeShred),
 		object("resource", func(r *Metric) map[string]any { return r.Resource }, resourceShred),
 		str("scope_name", func(r *Metric) string { return r.ScopeName }).dict(),
 		str("scope_version", func(r *Metric) string { return r.ScopeVersion }).dict(),
 		ts("ingested_at", func(r *Metric) int64 { return r.IngestedAt }),
 		nanos("ingested_unix_nano", func(r *Metric) int64 { return r.IngestedAt }),
-	},
+		spill(),
+	}, dedicated(semconv.Resource)...),
 }
 
-func column(name string, t Type, get any) Column {
+func column[R, T any](name string, t Type, get func(*R) T) Column {
 	return Column{Name: name, Type: t, View: Field{Name: name, Type: t}, get: get}
 }
 
-func str[R any](name string, get func(*R) string) Column   { return column(name, String, get) }
-func i64[R any](name string, get func(*R) int64) Column    { return column(name, Int64, get) }
-func u64[R any](name string, get func(*R) uint64) Column   { return column(name, Uint64, get) }
-func f64[R any](name string, get func(*R) float64) Column  { return column(name, Float64, get) }
-func boolean[R any](name string, get func(*R) bool) Column { return column(name, Bool, get) }
+func str[R any](name string, get func(*R) string) Column  { return column(name, String, get) }
+func i64[R any](name string, get func(*R) int64) Column   { return column(name, Int64, get) }
+func u64[R any](name string, get func(*R) uint64) Column  { return column(name, Uint64, get) }
+func f64[R any](name string, get func(*R) float64) Column { return column(name, Float64, get) }
 func ts[R any](name string, get func(*R) int64) Column {
 	return column(name, Time, get).delta().as(name)
 }
 func nanos[R any](name string, get func(*R) int64) Column { return column(name, Int64, get).delta() }
+
+func nullable[R, T any](name string, t Type, get func(*R) (T, bool)) Column {
+	return Column{Name: name, Type: t, Null: true, View: Field{Name: name, Type: t}, get: get}
+}
+
+func list[R, T any](name string, t Type, get func(*R, []T) ([]T, bool)) Column {
+	return Column{Name: name, Type: t, List: true, View: Field{Name: name, Type: t, List: true}, get: get}
+}
+
 func derived(name string, t Type, expr string) Column {
 	return Column{Name: name, Type: t, Expr: expr, View: Field{Name: name, Type: t}}
 }
+
 func object[R any](name string, get func(*R) map[string]any, shred []string) Column {
 	c := column(name, Variant, get)
 	c.Shred = shred
 	return c
 }
 
-func (c Column) dict() Column    { c.Dict = true; return c }
-func (c Column) delta() Column   { c.Delta = true; return c }
-func (c Column) private() Column { c.Private, c.View = true, Field{}; return c }
+// dedicated declares the columns of the standard keys in these scopes.
+func dedicated(scopes ...semconv.Scope) []Column {
+	var columns []Column
+	for i := range semconv.Keys {
+		k := &semconv.Keys[i]
+		for _, scope := range scopes {
+			if k.Scope != scope {
+				continue
+			}
+			t := String
+			if k.Type == semconv.Int {
+				t = Int64
+			}
+			columns = append(columns, Column{Name: k.Column, Type: t, Null: true, Dict: true, Key: k, View: Field{Name: k.Column, Type: t}})
+		}
+	}
+	return columns
+}
+
+// spill is the per-row mask of keys whose value had another type than the
+// key's dedicated column; bit i is semconv.Keys[i].
+func spill() Column {
+	return Column{Name: "_spill", Type: Uint64, Dict: true, Private: true}
+}
+
+func (c Column) dict() Column                 { c.Dict = true; return c }
+func (c Column) parallel(group string) Column { c.Parallel = group; return c }
+func (c Column) delta() Column                { c.Delta = true; return c }
+func (c Column) private() Column              { c.Private, c.View = true, Field{}; return c }
 
 func (c Column) view(f Field) Column { c.View = f; return c }
 
@@ -302,20 +459,10 @@ func buildSchema(s *Signal) *parquet.Schema {
 			continue
 		}
 		var node parquet.Node
-		switch c.Type {
-		case String:
-			node = parquet.String()
-		case Int64:
-			node = parquet.Int(64)
-		case Uint64:
-			node = parquet.Uint(64)
-		case Float64:
-			node = parquet.Leaf(parquet.DoubleType)
-		case Bool:
-			node = parquet.Leaf(parquet.BooleanType)
-		case Time:
-			node = parquet.Timestamp(parquet.Nanosecond)
-		case Variant:
+		switch {
+		case c.Type == Variant && c.List:
+			node = parquet.Optional(dictMetadata{parquet.Variant()})
+		case c.Type == Variant:
 			shred := parquet.Group{}
 			for _, key := range c.Shred {
 				shred[key] = parquet.Optional(parquet.String())
@@ -324,17 +471,47 @@ func buildSchema(s *Signal) *parquet.Schema {
 			if err != nil {
 				panic(fmt.Sprintf("%s.%s: %v", s.Name, c.Name, err))
 			} // The fixed schema is a programmer-owned constant.
-			node = parquet.Optional(dictMetadata{variant})
+			node = dictMetadata{variant}
+		default:
+			node = leaf(c.Type)
+			if c.Dict {
+				node = parquet.Encoded(node, &parquet.RLEDictionary)
+			}
+			if c.Delta {
+				node = parquet.Encoded(node, &parquet.DeltaBinaryPacked)
+			}
 		}
-		if c.Dict {
-			node = parquet.Encoded(node, &parquet.RLEDictionary)
-		}
-		if c.Delta {
-			node = parquet.Encoded(node, &parquet.DeltaBinaryPacked)
+		switch {
+		case c.List:
+			node = parquet.Optional(parquet.List(node))
+		case c.Null || c.Type == Variant:
+			node = parquet.Optional(node)
 		}
 		fields[c.Name] = node
 	}
 	return parquet.NewSchema(s.Name, fields)
+}
+
+func leaf(t Type) parquet.Node {
+	switch t {
+	case String:
+		return parquet.String()
+	case Int32:
+		return parquet.Int(32)
+	case Int64:
+		return parquet.Int(64)
+	case Uint32:
+		return parquet.Uint(32)
+	case Uint64:
+		return parquet.Uint(64)
+	case Float64:
+		return parquet.Leaf(parquet.DoubleType)
+	case Bool:
+		return parquet.Leaf(parquet.BooleanType)
+	case Time:
+		return parquet.Timestamp(parquet.Nanosecond)
+	}
+	panic(fmt.Sprintf("type %d has no Parquet leaf", t))
 }
 
 // dictMetadata dictionary-encodes a VARIANT group's metadata leaf. The variant

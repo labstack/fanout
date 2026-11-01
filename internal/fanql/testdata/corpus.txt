@@ -2511,41 +2511,41 @@
 }
 
 {
-  "text": "spans where -http_status_code between 400 and 599",
+  "text": "spans where -http.response.status_code between 400 and 599",
   "query": {
     "from": "spans",
     "where": [
-      "NOT coalesce((TRY_CAST(http_status_code AS INTEGER) BETWEEN 400 AND 599), FALSE)"
+      "NOT coalesce((attributes['http.response.status_code'] BETWEEN 400 AND 599), FALSE)"
     ]
   }
 }
 
 {
-  "text": "spans where -http_status_code not between 400 and 599",
+  "text": "spans where -http.response.status_code not between 400 and 599",
   "query": {
     "from": "spans",
     "where": [
-      "NOT coalesce((TRY_CAST(http_status_code AS INTEGER) NOT BETWEEN 400 AND 599), FALSE)"
+      "NOT coalesce((attributes['http.response.status_code'] NOT BETWEEN 400 AND 599), FALSE)"
     ]
   }
 }
 
 {
-  "text": "spans where -http_status_code:500",
+  "text": "spans where -http.response.status_code:500",
   "query": {
     "from": "spans",
     "where": [
-      "(http_status_code IS NULL OR http_status_code != '500')"
+      "(attributes['http.response.status_code'] IS NULL OR attributes['http.response.status_code'] != 500)"
     ]
   }
 }
 
 {
-  "text": "spans where -http_status_code>=500",
+  "text": "spans where -http.response.status_code>=500",
   "query": {
     "from": "spans",
     "where": [
-      "NOT coalesce((TRY_CAST(http_status_code AS INTEGER) >= 500), FALSE)"
+      "NOT coalesce((attributes['http.response.status_code'] >= 500), FALSE)"
     ]
   }
 }
@@ -2601,11 +2601,11 @@
 }
 
 {
-  "text": "spans where -starts_with(http_route, \"/api\")",
+  "text": "spans where -starts_with(operation, \"/api\")",
   "query": {
     "from": "spans",
     "where": [
-      "NOT coalesce((starts_with(http_route, '/api')), FALSE)"
+      "NOT coalesce((starts_with(operation, '/api')), FALSE)"
     ]
   }
 }
@@ -2815,7 +2815,7 @@
 }
 
 {
-  "text": "spans where a:1 b:2 or c:3 | p99(duration) by http_route every 1m",
+  "text": "spans where a:1 b:2 or c:3 | p99(duration) by http.route every 1m",
   "problems": [
     {
       "path": "text",
@@ -4192,11 +4192,11 @@
 }
 
 {
-  "text": "spans where db_system:postgresql db.statement ~ \"SELECT\" duration>500ms sort duration limit 10",
+  "text": "spans where db.system.name:postgresql db.statement ~ \"SELECT\" duration>500ms sort duration limit 10",
   "query": {
     "from": "spans",
     "where": [
-      "db_system = 'postgresql'",
+      "attributes['db.system.name'] = 'postgresql'",
       "contains(lower(CAST(attributes['db.statement'] AS VARCHAR)), lower('SELECT'))",
       "duration_ms > 500"
     ],
@@ -4561,75 +4561,75 @@
 }
 
 {
-  "text": "spans where http_status_code not between 400 and 599",
+  "text": "spans where http.response.status_code not between 400 and 599",
   "query": {
     "from": "spans",
     "where": [
-      "TRY_CAST(http_status_code AS INTEGER) NOT BETWEEN 400 AND 599"
+      "attributes['http.response.status_code'] NOT BETWEEN 400 AND 599"
     ]
   }
 }
 
 {
-  "text": "spans where http_status_code:2e3",
+  "text": "spans where operation:2e3",
   "query": {
     "from": "spans",
     "where": [
-      "http_status_code = '2e3'"
+      "operation = '2e3'"
     ]
   }
 }
 
 {
-  "text": "spans where http_status_code:500",
+  "text": "spans where http.response.status_code:500",
   "query": {
     "from": "spans",
     "where": [
-      "http_status_code = '500'"
+      "attributes['http.response.status_code'] = 500"
     ]
   }
 }
 
 {
-  "text": "spans where http_status_code>500ms",
+  "text": "spans where http.response.status_code>500ms",
   "problems": [
     {
       "path": "where[0]",
-      "message": "units apply to duration only; write http_status_code>500",
+      "message": "units apply to duration only; write http.response.status_code>500",
       "span": {
-        "start": 29,
-        "end": 34
+        "start": 38,
+        "end": 43
       }
     }
   ]
 }
 
 {
-  "text": "spans where http_status_code>=$code",
+  "text": "spans where http.response.status_code>=$code",
   "query": {
     "from": "spans",
     "where": [
-      "TRY_CAST(http_status_code AS INTEGER) >= $code"
+      "attributes['http.response.status_code'] >= $code"
     ]
   }
 }
 
 {
-  "text": "spans where http_status_code>=500",
+  "text": "spans where http.response.status_code>=500",
   "query": {
     "from": "spans",
     "where": [
-      "TRY_CAST(http_status_code AS INTEGER) >= 500"
+      "attributes['http.response.status_code'] >= 500"
     ]
   }
 }
 
 {
-  "text": "spans where http_status_code>=warn",
+  "text": "spans where http.response.status_code>=warn",
   "query": {
     "from": "spans",
     "where": [
-      "TRY_CAST(http_status_code AS INTEGER) >= 'warn'"
+      "attributes['http.response.status_code'] >= 'warn'"
     ]
   }
 }
@@ -4894,33 +4894,33 @@
 }
 
 {
-  "text": "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route",
+  "text": "spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route",
   "query": {
     "from": "spans",
     "where": [
       "kind = 'SPAN_KIND_SERVER'"
     ],
     "measures": [
-      "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) / count() * 100 as pct_5xx"
+      "count_if(attributes['http.response.status_code'] >= 500) / count() * 100 as pct_5xx"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ]
   }
 }
 
 {
-  "text": "spans where kind:server | count_if(http_status_code>=500) / count() * 100 as pct_5xx by http_route every auto",
+  "text": "spans where kind:server | count_if(http.response.status_code>=500) / count() * 100 as pct_5xx by http.route every auto",
   "query": {
     "from": "spans",
     "where": [
       "kind = 'SPAN_KIND_SERVER'"
     ],
     "measures": [
-      "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) / count() * 100 as pct_5xx"
+      "count_if(attributes['http.response.status_code'] >= 500) / count() * 100 as pct_5xx"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ],
     "bucket": "auto"
   }
@@ -5290,7 +5290,7 @@
 }
 
 {
-  "text": "spans where service:$service (status:error or status:unset) | count() by http_route",
+  "text": "spans where service:$service (status:error or status:unset) | count() by http.route",
   "query": {
     "from": "spans",
     "where": [
@@ -5301,7 +5301,7 @@
       "count()"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ]
   }
 }
@@ -5415,19 +5415,19 @@
 }
 
 {
-  "text": "spans where service:checkout status:error -http.target:/healthz | count() by http_route",
+  "text": "spans where service:checkout status:error -url.path:/healthz | count() by http.route",
   "query": {
     "from": "spans",
     "where": [
       "service = 'checkout'",
       "status = 'STATUS_CODE_ERROR'",
-      "(attributes['http.target'] IS NULL OR attributes['http.target'] != '/healthz')"
+      "(attributes['url.path'] IS NULL OR attributes['url.path'] != '/healthz')"
     ],
     "measures": [
       "count()"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ]
   }
 }
@@ -5491,38 +5491,38 @@
 }
 
 {
-  "text": "spans where starts_with(http_route, \"/api\")",
+  "text": "spans where starts_with(operation, \"/api\")",
   "query": {
     "from": "spans",
     "where": [
-      "starts_with(http_route, '/api')"
+      "starts_with(operation, '/api')"
     ]
   }
 }
 
 {
-  "text": "spans where starts_with(http_route, \"/api\") > 1",
+  "text": "spans where starts_with(operation, \"/api\") > 1",
   "problems": [
     {
       "path": "where[0]",
       "message": "predicates are not compared; use starts_with(...) alone",
       "span": {
         "start": 12,
-        "end": 47
+        "end": 46
       }
     }
   ]
 }
 
 {
-  "text": "spans where starts_with(http_route, /api)",
+  "text": "spans where starts_with(operation, /api)",
   "problems": [
     {
       "path": "where[0]",
       "message": "starts_with needs a quoted string",
       "span": {
         "start": 12,
-        "end": 41
+        "end": 40
       }
     }
   ]
@@ -6598,12 +6598,12 @@
 }
 
 {
-  "text": "spans | count_if(http_status_code between 400 and 499) as client_errors, count_if(http_status_code>=500) as server_errors",
+  "text": "spans | count_if(http.response.status_code between 400 and 499) as client_errors, count_if(http.response.status_code>=500) as server_errors",
   "query": {
     "from": "spans",
     "measures": [
-      "count_if(TRY_CAST(http_status_code AS INTEGER) BETWEEN 400 AND 499) as client_errors",
-      "count_if(TRY_CAST(http_status_code AS INTEGER) >= 500) as server_errors"
+      "count_if(attributes['http.response.status_code'] BETWEEN 400 AND 499) as client_errors",
+      "count_if(attributes['http.response.status_code'] >= 500) as server_errors"
     ]
   }
 }
@@ -6657,14 +6657,14 @@
 }
 
 {
-  "text": "spans | count_if(status:error) / count() * 100 as err_pct by http_route every 1m sort err_pct limit 10",
+  "text": "spans | count_if(status:error) / count() * 100 as err_pct by http.route every 1m sort err_pct limit 10",
   "query": {
     "from": "spans",
     "measures": [
       "count_if(status = 'STATUS_CODE_ERROR') / count() * 100 as err_pct"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ],
     "bucket": "1m",
     "sort": "err_pct",
@@ -6673,14 +6673,14 @@
 }
 
 {
-  "text": "spans | count_if(status:error) / count() as r by http_route",
+  "text": "spans | count_if(status:error) / count() as r by http.route",
   "query": {
     "from": "spans",
     "measures": [
       "count_if(status = 'STATUS_CODE_ERROR') / count() as r"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ]
   }
 }
@@ -7101,14 +7101,14 @@
 }
 
 {
-  "text": "spans | p99(duration) by http_route every 1m",
+  "text": "spans | p99(duration) by http.route every 1m",
   "query": {
     "from": "spans",
     "measures": [
       "p99(duration_ms)"
     ],
     "by": [
-      "http_route"
+      "attributes['http.route']"
     ],
     "bucket": "1m"
   }
@@ -7634,14 +7634,14 @@
 }
 
 {
-  "text": "spans where http_status_code between 500 and 400",
+  "text": "spans where http.response.status_code between 500 and 400",
   "problems": [
     {
       "path": "where[0]",
-      "message": "between needs the lower value first: http_status_code between 400 and 500",
+      "message": "between needs the lower value first: http.response.status_code between 400 and 500",
       "span": {
         "start": 12,
-        "end": 48
+        "end": 57
       }
     }
   ]

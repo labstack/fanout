@@ -155,15 +155,14 @@ reviewed edits before rolling back to a binary without `resource_inventory`.
 ## Choose metric measures by kind
 
 `get_telemetry_schema` lists each metric's name, unit, semantic `type` and
-`temporality`. The `metrics` view uses these kinds: `gauge`, `counter` (a
-monotonic sum), `updown` (a non-monotonic sum), `histogram` (explicit or
-exponential) and `summary`. These differ from the stored OTLP kinds: `gauge`,
-`sum`, `histogram`, `exponential_histogram` and `summary`. Discovery keeps
+`temporality`. The `metrics` view and the stored files use these kinds:
+`gauge`, `counter` (a monotonic sum), `updown` (a non-monotonic sum),
+`histogram` (explicit or exponential) and `summary`. Discovery keeps
 separate entries when one name has different units, kinds or temporalities.
 There is no separate `kind` field in metric discovery.
 
 Counters and histograms carry `cumulative` or `delta` temporality; gauges and
-summaries have empty temporality. `start_time` is the data point's start time,
+summaries have none. `start_time` is the data point's start time,
 or NULL when absent. Choose measures from the discovered kind:
 
 | Measure | gauge, updown | counter | histogram |
