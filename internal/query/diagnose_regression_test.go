@@ -65,7 +65,7 @@ func TestDiagnosisNamesOnlyEmptyingRouteFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := results[0]
-	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without HTTP route filter, 120 match the remaining filters.") {
+	if r.Status != "empty" || !strings.Contains(r.Diagnosis, "Without the HTTP route filter, 120 match the remaining filters.") {
 		t.Fatalf("result = %+v", r)
 	}
 	if strings.Contains(r.Diagnosis, "Without service = $service") {
@@ -199,7 +199,7 @@ func TestDiagnosisNamesTextAndNegatedFilters(t *testing.T) {
 	if r := results[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, `Without operation containing "zzqxnomatch", 120 match the remaining filters.`) {
 		t.Fatalf("text result = %+v", r)
 	}
-	if r := results[1]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without service filter, 120 match") {
+	if r := results[1]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without the service filter, 120 match") {
 		t.Fatalf("negated result = %+v", r)
 	}
 }

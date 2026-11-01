@@ -2,13 +2,15 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
 
-// The Traces page lists traces, so its diagnosis names traces, counts spans
-// with digit grouping, and spells stored enum values the way FanQL writes them.
+// The Traces page lists traces of spans; a diagnosis that counts names spans
+// throughout, groups digits, and spells stored enum values the way FanQL
+// writes them.
 func TestTracesDiagnosisWording(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Traces", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Traces", Viz: "traces",
@@ -17,7 +19,7 @@ func TestTracesDiagnosisWording(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "No traces match this combination of filters in this time range. Without status error, 60 spans match the remaining filters. Values seen: ok (60)."
+	want := "No spans match this combination of filters in this time range. Without status error, 60 match the remaining filters. Values seen: ok (60)."
 	if r := got[0]; r.Status != StatusEmpty || r.Diagnosis != want {
 		t.Fatalf("diagnosis %q, want %q", r.Diagnosis, want)
 	}
@@ -56,7 +58,37 @@ func TestDiagnosisNamesDurationAsFanQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without duration filter,") {
+	if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without the duration filter,") {
 		t.Fatalf("diagnosis %q", r.Diagnosis)
+	}
+}
+
+// IDs are unique, so the most common ones say nothing: an ID filter lists no
+// values seen. Other fields do, and an empty value is written as FanQL
+// writes it.
+func TestDiagnosisValuesSeen(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	spans := shopSpans()
+	for i := range spans {
+		spans[i].HTTPRoute = ""
+	}
+	commit(t, repo, spans, nil)
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := Dashboard{Name: "Seen", Time: Time{Range: "1h"}}
+	for i, where := range []string{"trace_id = 'nope'", "span_id = 'nope'", "http_route = '/missing'"} {
+		d.Panels = append(d.Panels, Panel{ID: fmt.Sprint("p", i), Title: "Spans", Viz: "stat", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{where}}})
+	}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range got[:2] {
+		if r.Status != StatusEmpty || strings.Contains(r.Diagnosis, "Values seen") {
+			t.Errorf("%+v", r)
+		}
+	}
+	if r := got[2]; r.Status != StatusEmpty || !strings.HasSuffix(r.Diagnosis, ` Values seen: "" (180).`) {
+		t.Errorf("%+v", r)
 	}
 }

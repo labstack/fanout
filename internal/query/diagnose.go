@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"strings"
@@ -112,14 +113,12 @@ func (e *Executor) explain(ctx context.Context, p *Panel, filters []Filter, scop
 			if value != "" {
 				selection = f.DisplayField + " " + value
 			} else {
-				selection = f.DisplayField + " filter"
+				selection = "the " + f.DisplayField + " filter"
 			}
 		}
-		// Counts are of the signal's rows; the traces viz lists traces of spans.
-		noun, matched := rowNoun(p), grouped(recovered)
-		if noun != sig.name {
-			matched += " " + sig.name
-		}
+		// Counts are of the signal's rows, so the message names them even
+		// where the traces viz lists traces of spans.
+		noun, matched := sig.name, grouped(recovered)
 		message := fmt.Sprintf("No %s match the selected filters in this time range. Without %s, %s match.", noun, selection, matched)
 		if f.DisplayField != "" && (f.DisplayLiteral != "" || f.DisplayParam != "") {
 			message = fmt.Sprintf("No %s for %s in this time range. Without that filter, %s match.", noun, selection, matched)
@@ -279,7 +278,7 @@ func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others
 	}
 	expr := ref.stringSQL()
 	query := fmt.Sprintf("WITH g AS MATERIALIZED (SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1) "+
-		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5)", expr, structuredSource(sig.name), where, expr)
+		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5) UNION ALL SELECT '', sum(n), 'rows' FROM g", expr, structuredSource(sig.name), where, expr)
 	if literal := f.DisplayLiteral; literal != "" {
 		if _, err := strconv.ParseFloat(literal, 64); err != nil && ref.Type == TypeString && utf8.RuneCountInString(literal) >= 3 && fieldVocabularies[f.EqField].Signal != sig.name {
 			// A typo changes about one character in four of a name; numbers,
@@ -301,23 +300,35 @@ func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others
 	}
 	defer rows.Close()
 	var parts []string
+	var shown, total int64
 	for rows.Next() {
 		var value, kind string
-		var n int64
+		var n sql.NullInt64
 		if rows.Scan(&value, &n, &kind) != nil {
 			continue
 		}
 		switch kind {
 		case "seen":
-			parts = append(parts, fmt.Sprintf("%s (%s)", spoken(sig, f.EqField, value), grouped(n)))
+			if value == "" {
+				value = `""`
+			}
+			parts = append(parts, fmt.Sprintf("%s (%s)", spoken(sig, f.EqField, value), grouped(n.Int64)))
+			shown += n.Int64
+		case "rows":
+			total = n.Int64
 		case "near":
 			near = value
 		case "literal":
-			other = n
+			other = n.Int64
 		}
 	}
 	if rows.Err() != nil {
 		return "", 0, ""
+	}
+	if strings.HasSuffix(ref.Column, "_id") && ref.Key == "" || shown*100 < total {
+		// IDs, and any field whose five most common values cover under one
+		// row in a hundred, are near-unique: listing some says nothing.
+		parts = nil
 	}
 	return strings.Join(parts, ", "), other, near
 }
