@@ -2,6 +2,7 @@ package engine
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -147,5 +148,42 @@ func TestVersionRollupReadsNumericVersions(t *testing.T) {
 	var versions string
 	if err := d.DB.QueryRow(`SELECT string_agg(service_version, ',' ORDER BY service_version) FROM version_rollup`).Scan(&versions); err != nil || versions != "2,v1" {
 		t.Fatalf("versions %q, %v", versions, err)
+	}
+}
+
+// Stars in the result leave the dedicated columns out; inner stars pass them
+// on, so subscripts above still read the columns.
+func TestStarsHideDedicatedColumns(t *testing.T) {
+	d, _ := newBatchCacheTest(t)
+	at := time.Now().UTC()
+	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at.Add(-time.Hour), End: at})
+	for _, query := range []string{
+		`SELECT * FROM spans`,
+		`SELECT s.*, l.* EXCLUDE (body) FROM spans s JOIN logs l ON true`,
+		`WITH s AS (SELECT * FROM spans) SELECT *, attributes['http.route'] AS r FROM s`,
+		`SELECT * FROM (SELECT * FROM metrics) UNION ALL SELECT * FROM metrics`,
+		`SELECT * FROM (SELECT * EXCLUDE (attributes) FROM spans)`,
+	} {
+		rows, err := d.QueryContext(ctx, query+` LIMIT 0`)
+		if err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		columns, err := rows.Columns()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(columns, "resource") {
+			t.Fatalf("%s: %v", query, columns)
+		}
+		for _, c := range columns {
+			if _, internal := internalColumn(c); internal {
+				t.Fatalf("%s returns %s", query, c)
+			}
+		}
+	}
+	compiled, err := compileRelations(t.Context(), d.DB, `WITH s AS (SELECT * FROM spans) SELECT attributes['http.route'] AS r, * FROM s`, nil, map[string]string{})
+	if err != nil || !strings.Contains(compiled, `SELECT _a_http_route AS r, * EXCLUDE (`) {
+		t.Fatalf("%s: %v", compiled, err)
 	}
 }

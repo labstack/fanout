@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/labstack/fanout/internal/telemetry"
@@ -22,6 +23,9 @@ import (
 // outside the list, the attributes of logs and metrics, subscripts whose
 // relation the AST does not tell, and subscripts of a map that a subquery or
 // CTE projects without its columns.
+//
+// The dedicated columns are part of the file layout, so the outermost SELECT
+// excludes them from its stars: users see the attributes and resource maps.
 
 func keyMap(k semconv.Key) string {
 	if k.Scope == semconv.Span {
@@ -51,8 +55,20 @@ type keyMapSource struct {
 
 // keyRelation is what a FROM binding exposes of the signal maps.
 type keyRelation struct {
-	maps map[string]keyMapSource // by lower-case column name
-	open bool                    // its other columns are unknown and may shadow these
+	maps   map[string]keyMapSource // by lower-case column name
+	open   bool                    // its other columns are unknown and may shadow these
+	hidden map[string]bool         // dedicated columns it passes on
+}
+
+func (r *keyRelation) hide(names map[string]bool, excluded map[string]bool) {
+	for name := range names {
+		if !excluded[name] {
+			if r.hidden == nil {
+				r.hidden = map[string]bool{}
+			}
+			r.hidden[name] = true
+		}
+	}
 }
 
 func (r *keyRelation) add(name string, m keyMapSource) {
@@ -145,19 +161,28 @@ type namedItem struct {
 // rewriteKeys rewrites the subscripts of one parsed statement in place.
 func rewriteKeys(ctx context.Context, db snapshotSQL, statement map[string]any) error {
 	r := &keyRewriter{}
-	r.query(statement, nil)
+	r.queryAt(statement, nil, true)
 	return r.name(ctx, db)
 }
 
 func signalRelation(s *telemetry.Signal) *keyRelation {
-	return &keyRelation{maps: map[string]keyMapSource{
+	rel := &keyRelation{maps: map[string]keyMapSource{
 		"attributes": {signal: s},
 		"resource":   {signal: s},
-	}}
+	}, hidden: map[string]bool{}}
+	for _, k := range s.Keys() {
+		rel.hidden[k.Column] = true
+	}
+	return rel
 }
 
 // query analyzes a query node and returns the relation it produces.
 func (r *keyRewriter) query(node map[string]any, outer *keyScope) *keyRelation {
+	return r.queryAt(node, outer, false)
+}
+
+// queryAt analyzes a query node; outermost marks the statement's result.
+func (r *keyRewriter) queryAt(node map[string]any, outer *keyScope, outermost bool) *keyRelation {
 	scope := outer
 	if cteMap, _ := node["cte_map"].(map[string]any); cteMap != nil {
 		entries, _ := cteMap["map"].([]any)
@@ -174,17 +199,17 @@ func (r *keyRewriter) query(node map[string]any, outer *keyScope) *keyRelation {
 	}
 	switch node["type"] {
 	case "SELECT_NODE":
-		return r.selectNode(node, scope)
+		return r.selectNode(node, scope, outermost)
 	case "SET_OPERATION_NODE":
 		var parts []*keyRelation
 		for _, key := range []string{"left", "right", "children"} {
 			switch child := node[key].(type) {
 			case map[string]any:
-				parts = append(parts, r.query(child, scope))
+				parts = append(parts, r.queryAt(child, scope, outermost))
 			case []any:
 				for _, c := range child {
 					if c, ok := c.(map[string]any); ok {
-						parts = append(parts, r.query(c, scope))
+						parts = append(parts, r.queryAt(c, scope, outermost))
 					}
 				}
 			}
@@ -229,6 +254,7 @@ func unionRelation(parts []*keyRelation) *keyRelation {
 		out.open = true
 		return out
 	}
+	out.hide(parts[0].hidden, nil)
 	for name, m := range parts[0].maps {
 		for _, p := range parts[1:] {
 			if p.maps[name] != m {
@@ -243,7 +269,7 @@ func unionRelation(parts []*keyRelation) *keyRelation {
 	return out
 }
 
-func (r *keyRewriter) selectNode(node map[string]any, outer *keyScope) *keyRelation {
+func (r *keyRewriter) selectNode(node map[string]any, outer *keyScope, outermost bool) *keyRelation {
 	scope := &keyScope{parent: outer, relations: map[string]*keyRelation{}}
 	r.from(node["from_table"], scope)
 	for key, child := range node {
@@ -268,7 +294,51 @@ func (r *keyRewriter) selectNode(node map[string]any, outer *keyScope) *keyRelat
 			r.expr(child, scope)
 		}
 	}
-	return r.output(node["select_list"], scope)
+	out := r.output(node["select_list"], scope)
+	if outermost {
+		excludeHidden(node["select_list"], scope)
+	}
+	return out
+}
+
+// excludeHidden adds the dedicated columns each star passes on to its
+// exclude list.
+func excludeHidden(value any, scope *keyScope) {
+	items, _ := value.([]any)
+	for _, item := range items {
+		item, _ := item.(map[string]any)
+		if item["class"] != "STAR" || item["columns"] == true || item["expr"] != nil {
+			continue
+		}
+		star := &keyRelation{}
+		excluded := starExclusions(item)
+		for _, rel := range starRelations(item, scope) {
+			if rel != nil {
+				star.hide(rel.hidden, excluded)
+			}
+		}
+		names := make([]string, 0, len(star.hidden))
+		for name := range star.hidden {
+			names = append(names, name)
+		}
+		if len(names) == 0 {
+			continue
+		}
+		slices.Sort(names)
+		list, _ := item["exclude_list"].([]any)
+		for _, name := range names {
+			list = append(list, name)
+		}
+		item["exclude_list"] = list
+	}
+}
+
+func starExclusions(star map[string]any) map[string]bool {
+	excluded := map[string]bool{}
+	for _, key := range []string{"exclude_list", "qualified_exclude_list", "replace_list", "rename_list"} {
+		collectNames(star[key], excluded)
+	}
+	return excluded
 }
 
 // from binds a FROM clause's relations into scope.
@@ -353,15 +423,13 @@ func (r *keyRewriter) output(value any, scope *keyScope) *keyRelation {
 				out.open = true
 				continue
 			}
-			excluded := map[string]bool{}
-			for _, key := range []string{"exclude_list", "qualified_exclude_list", "replace_list", "rename_list"} {
-				collectNames(item[key], excluded)
-			}
+			excluded := starExclusions(item)
 			for _, rel := range starRelations(item, scope) {
 				if rel == nil || rel.open {
 					out.open = true
 					continue
 				}
+				out.hide(rel.hidden, excluded)
 				for name, m := range rel.maps {
 					if excluded[name] {
 						m = keyMapSource{}
