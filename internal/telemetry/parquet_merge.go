@@ -11,6 +11,7 @@ import (
 	"runtime"
 
 	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/format"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -38,6 +39,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	schema := s.schema
 	var spilled spills
 	var groups []parquet.RowGroup
+	var chunkBytes []format.RowGroup // by group: its footer metadata
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -66,6 +68,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			spilled[bit] += n
 		}
 		groups = append(groups, pf.RowGroups()...)
+		chunkBytes = append(chunkBytes, pf.Metadata().RowGroups...)
 	}
 	out, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
 	if err != nil {
@@ -149,11 +152,28 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 	}
 	owned := make([]bool, len(columns))
+	// rowBytes[group][variant] is a row's share of the variant's uncompressed
+	// input bytes, which bounds an output row group's buffered variant state.
+	rowBytes := make([][]int64, len(groups))
+	for g := range groups {
+		rowBytes[g] = make([]int64, len(variants))
+		rows := groups[g].NumRows()
+		for i, v := range variants {
+			var total int64
+			for _, c := range v.columns {
+				total += chunkBytes[g].Columns[c.column].MetaData.TotalUncompressedSize
+			}
+			if rows > 0 {
+				rowBytes[g][i] = (total + rows - 1) / rows
+			}
+		}
+	}
 	for _, v := range variants {
 		for _, c := range v.columns {
 			owned[c.column] = true
 		}
 	}
+	buffered := make([]int64, len(variants))
 	// Give workers a standard, concurrency-safe context even when a caller wraps
 	// Context.Err for instrumentation. Cancellation never leaves workers behind.
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -165,7 +185,9 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 		runs = runs[:0]
 		count := 0
-		for count < parquetRowGroupRows && len(keys) > 0 {
+		clear(buffered)
+		full := false
+		for count < parquetRowGroupRows && len(keys) > 0 && !full {
 			c := keys[0]
 			if s.Traces {
 				// The span order leads with the trace hash, then start time.
@@ -180,6 +202,10 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			}
 			runs = appendMergeRun(runs, c.input, 1)
 			count++
+			for i, n := range rowBytes[c.input] {
+				buffered[i] += n
+				full = full || buffered[i] >= maxVariantRowGroupBytes
+			}
 			has, e := c.next()
 			if e != nil {
 				return e
@@ -227,6 +253,13 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	ok = true
 	return nil
 }
+
+// maxVariantRowGroupBytes ends an output row group early once the input
+// bytes of any one of its VARIANT columns reach it. variantMerge buffers a
+// row group of each such column, its interned names and its rewritten values;
+// with wide, unique attribute sets a full row group would hold gigabytes.
+// The bound depends only on the inputs, so output stays deterministic.
+const maxVariantRowGroupBytes = 64 << 20
 
 type mergeRun struct{ input, rows int }
 

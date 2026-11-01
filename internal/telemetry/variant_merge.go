@@ -38,9 +38,11 @@ import (
 //
 // The dictionaries of a row group form the metadata column chunk's Parquet
 // dictionary, so at most parquetDictionaryMaxBytes/variantMetadataBytes are
-// shared. A row that fits none of them once that many exist carries only its
-// own names: its names are shared with too few rows to be worth a dictionary,
-// and its metadata is no larger than the names it uses.
+// shared, and only while the row group's distinct blobs fit that dictionary.
+// Any other row carries only its own names: they are shared with too few rows
+// to be worth a dictionary, and its metadata is no larger than the names it
+// uses. Rows are buffered per output row group, which mergeParquet bounds by
+// the inputs' variant bytes (maxVariantRowGroupBytes).
 //
 // Assignment depends only on the merged row order and the rows' names, so
 // equal inputs give byte-identical output.
@@ -72,21 +74,23 @@ type variantMerge struct {
 
 	// By output row.
 	null    []bool
-	sets    [][]int32 // the row's names, by ID; a row of its own names, by name
-	rowDict []int     // the row's shared dictionary, -1 for its own names
+	sets    [][]int32 // the row's names, by ID
+	rowDict []int     // the row's shared dictionary d, or segment s as -2-s; -1 if NULL
 	// By position, for the metadata and encoded leaves.
 	defs [][]int8
 	data [][]byte // encoded leaves: values with interned field IDs
 	ends [][]int
 
-	dicts  []variantDict
-	meta   []parquet.Value // the current chunk's input metadata
-	known  [][]int32       // by input: names of its field IDs last seen, -1 if none
-	rw     variantRewriter
-	blobs  []byte // metadata of rows of their own names
-	out    []byte
-	slices [][]byte
-	values []parquet.Value
+	dicts     []variantDict   // shared dictionaries
+	segments  []variantDict   // rows' own names, shared by neighbours they hold
+	mark      []int32         // by name: the last segment holding it
+	dictBytes int             // about the dictionaries' encoded size
+	meta      []parquet.Value // the current chunk's input metadata
+	known     [][]int32       // by input: names of its field IDs last seen, -1 if none
+	rw        variantRewriter
+	out       []byte
+	slices    [][]byte
+	values    []parquet.Value
 }
 
 type variantDict struct {
@@ -147,8 +151,8 @@ func (m *variantMerge) reset() {
 	m.member = m.member[:0]
 	m.null, m.sets, m.rowDict = m.null[:0], m.sets[:0], m.rowDict[:0]
 	clear(m.dicts)
-	m.dicts = m.dicts[:0]
-	m.blobs = m.blobs[:0]
+	clear(m.segments)
+	m.dicts, m.segments, m.mark, m.dictBytes = m.dicts[:0], m.segments[:0], m.mark[:0], 0
 	for i := range m.known {
 		m.known[i] = m.known[i][:0]
 	}
@@ -287,23 +291,76 @@ func (m *variantMerge) byName(a, b int32) int { return strings.Compare(m.names[a
 // assign gives each row the first shared dictionary that holds its names or
 // has room for the missing ones, opening a new one while the row group has
 // fewer than variantSharedDictionaries.
+//
+// Every distinct blob is a value of the metadata column chunk's Parquet
+// dictionary. Once they would outgrow parquetDictionaryMaxBytes the writer
+// falls back to plain pages, where each row stores its blob again. From that
+// row on, and for a row no shared dictionary takes, a row carries only its
+// own names, the smallest blob that holds them; a neighbour whose names it
+// holds reuses it. Measured on unique attribute names, plain pages of rows'
+// own names compressed to about 130 bytes a row, and pages repeating shared
+// 4 KiB dictionaries to about 600.
 func (m *variantMerge) assign() {
+	distinct := 0
 	for row, null := range m.null {
 		d := -1
 		if !null {
-			d = m.fit(m.sets[row])
+			names := m.sets[row]
+			before := m.dictBytes
+			if distinct <= parquetDictionaryMaxBytes {
+				d = m.fit(names)
+			}
+			if d < 0 {
+				d = -2 - m.segment(names)
+			}
+			distinct += m.dictBytes - before
 		}
 		m.rowDict = append(m.rowDict, d)
 	}
+	for _, dicts := range [][]variantDict{m.dicts, m.segments} {
+		for i := range dicts {
+			d := &dicts[i]
+			slices.SortFunc(d.names, m.byName)
+			d.blob = m.appendMetadata(nil, d.names)
+		}
+	}
 	for i := range m.dicts {
 		d := &m.dicts[i]
-		slices.SortFunc(d.names, m.byName)
 		d.pos = make(map[int32]int, len(d.names))
 		for j, name := range d.names {
 			d.pos[name] = j
 		}
-		d.blob = m.appendMetadata(nil, d.names)
 	}
+}
+
+// segment returns the current segment if it holds a row's names, or a new
+// one of the row's names.
+func (m *variantMerge) segment(names []int32) int {
+	for len(m.mark) < len(m.names) {
+		m.mark = append(m.mark, -1)
+	}
+	current := len(m.segments) - 1
+	missing := 0
+	for _, name := range names {
+		if m.mark[name] != int32(current) {
+			missing += len(m.names[name])
+		}
+	}
+	if current < 0 || missing > 0 {
+		m.segments = append(m.segments, variantDict{})
+		m.dictBytes += 4
+		current++
+	}
+	d := &m.segments[current]
+	for _, name := range names {
+		if m.mark[name] != int32(current) {
+			m.mark[name] = int32(current)
+			d.names = append(d.names, name)
+			d.size += len(m.names[name])
+			m.dictBytes += len(m.names[name]) + 2
+		}
+	}
+	return current
 }
 
 func (m *variantMerge) fit(names []int32) int {
@@ -342,6 +399,7 @@ func (m *variantMerge) fit(names []int32) int {
 	}
 	if len(m.dicts) < variantSharedDictionaries && size <= variantMetadataBytes {
 		m.dicts = append(m.dicts, variantDict{})
+		m.dictBytes += 4
 		m.join(len(m.dicts)-1, names)
 		return len(m.dicts) - 1
 	}
@@ -355,6 +413,7 @@ func (m *variantMerge) join(i int, names []int32) {
 			m.member[name][i/64] |= 1 << (i % 64)
 			d.names = append(d.names, name)
 			d.size += len(m.names[name])
+			m.dictBytes += len(m.names[name]) + 2
 		}
 	}
 }
@@ -386,31 +445,23 @@ func (m *variantMerge) appendMetadata(dst []byte, names []int32) []byte {
 // to its dictionary.
 func (m *variantMerge) emit(writers []*parquet.ColumnWriter) error {
 	rows := len(m.null)
-	ends := make([]int, rows) // of rows of their own names, in blobs
-	for row := range rows {
-		if !m.null[row] && m.rowDict[row] < 0 {
-			slices.SortFunc(m.sets[row], m.byName)
-			m.blobs = m.appendMetadata(m.blobs, m.sets[row])
-		}
-		ends[row] = len(m.blobs)
-	}
 	values := m.slices[:0]
-	start := 0
+	fresh := make([]bool, rows) // the row's metadata is new to the row group
+	seen := make([]bool, len(m.dicts)+len(m.segments))
 	for row := range rows {
 		var blob []byte
-		switch {
-		case m.null[row]:
-		case m.rowDict[row] >= 0:
-			blob = m.dicts[m.rowDict[row]].blob
-		default:
-			blob = m.blobs[start:ends[row]]
+		if d := m.rowDict[row]; d >= 0 {
+			blob, fresh[row], seen[d] = m.dicts[d].blob, !seen[d], true
+		} else if d <= -2 {
+			s := -2 - d
+			blob, fresh[row], seen[len(m.dicts)+s] = m.segments[s].blob, !seen[len(m.dicts)+s], true
 		}
-		start = ends[row]
 		values = append(values, blob)
 	}
-	if err := m.put(writers, m.metadata, values); err != nil {
+	if err := m.put(writers, m.metadata, values, fresh); err != nil {
 		return err
 	}
+	ends := make([]int, rows)
 	for _, position := range m.encoded {
 		m.out = m.out[:0]
 		for row := range rows {
@@ -418,7 +469,7 @@ func (m *variantMerge) emit(writers []*parquet.ColumnWriter) error {
 				if d := m.rowDict[row]; d >= 0 {
 					m.rw.pos, m.rw.own = m.dicts[d].pos, nil
 				} else {
-					m.rw.pos, m.rw.own = nil, m.sets[row]
+					m.rw.pos, m.rw.own = nil, m.segments[-2-d].names
 				}
 				var err error
 				if m.out, err = m.rw.rewrite(m.out, data, true); err != nil {
@@ -435,7 +486,7 @@ func (m *variantMerge) emit(writers []*parquet.ColumnWriter) error {
 			}
 			start = ends[row]
 		}
-		if err := m.put(writers, position, values); err != nil {
+		if err := m.put(writers, position, values, nil); err != nil {
 			return err
 		}
 	}
@@ -447,23 +498,47 @@ func (m *variantMerge) emit(writers []*parquet.ColumnWriter) error {
 
 // put writes a leaf's byte values of the row group, nil being NULL, at their
 // buffered definition levels.
-func (m *variantMerge) put(writers []*parquet.ColumnWriter, position int, data [][]byte) error {
+//
+// The writer checks its page size only between calls, so each call holds
+// about a page. A dictionary-encoded page's size counts its indices, not its
+// dictionary, which the writer caps only when a page flushes: metadata pages
+// are flushed once their values new to the dictionary reach a page, so a
+// dictionary of unshared names falls back to plain pages near its cap.
+func (m *variantMerge) put(writers []*parquet.ColumnWriter, position int, data [][]byte, fresh []bool) error {
 	column := m.columns[position].column
-	values := m.values[:0]
-	for row, b := range data {
-		v := parquet.NullValue()
-		if b != nil {
-			v = parquet.ByteArrayValue(b)
+	added := 0 // bytes new to the dictionary since the last flush
+	for start := 0; start < len(data); {
+		values, size := m.values[:0], 0
+		for _, b := range data[start:] {
+			if len(values) > 0 && (size+len(b) > parquetPageSize || added >= parquetPageSize) {
+				break
+			}
+			v := parquet.NullValue()
+			if b != nil {
+				v = parquet.ByteArrayValue(b)
+			}
+			if fresh != nil && fresh[start+len(values)] {
+				added += len(b)
+			}
+			values = append(values, v.Level(0, int(m.defs[position][start+len(values)]), column))
+			size += len(b)
 		}
-		values = append(values, v.Level(0, int(m.defs[position][row]), column))
+		written, err := writers[column].WriteRowValues(values)
+		clear(values)
+		m.values = values[:0]
+		if err == nil && written != len(values) {
+			err = fmt.Errorf("variant leaf %d: short write", position)
+		}
+		if err == nil && added >= parquetPageSize {
+			err = writers[column].Flush()
+			added = 0
+		}
+		if err != nil {
+			return err
+		}
+		start += written
 	}
-	written, err := writers[column].WriteRowValues(values)
-	clear(values)
-	m.values = values[:0]
-	if err == nil && written != len(data) {
-		err = fmt.Errorf("variant leaf %d: short write", position)
-	}
-	return err
+	return nil
 }
 
 // Variant binary walking. The spec (VariantEncoding.md) lays out a value as a
@@ -594,8 +669,8 @@ func variantValueSize(data []byte) (int, error) {
 
 // variantRewriter rewrites the field IDs of encoded values. With input
 // metadata, an input's IDs become interned names, which are added to set;
-// otherwise interned names become positions in pos, or in own, a row's names
-// sorted by name.
+// otherwise interned names become positions in pos, or in own, a segment's
+// names sorted by name.
 type variantRewriter struct {
 	m *variantMerge
 	// The input metadata: its offsets' width, its size, and where its offsets

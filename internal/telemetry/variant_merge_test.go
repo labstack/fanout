@@ -191,3 +191,85 @@ func TestVariantRewriteRemapsUnorderedObjects(t *testing.T) {
 		t.Fatalf("rewrite %x, builder %x", got, expected)
 	}
 }
+
+// Wide, unique attribute sets must not make a merged row group's variant
+// leaves one huge page with an uncapped dictionary: the verifier decodes them
+// within its memory limit.
+func TestCompactionBoundsUniqueVariantPages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("merges 100,000 rows of unique attribute names")
+	}
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inputs []string
+	for part := range 8 {
+		logs := make([]Log, 12_500)
+		for i := range logs {
+			n := part*len(logs) + i
+			attributes := map[string]any{"messaging.system": "kafka"}
+			for k := range 50 {
+				attributes[fmt.Sprintf("app.unique.attribute.name.row%07d.key%02d.x", n, k)] = int64(k)
+			}
+			logs[i] = Log{EventUnixNanos: int64(n*8%100_000 + part), Attributes: attributes, Resource: map[string]any{"service.name": "api"}}
+		}
+		id := fmt.Sprint("input-", part)
+		if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: id}, nil, logs, nil); err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, filepath.Join(store.BatchPath(id), "logs.parquet"))
+	}
+	dir := filepath.Join(t.TempDir(), "output"+BatchSuffix)
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "logs.parquet")
+	stats, err := store.MergeParquet(t.Context(), "logs", inputs, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No page is larger than the largest an ingest writer wrote.
+	largest := make([]int64, 2)
+	for i, path := range []string{inputs[0], output} {
+		file := openParquetFile(t, path)
+		for _, group := range file.RowGroups() {
+			for _, chunk := range group.ColumnChunks() {
+				pages := chunk.Pages()
+				for {
+					page, err := pages.ReadPage()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					size := page.Size()
+					if dictionary := page.Dictionary(); dictionary != nil {
+						size = max(size, dictionary.Page().Size())
+					}
+					parquet.Release(page)
+					largest[i] = max(largest[i], size)
+				}
+				if err := pages.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	t.Logf("largest page: input %d bytes, merged %d", largest[0], largest[1])
+	if largest[1] > largest[0] {
+		t.Fatalf("merged file holds a page of %d bytes, its input %d", largest[1], largest[0])
+	}
+	if err := store.PrepareReplacement(dir, BatchMetadata{ID: "output", Logs: int(stats.Rows)}); err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := NewBatchVerifier(t.Context(), filepath.Dir(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verifier.Close()
+	if err := verifier.Validate(t.Context(), dir); err != nil {
+		t.Fatal(err)
+	}
+}
