@@ -1269,22 +1269,28 @@ func (s *Signal) writerOptions() []parquet.WriterOption {
 }
 
 // commitSignal writes one signal of a staged batch in the signal's order,
-// with its trace index when the signal has one.
+// with its trace index when the signal has one. The index needs only the
+// sorted hashes, so it is written while the Parquet file is.
 func commitSignal[R any](stage string, s *Signal, rows []R) error {
 	perm, keys := sortRows(s, rows)
+	var index errgroup.Group
 	if s.Traces {
 		hashes := make([]uint64, len(perm))
 		for i, row := range perm {
 			hashes[i] = keys[row].n[0]
 		}
-		if err := writeTraceIndex(filepath.Join(stage, "trace.fidx"), hashes); err != nil {
-			return fmt.Errorf("write trace index: %w", err)
-		}
+		index.Go(func() error {
+			if err := writeTraceIndex(filepath.Join(stage, "trace.fidx"), hashes); err != nil {
+				return fmt.Errorf("write trace index: %w", err)
+			}
+			return nil
+		})
 	}
-	if err := writeOrdered(filepath.Join(stage, s.Name+".parquet"), s, rows, perm, parquetPageSize); err != nil {
-		return fmt.Errorf("write %s Parquet: %w", s.Name, err)
+	err := writeOrdered(filepath.Join(stage, s.Name+".parquet"), s, rows, perm, parquetPageSize)
+	if err != nil {
+		err = fmt.Errorf("write %s Parquet: %w", s.Name, err)
 	}
-	return nil
+	return errors.Join(err, index.Wait())
 }
 
 func parquetWriterOptions(pageSize int, extra ...parquet.WriterOption) []parquet.WriterOption {
