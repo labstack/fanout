@@ -197,12 +197,13 @@ func TestSchemaAttributeValuesAndServices(t *testing.T) {
 }
 
 // Columns copied from attributes take the attribute's sampled values, the
-// span name is listed too, and a key whose rows disagree on the type says so.
+// span name is listed too, and a key whose rows disagree on the type says so
+// and which values some rows store as numbers.
 func TestSchemaColumnValuesAndMixedTypes(t *testing.T) {
 	d, repo := newTestEngine(t)
 	spans := shopSpans()
 	n := fixtureStart.UnixNano()
-	for i, code := range []any{int64(308), "308"} {
+	for i, code := range []any{int64(200), "308", "308"} {
 		id := fmt.Sprint("mixed", i)
 		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: "frontend", TraceID: id, SpanID: id, Name: "GET", Kind: "SPAN_KIND_SERVER",
 			StartUnixNanos: n, EndUnixNanos: n + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", Attributes: map[string]any{"http.status_code": code}, IngestedAt: n})
@@ -225,11 +226,11 @@ func TestSchemaColumnValuesAndMixedTypes(t *testing.T) {
 		t.Error("operation has no values")
 	}
 	for _, a := range schema.Signals["spans"].Attributes {
-		if a.Key == "http.status_code" && !slices.Equal(a.Types, []string{"number", "string"}) {
-			t.Errorf("http.status_code types = %v", a.Types)
+		if a.Key == "http.status_code" && (!slices.Equal(a.Types, []string{"number", "string"}) || !slices.Equal(a.Numbers, []Option{{Value: "200", Count: 1}})) {
+			t.Errorf("http.status_code types = %v, numbers = %v", a.Types, a.Numbers)
 		}
-		if a.Key == "http.route" && a.Types != nil {
-			t.Errorf("http.route types = %v", a.Types)
+		if a.Key == "http.route" && (a.Types != nil || a.Numbers != nil) {
+			t.Errorf("http.route types = %v, numbers = %v", a.Types, a.Numbers)
 		}
 	}
 }

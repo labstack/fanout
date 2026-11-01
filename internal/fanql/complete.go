@@ -573,7 +573,16 @@ func (s *completionCandidates) values(e expect) {
 	sampledValue := func(label string, kind valueKind, count int64) {
 		addValue(label, label, printValue(literalValue{Kind: kind, Text: label}, *f, false), count)
 	}
-	if f.Scope == "" && !f.Bracket {
+	// A bare column name reads the column, as the resolver does, so an
+	// attribute of the same name has no values to offer here.
+	column := false
+	if f.Scope == "" && !f.Bracket && !strings.Contains(f.Key, ".") {
+		columns, _ := query.SignalColumns(s.source)
+		for _, c := range columns {
+			column = column || strings.EqualFold(f.Key, c.Name) || strings.EqualFold(f.Key, "duration") && c.Name == "duration_ms"
+		}
+	}
+	if column {
 		// Column names fold case (section 0.3 rule 16); attribute keys do not.
 		key := strings.ToLower(f.Key)
 		if key == "severity" {
@@ -583,7 +592,7 @@ func (s *completionCandidates) values(e expect) {
 			if isRange(e.Scope) || e.Scope == "between" {
 				return
 			}
-		} else {
+		} else if query.FieldVocabularies()[key].Signal == s.source {
 			aliases := query.FieldAliases(key)
 			for _, label := range sortedCompletionKeys(aliases) {
 				value(label, aliases[label], 0)
@@ -609,7 +618,11 @@ func (s *completionCandidates) values(e expect) {
 		}
 	}
 	vocabulary = false
-	for _, attribute := range s.signal.Attributes {
+	attributes := s.signal.Attributes
+	if column {
+		attributes = nil
+	}
+	for _, attribute := range attributes {
 		scope := f.Scope
 		if scope == "" {
 			scope = "attributes"
@@ -628,17 +641,24 @@ func (s *completionCandidates) values(e expect) {
 		}
 		if slices.Contains(attribute.Types, "number") && slices.Contains(attribute.Types, "string") {
 			// Rows disagree on the type, so each form matches only some of
-			// them: offer both, saying which rows each matches.
+			// them: offer the forms rows store, saying which rows each matches.
 			for _, v := range attribute.Values {
+				var numbers int64
+				for _, n := range attribute.Numbers {
+					if n.Value == v.Value {
+						numbers = n.Count
+					}
+				}
 				for _, form := range []struct {
 					kind   valueKind
 					detail string
-				}{{numberValue, "matches numbers"}, {stringValue, "matches text"}} {
-					if form.kind == numberValue && !numberPattern.MatchString(v.Value) {
+					count  int64
+				}{{numberValue, "matches numbers", numbers}, {stringValue, "matches text", v.Count - numbers}} {
+					if form.count <= 0 || form.kind == numberValue && !numberPattern.MatchString(v.Value) {
 						continue
 					}
 					text := printValue(literalValue{Kind: form.kind, Text: v.Value}, *f, false)
-					s.add(text, text, "value", form.detail, v.Count, 0)
+					s.add(text, text, "value", form.detail, form.count, 0)
 				}
 			}
 			continue

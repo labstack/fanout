@@ -53,6 +53,9 @@ type AttributeSchema struct {
 	// Types lists every scalar type seen when rows disagree, e.g. a status
 	// code stored as a number by one service and as text by another.
 	Types []string `json:"types,omitempty"`
+	// Numbers lists the sampled values some rows store as numbers, with
+	// those rows' counts, when rows disagree on the type.
+	Numbers []Option `json:"numbers,omitempty"`
 }
 
 type MetricSchema struct {
@@ -441,10 +444,10 @@ func (e *Executor) attributes(ctx context.Context, sig *signal, start, end time.
          array_to_string(list(DISTINCT t ORDER BY t) FILTER (WHERE t NOT IN ('OBJECT', 'ARRAY', 'NULL')), ',') AS ts
   FROM typed GROUP BY scope, k ORDER BY n DESC, k LIMIT 200
 ), counted AS (
-  SELECT scope, k, v, count(*) AS c FROM typed
+  SELECT scope, k, v, count(*) AS c, count(*) FILTER (WHERE t IN ('BIGINT', 'UBIGINT', 'DOUBLE')) AS cn FROM typed
   WHERE v IS NOT NULL AND v <> '' AND length(v) <= 100 AND t NOT IN ('OBJECT', 'ARRAY') GROUP BY scope, k, v
 ), top AS (
-  SELECT scope, k, CAST(to_json(list({'value': v, 'count': c} ORDER BY c DESC, v)[1:12]) AS VARCHAR) AS vals FROM counted GROUP BY scope, k
+  SELECT scope, k, CAST(to_json(list({'value': v, 'count': c, 'numbers': cn} ORDER BY c DESC, v)[1:12]) AS VARCHAR) AS vals FROM counted GROUP BY scope, k
 )
 SELECT keys.scope, keys.k, keys.t, keys.n, keys.services, keys.ts, top.vals
 FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
@@ -463,10 +466,18 @@ FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 		if err := rows.Scan(&a.Scope, &a.Key, &jsonType, &a.Count, &a.Services, &types, &values); err != nil {
 			return nil, err
 		}
+		var sampled []struct {
+			Value   string
+			Count   int64
+			Numbers int64
+		}
 		if values != nil {
-			if err := json.Unmarshal([]byte(*values), &a.Values); err != nil {
+			if err := json.Unmarshal([]byte(*values), &sampled); err != nil {
 				return nil, fmt.Errorf("discover %s attribute values: %w", sig.name, err)
 			}
+		}
+		for _, v := range sampled {
+			a.Values = append(a.Values, Option{Value: v.Value, Count: v.Count})
 		}
 		if jsonType != nil {
 			a.Type = attributeType(*jsonType)
@@ -481,6 +492,11 @@ FROM keys LEFT JOIN top USING (scope, k) ORDER BY keys.n DESC, keys.k`
 			}
 			if len(a.Types) < 2 {
 				a.Types = nil
+			}
+			for _, v := range sampled {
+				if a.Types != nil && v.Numbers > 0 {
+					a.Numbers = append(a.Numbers, Option{Value: v.Value, Count: v.Numbers})
+				}
 			}
 		}
 		out = append(out, a)

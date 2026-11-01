@@ -114,7 +114,7 @@ func TestCompleteValuesNameTheirForm(t *testing.T) {
 	schema := completionFixtureSchema()
 	spans := schema.Signals["spans"]
 	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "http.status_code", Scope: "attributes", Type: "string", Types: []string{"number", "string"}, Count: 50,
-		Values: []query.Option{{Value: "200", Count: 40}, {Value: "308", Count: 3}}})
+		Values: []query.Option{{Value: "200", Count: 40}, {Value: "308", Count: 3}}, Numbers: []query.Option{{Value: "200", Count: 30}}})
 	spans.Columns = []query.ColumnSchema{{Field: query.Field{Name: "http_route"}, Values: []query.Option{{Value: "/api/cart", Count: 9}}}}
 	schema.Signals["spans"] = spans
 	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
@@ -124,7 +124,8 @@ func TestCompleteValuesNameTheirForm(t *testing.T) {
 	for _, item := range r.Items {
 		got = append(got, item.Label+" "+item.Detail)
 	}
-	if want := []string{"200 matches numbers", `"200" matches text`, "308 matches numbers", `"308" matches text`, "* "}; !slices.Equal(got, want) {
+	// 308 is stored only as text, so its bare number form would match nothing.
+	if want := []string{"200 matches numbers", `"200" matches text`, `"308" matches text`, "* "}; !slices.Equal(got, want) {
 		t.Errorf("mixed values = %q", got)
 	}
 	if got := completionLabels(c.Complete(context.Background(), completionRequest("spans where http_route:"))); !slices.Contains(got, `"/api/cart"`) && !slices.Contains(got, "/api/cart") {
@@ -134,5 +135,30 @@ func TestCompleteValuesNameTheirForm(t *testing.T) {
 		if item.Label == "kind" && item.Detail != "client, consumer, internal, producer, server, unspecified" {
 			t.Errorf("kind detail = %q", item.Detail)
 		}
+	}
+}
+
+// A bare column name reads the column, so completion offers the column's
+// values only, never the values of an attribute that shares its name.
+func TestCompleteColumnValuesExcludeSameNamedAttribute(t *testing.T) {
+	schema := completionFixtureSchema()
+	metrics := schema.Signals["metrics"]
+	metrics.Columns = []query.ColumnSchema{{Field: query.Field{Name: "type"}, Values: []query.Option{{Value: "histogram", Count: 9}}}}
+	metrics.Attributes = []query.AttributeSchema{{Key: "type", Scope: "attributes", Type: "string", Types: []string{"number", "string"}, Count: 50,
+		Values: []query.Option{{Value: "1", Count: 40}, {Value: "Produce", Count: 3}}, Numbers: []query.Option{{Value: "1", Count: 20}}}}
+	schema.Signals["metrics"] = metrics
+	spans := schema.Signals["spans"]
+	spans.Attributes = append(spans.Attributes, query.AttributeSchema{Key: "type", Scope: "attributes", Type: "string", Count: 5, Values: []query.Option{{Value: "Produce", Count: 5}}})
+	schema.Signals["spans"] = spans
+	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
+	waitCompletion(t, c, completionRequest("metrics "), func(r CompleteResponse) bool { return r.Schema.Warm })
+	got := completionLabels(c.Complete(context.Background(), completionRequest("metrics where type:")))
+	if want := []string{"counter", "gauge", "histogram", "summary", "updown", "*"}; !slices.Equal(got, want) {
+		t.Errorf("metrics type values = %q", got)
+	}
+	// On spans, type is an attribute: its values, not the metric kinds.
+	got = completionLabels(c.Complete(context.Background(), completionRequest("spans where type:")))
+	if !slices.Contains(got, "Produce") || slices.Contains(got, "gauge") {
+		t.Errorf("spans type values = %q", got)
 	}
 }
