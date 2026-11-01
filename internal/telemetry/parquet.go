@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -167,17 +168,11 @@ type ParquetMergeStats struct {
 // consolidates tiny ingest row groups.
 func (p *ParquetStore) MergeParquet(ctx context.Context, signal string, inputs []string, output string) (ParquetMergeStats, error) {
 	var stats ParquetMergeStats
-	var err error
-	switch signal {
-	case "spans":
-		err = mergeTypedParquet[spanParquetRow](ctx, inputs, output, true, &stats)
-	case "logs":
-		err = mergeTypedParquet[logParquetRow](ctx, inputs, output, false, &stats)
-	case "metrics":
-		err = mergeTypedParquet[metricParquetRow](ctx, inputs, output, false, &stats)
-	default:
-		err = fmt.Errorf("unsupported Parquet signal %q", signal)
+	s, ok := LookupSignal(signal)
+	if !ok {
+		return stats, fmt.Errorf("unsupported Parquet signal %q", signal)
 	}
+	err := mergeParquet(ctx, s, inputs, output, &stats)
 	return stats, err
 }
 
@@ -274,65 +269,43 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 		}
 	}()
 
-	var spanRows []spanParquetRow
+	var hashes []uint64
 	if len(spans) > 0 {
-		spanRows = make([]spanParquetRow, len(spans))
+		spans, hashes = orderSpans(spans)
 		for i := range spans {
-			spanRows[i] = makeSpanParquetRow(spans[i])
-			spanRows[i].TraceHash = xxh3.HashString(spanRows[i].TraceID)
-			if spanRows[i].StartUnixNano > 0 && (metadata.MinSpanStartNanos == 0 || spanRows[i].StartUnixNano < metadata.MinSpanStartNanos) {
-				metadata.MinSpanStartNanos = spanRows[i].StartUnixNano
+			start := spans[i].StartUnixNanos
+			if start > 0 && (metadata.MinSpanStartNanos == 0 || start < metadata.MinSpanStartNanos) {
+				metadata.MinSpanStartNanos = start
 			}
-			metadata.MaxSpanStartNanos = max(metadata.MaxSpanStartNanos, spanRows[i].StartUnixNano)
-		}
-		sort.Slice(spanRows, func(i, j int) bool {
-			if spanRows[i].TraceHash != spanRows[j].TraceHash {
-				return spanRows[i].TraceHash < spanRows[j].TraceHash
-			}
-			if spanRows[i].StartUnixNano != spanRows[j].StartUnixNano {
-				return spanRows[i].StartUnixNano < spanRows[j].StartUnixNano
-			}
-			return spanRows[i].SpanID < spanRows[j].SpanID
-		})
-	}
-	logRows := make([]logParquetRow, len(logs))
-	if len(logs) > 0 {
-		for i := range logs {
-			logRows[i] = makeLogParquetRow(logs[i])
-		}
-	}
-	metricRows := make([]metricParquetRow, len(metrics))
-	if len(metrics) > 0 {
-		for i := range metrics {
-			metricRows[i] = makeMetricParquetRow(metrics[i])
+			metadata.MaxSpanStartNanos = max(metadata.MaxSpanStartNanos, start)
 		}
 	}
 	var writes errgroup.Group
-	if len(spanRows) > 0 {
+	if len(spans) > 0 {
 		writes.Go(func() error {
-			if err := writeTypedParquet(filepath.Join(stage, "spans.parquet"), spanRows, parquetPageSize, parquet.SortingWriterConfig(spanSortingColumns())); err != nil {
+			if err := writeParquet(filepath.Join(stage, "spans.parquet"), Spans, spans, parquetPageSize); err != nil {
 				return fmt.Errorf("write span Parquet: %w", err)
 			}
 			return nil
 		})
 		writes.Go(func() error {
-			if err := writeTraceIndex(filepath.Join(stage, "trace.fidx"), spanRows); err != nil {
+			if err := writeTraceIndex(filepath.Join(stage, "trace.fidx"), hashes); err != nil {
 				return fmt.Errorf("write trace index: %w", err)
 			}
 			return nil
 		})
 	}
-	if len(logRows) > 0 {
+	if len(logs) > 0 {
 		writes.Go(func() error {
-			if err := writeTypedParquet(filepath.Join(stage, "logs.parquet"), logRows, parquetPageSize); err != nil {
+			if err := writeParquet(filepath.Join(stage, "logs.parquet"), Logs, logs, parquetPageSize); err != nil {
 				return fmt.Errorf("write log Parquet: %w", err)
 			}
 			return nil
 		})
 	}
-	if len(metricRows) > 0 {
+	if len(metrics) > 0 {
 		writes.Go(func() error {
-			if err := writeTypedParquet(filepath.Join(stage, "metrics.parquet"), metricRows, parquetPageSize); err != nil {
+			if err := writeParquet(filepath.Join(stage, "metrics.parquet"), Metrics, metrics, parquetPageSize); err != nil {
 				return fmt.Errorf("write metric Parquet: %w", err)
 			}
 			return nil
@@ -566,6 +539,29 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 	return out, totals, nil
 }
 
+// indexedSpanRow reads the IndexedSpan columns of a span file.
+type indexedSpanRow struct {
+	Namespace     string  `parquet:"namespace"`
+	TraceID       string  `parquet:"trace_id"`
+	SpanID        string  `parquet:"span_id"`
+	ParentSpanID  string  `parquet:"parent_span_id"`
+	Service       string  `parquet:"service"`
+	Operation     string  `parquet:"operation"`
+	Kind          string  `parquet:"kind"`
+	StartUnixNano int64   `parquet:"start_unix_nano"`
+	DurationMS    float64 `parquet:"duration_ms"`
+	Status        string  `parquet:"status"`
+	StatusMessage string  `parquet:"status_message"`
+}
+
+func (r indexedSpanRow) span() IndexedSpan {
+	return IndexedSpan{
+		Namespace: r.Namespace, TraceID: r.TraceID, SpanID: r.SpanID, ParentSpanID: r.ParentSpanID,
+		ServiceName: r.Service, Name: r.Operation, Kind: r.Kind, StartUnixNanos: r.StartUnixNano,
+		DurationMS: r.DurationMS, StatusCode: r.Status, StatusMsg: r.StatusMessage,
+	}
+}
+
 func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange, query TraceQuery, selected *indexedSpanHeap, totals *TraceTotals, services map[string]struct{}) (err error) {
 	if match.row > uint64(math.MaxInt64) {
 		return errors.New("trace index row exceeds Parquet reader limit")
@@ -574,13 +570,13 @@ func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange,
 	if err != nil {
 		return err
 	}
-	reader := parquet.NewGenericReader[indexedSpanParquetRow](file)
+	reader := parquet.NewGenericReader[indexedSpanRow](file)
 	defer func() { err = errors.Join(err, reader.Close(), file.Close()) }()
 	if err := reader.SeekToRow(int64(match.row)); err != nil {
 		return err
 	}
 	remaining := match.count
-	buffer := make([]indexedSpanParquetRow, min(uint64(8192), remaining))
+	buffer := make([]indexedSpanRow, min(uint64(8192), remaining))
 	for remaining > 0 {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -945,8 +941,8 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 //
 // It is rewritten on every open rather than created once. Written once, it
 // pinned the views to whichever build first created the data directory, for
-// the life of that deployment -- and a later build that added a column to
-// spanParquetRow could not start at all: the view would not expose it,
+// the life of that deployment -- and a later build that added a span column
+// could not start at all: the view would not expose it,
 // CreateViews would fail to bind it, NewDuck would return an error, and
 // restarting would not help because the stale file was still there. The files
 // are empty, so this is three small writes per boot.
@@ -959,13 +955,13 @@ func (p *ParquetStore) ensureSchemaBatch() error {
 	if err := os.Mkdir(stage, 0o755); err != nil {
 		return err
 	}
-	if err := writeTypedParquet(filepath.Join(stage, "spans.parquet"), []spanParquetRow{}, parquetPageSize, parquet.SortingWriterConfig(spanSortingColumns())); err != nil {
+	if err := writeParquet(filepath.Join(stage, "spans.parquet"), Spans, []Span{}, parquetPageSize); err != nil {
 		return err
 	}
-	if err := writeTypedParquet(filepath.Join(stage, "logs.parquet"), []logParquetRow{}, parquetPageSize); err != nil {
+	if err := writeParquet(filepath.Join(stage, "logs.parquet"), Logs, []Log{}, parquetPageSize); err != nil {
 		return err
 	}
-	if err := writeTypedParquet(filepath.Join(stage, "metrics.parquet"), []metricParquetRow{}, parquetPageSize); err != nil {
+	if err := writeParquet(filepath.Join(stage, "metrics.parquet"), Metrics, []Metric{}, parquetPageSize); err != nil {
 		return err
 	}
 	if err := syncDirectory(stage); err != nil {
@@ -1135,21 +1131,22 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		return nil, err
 	}
 	signals := [...]struct {
-		name  string
-		count int
+		*Signal
+		count  int
+		bounds *TimeRange
 	}{
-		{name: "spans", count: metadata.Spans},
-		{name: "logs", count: metadata.Logs},
-		{name: "metrics", count: metadata.Metrics},
+		{Spans, metadata.Spans, &metadata.SpanTime},
+		{Logs, metadata.Logs, &metadata.LogTime},
+		{Metrics, metadata.Metrics, &metadata.MetricTime},
 	}
 	for _, signal := range signals {
-		path := filepath.Join(dir, signal.name+".parquet")
+		path := filepath.Join(dir, signal.Name+".parquet")
 		if signal.count == 0 {
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 				if err != nil {
 					return nil, err
 				}
-				return nil, fmt.Errorf("%s parquet exists but metadata declares zero rows", signal.name)
+				return nil, fmt.Errorf("%s parquet exists but metadata declares zero rows", signal.Name)
 			}
 			continue
 		}
@@ -1158,7 +1155,7 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 			return nil, err
 		}
 		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("%s Parquet is not a regular file", signal.name)
+			return nil, fmt.Errorf("%s Parquet is not a regular file", signal.Name)
 		}
 		// Size the batch from the stat this validation already performs.
 		// Compaction prices a merge by the bytes it admits, and measuring here
@@ -1171,31 +1168,15 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		parquetFile, openErr := parquet.OpenFile(file, info.Size())
 		closeErr := file.Close()
 		if err := errors.Join(openErr, closeErr); err != nil {
-			return nil, fmt.Errorf("open %s Parquet: %w", signal.name, err)
+			return nil, fmt.Errorf("open %s Parquet: %w", signal.Name, err)
 		}
-		var expectedSchema *parquet.Schema
-		switch signal.name {
-		case "spans":
-			expectedSchema = telemetrySchema[spanParquetRow]()
-		case "logs":
-			expectedSchema = telemetrySchema[logParquetRow]()
-		case "metrics":
-			expectedSchema = telemetrySchema[metricParquetRow]()
-		}
-		if !parquet.EqualNodes(parquetFile.Schema(), expectedSchema) {
-			return nil, fmt.Errorf("%w: %s parquet schema does not match telemetry format %d", ErrUnsupportedBatchFormat, signal.name, batchMetadataVersion)
+		if !parquet.EqualNodes(parquetFile.Schema(), signal.schema) {
+			return nil, fmt.Errorf("%w: %s parquet schema does not match telemetry format %d", ErrUnsupportedBatchFormat, signal.Name, batchMetadataVersion)
 		}
 		if rows := parquetFile.NumRows(); rows != int64(signal.count) {
-			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.name, rows, signal.count)
+			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, signal.count)
 		}
-		switch signal.name {
-		case "spans":
-			metadata.SpanTime = parquetTimeRange(parquetFile, "start_time")
-		case "logs":
-			metadata.LogTime = parquetTimeRange(parquetFile, "log_time")
-		case "metrics":
-			metadata.MetricTime = parquetTimeRange(parquetFile, "metric_time")
-		}
+		*signal.bounds = parquetTimeRange(parquetFile, signal.Time)
 	}
 	var traces traceIndex
 	if metadata.Spans > 0 {
@@ -1241,12 +1222,18 @@ func parquetTimeRange(file *parquet.File, column string) TimeRange {
 	return result
 }
 
-func spanSortingColumns() parquet.SortingOption {
-	return parquet.SortingColumns(
-		parquet.Ascending("_trace_hash"),
-		parquet.Ascending("start_unix_nano"),
-		parquet.Ascending("span_id"),
-	)
+// writerOptions are the schema and footer sort order every file of the signal
+// is written with.
+func (s *Signal) writerOptions() []parquet.WriterOption {
+	options := []parquet.WriterOption{s.schema}
+	if len(s.Sort) > 0 {
+		sorting := make([]parquet.SortingColumn, len(s.Sort))
+		for i, name := range s.Sort {
+			sorting[i] = parquet.Ascending(name)
+		}
+		options = append(options, parquet.SortingWriterConfig(parquet.SortingColumns(sorting...)))
+	}
+	return options
 }
 
 func parquetWriterOptions(pageSize int, extra ...parquet.WriterOption) []parquet.WriterOption {
@@ -1259,7 +1246,7 @@ func parquetWriterOptions(pageSize int, extra ...parquet.WriterOption) []parquet
 	return append(options, extra...)
 }
 
-func writeTypedParquet[T any](path string, rows []T, pageSize int, options ...parquet.WriterOption) error {
+func writeParquet[R any](path string, s *Signal, rows []R, pageSize int, options ...parquet.WriterOption) error {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
@@ -1271,9 +1258,8 @@ func writeTypedParquet[T any](path string, rows []T, pageSize int, options ...pa
 			_ = os.Remove(path)
 		}
 	}()
-	options = append(options, telemetrySchema[T]())
-	writer := parquet.NewGenericWriter[T](f, parquetWriterOptions(pageSize, options...)...)
-	if err := writeTelemetryColumns(writer, rows); err != nil {
+	writer := parquet.NewGenericWriter[any](f, parquetWriterOptions(pageSize, append(s.writerOptions(), options...)...)...)
+	if err := writeColumns(writer, s, rows); err != nil {
 		_ = writer.Close()
 		return err
 	}
@@ -1288,6 +1274,38 @@ func writeTypedParquet[T any](path string, rows []T, pageSize int, options ...pa
 	}
 	ok = true
 	return nil
+}
+
+// orderSpans returns a copy of the batch in file order, trace hash then start
+// time then span ID, with each row's trace hash. The copy shares the rows'
+// strings and maps; the caller's slice keeps its order.
+func orderSpans(spans []Span) ([]Span, []uint64) {
+	order := spanOrder{spans: slices.Clone(spans), hashes: make([]uint64, len(spans))}
+	for i := range order.spans {
+		order.hashes[i] = xxh3.HashString(order.spans[i].TraceID)
+	}
+	sort.Sort(order)
+	return order.spans, order.hashes
+}
+
+type spanOrder struct {
+	spans  []Span
+	hashes []uint64
+}
+
+func (o spanOrder) Len() int { return len(o.spans) }
+func (o spanOrder) Less(i, j int) bool {
+	if o.hashes[i] != o.hashes[j] {
+		return o.hashes[i] < o.hashes[j]
+	}
+	if o.spans[i].StartUnixNanos != o.spans[j].StartUnixNanos {
+		return o.spans[i].StartUnixNanos < o.spans[j].StartUnixNanos
+	}
+	return o.spans[i].SpanID < o.spans[j].SpanID
+}
+func (o spanOrder) Swap(i, j int) {
+	o.spans[i], o.spans[j] = o.spans[j], o.spans[i]
+	o.hashes[i], o.hashes[j] = o.hashes[j], o.hashes[i]
 }
 
 func readBatchMetadata(path string) (BatchMetadata, error) {

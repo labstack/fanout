@@ -22,8 +22,8 @@ func TestMetricPhysicalRowKeepsFidelityColumns(t *testing.T) {
 	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "fidelity"}, nil, nil, []Metric{metric}); err != nil {
 		t.Fatal(err)
 	}
-	got := readOneParquetRow[metricParquetRow](t, filepath.Join(store.BatchPath("fidelity"), "metrics.parquet"))
-	if got.SeriesID != metric.SeriesID || got.MetricType != "sum" || got.Temporality != "delta" || !got.Monotonic || got.StartTimeUnixNano != metric.StartTimeUnixNanos {
+	got := fileRows(t, filepath.Join(store.BatchPath("fidelity"), "metrics.parquet"), Metrics)[0]
+	if got["series_id"] != metric.SeriesID || got["metric_type"] != "sum" || got["temporality"] != "delta" || got["monotonic"] != true || got["start_time_unix_nano"] != metric.StartTimeUnixNanos {
 		t.Fatalf("physical=%+v", got)
 	}
 	if err := ValidatePublishedBatch(store.BatchPath("fidelity")); err != nil {
@@ -116,10 +116,13 @@ func TestFormatFourRequiresNewMetricPhysicalSchema(t *testing.T) {
 		write func(string) error
 	}{
 		{"format_three_columns", func(path string) error {
-			return writeTypedParquet(path, []formatThreeMetricParquetRow{{Name: "n", MetricType: "sum", MetricTime: 1, TimeUnixNano: 1, IngestedAt: 1, IngestedUnixNano: 1}}, 1024)
+			layout := metricLayout(map[string]*Column{"series_id": nil, "temporality": nil, "monotonic": nil, "start_time_unix_nano": nil})
+			return writeParquet(path, layout, []Metric{{Name: "n", Type: "sum", TimeUnixNanos: 1, IngestedAt: 1}}, 1024)
 		}},
 		{"temporality_int64", func(path string) error {
-			return writeTypedParquet(path, []wrongTemporalityMetricParquetRow{{Name: "n", MetricType: "sum", Temporality: 1, Monotonic: true, MetricTime: 1, TimeUnixNano: 1, IngestedAt: 1, IngestedUnixNano: 1}}, 1024)
+			temporality := i64("temporality", func(*Metric) int64 { return 1 }).dict()
+			layout := metricLayout(map[string]*Column{"temporality": &temporality})
+			return writeParquet(path, layout, []Metric{{Name: "n", Type: "sum", Monotonic: true, TimeUnixNanos: 1, IngestedAt: 1}}, 1024)
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -253,53 +256,19 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 	}
 }
 
-// Format 3 had every metric column except the three fidelity columns.
-type formatThreeMetricParquetRow struct {
-	Namespace        string  `parquet:"namespace,dict"`
-	MetricTime       int64   `parquet:"metric_time,timestamp(nanosecond)"`
-	TimeUnixNano     int64   `parquet:"time_unix_nano"`
-	Name             string  `parquet:"name,dict"`
-	Description      string  `parquet:"description,dict"`
-	Unit             string  `parquet:"unit,dict"`
-	MetricType       string  `parquet:"metric_type,dict"`
-	Service          string  `parquet:"service,dict"`
-	Value            float64 `parquet:"value"`
-	HistBoundsJSON   string  `parquet:"hist_bounds_json,dict"`
-	HistCountsJSON   string  `parquet:"hist_counts_json,dict"`
-	HistCount        int64   `parquet:"hist_count"`
-	HistSum          float64 `parquet:"hist_sum"`
-	ExemplarsJSON    string  `parquet:"exemplars_json"`
-	Attributes       any     `parquet:"attributes,variant"`
-	Resource         any     `parquet:"resource,variant"`
-	ScopeName        string  `parquet:"scope_name,dict"`
-	ScopeVersion     string  `parquet:"scope_version,dict"`
-	IngestedAt       int64   `parquet:"ingested_at,timestamp(nanosecond)"`
-	IngestedUnixNano int64   `parquet:"ingested_unix_nano"`
-}
-
-// Keep all format-4 columns and change only temporality's physical type.
-type wrongTemporalityMetricParquetRow struct {
-	Namespace         string  `parquet:"namespace,dict"`
-	MetricTime        int64   `parquet:"metric_time,timestamp(nanosecond)"`
-	TimeUnixNano      int64   `parquet:"time_unix_nano"`
-	Name              string  `parquet:"name,dict"`
-	Description       string  `parquet:"description,dict"`
-	Unit              string  `parquet:"unit,dict"`
-	MetricType        string  `parquet:"metric_type,dict"`
-	Temporality       int64   `parquet:"temporality,dict"`
-	Monotonic         bool    `parquet:"monotonic"`
-	StartTimeUnixNano int64   `parquet:"start_time_unix_nano"`
-	Service           string  `parquet:"service,dict"`
-	Value             float64 `parquet:"value"`
-	HistBoundsJSON    string  `parquet:"hist_bounds_json,dict"`
-	HistCountsJSON    string  `parquet:"hist_counts_json,dict"`
-	HistCount         int64   `parquet:"hist_count"`
-	HistSum           float64 `parquet:"hist_sum"`
-	ExemplarsJSON     string  `parquet:"exemplars_json"`
-	Attributes        any     `parquet:"attributes,variant"`
-	Resource          any     `parquet:"resource,variant"`
-	ScopeName         string  `parquet:"scope_name,dict"`
-	ScopeVersion      string  `parquet:"scope_version,dict"`
-	IngestedAt        int64   `parquet:"ingested_at,timestamp(nanosecond)"`
-	IngestedUnixNano  int64   `parquet:"ingested_unix_nano"`
+// metricLayout is the metric layout with columns replaced or, where the
+// replacement is nil, removed.
+func metricLayout(replace map[string]*Column) *Signal {
+	s := &Signal{Name: Metrics.Name, Time: Metrics.Time}
+	for _, c := range Metrics.Columns {
+		if r, ok := replace[c.Name]; ok {
+			if r == nil {
+				continue
+			}
+			c = *r
+		}
+		s.Columns = append(s.Columns, c)
+	}
+	s.schema = buildSchema(s)
+	return s
 }

@@ -3,7 +3,6 @@ package telemetry
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +12,7 @@ import (
 	"github.com/parquet-go/parquet-go"
 )
 
-func verificationFixture(t *testing.T) (string, []spanParquetRow) {
+func verificationFixture(t *testing.T) (string, []Span) {
 	t.Helper()
 	store, err := OpenParquetStore(t.TempDir())
 	if err != nil {
@@ -30,29 +29,19 @@ func verificationFixture(t *testing.T) (string, []spanParquetRow) {
 		t.Fatal(err)
 	}
 	dir := store.BatchPath("verify")
-	f, err := os.Open(filepath.Join(dir, "spans.parquet"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := parquet.NewGenericReader[spanParquetRow](f, telemetrySchema[spanParquetRow]())
-	rows := make([]spanParquetRow, len(spans))
-	if n, err := r.Read(rows); n != len(rows) || (err != nil && !errors.Is(err, io.EOF)) {
-		t.Fatal(err)
-	}
-	r.Close()
-	f.Close()
+	rows, _ := orderSpans(spans)
 	// Multiple tiny row groups make a late-page failure observable cheaply.
 	path := filepath.Join(dir, "spans.parquet")
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	f, err = os.Create(path)
+	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := parquet.NewGenericWriter[spanParquetRow](f, parquetWriterOptions(1024, telemetrySchema[spanParquetRow]())...)
+	writer := parquet.NewGenericWriter[any](f, parquetWriterOptions(1024, Spans.writerOptions()...)...)
 	for i := 0; i < len(rows); i += 2 {
-		if err := writeTelemetryColumns(writer, rows[i:i+2]); err != nil {
+		if err := writeColumns(writer, Spans, rows[i:i+2]); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Flush(); err != nil {
@@ -127,9 +116,9 @@ func TestNativeVerifierRejectsWrongSchemaAndTraceOrdering(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "time_order":
-				rows[2].StartUnixNano = 5
+				rows[2].StartUnixNanos = 5
 			case "id_order":
-				rows[1].StartUnixNano = rows[0].StartUnixNano
+				rows[1].StartUnixNanos = rows[0].StartUnixNanos
 				rows[1].SpanID = "0"
 			case "row_count":
 				rows = rows[:3]
@@ -138,7 +127,7 @@ func TestNativeVerifierRejectsWrongSchemaAndTraceOrdering(t *testing.T) {
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
-				if err := writeTypedParquet(path, rows, 1024); err != nil {
+				if err := writeParquet(path, Spans, rows, 1024); err != nil {
 					t.Fatal(err)
 				}
 			}

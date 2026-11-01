@@ -3,124 +3,114 @@ package telemetry
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/variant"
 )
 
-// writeTelemetryColumns streams variant events straight into shredded columns.
+// writeColumns streams variant events straight into shredded columns.
 // The generic map encoder builds a second object tree for every row; keeping
 // the canonical OTel maps as the event source bounds the ingest working set.
-func writeTelemetryColumns[T any](writer *parquet.GenericWriter[T], rows []T) error {
+func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R) error {
 	type scalarColumn struct {
-		field, column int
-		kind          reflect.Kind
-		values        []parquet.Value
-		bytes         []byte
+		get    any
+		column int
+		values []parquet.Value
+		bytes  []byte
 	}
 	type variantColumn struct {
-		field  int
+		get    func(*R) map[string]any
 		writer *parquet.VariantColumnWriter
 	}
-	typ := reflect.TypeFor[T]()
-	fields := make(map[string]int, typ.NumField())
-	for i := 0; i < typ.NumField(); i++ {
-		fields[strings.Split(typ.Field(i).Tag.Get("parquet"), ",")[0]] = i
-	}
 	var scalars []scalarColumn
-	var variants []variantColumn
 	for column, path := range writer.Schema().Columns() {
+		c, ok := s.Column(path[0])
+		if !ok || !c.Stored() {
+			return fmt.Errorf("parquet column %q is not a %s column", path[0], s.Name)
+		}
 		if len(path) != 1 {
-			if path[0] != "attributes" && path[0] != "resource" {
+			if c.Type != Variant {
 				return fmt.Errorf("unsupported nested Parquet column %q", path)
 			}
 			continue
 		}
-		field, ok := fields[path[0]]
-		if !ok {
-			return fmt.Errorf("parquet column %q has no row field", path[0])
-		}
-		kind := typ.Field(field).Type.Kind()
-		switch kind {
-		case reflect.Bool, reflect.String, reflect.Int64, reflect.Uint64, reflect.Float64:
+		switch c.get.(type) {
+		case func(*R) string, func(*R) int64, func(*R) uint64, func(*R) float64, func(*R) bool:
 		default:
-			return fmt.Errorf("unsupported scalar Parquet field %q", path[0])
+			return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
 		}
-		scalars = append(scalars, scalarColumn{field: field, column: column, kind: kind, values: make([]parquet.Value, 256)})
+		scalars = append(scalars, scalarColumn{get: c.get, column: column, values: make([]parquet.Value, 256)})
 	}
-	for _, name := range []string{"attributes"} {
-		field, ok := fields[name]
-		if !ok {
+	var variants []variantColumn
+	var resources *resourceColumns
+	for _, c := range s.Columns {
+		if c.Type != Variant {
 			continue
 		}
-		column, err := parquet.NewVariantColumnWriter(writer, name)
+		get, ok := c.get.(func(*R) map[string]any)
+		if !ok {
+			return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
+		}
+		stream, err := parquet.NewVariantColumnWriter(writer, c.Name)
 		if err != nil {
 			return err
 		}
-		variants = append(variants, variantColumn{field: field, writer: column})
-	}
-	resources, err := newResourceColumns(writer.Schema(), fields)
-	if err != nil {
-		return err
-	}
-	if resources != nil {
-		resources.stream, err = parquet.NewVariantColumnWriter(writer, "resource")
-		if err != nil {
+		if c.Name != "resource" {
+			variants = append(variants, variantColumn{get: get, writer: stream})
+			continue
+		}
+		if resources, err = newResourceColumns(writer.Schema()); err != nil {
 			return err
 		}
-		if err := selectSharedResources(resources, rows); err != nil {
-			return err
-		}
+		resources.stream = stream
+		selectSharedResources(resources, rows, get)
+		variants = append(variants, variantColumn{get: get})
 	}
 
 	columns := writer.ColumnWriters()
 	for start := 0; start < len(rows); {
 		end := min(start+256, len(rows), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
-		// Dispatch once per column and chunk, rather than once per cell. Keep
-		// reflection at the schema boundary while the scalar encoding loops are
-		// homogeneous and reuse their byte/value buffers.
-		var reflected [256]reflect.Value
-		for i := start; i < end; i++ {
-			reflected[i-start] = reflect.ValueOf(&rows[i]).Elem()
-		}
+		// Dispatch once per column and chunk, rather than once per cell, so
+		// the scalar encoding loops are homogeneous and reuse their byte and
+		// value buffers.
+		chunk := rows[start:end]
 		for c := range scalars {
 			column := &scalars[c]
-			switch column.kind {
-			case reflect.Bool:
-				for i := start; i < end; i++ {
-					column.values[i-start] = parquet.BooleanValue(reflected[i-start].Field(column.field).Bool()).Level(0, 0, column.column)
-				}
-			case reflect.String:
-				for i := start; i < end; i++ {
+			switch get := column.get.(type) {
+			case func(*R) string:
+				for i := range chunk {
 					offset := len(column.bytes)
-					column.bytes = append(column.bytes, reflected[i-start].Field(column.field).String()...)
-					column.values[i-start] = parquet.ByteArrayValue(column.bytes[offset:]).Level(0, 0, column.column)
+					column.bytes = append(column.bytes, get(&chunk[i])...)
+					column.values[i] = parquet.ByteArrayValue(column.bytes[offset:]).Level(0, 0, column.column)
 				}
-			case reflect.Int64:
-				for i := start; i < end; i++ {
-					column.values[i-start] = parquet.Int64Value(reflected[i-start].Field(column.field).Int()).Level(0, 0, column.column)
+			case func(*R) int64:
+				for i := range chunk {
+					column.values[i] = parquet.Int64Value(get(&chunk[i])).Level(0, 0, column.column)
 				}
-			case reflect.Uint64:
-				for i := start; i < end; i++ {
-					column.values[i-start] = parquet.Int64Value(int64(reflected[i-start].Field(column.field).Uint())).Level(0, 0, column.column)
+			case func(*R) uint64:
+				for i := range chunk {
+					column.values[i] = parquet.Int64Value(int64(get(&chunk[i]))).Level(0, 0, column.column)
 				}
-			case reflect.Float64:
-				for i := start; i < end; i++ {
-					column.values[i-start] = parquet.DoubleValue(reflected[i-start].Field(column.field).Float()).Level(0, 0, column.column)
+			case func(*R) float64:
+				for i := range chunk {
+					column.values[i] = parquet.DoubleValue(get(&chunk[i])).Level(0, 0, column.column)
+				}
+			case func(*R) bool:
+				for i := range chunk {
+					column.values[i] = parquet.BooleanValue(get(&chunk[i])).Level(0, 0, column.column)
 				}
 			}
 		}
-		for i := start; i < end; i++ {
-			row := reflected[i-start]
-			if resources != nil {
-				if err := resources.append(row.Field(resources.field).Interface(), columns); err != nil {
-					return err
-				}
-			}
+		for i := range chunk {
 			for _, column := range variants {
-				value := row.Field(column.field).Interface()
-				if value == nil || (reflect.ValueOf(value).Kind() == reflect.Map && reflect.ValueOf(value).IsNil()) {
+				value := column.get(&chunk[i])
+				if column.writer == nil {
+					if err := resources.append(value, columns); err != nil {
+						return err
+					}
+					continue
+				}
+				if value == nil {
 					if err := column.writer.WriteNullRow(); err != nil {
 						return err
 					}
@@ -139,10 +129,10 @@ func writeTelemetryColumns[T any](writer *parquet.GenericWriter[T], rows []T) er
 		}
 		for c := range scalars {
 			column := &scalars[c]
-			if _, err := columns[column.column].WriteRowValues(column.values[:end-start]); err != nil {
+			if _, err := columns[column.column].WriteRowValues(column.values[:len(chunk)]); err != nil {
 				return err
 			}
-			clear(column.values[:end-start])
+			clear(column.values[:len(chunk)])
 			column.bytes = column.bytes[:0]
 		}
 		if resources != nil {
@@ -204,7 +194,6 @@ func writeVariantValue(writer variant.ValueBuilder, value any) error {
 // Reflect values compare object identities and retain their Go objects. The
 // cache owns cloned physical cells and is bounded to 64 canonical objects.
 type resourceColumns struct {
-	field   int
 	schema  *parquet.Schema
 	columns []int
 	values  [][]parquet.Value
@@ -213,15 +202,11 @@ type resourceColumns struct {
 	stream  *parquet.VariantColumnWriter
 	pending int
 }
-type resourceParquetRow struct {
+type resourceRow struct {
 	Resource any `parquet:"resource,variant"`
 }
 
-func newResourceColumns(schema *parquet.Schema, fields map[string]int) (*resourceColumns, error) {
-	field, ok := fields["resource"]
-	if !ok {
-		return nil, nil
-	}
+func newResourceColumns(schema *parquet.Schema) (*resourceColumns, error) {
 	var node parquet.Node
 	for _, f := range schema.Fields() {
 		if f.Name() == "resource" {
@@ -232,7 +217,7 @@ func newResourceColumns(schema *parquet.Schema, fields map[string]int) (*resourc
 	if node == nil {
 		return nil, fmt.Errorf("resource missing from physical schema")
 	}
-	r := &resourceColumns{field: field, schema: parquet.NewSchema("resource", parquet.Group{"resource": node}), cache: make(map[reflect.Value]parquet.Row)}
+	r := &resourceColumns{schema: parquet.NewSchema("resource", parquet.Group{"resource": node}), cache: make(map[reflect.Value]parquet.Row)}
 	for _, path := range r.schema.Columns() {
 		column := -1
 		for i, full := range schema.Columns() {
@@ -249,28 +234,19 @@ func newResourceColumns(schema *parquet.Schema, fields map[string]int) (*resourc
 	}
 	return r, nil
 }
-func resourceKey(value any) (reflect.Value, any, error) {
-	var key reflect.Value
-	if value != nil {
-		object, ok := value.(map[string]any)
-		if !ok {
-			return key, nil, fmt.Errorf("resource must be a canonical object, got %T", value)
-		}
-		if object != nil {
-			key = reflect.ValueOf(object)
-		} else {
-			value = nil
-		}
+
+// resourceKey is the object's identity; an absent resource has the zero key.
+func resourceKey(value map[string]any) reflect.Value {
+	if value == nil {
+		return reflect.Value{}
 	}
-	return key, value, nil
+	return reflect.ValueOf(value)
 }
-func selectSharedResources[T any](r *resourceColumns, rows []T) error {
+
+func selectSharedResources[R any](r *resourceColumns, rows []R, get func(*R) map[string]any) {
 	candidates := map[reflect.Value]int{}
 	for i := range rows {
-		key, _, err := resourceKey(reflect.ValueOf(&rows[i]).Elem().Field(r.field).Interface())
-		if err != nil {
-			return err
-		}
+		key := resourceKey(get(&rows[i]))
 		if count, ok := candidates[key]; ok {
 			candidates[key] = count + 1
 		} else if len(candidates) < 64 {
@@ -283,13 +259,10 @@ func selectSharedResources[T any](r *resourceColumns, rows []T) error {
 			r.shared[key] = true
 		}
 	}
-	return nil
 }
-func (r *resourceColumns) append(value any, columns []*parquet.ColumnWriter) error {
-	key, value, err := resourceKey(value)
-	if err != nil {
-		return err
-	}
+
+func (r *resourceColumns) append(value map[string]any, columns []*parquet.ColumnWriter) error {
+	key := resourceKey(value)
 	if !r.shared[key] {
 		// Preserve row order when an uncached resource follows buffered cells.
 		if err := r.flush(columns); err != nil {
@@ -308,7 +281,11 @@ func (r *resourceColumns) append(value any, columns []*parquet.ColumnWriter) err
 	}
 	encoded, ok := r.cache[key]
 	if !ok {
-		encoded = r.schema.Deconstruct(nil, resourceParquetRow{Resource: value}).Clone()
+		row := resourceRow{}
+		if value != nil {
+			row.Resource = value
+		}
+		encoded = r.schema.Deconstruct(nil, row).Clone()
 		r.cache[key] = encoded
 	}
 	if len(encoded) != len(r.columns) {

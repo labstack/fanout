@@ -22,7 +22,7 @@ import (
 // Columns own their input cursors and output buffers; only footer publication
 // is serial. At most eight columns decode/encode at once, sharing the existing
 // compression pool and preserving the ingest writer's row-group ceiling.
-func mergeTypedParquet[T any](ctx context.Context, inputs []string, output string, sorted bool, stats *ParquetMergeStats) (err error) {
+func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string, stats *ParquetMergeStats) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -35,7 +35,10 @@ func mergeTypedParquet[T any](ctx context.Context, inputs []string, output strin
 			err = errors.Join(err, f.Close())
 		}
 	}()
-	schema := telemetrySchema[T]()
+	schema := s.schema
+	// A sorted signal is merged on its sort key; the key cursor reads the
+	// span order, the only one Signal.Sort declares.
+	sorted := len(s.Sort) > 0
 	var groups []parquet.RowGroup
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
@@ -76,11 +79,7 @@ func mergeTypedParquet[T any](ctx context.Context, inputs []string, output strin
 			_ = os.Remove(output)
 		}
 	}()
-	options := []parquet.WriterOption{schema}
-	if sorted {
-		options = append(options, parquet.SortingWriterConfig(spanSortingColumns()))
-	}
-	writer := parquet.NewGenericWriter[T](out, parquetWriterOptions(parquetPageSize, options...)...)
+	writer := parquet.NewGenericWriter[any](out, parquetWriterOptions(parquetPageSize, s.writerOptions()...)...)
 	// Close on failure too: it returns the column page buffers to their pool.
 	defer func() {
 		if !ok {
@@ -101,7 +100,7 @@ func mergeTypedParquet[T any](ctx context.Context, inputs []string, output strin
 		}()
 		for i, group := range groups {
 			c := &mergeKeyCursor{input: i, remaining: group.NumRows()}
-			for k, name := range [...]string{"_trace_hash", "start_unix_nano", "span_id"} {
+			for k, name := range s.Sort {
 				leaf, _ := schema.Lookup(name)
 				c.readers[k] = parquet.NewColumnChunkValueReader(group.ColumnChunks()[leaf.ColumnIndex])
 			}

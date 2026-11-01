@@ -6,15 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/parquet-go/parquet-go"
 )
 
 func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
@@ -76,10 +73,8 @@ func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
 	if !reflect.DeepEqual(spans, []IndexedSpan{wantIndexed}) {
 		t.Fatalf("trace projection mismatch\n got: %#v\nwant: %#v", spans, []IndexedSpan{wantIndexed})
 	}
-	gotSpan := readOneParquetRow[spanParquetRow](t, filepath.Join(batchDir, "spans.parquet"))
-	wantSpan := makeSpanParquetRow(span)
-	wantSpan.TraceHash = gotSpan.TraceHash
-	if !reflect.DeepEqual(gotSpan, wantSpan) {
+	gotSpan := fileRows(t, filepath.Join(batchDir, "spans.parquet"), Spans)[0]
+	if wantSpan := wantRow(Spans, &span); !reflect.DeepEqual(gotSpan, wantSpan) {
 		t.Fatalf("complete span row mismatch\n got: %#v\nwant: %#v", gotSpan, wantSpan)
 	}
 }
@@ -197,18 +192,18 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	batchDir := store.BatchPath("complete-signals")
-	gotLog := readOneParquetRow[logParquetRow](t, filepath.Join(batchDir, "logs.parquet"))
-	if gotLog.LogTime != logRow.EventUnixNanos {
-		t.Fatalf("log event time = %d, want canonical %d", gotLog.LogTime, logRow.EventUnixNanos)
+	gotLog := fileRows(t, filepath.Join(batchDir, "logs.parquet"), Logs)[0]
+	if gotLog["log_time"] != logRow.EventUnixNanos {
+		t.Fatalf("log event time = %d, want canonical %d", gotLog["log_time"], logRow.EventUnixNanos)
 	}
-	if want := makeLogParquetRow(logRow); !reflect.DeepEqual(gotLog, want) {
+	if want := wantRow(Logs, &logRow); !reflect.DeepEqual(gotLog, want) {
 		t.Fatalf("log row mismatch\n got: %#v\nwant: %#v", gotLog, want)
 	}
-	gotMetric := readOneParquetRow[metricParquetRow](t, filepath.Join(batchDir, "metrics.parquet"))
-	if gotMetric.MetricTime != metricRow.EventUnixNanos {
-		t.Fatalf("metric event time = %d, want canonical %d", gotMetric.MetricTime, metricRow.EventUnixNanos)
+	gotMetric := fileRows(t, filepath.Join(batchDir, "metrics.parquet"), Metrics)[0]
+	if gotMetric["metric_time"] != metricRow.EventUnixNanos {
+		t.Fatalf("metric event time = %d, want canonical %d", gotMetric["metric_time"], metricRow.EventUnixNanos)
 	}
-	if want := makeMetricParquetRow(metricRow); !reflect.DeepEqual(gotMetric, want) {
+	if want := wantRow(Metrics, &metricRow); !reflect.DeepEqual(gotMetric, want) {
 		t.Fatalf("metric row mismatch\n got: %#v\nwant: %#v", gotMetric, want)
 	}
 }
@@ -506,22 +501,6 @@ func traceAll(store *ParquetStore, traceID string) ([]IndexedSpan, error) {
 		TraceID: traceID, StartNanos: math.MinInt64, EndNanos: math.MaxInt64, Limit: maxTraceQueryResults,
 	})
 	return spans, err
-}
-
-func readOneParquetRow[T any](t *testing.T, path string) T {
-	t.Helper()
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	reader := parquet.NewGenericReader[T](file)
-	defer reader.Close()
-	var rows [1]T
-	if n, err := reader.Read(rows[:]); err != nil && !errors.Is(err, io.EOF) || n != 1 {
-		t.Fatalf("read %s: rows=%d err=%v", path, n, err)
-	}
-	return rows[0]
 }
 
 // TestCommitBatchDoesNotBlockIndefinitelyOnStalledPublication pins the

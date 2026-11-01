@@ -1,0 +1,72 @@
+message spans {
+	required int64 _trace_hash (INT(64,false));
+	optional group attributes (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group messaging.destination.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group messaging.system {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary db_system (STRING);
+	required binary deployment_env (STRING);
+	required double duration_ms;
+	required int64 end_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 end_unix_nano (INT(64,true));
+	required binary events_json (STRING);
+	required binary exception_message (STRING);
+	required binary exception_type (STRING);
+	required int64 flags (INT(64,true));
+	required binary http_method (STRING);
+	required binary http_route (STRING);
+	required binary http_status_code (STRING);
+	required int64 ingested_at (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 ingested_unix_nano (INT(64,true));
+	required binary kind (STRING);
+	required binary links_json (STRING);
+	required binary namespace (STRING);
+	required binary operation (STRING);
+	required binary parent_span_id (STRING);
+	required binary peer_service (STRING);
+	optional group resource (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group deployment.environment.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.namespace {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.version {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary rpc_method (STRING);
+	required binary rpc_service (STRING);
+	required binary scope_name (STRING);
+	required binary scope_version (STRING);
+	required binary service (STRING);
+	required binary service_version (STRING);
+	required binary span_id (STRING);
+	required int64 start_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 start_unix_nano (INT(64,true));
+	required binary status (STRING);
+	required binary status_message (STRING);
+	required binary trace_id (STRING);
+	required binary trace_state (STRING);
+}

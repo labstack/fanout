@@ -39,8 +39,8 @@ import (
 // measured 3x-9x: encoders rebuilt after each garbage collection allocated
 // 8 MiB of match history apiece, and that history outweighed every copy.
 //
-// What remains above 1x is a conversion copy of every JSON column
-// (makeSpanParquetRow) plus row-struct headers and the writer's own buffers.
+// What remains above 1x is the ordered copy of the batch's row headers
+// (orderSpans) and the writer's own buffers.
 // Lower this constant as each is addressed; see the ordered plan in the
 // ingest-memory issue.
 const commitAllocRatioLimit = 3.0

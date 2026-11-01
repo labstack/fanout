@@ -1,0 +1,55 @@
+message logs {
+	optional group attributes (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group messaging.destination.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group messaging.system {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary body (STRING);
+	required binary body_template (STRING);
+	required int64 flags (INT(64,true));
+	required int64 ingested_at (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 ingested_unix_nano (INT(64,true));
+	required int64 log_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required binary namespace (STRING);
+	required int64 observed_time (TIMESTAMP(isAdjustedToUTC=true,unit=NANOS));
+	required int64 observed_time_unix_nano (INT(64,true));
+	optional group resource (VARIANT) {
+		required binary metadata;
+		optional binary value;
+		optional group typed_value {
+			required group deployment.environment.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.name {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.namespace {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+			required group service.version {
+				optional binary value;
+				optional binary typed_value (STRING);
+			}
+		}
+	}
+	required binary scope_name (STRING);
+	required binary scope_version (STRING);
+	required binary service (STRING);
+	required binary severity (STRING);
+	required int64 severity_number (INT(64,true));
+	required binary span_id (STRING);
+	required int64 time_unix_nano (INT(64,true));
+	required binary trace_id (STRING);
+}

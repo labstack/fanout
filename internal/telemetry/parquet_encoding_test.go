@@ -1,9 +1,7 @@
 package telemetry
 
 import (
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,7 +59,7 @@ func TestSpanParquetDictionaryEncodesLowCardinalityColumns(t *testing.T) {
 	}
 	// The encoding is physical layout, not schema: the fixed format-4 schema
 	// still matches, so files written either way remain readable together.
-	if !parquet.EqualNodes(file.Schema(), telemetrySchema[spanParquetRow]()) {
+	if !parquet.EqualNodes(file.Schema(), Spans.schema) {
 		t.Fatal("dictionary encoding changed the physical schema")
 	}
 	rows, totals, err := store.Trace(t.Context(), TraceQuery{TraceID: spans[7].TraceID, StartNanos: 0, EndNanos: 1000, Limit: 10})
@@ -110,13 +108,9 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	if !plainPages {
 		t.Fatalf("http_route stayed dictionary encoded past its bound: %+v", stats)
 	}
-	rows := make([]spanParquetRow, len(spans))
-	if n, err := parquet.NewGenericReader[spanParquetRow](file).Read(rows); n != len(spans) || (err != nil && !errors.Is(err, io.EOF)) {
-		t.Fatalf("read %d rows: %v", n, err)
-	}
-	routes := map[string]bool{}
-	for _, row := range rows {
-		routes[row.HTTPRoute] = true
+	routes := map[any]bool{}
+	for _, row := range fileRows(t, filepath.Join(store.BatchPath("bounded"), "spans.parquet"), Spans) {
+		routes[row["http_route"]] = true
 	}
 	if len(routes) != len(spans) || !routes[spans[len(spans)-1].HTTPRoute] {
 		t.Fatalf("read back %d distinct routes, want %d", len(routes), len(spans))
