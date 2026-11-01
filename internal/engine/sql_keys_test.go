@@ -228,8 +228,7 @@ func TestDedicatedColumnsStayHidden(t *testing.T) {
 	at := time.Now().UTC()
 	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at.Add(-time.Hour), End: at})
 	for query, want := range map[string]string{
-		`SELECT COLUMNS('_a_http_route') FROM spans`:                  `matches internal column "_a_http_route"`,
-		`SELECT COLUMNS('.*route') FROM spans`:                        `matches internal column "_a_http_route"`,
+		`SELECT COLUMNS('.*route') AS 'x' FROM spans`:                 `matches internal column "_a_http_route"`,
 		`SELECT struct_extract(s, '_a_http_route') FROM spans s`:      `row reference "s" is not available`,
 		`SELECT s FROM spans s`:                                       `row reference "s" is not available`,
 		`WITH t AS (SELECT * FROM spans) SELECT to_json(t) FROM t`:    `row reference "t" is not available`,
@@ -264,5 +263,44 @@ func TestDedicatedColumnsStayHidden(t *testing.T) {
 	compiled, err := compileRelations(t.Context(), d.DB, `SELECT COLUMNS(lambda c: c LIKE '%e%') FROM (SELECT * FROM spans)`, nil, map[string]string{})
 	if err != nil || !strings.Contains(compiled, `list_filter(* EXCLUDE (`) {
 		t.Fatalf("%s: %v", compiled, err)
+	}
+}
+
+// COLUMNS patterns select as DuckDB matches them, without the dedicated
+// columns, and PIVOT and UNPIVOT carry none of them either.
+func TestPatternsAndPivotsHideDedicatedColumns(t *testing.T) {
+	d, _ := newBatchCacheTest(t)
+	at := time.Now().UTC()
+	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at.Add(-time.Hour), End: at})
+	for query, want := range map[string][]string{
+		`SELECT COLUMNS('.*') FROM spans`:                                                                          nil,
+		`SELECT COLUMNS('ource') FROM logs`:                                                                        {"resource"},
+		`SELECT max(COLUMNS('ion_ms')) FROM spans`:                                                                 {"duration_ms"},
+		`SELECT * FROM (UNPIVOT (SELECT * FROM spans) ON operation, service INTO NAME k VALUE v)`:                  nil,
+		`SELECT * FROM (UNPIVOT logs ON body, service INTO NAME k VALUE v) WHERE attributes['http.route'] IS NULL`: nil,
+	} {
+		rows, err := d.QueryContext(ctx, query+` LIMIT 0`)
+		if err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		columns, err := rows.Columns()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range columns {
+			if _, internal := internalColumn(c); internal {
+				t.Fatalf("%s returns %s", query, c)
+			}
+		}
+		for _, c := range want {
+			if !slices.Contains(columns, c) {
+				t.Fatalf("%s: %v lacks %s", query, columns, c)
+			}
+		}
+	}
+	// A pattern only a dedicated column matches matches nothing.
+	if _, err := d.QueryContext(ctx, `SELECT COLUMNS('_a_http_route') FROM spans`); err == nil || !strings.Contains(err.Error(), "empty set of columns") {
+		t.Fatalf("pattern of a dedicated column: %v", err)
 	}
 }

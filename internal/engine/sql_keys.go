@@ -360,8 +360,11 @@ func excludeStar(star map[string]any, scope *keyScope) {
 
 // expressionStar hides the dedicated columns from a star inside an
 // expression, or from COLUMNS. A COLUMNS pattern cannot carry an exclude
-// list, so one that matches a dedicated column is rejected; a lambda filters
-// the star it is given, which excludes them itself.
+// list, so it becomes the equivalent lambda over a star that excludes them:
+// DuckDB matches a COLUMNS pattern as regexp_matches does, anywhere in the
+// name and case-sensitively. An aliased pattern may rename by its groups, so
+// it stays a pattern and is rejected if it matches a dedicated column. A
+// lambda filters the star it is given, which excludes them itself.
 func (r *keyRewriter) expressionStar(star map[string]any, scope *keyScope) {
 	pattern, _ := star["expr"].(map[string]any)
 	if pattern == nil {
@@ -375,7 +378,11 @@ func (r *keyRewriter) expressionStar(star map[string]any, scope *keyScope) {
 	literal, _ := pattern["literal"].(map[string]any)
 	text, _ := literal["text"].(string)
 	if pattern["class"] == "CONSTANT" && literal["kind"] == "STRING" {
-		re, err := regexp.Compile("(?i)" + text)
+		if alias, _ := star["alias"].(string); alias == "" {
+			star["expr"] = patternFilter(star, pattern)
+			return
+		}
+		re, err := regexp.Compile(text)
 		if err != nil {
 			r.err = fmt.Errorf("COLUMNS pattern %q is not available to telemetry SQL", text)
 			return
@@ -391,6 +398,29 @@ func (r *keyRewriter) expressionStar(star map[string]any, scope *keyScope) {
 	if !containsStar(pattern) {
 		r.err = errors.New("this COLUMNS expression is not available to telemetry SQL; use *, a pattern or a lambda")
 	}
+}
+
+// patternFilter writes COLUMNS('re') as COLUMNS(list_filter(*, lambda c:
+// regexp_matches(c, 're'))); expr then excludes the dedicated columns from
+// the inner star.
+func patternFilter(star, pattern map[string]any) map[string]any {
+	param := func() map[string]any {
+		return map[string]any{"class": "COLUMN_REF", "type": "COLUMN_REF", "alias": "", "column_names": []any{"__fanout_column"}}
+	}
+	function := func(name string, args ...map[string]any) map[string]any {
+		arguments := make([]any, len(args))
+		for i, a := range args {
+			arguments[i] = map[string]any{"expression": a, "name": ""}
+		}
+		return map[string]any{"class": "FUNCTION", "type": "FUNCTION", "alias": "", "function_name": name, "schema": "", "catalog": "",
+			"arguments": arguments, "filter": nil, "order_bys": map[string]any{"type": "ORDER_MODIFIER", "orders": []any{}},
+			"distinct": false, "is_operator": false, "export_state": false}
+	}
+	inner := map[string]any{"class": "STAR", "type": "STAR", "alias": "", "columns": false, "expr": nil, "relation_name": star["relation_name"],
+		"exclude_list": []any{}, "qualified_exclude_list": []any{}, "replace_list": []any{}, "rename_list": []any{}}
+	lambda := map[string]any{"class": "LAMBDA", "type": "LAMBDA", "alias": "", "syntax_type": "LAMBDA_KEYWORD", "lhs": param(),
+		"expr": function("regexp_matches", param(), pattern)}
+	return function("list_filter", inner, lambda)
 }
 
 func containsStar(value any) bool {
@@ -489,6 +519,9 @@ func (r *keyRewriter) from(value any, scope *keyScope) {
 		r.from(ref["left"], scope)
 		r.from(ref["right"], scope)
 		r.expr(ref["condition"], scope)
+	case "PIVOT":
+		r.pivot(ref, scope)
+		bind("", &keyRelation{open: true})
 	default:
 		for key, child := range ref {
 			if key != "alias" {
@@ -496,6 +529,37 @@ func (r *keyRewriter) from(value any, scope *keyScope) {
 			}
 		}
 		bind("", &keyRelation{open: true})
+	}
+}
+
+// pivot keeps the dedicated columns out of a PIVOT or UNPIVOT, whose
+// output carries its source's other columns: the source becomes a subquery
+// that excludes them, so the pivot's own expressions read the maps.
+func (r *keyRewriter) pivot(ref map[string]any, scope *keyScope) {
+	source, _ := ref["source"].(map[string]any)
+	inner := &keyScope{parent: scope, relations: map[string]*keyRelation{}}
+	r.from(source, inner)
+	star := map[string]any{"class": "STAR", "type": "STAR", "alias": "", "columns": false, "expr": nil, "relation_name": "",
+		"exclude_list": []any{}, "qualified_exclude_list": []any{}, "replace_list": []any{}, "rename_list": []any{}}
+	if names := starHidden(star, inner); len(names) > 0 && source != nil {
+		excludeStar(star, inner)
+		alias, _ := source["alias"].(string)
+		if alias == "" && source["type"] == "BASE_TABLE" {
+			alias, _ = source["table_name"].(string)
+		}
+		ref["source"] = map[string]any{"type": "SUBQUERY", "alias": alias, "sample": nil, "column_name_alias": []any{},
+			"subquery": map[string]any{"named_param_map": []any{}, "node": map[string]any{
+				"type": "SELECT_NODE", "modifiers": []any{}, "cte_map": map[string]any{"map": []any{}},
+				"select_list": []any{star}, "from_table": source, "where_clause": nil, "group_expressions": []any{}, "group_sets": []any{},
+				"aggregate_handling": "STANDARD_HANDLING", "having": nil, "sample": nil, "qualify": nil,
+			}}}
+	}
+	opaque := &keyScope{parent: scope, relations: map[string]*keyRelation{}}
+	opaque.bind("", &keyRelation{open: true})
+	for key, child := range ref {
+		if key != "alias" && key != "source" {
+			r.walk(child, opaque)
+		}
 	}
 }
 
