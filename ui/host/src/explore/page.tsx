@@ -131,10 +131,13 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   // The window the range menu asked for: reaching it reruns the editor; reaching any other is navigation.
   const asked = useRef<string | undefined>(undefined);
   const pickWindow = (next: ExploreSearch) => { if (windowOf(next) !== windowKey) asked.current = windowOf(next); onSearch(next); };
+  // The window last shown; unset until the page has opened.
+  const seen = useRef<string | undefined>(undefined);
   // Responses compare against what is in the editors now, not when they were sent.
   const current = useRef({ text, sql }); current.current = { text, sql };
   const schema = useQuery({ queryKey: ["telemetry-schema"], queryFn: ({ signal }) => getTelemetrySchema(signal), staleTime: 60_000, retry: false, enabled: search.tab !== "query" });
-  useEffect(() => () => { controller.current?.abort(); formatter.current.abort?.abort(); clearTimeout(formatter.current.timer); }, []);
+  // A remount, as StrictMode does, opens the page again.
+  useEffect(() => () => { controller.current?.abort(); formatter.current.abort?.abort(); clearTimeout(formatter.current.timer); seen.current = undefined; }, []);
 
   /** `direct` runs a builder query the text cannot carry (format said editable: false). */
   const execute = async (kind: Kind, source: string, viz?: Viz, direct?: Query) => {
@@ -254,7 +257,6 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   };
 
   // Back and Forward bring another entry, which may differ only in its window: show and run what it holds, never the draft.
-  const seen = useRef<string | undefined>(undefined);
   useEffect(() => {
     const entry = { q: search.q, sql: search.sql ?? "", viz: search.viz };
     const same = entry.q === shown.current.q && entry.sql === shown.current.sql && entry.viz === shown.current.viz;

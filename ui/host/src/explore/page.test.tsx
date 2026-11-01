@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, within } from "@testing-library/dom";
 import { EditorView } from "@codemirror/view";
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExplorePage } from "./page";
@@ -44,13 +44,13 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => cleanups.splice(0).forEach(cleanup => cleanup())); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
-async function render(initial: Partial<ExploreSearch> = {}) {
+async function render(initial: Partial<ExploreSearch> = {}, strict = false) {
   const host = document.createElement("div"); document.body.append(host);
   const root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   let search: ExploreSearch = { q: "", range: "1h", tab: "query", ...initial };
   const onSearch = vi.fn((next: ExploreSearch, _replace?: boolean) => { search = next; void draw(); });
   const onSaved = vi.fn<(id: string) => void>();
-  const draw = async () => act(async () => root.render(<MantineProvider><QueryClientProvider client={client}><ExplorePage search={search} onSearch={onSearch} onSaved={onSaved} /></QueryClientProvider></MantineProvider>));
+  const draw = async () => act(async () => { const page = <MantineProvider><QueryClientProvider client={client}><ExplorePage search={search} onSearch={onSearch} onSaved={onSaved} /></QueryClientProvider></MantineProvider>; root.render(strict ? <StrictMode>{page}</StrictMode> : page); });
   cleanups.push(() => { root.unmount(); client.clear(); });
   await draw();
   const ui = within(host);
@@ -136,6 +136,11 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" }));
     expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(4));
+  });
+
+  it("runs a shared link on open under StrictMode's remount", async () => {
+    const { ui, wait } = await render({ q: "spans | count() by service" }, true);
+    await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
   });
 
   it("restores an entry's own text and window on Back after a range change, without rewriting it", async () => {
