@@ -1,0 +1,1 @@
+import{t as e}from"./chat-_z0TlgOA.js";var t=e;export{t as component};
