@@ -20,8 +20,9 @@ import (
 // canonical OTel maps as the event source bounds the ingest working set.
 func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32, spilled *spills) error {
 	type variantColumn struct {
-		get    func(*R) map[string]any
-		writer *parquet.VariantColumnWriter
+		get        func(*R) map[string]any
+		writer     *parquet.VariantColumnWriter
+		attributes bool
 	}
 	leaves := map[string]int{}
 	for i, path := range writer.Schema().Columns() {
@@ -78,7 +79,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 				return err
 			}
 			if c.Name != "resource" {
-				variants = append(variants, variantColumn{get: get, writer: stream})
+				variants = append(variants, variantColumn{get: get, writer: stream, attributes: c.Name == "attributes"})
 				continue
 			}
 			if resources, err = newResourceColumns(writer.Schema()); err != nil {
@@ -137,7 +138,15 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 				if err := column.writer.BeginRow(); err != nil {
 					return err
 				}
-				if err := encoder.write(column.writer, value); err != nil {
+				var err error
+				// Attributes gathered for the dedicated columns are not
+				// walked a second time.
+				if fields, ok := keys.fields(i); column.attributes && ok {
+					err = encoder.object(column.writer, fields, 0)
+				} else {
+					err = encoder.write(column.writer, value)
+				}
+				if err != nil {
 					return err
 				}
 				if err := column.writer.EndRow(); err != nil {
@@ -370,7 +379,9 @@ func variantList[R any](encoder *variantEncoder, metadata, value *cellWriter, ge
 
 // keyWriter fills the dedicated columns and _spill from each row's
 // attributes and resource. A resource map is shared by the rows of its OTLP
-// block, so its part of the projection is computed once per map. Most rows
+// block, so its part of the projection is computed once per map. A row's
+// attributes are gathered once, in key order, for both its dedicated columns
+// and its attributes variant. Most rows
 // hold few of the keys: a row visits only the columns it fills, and each
 // column's NULLs are appended as one run when its next value or the chunk's
 // end arrives.
@@ -383,6 +394,21 @@ type keyWriter[R any] struct {
 	spill                *cellWriter
 	counts               *spills
 	resources            map[reflect.Value]*keyRow
+	entries              []field // the chunk's attribute entries, in key order by row
+	ends                 []int   // by chunk row: the end of its entries
+}
+
+// fields returns chunk row i's attribute entries, when the chunk's attributes
+// were gathered.
+func (k *keyWriter[R]) fields(i int) ([]field, bool) {
+	if i >= len(k.ends) {
+		return nil, false
+	}
+	start := 0
+	if i > 0 {
+		start = k.ends[i-1]
+	}
+	return k.entries[start:k.ends[i]], true
 }
 
 // keyRow is a map's projection: the values of the keys it holds with their
@@ -400,9 +426,10 @@ func (k *keyWriter[R]) add(c Column, w *cellWriter) {
 	k.keys = append(k.keys, *c.Key)
 }
 
-func (k *keyWriter[R]) project(row *keyRow, scope semconv.Scope, values map[string]any) {
+func (k *keyWriter[R]) project(row *keyRow, scope semconv.Scope, fields []field) {
 	names := k.byName[scope]
-	for name, v := range values {
+	for _, f := range fields {
+		name, v := f.key, f.value
 		position, ok := names[name]
 		// A null value has no type: the column stays NULL without a spill.
 		if !ok || v == nil {
@@ -429,6 +456,8 @@ func typed(v any, t semconv.Type) bool {
 }
 
 func (k *keyWriter[R]) fill(chunk []R) {
+	clear(k.entries)
+	k.entries, k.ends = k.entries[:0], k.ends[:0]
 	var row keyRow
 	for i := range chunk {
 		row = keyRow{}
@@ -437,7 +466,10 @@ func (k *keyWriter[R]) fill(chunk []R) {
 			if cached, ok := k.resources[id]; ok {
 				row = *cached
 			} else {
-				k.project(&row, semconv.Resource, resource)
+				start := len(k.entries)
+				k.entries = gather(k.entries, resource)
+				k.project(&row, semconv.Resource, k.entries[start:])
+				k.entries = k.entries[:start]
 				if len(k.resources) < 64 {
 					cached := row
 					k.resources[id] = &cached
@@ -445,7 +477,10 @@ func (k *keyWriter[R]) fill(chunk []R) {
 			}
 		}
 		if len(k.byName[semconv.Span]) > 0 {
-			k.project(&row, semconv.Span, k.attributes(&chunk[i]))
+			start := len(k.entries)
+			k.entries = gather(k.entries, k.attributes(&chunk[i]))
+			k.project(&row, semconv.Span, k.entries[start:])
+			k.ends = append(k.ends, len(k.entries))
 		}
 		for has := row.has; has != 0; has &= has - 1 {
 			position := bits.TrailingZeros64(has)
@@ -508,6 +543,31 @@ func (e *variantEncoder) write(writer variant.ValueBuilder, value any) error {
 	return e.value(writer, value, 0)
 }
 
+// gather appends a map's entries to dst in key order.
+func gather(dst []field, value map[string]any) []field {
+	start := len(dst)
+	for key, v := range value {
+		dst = append(dst, field{key, v})
+	}
+	if len(dst)-start > 1 {
+		slices.SortFunc(dst[start:], func(a, b field) int { return strings.Compare(a.key, b.key) })
+	}
+	return dst
+}
+
+// object writes an object at depth from its entries in key order.
+func (e *variantEncoder) object(writer variant.ValueBuilder, fields []field, depth int) error {
+	writer.BeginObject()
+	for _, f := range fields {
+		writer.Field(f.key)
+		if err := e.value(writer, f.value, depth+1); err != nil {
+			return err
+		}
+	}
+	writer.EndObject()
+	return nil
+}
+
 func (e *variantEncoder) value(writer variant.ValueBuilder, value any, depth int) error {
 	switch value := value.(type) {
 	case nil:
@@ -528,23 +588,13 @@ func (e *variantEncoder) value(writer variant.ValueBuilder, value any, depth int
 		for depth >= len(e.fields) {
 			e.fields = append(e.fields, nil)
 		}
-		fields := e.fields[depth][:0]
-		for key, v := range value {
-			fields = append(fields, field{key, v})
-		}
-		if len(fields) > 1 {
-			slices.SortFunc(fields, func(a, b field) int { return strings.Compare(a.key, b.key) })
-		}
+		fields := gather(e.fields[depth][:0], value)
 		e.fields[depth] = fields
-		writer.BeginObject()
-		for _, f := range fields {
-			writer.Field(f.key)
-			if err := e.value(writer, f.value, depth+1); err != nil {
-				return err
-			}
-		}
-		writer.EndObject()
+		err := e.object(writer, fields, depth)
 		clear(fields)
+		if err != nil {
+			return err
+		}
 	case []any:
 		writer.BeginArray()
 		for _, child := range value {
