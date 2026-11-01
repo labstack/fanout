@@ -128,6 +128,15 @@ describe("FanqlEditor", () => {
     });
   });
 
+  it("drops whole-query problems on a fix-it, which may have resolved them, but keeps whole-query notices", async () => {
+    const at = { start: 8, end: 13 };
+    const problems = [{ path: "text", message: "unknown function cuont", span: at, fix_its: [{ label: "count", span: at, text: "count" }] }, { path: "query", message: "the query needs a measure" }];
+    const notices = [{ path: "text", message: "Grouped by service" }];
+    const { change } = await renderEditor({ value: "spans | cuont() by service", problems, notices });
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-fanql-problems] button")!.click());
+    expect(change).toHaveBeenLastCalledWith("spans | count() by service", { problems: [], notices });
+  });
+
   it("drops the items a fix-it touches and keeps those before it in place", async () => {
     const value = "spans | count() by host.name";
     const by = { start: 16, end: 28 }, host = { start: 19, end: 28 };

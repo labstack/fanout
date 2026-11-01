@@ -47,8 +47,8 @@ export type FanqlEditorProps = {
 const describe = (item: Problem | Notice) => item.message + ("hint" in item && item.hint ? ` (${item.hint})` : "");
 
 /**
- * What a fix-it leaves standing: items it touches go, the rest move by its
- * length change. Spans that meet the edit at an end count as touching.
+ * What a fix-it leaves standing: items it touches and whole-query problems go,
+ * the rest move by its length change. Spans that meet the edit at an end count as touching.
  */
 function keep(fix: FixIt, problems: readonly Problem[], notices: readonly Notice[]): Kept {
   const { start, end } = fix.span, delta = Array.from(fix.text).length - (end - start);
@@ -57,7 +57,8 @@ function keep(fix: FixIt, problems: readonly Problem[], notices: readonly Notice
   const shift = <T extends Problem | Notice>(items: readonly T[]) => items.flatMap(item =>
     (item.span && touches(item.span)) || item.fix_its?.some(other => touches(other.span)) ? []
       : [{ ...item, ...(item.span && { span: move(item.span) }), ...(item.fix_its && { fix_its: item.fix_its.map(other => ({ ...other, span: move(other.span) })) }) }]);
-  return { problems: shift(problems), notices: shift(notices) };
+  // A problem with no span is about the whole query, which the fix may have resolved.
+  return { problems: shift(problems.filter(problem => problem.span)), notices: shift(notices) };
 }
 
 /** Applies a fix-it to the text it was computed for and returns the cursor to the editor, after the replacement. */
