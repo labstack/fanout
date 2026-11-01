@@ -62,11 +62,15 @@ func TestWriterBackpressureKeepsSubmissionsQueuedAndHonorsContexts(t *testing.T)
 		t.Fatal("committed while debt blocked")
 	default:
 	}
+	abandoned := testutil.ToFloat64(metrics.IngestAbandonedTotal)
 	close(s.release)
-	select {
-	case <-s.committed:
-	case <-time.After(time.Second):
-		t.Fatal("retirement did not unblock writer")
+	// The sender gave up while queued, so its request is dropped unwritten and
+	// its retry is the only copy.
+	if err := w.Submit(t.Context(), testBatch()); err != nil {
+		t.Fatalf("retirement did not unblock writer: %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.IngestAbandonedTotal) - abandoned; got != 1 {
+		t.Fatalf("abandoned=%v want 1", got)
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -250,7 +254,7 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 				w := testWriter(c, maxGroupBatchRows)
 				w.compaction = c
 				w.submissions = make(chan submission, maxAdmissionRequests)
-				request := submission{batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
+				request := submission{ctx: context.Background(), batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
 				switch bound {
 				case "rows":
 					request.batch.Spans = make([]telemetry.Span, maxGroupBatchRows)
@@ -274,7 +278,7 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 					t.Fatalf("jobs=%d", len(out))
 				}
 				job := <-out
-				if len(job.acks) > maxAdmissionRequests || batchRows(job.batches[0]) > maxGroupBatchRows {
+				if len(job.requests) > maxAdmissionRequests || batchRows(job.batch()) > maxGroupBatchRows {
 					t.Fatal("group bound exceeded")
 				}
 			})
@@ -290,7 +294,7 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 				c.debt.Store(telemetry.CompactionDebtLimit / 2)
 				w := testWriter(c, maxGroupBatchRows)
 				w.compaction = c
-				request := submission{batch: testBatch(), ack: make(chan error, 1)}
+				request := submission{ctx: context.Background(), batch: testBatch(), ack: make(chan error, 1)}
 				out := make(chan commitJob, 1)
 				done := make(chan error, 1)
 				at := time.Now()
@@ -320,8 +324,8 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 				if elapsed != wantElapsed {
 					t.Fatalf("dispatch after %v want=%v", elapsed, wantElapsed)
 				}
-				if len(job.acks) != wantRequests {
-					t.Fatalf("requests=%d want=%d", len(job.acks), wantRequests)
+				if len(job.requests) != wantRequests {
+					t.Fatalf("requests=%d want=%d", len(job.requests), wantRequests)
 				}
 			})
 		})

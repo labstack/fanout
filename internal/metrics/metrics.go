@@ -79,6 +79,14 @@ var (
 		Help: "Telemetry requests refused because ingest was over its in-flight byte budget",
 	})
 
+	// IngestAbandonedTotal counts requests dropped before their commit
+	// started because the sender had already stopped waiting. The sender
+	// resends, so storing the abandoned copy too would duplicate its rows.
+	IngestAbandonedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_ingest_abandoned_total",
+		Help: "Telemetry requests dropped before commit because the sender stopped waiting",
+	})
+
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_flush_duration_seconds",
 		Help:    "Flush duration in seconds",
@@ -307,6 +315,9 @@ func RecordIngest(signal string, count int) {
 
 // RecordIngestShed counts one refused telemetry request.
 func RecordIngestShed() { IngestShedTotal.Inc() }
+
+// RecordIngestAbandoned counts one telemetry request dropped before commit.
+func RecordIngestAbandoned() { IngestAbandonedTotal.Inc() }
 
 // RecordFlush records a flush event.
 func RecordFlush(signal string, durationSec float64) {

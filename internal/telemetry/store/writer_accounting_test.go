@@ -101,7 +101,7 @@ func TestWriterReleasesUnenqueuedAndDiscardedJobsExactlyOnce(t *testing.T) {
 				requests := make([]submission, 4)
 				for i := range requests {
 					batch := accountingBatch()
-					requests[i] = submission{batch: batch, bytes: batchBytes(batch), ack: make(chan error, 1)}
+					requests[i] = submission{ctx: context.Background(), batch: batch, bytes: batchBytes(batch), ack: make(chan error, 1)}
 					if err := w.reserve(requests[i].bytes); err != nil {
 						t.Fatal(err)
 					}

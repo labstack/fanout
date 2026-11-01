@@ -118,8 +118,8 @@ func TestWriterAdmitsSubmissionArrivingDuringBoundedWindow(t *testing.T) {
 	committer := &recordingCommitter{}
 	w := testWriter(committer, maxGroupBatchRows)
 	w.groupWindow = 100 * time.Millisecond
-	first := submission{batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
-	second := submission{batch: Batch{Spans: []telemetry.Span{{SpanID: "second"}}}, ack: make(chan error, 1)}
+	first := submission{ctx: context.Background(), batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
+	second := submission{ctx: context.Background(), batch: Batch{Spans: []telemetry.Span{{SpanID: "second"}}}, ack: make(chan error, 1)}
 	out := make(chan commitJob, 1)
 	started := make(chan struct{})
 	go func() {
@@ -132,7 +132,7 @@ func TestWriterAdmitsSubmissionArrivingDuringBoundedWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := <-out
-	if len(job.batches) != 1 || batchRows(job.batches[0]) != 2 || len(job.acks) != 2 {
+	if batchRows(job.batch()) != 2 || len(job.requests) != 2 {
 		t.Fatalf("admitted job = %#v", job)
 	}
 }
@@ -317,3 +317,135 @@ func waitForQueue(t *testing.T, w *Writer, count int) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// A sender that stops waiting before its commit starts will resend. Committing
+// the abandoned copy as well would store every row twice.
+func TestWriterDropsSubmissionAbandonedBeforeCommit(t *testing.T) {
+	committer := &recordingCommitter{}
+	w := testWriter(committer, maxGroupBatchRows)
+	w.SetInFlightBudget(8192)
+	ctx, cancel := context.WithCancel(context.Background())
+	results := make(chan error, 1)
+	go func() {
+		results <- w.Submit(ctx, Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "abandoned"}}})
+	}()
+	waitForQueue(t, w, 1)
+	cancel()
+	if err := <-results; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Submit = %v, want context.Canceled", err)
+	}
+	before := testutil.ToFloat64(metrics.IngestAbandonedTotal)
+	runCtx, stop := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(runCtx) }()
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "kept"}}}); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	committer.mu.Lock()
+	defer committer.mu.Unlock()
+	if len(committer.batches) != 1 || len(committer.batches[0].Spans) != 1 || committer.batches[0].Spans[0].SpanID != "kept" {
+		t.Fatalf("committed batches = %#v", committer.batches)
+	}
+	if got := testutil.ToFloat64(metrics.IngestAbandonedTotal) - before; got != 1 {
+		t.Fatalf("abandoned counter rose by %v, want 1", got)
+	}
+	if got := w.inFlightBytes.Load(); got != 0 {
+		t.Fatalf("abandoned submission retained %d bytes", got)
+	}
+}
+
+// Once a commit has started it completes: the batch is atomic, and the sender
+// that gave up meanwhile retries into at-least-once delivery.
+func TestWriterFinishesCommitStartedBeforeAbandonment(t *testing.T) {
+	committer := &blockingCommitter{entered: make(chan struct{}), release: make(chan struct{})}
+	recorded := &recordingCommitter{}
+	w := testWriter(committerFunc(func(ctx context.Context, batch Batch) error {
+		if err := committer.Commit(ctx, batch); err != nil {
+			return err
+		}
+		return recorded.Commit(ctx, batch)
+	}), maxGroupBatchRows)
+	runCtx, stop := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(runCtx) }()
+	ctx, cancel := context.WithCancel(context.Background())
+	results := make(chan error, 1)
+	go func() {
+		results <- w.Submit(ctx, Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "started"}}})
+	}()
+	<-committer.entered
+	cancel()
+	if err := <-results; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Submit = %v, want context.Canceled", err)
+	}
+	close(committer.release)
+	stop()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	if len(recorded.batches) != 1 || len(recorded.batches[0].Spans) != 1 {
+		t.Fatalf("committed batches = %#v", recorded.batches)
+	}
+}
+
+func TestWriterGroupDropsOnlyAbandonedSubmissions(t *testing.T) {
+	committer := &recordingCommitter{}
+	w := testWriter(committer, maxGroupBatchRows)
+	w.SetInFlightBudget(8192)
+	abandoned, cancel := context.WithCancel(context.Background())
+	results := make(chan error, 4)
+	for i := range 4 {
+		ctx := context.Background()
+		if i%2 == 1 {
+			ctx = abandoned
+		}
+		go func() {
+			results <- w.Submit(ctx, Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i)}}})
+		}()
+	}
+	waitForQueue(t, w, 4)
+	cancel()
+	runCtx, stop := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(runCtx) }()
+	var canceled int
+	for range 4 {
+		if err := <-results; errors.Is(err, context.Canceled) {
+			canceled++
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	if canceled != 2 {
+		t.Fatalf("canceled = %d, want 2", canceled)
+	}
+	committer.mu.Lock()
+	defer committer.mu.Unlock()
+	if len(committer.batches) != 1 {
+		t.Fatalf("committed batches = %d, want one group", len(committer.batches))
+	}
+	got := map[string]bool{}
+	for _, span := range committer.batches[0].Spans {
+		got[span.SpanID] = true
+	}
+	if len(got) != 2 || !got["span-0"] || !got["span-2"] {
+		t.Fatalf("committed spans = %v, want span-0 and span-2", got)
+	}
+	if got := w.inFlightBytes.Load(); got != 0 {
+		t.Fatalf("group retained %d bytes", got)
+	}
+}
+
+type committerFunc func(context.Context, Batch) error
+
+func (f committerFunc) Commit(ctx context.Context, batch Batch) error { return f(ctx, batch) }

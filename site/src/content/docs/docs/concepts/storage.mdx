@@ -48,6 +48,14 @@ startup discovers directly from the filesystem. The atomic directory publish
 is both the durable commit and the unit startup discovers; acknowledgement
 occurs only after publication and parent-directory fsync complete.
 
+A request whose sender stops waiting (it cancels or its deadline passes) before
+the commit of its batch starts is dropped unwritten and counted in
+`fanout_ingest_abandoned_total`; the sender's retry is the only copy. Other
+requests sharing that group commit are unaffected. Once a commit has started it
+completes, so a sender that gives up during it and retries stores those rows
+twice. Delivery is therefore at least once only within that commit window: OTLP
+has no idempotency key that lets Fanout recognize a resent request.
+
 ## One authoritative copy for logs and metrics
 
 Every signal is written once, to typed Zstandard-compressed Parquet. DuckDB
@@ -213,7 +221,8 @@ rollup's served-span minute p95 values; log-pattern detection still reads logs.
 
 The ingest writer waits when reclaimable generation-0 compaction debt reaches
 1,024 batches. Already admitted commits finish and requests wait in the bounded
-submission queue, honoring their own deadlines. Debt excludes batches above half
+submission queue, honoring their own deadlines; a request whose deadline passes
+there is dropped before its commit, not written after the sender gave up. Debt excludes batches above half
 the merge row ceiling and reserves 127 smaller inputs per ingestion day: those
 inputs can otherwise be stranded by the compaction eligibility rules.
 At 512 batches of reclaimable debt, compaction prioritizes eligible generation-0
