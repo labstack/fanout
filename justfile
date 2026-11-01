@@ -142,6 +142,10 @@ notices-check:
 db-gen:
     cd internal/db && sqlc generate
 
+# Regenerate the format-5 dedicated attribute keys from the pinned semconv tag (network).
+semconv-generate:
+    bash scripts/semconv-generate.sh
+
 # Create a timestamped SQLite SQL migration. Edit its Up section, then db-gen.
 db-migrate-create NAME:
     {{goose}} -dir internal/db/migrations create {{NAME}} sql
