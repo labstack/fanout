@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -56,19 +57,21 @@ func TestStatementsThatTimeOutAndReturnAreNoStall(t *testing.T) {
 // engine has stopped honouring deadlines.
 func TestAStatementPastItsDeadlineIsAStall(t *testing.T) {
 	d, _ := mockDuck(t)
-	done := d.begin(time.Now().Add(-overrunGrace - time.Second))
+	late, cancel := context.WithDeadline(t.Context(), time.Now().Add(-overrunGrace-time.Second))
+	defer cancel()
+	done := d.begin(late)
 	if !d.Stalled() {
 		t.Fatal("a statement overrunning its deadline is a stall")
 	}
 	if err := d.Live(t.Context()); !errors.Is(err, ErrStalled) {
 		t.Fatalf("live = %v, want ErrStalled", err)
 	}
-	done()
+	done(late.Err())
 	if d.Stalled() {
 		t.Fatal("a statement that returned is no stall")
 	}
-	within := d.begin(time.Now())
-	defer within()
+	within := d.begin(shortContext(t))
+	defer within(nil)
 	if d.Stalled() {
 		t.Fatal("a statement within its deadline and grace is no stall")
 	}
@@ -101,10 +104,79 @@ func TestASaturatedPoolIsAlive(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer held.Close()
-	done := d.begin(time.Now().Add(time.Second))
-	defer done()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	done := d.begin(ctx)
+	defer done(nil)
 	d.progress.Store(time.Now().Add(-idleLimit - time.Second).UnixNano())
 	if err := d.Live(shortContext(t)); err != nil {
 		t.Fatalf("a saturated pool is alive: %v", err)
+	}
+}
+
+// A broken engine fails every statement at once. Its errors show nothing
+// runs, so they are no progress: liveness pings, and the failed ping is dead.
+func TestEngineErrorsAreNoProgress(t *testing.T) {
+	d, mock := mockDuck(t)
+	d.progress.Store(time.Now().Add(-idleLimit - time.Second).UnixNano())
+	broken := errors.New("IO Error: could not read file")
+	for range 2 {
+		mock.ExpectQuery("SELECT 1").WillReturnError(broken)
+	}
+	var one int
+	if err := d.QueryRowScan(shortContext(t), []any{&one}, "SELECT 1"); !errors.Is(err, broken) {
+		t.Fatal(err)
+	}
+	if _, err := d.QueryContext(shortContext(t), "SELECT 1"); !errors.Is(err, broken) {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery("SELECT 1").WillReturnError(broken)
+	if err := d.Live(t.Context()); err == nil {
+		t.Fatal("an engine failing every statement is alive")
+	}
+	// No row is an answer.
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"1"}))
+	if err := d.QueryRowScan(t.Context(), []any{&one}, "SELECT 1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal(err)
+	}
+	if err := d.Live(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A read without a deadline has none to overrun, so it is not tracked, and
+// rows a caller holds after the engine produced them are its own time.
+func TestOnlyEngineTimeOnADeadlineIsTracked(t *testing.T) {
+	d, mock := mockDuck(t)
+	done := d.begin(t.Context())
+	if d.inFlight() != 0 {
+		t.Fatal("a read without a deadline is tracked")
+	}
+	done(nil)
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1).AddRow(2))
+	rows, err := d.QueryContext(shortContext(t), "SELECT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if d.inFlight() != 0 {
+		t.Fatal("held rows are tracked as engine time")
+	}
+}
+
+// A publisher holding readers out past its swap budget and the grace has
+// stopped honouring its deadline too; reads then fail before the engine.
+func TestAPublicationHeldPastItsBudgetIsAStall(t *testing.T) {
+	d, _ := mockDuck(t)
+	held := false
+	if err := d.PublishParquet(t.Context(), func(context.Context) error { held = d.publishing.Load() != 0; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !held || d.publishing.Load() != 0 || d.Stalled() {
+		t.Fatalf("held=%t publishing=%d stalled=%t", held, d.publishing.Load(), d.Stalled())
+	}
+	d.publishing.Store(time.Now().Add(-parquetSwapBudget - overrunGrace - time.Second).UnixNano())
+	if !d.Stalled() {
+		t.Fatal("a publication held past its budget and grace is a stall")
 	}
 }

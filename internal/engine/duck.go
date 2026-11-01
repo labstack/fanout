@@ -41,6 +41,9 @@ type Duck struct {
 	// nanoseconds, and statements are those in flight; see Live.
 	progress   atomic.Int64
 	statements statements
+	// publishing is when a Parquet publication took the exclusive read
+	// gate, in Unix nanoseconds, or zero; see Stalled.
+	publishing atomic.Int64
 	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
 	// second Close would call duckdb_close twice on the same instance, which
@@ -1929,11 +1932,13 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		}
 	}
 	started := time.Now()
-	done := d.begin(deadline(ctx))
+	// Tracked while the engine runs the statement; rows a caller then holds
+	// are its own time.
+	done := d.begin(ctx)
 	rows, err := db.QueryContext(ctx, query, args...)
+	done(err)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
-		done()
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
 		return nil, err
@@ -1949,7 +1954,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		// on every path; this is what it costs if one stops.
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
-		done()
+		d.answered(ctx, rows.Err())
 	}
 	return &lockedRows{Rows: rows, unlock: release}, nil
 }
@@ -2037,8 +2042,10 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
 	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
-	defer d.begin(deadline(ctx))()
-	return conn.QueryRowContext(ctx, query, args...).Scan(dest...)
+	done := d.begin(ctx)
+	err = conn.QueryRowContext(ctx, query, args...).Scan(dest...)
+	done(err)
+	return err
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
@@ -2072,6 +2079,8 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context)
 	}
 	defer d.parquetMu.Unlock()
 	swapStarted := time.Now()
+	d.publishing.Store(swapStarted.UnixNano())
+	defer d.publishing.Store(0)
 	defer func() { metrics.ParquetPublishHold.Observe(time.Since(swapStarted).Seconds()) }()
 	swapCtx, cancelSwap := context.WithTimeout(ctx, parquetSwapBudget)
 	defer cancelSwap()

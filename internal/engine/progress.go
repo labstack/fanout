@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sync"
 	"time"
@@ -28,10 +29,13 @@ type statements struct {
 	due  map[uint64]time.Time
 }
 
-// begin tracks a read statement until the returned func reports that it
-// returned. Any return counts as progress, success, error or cancellation
-// alike: each shows the engine is still answering.
-func (d *Duck) begin(deadline time.Time) func() {
+// begin tracks a read statement on ctx until the returned func reports how it
+// ended. A read without a deadline has none to overrun, so it is not tracked.
+func (d *Duck) begin(ctx context.Context) func(error) {
+	due, ok := ctx.Deadline()
+	if !ok {
+		return func(err error) { d.answered(ctx, err) }
+	}
 	s := &d.statements
 	s.mu.Lock()
 	if s.due == nil {
@@ -39,25 +43,26 @@ func (d *Duck) begin(deadline time.Time) func() {
 	}
 	id := s.next
 	s.next++
-	s.due[id] = deadline
+	s.due[id] = due
 	s.mu.Unlock()
 	var once sync.Once
-	return func() {
+	return func(err error) {
 		once.Do(func() {
 			s.mu.Lock()
 			delete(s.due, id)
 			s.mu.Unlock()
-			d.noteProgress()
+			d.answered(ctx, err)
 		})
 	}
 }
 
-// deadline is ctx's deadline, or the longest a read may run when it has none.
-func deadline(ctx context.Context) time.Time {
-	if at, ok := ctx.Deadline(); ok {
-		return at
+// answered records progress for a statement that shows the engine runs: one
+// that succeeded, found no row, or stopped when its context ended. Other
+// errors may come from a broken engine that fails everything at once.
+func (d *Duck) answered(ctx context.Context, err error) {
+	if err == nil || errors.Is(err, sql.ErrNoRows) || ctx.Err() != nil {
+		d.noteProgress()
 	}
-	return time.Now().Add(maxQueryTimeoutMs * time.Millisecond)
 }
 
 func (d *Duck) inFlight() int {
@@ -66,12 +71,16 @@ func (d *Duck) inFlight() int {
 	return len(d.statements.due)
 }
 
-// noteProgress records that a read statement returned.
+// noteProgress records that the engine answered.
 func (d *Duck) noteProgress() { d.progress.Store(time.Now().UnixNano()) }
 
 // Stalled reports whether a read statement is still running more than
-// overrunGrace past its deadline.
+// overrunGrace past its deadline, or a Parquet publication has held readers
+// out that long past its swap budget: reads then fail before the engine.
 func (d *Duck) Stalled() bool {
+	if since := d.publishing.Load(); since != 0 && time.Since(time.Unix(0, since)) > parquetSwapBudget+overrunGrace {
+		return true
+	}
 	d.statements.mu.Lock()
 	defer d.statements.mu.Unlock()
 	for _, due := range d.statements.due {
