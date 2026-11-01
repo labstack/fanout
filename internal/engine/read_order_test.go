@@ -58,6 +58,60 @@ func TestReadersQueuedForAConnectionDoNotHoldPublication(t *testing.T) {
 	}
 }
 
+// A reader the gate holds back reads nothing, so it must not hold a pool
+// connection either: readiness pings, annotation reads and the watchdog use
+// the same pool and would queue behind it for the publisher's whole drain.
+func TestReadersBlockedByAPublisherHoldNoConnection(t *testing.T) {
+	blockers := map[string]func(*Duck) (release func()){
+		"active": func(d *Duck) func() {
+			mustLock(&d.parquetMu)
+			return d.parquetMu.Unlock
+		},
+		"pending": func(d *Duck) func() {
+			// A held reader keeps the publisher queued; past its grace, new
+			// readers wait for it.
+			d.parquetMu.writerGrace = time.Nanosecond
+			mustRLock(t, &d.parquetMu)
+			queued := make(chan error, 1)
+			go func() { queued <- d.parquetMu.LockContext(context.Background()) }()
+			for waitingParquetWriters(&d.parquetMu) == 0 {
+				time.Sleep(time.Millisecond)
+			}
+			return func() {
+				d.parquetMu.RUnlock()
+				if err := <-queued; err == nil {
+					d.parquetMu.Unlock()
+				}
+			}
+		},
+	}
+	for name, block := range blockers {
+		t.Run(name, func(t *testing.T) {
+			db := openTestDuck(t)
+			d := &Duck{DB: db}
+			release := block(d)
+			done := make(chan error, 1)
+			go func() {
+				var one int
+				done <- d.QueryRowScan(t.Context(), []any{&one}, "SELECT 1")
+			}()
+			time.Sleep(50 * time.Millisecond)
+			if inUse := db.Stats().InUse; inUse != 0 {
+				t.Fatalf("a reader blocked by the publisher holds %d connections", inUse)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if err := d.Ping(ctx); err != nil {
+				t.Fatalf("readiness ping queued behind a blocked reader: %v", err)
+			}
+			release()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 // emptyRepository is the telemetry repository every Duck has, with no batches.
 func emptyRepository(t testing.TB) *telemetrystore.Repository {
 	t.Helper()

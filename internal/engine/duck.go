@@ -1880,21 +1880,34 @@ func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
 	return d.DB.Conn(ctx)
 }
 
-// readConn takes a read-pool connection, then admits it to the Parquet
-// snapshot. A reader queued for a connection reads no Parquet yet, so holding
-// the gate there would make a publisher wait out the pool's queue as well.
-// The caller closes conn, then releases the gate with parquetMu.RUnlock. No
-// gate holder waits for a read-pool connection, so the order cannot deadlock.
+// readConn admits a reader to the Parquet snapshot with a read-pool
+// connection. It waits for the gate without a connection, so a reader a
+// publisher holds back keeps no pool slot from readiness pings and other
+// gate-free reads. It then takes the connection and enters the gate without
+// waiting, so a reader queued for the pool holds no snapshot a publisher
+// would wait out. If a publisher slipped in between, it returns the
+// connection and waits again. The caller closes conn, then releases the gate
+// with parquetMu.RUnlock.
 func (d *Duck) readConn(ctx context.Context) (*sql.Conn, error) {
-	conn, err := d.acquireRead(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
+	var waited time.Duration
+	for {
+		start := time.Now()
+		err := d.parquetMu.WaitReadable(ctx, parquetReadQuery)
+		waited += time.Since(start)
+		if err != nil {
+			metrics.RecordParquetRead(readerQuery, waited.Seconds(), false)
+			return nil, errors.Join(ErrParquetReadWait, err)
+		}
+		conn, err := d.acquireRead(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if d.parquetMu.TryRLock(parquetReadQuery) {
+			metrics.RecordParquetRead(readerQuery, waited.Seconds(), true)
+			return conn, nil
+		}
 		_ = conn.Close()
-		return nil, err
 	}
-	return conn, nil
 }
 
 // QueryContext executes a read against immutable Parquet files and DuckDB's

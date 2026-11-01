@@ -121,6 +121,26 @@ func (g *parquetReadGate) RLockContext(ctx context.Context, mode parquetReadMode
 	return nil
 }
 
+// WaitReadable blocks until a reader of mode would be admitted, without
+// admitting one. A caller that must take another resource before reading
+// waits here first, so it holds nothing while a publisher keeps it out.
+func (g *parquetReadGate) WaitReadable(ctx context.Context, mode parquetReadMode) error {
+	g.init()
+	g.mu.Lock()
+	for !g.admitsReaderLocked(mode) {
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+		g.mu.Lock()
+	}
+	g.mu.Unlock()
+	return nil
+}
+
 func (g *parquetReadGate) RUnlock() {
 	g.init()
 	g.mu.Lock()
