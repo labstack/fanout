@@ -301,7 +301,7 @@ func TestCompileForeignQueryLanguages(t *testing.T) {
 
 // Spans count code points, as the editor converts them: text before the
 // fix-it with multi-byte characters does not shift it.
-func TestFixItSpansCountCodePoints(t *testing.T) {
+func TestEditSpansCountCodePoints(t *testing.T) {
 	text := `spans where service:"café☕" | cuont()`
 	_, ps := Compile(text, Options{})
 	if len(ps) != 1 || len(ps[0].FixIts) != 1 {
