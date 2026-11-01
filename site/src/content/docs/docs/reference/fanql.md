@@ -63,6 +63,8 @@ Whitespace and `and` join filters. An `or` chain must occupy its whole filter li
 
 A single identifier is a source column when one exists, otherwise an attribute key with a notice. Dotted `url.path` means `attributes['url.path']`; `resource.k8s.pod.name` means `resource['k8s.pod.name']`. Explicit `attributes.<path>` uses the attributes map. Bracket keys are literal nonempty strings, including spaces, Unicode, punctuation and doubled quotes. Keys beginning `resource.` or `attributes.` retain brackets where needed to preserve the map.
 
+Standard OpenTelemetry keys that the schema marks indexed, such as `http.response.status_code` and `k8s.pod.name`, read typed from their own columns: ingest converts a value sent in another type, so `"200"` reads as the number 200. Other keys read as sent.
+
 Canonical text brackets single-segment attribute keys, so new columns cannot reinterpret canonical or stored text. Map columns require a key. `duration` denotes `duration_ms` in filters, measure arguments and trace sorts. `duration_ms>500` takes a number; `duration>500ms` requires a unit. A measure alias named duration or duration_ms stays that alias in sort. Time columns accept range comparisons against quoted timestamps, not equality shorthand.
 
 ### spans
