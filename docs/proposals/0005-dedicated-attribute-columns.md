@@ -256,6 +256,28 @@ correct but slow. All other files read the column alone. Users cannot write
 underscore-prefixed names. Catalog, suggestion and `get_telemetry_schema` show
 the keys as attributes with an "indexed" mark.
 
+The read path implements this as follows (`internal/engine/sql_keys.go`):
+
+- The read value of a key is `TRY_CAST(map['k'] AS <column type>)`. A value
+  of another type reads as its cast, so the text `"200"` reads as 200 and
+  `"abc"` as NULL for `http.response.status_code`.
+- Snapshot binding rewrites every query, so FanQL, structured panels, panel
+  SQL and product SQL share one rule. A subscript becomes the column when its
+  map binds to a signal relation directly, or through subqueries and CTEs
+  that pass it on with `*`. When a subquery projects the map without the
+  columns, it becomes the `TRY_CAST` above. Keys outside the list, log and
+  metric attributes, and subscripts whose relation the AST does not
+  determine read the map unchanged. Rewritten select items keep their
+  original result names.
+- Snapshot sources split each signal's files in two: files whose spill masks
+  contain no key the statement reads, and the others, which read
+  `coalesce(column, TRY_CAST(map['k'] AS <type>))` for those keys. A
+  `UNION ALL` joins the two groups. Only the first group's predicates reach
+  Parquet statistics. Unpinned views apply the coalesce to every file.
+- Variables compared with an integer key bind as numbers. The SQL guard and
+  the filter gate reject the `_a_*`, `_r_*`, `_spill` and `_trace_hash`
+  names and name the key to write instead.
+
 **Shredding.** Format 4 shreds `messaging.*` and four `service.*` and
 `deployment.*` resource keys. Format 5 stops shredding the keys that now have
 dedicated columns, since shredding them would store a third copy, and keeps
