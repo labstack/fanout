@@ -329,3 +329,30 @@ func TestResolveResourceKeyNotice(t *testing.T) {
 		}
 	}
 }
+
+// A dotted key the window has not seen, near one it has, is likely a typo: the
+// notice offers the seen key. Without a schema there is nothing to compare.
+func TestResolveDottedKeySpelling(t *testing.T) {
+	schema := &query.Schema{Signals: map[string]query.SignalSchema{"spans": {Attributes: []query.AttributeSchema{
+		{Key: "http.route", Scope: "attributes"}, {Key: "http.request.method", Scope: "attributes"}, {Key: "host.name", Scope: "resource"},
+	}}}}
+	text := "spans where http.rout:/api/cart"
+	r, ps := resolvedText(t, text, Options{Schema: schema})
+	if len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].Message != `"http.rout" was not seen on spans in this window; did you mean http.route?` {
+		t.Fatal(r.Notices, ps)
+	}
+	if fixes := r.Notices[0].FixIts; len(fixes) != 1 || fixes[0].Text != "http.route" || text[fixes[0].Span.Start:fixes[0].Span.End] != "http.rout" {
+		t.Fatal(fixes)
+	}
+	if r, ps := resolvedText(t, "spans where resource.host.nam:a", Options{Schema: schema}); len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].FixIts[0].Text != "resource.host.name" {
+		t.Fatal(r.Notices, ps)
+	}
+	for _, text := range []string{"spans where http.route:/api/cart", "spans where http.zzz:1", "spans where resource.http.route:a"} {
+		if r, ps := resolvedText(t, text, Options{Schema: schema}); len(ps) > 0 || len(r.Notices) != 0 {
+			t.Errorf("%s: %+v %v", text, r.Notices, ps)
+		}
+	}
+	if r, _ := resolvedText(t, text, Options{}); len(r.Notices) != 0 {
+		t.Fatal(r.Notices)
+	}
+}

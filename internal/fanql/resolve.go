@@ -350,6 +350,10 @@ func (r *resolver) field(f *fieldName) {
 		r.notice(f.At, fmt.Sprintf("%s is usually a resource attribute; reading attributes['%s']. For the resource, write %s", key, key, name), query.FixIt{Label: name, Span: *textSpan(f.At), Text: name})
 		return
 	}
+	if !f.Bracket && strings.Contains(key, ".") {
+		r.keySpelling(f, scope)
+		return
+	}
 	if f.Scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		message := fmt.Sprintf("%q is not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
 		for _, m := range r.vocab.measures() {
@@ -378,6 +382,33 @@ func (r *resolver) field(f *fieldName) {
 		}
 		r.notice(f.At, message)
 	}
+}
+
+// keySpelling offers the nearest key the schema saw in the field's scope when
+// the window never saw this dotted key: http.rout for http.route. Without a
+// schema there are no keys to compare.
+func (r *resolver) keySpelling(f *fieldName, scope string) {
+	if r.opts.Schema == nil {
+		return
+	}
+	var keys []string
+	for _, a := range r.opts.Schema.Signals[r.out.Query.Source].Attributes {
+		if a.Key == f.Key {
+			return
+		}
+		if a.Scope == scope || a.Scope == "" && scope == "attributes" {
+			keys = append(keys, a.Key)
+		}
+	}
+	hint := suggest.Spelling(f.Key, keys)
+	if hint == "" {
+		return
+	}
+	name, written := strings.TrimSuffix(strings.TrimPrefix(hint, "did you mean "), "?"), f.Key
+	if f.Scope != "" {
+		name, written = f.Scope+"."+name, f.Scope+"."+f.Key
+	}
+	r.notice(f.At, fmt.Sprintf("%q was not seen on %s in this window; did you mean %s?", written, r.out.Query.Source, name), query.FixIt{Label: name, Span: *textSpan(f.At), Text: name})
 }
 
 func (r *resolver) expr(e filterExpr) {

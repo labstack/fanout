@@ -425,3 +425,27 @@ func TestFanQLParseProblemsKeepURLPaths(t *testing.T) {
 		}
 	}
 }
+
+type fakeCachedSchemaPanels struct{ fakePanels }
+
+func (*fakeCachedSchemaPanels) Schema(_ context.Context, req query.SchemaRequest) (*query.Schema, error) {
+	if !req.Cached || req.Window != "1h" {
+		return nil, query.ErrSchemaNotCached
+	}
+	return &query.Schema{Window: req.Window, Signals: map[string]query.SignalSchema{
+		"spans": {Attributes: []query.AttributeSchema{{Key: "http.route", Scope: "attributes"}}},
+	}}, nil
+}
+
+// Parse compares keys with a schema already cached, never waiting for one,
+// so a misspelled dotted key gets the seen key as a fix.
+func TestFanQLParseOffersSeenDottedKey(t *testing.T) {
+	rec := serveFanQL(t, nil, &fakeCachedSchemaPanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"spans where http.rout:/api/cart | count()"}`)
+	var body struct {
+		Notices []fanql.Notice `json:"notices"`
+	}
+	fanqlResponse(t, rec, http.StatusOK, &body)
+	if len(body.Notices) != 1 || len(body.Notices[0].FixIts) != 1 || body.Notices[0].FixIts[0].Text != "http.route" {
+		t.Fatalf("response: %s", rec.Body)
+	}
+}

@@ -53,6 +53,7 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
 	}
+	req.Schema = h.cachedSchema(c.Request().Context())
 	compiled, problems := fanql.Compile(req.Text, req.Options)
 	if len(problems) != 0 {
 		failure := &fanqlFailure{apiError: newAPIError(http.StatusBadRequest, "invalid_fanql", "The query has problems.")}
@@ -80,6 +81,20 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 		}{Requested: req.Viz, Compatible: compiled.Compatible, Edits: compiled.Edits},
 		Notices: fanqlNotices(compiled.Notices),
 	})
+}
+
+// cachedSchema is the recent schema if one is already cached, so parse can
+// compare keys with those seen without waiting for a discovery.
+func (h *FanQLHandler) cachedSchema(ctx context.Context) *query.Schema {
+	if h.engine == nil {
+		return nil
+	}
+	for _, window := range []string{"1h", "24h"} {
+		if schema, err := h.engine.Schema(ctx, query.SchemaRequest{Window: window, Cached: true}); err == nil && schema != nil {
+			return schema
+		}
+	}
+	return nil
 }
 
 func (h *FanQLHandler) format(c *echo.Context) error {
