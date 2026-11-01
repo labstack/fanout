@@ -585,3 +585,18 @@ it("keeps the last result of busy panels a stopped refresh did not send", async 
     for (const id of ["d", "e"]) expect(host.current.results.get(id)).toMatchObject({reason: "busy", error: "Not run: busy"});
   } finally { await host.dispose(); }
 });
+
+it("claims no update while every panel the server turned away has not run", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["a", "b"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: busy", reason: "busy", retryable: true});
+  wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(busy)));
+  const host = await mountVisibility(spec.panels.map(p => p.id), spec);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("b")?.reason).toBe("busy");});
+    expect(host.current.updatedAt).toBeNull();
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(id => id === "a" ? resultFor(id) : busy(id))));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok");});
+    expect(host.current.updatedAt).toEqual(expect.any(Number));
+  } finally { await host.dispose(); }
+});

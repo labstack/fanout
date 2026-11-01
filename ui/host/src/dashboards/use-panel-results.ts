@@ -99,6 +99,8 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   }, [key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const staleAt = new Map([...snapshot.stale].flatMap((id) => { const at = snapshot.updated.get(id); return at ? [[id, at] as const] : []; }));
   const panelError = (query.data?.results ?? []).find((r) => r.status === "error" && snapshot.stale.has(r.id));
+  // Updated is when a panel last ran; a panel the server turned away did not.
+  const ranAt = Math.max(0, ...[...snapshot.updated].filter(([id]) => snapshot.results.get(id)?.reason !== "busy").map(([, at]) => at));
   // A panel scrolled into view that has never loaded under this key is
   // fetched now, including when visibility changed during the previous batch.
   useEffect(() => {
@@ -141,7 +143,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     }
     sendRetry([panelId]);
   };
-  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current.filter(id => !arrived.current.has(id)) : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: query.isPlaceholderData ? null : query.dataUpdatedAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
+  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current.filter(id => !arrived.current.has(id)) : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: ranAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
 }
 
 type Snapshot = { key: string; results: Map<string, PanelDisplayResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number; receivedBatch?: number };
