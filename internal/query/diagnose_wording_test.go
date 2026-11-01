@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,5 +44,19 @@ func TestDiagnosisWithoutTimeStaysNeutral(t *testing.T) {
 		if got := e.diagnose(ctx, &tc.panel, tc.filters, scope); got != tc.want {
 			t.Errorf("diagnosis %q, want %q", got, tc.want)
 		}
+	}
+}
+
+// A diagnosis names fields as FanQL spells them: duration, not duration ms.
+func TestDiagnosisNamesDurationAsFanQL(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := Dashboard{Name: "Duration", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Slow", Viz: "table",
+		Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = 'frontend'", "duration_ms > 9999000"}}}}}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Without duration filter,") {
+		t.Fatalf("diagnosis %q", r.Diagnosis)
 	}
 }

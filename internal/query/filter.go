@@ -718,6 +718,8 @@ func displayField(field string) string {
 		return "HTTP status code"
 	case "name":
 		return "metric"
+	case "duration_ms":
+		return "duration"
 	}
 	// Attribute keys keep their spelling; only column names read as words.
 	if key, ok := strings.CutPrefix(field, "attributes['"); ok {
