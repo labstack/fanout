@@ -39,3 +39,18 @@ func TestMetricPanelUsesReportedUnit(t *testing.T) {
 		}
 	}
 }
+
+// A lookup that finds no single unit is not cached, so a later window that
+// does see one is not left without it.
+func TestMetricUnitDoesNotCacheAMiss(t *testing.T) {
+	e, db := metricFixture(t)
+	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour)}
+	if got := e.metricUnit(t.Context(), "jvm.memory.used", scope); got != "" {
+		t.Fatalf("unit before data = %q", got)
+	}
+	at := fixtureStart.Add(30 * time.Minute).UnixNano()
+	insertMetrics(t, db, telemetry.Metric{ServiceName: "ad", Name: "jvm.memory.used", Unit: "By", Type: "gauge", TimeUnixNanos: at, Value: 1, IngestedAt: at})
+	if got := e.metricUnit(t.Context(), "jvm.memory.used", scope); got != "By" {
+		t.Fatalf("unit after data = %q, want By", got)
+	}
+}

@@ -10,6 +10,7 @@ import (
 
 // metricUnitTTL bounds how long a metric's reported unit is reused; a
 // metric's unit rarely changes, and one lookup serves every panel on it.
+// Windows without points or with several units are not cached.
 const metricUnitTTL = 10 * time.Minute
 
 type unitEntry struct {
@@ -88,17 +89,21 @@ func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) str
 	}
 	where, args := windowWhere(signals["metrics"], scope.Start, scope.End, "")
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
-	rows, err := e.engine.QueryContext(ctx, "SELECT coalesce(min(unit),''),coalesce(max(unit),'') FROM metrics WHERE name = ? AND "+where, append([]any{name}, args...)...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT coalesce(min(unit),''),coalesce(max(unit),''),count(*) FROM metrics WHERE name = ? AND "+where, append([]any{name}, args...)...)
 	if err != nil {
 		return ""
 	}
 	defer rows.Close()
 	var lo, hi string
-	if !rows.Next() || rows.Scan(&lo, &hi) != nil || rows.Err() != nil {
+	var n int64
+	if !rows.Next() || rows.Scan(&lo, &hi, &n) != nil || rows.Err() != nil {
 		return ""
 	}
-	if lo != hi {
-		lo = ""
+	// Only a single reported unit, possibly empty, is cached: a window that
+	// sees no points or several units must not hide the unit from panels
+	// whose windows see one.
+	if lo != hi || n == 0 {
+		return ""
 	}
 	e.mu.Lock()
 	if e.units == nil || len(e.units) >= 1000 {
