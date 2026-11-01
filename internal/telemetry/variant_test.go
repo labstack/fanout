@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -70,6 +71,41 @@ func TestSharedResourceCellsPreserveInterleavedRows(t *testing.T) {
 	}
 	// An absent canonical resource is SQL NULL, not VARIANT null.
 	checkVariantRows(t, path, rows)
+}
+
+// Go randomizes map order, and variant metadata interns names in first-use
+// order. Equal rows must still encode to equal files.
+func TestVariantEncodingIsDeterministic(t *testing.T) {
+	shared := map[string]any{"service.name": "shared", "host.name": "one", "k8s.pod.name": "pod", "cloud.region": "eu"}
+	rows := make([]Log, 600)
+	for i := range rows {
+		resource := shared
+		if i%3 == 0 {
+			resource = map[string]any{"service.name": "own", "zone": fmt.Sprint(i % 7), "rack": "r1", "row": "a"}
+		}
+		rows[i] = Log{EventUnixNanos: int64(i + 1), Resource: resource, Attributes: map[string]any{
+			"alpha": int64(i), "beta": "b", "gamma": true, "delta": 1.5, "epsilon": "e", "zeta": nil,
+			"nested": map[string]any{"z": int64(1), "y": []any{map[string]any{"b": "1", "a": "2"}}, "x": "3"},
+		}}
+	}
+	dir := t.TempDir()
+	var files [][]byte
+	for i := range 4 {
+		path := filepath.Join(dir, fmt.Sprintf("%d.parquet", i))
+		if err := writeParquet(path, Logs, rows, parquetPageSize); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, data)
+	}
+	for i := 1; i < len(files); i++ {
+		if !bytes.Equal(files[0], files[i]) {
+			t.Fatalf("write %d differs from write 0 for the same rows", i)
+		}
+	}
 }
 
 func checkVariantRows(t *testing.T, path string, want []Log) {

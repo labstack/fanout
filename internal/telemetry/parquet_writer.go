@@ -3,6 +3,7 @@ package telemetry
 import (
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/variant"
@@ -22,6 +23,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 		get    func(*R) map[string]any
 		writer *parquet.VariantColumnWriter
 	}
+	var encoder variantEncoder
 	var scalars []scalarColumn
 	for column, path := range writer.Schema().Columns() {
 		c, ok := s.Column(path[0])
@@ -105,7 +107,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 			for _, column := range variants {
 				value := column.get(&chunk[i])
 				if column.writer == nil {
-					if err := resources.append(value, columns); err != nil {
+					if err := resources.append(&encoder, value, columns); err != nil {
 						return err
 					}
 					continue
@@ -119,7 +121,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 				if err := column.writer.BeginRow(); err != nil {
 					return err
 				}
-				if err := writeVariantValue(column.writer, value); err != nil {
+				if err := encoder.write(column.writer, value); err != nil {
 					return err
 				}
 				if err := column.writer.EndRow(); err != nil {
@@ -150,7 +152,16 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 	return nil
 }
 
-func writeVariantValue(writer variant.ValueBuilder, value any) error {
+// variantEncoder writes canonical maps with their keys in sorted order. A
+// variant metadata dictionary interns names in first-use order, so sorting
+// makes equal rows encode to equal bytes, whatever Go's map order.
+type variantEncoder struct{ keys [][]string }
+
+func (e *variantEncoder) write(writer variant.ValueBuilder, value any) error {
+	return e.value(writer, value, 0)
+}
+
+func (e *variantEncoder) value(writer variant.ValueBuilder, value any, depth int) error {
 	switch value := value.(type) {
 	case nil:
 		writer.Null()
@@ -167,18 +178,28 @@ func writeVariantValue(writer variant.ValueBuilder, value any) error {
 	case []byte:
 		writer.Binary(value)
 	case map[string]any:
+		for depth >= len(e.keys) {
+			e.keys = append(e.keys, nil)
+		}
+		keys := e.keys[depth][:0]
+		for key := range value {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		e.keys[depth] = keys
 		writer.BeginObject()
-		for key, child := range value {
+		for _, key := range keys {
 			writer.Field(key)
-			if err := writeVariantValue(writer, child); err != nil {
+			if err := e.value(writer, value[key], depth+1); err != nil {
 				return err
 			}
 		}
 		writer.EndObject()
+		clear(keys)
 	case []any:
 		writer.BeginArray()
 		for _, child := range value {
-			if err := writeVariantValue(writer, child); err != nil {
+			if err := e.value(writer, child, depth+1); err != nil {
 				return err
 			}
 		}
@@ -205,6 +226,9 @@ type resourceColumns struct {
 type resourceRow struct {
 	Resource any `parquet:"resource,variant"`
 }
+
+// rawVariant is an encoded variant value that Deconstruct shreds as is.
+type rawVariant struct{ Metadata, Value []byte }
 
 func newResourceColumns(schema *parquet.Schema) (*resourceColumns, error) {
 	var node parquet.Node
@@ -261,7 +285,7 @@ func selectSharedResources[R any](r *resourceColumns, rows []R, get func(*R) map
 	}
 }
 
-func (r *resourceColumns) append(value map[string]any, columns []*parquet.ColumnWriter) error {
+func (r *resourceColumns) append(encoder *variantEncoder, value map[string]any, columns []*parquet.ColumnWriter) error {
 	key := resourceKey(value)
 	if !r.shared[key] {
 		// Preserve row order when an uncached resource follows buffered cells.
@@ -274,7 +298,7 @@ func (r *resourceColumns) append(value map[string]any, columns []*parquet.Column
 		if err := r.stream.BeginRow(); err != nil {
 			return err
 		}
-		if err := writeVariantValue(r.stream, value); err != nil {
+		if err := encoder.write(r.stream, value); err != nil {
 			return err
 		}
 		return r.stream.EndRow()
@@ -283,7 +307,17 @@ func (r *resourceColumns) append(value map[string]any, columns []*parquet.Column
 	if !ok {
 		row := resourceRow{}
 		if value != nil {
-			row.Resource = value
+			// Deconstruct shreds a Go map in map order; pre-encoded variant
+			// bytes keep the encoder's sorted order.
+			var builder variant.Builder
+			if err := encoder.write(&builder, value); err != nil {
+				return err
+			}
+			metadata, data, err := builder.Finish()
+			if err != nil {
+				return err
+			}
+			row.Resource = rawVariant{Metadata: metadata, Value: data}
 		}
 		encoded = r.schema.Deconstruct(nil, row).Clone()
 		r.cache[key] = encoded
