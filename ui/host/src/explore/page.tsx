@@ -106,6 +106,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [error, setError] = useState<string>();
   const [run, setRun] = useState<ExploreRun>();
+  // A run the server refused leaves the last result shown; this marks what was refused.
+  const [refused, setRefused] = useState<{ kind: Kind; source: string; window: string }>();
   const [running, setRunning] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined);
   const resultBox = useRef<HTMLDivElement>(null);
@@ -133,7 +135,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     if (!source.trim()) return;
     controller.current?.abort();
     const abort = new AbortController(); controller.current = abort;
-    setRunning(true); setError(undefined); setProblems([]);
+    setRunning(true); setError(undefined); setProblems([]); setRefused(undefined);
     try {
       let panel: Panel;
       let canonical: string | undefined;
@@ -170,6 +172,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       if (kind === "sql" && result.status === "error" && !result.retryable && current.current.sql === source) setProblems([{ path: "sql", message: result.error ?? "Query failed" }]);
     } catch (failure) {
       if (abort.signal.aborted) return;
+      setRefused({ kind, source, window: windowKey });
       if (failure instanceof ApiError && failure.problems.length > 0) {
         // Spans index the text that was sent; drop them once it has been edited.
         if (current.current[kind === "query" ? "text" : "sql"] === source) setProblems(failure.problems);
@@ -268,7 +271,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const unchanged = base !== undefined && !dirty && (search.viz ?? base.viz) === base.viz;
   const ran = !stale && !running && canKeep(run, editing);
   const canSave = ran || unchanged;
-  const saveReason = running ? "Wait for the run to finish" : stale ? "Run the query as it is now first" : run?.result.status === "error" ? "The last run failed; saving needs a run that works" : editing ? "Run the query first" : "Run a query that returns rows first";
+  const failed = refused !== undefined ? refused.kind === kind && refused.source === source && refused.window === windowKey : !stale && run?.result.status === "error";
+  const saveReason = running ? "Wait for the run to finish" : failed ? "The last run failed; saving needs a run that works" : stale ? "Run the query as it is now first" : editing ? "Run the query first" : "Run a query that returns rows first";
   const saveHelp = useId();
   // Points open what makes makeDrill return a target; otherwise the chart offers no drill.
   const drills = run !== undefined && (run.panel.drill !== undefined || run.panel.viz === "service_map" || (run.result.frame?.columns.some(c => c.name === "trace_id") ?? false));

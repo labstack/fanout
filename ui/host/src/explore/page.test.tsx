@@ -183,6 +183,23 @@ describe("ExplorePage", () => {
     expect(save().getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("says the run failed when a changed query is rejected", async () => {
+    const { ui, type, click, wait } = await render();
+    const save = () => ui.getByRole("button", { name: "Save to dashboard" });
+    const reason = () => document.getElementById(save().getAttribute("aria-describedby")!)?.textContent;
+    await type("spans | count() by service");
+    await click("Run");
+    await wait(() => expect(save().getAttribute("aria-disabled")).toBe("false"));
+    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown field nosuchcol" }] }, 400);
+    await type("spans | count() by nosuchcol");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("alert").textContent).toBe("unknown field nosuchcol"));
+    expect(save().getAttribute("aria-disabled")).toBe("true");
+    expect(reason()).toBe("The last run failed; saving needs a run that works");
+    await type("spans | count() by operation");
+    expect(reason()).toBe("Run the query as it is now first");
+  });
+
   it("refuses to save a run without rows", async () => {
     runQuery = async () => json({ results: [{ id: "explore", status: "empty", elapsed_ms: 3, frame: { ...frame, values: [], rows: 0 } }] });
     const { ui, type, click, wait } = await render();
