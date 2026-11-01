@@ -1,4 +1,4 @@
-import { Alert, Badge, Box, Button, Group, Paper, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Box, Button, Group, Paper, Stack, Text, VisuallyHidden } from "@mantine/core";
 import { Tooltip } from "@mantine/core";
 import { useMemo, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
@@ -42,7 +42,11 @@ function FlameGraph({ spans, dark, onSpan }: { spans: TraceSpan[]; dark: boolean
   const named = services.slice(0, series.light.length), others = services.slice(series.light.length);
   return <Stack px={{ base: "md", sm: "lg" }} pb="md" gap="xs">
     <Group justify="space-between"><Group gap="md" data-flame-legend>{named.map((service, index) => <Group gap={5} key={service}><Box w={8} h={8} bg={seriesSlot(index, dark)} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{service}</Text></Group>)}
-      {others.length > 0 && <Group gap={5} title={others.join(", ")}><Box w={8} h={8} bg={chartTheme(dark).muted} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{others.length === 1 ? others[0] : `${others.length} other services`}</Text></Group>}
+      {others.length === 1 && <Group gap={5}><Box w={8} h={8} bg={chartTheme(dark).muted} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{others[0]}</Text></Group>}
+      {/* The names are read with the entry, and shown on hover, focus or touch. */}
+      {others.length > 1 && <Tooltip label={others.join(", ")} multiline maw={360} withArrow events={{ hover: true, focus: true, touch: true }}>
+        <Group gap={5} tabIndex={0} data-flame-others><Box w={8} h={8} bg={chartTheme(dark).muted} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{others.length} other services<VisuallyHidden>: {others.join(", ")}</VisuallyHidden></Text></Group>
+      </Tooltip>}
     </Group><Badge variant="light">{duration(model.total)}</Badge></Group>
     <Paper withBorder radius="md" p="sm" data-flame-graph>
       <Box pos="relative" h={22} mb={4}>{[0, 25, 50, 75, 100].map((position) => <Text key={position} pos="absolute" left={`${position}%`} c="dimmed" size="xs" style={{ whiteSpace: "nowrap", transform: position === 100 ? "translateX(-100%)" : position ? "translateX(-50%)" : undefined }}>{duration(model.total * position / 100)}</Text>)}</Box>

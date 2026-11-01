@@ -119,6 +119,11 @@ it("keeps flame ticks on one line and folds services past the palette into one l
     expect(ticks.at(-1)?.textContent).toBe("50m 20s");
     expect(ticks.every(tick => tick.style.whiteSpace === "nowrap")).toBe(true);
     const legend = [...node.querySelectorAll("[data-flame-legend] > *")].map(item => item.textContent);
-    expect(legend).toEqual(["svc0", "svc1", "svc2", "svc3", "svc4", "svc5", "2 other services"]);
+    expect(legend).toEqual(["svc0", "svc1", "svc2", "svc3", "svc4", "svc5", "2 other services: svc6, svc7"]);
+    // The folded entry is reachable by keyboard and shows the names on focus.
+    const others = node.querySelector<HTMLElement>("[data-flame-others]")!;
+    expect(others.tabIndex).toBe(0);
+    await act(async () => others.focus());
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });
