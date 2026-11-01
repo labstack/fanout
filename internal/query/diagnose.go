@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/queryrows"
 )
@@ -127,10 +128,14 @@ func (e *Executor) explain(ctx context.Context, p *Panel, filters []Filter, scop
 			message = fmt.Sprintf("No %s match this combination of filters in this time range. Without %s, %s match the remaining filters.", noun, selection, matched)
 		}
 		if f.EqField != "" {
-			if seen := e.topValues(ctx, sig, f.EqField, others, scope); seen != "" {
+			seen, n, near := e.seenValues(ctx, sig, f, others, scope)
+			if near != "" {
+				message += " Did you mean " + spoken(sig, f.EqField, near) + "?"
+			}
+			if seen != "" {
 				message += " Values seen: " + seen + "."
 			}
-			if n := e.otherTypeMatches(ctx, sig, f, others, scope); n > 0 {
+			if n > 0 {
 				// The filter matches one type only; say which form finds the rest.
 				if strings.Contains(f.Expr, "'"+strings.ReplaceAll(f.DisplayLiteral, "'", "''")+"'") {
 					message += fmt.Sprintf(" %s %s store %s %s as a number; write the value without quotes, %s, to match them.", grouped(n), sig.name, f.DisplayField, f.DisplayLiteral, f.DisplayLiteral)
@@ -256,57 +261,62 @@ func (e *Executor) rerunCounts(ctx context.Context, sig *signal, active []Filter
 	return total, without, nil
 }
 
-// otherTypeMatches counts rows whose attribute equals the filter's literal
-// as text. Attribute equality is typed, so 500 misses a stored "500"; in an
-// empty panel the filter itself matches none of these rows.
-func (e *Executor) otherTypeMatches(ctx context.Context, sig *signal, f Filter, others []Filter, scope Scope) int64 {
-	if f.DisplayLiteral == "" || !strings.HasPrefix(f.EqField, "attributes[") && !strings.HasPrefix(f.EqField, "resource[") {
-		return 0
-	}
+// seenValues lists the five most common values of the filter's field among
+// the rows the other filters keep. For a literal it also finds the nearest
+// other value within a small edit distance, a likely typo, and counts the rows
+// whose attribute equals the literal as text: attribute equality is typed, so
+// 500 misses a stored "500", and in an empty panel the filter itself matches
+// none of these rows. One grouped scan answers all three: decoding attributes
+// dominates the cost, and more scans could outlast the panel's deadline.
+func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others []Filter, scope Scope) (seen string, other int64, near string) {
 	ref, err := sig.field(f.EqField)
 	if err != nil {
-		return 0
+		return "", 0, ""
 	}
 	where, args, err := buildWhere(sig, others, scope)
 	if err != nil {
-		return 0
-	}
-	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT count(*) FROM %s WHERE %s AND %s = ?", structuredSource(sig.name), where, ref.stringSQL()), append(args, f.DisplayLiteral)...)
-	if err != nil {
-		return 0
-	}
-	defer rows.Close()
-	var n int64
-	if !rows.Next() || rows.Scan(&n) != nil {
-		return 0
-	}
-	return n
-}
-
-func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string, filters []Filter, scope Scope) string {
-	ref, err := sig.field(fieldText)
-	if err != nil {
-		return ""
-	}
-	where, args, err := buildWhere(sig, filters, scope)
-	if err != nil {
-		return ""
+		return "", 0, ""
 	}
 	expr := ref.stringSQL()
-	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5", expr, structuredSource(sig.name), where, expr), args...)
+	query := fmt.Sprintf("WITH g AS MATERIALIZED (SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1) "+
+		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5)", expr, structuredSource(sig.name), where, expr)
+	if literal := f.DisplayLiteral; literal != "" {
+		if fieldVocabularies[f.EqField].Signal != sig.name {
+			// A typo changes about one character in four; named values such
+			// as status error are already checked against their vocabulary.
+			query += " UNION ALL SELECT * FROM (SELECT v, n, 'near' FROM g WHERE v <> ? AND length(v) <= 128 AND levenshtein(v, ?) <= ? ORDER BY levenshtein(v, ?), n DESC, v LIMIT 1)"
+			args = append(args, literal, literal, utf8.RuneCountInString(literal)/4+1, literal)
+		}
+		if strings.HasPrefix(f.EqField, "attributes[") || strings.HasPrefix(f.EqField, "resource[") {
+			query += " UNION ALL SELECT v, n, 'literal' FROM g WHERE v = ?"
+			args = append(args, literal)
+		}
+	}
+	rows, err := e.engine.QueryContext(ctx, query, args...)
 	if err != nil {
-		return ""
+		return "", 0, ""
 	}
 	defer rows.Close()
 	var parts []string
 	for rows.Next() {
-		var value string
+		var value, kind string
 		var n int64
-		if rows.Scan(&value, &n) == nil {
-			parts = append(parts, fmt.Sprintf("%s (%s)", spoken(sig, fieldText, value), grouped(n)))
+		if rows.Scan(&value, &n, &kind) != nil {
+			continue
+		}
+		switch kind {
+		case "seen":
+			parts = append(parts, fmt.Sprintf("%s (%s)", spoken(sig, f.EqField, value), grouped(n)))
+		case "near":
+			near = value
+		case "literal":
+			other = n
 		}
 	}
-	return strings.Join(parts, ", ")
+	if rows.Err() != nil {
+		return "", 0, ""
+	}
+	return strings.Join(parts, ", "), other, near
 }
 
 func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {

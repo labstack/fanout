@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 // Attribute equality is typed: a number filter misses values stored as text.
@@ -55,6 +56,30 @@ func TestDiagnosisTellsQuotedFilterToMatchNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "3 spans store attribute http.status_code 308 as a number; write the value without quotes, 308, to match them.") {
+		t.Fatalf("diagnosis = %q", r.Diagnosis)
+	}
+}
+
+// A misspelled metric name is answered with the nearest name in the window.
+func TestDiagnosisSuggestsNearestMetricName(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	var metrics []telemetry.Metric
+	for i, name := range []string{"container.cpu.utilization", "container.memory.usage", "process.cpu.time"} {
+		n := fixtureStart.Add(time.Duration(i) * time.Minute).UnixNano()
+		metrics = append(metrics, telemetry.Metric{Namespace: "shop", ServiceName: "cart", Name: name, Type: "gauge", TimeUnixNanos: n, EventUnixNanos: n, IngestedAt: n, Value: 1})
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "names", Metrics: metricSeriesIDs(metrics)}); err != nil {
+		t.Fatal(err)
+	}
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := Dashboard{Name: "Names", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "a", Title: "A", Viz: "table",
+		Query: &Spec{From: "metrics", Measures: []string{"avg(value)"}, By: []string{"service"}, Where: []string{"name = 'container.cpu.utilizaton'"}}}}}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := got[0]; r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, "Did you mean container.cpu.utilization?") {
 		t.Fatalf("diagnosis = %q", r.Diagnosis)
 	}
 }
