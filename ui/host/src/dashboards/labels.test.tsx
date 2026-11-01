@@ -58,3 +58,14 @@ it("heads a table duration column without the unit its cells already print", () 
   const bare = renderToStaticMarkup(<MantineProvider><TableViz panel={{...panel,unit:undefined}} result={result} height={240}/></MantineProvider>);
   expect(bare).toContain("Max (ms)");
 });
+
+it("keeps the unit in a duration column's header when its format prints raw values", () => {
+  const result: PanelResult = {id:"p",status:"ok",elapsed_ms:1,frame:{columns:[{name:"max_ms",type:"number",role:"measure",unit:"ms"}],values:[[600014]],rows:1}};
+  const header = (format: "service_link" | "trace_link" | "bar" | "status") => renderToStaticMarkup(<MantineProvider><TableViz panel={{id:"p",title:"Slowest",viz:"table",options:{columns:[{field:"max_ms",format}]}}} result={result} height={240}/></MantineProvider>);
+  // These print the cell as it came, so the header has to say what it is in.
+  expect(header("service_link")).toContain("Max (ms)");
+  expect(header("trace_link")).toContain("Max (ms)");
+  // These print durations in their own unit.
+  expect(header("bar")).not.toContain("Max (ms)");
+  expect(header("status")).not.toContain("Max (ms)");
+});

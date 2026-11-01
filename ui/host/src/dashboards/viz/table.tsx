@@ -25,12 +25,18 @@ export type TableCellProps = { column: Column; value: Cell; row: Cell[]; rowInde
 /** Logs and Traces pages render rows a page at a time, show a details row under an expanded log, and offer exclusions. */
 export type RowControls = { page?: number; details?: (row: Record<string, Cell>) => ReactNode; exclude?: (field: "service" | "operation", value: string) => void };
 
+/** Formats that print a number in its unit; the rest print the cell as it came. */
+const unitFormats = new Set(["unit", "bar", "status", "sparkline"]);
+
 /** Cells print each duration in its own unit (10m, 29.5s), so a duration
- *  column's header names none: "Max (ms)" above "10m" contradicts itself. */
+ *  column's header names none: "Max (ms)" above "10m" contradicts itself.
+ *  A format that prints the raw value keeps the unit in the header. */
 function columnHeader(column: Column, panel: Panel): string {
   const label = displayLabel(column, panel);
-  const unit = panel.options?.columns?.find(c => c.field === column.name)?.unit ?? column.unit ?? panel.unit;
-  return column.type === "number" && (unit === "ms" || unit === "s" || unit === "ns") ? label.replace(/ \((?:ms|s|ns)\)$/, "") : label;
+  const format = panel.options?.columns?.find(c => c.field === column.name);
+  const unit = format?.unit ?? column.unit ?? panel.unit;
+  const printed = !format || unitFormats.has(format.format);
+  return printed && column.type === "number" && (unit === "ms" || unit === "s" || unit === "ns") ? label.replace(/ \((?:ms|s|ns)\)$/, "") : label;
 }
 
 export function TableViz({ panel, result, onSelect, onPoint, onVariable, renderCell, traceLinks, foldConstants = true, controls }: { foldConstants?: boolean; traceLinks?: "button"; panel: Panel; result: PanelResult; height: number; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onVariable?: (name: string, value: string) => void; renderCell?: (props: TableCellProps) => ReactNode; controls?: RowControls }) {
