@@ -106,10 +106,10 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 	// Each chunk's rows are gathered once into a contiguous buffer: every
 	// column then reads them in sequence instead of chasing the permutation
 	// across the whole batch once per column.
-	buffer := make([]R, 256)
+	buffer := make([]R, chunkRows)
 	defer clear(buffer)
 	for start := 0; start < len(perm); {
-		end := min(start+256, len(perm), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
+		end := min(start+chunkRows, len(perm), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
 		chunk := buffer[:end-start]
 		for i, row := range perm[start:end] {
 			chunk[i] = rows[row]
@@ -168,12 +168,16 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 	return nil
 }
 
+// chunkRows is how many rows writeColumns fills at a time.
+const chunkRows = 256
+
 // cellWriter buffers one leaf column's values for a chunk of rows. Byte
 // values reference its byte buffer, which is reused once they are written.
 type cellWriter struct {
 	column int
 	values []parquet.Value
 	bytes  []byte
+	nulls  []parquet.Value // top-level NULLs levelled for this column
 }
 
 func (w *cellWriter) put(v parquet.Value, rep, def int) {
@@ -181,6 +185,20 @@ func (w *cellWriter) put(v parquet.Value, rep, def int) {
 }
 
 func (w *cellWriter) null(rep, def int) { w.put(parquet.NullValue(), rep, def) }
+
+// skip appends n top-level NULLs, copied from a template levelled once.
+func (w *cellWriter) skip(n int) {
+	if n == 0 {
+		return
+	}
+	if w.nulls == nil {
+		w.nulls = make([]parquet.Value, chunkRows)
+		for i := range w.nulls {
+			w.nulls[i] = parquet.NullValue().Level(0, 0, w.column)
+		}
+	}
+	w.values = append(w.values, w.nulls[:n]...)
+}
 
 func (w *cellWriter) text(v []byte, rep, def int) {
 	offset := len(w.bytes)
@@ -352,10 +370,14 @@ func variantList[R any](encoder *variantEncoder, metadata, value *cellWriter, ge
 
 // keyWriter fills the dedicated columns and _spill from each row's
 // attributes and resource. A resource map is shared by the rows of its OTLP
-// block, so its part of the projection is computed once per map.
+// block, so its part of the projection is computed once per map. Most rows
+// hold few of the keys: a row visits only the columns it fills, and each
+// column's NULLs are appended as one run when its next value or the chunk's
+// end arrives.
 type keyWriter[R any] struct {
 	attributes, resource func(*R) map[string]any
 	columns              []*cellWriter
+	filled               []int // by column position: chunk rows written
 	keys                 []semconv.Key
 	byName               [2]map[string]int // by scope: key name to column position
 	spill                *cellWriter
@@ -374,6 +396,7 @@ type keyRow struct {
 func (k *keyWriter[R]) add(c Column, w *cellWriter) {
 	k.byName[c.Key.Scope][c.Key.Name] = len(k.columns)
 	k.columns = append(k.columns, w)
+	k.filled = append(k.filled, 0)
 	k.keys = append(k.keys, *c.Key)
 }
 
@@ -424,11 +447,11 @@ func (k *keyWriter[R]) fill(chunk []R) {
 		if len(k.byName[semconv.Span]) > 0 {
 			k.project(&row, semconv.Span, k.attributes(&chunk[i]))
 		}
-		for position, w := range k.columns {
-			if row.has&(1<<position) == 0 {
-				w.null(0, 0)
-				continue
-			}
+		for has := row.has; has != 0; has &= has - 1 {
+			position := bits.TrailingZeros64(has)
+			w := k.columns[position]
+			w.skip(i - k.filled[position])
+			k.filled[position] = i + 1
 			switch v := row.values[position].(type) {
 			case string:
 				putString(w, v, 0, 1)
@@ -442,6 +465,10 @@ func (k *keyWriter[R]) fill(chunk []R) {
 		for spill := row.spill; spill != 0; spill &= spill - 1 {
 			k.counts[bits.TrailingZeros64(spill)]++
 		}
+	}
+	for position, w := range k.columns {
+		w.skip(len(chunk) - k.filled[position])
+		k.filled[position] = 0
 	}
 }
 
