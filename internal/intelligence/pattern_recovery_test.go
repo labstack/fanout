@@ -5,11 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/testutil"
-
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -56,13 +53,9 @@ func TestLogPatternsIncludeObservedTimeAndExactEventBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := NewDetector(duck, DefaultDetectorConfig())
-	userSQL := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "ok"))
 	patterns, err := d.detectLogPatterns(t.Context(), start, end)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "ok")); got != userSQL {
-		t.Fatalf("the fixed pattern statement counted as user SQL: %v, want %v", got, userSQL)
 	}
 	if len(patterns) != 2 {
 		t.Fatalf("patterns=%+v, want original and observed timestamps", patterns)

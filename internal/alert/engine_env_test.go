@@ -7,10 +7,8 @@ import (
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/metrics"
 )
 
 // buildEnvs feeds CEL rules from a SQL aggregate over service_rollup. DuckDB
@@ -42,11 +40,7 @@ INSERT INTO service_rollup VALUES
 	}
 
 	eng := NewEngine(nil, &engine.Duck{DB: db}, nil, time.Minute, 7)
-	userSQL := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "ok"))
 	envs := eng.buildEnvs(context.Background())
-	if got := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "ok")); got != userSQL {
-		t.Fatalf("the fixed env statement counted as user SQL: %v, want %v", got, userSQL)
-	}
 	env, ok := envs["svc-a"]
 	if !ok {
 		t.Fatalf("buildEnvs returned no env for svc-a: %#v", envs)

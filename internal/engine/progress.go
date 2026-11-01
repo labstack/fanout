@@ -24,11 +24,15 @@ var ErrStalled = errors.New("query engine stalled")
 // checks for interrupts only between chunks, so a costly expression can keep
 // a statement running past its deadline. That costs the statement's own
 // connection, not the engine, so it never fails liveness.
-const overrunGrace = maxQueryTimeoutMs * time.Millisecond
+const overrunGrace = longestRead
+
+// longestRead bounds the deadline of every read Fanout issues; panel batches
+// take 20 s and the detector's statements 15 s.
+const longestRead = 25 * time.Second
 
 // idleLimit is how long the read pool may go without a statement returning
 // before liveness confirms the engine with a ping: three of the longest reads.
-const idleLimit = 3 * maxQueryTimeoutMs * time.Millisecond
+const idleLimit = 3 * longestRead
 
 // publishStall is how long a Parquet publication may hold readers out before
 // the engine counts as stalled. The swap's renames and fsyncs do not honour

@@ -6,14 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/labstack/fanout/internal/metrics"
-	"github.com/labstack/fanout/internal/queryrows"
 )
-
-// querySQL validates, describes and executes one statement on one connection
-// while holding the same immutable Parquet snapshot throughout.
 
 // blockedSQLFunctions are built-ins telemetry SQL must not call: they mutate
 // state, read files or settings, or return catalog contents and file paths.
@@ -135,42 +128,6 @@ func checkPattern(node map[string]any, name string) error {
 	return fmt.Errorf("the pattern of %s must be a literal of at most %d bytes", patternFunctions[strings.ToLower(name)], MaxPatternBytes)
 }
 
-func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain bool) (queryrows.Rows, []bool, error) {
-	conn, err := d.readConn(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	release := func() { _ = conn.Close(); d.parquetMu.RUnlock() }
-	failed := true
-	defer func() {
-		if failed {
-			release()
-		}
-	}()
-	if err := validateSQLAST(ctx, conn, query, false); err != nil {
-		return nil, nil, err
-	}
-	query = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(query), ";"))
-	var serialized []bool
-	execQuery := "EXPLAIN " + query
-	if !explain {
-		execQuery, serialized, err = projectSQLResults(ctx, conn, query, maxRows)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	started := time.Now()
-	done := d.begin(ctx, query)
-	rows, err := conn.QueryContext(ctx, execQuery)
-	done(err)
-	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
-	if err != nil {
-		return nil, nil, err
-	}
-	failed = false
-	return &lockedRows{Rows: rows, unlock: release}, serialized, nil
-}
-
 type rowQueryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
@@ -204,12 +161,12 @@ func parseStatement(ctx context.Context, db rowQueryer, query string) (map[strin
 	return parsed.Statements[0].Node, nil
 }
 
-func validateSQLAST(ctx context.Context, conn *sql.Conn, query string, panel bool) error {
+func validateSQLAST(ctx context.Context, conn *sql.Conn, query string) error {
 	node, err := parseStatement(ctx, conn, query)
 	if err != nil {
 		return err
 	}
-	return validateSQLNode(node, nil, panel)
+	return validateSQLNode(node, nil)
 }
 
 // describeProjection describes a query and returns, per result column, the
@@ -248,14 +205,6 @@ func describeProjection(ctx context.Context, conn *sql.Conn, query string) (proj
 	return projection, aliases, serialized, rows.Err()
 }
 
-func projectSQLResults(ctx context.Context, conn *sql.Conn, query string, maxRows int) (string, []bool, error) {
-	projection, aliases, serialized, err := describeProjection(ctx, conn, query)
-	if err != nil {
-		return "", nil, err
-	}
-	return fmt.Sprintf("SELECT %s FROM (%s) AS _result(%s) LIMIT %d", strings.Join(projection, ","), query, strings.Join(aliases, ","), maxRows), serialized, nil
-}
-
 func sqlIdentifier(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 
 // DESCRIBE types can contain quoted field names. A field named "VARIANT"
@@ -285,7 +234,7 @@ func containsLogicalType(expression, name string) bool {
 	return strings.EqualFold(token.String(), name)
 }
 
-func validateSQLNode(value any, ctes map[string]bool, panel bool) error {
+func validateSQLNode(value any, ctes map[string]bool) error {
 	switch node := value.(type) {
 	case map[string]any:
 		// Definitions see prior and outer CTEs. A nonrecursive definition cannot
@@ -306,7 +255,7 @@ func validateSQLNode(value any, ctes map[string]bool, panel bool) error {
 				if !ok || !defined || definition["query_node"] == nil {
 					return fmt.Errorf("invalid CTE definition")
 				}
-				if err := validateSQLNode(definition, scope, panel); err != nil {
+				if err := validateSQLNode(definition, scope); err != nil {
 					return err
 				}
 				scope[strings.ToLower(name)] = true
@@ -334,7 +283,7 @@ func validateSQLNode(value any, ctes map[string]bool, panel bool) error {
 			catalog, _ := node["catalog_name"].(string)
 			allowed := map[string]bool{"spans": true, "logs": true, "metrics": true, "service_rollup": true, "edge_rollup": true}
 			if strings.EqualFold(name, "resource_inventory") {
-				if !panel || (schema != "" && schema != "main") {
+				if schema != "" && schema != "main" {
 					return fmt.Errorf("resource_inventory is available only to panel SQL in its logical window")
 				}
 				allowed["resource_inventory"] = true
@@ -375,13 +324,13 @@ func validateSQLNode(value any, ctes map[string]bool, panel bool) error {
 				scope[strings.ToLower(name)] = true
 				scope["recurring:"+strings.ToLower(name)] = true
 			}
-			if err := validateSQLNode(child, scope, panel); err != nil {
+			if err := validateSQLNode(child, scope); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for _, child := range node {
-			if err := validateSQLNode(child, ctes, panel); err != nil {
+			if err := validateSQLNode(child, ctes); err != nil {
 				return err
 			}
 		}

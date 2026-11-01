@@ -116,18 +116,6 @@ var (
 		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"operation"})
 
-	// Query metrics
-	QueryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_query_total",
-		Help: "Total queries executed",
-	}, []string{"endpoint", "status"})
-
-	QueryDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_query_duration_seconds",
-		Help:    "Query duration in seconds",
-		Buckets: []float64{.01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
-	}, []string{"endpoint"})
-
 	// Rollup metrics
 	RollupTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "fanout_rollup_total",
@@ -485,12 +473,6 @@ func RecordParquetRead(reader string, waitSec float64, admitted bool) {
 func RecordWriteGate(operation string, waitSec, holdSec float64) {
 	WriteGateWait.WithLabelValues(operation).Observe(waitSec)
 	WriteGateHold.WithLabelValues(operation).Observe(holdSec)
-}
-
-// RecordQuery records a query event
-func RecordQuery(endpoint, status string, durationSec float64) {
-	QueryTotal.WithLabelValues(endpoint, status).Inc()
-	QueryDuration.WithLabelValues(endpoint).Observe(durationSec)
 }
 
 // RecordRollup records a complete rollup cycle. A partial failure still records

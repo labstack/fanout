@@ -6,8 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -41,6 +43,7 @@ func testResidualSerialization(t *testing.T, noStrings bool) {
 	if err := repo.Commit(ctx, telemetrystore.Batch{ID: "mismatch", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
+	window := queryrows.WithWindow(ctx, queryrows.Window{Start: time.Unix(0, 0), End: time.Now().Add(time.Hour)})
 	norm := func(v any) any {
 		b, e := json.Marshal(v)
 		if e != nil {
@@ -63,18 +66,15 @@ func testResidualSerialization(t *testing.T, noStrings bool) {
 						t.Fatal(e)
 					}
 					defer d.Close()
-					resp := d.ExecuteSQL(ctx, SQLRequest{Query: "SELECT " + shape + " FROM " + surface + filter + " ORDER BY span_id", MaxRows: 5000})
-					if resp.Error != "" {
-						t.Fatal(resp.Error)
-					}
+					rows := mustRunTelemetrySQL(t, window, d, "SELECT "+shape+" FROM "+surface+filter+" ORDER BY span_id", 5000)
 					count := len(spans)
 					if filter != "" {
 						count = 1
 					}
-					if len(resp.Results) != count {
-						t.Fatalf("rows %d want %d", len(resp.Results), count)
+					if len(rows) != count {
+						t.Fatalf("rows %d want %d", len(rows), count)
 					}
-					for _, row := range resp.Results {
+					for _, row := range rows {
 						var i int
 						if _, e := fmt.Sscanf(row["span_id"].(string), "%d", &i); e != nil {
 							t.Fatal(e)
@@ -84,12 +84,12 @@ func testResidualSerialization(t *testing.T, noStrings bool) {
 							if strings.Contains(shape, "[attributes,resource] AS") {
 								want = []any{attrs[i], resources[i]}
 							}
-							if !reflect.DeepEqual(row["nested"], norm(want)) {
-								t.Fatalf("row %d nested got %#v want %#v", i, row["nested"], norm(want))
+							if !reflect.DeepEqual(jsonValue(t, row["nested"]), norm(want)) {
+								t.Fatalf("row %d nested got %v want %#v", i, row["nested"], norm(want))
 							}
 						} else {
 							for k, want := range map[string]any{"attributes": attrs[i], "resource": resources[i]} {
-								if !reflect.DeepEqual(row[k], norm(want)) {
+								if !reflect.DeepEqual(jsonValue(t, row[k]), norm(want)) {
 									t.Fatalf("row %d %s got %#v want %#v", i, k, row[k], norm(want))
 								}
 							}

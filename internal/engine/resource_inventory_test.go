@@ -688,8 +688,8 @@ func TestResourceInventoryPanelSQLBoundary(t *testing.T) {
 		if _, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10); err != nil {
 			t.Fatalf("panel relation %s: %v", relation, err)
 		}
-		if result := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement}); result.Error == "" {
-			t.Fatalf("unscoped inventory accepted: %+v", result)
+		if _, err := d.QueryContext(t.Context(), statement); err == nil {
+			t.Fatalf("unscoped inventory accepted: %s", statement)
 		}
 	}
 	for _, statement := range []string{

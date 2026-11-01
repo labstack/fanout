@@ -26,10 +26,6 @@ func TestTelemetrySQLRejectsCatalogMacrosAndSideEffects(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "not available to telemetry SQL") {
 					t.Fatalf("function boundary for %s: %v", statement, err)
 				}
-				response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement})
-				if !strings.Contains(response.Error, "not available to telemetry SQL") {
-					t.Fatalf("direct SQL function boundary: %+v", response)
-				}
 			})
 		}
 	}
@@ -110,9 +106,8 @@ func TestSnapshotExecutionMatchesDescribedColumnBindings(t *testing.T) {
 		"SELECT telemetry.logs.body AS b FROM telemetry.logs",
 	} {
 		t.Run(statement, func(t *testing.T) {
-			response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement})
-			if response.Error != "" || len(response.Results) != 1 || response.Results[0]["b"] != "fixture body" {
-				t.Fatalf("direct SQL: %+v", response)
+			if rows := mustRunTelemetrySQL(t, ctx, d, statement, 10); len(rows) != 1 || rows[0]["b"] != "fixture body" {
+				t.Fatalf("panel SQL: %+v", rows)
 			}
 			prepared, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10)
 			if err != nil {

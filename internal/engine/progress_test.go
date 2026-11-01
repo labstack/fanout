@@ -81,7 +81,7 @@ func TestAReadPastItsDeadlineIsAnOverrunNotAStall(t *testing.T) {
 	if d.Overruns() != 0 {
 		t.Fatal("a read within its deadline and grace overruns")
 	}
-	if overrunGrace < maxQueryTimeoutMs*time.Millisecond {
+	if overrunGrace < longestRead {
 		t.Fatalf("grace %s is shorter than the longest read", overrunGrace)
 	}
 }

@@ -21,9 +21,6 @@ func TestReadersQueuedForAConnectionDoNotHoldPublication(t *testing.T) {
 			var one int
 			_ = d.QueryRowScan(ctx, []any{&one}, "SELECT 1")
 		},
-		"sql": func(d *Duck, ctx context.Context) {
-			d.ExecuteSQL(ctx, SQLRequest{Query: "SELECT 1"})
-		},
 		"prepare": func(d *Duck, ctx context.Context) {
 			_, _, _ = d.PrepareTelemetrySQL(ctx, "SELECT 1", "SELECT 1", 1)
 		},

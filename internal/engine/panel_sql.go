@@ -25,10 +25,10 @@ func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, 
 		return "", nil, err
 	}
 	defer func() { _ = conn.Close(); d.parquetMu.RUnlock() }()
-	if err := validateSQLAST(ctx, conn, query, true); err != nil {
+	if err := validateSQLAST(ctx, conn, query); err != nil {
 		return "", nil, err
 	}
-	if err := validateSQLAST(ctx, conn, describe, true); err != nil {
+	if err := validateSQLAST(ctx, conn, describe); err != nil {
 		return "", nil, err
 	}
 	trim := func(s string) string { return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), ";")) }

@@ -39,7 +39,7 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"SELECT getvariable('operator_secret')",
 		"WITH x AS MATERIALIZED (COPY (SELECT 1) TO '" + output + "') SELECT * FROM x",
 	} {
-		if err := validateSQLAST(ctx, conn, query, false); err == nil {
+		if err := validateSQLAST(ctx, conn, query); err == nil {
 			t.Errorf("accepted %s", query)
 		}
 	}
@@ -50,7 +50,7 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"WITH x AS (SELECT 1 AS n) SELECT * FROM x",
 		"WITH RECURSIVE x(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM x WHERE n<3) SELECT * FROM x",
 	} {
-		if err := validateSQLAST(ctx, conn, query, false); err != nil {
+		if err := validateSQLAST(ctx, conn, query); err != nil {
 			t.Errorf("rejected %s: %v", query, err)
 		}
 	}
@@ -59,7 +59,7 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 func TestSQLBoundarySerializesNestedVariants(t *testing.T) {
 	db := openTestDuck(t)
 	db.SetMaxOpenConns(1)
-	d := &Duck{DB: db, writeDB: db}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t)}
 	queries := []string{
 		`SELECT '{"dotted.key":9223372036854775807,"zero":0,"false":false,"null":null,"nested":[1,{"a":true}]}'::JSON::VARIANT AS data`,
 		`SELECT [1::VARIANT, '"text"'::JSON::VARIANT] AS data`,
@@ -69,23 +69,19 @@ func TestSQLBoundarySerializesNestedVariants(t *testing.T) {
 		`SELECT 'Infinity'::DOUBLE AS data`,
 	}
 	for _, query := range queries {
-		resp := d.ExecuteSQL(context.Background(), SQLRequest{Query: query})
-		if resp.Error != "" {
-			t.Fatalf("%s: %s", query, resp.Error)
+		rows := mustRunTelemetrySQL(t, t.Context(), d, query, 1000)
+		if len(rows) != 1 {
+			t.Fatalf("%s: %#v", query, rows)
 		}
-		if len(resp.Results) != 1 {
-			t.Fatalf("%s: %#v", query, resp)
-		}
-		if _, err := json.Marshal(resp.Results); err != nil {
-			t.Fatal(err)
+		if _, serialized := rows[0]["data"].(string); serialized {
+			jsonValue(t, rows[0]["data"])
 		}
 	}
-	resp := d.ExecuteSQL(context.Background(), SQLRequest{Query: queries[0]})
-	value := resp.Results[0]["data"].(map[string]any)
+	value := jsonValue(t, mustRunTelemetrySQL(t, t.Context(), d, queries[0], 1000)[0]["data"]).(map[string]any)
 	if value["dotted.key"] != json.Number("9223372036854775807") || value["zero"] != json.Number("0") || value["false"] != false || value["null"] != nil {
 		t.Fatalf("typed values changed: %#v", value)
 	}
-	if resp := d.ExecuteSQL(context.Background(), SQLRequest{Query: "SELECT 1 AS x, 2 AS x"}); resp.Error == "" {
+	if _, err := runTelemetrySQL(t.Context(), d, "SELECT 1 AS x, 2 AS x", 1000); err == nil {
 		t.Fatal("duplicate aliases accepted")
 	}
 }
@@ -106,7 +102,7 @@ func TestLogicalTypeDetectionSkipsFieldNames(t *testing.T) {
 	}
 }
 
-func TestExecuteSQLRejectsEngineMetadataReads(t *testing.T) {
+func TestTelemetrySQLRejectsEngineMetadataReads(t *testing.T) {
 	d := &Duck{DB: openTestDuck(t)}
 	for _, statement := range []string{
 		"SELECT * FROM (SHOW ALL TABLES)",
@@ -120,7 +116,7 @@ func TestExecuteSQLRejectsEngineMetadataReads(t *testing.T) {
 		"SELECT current_setting('allowed_directories')",
 		"SELECT getvariable('operator_secret')",
 	} {
-		if response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement}); response.Error == "" {
+		if _, _, err := d.PrepareTelemetrySQL(t.Context(), statement, statement, 10); err == nil {
 			t.Errorf("executed forbidden query %s", statement)
 		}
 	}
@@ -156,7 +152,7 @@ func TestSQLBoundaryRejectsQuadraticRowCosts(t *testing.T) {
 		"SELECT * FROM spans WHERE regexp_matches(name, " + long + ")":                                    "at most 256 bytes",
 		"SELECT * FROM spans WHERE list_has_any(['x'], list_transform(['y'], s -> s LIKE name))":          "pattern of LIKE must be a literal",
 	} {
-		err := validateSQLAST(ctx, conn, query, false)
+		err := validateSQLAST(ctx, conn, query)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", query, err, want)
 		}
@@ -169,7 +165,7 @@ func TestSQLBoundaryRejectsQuadraticRowCosts(t *testing.T) {
 		"SELECT contains(name, service_name), jaccard(name, 'checkout') FROM spans",
 		"SELECT * FROM spans WHERE name LIKE ?::VARCHAR AND regexp_matches(name, ?)",
 	} {
-		if err := validateSQLAST(ctx, conn, query, false); err != nil {
+		if err := validateSQLAST(ctx, conn, query); err != nil {
 			t.Errorf("rejected %s: %v", query, err)
 		}
 	}
