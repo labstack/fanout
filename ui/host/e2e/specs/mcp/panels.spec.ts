@@ -54,6 +54,9 @@ for (const theme of ["light", "dark"] as const) test.describe(theme, () => {
         await expect(frame).toBeVisible();
         await frame.click();
         await expect(details).toBeVisible();
+        // The hovered frame's tooltip fades out; scanning it mid-fade blends its colors with the chart.
+        await main.page().mouse.move(0, 0);
+        await expect(main.locator("xpath=ancestor::body").getByRole("tooltip")).toHaveCount(0);
       }
       if (scenario === "logs") await expect(main.getByRole("columnheader", { name: /body/i })).toBeVisible();
       if (scenario === "custom") {
