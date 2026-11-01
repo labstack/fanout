@@ -46,7 +46,7 @@ Recorded on 2026-11-01:
    never the OpenTelemetry Demo.
 7. Rule C resource columns apply to every signal: spans, logs and metrics
    get the same 29 keys under the same `_r_<key>` names. Each signal's file
-   has its own `_spill` mask and footer counts. Rule A stays on spans.
+   has its own footer spill counts. Rule A stays on spans.
 8. Exemplars become typed list columns, following the ClickHouse exporter's
    exemplar layout.
 9. The L1 thresholds stand as written: at most half of format 4's time at
@@ -229,11 +229,17 @@ columns under the same `_r_<key>` names, so `resource['k8s.pod.name']`
 resolves the same way on every signal. Metric `series_id` still hashes the
 complete resource map, so series identity does not change.
 
-**Wrong types.** A column holds a value only if its OTLP type matches the
-semconv type. For example, a string `"200"` for `http.response.status_code`
-goes only to the map. A 64-bit `_spill` mask marks that row's bit for the key,
-and the file footer records a count per key. Each signal's file has its own
-mask and counts, so a spilled log key does not slow span queries.
+**Other types.** Ingest converts a value of another OTLP type to the key's
+semconv type, and the column holds the result. An integer key takes an
+integer, a double that is integral and within int64 range, and a string that
+Go's `strconv.ParseInt` reads in base 10 exactly as sent, with no trimming.
+For example, the string `"200"` for `http.response.status_code` becomes 200
+and `503.0` becomes 503. A string key takes a string and the text of an
+integer, a boolean or a double, written by Go's `strconv` (`503.0` becomes
+`"503"`). Any other value, such as `503.5` or `true` for an integer key or
+bytes, maps and lists for any key, has no conversion: the column is NULL and
+the file footer counts it for the key as a spill. The map always keeps the
+value as sent.
 
 The following format-4 columns are removed with no aliases: `http_method`,
 `http_status_code`, `http_route`, `db_system`, `rpc_method`,
@@ -250,33 +256,28 @@ The SQL guard does the same on the parsed AST for every
 rewritten expression has the column's type, not VARIANT, so the existing
 `::INTEGER` casts still work.
 
-A query runs against a pinned file snapshot. If any file in the snapshot has
-spilled values for a key, those files read `coalesce(column, map)`, which is
-correct but slow. All other files read the column alone. Users cannot write
-underscore-prefixed names. Catalog, suggestion and `get_telemetry_schema` show
-the keys as attributes with an "indexed" mark.
+The column is the key's read value everywhere, so queries never read the map
+for a key in the list and every file keeps its statistics and filter
+pushdown. Users cannot write underscore-prefixed names. Catalog, suggestion
+and `get_telemetry_schema` show the keys as attributes with an "indexed"
+mark.
 
 The read path implements this as follows (`internal/engine/sql_keys.go`):
 
-- The read value of a key is `TRY_CAST(map['k'] AS <column type>)`. A value
-  of another type reads as its cast, so the text `"200"` reads as 200 and
-  `"abc"` as NULL for `http.response.status_code`.
 - Snapshot binding rewrites every query, so FanQL, structured panels, panel
   SQL and product SQL share one rule. A subscript becomes the column when its
   map binds to a signal relation directly, or through subqueries and CTEs
-  that pass it on with `*`. When a subquery projects the map without the
-  columns, it becomes the `TRY_CAST` above. Keys outside the list, log and
-  metric attributes, and subscripts whose relation the AST does not
-  determine read the map unchanged. Rewritten select items keep their
-  original result names.
-- Snapshot sources split each signal's files in two: files whose spill masks
-  contain no key the statement reads, and the others, which read
-  `coalesce(column, TRY_CAST(map['k'] AS <type>))` for those keys. A
-  `UNION ALL` joins the two groups. Only the first group's predicates reach
-  Parquet statistics. Unpinned views apply the coalesce to every file.
+  that pass it on with `*`. Rewritten select items keep their original
+  result names.
+- Every other subscript reads the map unchanged, which is the value as sent:
+  keys outside the list, log and metric attributes, subscripts whose relation
+  the AST does not determine, and subscripts of a map that a subquery or CTE
+  projects without its columns. In that last case a value that ingest
+  converted reads in its original type, as any key outside the list does.
+- Unpinned views read the files' columns as they are.
 - Variables compared with an integer key bind as numbers. The SQL guard and
-  the filter gate reject the `_a_*`, `_r_*`, `_spill` and `_trace_hash`
-  names and name the key to write instead.
+  the filter gate reject the `_a_*`, `_r_*` and `_trace_hash` names and name
+  the key to write instead.
 
 **Shredding.** Format 4 shreds `messaging.*` and four `service.*` and
 `deployment.*` resource keys. Format 5 stops shredding the keys that now have
@@ -291,8 +292,9 @@ shredding `messaging.*`.
 - The read-cache schema version changes, so caches rebuild.
 - Compaction merges format-5 inputs column for column and sums the spill
   counts. Its existing schema check already refuses mixed formats.
-- Offline verification also checks that column equals map value on every
-  row without a spill bit.
+- Offline verification also checks, on every row, that each column equals
+  the conversion of its map value, restated in SQL, and that the footer
+  counts each key's values without a conversion.
 
 **Existing format-4 data.** AGENTS.md and ADR 0004 forbid a legacy reader.
 Fanout keeps refusing format-4 directories and preserves them, as it does
@@ -545,7 +547,7 @@ of the peer order, not a tuning target, and the evaluation reports it.
    - Do not use the OpenTelemetry Demo or the bench query set.
 4. **Report regressions next to wins.** The report covers ingest CPU per span,
    allocation ratio, file size, compaction write amplification, startup and
-   verification time, and spill-path query time, each with variance across
+   verification time, and query time on wrong-typed data, each with variance across
    seeds. For logs and metrics it adds sort time at ingest and the share of
    row groups each query skipped.
 
