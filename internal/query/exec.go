@@ -479,8 +479,19 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if frame.Trend != nil {
 		res.Interval = formatInterval(time.Duration(frame.Trend.StepMS) * time.Millisecond)
 	}
-	// With no rows the panel is empty: totals and the previous range would
-	// cost scans the diagnosis needs, and nothing shows them.
+	// A panel without rows reads no totals, and an empty one no previous
+	// range: those scans would cost the diagnosis its deadline, and nothing
+	// shows them. A count of nothing is 0, and still compares.
+	zero := zeroCount(p, checked.Measures[p.ID], frame)
+	if zero && frame.Rows == 0 {
+		// The stat's buckets are empty, so its total is the count's 0.
+		frame.Totals = make([]any, len(frame.Columns))
+		for i, c := range frame.Columns {
+			if c.Role == "measure" {
+				frame.Totals[i] = 0.0
+			}
+		}
+	}
 	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil && frame.Rows > 0 {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
 		if err != nil {
@@ -488,7 +499,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		}
 		frame.Totals = totals
 	}
-	if compare && (p.Viz == "stat" || p.Viz == "timeseries") && frame.Rows > 0 {
+	if compare && (p.Viz == "stat" || p.Viz == "timeseries") && (frame.Rows > 0 || zero) {
 		shift := end.Sub(start)
 		previous := scope
 		previous.Start, previous.End = start.Add(-shift), end.Add(-shift)
@@ -502,16 +513,6 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	}
 	if frame.Rows > 0 {
 		e.applyMetricUnit(ctx, p, checked, scope, frame, res.Previous)
-	}
-	zero := zeroCount(p, checked.Measures[p.ID], frame)
-	if zero && frame.Rows == 0 {
-		// The stat's buckets are empty, so its total is the count's 0.
-		frame.Totals = make([]any, len(frame.Columns))
-		for i, c := range frame.Columns {
-			if c.Role == "measure" {
-				frame.Totals[i] = 0.0
-			}
-		}
 	}
 	if zero {
 		// A count of nothing is a real 0; the diagnosis says why, as a hint.

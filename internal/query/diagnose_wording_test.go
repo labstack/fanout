@@ -127,3 +127,19 @@ func TestZeroCountIsZeroWithHint(t *testing.T) {
 		t.Errorf("found: %+v", r)
 	}
 }
+
+// A zero count still compares with the previous range: 60 then 0 is a drop.
+func TestZeroCountKeepsPreviousRange(t *testing.T) {
+	e := newFixtureExecutor(t)
+	e.now = func() time.Time { return fixtureStart.Add(2 * time.Hour) }
+	compare := true
+	d := Dashboard{Name: "Zero", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Spans", Viz: "stat", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'frontend'"}}}}}
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d, Compare: &compare})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := got[0]
+	if r.Status != StatusOK || r.Frame.Totals[1] != 0.0 || r.Previous == nil || len(r.Previous.Totals) != 2 || r.Previous.Totals[1] != 60.0 {
+		t.Fatalf("%+v previous %+v", r, r.Previous)
+	}
+}

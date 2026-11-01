@@ -204,18 +204,18 @@ func TestDiagnosisNamesTextAndNegatedFilters(t *testing.T) {
 	}
 }
 
-// A stat that matches nothing reads no totals and no previous range, so its
-// diagnosis has the deadline a table's has: both issue the same statements.
-func TestZeroStatSkipsTotalsAndPrevious(t *testing.T) {
+// A stat that matches nothing reads no totals, so its diagnosis has the
+// deadline a table's has: both issue the same statements.
+func TestZeroStatSkipsTotals(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	commit(t, repo, shopSpans(), nil)
-	queries, compare := map[string]int{}, true
+	queries := map[string]int{}
 	for _, viz := range []string{"stat", "table"} {
 		counting := &countingEngine{Engine: engine}
 		e := NewExecutor(counting, 30)
 		e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 		d := Dashboard{Name: "Empty", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Empty", Viz: viz, Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'nope'"}}}}}
-		got, err := e.Run(t.Context(), RunRequest{Dashboard: d, Compare: &compare})
+		got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 		if err != nil || got[0].Status != StatusOK || got[0].Diagnosis == "" {
 			t.Fatalf("%s: %v %+v", viz, err, got)
 		}
