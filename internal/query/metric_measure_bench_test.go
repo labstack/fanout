@@ -180,7 +180,7 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 						if err != nil || f == nil || f.Rows == 0 {
 							t.Fatalf("%s: frame=%+v err=%v", shape.id, f, err)
 						}
-						if !metricFrameHasValue(f) {
+						if !measuresHaveValue(f) {
 							t.Fatalf("%s: no measure values", shape.id)
 						}
 					} else {

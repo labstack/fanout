@@ -497,7 +497,16 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			res.ShiftMS = shift.Milliseconds()
 		}
 	}
-	if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !metricFrameHasValue(frame)) {
+	if frame.Rows > 0 && p.Query != nil && p.Query.From != "metrics" && p.Viz != "state_timeline" && hasMeasure(frame) && !measuresHaveValue(frame) {
+		// Rows whose every measure is null have nothing to plot. A state
+		// timeline draws null buckets as unknown, so it keeps them.
+		res.Status = StatusEmpty
+		noun := "this measure"
+		if len(p.Query.Measures) > 1 {
+			noun = "these measures"
+		}
+		res.Diagnosis = fmt.Sprintf("The matching %s have no values for %s in this time range.", rowNoun(p), noun)
+	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
 	}
@@ -678,7 +687,16 @@ func failed(res Result, err error, stopped error) Result {
 	return res
 }
 
-func metricFrameHasValue(f *Frame) bool {
+func hasMeasure(f *Frame) bool {
+	for _, c := range f.Columns {
+		if c.Role == "measure" {
+			return true
+		}
+	}
+	return false
+}
+
+func measuresHaveValue(f *Frame) bool {
 	if f == nil {
 		return false
 	}
