@@ -510,7 +510,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			noun = "these measures"
 		}
 		res.Diagnosis = fmt.Sprintf("The matching %s have no values for %s in this time range.", rowNoun(p), noun)
-	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
+	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || zeroCount(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
 	}
@@ -714,6 +714,28 @@ func measuresHaveValue(f *Frame) bool {
 		}
 	}
 	return false
+}
+
+// zeroCount reports an ungrouped count that found no rows. Such a query
+// always returns one row, so a table would show a bare 0 where a stat, whose
+// buckets are empty, explains why.
+func zeroCount(p *Panel, measures []Measure, frame *Frame) bool {
+	if p.Query == nil || len(p.Query.By) > 0 || p.Query.Bucket != "" || frame.Rows != 1 || len(measures) == 0 {
+		return false
+	}
+	for _, m := range measures {
+		if m.Func != "count" || m.IsExpression() {
+			return false
+		}
+	}
+	for i, c := range frame.Columns {
+		if c.Role == "measure" {
+			if n, ok := frame.Values[i][0].(float64); !ok || n != 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func emptyExpressionTotal(p *Panel, measures []Measure, frame *Frame) bool {

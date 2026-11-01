@@ -92,3 +92,26 @@ func TestDiagnosisValuesSeen(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+// A count of nothing is an empty panel on every viz: a table answers as a
+// stat does, with the diagnosis, rather than with a bare zero.
+func TestZeroCountIsEmptyOnEveryViz(t *testing.T) {
+	e := newFixtureExecutor(t)
+	d := Dashboard{Name: "Zero", Time: Time{Range: "1h"}}
+	for _, viz := range []string{"stat", "table"} {
+		d.Panels = append(d.Panels, Panel{ID: viz, Title: "Spans", Viz: viz, Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'nope'"}}})
+	}
+	d.Panels = append(d.Panels, Panel{ID: "found", Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'frontend'"}}})
+	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range got[:2] {
+		if r.Status != StatusEmpty || !strings.HasPrefix(r.Diagnosis, "No spans for service nope in this time range.") {
+			t.Errorf("%s: %+v", r.ID, r)
+		}
+	}
+	if r := got[2]; r.Status != StatusOK {
+		t.Errorf("%+v", r)
+	}
+}
