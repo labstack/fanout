@@ -51,6 +51,19 @@ type sortKey struct {
 	s [3]string
 }
 
+// sortKeys are a batch's sort keys, laid out as only its order needs. Row
+// i's integer parts are n[i*width : (i+1)*width], filled as sortKey's n. A
+// text part that is not ranked keeps its rows' strings in s[slot]; the slot
+// stays nil when the part is ranked.
+type sortKeys struct {
+	width int
+	n     []uint64
+	s     [][]string
+}
+
+// row returns row i's integer parts.
+func (k *sortKeys) row(i int) []uint64 { return k.n[i*k.width : (i+1)*k.width] }
+
 // keyPart is a compiled Part: the slots it fills and the reader that feeds it.
 type keyPart struct {
 	column int // position in the order's distinct columns
@@ -152,26 +165,30 @@ const maxRanked = 4096
 // every row's key, indexed by input position. The rows are not moved. Text
 // parts with few distinct values are replaced by their rank, so most
 // comparisons are integer comparisons.
-func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
-	keys := make([]sortKey, len(rows))
-	var texts []keyPart // text parts compared as text
+func sortRows[R any](s *Signal, rows []R) ([]int32, sortKeys) {
+	parts := len(s.order.parts)
+	keys := sortKeys{width: parts, n: make([]uint64, len(rows)*parts)}
 	for _, p := range s.order.parts {
 		c, _ := s.Column(s.order.columns[p.column])
 		switch get := c.get.(type) {
 		case func(*R) string:
 			if !rankText(rows, keys, p, get) {
-				for i := range rows {
-					keys[i].s[p.slot] = get(&rows[i])
+				for len(keys.s) <= p.slot {
+					keys.s = append(keys.s, nil)
 				}
-				texts = append(texts, p)
+				text := make([]string, len(rows))
+				for i := range rows {
+					text[i] = get(&rows[i])
+				}
+				keys.s[p.slot] = text
 			}
 		case func(*R) int64:
 			for i := range rows {
-				keys[i].n[p.index] = p.integer(get(&rows[i]))
+				keys.n[i*parts+p.index] = p.integer(get(&rows[i]))
 			}
 		case func(*R) uint64:
 			for i := range rows {
-				keys[i].n[p.index] = p.integer(int64(get(&rows[i])))
+				keys.n[i*parts+p.index] = p.integer(int64(get(&rows[i])))
 			}
 		default:
 			panic(fmt.Sprintf("%s order column %s has no accessor for %T", s.Name, c.Name, *new(R)))
@@ -181,30 +198,29 @@ func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
 	for i := range perm {
 		perm[i] = int32(i)
 	}
-	parts := len(s.order.parts)
 	// Each radix pass clears and sums 65,536 counters, more work than
 	// comparing a small batch.
-	if len(texts) == 0 && len(rows) >= radixMinRows && radixSort(keys, parts, perm) {
+	if len(keys.s) == 0 && len(rows) >= radixMinRows && radixSort(keys.n, parts, perm) {
 		return perm, keys
 	}
 	compare := func(a, b int32) int {
-		x, y := &keys[a], &keys[b]
-		for i := range parts {
-			if x.n[i] != y.n[i] {
-				return cmp.Compare(x.n[i], y.n[i])
+		x, y := keys.row(int(a)), keys.row(int(b))
+		for i := range x {
+			if x[i] != y[i] {
+				return cmp.Compare(x[i], y[i])
 			}
 		}
 		return cmp.Compare(a, b)
 	}
-	if len(texts) > 0 {
+	if len(keys.s) > 0 {
 		compare = func(a, b int32) int {
-			x, y := &keys[a], &keys[b]
+			x, y := keys.row(int(a)), keys.row(int(b))
 			for _, p := range s.order.parts {
 				var c int
-				if p.text && slices.Contains(texts, p) {
-					c = strings.Compare(x.s[p.slot], y.s[p.slot])
+				if p.text && p.slot < len(keys.s) && keys.s[p.slot] != nil {
+					c = strings.Compare(keys.s[p.slot][a], keys.s[p.slot][b])
 				} else {
-					c = cmp.Compare(x.n[p.index], y.n[p.index])
+					c = cmp.Compare(x[p.index], y[p.index])
 				}
 				if c != 0 {
 					return c
@@ -219,21 +235,22 @@ func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
 
 const radixMinRows = 256
 
-// radixSort sorts perm by the keys' integer parts when, each offset by its
-// minimum, they pack into 128 bits, and reports whether they did. Least
-// significant 16-bit digits come first and every pass is stable, so ties keep
-// their input order, as the comparison sort's index tiebreak does.
-func radixSort(keys []sortKey, parts int, perm []int32) bool {
-	if len(keys) < 2 {
+// radixSort sorts perm by the rows' integer parts, parts to a row in n, when,
+// each offset by its minimum, they pack into 128 bits, and reports whether
+// they did. Least significant 16-bit digits come first and every pass is
+// stable, so ties keep their input order, as the comparison sort's index
+// tiebreak does.
+func radixSort(n []uint64, parts int, perm []int32) bool {
+	if len(perm) < 2 {
 		return true
 	}
 	var low [len(sortKey{}.n)]uint64
 	var width [len(sortKey{}.n)]int
 	total := 0
 	for p := range parts {
-		lo, hi := keys[0].n[p], keys[0].n[p]
-		for i := range keys {
-			lo, hi = min(lo, keys[i].n[p]), max(hi, keys[i].n[p])
+		lo, hi := n[p], n[p]
+		for i := p; i < len(n); i += parts {
+			lo, hi = min(lo, n[i]), max(hi, n[i])
 		}
 		low[p], width[p] = lo, bits.Len64(hi-lo)
 		total += width[p]
@@ -243,12 +260,12 @@ func radixSort(keys []sortKey, parts int, perm []int32) bool {
 	}
 	// packed[i] is row i's key, its first part most significant.
 	type packed struct{ hi, lo uint64 }
-	key := make([]packed, len(keys))
-	for i := range keys {
+	key := make([]packed, len(perm))
+	for i := range key {
 		var k packed
-		for p := range parts {
+		for p, v := range n[i*parts : (i+1)*parts] {
 			w := width[p]
-			v := keys[i].n[p] - low[p]
+			v -= low[p]
 			switch {
 			case w == 0:
 			case w == 64:
@@ -296,7 +313,7 @@ func radixSort(keys []sortKey, parts int, perm []int32) bool {
 // distinct values, or reports false when there are more than maxRanked.
 // Rows of one resource share their strings, so a value equal in identity to
 // the previous row's skips the map.
-func rankText[R any](rows []R, keys []sortKey, p keyPart, get func(*R) string) bool {
+func rankText[R any](rows []R, keys sortKeys, p keyPart, get func(*R) string) bool {
 	ranks := map[string]uint64{}
 	var last string
 	var rank uint64
@@ -313,7 +330,7 @@ func rankText[R any](rows []R, keys []sortKey, p keyPart, get func(*R) string) b
 			}
 			last, rank = v, r
 		}
-		keys[i].n[p.index] = rank
+		keys.n[i*keys.width+p.index] = rank
 	}
 	// Ranks were assigned in first-seen order; remap them to sorted order.
 	values := make([]string, len(ranks))
@@ -329,8 +346,8 @@ func rankText[R any](rows []R, keys []sortKey, p keyPart, get func(*R) string) b
 	for position, r := range order {
 		sorted[r] = uint64(position)
 	}
-	for i := range keys {
-		keys[i].n[p.index] = sorted[keys[i].n[p.index]]
+	for i := p.index; i < len(keys.n); i += keys.width {
+		keys.n[i] = sorted[keys.n[i]]
 	}
 	return true
 }

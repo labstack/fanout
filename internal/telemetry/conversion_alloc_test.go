@@ -44,14 +44,18 @@ func TestSpanOrderingDoesNotCopyRows(t *testing.T) {
 	runtime.KeepAlive(spans)
 
 	allocated := int64(after.TotalAlloc - before.TotalAlloc)
-	order := int64(len(spans)) * int64(unsafe.Sizeof(sortKey{})+unsafe.Sizeof(int32(0)))
+	order := int64(len(keys.n))*int64(unsafe.Sizeof(uint64(0))) + int64(len(perm))*int64(unsafe.Sizeof(int32(0)))
+	for _, text := range keys.s {
+		order += int64(len(text)) * int64(unsafe.Sizeof(""))
+	}
 	rows := int64(len(spans)) * int64(unsafe.Sizeof(Span{}))
 	t.Logf("json payload %.1f MiB, row headers %.1f MiB, keys and permutation %.1f MiB, allocated %.1f MiB",
 		float64(jsonBytes)/(1<<20), float64(rows)/(1<<20), float64(order)/(1<<20), float64(allocated)/(1<<20))
 
-	// The keys and permutation plus a margin: no copy of the rows, and
-	// nothing like the payload again.
-	limit := order + order/4
+	// The keys and permutation plus a margin, and the span ID's rank map,
+	// which stops at maxRanked values whatever the batch size: no copy of the
+	// rows, and nothing like the payload again.
+	limit := order + order/4 + 1<<20
 	if allocated > limit {
 		t.Errorf("ordering allocated %.1f MiB for %.1f MiB of keys; it is copying rows or payload rather than referencing them",
 			float64(allocated)/(1<<20), float64(order)/(1<<20))

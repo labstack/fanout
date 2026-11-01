@@ -1277,7 +1277,7 @@ func commitSignal[R any](stage string, s *Signal, rows []R) error {
 	if s.Traces {
 		hashes := make([]uint64, len(perm))
 		for i, row := range perm {
-			hashes[i] = keys[row].n[0]
+			hashes[i] = keys.row(int(row))[0]
 		}
 		index.Go(func() error {
 			if err := writeTraceIndex(filepath.Join(stage, "trace.fidx"), hashes); err != nil {

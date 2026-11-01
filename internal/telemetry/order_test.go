@@ -18,7 +18,7 @@ func TestRadixSortMatchesComparisonSort(t *testing.T) {
 	for trial := range 2000 {
 		n := []int{0, 1, 2, 3, 257, r.Intn(3000)}[trial%6]
 		parts := 1 + r.Intn(len(sortKey{}.n))
-		keys := make([]sortKey, n)
+		keys := make([]uint64, n*parts)
 		for p := range parts {
 			part := keyPart{index: p, signed: r.Intn(2) == 0}
 			if part.signed && r.Intn(2) == 0 {
@@ -26,7 +26,7 @@ func TestRadixSortMatchesComparisonSort(t *testing.T) {
 			}
 			spread := []int64{0, 3, 1 << 20, 1 << 40, -1}[r.Intn(5)]
 			base := r.Int63() - 1<<62
-			for i := range keys {
+			for i := range n {
 				var v int64
 				switch spread {
 				case 0:
@@ -36,13 +36,13 @@ func TestRadixSortMatchesComparisonSort(t *testing.T) {
 				default:
 					v = base + r.Int63n(spread) - spread/2
 				}
-				keys[i].n[p] = part.integer(v)
+				keys[i*parts+p] = part.integer(v)
 			}
 		}
 		want := identity(n)
 		slices.SortFunc(want, func(a, b int32) int {
 			for p := range parts {
-				if c := cmp.Compare(keys[a].n[p], keys[b].n[p]); c != 0 {
+				if c := cmp.Compare(keys[int(a)*parts+p], keys[int(b)*parts+p]); c != 0 {
 					return c
 				}
 			}
