@@ -385,8 +385,9 @@ func (r *resolver) field(f *fieldName) {
 }
 
 // keySpelling offers the nearest key the schema saw in the field's scope when
-// the window never saw this dotted key: http.rout for http.route. Without a
-// schema there are no keys to compare.
+// it never saw this dotted key: http.rout for http.route. The schema is a
+// recent sample, so only one known to cover the query offers a fix. Without
+// a schema there are no keys to compare.
 func (r *resolver) keySpelling(f *fieldName, scope string) {
 	if r.opts.Schema == nil {
 		return
@@ -408,7 +409,12 @@ func (r *resolver) keySpelling(f *fieldName, scope string) {
 	if f.Scope != "" {
 		name, written = f.Scope+"."+name, f.Scope+"."+f.Key
 	}
-	r.notice(f.At, fmt.Sprintf("%q was not seen on %s in this window; did you mean %s?", written, r.out.Query.Source, name), query.FixIt{Label: name, Span: *textSpan(f.At), Text: name})
+	message := fmt.Sprintf("%q was not seen recently on %s; did you mean %s?", written, r.out.Query.Source, name)
+	if r.opts.SchemaPartial {
+		r.notice(f.At, message)
+		return
+	}
+	r.notice(f.At, message, query.FixIt{Label: name, Span: *textSpan(f.At), Text: name})
 }
 
 func (r *resolver) expr(e filterExpr) {

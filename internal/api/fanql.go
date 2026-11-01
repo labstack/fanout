@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -47,13 +48,15 @@ func fanqlNotices(notices []fanql.Notice) []fanql.Notice {
 func (h *FanQLHandler) parse(c *echo.Context) error {
 	var req struct {
 		fanql.Options
-		Text    string `json:"text"`
-		Preview bool   `json:"preview,omitempty"`
+		Text      string `json:"text"`
+		Preview   bool   `json:"preview,omitempty"`
+		Window    string `json:"window,omitempty"`
+		Namespace string `json:"namespace,omitempty"`
 	}
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
 	}
-	req.Schema = h.cachedSchema(c.Request().Context())
+	req.Schema, req.SchemaPartial = h.cachedSchema(c.Request().Context(), req.Window, req.Namespace)
 	compiled, problems := fanql.Compile(req.Text, req.Options)
 	if len(problems) != 0 {
 		failure := &fanqlFailure{apiError: newAPIError(http.StatusBadRequest, "invalid_fanql", "The query has problems.")}
@@ -83,18 +86,35 @@ func (h *FanQLHandler) parse(c *echo.Context) error {
 	})
 }
 
-// cachedSchema is the recent schema if one is already cached, so parse can
-// compare keys with those seen without waiting for a discovery.
-func (h *FanQLHandler) cachedSchema(ctx context.Context) *query.Schema {
+// cachedSchema is a schema already cached, so parse can compare keys with
+// those seen without waiting for a discovery. One for the query's window, or
+// the widest, and its namespace covers the query; otherwise the recent
+// schema is partial.
+func (h *FanQLHandler) cachedSchema(ctx context.Context, window, namespace string) (*query.Schema, bool) {
 	if h.engine == nil {
-		return nil
+		return nil, false
 	}
-	for _, window := range []string{"1h", "24h"} {
-		if schema, err := h.engine.Schema(ctx, query.SchemaRequest{Window: window, Cached: true}); err == nil && schema != nil {
-			return schema
+	cached := func(window, namespace string) (*query.Schema, error) {
+		return h.engine.Schema(ctx, query.SchemaRequest{Window: window, Namespace: namespace, Cached: true})
+	}
+	if window != "" {
+		// An invalid or longer window is an error other than not cached.
+		schema, err := cached(window, namespace)
+		if err == nil && schema != nil {
+			return schema, false
+		}
+		if errors.Is(err, query.ErrSchemaNotCached) {
+			if schema, err := cached("24h", namespace); err == nil && schema != nil {
+				return schema, false
+			}
 		}
 	}
-	return nil
+	for _, window := range []string{"1h", "24h"} {
+		if schema, err := cached(window, ""); err == nil && schema != nil {
+			return schema, true
+		}
+	}
+	return nil, false
 }
 
 func (h *FanQLHandler) format(c *echo.Context) error {

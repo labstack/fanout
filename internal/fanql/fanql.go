@@ -13,6 +13,9 @@ type Options struct {
 	Viz       string           `json:"viz,omitempty"`
 	Variables []query.Variable `json:"variables,omitempty"`
 	Schema    *query.Schema    `json:"-"`
+	// SchemaPartial says Schema may not cover the query's window or
+	// namespace: notices may name a seen key but offer no fix.
+	SchemaPartial bool `json:"-"`
 }
 
 type Compiled struct {

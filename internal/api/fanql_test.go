@@ -429,7 +429,10 @@ func TestFanQLParseProblemsKeepURLPaths(t *testing.T) {
 type fakeCachedSchemaPanels struct{ fakePanels }
 
 func (*fakeCachedSchemaPanels) Schema(_ context.Context, req query.SchemaRequest) (*query.Schema, error) {
-	if !req.Cached || req.Window != "1h" {
+	if req.Window == "7d" {
+		return nil, query.Problems{{Path: "window", Message: "window must be one of 5m, 15m, 1h, 3h, 6h, 12h or 24h"}}
+	}
+	if !req.Cached || req.Window != "1h" || req.Namespace != "" {
 		return nil, query.ErrSchemaNotCached
 	}
 	return &query.Schema{Window: req.Window, Signals: map[string]query.SignalSchema{
@@ -437,15 +440,21 @@ func (*fakeCachedSchemaPanels) Schema(_ context.Context, req query.SchemaRequest
 	}}, nil
 }
 
-// Parse compares keys with a schema already cached, never waiting for one,
-// so a misspelled dotted key gets the seen key as a fix.
+// Parse compares keys with a schema already cached, never waiting for one.
+// It offers the seen key as a fix only when that schema covers the query's
+// window and namespace; otherwise it only names the key.
 func TestFanQLParseOffersSeenDottedKey(t *testing.T) {
-	rec := serveFanQL(t, nil, &fakeCachedSchemaPanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"spans where http.rout:/api/cart | count()"}`)
-	var body struct {
-		Notices []fanql.Notice `json:"notices"`
-	}
-	fanqlResponse(t, rec, http.StatusOK, &body)
-	if len(body.Notices) != 1 || len(body.Notices[0].FixIts) != 1 || body.Notices[0].FixIts[0].Text != "http.route" {
-		t.Fatalf("response: %s", rec.Body)
+	for _, tt := range []struct {
+		scope string
+		fix   bool
+	}{{`,"window":"1h"`, true}, {`,"window":"15m"`, false}, {``, false}, {`,"window":"7d"`, false}, {`,"window":"1h","namespace":"shop"`, false}} {
+		rec := serveFanQL(t, nil, &fakeCachedSchemaPanels{}, http.MethodPost, "/api/fanql/parse", `{"text":"spans where http.rout:/api/cart | count()"`+tt.scope+`}`)
+		var body struct {
+			Notices []fanql.Notice `json:"notices"`
+		}
+		fanqlResponse(t, rec, http.StatusOK, &body)
+		if len(body.Notices) != 1 || (len(body.Notices[0].FixIts) == 1) != tt.fix || !strings.Contains(body.Notices[0].Message, "did you mean http.route?") {
+			t.Errorf("%s: %s", tt.scope, rec.Body)
+		}
 	}
 }

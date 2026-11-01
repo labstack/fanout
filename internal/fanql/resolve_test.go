@@ -338,7 +338,7 @@ func TestResolveDottedKeySpelling(t *testing.T) {
 	}}}}
 	text := "spans where http.rout:/api/cart"
 	r, ps := resolvedText(t, text, Options{Schema: schema})
-	if len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].Message != `"http.rout" was not seen on spans in this window; did you mean http.route?` {
+	if len(ps) > 0 || len(r.Notices) != 1 || r.Notices[0].Message != `"http.rout" was not seen recently on spans; did you mean http.route?` {
 		t.Fatal(r.Notices, ps)
 	}
 	if fixes := r.Notices[0].FixIts; len(fixes) != 1 || fixes[0].Text != "http.route" || text[fixes[0].Span.Start:fixes[0].Span.End] != "http.rout" {
@@ -354,5 +354,10 @@ func TestResolveDottedKeySpelling(t *testing.T) {
 	}
 	if r, _ := resolvedText(t, text, Options{}); len(r.Notices) != 0 {
 		t.Fatal(r.Notices)
+	}
+	// A schema that may not cover the query's window or namespace can name
+	// a likely key, but must not rewrite a rare valid one.
+	if r, ps := resolvedText(t, text, Options{Schema: schema, SchemaPartial: true}); len(ps) > 0 || len(r.Notices) != 1 || len(r.Notices[0].FixIts) != 0 {
+		t.Fatal(r.Notices, ps)
 	}
 }
