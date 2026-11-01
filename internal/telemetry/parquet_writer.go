@@ -1,9 +1,11 @@
 package telemetry
 
 import (
+	"errors"
 	"fmt"
 	"math/bits"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"github.com/labstack/fanout/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/variant"
+	"golang.org/x/sync/errgroup"
 )
 
 // writeColumns writes rows[perm[0]], rows[perm[1]] and so on. Scalar and list
@@ -18,6 +21,17 @@ import (
 // variant events stream straight into shredded columns: the generic map
 // encoder builds a second object tree for every row, and keeping the
 // canonical OTel maps as the event source bounds the ingest working set.
+//
+// Lanes write disjoint sets of columns in parallel, each walking a row group
+// on its own and joining the others only at the row group's end. The first
+// lane writes everything derived from a row's attributes and resource, which
+// share one gathering of their entries; the others share the remaining
+// columns. In the pinned parquet-go v0.32.0, a ColumnWriter's WriteRowValues
+// and Flush (writer.go) touch only that column's buffers and dictionary, page
+// buffers come from a BufferPool that must be safe for concurrent use
+// (buffer_pool.go), and data page scratch and parquetCodec's encoders are
+// sync.Pools. writer_test.go writes each column from its own goroutine in its
+// "Parallel ColumnWriter.WriteRowValues" case.
 func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32, spilled *spills) error {
 	type variantColumn struct {
 		get        func(*R) map[string]any
@@ -25,49 +39,74 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 		attributes bool
 	}
 	leaves := map[string]int{}
+	byColumn := map[string][]int{} // a stored column's leaves
 	for i, path := range writer.Schema().Columns() {
 		c, ok := s.Column(path[0])
 		if !ok || !c.Stored() {
 			return fmt.Errorf("parquet column %q is not a %s column", path[0], s.Name)
 		}
 		leaves[strings.Join(path, ".")] = i
+		byColumn[path[0]] = append(byColumn[path[0]], i)
 	}
-	var encoder variantEncoder
-	var cells []*cellWriter
-	var fills []func([]R)
-	keys := keyWriter[R]{byName: [2]map[string]int{{}, {}}, resources: map[reflect.Value]*keyRow{}, counts: spilled}
-	cell := func(path string) *cellWriter {
+	lanes := make([]*lane[R], min(maxWriteLanes, runtime.GOMAXPROCS(0)))
+	for i := range lanes {
+		lanes[i] = &lane[R]{chunk: make([]R, chunkRows)}
+	}
+	defer func() {
+		for _, l := range lanes {
+			clear(l.chunk)
+		}
+	}()
+	shared := lanes[0]
+	next := 0
+	// other takes turns among the lanes after the shared one.
+	other := func() *lane[R] {
+		if len(lanes) == 1 {
+			return shared
+		}
+		next++
+		return lanes[1+(next-1)%(len(lanes)-1)]
+	}
+	own := func(l *lane[R], c Column) *lane[R] {
+		l.columns = append(l.columns, byColumn[c.Name]...)
+		return l
+	}
+	cell := func(l *lane[R], path string) *cellWriter {
 		w := &cellWriter{column: leaves[path]}
-		cells = append(cells, w)
+		l.cells = append(l.cells, w)
 		return w
 	}
+	keys := keyWriter[R]{byName: [2]map[string]int{{}, {}}, resources: map[reflect.Value]*keyRow{}, counts: spilled}
 	var variants []variantColumn
 	var resources *resourceColumns
 	for _, c := range s.Columns {
 		switch {
 		case !c.Stored():
 		case c.Key != nil:
-			keys.add(c, cell(c.Name))
+			keys.add(c, cell(own(shared, c), c.Name))
 		case c.Name == "_spill" && c.get == nil:
-			keys.spill = cell(c.Name)
+			keys.spill = cell(own(shared, c), c.Name)
 		case c.List && c.Type == Variant:
 			get, ok := c.get.(func(*R, []map[string]any) ([]map[string]any, bool))
 			if !ok {
 				return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
 			}
+			l := own(other(), c)
 			element := c.Name + ".list.element."
-			fills = append(fills, variantList(&encoder, cell(element+"metadata"), cell(element+"value"), get))
+			l.fills = append(l.fills, variantList(&l.encoder, cell(l, element+"metadata"), cell(l, element+"value"), get))
 		case c.List:
-			fill, err := listFill[R](c, cell(c.Name+".list.element"))
+			l := own(other(), c)
+			fill, err := listFill[R](c, cell(l, c.Name+".list.element"))
 			if err != nil {
 				return fmt.Errorf("%s: %w", s.Name, err)
 			}
-			fills = append(fills, fill)
+			l.fills = append(l.fills, fill)
 		case c.Type == Variant:
 			get, ok := c.get.(func(*R) map[string]any)
 			if !ok {
 				return fmt.Errorf("%s column %q has no accessor for %T", s.Name, c.Name, *new(R))
 			}
+			own(shared, c)
 			switch c.Name {
 			case "attributes":
 				keys.attributes = get
@@ -89,42 +128,29 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 			selectSharedResources(resources, rows, get)
 			variants = append(variants, variantColumn{get: get})
 		default:
-			fill, err := scalarFill[R](c, cell(c.Name))
+			l := own(other(), c)
+			fill, err := scalarFill[R](c, cell(l, c.Name))
 			if err != nil {
 				return fmt.Errorf("%s: %w", s.Name, err)
 			}
-			fills = append(fills, fill)
+			l.fills = append(l.fills, fill)
 		}
 	}
 	if len(keys.columns) > 0 {
 		if keys.attributes == nil || keys.resource == nil {
 			return fmt.Errorf("%s has dedicated columns without attributes and resource", s.Name)
 		}
-		fills = append(fills, keys.fill)
+		shared.fills = append(shared.fills, keys.fill)
 	}
 
 	columns := writer.ColumnWriters()
-	// Each chunk's rows are gathered once into a contiguous buffer: every
-	// column then reads them in sequence instead of chasing the permutation
-	// across the whole batch once per column.
-	buffer := make([]R, chunkRows)
-	defer clear(buffer)
-	for start := 0; start < len(perm); {
-		end := min(start+chunkRows, len(perm), (start/parquetRowGroupRows+1)*parquetRowGroupRows)
-		chunk := buffer[:end-start]
-		for i, row := range perm[start:end] {
-			chunk[i] = rows[row]
-		}
-		// Dispatch once per column and chunk, rather than once per cell, so
-		// the encoding loops are homogeneous and reuse their buffers.
-		for _, fill := range fills {
-			fill(chunk)
-		}
+	encoder := &shared.encoder
+	shared.rows = func(chunk []R) error {
 		for i := range chunk {
 			for _, column := range variants {
 				value := column.get(&chunk[i])
 				if column.writer == nil {
-					if err := resources.append(&encoder, value, columns); err != nil {
+					if err := resources.append(encoder, value, columns); err != nil {
 						return err
 					}
 					continue
@@ -154,24 +180,78 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 				}
 			}
 		}
-		if err := encoder.err; err != nil {
+		if resources != nil {
+			return resources.flush(columns)
+		}
+		return nil
+	}
+	for start := 0; start < len(perm); start += parquetRowGroupRows {
+		group := perm[start:min(start+parquetRowGroupRows, len(perm))]
+		var others errgroup.Group
+		for _, l := range lanes[1:] {
+			others.Go(func() error { return l.write(columns, rows, group) })
+		}
+		err := shared.write(columns, rows, group)
+		if err := errors.Join(err, others.Wait()); err != nil {
 			return err
 		}
-		for _, w := range cells {
+		if len(group) == parquetRowGroupRows {
+			if err := writer.Flush(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// maxWriteLanes caps the lanes that write one file. Commit workers write
+// files concurrently, so a few lanes each already cover the cores.
+const maxWriteLanes = 4
+
+// lane writes its columns for the rows of one row group at a time.
+type lane[R any] struct {
+	fills   []func([]R)
+	rows    func([]R) error // writes the columns that stream row by row
+	cells   []*cellWriter
+	columns []int // every leaf the lane writes
+	encoder variantEncoder
+	chunk   []R
+}
+
+// write writes rows[group[0]], rows[group[1]] and so on to the lane's
+// columns, then encodes their last pages so the row group's flush has only
+// encoded pages left to copy.
+func (l *lane[R]) write(columns []*parquet.ColumnWriter, rows []R, group []int32) error {
+	for start := 0; start < len(group); start += chunkRows {
+		// Each chunk's rows are gathered once into a contiguous buffer:
+		// every column then reads them in sequence instead of chasing the
+		// permutation across the whole batch once per column.
+		chunk := l.chunk[:min(chunkRows, len(group)-start)]
+		for i, row := range group[start : start+len(chunk)] {
+			chunk[i] = rows[row]
+		}
+		// Dispatch once per column and chunk, rather than once per cell, so
+		// the encoding loops are homogeneous and reuse their buffers.
+		for _, fill := range l.fills {
+			fill(chunk)
+		}
+		if l.rows != nil {
+			if err := l.rows(chunk); err != nil {
+				return err
+			}
+		}
+		if err := l.encoder.err; err != nil {
+			return err
+		}
+		for _, w := range l.cells {
 			if err := w.flush(columns[w.column]); err != nil {
 				return err
 			}
 		}
-		if resources != nil {
-			if err := resources.flush(columns); err != nil {
-				return err
-			}
-		}
-		start = end
-		if start%parquetRowGroupRows == 0 {
-			if err := writer.Flush(); err != nil {
-				return err
-			}
+	}
+	for _, column := range l.columns {
+		if err := columns[column].Flush(); err != nil {
+			return err
 		}
 	}
 	return nil

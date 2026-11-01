@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"flag"
@@ -8,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,7 +25,7 @@ var updateFiles = flag.Bool("update-files", false, "rewrite testdata/format*.sha
 // bytes; the digest covers row order, every leaf's levels and values, page
 // layout and the footer.
 func TestParquetBytesMatchRecordedDigest(t *testing.T) {
-	spans, logs, metrics := digestRows()
+	spans, logs, metrics := digestRows(700)
 	dir := t.TempDir()
 	write := map[string]func(string) error{
 		"spans":   func(path string) error { return writeDigestFile(path, Spans, spans) },
@@ -60,6 +62,52 @@ func TestParquetBytesMatchRecordedDigest(t *testing.T) {
 	}
 }
 
+// Lanes write a file's columns in parallel, each walking every row group on
+// its own. Over several row groups, the file must match the one a single lane
+// writes byte for byte and keep its rows in order.
+func TestLanesWriteTheSingleLaneBytes(t *testing.T) {
+	rows := 2*parquetRowGroupRows + parquetRowGroupRows/2 + 3
+	spans, logs, metrics := digestRows(rows)
+	write := map[string]func(string) error{
+		"spans":   func(path string) error { return writeParquet(path, Spans, spans, parquetPageSize) },
+		"logs":    func(path string) error { return writeParquet(path, Logs, logs, parquetPageSize) },
+		"metrics": func(path string) error { return writeParquet(path, Metrics, metrics, parquetPageSize) },
+	}
+	dir := t.TempDir()
+	for _, s := range Signals {
+		t.Run(s.Name, func(t *testing.T) {
+			files := map[int][]byte{}
+			for _, procs := range []int{1, maxWriteLanes} {
+				path := filepath.Join(dir, fmt.Sprintf("%s-%d.parquet", s.Name, procs))
+				previous := runtime.GOMAXPROCS(procs)
+				err := write[s.Name](path)
+				runtime.GOMAXPROCS(previous)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := verifyOrder(path, s, rows); err != nil {
+					t.Fatal(err)
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				files[procs] = data
+			}
+			file, err := parquet.OpenFile(bytes.NewReader(files[1]), int64(len(files[1])))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if groups := len(file.RowGroups()); groups != 3 {
+				t.Fatalf("%d row groups, want 3", groups)
+			}
+			if !bytes.Equal(files[1], files[maxWriteLanes]) {
+				t.Fatalf("%d lanes wrote a different file than one lane", maxWriteLanes)
+			}
+		})
+	}
+}
+
 func writeDigestFile[R any](path string, s *Signal, rows []R) error {
 	return writeParquet(path, s, rows, parquetPageSize, parquet.Compression(&parquet.Uncompressed))
 }
@@ -67,7 +115,7 @@ func writeDigestFile[R any](path string, s *Signal, rows []R) error {
 // digestRows covers the writer's paths: chunks and sparse dedicated keys,
 // spilled and NULL values, shared, unique and absent resources, nested
 // variants, lists, signed times and every metric layout.
-func digestRows() ([]Span, []Log, []Metric) {
+func digestRows(n int) ([]Span, []Log, []Metric) {
 	r := rand.New(rand.NewSource(5))
 	resources := make([]map[string]any, 4)
 	for i := range resources {
@@ -88,7 +136,6 @@ func digestRows() ([]Span, []Log, []Metric) {
 		r.Read(b)
 		return hex.EncodeToString(b)
 	}
-	const n = 700
 	spans := make([]Span, n)
 	trace := id(32)
 	for i := range spans {
