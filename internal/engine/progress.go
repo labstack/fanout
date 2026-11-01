@@ -5,14 +5,16 @@ import (
 	"time"
 )
 
-// stallLimit is how long the read pool may go without handing out a
-// connection or finishing a statement before it counts as wedged: three of
-// the longest statements a read is allowed to run. A busy pool frees a slot
-// well within it; a wedged one never does.
+// stallLimit is how long the read pool may go without completing a statement
+// before it counts as wedged: three of the longest statements a read is
+// allowed to run. A busy pool completes one well within it; a wedged one never
+// does.
 const stallLimit = 3 * maxQueryTimeoutMs * time.Millisecond
 
-// noteProgress records that the read pool moved: a connection was handed out,
-// so one was free or had been returned, or a statement finished.
+// noteProgress records that a read statement completed. Only success counts:
+// a wedged engine still hands out free connections and returns every hung
+// statement at its deadline, and an engine error may come from a broken
+// engine, so neither shows that statements run.
 func (d *Duck) noteProgress() { d.progress.Store(time.Now().UnixNano()) }
 
 // Stalled reports whether the read pool has made no progress for stallLimit.

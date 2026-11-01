@@ -37,8 +37,8 @@ type Duck struct {
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
-	// progress is when the read pool last handed out a connection or
-	// finished a statement, in Unix nanoseconds; see Stalled.
+	// progress is when a read statement last completed, in Unix
+	// nanoseconds; see Stalled.
 	progress atomic.Int64
 	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
@@ -1882,11 +1882,7 @@ FROM messaging_edges;`
 // counted by the pool's own gauges; taking it explicitly keeps it out of the
 // statement histogram.
 func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
-	conn, err := d.DB.Conn(ctx)
-	if err == nil {
-		d.noteProgress()
-	}
-	return conn, err
+	return d.DB.Conn(ctx)
 }
 
 // QueryContext executes a read against immutable Parquet files and DuckDB's
@@ -1934,7 +1930,6 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	started := time.Now()
 	rows, err := db.QueryContext(ctx, query, args...)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
-	d.noteProgress()
 	if err != nil {
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
@@ -1951,6 +1946,11 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		// on every path; this is what it costs if one stops.
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
+		// Rows that ended without an error came from a statement that ran;
+		// a cancelled or timed-out one is no progress.
+		if rows.Err() == nil {
+			d.noteProgress()
+		}
 	}
 	return &lockedRows{Rows: rows, unlock: release}, nil
 }
@@ -2037,8 +2037,12 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	// be fetched separately from being read. Both are DuckDB's time rather
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
-	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()); d.noteProgress() }()
-	return conn.QueryRowContext(ctx, query, args...).Scan(dest...)
+	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
+	err = conn.QueryRowContext(ctx, query, args...).Scan(dest...)
+	if err == nil || errors.Is(err, sql.ErrNoRows) {
+		d.noteProgress()
+	}
+	return err
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
