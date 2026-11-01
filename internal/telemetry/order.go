@@ -182,7 +182,9 @@ func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
 		perm[i] = int32(i)
 	}
 	parts := len(s.order.parts)
-	if len(texts) == 0 && radixSort(keys, parts, perm) {
+	// Each radix pass clears and sums 65,536 counters, more work than
+	// comparing a small batch.
+	if len(texts) == 0 && len(rows) >= radixMinRows && radixSort(keys, parts, perm) {
 		return perm, keys
 	}
 	compare := func(a, b int32) int {
@@ -214,6 +216,8 @@ func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
 	slices.SortFunc(perm, compare)
 	return perm, keys
 }
+
+const radixMinRows = 256
 
 // radixSort sorts perm by the keys' integer parts when, each offset by its
 // minimum, they pack into 128 bits, and reports whether they did. Least
