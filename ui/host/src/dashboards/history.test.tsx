@@ -192,6 +192,13 @@ it.each(["light", "dark"] as const)("uses the defined ok palette for success and
   await render(false); await render(); expect(document.body.textContent).not.toContain("Restored v1 as v4");
 });
 
+it("moves focus to the restore confirmation", async () => {
+  api.restoreVersion.mockResolvedValue({ ...record, version: 4 });
+  await render(); await act(async () => button("Version 1").click()); await settle();
+  await act(async () => { button("Restore version 1").focus(); button("Restore version 1").click(); }); await settle();
+  expect(document.activeElement?.textContent).toContain("Restored v1 as v4");
+});
+
 it("releases restore pending when the POST responds without waiting for or refetching the old panel batch", async () => {
   const refetch = vi.fn(() => new Promise<never>(() => {}));
   const observer = new QueryObserver(client, { queryKey: panelResultsKey("board", record.spec, record.spec.time, {}, false), queryFn: refetch, staleTime: Infinity, initialData: [] });

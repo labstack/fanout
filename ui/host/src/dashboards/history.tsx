@@ -84,9 +84,12 @@ function HistoryContent({ id, opened, currentVersion, selected, onSelect, pendin
   const list = useQuery({ queryKey: ["dashboard-versions", id], queryFn: ({ signal }) => listVersions(id, signal), enabled: opened, retry: false });
   const version = selected ?? list.data?.[0]?.version;
   const detail = useQuery({ queryKey: ["dashboard-version", id, version], queryFn: ({ signal }) => getVersion(id, version!, signal), enabled: opened && version !== undefined, retry: false });
+  // The restore button is disabled while it works, which drops focus; the confirmation takes it.
+  const confirmation = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (success) confirmation.current?.focus(); }, [success]);
   return <Stack gap="md" data-version-history>
     <Text size="sm" c="dimmed">Inspect saved specs and changes. Restoring adds a new version.</Text>
-    {success && <Alert color="ok" role="status">{success}</Alert>}
+    {success && <Alert ref={confirmation} tabIndex={-1} color="ok" role="status">{success}</Alert>}
     {error && failedVersion === version && <RestoreError error={error} version={version!} />}
     <Box mih={160}>
       {list.isPending && <Group gap="xs" role="status"><Loader size="sm" /><Text size="sm">Loading history…</Text></Group>}
