@@ -191,3 +191,31 @@ it("dismisses the other-services names with Escape before the drawer closes", as
     expect(onClose).toHaveBeenCalledOnce();
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });
+
+it("dismisses hover-opened other-services names with Escape before the drawer closes, and opens them on touch", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [first] = traceFixture.data.spans;
+  const spans = Array.from({ length: 8 }, (_, i) => ({ ...first, span_id: `s${i}`, parent_span_id: i ? "s0" : undefined, service: `svc${i}` }));
+  const onClose = vi.fn();
+  const escape = (target: Element) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><Drawer opened onClose={onClose} transitionProps={{ duration: 0 }}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></Drawer></QueryClientProvider></MantineProvider>));
+    const toggle = [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!;
+    await act(async () => toggle.click());
+    toggle.focus();
+    const others = document.querySelector<HTMLElement>("[data-flame-others]")!;
+    // Hovered while focus stays on the view toggle.
+    await act(async () => { others.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body })); });
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+    await escape(toggle);
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { others.dispatchEvent(new Event("touchstart", { bubbles: true })); });
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+    await escape(toggle);
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")).toBeNull());
+    await escape(toggle);
+    expect(onClose).toHaveBeenCalledOnce();
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});

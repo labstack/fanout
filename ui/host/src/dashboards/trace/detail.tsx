@@ -1,6 +1,6 @@
 import { Alert, Badge, Box, Button, Group, Paper, Stack, Text, VisuallyHidden } from "@mantine/core";
 import { Tooltip } from "@mantine/core";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Result, TraceDetail, TraceSpan } from "../../../../contracts";
 import { chartTheme, seriesSlot, statusHex } from "../../../../chart";
 import { series } from "../../../../tokens";
@@ -87,15 +87,29 @@ function FlameGraph({ spans, dark, onSpan, traceMs }: { spans: TraceSpan[]; dark
   </Stack>;
 }
 
-/** The names are read with the entry, and shown on hover, focus or touch.
- *  Escape hides them before it reaches the drawer (WCAG 1.4.13); Mantine's
- *  drawer skips an Escape whose target carries its stop-propagation mark. */
+// Names shown on hover, focus or touch close on Escape before the drawer does
+// (WCAG 1.4.13), wherever focus is. Mantine's drawer listens on the window in
+// the capture phase; a listener added when this module loads, before any
+// drawer mounts, runs first and keeps the Escape from it.
+const dismissers = new Set<() => void>();
+if (typeof window !== "undefined") window.addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !dismissers.size) return;
+  event.stopImmediatePropagation();
+  for (const dismiss of [...dismissers]) dismiss();
+}, { capture: true });
+
+/** The names are read with the entry, and shown on hover, focus or touch. */
 function OtherServices({ names, color }: { names: string[]; color: string }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = () => setOpen(false);
+    dismissers.add(dismiss);
+    return () => { dismissers.delete(dismiss); };
+  }, [open]);
   return <Tooltip label={names.join(", ")} multiline maw={360} withArrow opened={open}>
-    <Group gap={5} tabIndex={0} data-flame-others data-mantine-stop-propagation={open || undefined}
-      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
-      onKeyDown={event => { if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); } }}>
+    <Group gap={5} tabIndex={0} data-flame-others
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)} onTouchStart={() => setOpen(true)}>
       <Box w={8} h={8} bg={color} style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs">{names.length} other services<VisuallyHidden>: {names.join(", ")}</VisuallyHidden></Text>
     </Group>
   </Tooltip>;
