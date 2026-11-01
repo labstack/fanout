@@ -47,8 +47,19 @@ export function formatValue(unit: string | undefined, value: number | null | und
   }
 }
 
-/** Axis ticks: the same units, shorter. */
-export function formatAxis(unit?: string): (value: number) => string {
+const durationFactor: Record<string, number> = { ms: 1, s: 1000, ns: 1e-6 };
+const durationScales = [[3_600_000, "h"], [60_000, "m"], [1000, "s"], [1, "ms"]] as const;
+
+/** Axis ticks: the same units, shorter. Given the axis's bounds, a duration
+ *  axis reads in one unit, so 0, 5s and 10s are not printed as 0ms, 5s, 10s. */
+export function formatAxis(unit?: string, axis?: { min: number; max: number; interval: number }): (value: number) => string {
+  const factor = unit === undefined ? undefined : durationFactor[unit];
+  if (factor !== undefined && axis && axis.interval > 0) {
+    const extent = Math.max(Math.abs(axis.min), Math.abs(axis.max)) * factor, step = axis.interval * factor;
+    // The largest unit the axis reaches whose ticks still read in two decimals.
+    const [scale, suffix] = durationScales.find(([size]) => extent >= size && Math.abs(step / size * 100 - Math.round(step / size * 100)) < 1e-6) ?? [1, "ms"];
+    return (value: number) => Number.isFinite(value) ? `${number(value * factor / scale)}${suffix}` : "—";
+  }
   return (value: number) => {
     if (unit === "ms" || unit === "s" || unit === "ns") return formatValue(unit, value).replace(/(\.\d*?)0+([a-z]*)$/, "$1$2").replace(/\.([a-z]*)$/, "$1");
     return formatValue(unit, value);
@@ -56,8 +67,8 @@ export function formatAxis(unit?: string): (value: number) => string {
 }
 
 /** Readable chart/table labels use a space before duration units. */
-export function formatLabel(unit: string | undefined, value: number | null): string {
-  return formatAxis(unit)(value ?? NaN).replace(/(?<=\d)(ms|ns|s|m|h)\b/g, " $1");
+export function formatLabel(unit: string | undefined, value: number | null, axis?: { min: number; max: number; interval: number }): string {
+  return formatAxis(unit, axis)(value ?? NaN).replace(/(?<=\d)(ms|ns|s|m|h)\b/g, " $1");
 }
 
 /** Value axes use about one tick per 70 pixels, including both endpoints. */
@@ -88,7 +99,11 @@ export function valueAxis(min: number, max: number, unit: string | undefined, pi
 /** Recompute after the native plot or annotation band changes its height. */
 export function adaptValueAxis(axis: Record<string, unknown>, pixels: number): Record<string, unknown> {
   if (axis.type !== "value" && axis.type !== "log") return axis;
-  return { ...axis, ...(axis.type === "value" && typeof axis.min === "number" && typeof axis.max === "number" ? valueAxis(axis.min, axis.max, typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined, pixels) : { splitNumber: valueAxisTicks(pixels) }) };
+  if (axis.type !== "value" || typeof axis.min !== "number" || typeof axis.max !== "number") return { ...axis, splitNumber: valueAxisTicks(pixels) };
+  const unit = typeof axis.fanout_unit === "string" ? axis.fanout_unit : undefined;
+  const next = valueAxis(axis.min, axis.max, unit, pixels);
+  // New ticks may need another duration unit.
+  return { ...axis, ...next, ...(unit && unit in durationFactor ? { axisLabel: { ...(axis.axisLabel as object), formatter: formatAxis(unit, next) } } : {}) };
 }
 
 /** Use one duration scale for both ends of a bucket. */

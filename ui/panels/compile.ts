@@ -187,7 +187,7 @@ export function timeseriesOption(panel: Panel, result: PanelResult, theme: Chart
     lineStyle: { width: 1, type: "dashed", color: theme.muted },
     itemStyle: { color: theme.muted },
   })) : [];
-  const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit) } }));
+  const axes = units.map((axisUnit, i) => ({ ...(panel.options?.scale === "log" ? { splitNumber: valueAxisTicks(plotHeight) } : bounds[i]), type: panel.options?.scale === "log" ? "log" : "value", position: i === 0 ? "left" : "right", offset: Math.max(0, i - 1) * 56, axisLine: { show: false }, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, hideOverlap: true, formatter: formatAxis(axisUnit, panel.options?.scale === "log" ? undefined : bounds[i]) } }));
   return layoutEndLabels({
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue([...current, ...previousSeries].find(s => s.name === name || `${s.name} · previous` === name)?.unit ?? panel.unit, value), true) },
@@ -240,7 +240,7 @@ export function barOption(panel: Panel, frame: Frame, theme: ChartTheme, size: C
   const measure = (text: string) => size.measureText?.(text, `11px ${theme.font}`) ?? Array.from(text).length * 6.6;
   const categoryWidth = Math.min(size.width * .4, Math.max(40, ...categories.map(measure)));
   const legendLayout = wrappingLegend(series.map(s => s.name), size.width, multi && panel.options?.legend !== "hidden", theme.text, theme.font, size.measureText);
-  const axes = units.map((axisUnit, i) => ({ ...valueAxis(Math.min(0, ...series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null))), Math.max(0, ...series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null))), axisUnit, size.width - categoryWidth - 80), type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: (v: number) => formatLabel(axisUnit,v), hideOverlap: true } }));
+  const axes = units.map((axisUnit, i) => { const values = series.filter(s => (s.unit ?? panel.unit) === axisUnit).flatMap(s => s.values.filter((v): v is number => v !== null)); const bounds = valueAxis(Math.min(0, ...values), Math.max(0, ...values), axisUnit, size.width - categoryWidth - 80); return { ...bounds, type: "value", position: i === 0 ? "bottom" : "top", offset: Math.max(0, i - 1) * 36, splitLine: { show: i === 0, lineStyle: { color: theme.grid } }, axisLabel: { color: theme.muted, fontFamily: theme.font, fontSize: 11, formatter: (v: number) => formatLabel(axisUnit, v, bounds), hideOverlap: true } }; });
   return {
     ...baseOption(theme, unit),
     tooltip: { ...(baseOption(theme, unit).tooltip as object), formatter: htmlTooltip((value, name) => formatValue(series.find(s => s.name === name)?.unit ?? panel.unit, value)), axisPointer: { type: "shadow" } },

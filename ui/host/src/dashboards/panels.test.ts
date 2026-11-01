@@ -33,6 +33,24 @@ describe("units", () => {
     expect(formatValue("count", null)).toBe("—");
     expect(formatAxis("ms")(1500)).toBe("1.5s");
   });
+  it("reads a duration axis in one unit", () => {
+    const ticks = (unit: string, axis: { min: number; max: number; interval: number }) => Array.from({ length: Math.round((axis.max - axis.min) / axis.interval) + 1 }, (_, i) => formatAxis(unit, axis)(axis.min + i * axis.interval));
+    expect(ticks("ms", { min: 0, max: 10_000, interval: 5000 })).toEqual(["0s", "5s", "10s"]);
+    expect(ticks("ms", { min: 0, max: 1500, interval: 500 })).toEqual(["0s", "0.5s", "1s", "1.5s"]);
+    expect(ticks("ms", { min: 0, max: 300, interval: 100 })).toEqual(["0ms", "100ms", "200ms", "300ms"]);
+    // A minute axis in thirds of a minute stays in seconds rather than printing 0.33m.
+    expect(ticks("ms", { min: 0, max: 100_000, interval: 20_000 })).toEqual(["0s", "20s", "40s", "60s", "80s", "100s"]);
+    expect(ticks("s", { min: 0, max: 600, interval: 300 })).toEqual(["0m", "5m", "10m"]);
+    expect(ticks("ns", { min: 0, max: 2e6, interval: 1e6 })).toEqual(["0ms", "1ms", "2ms"]);
+  });
+  type Axis = { min: number; max: number; interval: number; axisLabel: { formatter(v: number): string } };
+  it("keeps a duration time-series axis in one unit", () => {
+    const frame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "p95", type: "number", role: "measure", unit: "ms" }], values: [[1000, 2000], [400, 9000]], rows: 2 };
+    const option = timeseriesOption({ id: "p", title: "p95", viz: "timeseries" }, { id: "p", status: "ok", elapsed_ms: 1, frame, from_ms: 0, to_ms: 3000 }, chartThemeFor(false), { width: 600, height: 300 }) as { yAxis: Axis | Axis[] };
+    const axis = Array.isArray(option.yAxis) ? option.yAxis[0] : option.yAxis;
+    const labels = Array.from({ length: Math.round((axis.max - axis.min) / axis.interval) + 1 }, (_, i) => axis.axisLabel.formatter(axis.min + i * axis.interval));
+    expect(new Set(labels.map(label => label.replace(/[\d.,-]/g, "")))).toEqual(new Set(["s"]));
+  });
 });
 
 describe("frames", () => {
