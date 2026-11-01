@@ -226,6 +226,19 @@ func TestCompileMetricAggregateNeedsOneMetric(t *testing.T) {
 	}
 }
 
+// A misspelled name field is why no metric is named: the problem says so
+// first and offers name as a fix, rather than blaming the aggregate.
+func TestCompileMetricAggregateNamesMisspelledName(t *testing.T) {
+	text := "metrics where nme:container.cpu.utilization | avg(value)"
+	_, ps := Compile(text, Options{})
+	if len(ps) != 1 || ps[0].Message != `"nme" is not a metrics column; did you mean name?` || ps[0].Span == nil || text[ps[0].Span.Start:ps[0].Span.End] != "nme" {
+		t.Fatalf("%+v", ps)
+	}
+	if len(ps[0].FixIts) != 1 || ps[0].FixIts[0].Text != "name" {
+		t.Fatalf("fixes %+v", ps[0].FixIts)
+	}
+}
+
 // A misspelled measure function offers the nearest function as a fix-it on
 // its name; a percentile FanQL lacks offers swapped digits and quantile.
 func TestCompileUnknownMeasureOffersFix(t *testing.T) {
@@ -262,7 +275,7 @@ func TestCompileUnknownMeasureOffersFix(t *testing.T) {
 
 // PromQL and Kusto get one message for the whole query, not a cascade.
 func TestCompileForeignQueryLanguages(t *testing.T) {
-	const promql = "PromQL is not FanQL; start with the source, e.g. metrics where name:http.server.duration | rate() by service"
+	const promql = "PromQL is not FanQL; start with the source, e.g. metrics where name:http.server.request.duration | rate() by service"
 	for _, tt := range []struct{ text, message string }{
 		{"sum(rate(http_server_requests_total[5m])) by (service)", promql},
 		{"http_server_duration_seconds_bucket", promql},

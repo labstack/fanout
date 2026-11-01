@@ -191,6 +191,21 @@ func (r *resolver) metricGroups(q *queryTree) {
 		at = e.Span()
 	}
 	r.path = "where"
+	for i, e := range q.Where {
+		// A misspelled name reads an attribute, so no metric is named: the
+		// spelling is the cause to report.
+		x, ok := e.(*comparison)
+		if !ok || x.Field.Scope != "" || x.Field.Bracket || x.Field.Ref == nil || x.Field.Ref.Column != "attributes" {
+			continue
+		}
+		if suggest.Spelling(strings.ToLower(x.Field.Key), []string{"name"}) == "did you mean name?" {
+			at := textSpan(x.Field.At)
+			r.path = fmt.Sprintf("where[%d]", i)
+			r.problems = append(r.problems, query.Problem{Path: r.path, Message: fmt.Sprintf("%q is not a metrics column; did you mean name?", x.Field.Key),
+				Span: at, FixIts: []query.FixIt{{Label: "name", Span: *at, Text: "name"}}})
+			return
+		}
+	}
 	r.problems = append(r.problems, query.Problem{Path: r.path, Message: "metric aggregates need one metric per group",
 		Hint: "filter name to one literal or a single-value variable without All, or group by name", Span: textSpan(at)})
 }
@@ -420,7 +435,7 @@ func (r *resolver) expr(e filterExpr) {
 			x.column = "operation"
 		}
 		if r.out.Query.Source == "metrics" {
-			name := "http.server.duration"
+			name := "http.server.request.duration"
 			if r.opts.Schema != nil {
 				var selected *query.MetricSchema
 				for _, metric := range r.opts.Schema.Signals["metrics"].Metrics {
