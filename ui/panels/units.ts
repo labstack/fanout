@@ -89,10 +89,11 @@ function niceStep(target: number, unit?: string): number {
     return [1, 2, 5, 10].map(k => k * base).find(step => step >= n)!;
   };
   if (unit === "bytes") {
-    // Steps of 1, 2 or 5 in the binary unit the ticks print in; 1000 of one unit is 1 of the next.
+    // Steps of 1, 2 or 5 whole bytes, or of the binary unit the ticks print in;
+    // 1000 of one unit is 1 of the next, except in the largest, which keeps growing.
     const power = Math.min(4, Math.max(0, Math.floor(Math.log(target) / Math.log(1024))));
-    const step = ceil125(target / 1024 ** power);
-    return (step >= 1000 ? 1024 : step) * 1024 ** power;
+    const step = ceil125(Math.max(target / 1024 ** power, power === 0 ? 1 : 0));
+    return (step >= 1000 && power < 4 ? 1024 : step) * 1024 ** power;
   }
   if (factor === undefined) return ceil125(target);
   const ms = target * factor;
@@ -105,8 +106,8 @@ export function valueAxis(min: number, max: number, unit: string | undefined, pi
   if (max === min) max = min + 1;
   const splitNumber = valueAxisTicks(pixels);
   let interval = niceStep(Math.max(max - min, Number.EPSILON) / splitNumber, unit);
-  // Rounding the bounds must not introduce more ticks than the pixel budget.
-  while (Math.ceil(max / interval) - Math.floor(min / interval) > splitNumber) interval = niceStep(interval * 1.01, unit);
+  // Rounding the bounds must not introduce more ticks than the pixel budget; the cap ends the search whatever the step.
+  for (let round = 0; round < 64 && Math.ceil(max / interval) - Math.floor(min / interval) > splitNumber; round++) interval = niceStep(interval * 1.01, unit);
   return { min: Math.floor(min / interval) * interval, max: Math.ceil(max / interval) * interval, interval, splitNumber, fanout_unit: unit };
 }
 /** Recompute after the native plot or annotation band changes its height. */

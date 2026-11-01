@@ -50,6 +50,14 @@ describe("units", () => {
     const wide = valueAxis(0, 1.1 * 2 ** 30, "bytes", 280);
     expect(Array.from({ length: Math.round(wide.max / wide.interval) + 1 }, (_, i) => formatAxis("bytes", wide)(i * wide.interval))).toEqual(["0 MiB", "500 MiB", "1,000 MiB", "1,500 MiB"]);
     expect(valueAxis(0, 2000, "bytes", 280).interval).toBe(1024);
+    // Past the largest unit, steps keep growing in it and the tick budget still holds.
+    for (const max of [1e16, 1e18]) {
+      const huge = valueAxis(0, max, "bytes", 300);
+      expect(huge.max).toBeGreaterThanOrEqual(max);
+      expect(Math.round(huge.max / huge.interval)).toBeLessThanOrEqual(huge.splitNumber);
+    }
+    // Bytes are whole: an all-zero axis steps by one byte.
+    expect(valueAxis(0, 0, "bytes", 280).interval).toBe(1);
   });
   type Axis = { min: number; max: number; interval: number; axisLabel: { formatter(v: number): string } };
   it("keeps a duration time-series axis in one unit", () => {
