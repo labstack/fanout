@@ -15,11 +15,15 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-// readCacheVersion covers the schema and semantics of every table DuckDB
-// keeps: the rollups and their progress, version and anomaly history, and the
-// per-batch read caches. All of them are disposable; a mismatch drops them
-// together and they rebuild from immutable Parquet. Bump it whenever a table's
-// shape or the meaning of its rows changes.
+// readCacheVersion covers the schema and semantics of DuckDB's read caches:
+// the rollups and their progress, version history, and the per-batch read
+// caches. They are derived from immutable Parquet, so a mismatch drops them
+// together and they rebuild. Bump it whenever one's shape or the meaning of
+// its rows changes.
+//
+// anomaly_log is not one of them: it holds detector output that nothing can
+// rebuild, so the drop keeps it. Its table is created once; any change to its
+// schema must be a separate, explicit migration step.
 const readCacheVersion = 8
 
 const (
@@ -27,8 +31,9 @@ const (
 	readCacheRowBudget  = 64000
 )
 
-// CreateCacheTables creates DuckDB's rebuildable query accelerators. The
-// telemetry rows themselves live in immutable Parquet batches.
+// CreateCacheTables creates DuckDB's tables: the rebuildable read caches and
+// the anomaly history. The telemetry rows themselves live in immutable Parquet
+// batches.
 func CreateCacheTables(db *sql.DB) error {
 	tx, err := db.Begin()
 	if err != nil {
@@ -44,7 +49,7 @@ func CreateCacheTables(db *sql.DB) error {
 		return err
 	}
 	if version != readCacheVersion {
-		rows, err := tx.Query(`SELECT table_name FROM duckdb_tables() WHERE database_name=current_database() AND schema_name='main' AND NOT temporary AND table_name<>'read_cache_version'`)
+		rows, err := tx.Query(`SELECT table_name FROM duckdb_tables() WHERE database_name=current_database() AND schema_name='main' AND NOT temporary AND table_name NOT IN ('read_cache_version','anomaly_log')`)
 		if err != nil {
 			return err
 		}

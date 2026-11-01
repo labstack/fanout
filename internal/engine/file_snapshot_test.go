@@ -334,11 +334,16 @@ func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"read_batches", "read_resource_inventory", "read_trace_parts", "read_trace_candidates", "read_edge_buckets",
-		"service_rollup", "edge_rollup", "rollup_state", "version_rollup", "version_rollup_batches", "anomaly_log"} {
+		"service_rollup", "edge_rollup", "rollup_state", "version_rollup", "version_rollup_batches"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
 		}
+	}
+	// Anomaly history is detector output, not derived from Parquet: it survives.
+	var anomalies int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log`).Scan(&anomalies); err != nil || anomalies != 1 {
+		t.Fatalf("anomaly history after a version change: %d %v", anomalies, err)
 	}
 	if watermark, cursor := readEdgeRollupState(t, d); watermark != 0 || cursor != 0 {
 		t.Fatalf("obsolete edge cursor survived: watermark=%d cursor=%d", watermark, cursor)
