@@ -216,6 +216,13 @@ func TestRegistryColumnsRoundTrip(t *testing.T) {
 // as text in UTC.
 func engineRows(t *testing.T, path string) []map[string]string {
 	t.Helper()
+	return engineRowsQuery(t, "SELECT COLUMNS(*)::VARCHAR FROM read_parquet("+sqlString(path)+")")
+}
+
+// engineRowsQuery runs a query through the native engine with every column
+// read as text.
+func engineRowsQuery(t *testing.T, query string) []map[string]string {
+	t.Helper()
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +231,7 @@ func engineRows(t *testing.T, path string) []map[string]string {
 	if _, err := db.Exec("SET TimeZone='UTC'"); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := db.Query("SELECT COLUMNS(*)::VARCHAR FROM read_parquet(" + sqlString(path) + ")")
+	rows, err := db.Query(query)
 	if err != nil {
 		t.Fatal(err)
 	}

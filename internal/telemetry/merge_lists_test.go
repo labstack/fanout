@@ -54,7 +54,7 @@ func TestMergeCopiesListColumnsByWholeRows(t *testing.T) {
 				row["hist_count"], row["hist_bounds"], row["exemplar_trace_ids"], len(want[i].Bounds), floats(want[i].Bounds), ids(want[i].Exemplars))
 		}
 	}
-	counts, err := fileSpillCounts(output, Metrics)
+	counts, err := fileSpills(output, Metrics)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,5 +121,74 @@ func TestVerifierRejectsDedicatedColumnMismatch(t *testing.T) {
 	defer verifier.Close()
 	if err := verifier.values(t.Context(), path, Spans); !IsBatchCorrupt(err) {
 		t.Fatalf("mismatched column: %v", err)
+	}
+}
+
+// A null attribute value has no type: the batch commits with the key's
+// column NULL and no spill bit, and verifies.
+func TestNullStandardKeyValueIsNotSpilled(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	span := completeTestSpan()
+	span.Attributes = map[string]any{"http.route": nil}
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "null"}, []Span{span}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublishedBatch(store.BatchPath("null")); err != nil {
+		t.Fatal(err)
+	}
+	row := engineRows(t, filepath.Join(store.BatchPath("null"), "spans.parquet"))[0]
+	if row["_a_http_route"] != "NULL" || row["_spill"] != "16777216" {
+		t.Fatalf("route %s spill %s", row["_a_http_route"], row["_spill"])
+	}
+}
+
+// Spill bits outside the signal's keys, and a dedicated column whose map
+// value has another type without a spill bit, are corruption.
+func TestVerifierRejectsForeignSpillBitsAndUntypedValues(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func(*Column)
+	}{
+		{"foreign bit", func(c *Column) {
+			if c.Name == "_spill" { // bit 0 is a span key
+				*c = column("_spill", Uint64, func(*Log) uint64 { return 1 }).dict()
+			}
+		}},
+		{"untyped value", func(c *Column) {
+			if c.Name == "attributes" {
+				*c = object("attributes", func(*Log) map[string]any { return map[string]any{"k8s.pod.name": int64(1)} }, attributeShred)
+			}
+			if c.Name == "resource" {
+				*c = object("resource", func(*Log) map[string]any { return map[string]any{"k8s.pod.name": int64(1)} }, resourceShred)
+			}
+			if c.Name == "_r_k8s_pod_name" {
+				*c = nullable(c.Name, String, func(*Log) (string, bool) { return "", false }).dict()
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			layout := &Signal{Name: Logs.Name, Time: Logs.Time, Order: Logs.Order}
+			for _, c := range Logs.Columns {
+				test.change(&c)
+				layout.Columns = append(layout.Columns, c)
+			}
+			layout.schema, layout.order = buildSchema(layout), compileOrder(layout)
+			dir := t.TempDir()
+			path := filepath.Join(dir, "logs.parquet")
+			if err := writeParquet(path, layout, []Log{completeTestLog()}, parquetPageSize); err != nil {
+				t.Fatal(err)
+			}
+			verifier, err := NewBatchVerifier(t.Context(), dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer verifier.Close()
+			if err := verifier.values(t.Context(), path, Logs); !IsBatchCorrupt(err) {
+				t.Fatalf("verify: %v", err)
+			}
+		})
 	}
 }

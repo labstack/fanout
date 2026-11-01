@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 
 	"github.com/parquet-go/parquet-go"
 	"golang.org/x/sync/errgroup"
@@ -37,7 +36,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 	}()
 	schema := s.schema
-	var spilled [64]uint64
+	var spilled spills
 	var groups []parquet.RowGroup
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
@@ -59,7 +58,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		if !parquet.EqualNodes(schema, pf.Schema()) {
 			return fmt.Errorf("%w: compaction input schema", ErrUnsupportedBatchFormat)
 		}
-		counts, e := spillCounts(pf, s)
+		counts, e := readSpills(pf, s)
 		if e != nil {
 			return e
 		}
@@ -190,11 +189,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 		stats.Rows += int64(count)
 	}
-	for _, key := range s.Keys() {
-		if n := spilled[key.Bit]; n > 0 {
-			writer.SetKeyValueMetadata(spillPrefix+key.Name, strconv.FormatUint(n, 10))
-		}
-	}
+	spilled.footer(writer, s)
 	if err := writer.Close(); err != nil {
 		return err
 	}

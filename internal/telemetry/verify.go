@@ -151,7 +151,8 @@ func (v *BatchVerifier) decode(ctx context.Context, path string, expected int) e
 
 // values checks what the physical schema cannot state: every dedicated
 // column equals its map value of the key's type, or is NULL with the row's
-// spill bit set and the value left in the map; the footer counts each key's
+// spill bit set and a value of another type left in the map; spill bits
+// name only the signal's own keys; the footer counts each key's
 // spill bits; the parallel lists of a row have equal lengths; and metric
 // points carry exactly the columns of their kind.
 func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) error {
@@ -161,19 +162,27 @@ func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) erro
 	}
 	var checks []check
 	keys := s.Keys()
+	var mask uint64
 	for _, key := range keys {
+		mask |= 1 << key.Bit
 		column, _ := s.Column(key.Column)
-		source, cast := "attributes", "VARCHAR"
+		source, cast, kind := "attributes", "VARCHAR", "VARCHAR"
 		if key.Scope == semconv.Resource {
 			source = "resource"
 		}
 		if column.Type == Int64 {
-			cast = "BIGINT"
+			cast, kind = "BIGINT", "INT64"
 		}
 		value := fmt.Sprintf("%s[%s]", source, sqlString(key.Name))
-		checks = append(checks, check{key.Column, fmt.Sprintf(`CASE WHEN (_spill>>%d)&1=1 THEN %s IS NULL AND %s IS NOT NULL
-ELSE %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) AND (%s IS NULL)=(%s IS NULL) END`,
-			key.Bit, key.Column, value, key.Column, value, cast, value, key.Column)})
+		// An absent key and a null value both read as VARIANT_NULL: no
+		// type, so no spill and a NULL column.
+		checks = append(checks, check{key.Column, fmt.Sprintf(`CASE WHEN (_spill>>%d)&1=1 THEN %s IS NULL AND variant_typeof(%s) NOT IN ('VARIANT_NULL','%s')
+WHEN variant_typeof(%s)='VARIANT_NULL' THEN %s IS NULL
+ELSE variant_typeof(%s)='%s' AND %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) END`,
+			key.Bit, key.Column, value, kind, value, key.Column, value, kind, key.Column, value, cast)})
+	}
+	if len(keys) > 0 {
+		checks = append(checks, check{"_spill", fmt.Sprintf("_spill & %d = _spill", mask)})
 	}
 	groups := map[string][]string{}
 	var names []string
@@ -218,7 +227,7 @@ ELSE %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) AND (%s IS NULL)=(%s IS NULL) EN
 			return &CorruptBatchError{fmt.Errorf("%d rows break the %s check", results[i], c.name)}
 		}
 	}
-	counts, err := fileSpillCounts(path, s)
+	counts, err := fileSpills(path, s)
 	if err != nil {
 		return batchDataError(err)
 	}
@@ -252,21 +261,21 @@ var kindChecks = map[*Signal][]string{
 	},
 }
 
-func fileSpillCounts(path string, s *Signal) ([64]uint64, error) {
+func fileSpills(path string, s *Signal) (spills, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return [64]uint64{}, err
+		return spills{}, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return [64]uint64{}, err
+		return spills{}, err
 	}
 	file, err := parquet.OpenFile(f, info.Size())
 	if err != nil {
-		return [64]uint64{}, err
+		return spills{}, err
 	}
-	return spillCounts(file, s)
+	return readSpills(file, s)
 }
 
 func sqlString(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }

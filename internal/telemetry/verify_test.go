@@ -21,10 +21,10 @@ func verificationFixture(t *testing.T) (string, []Span) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	spans := []Span{
-		{TraceID: "trace", SpanID: "a", StartUnixNanos: 10, Resource: map[string]any{"service.name": "api", "extra": []any{int64(1), true}}, Attributes: map[string]any{"messaging.system": "kafka", "other": []byte{0, 255}}},
+		{TraceID: "trace", SpanID: "a", StartUnixNanos: 10, Resource: map[string]any{"service.name": "api", "extra": []any{int64(1), true}}, Attributes: map[string]any{"messaging.system": "kafka", "other": []byte{0, 255}, "server.port": "80"}},
 		{TraceID: "trace", SpanID: "b", StartUnixNanos: 20},
 		{TraceID: "trace", SpanID: "c", StartUnixNanos: 30},
-		{TraceID: "trace", SpanID: "d", StartUnixNanos: 40, Attributes: map[string]any{"other": []byte{0, 255}}, Resource: map[string]any{"service.name": "last", "extra": []any{int64(2), false}}},
+		{TraceID: "trace", SpanID: "d", StartUnixNanos: 40, Attributes: map[string]any{"other": []byte{0, 255}, "server.port": "81"}, Resource: map[string]any{"service.name": "last", "extra": []any{int64(2), false}}},
 	}
 	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "verify"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
@@ -45,14 +45,16 @@ func verificationFixture(t *testing.T) (string, []Span) {
 		t.Fatal(err)
 	}
 	writer := parquet.NewGenericWriter[any](f, parquetWriterOptions(1024, Spans.writerOptions()...)...)
+	var spilled spills
 	for i := 0; i < len(rows); i += 2 {
-		if err := writeColumns(writer, Spans, rows[i:i+2], []int32{0, 1}); err != nil {
+		if err := writeColumns(writer, Spans, rows[i:i+2], []int32{0, 1}, &spilled); err != nil {
 			t.Fatal(err)
 		}
 		if err := writer.Flush(); err != nil {
 			t.Fatal(err)
 		}
 	}
+	spilled.footer(writer, Spans)
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}

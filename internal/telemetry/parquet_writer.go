@@ -18,7 +18,7 @@ import (
 // variant events stream straight into shredded columns: the generic map
 // encoder builds a second object tree for every row, and keeping the
 // canonical OTel maps as the event source bounds the ingest working set.
-func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32) error {
+func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32, spilled *spills) error {
 	type variantColumn struct {
 		get    func(*R) map[string]any
 		writer *parquet.VariantColumnWriter
@@ -34,7 +34,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 	var encoder variantEncoder
 	var cells []*cellWriter
 	var fills []func([]R)
-	keys := keyWriter[R]{byName: [2]map[string]int{{}, {}}, resources: map[reflect.Value]*keyRow{}}
+	keys := keyWriter[R]{byName: [2]map[string]int{{}, {}}, resources: map[reflect.Value]*keyRow{}, counts: spilled}
 	cell := func(path string) *cellWriter {
 		w := &cellWriter{column: leaves[path]}
 		cells = append(cells, w)
@@ -47,7 +47,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 		case !c.Stored():
 		case c.Key != nil:
 			keys.add(c, cell(c.Name))
-		case c.Name == "_spill":
+		case c.Name == "_spill" && c.get == nil:
 			keys.spill = cell(c.Name)
 		case c.List && c.Type == Variant:
 			get, ok := c.get.(func(*R, []map[string]any) ([]map[string]any, bool))
@@ -96,8 +96,8 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 		}
 	}
 	if len(keys.columns) > 0 {
-		if keys.spill == nil || keys.attributes == nil || keys.resource == nil {
-			return fmt.Errorf("%s has dedicated columns without _spill, attributes and resource", s.Name)
+		if keys.attributes == nil || keys.resource == nil {
+			return fmt.Errorf("%s has dedicated columns without attributes and resource", s.Name)
 		}
 		fills = append(fills, keys.fill)
 	}
@@ -165,7 +165,6 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 			}
 		}
 	}
-	keys.footer(writer)
 	return nil
 }
 
@@ -360,7 +359,7 @@ type keyWriter[R any] struct {
 	keys                 []semconv.Key
 	byName               [2]map[string]int // by scope: key name to column position
 	spill                *cellWriter
-	counts               [64]uint64
+	counts               *spills
 	resources            map[reflect.Value]*keyRow
 }
 
@@ -382,7 +381,8 @@ func (k *keyWriter[R]) project(row *keyRow, scope semconv.Scope, values map[stri
 	names := k.byName[scope]
 	for name, v := range values {
 		position, ok := names[name]
-		if !ok {
+		// A null value has no type: the column stays NULL without a spill.
+		if !ok || v == nil {
 			continue
 		}
 		if !typed(v, k.keys[position].Type) {
@@ -436,17 +436,23 @@ func (k *keyWriter[R]) fill(chunk []R) {
 				putInt64(w, v, 0, 1)
 			}
 		}
-		putUint64(k.spill, row.spill, 0, 0)
+		if k.spill != nil { // a layout may fill _spill from its own accessor
+			putUint64(k.spill, row.spill, 0, 0)
+		}
 		for spill := row.spill; spill != 0; spill &= spill - 1 {
 			k.counts[bits.TrailingZeros64(spill)]++
 		}
 	}
 }
 
+// spills counts each key's spilled rows by key bit, across every write
+// into one file.
+type spills [64]uint64
+
 // footer records each key's count of spilled rows in the file footer.
-func (k *keyWriter[R]) footer(writer *parquet.GenericWriter[any]) {
-	for _, key := range k.keys {
-		if n := k.counts[key.Bit]; n > 0 {
+func (c *spills) footer(writer *parquet.GenericWriter[any], s *Signal) {
+	for _, key := range s.Keys() {
+		if n := c[key.Bit]; n > 0 {
 			writer.SetKeyValueMetadata(spillPrefix+key.Name, strconv.FormatUint(n, 10))
 		}
 	}

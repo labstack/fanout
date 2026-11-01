@@ -1174,7 +1174,7 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, *count)
 		}
 		*fields.time = parquetTimeRange(parquetFile, signal.Time)
-		counts, err := spillCounts(parquetFile, signal)
+		counts, err := readSpills(parquetFile, signal)
 		if err != nil {
 			return nil, fmt.Errorf("%s Parquet: %w", signal.Name, err)
 		}
@@ -1194,10 +1194,10 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
 }
 
-// spillCounts reads the footer's count of spilled rows for each of the
+// readSpills reads the footer's count of spilled rows for each of the
 // signal's standard keys, by key bit.
-func spillCounts(file *parquet.File, s *Signal) ([64]uint64, error) {
-	var counts [64]uint64
+func readSpills(file *parquet.File, s *Signal) (spills, error) {
+	var counts spills
 	keys := map[string]uint8{}
 	for _, key := range s.Keys() {
 		keys[key.Name] = key.Bit
@@ -1317,10 +1317,12 @@ func writeOrdered[R any](path string, s *Signal, rows []R, perm []int32, pageSiz
 		}
 	}()
 	writer := parquet.NewGenericWriter[any](f, parquetWriterOptions(pageSize, append(s.writerOptions(), options...)...)...)
-	if err := writeColumns(writer, s, rows, perm); err != nil {
+	var spilled spills
+	if err := writeColumns(writer, s, rows, perm, &spilled); err != nil {
 		_ = writer.Close()
 		return err
 	}
+	spilled.footer(writer, s)
 	if err := writer.Close(); err != nil {
 		return err
 	}
