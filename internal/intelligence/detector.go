@@ -13,13 +13,21 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
+// Engine is the read and annotation surface the detector uses; *engine.Duck
+// implements it.
+type Engine interface {
+	QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error)
+	DefaultNamespace() string
+	CompletedServiceRollupMinute(ctx context.Context) (time.Time, error)
+	RecordAnomalies(ctx context.Context, findings []annotations.Anomaly, at time.Time) error
+}
+
 // Detector runs intelligence detection on observability data
 type Detector struct {
-	duck                *engine.Duck
+	duck                Engine
 	config              DetectorConfig
 	mu                  sync.RWMutex
 	snapshot            *Snapshot
@@ -41,7 +49,7 @@ type annotationBatch struct {
 }
 
 // NewDetector creates a new intelligence detector
-func NewDetector(duck *engine.Duck, config DetectorConfig) *Detector {
+func NewDetector(duck Engine, config DetectorConfig) *Detector {
 	return &Detector{
 		duck:              duck,
 		config:            config,

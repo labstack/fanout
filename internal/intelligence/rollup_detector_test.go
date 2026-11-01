@@ -74,15 +74,8 @@ func TestServiceDetectorsWeightMinutesBySpanCount(t *testing.T) {
 	}
 }
 func TestDetectorsStopBeforeTheServiceWatermarkMinute(t *testing.T) {
-	db, err := sql.Open("duckdb", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if err := engine.CreateCacheTables(db); err != nil {
-		t.Fatal(err)
-	}
-	createDetectorLogs(t, db)
+	e := newDetectorEngine(t)
+	db := e.DB
 	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for i, rate := range []float64{0, .5, 1} {
 		if _, err := db.Exec(`INSERT INTO service_rollup(namespace,bucket,service,spans,served_spans,p95_ms,error_rate) VALUES ('prod',?,'api',100,100,10,?)`, base.Add(time.Duration(i)*5*time.Minute), rate); err != nil {
@@ -95,7 +88,7 @@ func TestDetectorsStopBeforeTheServiceWatermarkMinute(t *testing.T) {
 	}
 	cfg := DefaultDetectorConfig()
 	cfg.LookbackWindow = 5 * time.Minute
-	detector := NewDetector(&engine.Duck{DB: db}, cfg)
+	detector := NewDetector(e, cfg)
 	snapshot, err := detector.GenerateSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
