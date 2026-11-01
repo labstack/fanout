@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 	"os"
 	"slices"
 	"strings"
@@ -181,6 +182,9 @@ func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
 		perm[i] = int32(i)
 	}
 	parts := len(s.order.parts)
+	if len(texts) == 0 && radixSort(keys, parts, perm) {
+		return perm, keys
+	}
 	compare := func(a, b int32) int {
 		x, y := &keys[a], &keys[b]
 		for i := range parts {
@@ -209,6 +213,79 @@ func sortRows[R any](s *Signal, rows []R) ([]int32, []sortKey) {
 	}
 	slices.SortFunc(perm, compare)
 	return perm, keys
+}
+
+// radixSort sorts perm by the keys' integer parts when, each offset by its
+// minimum, they pack into 128 bits, and reports whether they did. Least
+// significant 16-bit digits come first and every pass is stable, so ties keep
+// their input order, as the comparison sort's index tiebreak does.
+func radixSort(keys []sortKey, parts int, perm []int32) bool {
+	if len(keys) < 2 {
+		return true
+	}
+	var low [len(sortKey{}.n)]uint64
+	var width [len(sortKey{}.n)]int
+	total := 0
+	for p := range parts {
+		lo, hi := keys[0].n[p], keys[0].n[p]
+		for i := range keys {
+			lo, hi = min(lo, keys[i].n[p]), max(hi, keys[i].n[p])
+		}
+		low[p], width[p] = lo, bits.Len64(hi-lo)
+		total += width[p]
+	}
+	if total > 128 {
+		return false
+	}
+	// packed[i] is row i's key, its first part most significant.
+	type packed struct{ hi, lo uint64 }
+	key := make([]packed, len(keys))
+	for i := range keys {
+		var k packed
+		for p := range parts {
+			w := width[p]
+			v := keys[i].n[p] - low[p]
+			switch {
+			case w == 0:
+			case w == 64:
+				k = packed{k.lo, v}
+			default:
+				k = packed{k.hi<<w | k.lo>>(64-w), k.lo<<w | v}
+			}
+		}
+		key[i] = k
+	}
+	digit := func(k packed, pass int) int {
+		if pass < 4 {
+			return int(k.lo >> (16 * pass) & 0xffff)
+		}
+		return int(k.hi >> (16 * (pass - 4)) & 0xffff)
+	}
+	src, dst := perm, make([]int32, len(perm))
+	count := make([]int32, 1<<16)
+	for pass := 0; pass*16 < total; pass++ {
+		clear(count)
+		for _, row := range src {
+			count[digit(key[row], pass)]++
+		}
+		// A digit shared by every row leaves the order as it is.
+		if int(count[digit(key[src[0]], pass)]) == len(src) {
+			continue
+		}
+		var sum int32
+		for d, n := range count {
+			count[d] = sum
+			sum += n
+		}
+		for _, row := range src {
+			d := digit(key[row], pass)
+			dst[count[d]] = row
+			count[d]++
+		}
+		src, dst = dst, src
+	}
+	copy(perm, src)
+	return true
 }
 
 // rankText fills a text part's n slot with each row's rank among the batch's
