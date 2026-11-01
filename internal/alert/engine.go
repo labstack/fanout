@@ -378,14 +378,18 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 			}
 		}
 
+		// A new episode gets its own row; the resolved one stays in history.
+		a := Alert{
+			RuleID:          rule.ID,
+			Service:         svc,
+			Value:           primaryValue(rule, env),
+			LastEvaluatedAt: nowStr,
+			CreatedAt:       began,
+		}
 		if rule.ForSeconds == 0 {
-			existing.State = "firing"
-			existing.FiredAt = nowStr
-			existing.ResolvedAt = ""
-			existing.LastEvaluatedAt = nowStr
-			existing.Value = primaryValue(rule, env)
-			existing.CreatedAt = began
-			saved, upsertErr := e.store.UpsertAlert(existing)
+			a.State = "firing"
+			a.FiredAt = nowStr
+			saved, upsertErr := e.store.UpsertAlert(a)
 			if upsertErr != nil {
 				slog.Error("alert: re-fire from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 				return
@@ -393,13 +397,8 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env Env, now 
 			e.fireWebhookAsync(rule, saved, env, "firing")
 		} else {
 			// Enter pending again.
-			existing.State = "pending"
-			existing.FiredAt = ""
-			existing.ResolvedAt = ""
-			existing.LastEvaluatedAt = nowStr
-			existing.Value = primaryValue(rule, env)
-			existing.CreatedAt = began
-			if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
+			a.State = "pending"
+			if _, upsertErr := e.store.UpsertAlert(a); upsertErr != nil {
 				slog.Error("alert: re-pend from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 			}
 		}
@@ -476,7 +475,7 @@ func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env Env, event string)
 			slog.Warn("alert: webhook delivery", "rule", rule.ID, "service", alert.Service, "event", event, "err", err)
 		}
 		now := time.Now().Format(time.RFC3339)
-		if updateErr := e.store.UpdateDeliveryStatus(alert.RuleID, alert.Service, status, now); updateErr != nil {
+		if updateErr := e.store.UpdateDeliveryStatus(alert.ID, status, now); updateErr != nil {
 			slog.Error("alert: update delivery status", "rule", rule.ID, "service", alert.Service, "err", updateErr)
 		}
 	}()

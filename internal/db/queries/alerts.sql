@@ -1,5 +1,10 @@
 -- name: GetAlert :one
-SELECT * FROM alerts WHERE rule_id = ? AND service = ?;
+SELECT * FROM alerts WHERE rule_id = ? AND service = ?
+ORDER BY state IN ('pending', 'firing') DESC, created_at DESC
+LIMIT 1;
+
+-- name: GetAlertByID :one
+SELECT * FROM alerts WHERE id = ?;
 
 -- name: ListAlerts :many
 SELECT * FROM alerts ORDER BY created_at DESC;
@@ -18,7 +23,7 @@ INSERT INTO alerts (
     id, rule_id, service, state, value, fired_at, resolved_at,
     repeated_at, last_evaluated_at, last_delivery_status, last_delivery_at, created_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(rule_id, service) DO UPDATE SET
+ON CONFLICT(id) DO UPDATE SET
     state = excluded.state,
     value = excluded.value,
     fired_at = excluded.fired_at,
@@ -38,7 +43,7 @@ DELETE FROM alerts WHERE rule_id = ? AND state IN (?, ?);
 
 -- name: UpdateDeliveryStatus :exec
 UPDATE alerts SET last_delivery_status = ?, last_delivery_at = ?
-WHERE rule_id = ? AND service = ?;
+WHERE id = ?;
 
 -- name: AlertSummary :many
 SELECT state, COUNT(*) AS count FROM alerts GROUP BY state;

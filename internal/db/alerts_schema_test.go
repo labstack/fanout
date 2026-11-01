@@ -66,3 +66,44 @@ func TestAlertCreatedAtMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Existing alerts survive the episode migration, after which a rule and
+// service keep many resolved episodes and at most one open alert.
+func TestAlertEpisodesMigration(t *testing.T) {
+	database, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	database.SetMaxOpenConns(1)
+	migrations, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, database, migrations, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(t.Context(), 20261031000000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO alert_rules (id, name, expression) VALUES ('r', 'rule', 'error_rate > 0.1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO alerts (id, rule_id, service, state, last_evaluated_at) VALUES ('kept', 'r', 'a', 'resolved', 'then')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(t.Context(), database); err != nil {
+		t.Fatal(err)
+	}
+	var evaluated string
+	if err := database.QueryRow(`SELECT last_evaluated_at FROM alerts WHERE id = 'kept'`).Scan(&evaluated); err != nil || evaluated != "then" {
+		t.Fatalf("kept alert: %q, %v", evaluated, err)
+	}
+	if _, err := database.Exec(`INSERT INTO alerts (id, rule_id, service, state) VALUES ('again', 'r', 'a', 'resolved'), ('open', 'r', 'a', 'firing')`); err != nil {
+		t.Fatalf("store episodes: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO alerts (id, rule_id, service, state) VALUES ('second', 'r', 'a', 'pending')`); err == nil {
+		t.Fatal("stored a second open alert")
+	}
+}

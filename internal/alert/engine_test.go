@@ -177,6 +177,38 @@ func TestEngine_Transition_FiringToResolved(t *testing.T) {
 	}
 }
 
+// Each firing episode keeps its own row: firing again after a resolve starts
+// a new alert and leaves the resolved one in history.
+func TestEngineRefireKeepsEachEpisode(t *testing.T) {
+	eng, store := newTestEngine(t)
+	rule := makeTestRule(t, store, "error_rate > 0.1", 0)
+	env := Env{Service: "svc-a", ErrorRate: 0.5}
+	start := time.Now().Add(-time.Hour)
+	at := func(s int) time.Time { return start.Add(time.Duration(s) * time.Second) }
+	eng.transition(rule, "svc-a", true, env, at(0))
+	eng.transition(rule, "svc-a", false, env, at(60))
+	eng.transition(rule, "svc-a", true, env, at(120))
+	eng.transition(rule, "svc-a", false, env, at(180))
+	eng.transition(rule, "svc-a", true, env, at(240))
+	all, err := store.ListAlerts("", "", rule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var states []string
+	for _, a := range all {
+		states = append(states, a.State)
+	}
+	if strings.Join(states, ",") != "firing,resolved,resolved" {
+		t.Fatalf("episodes newest first = %v, want firing,resolved,resolved", states)
+	}
+	if all[1].ID == all[2].ID || all[0].ID == all[1].ID {
+		t.Fatalf("episodes share an id: %+v", all)
+	}
+	if a, err := store.GetAlert(rule.ID, "svc-a"); err != nil || a.ID != all[0].ID {
+		t.Fatalf("GetAlert = %+v, %v; want the open episode", a, err)
+	}
+}
+
 // TestEngine_CompileRules verifies that compileRules populates the programs map.
 func TestEngine_CompileRules(t *testing.T) {
 	eng, store := newTestEngine(t)

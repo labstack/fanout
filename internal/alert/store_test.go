@@ -175,7 +175,8 @@ func TestStore_UpsertAndGetAlert(t *testing.T) {
 		t.Errorf("State = %q, want %q", created.State, "firing")
 	}
 
-	// Upsert again with updated state.
+	// Upsert the same episode with updated state.
+	a = created
 	a.State = "resolved"
 	a.ResolvedAt = "2026-01-01T01:00:00Z"
 	updated, err := s.UpsertAlert(a)
@@ -352,6 +353,23 @@ func TestStoreUpsertKeepsEpisodeStart(t *testing.T) {
 	}
 	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "new", State: "firing"}); err == nil {
 		t.Fatal("a new alert without an episode start was stored")
+	}
+}
+
+// A rule and service may have many resolved episodes but only one open alert.
+func TestStoreAllowsOneOpenAlertPerService(t *testing.T) {
+	s := newTestStore(t)
+	rule, err := s.CreateRule(makeRule("open-rule"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"resolved", "resolved", "firing"} {
+		if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "api", State: state, CreatedAt: episodeStart}); err != nil {
+			t.Fatalf("store %s episode: %v", state, err)
+		}
+	}
+	if _, err := s.UpsertAlert(Alert{RuleID: rule.ID, Service: "api", State: "pending", CreatedAt: episodeStart}); err == nil {
+		t.Fatal("stored a second open alert for one rule and service")
 	}
 }
 
