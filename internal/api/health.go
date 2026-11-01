@@ -99,16 +99,12 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
 	defer cancel()
 
 	var one int
 	if err := h.duck.DB.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
-		return CheckResult{
-			Status:    "unhealthy",
-			LatencyMs: time.Since(start).Milliseconds(),
-			Error:     err.Error(),
-		}
+		return failedCheck(ctx, start, err)
 	}
 
 	return CheckResult{
@@ -178,7 +174,20 @@ func maintenanceStaleThreshold(maintEvery time.Duration) time.Duration {
 	return stale
 }
 
-var telemetryReadinessTimeout = 5 * time.Second
+// readinessTimeout bounds each engine probe.
+var readinessTimeout = 5 * time.Second
+
+// failedCheck classifies a probe error. A probe that ran out its own time
+// waited behind long reads holding the engine's connections: the instance
+// still serves, so it is degraded rather than unready, and /readyz does not
+// flap out of rotation under load. Any other error is a failing engine.
+func failedCheck(ctx context.Context, start time.Time, err error) CheckResult {
+	res := CheckResult{Status: "unhealthy", LatencyMs: time.Since(start).Milliseconds(), Error: err.Error()}
+	if ctx.Err() != nil {
+		res.Status, res.Detail = "degraded", "engine busy"
+	}
+	return res
+}
 
 func (h *HealthHandler) checkTelemetry() CheckResult {
 	if h.duck == nil {
@@ -189,7 +198,7 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), telemetryReadinessTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
 	defer cancel()
 
 	var one int
@@ -204,11 +213,7 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 		}
 	}
 	if err != nil && err != sql.ErrNoRows {
-		return CheckResult{
-			Status:    "unhealthy",
-			LatencyMs: time.Since(start).Milliseconds(),
-			Error:     err.Error(),
-		}
+		return failedCheck(ctx, start, err)
 	}
 
 	res := CheckResult{
@@ -300,7 +305,7 @@ func (h *HealthHandler) checkRollups() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
 	defer cancel()
 
 	var updatedAt sql.NullTime
@@ -313,11 +318,7 @@ SELECT
   COALESCE(date_diff('second', MAX(updated_at), now()), 0)
 FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 	if err != nil {
-		return CheckResult{
-			Status:    "unhealthy",
-			LatencyMs: time.Since(start).Milliseconds(),
-			Error:     err.Error(),
-		}
+		return failedCheck(ctx, start, err)
 	}
 
 	res := CheckResult{

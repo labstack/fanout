@@ -196,9 +196,9 @@ func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) 
 		})
 	}()
 	<-entered
-	original := telemetryReadinessTimeout
-	telemetryReadinessTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { telemetryReadinessTimeout = original })
+	original := readinessTimeout
+	readinessTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { readinessTimeout = original })
 
 	result := NewHealthHandler(duck, config.Config{}).checkTelemetry()
 	if result.Status != "degraded" {
@@ -207,6 +207,54 @@ func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) 
 	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A long query holding the engine's connections made /readyz answer 503
+// once: a busy engine is still ready and must not flap out of rotation.
+func TestReadinessReportsABusyEngineAsDegraded(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	original := readinessTimeout
+	readinessTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { readinessTimeout = original })
+	slow := 200 * time.Millisecond
+	mock.ExpectQuery("SELECT 1").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+	mock.ExpectQuery("SELECT 1 FROM telemetry.spans LIMIT 1").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"1"}))
+	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\)").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
+
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/readyz", nil), rec)
+	if err := NewHealthHandler(&engine.Duck{DB: db}, config.Config{DataDir: os.TempDir(), RollupInterval: time.Minute}).Readiness(c); err != nil {
+		t.Fatal(err)
+	}
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || resp.Status != "degraded" {
+		t.Fatalf("status = %d %q, want 200 degraded: %+v", rec.Code, resp.Status, resp.Checks)
+	}
+	for _, key := range []string{"duckdb", "telemetry", "rollups"} {
+		if check := resp.Checks[key]; check.Status != "degraded" || check.Detail != "engine busy" {
+			t.Fatalf("%s check = %+v, want degraded and busy", key, check)
+		}
+	}
+}
+
+// A failing engine is not merely busy.
+func TestReadinessReportsAFailingEngineAsUnhealthy(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT 1").WillReturnError(errors.New("database is closed"))
+	if check := NewHealthHandler(&engine.Duck{DB: db}, config.Config{}).checkDuckDB(); check.Status != "unhealthy" {
+		t.Fatalf("duckdb check = %+v, want unhealthy", check)
 	}
 }
 
