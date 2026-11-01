@@ -63,9 +63,10 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const [mapView, setMapView] = useState<MapView>();
   const onMapView = useCallback((next: MapView) => setMapView(next), []);
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
-    : panel.viz === "traces" || (panel.drill === "traces" || result?.frame?.columns.some(c => c.name === "trace_id")) && panel.viz === "table" ? "click to open trace"
+    // A table row opens its own trace only when the row carries a trace_id; otherwise it lists exemplars.
+    : panel.viz === "traces" || panel.viz === "table" && result?.frame?.columns.some(c => c.name === "trace_id") ? "click to open trace"
     : panel.drill === "logs" ? "click for matching logs"
-    : panel.drill === "traces" && ["timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
+    : panel.drill === "traces" && ["table", "timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
   const bodyHeight = Math.max(40, height - 88);
   const constants = [...new Set(logConstants(panel, result?.frame).map(c => c.value))];
   const subtitle = `${panel.viz === "timeseries" ? "time series" : panel.viz.replaceAll("_", " ")}${constants.length ? ` · ${constants.join(" · ")}` : ""}${hint ? ` · ${hint}` : ""}`;
