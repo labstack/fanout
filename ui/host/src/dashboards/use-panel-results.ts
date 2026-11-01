@@ -98,17 +98,28 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     setKept((previous) => merge(previous, key, query.data?.results, query.dataUpdatedAt, query.data?.batch, failure));
   }, [key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const staleAt = new Map([...snapshot.stale].flatMap((id) => { const at = snapshot.updated.get(id); return at ? [[id, at] as const] : []; }));
-  const panelError = (query.data?.results ?? []).find((r) => r.status === "error" && snapshot.stale.has(r.id));
+  // A panel the server turned away keeps its earlier frame. The refresh was
+  // skipped, not broken, so it is no error; skippedAt is its oldest frame.
+  const panelError = (query.data?.results ?? []).find((r) => r.status === "error" && r.reason !== "busy" && snapshot.stale.has(r.id));
+  const skipped = (query.data?.results ?? []).flatMap((r) => r.reason === "busy" && snapshot.stale.has(r.id) ? [snapshot.updated.get(r.id) ?? 0] : []);
   // Updated is when a panel last ran. A panel the server turned away did not,
   // unless it still shows a frame from a run, whose time merge kept.
   const ranAt = Math.max(0, ...[...snapshot.updated].filter(([id]) => { const r = snapshot.results.get(id); return r?.reason !== "busy" || r.frame !== undefined; }).map(([, at]) => at));
-  // A panel scrolled into view that has never loaded under this key is
-  // fetched now, including when visibility changed during the previous batch.
+  // A panel the server turned away while out of view has not run, so it is
+  // no longer attempted: it runs when it scrolls into view. One still in view
+  // waits for the next refresh or its Retry rather than asking again at once.
+  useEffect(() => {
+    if (requested.current.key !== key) return;
+    for (const id of requested.current.ids) if (results.get(id)?.reason === "busy" && !ids.includes(id)) requested.current.ids.delete(id);
+  }, [visible, key, results]);
+  // A panel scrolled into view that has never loaded under this key, or was
+  // turned away out of view, is fetched now, including when visibility
+  // changed during the previous batch.
   useEffect(() => {
     // Never repeat attempted panels, but an older failure cannot block new panels.
     if (!canQuery || query.isFetching || queuedRefresh.current || queuedRetry.current?.key === key || lazyBatch.current?.key === key) return;
     const attempted = requested.current.key === key ? requested.current.ids : new Set<string>();
-    const missing = [...new Set(ids.filter((id) => !results.has(id) && !attempted.has(id) && spec.panels.find((p) => p.id === id)?.viz !== "text"))].sort();
+    const missing = [...new Set(ids.filter((id) => (!results.has(id) || results.get(id)?.reason === "busy") && !attempted.has(id) && spec.panels.find((p) => p.id === id)?.viz !== "text"))].sort();
     if (!missing.length) return;
     const batch = { key, ids: missing };
     lazyBatch.current = batch;
@@ -144,7 +155,7 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
     }
     sendRetry([panelId]);
   };
-  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current.filter(id => !arrived.current.has(id)) : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: ranAt || null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
+  return { retry, results, staleAt, annotations: annotationSnapshot?.annotations, annotationError: annotationSnapshot?.annotation_error, fetchingIds: query.isFetching ? inFlight.current.filter(id => !arrived.current.has(id)) : [], fetching: query.isFetching, error: query.error ?? (panelError ? new Error(panelError.error ?? "Panel refresh failed") : null), updatedAt: ranAt || null, skippedAt: skipped.length ? Math.min(...skipped) : null, refetch: () => { if (!canQuery || knownEmpty) return; if (query.isFetching) { if (lazyBatch.current?.key === key) queuedRefresh.current = true; return; } void query.refetch({ cancelRefetch: false }); } };
 }
 
 type Snapshot = { key: string; results: Map<string, PanelDisplayResult>; updated: Map<string, number>; stale: Set<string>; receivedAt: number; receivedBatch?: number };

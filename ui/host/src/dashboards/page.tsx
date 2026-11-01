@@ -163,6 +163,9 @@ function Loaded({ id, version, spec, search, onSearch, onOpen, agentAvailable, o
       {data.annotationError && <Alert color="warn" title="Annotations unavailable">{data.annotationError}</Alert>}
       {data.annotations?.truncated && <Text size="xs" c="warn" role="status">Annotation history is limited.</Text>}
     </Stack>
+    {!loadError && data.skippedAt !== null && <Alert color="gray" variant="light" mb="md" role="status" data-refresh-skipped>
+      The server was busy, so the latest refresh was skipped. Marked panels show data from {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" }).format(data.skippedAt)}.
+    </Alert>}
     {loadError && <Alert color="bad" icon={<WarningCircle size={18} weight="fill" />} mb="md" title={options.error ? "Variables could not be loaded" : "Panels could not be loaded"}>
       {loadError.message}
       {loadError instanceof ApiError && <ul>{loadError.problems.map((problem, index) =>

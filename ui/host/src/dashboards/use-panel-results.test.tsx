@@ -607,3 +607,31 @@ it("claims no update while every panel the server turned away has not run", asyn
     expect(host.current.updatedAt).toBe(ran);
   } finally { await host.dispose(); }
 });
+
+// System overview on a cold load: three panels below the fold came back busy
+// from the first full batch and never ran, because scrolling to them only
+// fetched panels without a result.
+it("runs a busy panel once it scrolls into view, without retrying it while it stays in view", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["top", "below"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: busy", reason: "busy", retryable: true});
+  wire.panels.mockImplementation((body: QueryBody) => Promise.resolve((body.panels?.length ? body.panels : ["top", "below"]).map(id => id === "top" ? resultFor(id) : busy(id))));
+  const host = await mountVisibility([], spec);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("below")?.reason).toBe("busy");});
+    await host.show(["top"]);
+    await act(async () => {});
+    expect(wire.panels).toHaveBeenCalledTimes(1);
+    // Scrolled into view, it runs once; turned away again, it waits for a refresh or Retry.
+    await host.show(["top", "below"]);
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(2);});
+    expect(wire.panels.mock.calls[1][0].panels).toEqual(["below"]);
+    await act(async () => {});
+    expect(wire.panels).toHaveBeenCalledTimes(2);
+    // Out of view and back again, it runs again, and this time it recovers.
+    await host.show(["top"]);
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+    await host.show(["top", "below"]);
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("below")?.status).toBe("ok");});
+    expect(wire.panels.mock.calls[2][0].panels).toEqual(["below"]);
+  } finally { await host.dispose(); }
+});

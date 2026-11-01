@@ -673,6 +673,24 @@ it("marks older panels stale after a failed refresh and clears stale on recovery
  await vi.waitFor(() => expect(within(host.querySelector<HTMLElement>('[data-panel="requests"]')!).queryByRole("button", {name: /refresh failed/})).toBeNull(), { interval: 5, timeout: 3000 });
 });
 
+it("says a refresh the server turned away was skipped instead of reporting a failure", async()=>{
+ const {host,client}=await render();
+ await vi.waitFor(async () => {
+  await act(async () => {});
+  expect(host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.disabled).toBe(false);
+  expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
+ }, { interval: 5, timeout: 3000 });
+ // Every panel shed busy while the cards still hold the earlier run.
+ panelResponse=async()=>json({results:[{id:"requests",status:"error",reason:"busy",retryable:true,error:"Not run: other queries kept the server busy for 20 seconds. Refresh to try again.",elapsed_ms:0},{id:"latency",status:"error",reason:"busy",retryable:true,error:"Not run: other queries kept the server busy for 20 seconds. Refresh to try again.",elapsed_ms:0}]});
+ await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
+ await vi.waitFor(() => expect(host.querySelector("[data-refresh-skipped]")?.textContent).toMatch(/The server was busy, so the latest refresh was skipped\. Marked panels show data from .+\./), { interval: 5, timeout: 3000 });
+ expect(host.textContent).not.toContain("Panels could not be loaded");
+ expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
+ panelResponse=async()=>defaultPanels();
+ await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
+ await vi.waitFor(() => expect(host.querySelector("[data-refresh-skipped]")).toBeNull(), { interval: 5, timeout: 3000 });
+});
+
 it("keeps a real fetch 403 fixable with no Retry or automatic retry", async () => {
  viewer.role = "admin";
  panelResponse = async () => json({message: "insufficient permissions"}, 403);
