@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
@@ -36,6 +37,9 @@ type Duck struct {
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
+	// progress is when the read pool last handed out a connection or
+	// finished a statement, in Unix nanoseconds; see Stalled.
+	progress atomic.Int64
 	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
 	// second Close would call duckdb_close twice on the same instance, which
@@ -269,6 +273,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
 	d := &Duck{DB: db, writeDB: writeDB, memoryDB: memoryDB, parseDB: parseDB, cfg: cfg, repository: repository, publicationBounds: repository.PublicationBounds, fatal: make(chan error, 1)}
+	d.noteProgress()
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
@@ -1877,7 +1882,11 @@ FROM messaging_edges;`
 // counted by the pool's own gauges; taking it explicitly keeps it out of the
 // statement histogram.
 func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
-	return d.DB.Conn(ctx)
+	conn, err := d.DB.Conn(ctx)
+	if err == nil {
+		d.noteProgress()
+	}
+	return conn, err
 }
 
 // QueryContext executes a read against immutable Parquet files and DuckDB's
@@ -1925,6 +1934,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	started := time.Now()
 	rows, err := db.QueryContext(ctx, query, args...)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
+	d.noteProgress()
 	if err != nil {
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
@@ -2027,7 +2037,7 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	// be fetched separately from being read. Both are DuckDB's time rather
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
-	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
+	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()); d.noteProgress() }()
 	return conn.QueryRowContext(ctx, query, args...).Scan(dest...)
 }
 

@@ -19,14 +19,25 @@ import (
 
 // HealthHandler handles health check endpoints
 type HealthHandler struct {
-	duck    *engine.Duck
+	duck *engine.Duck
+	// pool is the engine's read pool, which tells a stalled engine from a busy one.
+	pool    readPool
 	cfg     config.Config
 	started time.Time
 }
 
+type readPool interface {
+	Stalled() bool
+	Ping(context.Context) error
+}
+
 // NewHealthHandler creates a new health handler
 func NewHealthHandler(duck *engine.Duck, cfg config.Config) *HealthHandler {
-	return &HealthHandler{duck: duck, cfg: cfg, started: time.Now()}
+	h := &HealthHandler{duck: duck, cfg: cfg, started: time.Now()}
+	if duck != nil {
+		h.pool = duck
+	}
+	return h
 }
 
 // CheckResult represents a single health check result
@@ -45,8 +56,22 @@ type HealthResponse struct {
 	RuntimeSizing config.RuntimeSizing   `json:"runtime_sizing"`
 }
 
-// Liveness returns 200 if process is running (Kubernetes liveness probe)
+// livenessPingTimeout keeps the confirming ping inside the container health
+// check's 3 s timeout.
+const livenessPingTimeout = time.Second
+
+// Liveness returns 200 while the process can serve (Kubernetes liveness
+// probe). A read pool that has made no progress for longer than reads may run
+// is wedged and only a restart frees it, so liveness fails once a ping
+// confirms it; an idle pool records no progress either, but answers.
 func (h *HealthHandler) Liveness(c *echo.Context) error {
+	if h.pool != nil && h.pool.Stalled() {
+		ctx, cancel := context.WithTimeout(c.Request().Context(), livenessPingTimeout)
+		defer cancel()
+		if err := h.pool.Ping(ctx); err != nil {
+			return c.String(http.StatusServiceUnavailable, "engine stalled")
+		}
+	}
 	return c.String(http.StatusOK, "ok")
 }
 
@@ -58,13 +83,25 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 		RuntimeSizing: h.cfg.RuntimeSizing(),
 	}
 
-	// Check DuckDB
-	resp.Checks["duckdb"] = h.checkDuckDB()
-	resp.Checks["telemetry"] = h.checkTelemetry()
+	// The engine probes share one deadline and run concurrently, so a busy
+	// engine answers within it rather than after each probe's own.
+	ctx, cancel := context.WithTimeout(c.Request().Context(), readinessTimeout)
+	defer cancel()
+	probes := map[string]func(context.Context) CheckResult{"duckdb": h.checkDuckDB, "telemetry": h.checkTelemetry, "rollups": h.checkRollups}
+	type named struct {
+		name   string
+		result CheckResult
+	}
+	results := make(chan named, len(probes))
+	for name, probe := range probes {
+		go func() { results <- named{name, probe(ctx)} }()
+	}
+	for range probes {
+		result := <-results
+		resp.Checks[result.name] = result.result
+	}
 
-	// Check data directory
 	resp.Checks["data"] = h.checkDataDir()
-	resp.Checks["rollups"] = h.checkRollups()
 	resp.Checks["maintenance"] = h.checkMaintenance()
 
 	// Determine overall status
@@ -90,7 +127,7 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func (h *HealthHandler) checkDuckDB() CheckResult {
+func (h *HealthHandler) checkDuckDB(ctx context.Context) CheckResult {
 	if h.duck == nil {
 		return CheckResult{
 			Status: "unhealthy",
@@ -99,12 +136,10 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
-	defer cancel()
 
 	var one int
 	if err := h.duck.DB.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
-		return failedCheck(ctx, start, err)
+		return h.failedCheck(ctx, start, err)
 	}
 
 	return CheckResult{
@@ -174,22 +209,30 @@ func maintenanceStaleThreshold(maintEvery time.Duration) time.Duration {
 	return stale
 }
 
-// readinessTimeout bounds each engine probe.
-var readinessTimeout = 5 * time.Second
+// readinessTimeout is the engine probes' shared deadline, under the 1 s a
+// Kubernetes probe allows by default and the container check's 3 s.
+var readinessTimeout = 800 * time.Millisecond
 
-// failedCheck classifies a probe error. A probe that ran out its own time
+// failedCheck classifies a probe error. A probe that ran out its deadline
 // waited behind long reads holding the engine's connections: the instance
 // still serves, so it is degraded rather than unready, and /readyz does not
-// flap out of rotation under load. Any other error is a failing engine.
-func failedCheck(ctx context.Context, start time.Time, err error) CheckResult {
+// flap out of rotation under load. A stalled read pool times out the same
+// way but never recovers, so it fails readiness, as /healthz does. Any other
+// error is a failing engine. The deadline is checked on ctx as well: a driver
+// may report the cancelled statement in its own words.
+func (h *HealthHandler) failedCheck(ctx context.Context, start time.Time, err error) CheckResult {
 	res := CheckResult{Status: "unhealthy", LatencyMs: time.Since(start).Milliseconds(), Error: err.Error()}
-	if ctx.Err() != nil {
-		res.Status, res.Detail = "degraded", "engine busy"
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if h.pool != nil && h.pool.Stalled() {
+			res.Detail = "engine stalled"
+		} else {
+			res.Status, res.Detail = "degraded", "engine busy"
+		}
 	}
 	return res
 }
 
-func (h *HealthHandler) checkTelemetry() CheckResult {
+func (h *HealthHandler) checkTelemetry(ctx context.Context) CheckResult {
 	if h.duck == nil {
 		return CheckResult{
 			Status: "unhealthy",
@@ -198,8 +241,6 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
-	defer cancel()
 
 	var one int
 	// Use the same snapshot gate as public reads so a short compaction/retention
@@ -213,7 +254,7 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 		}
 	}
 	if err != nil && err != sql.ErrNoRows {
-		return failedCheck(ctx, start, err)
+		return h.failedCheck(ctx, start, err)
 	}
 
 	res := CheckResult{
@@ -296,7 +337,7 @@ func maintenanceResult(lastOK, lastAt time.Time, lastErr error, consecutiveFailu
 	return res
 }
 
-func (h *HealthHandler) checkRollups() CheckResult {
+func (h *HealthHandler) checkRollups(ctx context.Context) CheckResult {
 	if h.duck == nil {
 		return CheckResult{
 			Status: "unhealthy",
@@ -305,8 +346,6 @@ func (h *HealthHandler) checkRollups() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), readinessTimeout)
-	defer cancel()
 
 	var updatedAt sql.NullTime
 	var cacheCount int
@@ -318,7 +357,7 @@ SELECT
   COALESCE(date_diff('second', MAX(updated_at), now()), 0)
 FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 	if err != nil {
-		return failedCheck(ctx, start, err)
+		return h.failedCheck(ctx, start, err)
 	}
 
 	res := CheckResult{

@@ -124,7 +124,9 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	mock.ExpectQuery("SELECT 1").
+	// The engine probes run concurrently.
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery("SELECT 1$").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
 	mock.ExpectQuery("SELECT 1 FROM telemetry.spans LIMIT 1").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}))
@@ -200,7 +202,9 @@ func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) 
 	readinessTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { readinessTimeout = original })
 
-	result := NewHealthHandler(duck, config.Config{}).checkTelemetry()
+	ctx, cancel := context.WithTimeout(t.Context(), readinessTimeout)
+	defer cancel()
+	result := NewHealthHandler(duck, config.Config{}).checkTelemetry(ctx)
 	if result.Status != "degraded" {
 		t.Fatalf("telemetry status = %q, want degraded: %+v", result.Status, result)
 	}
@@ -222,14 +226,24 @@ func TestReadinessReportsABusyEngineAsDegraded(t *testing.T) {
 	readinessTimeout = 20 * time.Millisecond
 	t.Cleanup(func() { readinessTimeout = original })
 	slow := 200 * time.Millisecond
-	mock.ExpectQuery("SELECT 1").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery("SELECT 1$").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
 	mock.ExpectQuery("SELECT 1 FROM telemetry.spans LIMIT 1").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"1"}))
 	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\)").WillDelayFor(slow).WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
 
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/readyz", nil), rec)
+	started := time.Now()
 	if err := NewHealthHandler(&engine.Duck{DB: db}, config.Config{DataDir: os.TempDir(), RollupInterval: time.Minute}).Readiness(c); err != nil {
 		t.Fatal(err)
+	}
+	// One shared deadline, not one per probe: three sequential 5 s probes
+	// outlasted the 3 s container health check.
+	if elapsed := time.Since(started); elapsed >= 3*readinessTimeout {
+		t.Fatalf("readiness took %s, want one shared %s deadline", elapsed, readinessTimeout)
+	}
+	if original >= time.Second {
+		t.Fatalf("readiness deadline %s must stay under a 1 s probe timeout", original)
 	}
 	var resp HealthResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -253,8 +267,69 @@ func TestReadinessReportsAFailingEngineAsUnhealthy(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("SELECT 1").WillReturnError(errors.New("database is closed"))
-	if check := NewHealthHandler(&engine.Duck{DB: db}, config.Config{}).checkDuckDB(); check.Status != "unhealthy" {
+	if check := NewHealthHandler(&engine.Duck{DB: db}, config.Config{}).checkDuckDB(t.Context()); check.Status != "unhealthy" {
 		t.Fatalf("duckdb check = %+v, want unhealthy", check)
+	}
+}
+
+type fakePool struct {
+	stalled bool
+	ping    error
+	pinged  int
+}
+
+func (p *fakePool) Stalled() bool              { return p.stalled }
+func (p *fakePool) Ping(context.Context) error { p.pinged++; return p.ping }
+
+// A wedged engine times out like a busy one. Once the read pool has made no
+// progress for longer than reads may run, readiness fails and so does
+// liveness, so the supervisor restarts the process.
+func TestAStalledEngineFailsReadinessAndLiveness(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	original := readinessTimeout
+	readinessTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { readinessTimeout = original })
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery("SELECT 1$").WillDelayFor(time.Second).WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+	mock.ExpectQuery("SELECT 1 FROM telemetry.spans LIMIT 1").WillDelayFor(time.Second).WillReturnRows(sqlmock.NewRows([]string{"1"}))
+	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\)").WillDelayFor(time.Second).WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
+	h := NewHealthHandler(&engine.Duck{DB: db}, config.Config{DataDir: os.TempDir(), RollupInterval: time.Minute})
+	pool := &fakePool{stalled: true, ping: context.DeadlineExceeded}
+	h.pool = pool
+
+	rec := httptest.NewRecorder()
+	if err := h.Readiness(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/readyz", nil), rec)); err != nil {
+		t.Fatal(err)
+	}
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusServiceUnavailable || resp.Checks["duckdb"].Status != "unhealthy" || resp.Checks["duckdb"].Detail != "engine stalled" {
+		t.Fatalf("readiness = %d %+v, want 503 with a stalled engine", rec.Code, resp.Checks)
+	}
+	live := func() int {
+		rec := httptest.NewRecorder()
+		if err := h.Liveness(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/healthz", nil), rec)); err != nil {
+			t.Fatal(err)
+		}
+		return rec.Code
+	}
+	if code := live(); code != http.StatusServiceUnavailable {
+		t.Fatalf("liveness = %d, want 503 for a stalled engine", code)
+	}
+	// An idle pool records no progress either; it answers the ping and lives.
+	pool.ping = nil
+	if code := live(); code != http.StatusOK {
+		t.Fatalf("liveness = %d, want 200 for an idle engine that answers", code)
+	}
+	pool.stalled, pool.pinged = false, 0
+	if code := live(); code != http.StatusOK || pool.pinged != 0 {
+		t.Fatalf("liveness = %d after %d pings, want 200 without probing a pool that is moving", code, pool.pinged)
 	}
 }
 

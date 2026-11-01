@@ -17,8 +17,8 @@ Everything below is served by the same HTTP listener as the browser client, on
 
 | Path | Requires | Reports |
 |---|---|---|
-| `/healthz` | nothing | Liveness — the process is up |
-| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing |
+| `/healthz` | nothing | Liveness — the process is up and its query engine is not stalled |
+| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing; a busy engine reads `degraded` |
 
 Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
 
