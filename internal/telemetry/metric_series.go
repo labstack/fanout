@@ -4,21 +4,23 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/zeebo/xxh3"
 )
 
 // MetricSeriesID hashes the OTLP series identity, independent of point value,
 // kind, temporality and time. Call after decoding the complete identity.
+// Ingest hashes every point, so the encoding is built on the stack.
 func MetricSeriesID(m Metric) uint64 {
-	return xxh3.Hash(metricSeriesEncoding(m))
+	var buffer [512]byte
+	return xxh3.Hash(metricSeriesEncoding(buffer[:0], &m))
 }
 
-func metricSeriesEncoding(m Metric) []byte {
-	b := make([]byte, 0, 256)
-	for _, s := range []string{m.Namespace, m.ServiceName, m.Name, m.Unit, m.ScopeName, m.ScopeVersion} {
-		b = appendMetricIdentityValue(b, s)
+// metricSeriesEncoding appends the series identity to b.
+func metricSeriesEncoding(b []byte, m *Metric) []byte {
+	for _, s := range [...]string{m.Namespace, m.ServiceName, m.Name, m.Unit, m.ScopeName, m.ScopeVersion} {
+		b = appendMetricIdentityString(b, s)
 	}
 	b = appendMetricIdentityValue(b, m.Attributes)
 	return appendMetricIdentityValue(b, m.Resource)
@@ -31,17 +33,16 @@ func appendMetricIdentityValue(b []byte, v any) []byte {
 	case nil:
 		return append(b, 'n')
 	case string:
-		b = binary.LittleEndian.AppendUint64(append(b, 's'), uint64(len(v)))
-		return append(b, v...)
+		return appendMetricIdentityString(b, v)
 	case bool:
 		if v {
 			return append(b, 'b', 1)
 		}
 		return append(b, 'b', 0)
 	case int:
-		return appendMetricIdentityValue(b, int64(v))
+		return binary.LittleEndian.AppendUint64(append(b, 'i'), uint64(v))
 	case int32:
-		return appendMetricIdentityValue(b, int64(v))
+		return binary.LittleEndian.AppendUint64(append(b, 'i'), uint64(v))
 	case int64:
 		return binary.LittleEndian.AppendUint64(append(b, 'i'), uint64(v))
 	case float64:
@@ -56,18 +57,24 @@ func appendMetricIdentityValue(b []byte, v any) []byte {
 		}
 		return b
 	case map[string]any:
-		keys := make([]string, 0, len(v))
+		var stack [16]string
+		keys := stack[:0]
 		for k := range v {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		b = binary.LittleEndian.AppendUint64(append(b, 'm'), uint64(len(keys)))
 		for _, k := range keys {
-			b = appendMetricIdentityValue(b, k)
+			b = appendMetricIdentityString(b, k)
 			b = appendMetricIdentityValue(b, v[k])
 		}
 		return b
 	default:
 		panic(fmt.Sprintf("unsupported canonical metric attribute %T", v))
 	}
+}
+
+func appendMetricIdentityString(b []byte, s string) []byte {
+	b = binary.LittleEndian.AppendUint64(append(b, 's'), uint64(len(s)))
+	return append(b, s...)
 }

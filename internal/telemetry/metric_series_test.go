@@ -13,12 +13,22 @@ import (
 func TestMetricSeriesEncodingCanonicalizesMapOrder(t *testing.T) {
 	a := Metric{Attributes: map[string]any{"z": int64(1), "a": map[string]any{"y": true, "x": "v"}}}
 	b := Metric{Attributes: map[string]any{"a": map[string]any{"x": "v", "y": true}, "z": int64(1)}}
-	if !bytes.Equal(metricSeriesEncoding(a), metricSeriesEncoding(b)) || MetricSeriesID(a) != MetricSeriesID(b) {
+	if !bytes.Equal(metricSeriesEncoding(nil, &a), metricSeriesEncoding(nil, &b)) || MetricSeriesID(a) != MetricSeriesID(b) {
 		t.Fatal("map insertion order changed the identity")
 	}
 	a.Attributes, b.Attributes = nil, map[string]any{}
 	if MetricSeriesID(a) != MetricSeriesID(b) {
 		t.Fatal("absent and empty attributes differ")
+	}
+}
+
+// Ingest hashes every point; a typical point must not allocate.
+func TestMetricSeriesIDDoesNotAllocate(t *testing.T) {
+	m := Metric{Namespace: "prod", ServiceName: "checkout", Name: "http.server.request.duration", Unit: "s",
+		Attributes: map[string]any{"http.route": "/orders", "http.response.status_code": int64(200), "ok": true},
+		Resource:   map[string]any{"service.name": "checkout", "host.name": "node-1", "k8s.pod.name": "checkout-1"}}
+	if n := testing.AllocsPerRun(100, func() { MetricSeriesID(m) }); n != 0 {
+		t.Fatalf("MetricSeriesID allocated %.0f times per point", n)
 	}
 }
 
@@ -72,7 +82,7 @@ func TestMetricSeriesEncodingSeparatesTypedAndNestedValues(t *testing.T) {
 	hashes := map[uint64]bool{}
 	for _, value := range values {
 		m := Metric{Attributes: map[string]any{"key": value}}
-		encoded, hash := string(metricSeriesEncoding(m)), MetricSeriesID(m)
+		encoded, hash := string(metricSeriesEncoding(nil, &m)), MetricSeriesID(m)
 		if seen[encoded] || hashes[hash] {
 			t.Fatalf("identity conflated %T: %v", value, value)
 		}
@@ -88,7 +98,7 @@ func TestMetricSeriesEncodingSeparatesFieldAndContainerBoundaries(t *testing.T) 
 		{{Attributes: map[string]any{"a": []any{"b", "c"}}}, {Attributes: map[string]any{"a": []any{"bc"}}}},
 		{{Attributes: map[string]any{"x": true}}, {Resource: map[string]any{"x": true}}},
 	} {
-		if bytes.Equal(metricSeriesEncoding(pair[0]), metricSeriesEncoding(pair[1])) || MetricSeriesID(pair[0]) == MetricSeriesID(pair[1]) {
+		if bytes.Equal(metricSeriesEncoding(nil, &pair[0]), metricSeriesEncoding(nil, &pair[1])) || MetricSeriesID(pair[0]) == MetricSeriesID(pair[1]) {
 			t.Fatalf("field boundaries conflated: %+v", pair)
 		}
 	}
