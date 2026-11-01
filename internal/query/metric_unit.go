@@ -10,7 +10,7 @@ import (
 
 // metricUnitTTL bounds how long a metric's reported unit is reused; a
 // metric's unit rarely changes, and one lookup serves every panel on it.
-// Windows without points or with several units are not cached.
+// Windows without points or with units that disagree are not cached.
 const metricUnitTTL = 10 * time.Minute
 
 type unitEntry struct {
@@ -70,15 +70,17 @@ func (e *Executor) applyMetricUnit(ctx context.Context, p *Panel, checked *Check
 				continue
 			}
 			if !looked {
-				unit, looked = panelUnit(e.metricUnit(ctx, name, scope)), true
+				unit, looked = e.metricUnit(ctx, name, scope), true
 			}
 			frame.Columns[i].Unit = unit
 		}
 	}
 }
 
-// metricUnit is the unit the metric reports in the window, or "" when it
-// reports none or more than one.
+// metricUnit is the panel unit for the units the metric reports in the
+// window, or "" when it reports none or units that disagree. Spellings of one
+// unit, such as {packets} and packets, agree; so do units that map to the
+// same panel unit. An empty unit reports nothing and defers to the others.
 func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) string {
 	now := e.now()
 	e.mu.Lock()
@@ -89,27 +91,50 @@ func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) str
 	}
 	where, args := windowWhere(signals["metrics"], scope.Start, scope.End, "")
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
-	rows, err := e.engine.QueryContext(ctx, "SELECT coalesce(min(unit),''),coalesce(max(unit),''),count(*) FROM metrics WHERE name = ? AND "+where, append([]any{name}, args...)...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT DISTINCT coalesce(unit,'') FROM metrics WHERE name = ? AND "+where+" ORDER BY 1", append([]any{name}, args...)...)
 	if err != nil {
 		return ""
 	}
 	defer rows.Close()
-	var lo, hi string
-	var n int64
-	if !rows.Next() || rows.Scan(&lo, &hi, &n) != nil || rows.Err() != nil {
+	var units []string
+	for rows.Next() {
+		var u string
+		if rows.Scan(&u) != nil {
+			return ""
+		}
+		units = append(units, u)
+	}
+	if rows.Err() != nil || len(units) == 0 {
+		// A window without points must not hide the unit from panels whose
+		// windows see one.
 		return ""
 	}
-	// Only a single reported unit, possibly empty, is cached: a window that
-	// sees no points or several units must not hide the unit from panels
-	// whose windows see one.
-	if lo != hi || n == 0 {
+	unit, agree := "", true
+	spelling, mapped := "", map[string]bool{}
+	for _, u := range units {
+		if u == "" {
+			continue
+		}
+		bare := strings.Trim(u, "{}")
+		if spelling != "" && bare != spelling {
+			agree = false
+		}
+		spelling = bare
+		if m := panelUnit(u); m != "" {
+			unit = m
+			mapped[m] = true
+		} else {
+			mapped[""] = true
+		}
+	}
+	if !agree && len(mapped) > 1 {
 		return ""
 	}
 	e.mu.Lock()
 	if e.units == nil || len(e.units) >= 1000 {
 		e.units = map[string]unitEntry{}
 	}
-	e.units[name] = unitEntry{unit: lo, expires: now.Add(metricUnitTTL)}
+	e.units[name] = unitEntry{unit: unit, expires: now.Add(metricUnitTTL)}
 	e.mu.Unlock()
-	return lo
+	return unit
 }
