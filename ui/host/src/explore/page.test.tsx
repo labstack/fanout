@@ -70,6 +70,16 @@ describe("ExplorePage", () => {
     expect(fetchMock).not.toHaveBeenCalledWith("/api/fanql/parse", expect.anything());
   });
 
+  it("says what to do when Enter is pressed in the empty editor", async () => {
+    const { ui, type } = await render();
+    const editor = ui.getByRole("textbox", { name: "FanQL query" });
+    await act(async () => { editor.focus(); fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 }); });
+    expect(document.querySelector("[data-fanql-empty]")?.textContent).toBe("Type a query to run, for example spans | count() by service.");
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/fanql/parse", expect.anything());
+    await type("spans");
+    expect(document.querySelector("[data-fanql-empty]")).toBeNull();
+  });
+
   it("parses, runs one panel with the compiled query and shows the canonical text", async () => {
     parse = async body => json(parsed(body.text, "spans | count() by service"));
     const { ui, type, click, wait, onSearch } = await render();
@@ -263,6 +273,23 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "24h", refresh: "off" }));
   });
 
+  it("shows a running state, not a changed query, while a rerun or new window is in flight", async () => {
+    const { ui, type, click, wait, onSearch, search } = await render();
+    await type("spans | count() by service");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
+    let answer: (response: Response) => void = () => {};
+    runQuery = () => new Promise(resolve => { answer = resolve; });
+    await click("Run");
+    expect(ui.getByRole("status").textContent).toBe("Running the query…");
+    await act(async () => answer(json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] })));
+    await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
+    await act(async () => onSearch({ ...search(), range: "24h" }));
+    expect(ui.getByRole("status").textContent).toBe("Running the query…");
+    await act(async () => answer(json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] })));
+    await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
+  });
+
   it("marks a result stale when the window changes and the rerun fails", async () => {
     const { ui, type, click, wait, onSearch, search } = await render();
     await type("spans | count() by service");
@@ -271,7 +298,7 @@ describe("ExplorePage", () => {
     runQuery = async () => json({ code: "unavailable", message: "engine busy" }, 503);
     await act(async () => onSearch({ ...search(), range: "24h" }));
     await wait(() => expect(ui.getByText("engine busy")).toBeTruthy());
-    expect(ui.getByRole("status").textContent).toBe("Result of the last run · query has changed");
+    expect(ui.getByRole("status").textContent).toBe("Result of the last run · time range has changed");
     expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("true");
   });
 
