@@ -80,6 +80,7 @@ type Executor struct {
 	mu      sync.Mutex
 	checks  map[[32]byte]*Checked
 	schemas map[string]schemaEntry
+	units   map[string]unitEntry
 
 	// Schema discoveries outlive their callers but not the executor: they
 	// run under life, which Close cancels, two at a time through discoveries.
@@ -496,6 +497,9 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			res.Previous = pf
 			res.ShiftMS = shift.Milliseconds()
 		}
+	}
+	if frame.Rows > 0 {
+		e.applyMetricUnit(ctx, p, checked, scope, frame, res.Previous)
 	}
 	if frame.Rows > 0 && p.Query != nil && p.Query.From != "metrics" && p.Viz != "state_timeline" && hasMeasure(frame) && !measuresHaveValue(frame) {
 		// Rows whose every measure is null have nothing to plot. A state
