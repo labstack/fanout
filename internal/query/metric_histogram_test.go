@@ -108,6 +108,30 @@ func TestHistogramWithoutSumKeepsCountsAndQuantiles(t *testing.T) {
 	}
 }
 
+// A histogram point without buckets keeps its count and sum in count, sum,
+// rate and avg, and quantiles come from the bucketed points alone.
+func TestBucketlessHistogramCountsButHasNoQuantile(t *testing.T) {
+	e, db := metricFixture(t)
+	bucketed := metricHistogram(fixtureStart, "[10]", "[3,2]", 5, 30, "a")
+	bucketless := metricHistogram(fixtureStart, "[]", "[]", 5, 20, "b")
+	for _, m := range []telemetry.Metric{bucketed, bucketless} {
+		m.Temporality = "delta"
+		insertMetrics(t, db, m)
+	}
+	r := runMetricMeasure(t, e, []string{"count()", "sum(value)", "avg(value)", "p50(value)"}, "", nil, fixtureStart, fixtureStart.Add(time.Minute))
+	if metricValues(t, r, "count")[0] != 2.0 || metricValues(t, r, "sum")[0] != 50.0 || metricValues(t, r, "avg")[0] != 5.0 || metricValues(t, r, "p50")[0] != 25.0/3 {
+		t.Fatalf("bucketless=%+v", r.Frame)
+	}
+	e, db = metricFixture(t)
+	for i, count := range []int{0, 60, 120} {
+		insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Duration(i-1)*time.Minute), "[]", "[]", int64(count), float64(count), "a"))
+	}
+	r = runMetricMeasure(t, e, []string{"rate()", "p95(value)"}, "", nil, fixtureStart, fixtureStart.Add(2*time.Minute))
+	if metricValues(t, r, "rate")[0] != 1.0 || metricValues(t, r, "p95")[0] != nil {
+		t.Fatalf("bucketless rate=%+v", r.Frame)
+	}
+}
+
 func TestHistogramRateUsesPerSeriesCoveredElapsedTime(t *testing.T) {
 	e, db := metricFixture(t)
 	for _, p := range []struct {

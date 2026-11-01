@@ -121,9 +121,12 @@ func metricPointsCTE(source metricRead, scope Scope, kinds []string, lookback ti
         CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_bounds WHEN type='histogram' THEN ` + expBoundsSQL + ` END AS _bounds,
         CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_counts WHEN type='histogram' THEN ` + expCountsSQL + ` END AS _counts
         FROM metric_exp_kept),
+      -- OTLP allows a histogram without buckets: it counts toward count, sum,
+      -- rate and avg, and its empty bucket list adds nothing to quantiles.
       metric_valid AS (SELECT * FROM metric_decoded WHERE
         (type<>'histogram' AND isfinite(value)) OR
-        (type='histogram' AND (hist_sum IS NULL OR isfinite(hist_sum)) AND len(_counts)=len(_bounds)+1)),
+        (type='histogram' AND (hist_sum IS NULL OR isfinite(hist_sum))
+         AND (len(_counts)=len(_bounds)+1 OR len(_counts)=0 AND len(_bounds)=0))),
       metric_unique AS (SELECT * EXCLUDE (_retry) FROM (
         SELECT *,row_number() OVER (PARTITION BY ` + metricSeriesKey + `,time ORDER BY
           ingested_unix_nano DESC,value DESC,hist_count DESC,hist_sum DESC,
