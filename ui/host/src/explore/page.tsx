@@ -126,7 +126,11 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     // A viz chosen for an entry that named none refines that entry.
     onSearch(next, next.q === now.q && next.sql === now.sql && (now.viz === undefined || next.viz === now.viz));
   };
-  const windowKey = `${search.range}|${search.from ?? ""}|${search.to ?? ""}`;
+  const windowOf = (s: ExploreSearch) => `${s.range}|${s.from ?? ""}|${s.to ?? ""}`;
+  const windowKey = windowOf(search);
+  // The window the range menu asked for: reaching it reruns the editor; reaching any other is navigation.
+  const asked = useRef<string | undefined>(undefined);
+  const pickWindow = (next: ExploreSearch) => { if (windowOf(next) !== windowKey) asked.current = windowOf(next); onSearch(next); };
   // Responses compare against what is in the editors now, not when they were sent.
   const current = useRef({ text, sql }); current.current = { text, sql };
   const schema = useQuery({ queryKey: ["telemetry-schema"], queryFn: ({ signal }) => getTelemetrySchema(signal), staleTime: 60_000, retry: false, enabled: search.tab !== "query" });
@@ -186,11 +190,10 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     }
   };
 
-  // A shared link runs on open; a new time window reruns what is in the editor.
+  // A shared link runs on open; a window chosen in the range menu reruns what is in the editor.
   const latest = useRef({ kind: kindOf(search.tab), viz: run?.panel.viz ?? search.viz, direct: undefined as Query | undefined });
   latest.current = { kind: kindOf(search.tab), viz: run?.panel.viz ?? search.viz, direct: formatted?.editable === false ? built : undefined };
   const rerun = useRef<() => void>(() => undefined);
-  useEffect(() => { rerun.current(); }, [windowKey]);
 
   // Builder edits print through the server so the text stays the one query.
   const cancelFormat = () => { clearTimeout(formatter.current.timer); formatter.current.timer = undefined; formatter.current.abort?.abort(); };
@@ -250,16 +253,21 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     else void execute(kind, current.current[kind === "query" ? "text" : "sql"], viz, direct);
   };
 
-  // Back and Forward bring another run's entry: show and run what it holds.
+  // Back and Forward bring another entry, which may differ only in its window: show and run what it holds, never the draft.
+  const seen = useRef<string | undefined>(undefined);
   useEffect(() => {
     const entry = { q: search.q, sql: search.sql ?? "", viz: search.viz };
-    if (entry.q === shown.current.q && entry.sql === shown.current.sql && entry.viz === shown.current.viz) return;
+    const same = entry.q === shown.current.q && entry.sql === shown.current.sql && entry.viz === shown.current.viz;
+    const opened = seen.current === undefined, moved = seen.current !== windowKey, chosen = asked.current === windowKey;
+    seen.current = windowKey; asked.current = undefined;
+    if (same && (opened || (moved && chosen))) { rerun.current(); return; }
+    if (same && !moved) return;
     shown.current = entry;
     cancelFormat(); setFormatted(undefined); setProblems([]);
     setText(entry.q); setSql(entry.sql);
     const kind = kindOf(search.tab);
     void execute(kind, kind === "query" ? entry.q : entry.sql, entry.viz);
-  }, [search.q, search.sql, search.viz]);
+  }, [search.q, search.sql, search.viz, windowKey]);
 
   // A link that opens on the Builder seeds it like a tab switch would.
   useEffect(() => { if (search.tab === "builder") void openTab("builder"); }, []);
@@ -287,7 +295,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         <Title order={2}>Explore</Title>
         <Text size="sm" c="dimmed">Ask a question of your telemetry. Runs the same query path as dashboards.</Text>
       </Stack>}
-      <RangeMenu time={time} onRange={range => onSearch({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => onSearch({ ...search, from, to })} />
+      <RangeMenu time={time} onRange={range => pickWindow({ ...search, range, from: undefined, to: undefined })} onAbsolute={(from, to) => pickWindow({ ...search, from, to })} />
     </Group>
     <Tabs value={search.tab} onChange={value => void openTab(value === "sql" || value === "builder" ? value : "query")} keepMounted={false}>
       <Tabs.List>

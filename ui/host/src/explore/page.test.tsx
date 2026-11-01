@@ -58,7 +58,12 @@ async function render(initial: Partial<ExploreSearch> = {}) {
   const type = async (text: string) => act(async () => { const view = editor(); view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }); });
   const click = async (name: string | RegExp) => act(async () => ui.getByRole("button", { name }).click());
   const wait = async (assertion: () => void) => vi.waitFor(async () => { await act(async () => {}); assertion(); }, { timeout: 3000, interval: 10 });
-  return { ui, onSearch, onSaved, type, click, wait, search: () => search };
+  /** Picks a relative range in the range menu, as a user would. */
+  const pick = async (label: string) => {
+    await click(/Last /);
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)!.click());
+  };
+  return { ui, onSearch, onSaved, type, click, pick, wait, search: () => search };
 }
 
 describe("ExplorePage", () => {
@@ -131,6 +136,23 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" }));
     expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(4));
+  });
+
+  it("restores an entry's own text and window on Back after a range change, without rewriting it", async () => {
+    const { ui, type, pick, wait, onSearch, search } = await render({ q: "spans | count() by service" });
+    await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
+    const first = search();
+    await pick("Last 15 minutes");
+    await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "15m", refresh: "off" }));
+    await type("spans | count()");
+    const calls = onSearch.mock.calls.length;
+    // The router hands back the 1h entry; the draft in the editor is not run.
+    await act(async () => onSearch(first));
+    await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "1h", refresh: "off" }));
+    expect(bodies("/api/fanql/parse").map(body => body.text)).not.toContain("spans | count()");
+    expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count() by service");
+    // Rerunning the entry it shows replaces it with itself; it never adds or rewrites one.
+    expect(onSearch.mock.calls.slice(calls + 1).every(([next, replace]) => replace && next.q === first.q && next.range === "1h")).toBe(true);
   });
 
   it("gives logs panels the logs drill and offers no drill on metrics", async () => {
@@ -334,18 +356,18 @@ describe("ExplorePage", () => {
   });
 
   it("reruns the edited text, not the last result, when the window changes", async () => {
-    const { type, click, wait, onSearch, search } = await render();
+    const { type, click, pick, wait } = await render();
     await type("spans | count()");
     await click("Run");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await type("spans | count() by service");
-    await act(async () => onSearch({ ...search(), range: "24h" }));
+    await pick("Last 24 hours");
     await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service" }));
     await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "24h", refresh: "off" }));
   });
 
   it("shows a running state, not a changed query, while a rerun or new window is in flight", async () => {
-    const { ui, type, click, wait, onSearch, search } = await render();
+    const { ui, type, click, pick, wait } = await render();
     await type("spans | count() by service");
     await click("Run");
     await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
@@ -355,19 +377,19 @@ describe("ExplorePage", () => {
     expect(ui.getByRole("status").textContent).toBe("Running the query…");
     await act(async () => answer(json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] })));
     await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
-    await act(async () => onSearch({ ...search(), range: "24h" }));
+    await pick("Last 24 hours");
     expect(ui.getByRole("status").textContent).toBe("Running the query…");
     await act(async () => answer(json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, frame }] })));
     await wait(() => expect(ui.getByRole("status").textContent).toContain("Ran as"));
   });
 
   it("marks a result stale when the window changes and the rerun fails", async () => {
-    const { ui, type, click, wait, onSearch, search } = await render();
+    const { ui, type, click, pick, wait } = await render();
     await type("spans | count() by service");
     await click("Run");
     await wait(() => expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("false"));
     runQuery = async () => json({ code: "unavailable", message: "engine busy" }, 503);
-    await act(async () => onSearch({ ...search(), range: "24h" }));
+    await pick("Last 24 hours");
     await wait(() => expect(ui.getByText("engine busy")).toBeTruthy());
     expect(ui.getByRole("status").textContent).toBe("Result of the last run · time range has changed");
     expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("true");
