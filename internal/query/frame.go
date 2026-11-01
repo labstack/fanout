@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/queryrows"
 )
@@ -229,6 +230,9 @@ func convertDynamic(v any, kind string) any {
 	}
 	switch s := v.(type) {
 	case string:
+		if kind == "json" {
+			return engine.NormalizeJSON(s)
+		}
 		return s
 	case []byte:
 		return string(s)
