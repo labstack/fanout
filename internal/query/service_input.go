@@ -102,7 +102,7 @@ func (e *Executor) observedService(ctx context.Context, sql string, args ...any)
 // The read window pins/prunes Parquet, while predicates keep nanosecond bounds.
 const serviceGuidanceSQL = `
 WITH span_rows AS MATERIALIZED (
- SELECT namespace,service,messaging_system,attributes['db.system.name']::VARCHAR AS db_system,peer_service FROM spans
+ SELECT namespace,service,messaging_system,attributes['db.system.name'] AS db_system,peer_service FROM spans
  WHERE start_time >= $1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < $2::TIMESTAMP_NS::TIMESTAMPTZ_NS
  AND ($3='' OR namespace=$3)
 ), traffic AS (
