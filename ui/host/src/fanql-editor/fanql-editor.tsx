@@ -1,5 +1,5 @@
 import { Button, Group, Stack, Text } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Annotation, Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, drawSelection, keymap, placeholder, tooltips } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -72,12 +72,7 @@ export function FanqlEditor(props: FanqlEditorProps) {
   // Text reported through onChange that has not rendered back yet. A render
   // that lags behind typing echoes one of these and must not rewind the editor.
   const echoes = useRef<string[]>([]);
-  // The text each list describes; a run can replace one list and keep the other.
-  // Once the text is edited their spans no longer index it, so they are no
-  // longer marked and their fix-its are withdrawn.
-  const [basis, setBasis] = useState({ problems, notices, problemText: value, noticeText: value });
-  if (basis.problems !== problems || basis.notices !== notices) setBasis({ problems, notices, problemText: basis.problems !== problems ? value : basis.problemText, noticeText: basis.notices !== notices ? value : basis.noticeText });
-  const current = { problems: basis.problemText === value ? problems : noProblems, notices: basis.noticeText === value ? notices : noNotices };
+  const ids = useId();
   const compartments = useRef({ editable: new Compartment(), attributes: new Compartment() });
   useEffect(() => {
     const { editable, attributes } = compartments.current;
@@ -153,15 +148,16 @@ export function FanqlEditor(props: FanqlEditorProps) {
     EditorView.contentAttributes.of({ role: "textbox", "aria-label": label, "aria-multiline": "false", "aria-describedby": describedBy ?? "", "aria-invalid": problems.length ? "true" : "false", spellcheck: "false" }),
     props.placeholder ? placeholder(props.placeholder) : [],
   ]) }); }, [label, describedBy, problems.length, props.placeholder]);
-  useEffect(() => { const instance = view.current!; instance.dispatch(setDiagnostics(instance.state, fanqlDiagnostics(instance.state.doc.toString(), current.problems, current.notices))); }, [current.problems, current.notices]);
-  const fixes = (item: Problem | Notice, fresh: boolean) => fresh && !readOnly && item.fix_its?.map((fix, index) =>
-    <Button key={index} size="compact-xs" variant="default" fw={400} onClick={() => applyFix(view.current!, fix)} data-fix-it><span>Replace with <code>{fix.label || fix.text}</code></span></Button>);
+  useEffect(() => { const instance = view.current!; instance.dispatch(setDiagnostics(instance.state, fanqlDiagnostics(instance.state.doc.toString(), problems, notices))); }, [problems, notices]);
+  // Each button is described by its message, which it sits beside rather than inside, so an alert reads the message alone.
+  const fixes = (item: Problem | Notice, message: string) => !readOnly && item.fix_its?.map((fix, index) =>
+    <Button key={index} size="compact-xs" variant="default" fw={400} aria-describedby={message} onClick={() => applyFix(view.current!, fix)} data-fix-it><span>Replace with <code>{fix.label || fix.text}</code></span></Button>);
   return <div data-fanql-editor>
     <div ref={host} />
     {schemaNote && listOpen && <Text size="xs" c="dimmed" mt={4} data-completion-note>Suggestions: {schemaNote}</Text>}
-    {problems.length > 0 && <Stack gap={4} mt="xs" role="alert" data-fanql-problems>{problems.map((problem, index) =>
-      <Group key={index} gap={6} wrap="wrap"><Text size="sm" c="bad">{describe(problem)}</Text>{fixes(problem, current.problems === problems)}</Group>)}</Stack>}
+    {problems.length > 0 && <Stack gap={4} mt="xs" data-fanql-problems>{problems.map((problem, index) =>
+      <Group key={index} gap={6} wrap="wrap"><Text id={`${ids}p${index}`} role="alert" size="sm" c="bad">{describe(problem)}</Text>{fixes(problem, `${ids}p${index}`)}</Group>)}</Stack>}
     {notices.length > 0 && <Stack gap={4} mt="xs" data-fanql-notices>{notices.map((notice, index) =>
-      <Group key={index} gap={6} wrap="wrap"><Text size="xs" c="dimmed">{notice.message}</Text>{fixes(notice, current.notices === notices)}</Group>)}</Stack>}
+      <Group key={index} gap={6} wrap="wrap"><Text id={`${ids}n${index}`} size="xs" c="dimmed">{notice.message}</Text>{fixes(notice, `${ids}n${index}`)}</Group>)}</Stack>}
   </div>;
 }

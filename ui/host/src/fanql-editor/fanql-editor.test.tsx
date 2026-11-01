@@ -68,46 +68,43 @@ describe("FanqlEditor", () => {
     expect(change).toHaveBeenLastCalledWith("spans where service:a");
   });
 
-  it("lists each fix-it of a problem as a button that edits the text and returns focus", async () => {
+  it("lists each fix-it of a problem as a button beside the alert that edits the text and returns focus", async () => {
     const value = "spans | cuont() by host.name";
     const at = { start: 8, end: 13 };
-    const { view, change } = await renderEditor({ value, problems: [{ path: "text", message: "unknown function cuont", span: at, fix_its: [{ label: "count", span: at, text: "count" }, { label: "count_if", span: at, text: "count_if" }] }] });
-    const alert = document.querySelector<HTMLElement>('[role="alert"][data-fanql-problems]')!;
-    const buttons = [...alert.querySelectorAll("button")];
+    const { view, change, editor } = await renderEditor({ value, problems: [{ path: "text", message: "unknown function cuont", span: at, fix_its: [{ label: "count", span: at, text: "count" }, { label: "count_if", span: at, text: "count_if" }] }] });
+    expect(editor.getAttribute("aria-invalid")).toBe("true");
+    const alert = document.querySelector<HTMLElement>('[data-fanql-problems] [role="alert"]')!;
+    // The alert announces the message alone; the buttons are not read with it.
+    expect(alert.textContent).toBe("unknown function cuont");
+    expect(alert.querySelector("button")).toBeNull();
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>("[data-fanql-problems] button")];
     expect(buttons.map(b => b.textContent)).toEqual(["Replace with count", "Replace with count_if"]);
-    expect(alert.textContent).toContain("unknown function cuont");
+    expect(buttons.map(b => document.getElementById(b.getAttribute("aria-describedby")!))).toEqual([alert, alert]);
     await act(async () => buttons[0].click());
     expect(change).toHaveBeenLastCalledWith("spans | count() by host.name");
     expect(view.hasFocus).toBe(true);
     expect(view.state.selection.main.head).toBe(13);
   });
 
-  it("shows notices apart from problems, with their fix-its, until the text changes", async () => {
+  it("applies a fix-it after characters outside the basic plane, whose spans count code points", async () => {
+    // As the server reports it for this text: cuont is code points 30 to 35.
+    const value = 'spans where service:"café😀" | cuont()';
+    const { change } = await renderEditor({ value, problems: [{ path: "text", message: "unknown function cuont", span: { start: 30, end: 37 }, fix_its: [{ label: "count", span: { start: 30, end: 35 }, text: "count" }] }] });
+    await act(async () => document.querySelector<HTMLButtonElement>("[data-fanql-problems] button")!.click());
+    expect(change).toHaveBeenLastCalledWith('spans where service:"café😀" | count()');
+  });
+
+  it("shows notices apart from problems, quietly, with their fix-its", async () => {
     const value = "spans | count() by host.name";
     const at = { start: 19, end: 28 };
     const notices = [{ path: "text", message: "host.name is usually a resource attribute", span: at, fix_its: [{ label: "resource.host.name", span: at, text: "resource.host.name" }] }];
-    const { view, change, render } = await renderEditor({ value, notices });
+    const { view, change, editor } = await renderEditor({ value, notices });
     expect(document.querySelector('[role="alert"]')).toBeNull();
-    const list = document.querySelector<HTMLElement>("[data-fanql-notices]")!;
-    expect(list.textContent).toContain("host.name is usually a resource attribute");
-    expect(diagnostics(view)[0]).toMatchObject({ from: 19, to: 28, severity: "info" });
-    // Edited text no longer matches the notice's span: the message stays, the fix and the mark go.
-    await render({ value: "spans | count() by host", notices });
-    expect(document.querySelector("[data-fanql-notices] button")).toBeNull();
+    expect(editor.getAttribute("aria-invalid")).toBe("false");
     expect(document.querySelector("[data-fanql-notices]")?.textContent).toContain("host.name is usually a resource attribute");
-    expect(diagnostics(view)).toHaveLength(0);
-    await render({ value, notices: [...notices] });
+    expect(diagnostics(view)[0]).toMatchObject({ from: 19, to: 28, severity: "info" });
     await act(async () => document.querySelector<HTMLButtonElement>("[data-fanql-notices] button")!.click());
     expect(change).toHaveBeenLastCalledWith("spans | count() by resource.host.name");
-  });
-
-  it("keeps an earlier run's notice stale when new problems arrive for edited text", async () => {
-    const at = { start: 19, end: 28 };
-    const notices = [{ path: "text", message: "host.name is usually a resource attribute", span: at, fix_its: [{ label: "resource.host.name", span: at, text: "resource.host.name" }] }];
-    const { view, render } = await renderEditor({ value: "spans | count() by host.name", notices });
-    await render({ value: "spans | cuont() by service", notices, problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 } }] });
-    expect(document.querySelector("[data-fanql-notices] button")).toBeNull();
-    expect(diagnostics(view).map(d => d.severity)).toEqual(["error"]);
   });
 
   it("offers no fix-it buttons when read-only", async () => {

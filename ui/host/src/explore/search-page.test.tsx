@@ -238,6 +238,23 @@ describe("SearchPage", () => {
     expect(ui.getByRole("textbox", { name: "Search logs" }).textContent).toBe("resource.host.name:a");
   });
 
+  it("drops notices when the filters are edited or changed while the parse was out", async () => {
+    const notice = { path: "text", message: "host.name is usually a resource attribute", span: { start: 0, end: 9 } };
+    let answer: (() => void) | undefined;
+    parse = body => body.text === "host.name:b" ? new Promise(resolve => { answer = () => resolve(json({ query: { from: "logs" }, canonical: body.text, viz: { compatible: [], edits: [] }, notices: [notice] })); })
+      : Promise.resolve(json({ query: { from: "logs" }, canonical: body.text, viz: { compatible: [], edits: [] }, notices: [notice] }));
+    const { ui, wait } = await render(logsPreset, { q: "host.name:a" });
+    await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
+    const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!;
+    await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "host.name:b" } }));
+    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    await act(async () => ui.getByRole("button", { name: "Search" }).click());
+    await act(async () => view.dispatch({ changes: { from: view.state.doc.length, insert: " x" } }));
+    await act(async () => answer!());
+    await wait(() => expect(bodies("/api/queries/run").length).toBeGreaterThan(1));
+    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+  });
+
   it("groups typed filters before the fields and maps problem spans back to the editor", async () => {
     parse = async body => body.text.startsWith("(") && body.text.includes("where")
       ? json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "the page supplies where", span: { start: 1, end: 6 }, fix_its: [{ label: "Remove where", span: { start: 1, end: 7 }, text: "" }] }, { path: "text", message: "about the field", span: { start: 20, end: 30 } }] }, 400)
@@ -247,7 +264,7 @@ describe("SearchPage", () => {
     const view = EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!;
     await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "where x" } }));
     await act(async () => ui.getByRole("button", { name: "Search" }).click());
-    await wait(() => expect(ui.getByRole("alert").textContent).toContain("the page supplies where"));
+    await wait(() => expect(ui.getAllByRole("alert")[0].textContent).toBe("the page supplies where"));
     const marks: [number, number][] = [];
     forEachDiagnostic(view.state, (_d, from, to) => marks.push([from, to]));
     expect(marks).toEqual([[0, 5], [0, 7]]);

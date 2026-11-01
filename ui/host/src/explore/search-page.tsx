@@ -115,7 +115,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
   const execute = async (filters: string, order: string) => {
     controller.current?.abort();
     const abort = new AbortController(); controller.current = abort;
-    setRunning(true); setError(undefined); setProblems([]);
+    setRunning(true); setError(undefined); setProblems([]); setNotices([]);
     try {
       // Problem spans in the combined text are mapped back to the editor.
       const picked = termsNow.current;
@@ -124,7 +124,8 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       setShifted({ shift, length: Array.from(filters).length });
       const parsed = await parseFanql({ text: combined, source: preset.source, viz: preset.viz }, abort.signal);
       if (abort.signal.aborted) return;
-      setNotices(parsed.notices);
+      // Notice spans index the text that was sent, as problem spans do.
+      if (current.current === filters) setNotices(parsed.notices);
       const panel: Panel = { id: panelID, title: defaultTitle(`${preset.name}: ${[filters.trim(), picked].filter(Boolean).join(" ") || "all"}`), viz: preset.viz, query: { ...parsed.query, sort: order } };
       // A drawer opened from earlier results closes when the filters change.
       const changed = filters !== written.current;
@@ -194,7 +195,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
     <Stack gap="xs">
       <Text id={help} size="xs" c="dimmed">Filter with FanQL, for example <code>{preset.example}</code>. {preset.matching} Press Enter to search.</Text>
       <FanqlEditor value={text} label={`Search ${preset.name.toLowerCase()}`} describedBy={help} problems={local.problems} notices={local.notices}
-        onChange={value => { setText(value); setProblems([]); }} onRun={() => void execute(text, sort)}
+        onChange={value => { setText(value); setProblems([]); setNotices([]); }} onRun={() => void execute(text, sort)}
         complete={(value, cursor, signal) => completeFanql({ text: value, cursor, source: preset.source, viz: preset.viz, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
     </Stack>
     <Group gap="sm" align="flex-end" data-search-fields>

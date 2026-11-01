@@ -77,7 +77,26 @@ describe("ExplorePage", () => {
     expect(document.querySelector("[data-fanql-empty]")?.textContent).toBe("Type a query to run, for example spans | count() by service.");
     expect(fetchMock).not.toHaveBeenCalledWith("/api/fanql/parse", expect.anything());
     await type("spans");
-    expect(document.querySelector("[data-fanql-empty]")).toBeNull();
+    expect(document.querySelector("[data-fanql-empty]")?.textContent).toBe("");
+  });
+
+  it("keeps the empty-run region mounted, announces each empty Enter, and clears it when the text arrives from history", async () => {
+    const { ui, onSearch, search, wait } = await render();
+    const region = document.querySelector("[data-fanql-empty]")!;
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.textContent).toBe("");
+    const editor = ui.getByRole("textbox", { name: "FanQL query" });
+    const enter = async () => act(async () => { editor.focus(); fireEvent.keyDown(editor, { key: "Enter", code: "Enter", keyCode: 13 }); });
+    await enter();
+    const first = region.firstElementChild;
+    expect(region.textContent).toBe("Type a query to run, for example spans | count() by service.");
+    await enter();
+    // A new node is an addition the screen reader announces again.
+    expect(region.firstElementChild).not.toBe(first);
+    expect(document.querySelector("[data-fanql-empty]")).toBe(region);
+    await act(async () => onSearch({ ...search(), q: "spans | count()" }));
+    await wait(() => expect(editor.textContent).toBe("spans | count()"));
+    expect(region.textContent).toBe("");
   });
 
   it("parses, runs one panel with the compiled query and shows the canonical text", async () => {
@@ -182,6 +201,36 @@ describe("ExplorePage", () => {
     await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
     await click("Replace with resource.host.name");
     expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count() by resource.host.name");
+  });
+
+  it("drops notices when the text is edited, refused, or changed while the parse was out", async () => {
+    const at = { start: 19, end: 28 };
+    const notice = { path: "text", message: "host.name is usually a resource attribute", span: at, fix_its: [{ label: "resource.host.name", span: at, text: "resource.host.name" }] };
+    parse = async body => json({ ...parsed(body.text), notices: [notice] });
+    const { ui, type, click, wait } = await render();
+    await type("spans | count() by host.name");
+    await click("Run");
+    await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
+    await type("spans | count() by host");
+    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    // A refused run does not bring back the notices of the run before it.
+    await type("spans | count() by host.name");
+    await click("Run");
+    await wait(() => expect(ui.getByText("host.name is usually a resource attribute")).toBeTruthy());
+    parse = async () => json({ code: "invalid_fanql", message: "The query has problems.", problems: [{ path: "text", message: "unknown function cuont", span: { start: 8, end: 13 } }] }, 400);
+    await type("spans | cuont() by service");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("alert").textContent).toBe("unknown function cuont"));
+    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
+    // Notices for text the user has since changed are not shown.
+    let answer!: () => void;
+    parse = body => new Promise(resolve => { answer = () => resolve(json({ ...parsed(body.text), notices: [notice] })); });
+    await type("spans | count() by host.name");
+    await click("Run");
+    await type("spans | count() by host.name ");
+    await act(async () => answer());
+    await wait(() => expect(bodies("/api/queries/run").length).toBeGreaterThan(0));
+    expect(document.querySelector("[data-fanql-notices]")).toBeNull();
   });
 
   it("renders an execution error in the panel card", async () => {

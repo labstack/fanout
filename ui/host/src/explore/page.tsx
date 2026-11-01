@@ -105,8 +105,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const [problems, setProblems] = useState<Problem[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [error, setError] = useState<string>();
-  // Enter on an empty editor runs nothing; it says why.
-  const [emptyRun, setEmptyRun] = useState(false);
+  // Enter on an empty editor runs nothing; it says why, once per Enter, while the editor stays empty.
+  const [emptyRun, setEmptyRun] = useState(0);
   const [run, setRun] = useState<ExploreRun>();
   // A run the server refused leaves the last result shown; this marks what was refused.
   const [refused, setRefused] = useState<{ kind: Kind; source: string; window: string }>();
@@ -137,7 +137,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     if (!source.trim()) return;
     controller.current?.abort();
     const abort = new AbortController(); controller.current = abort;
-    setRunning(true); setError(undefined); setProblems([]); setRefused(undefined);
+    setRunning(true); setError(undefined); setProblems([]); setNotices([]); setRefused(undefined);
     try {
       let panel: Panel;
       let canonical: string | undefined;
@@ -150,7 +150,9 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         // Parse without the previous viz: a new query shape may not fit it.
         const next = await parseFanql({ text: source, variables }, abort.signal);
         if (abort.signal.aborted) return;
-        setParsed({ ...next, text: source }); setNotices(next.notices);
+        setParsed({ ...next, text: source });
+        // Notice spans index the text that was sent, as problem spans do.
+        if (current.current.text === source) setNotices(next.notices);
         // An accepted viz edit changes the query; the Builder follows it.
         if (searchNow.current.tab === "builder") setBuilt(next.query);
         const chosen = viz && next.viz.compatible.some(c => c.viz === viz && satisfied(c)) ? viz : next.viz.compatible.find(satisfied)?.viz ?? "table";
@@ -160,7 +162,6 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
       } else {
         // SQL has no viz analysis; an edited panel keeps its own viz.
         panel = compose({ id: explorePanelID, title: "SQL", viz: base?.viz ?? "table", sql: source });
-        setNotices([]);
         record({ ...searchNow.current, sql: source });
       }
       const dashboard: DashboardSpec = { version: 1, name: context?.spec.name ?? "Explore", time, variables, panels: [panel] };
@@ -265,6 +266,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
 
   const kind = kindOf(search.tab);
   const source = kind === "query" ? text : sql;
+  const emptyShown = emptyRun > 0 && !text.trim();
   const readOnlyText = formatted?.editable === false;
   const stale = run !== undefined && (run.kind !== kind || run.source !== source || run.window !== windowKey);
   const compatible = parsed?.viz.compatible ?? [];
@@ -297,9 +299,12 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         <Stack gap="xs">
           <Text id={help} size="xs" c="dimmed">Press Enter to run. For example <code>spans | p95(duration) by service every 5m</code>.</Text>
           {readOnlyText && <Text size="xs" c="dimmed" data-fanql-readonly>This query is edited in the Builder: {formatted?.reason ?? "it is too large for the text editor"}.</Text>}
-          <FanqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={value => { cancelFormat(); setText(value); setProblems([]); setFormatted(undefined); setEmptyRun(false); }} onRun={() => { setEmptyRun(!text.trim()); void execute("query", text, search.viz, readOnlyText ? built : undefined); }} problems={problems} notices={notices} describedBy={help}
-            complete={(value, cursor, signal) => completeFanql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
-          {emptyRun && <Text size="xs" c="dimmed" aria-live="polite" data-fanql-empty>Type a query to run, for example <code>spans | count() by service</code>.</Text>}
+          <div>
+            <FanqlEditor value={text} readOnly={readOnlyText} placeholder="spans | count() by service" onChange={value => { cancelFormat(); setText(value); setProblems([]); setNotices([]); setFormatted(undefined); }} onRun={() => { if (!text.trim()) setEmptyRun(count => count + 1); void execute("query", text, search.viz, readOnlyText ? built : undefined); }} problems={problems} notices={notices} describedBy={help}
+              complete={(value, cursor, signal) => completeFanql({ text: value, cursor, ...(time.from && time.to ? { from: time.from, to: time.to } : { window: time.range }) }, signal)} />
+            {/* The live region stays mounted so additions to it are announced; each Enter adds a new node. It sits with the editor so it takes no gap while empty. */}
+            <Text size="xs" c="dimmed" mt={emptyShown ? 4 : 0} aria-live="polite" data-fanql-empty>{emptyShown && <span key={emptyRun}>Type a query to run, for example <code>spans | count() by service</code>.</span>}</Text>
+          </div>
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value="builder" pt="sm">
