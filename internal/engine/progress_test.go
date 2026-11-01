@@ -4,10 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func mockDuck(t *testing.T) (*Duck, sqlmock.Sqlmock) {
@@ -53,30 +57,54 @@ func TestStatementsThatTimeOutAndReturnAreNoStall(t *testing.T) {
 	}
 }
 
-// (b) A statement still running past its deadline plus the grace means the
-// engine has stopped honouring deadlines.
-func TestAStatementPastItsDeadlineIsAStall(t *testing.T) {
+// (b) A read still running past its deadline plus the grace is an overrun:
+// a costly query holding its own connection, which degrades readiness but
+// never fails liveness.
+func TestAReadPastItsDeadlineIsAnOverrunNotAStall(t *testing.T) {
 	d, _ := mockDuck(t)
 	late, cancel := context.WithDeadline(t.Context(), time.Now().Add(-overrunGrace-time.Second))
 	defer cancel()
-	done := d.begin(late)
-	if !d.Stalled() {
-		t.Fatal("a statement overrunning its deadline is a stall")
+	done := d.begin(late, "SELECT levenshtein(a, b)")
+	if d.Stalled() || d.Overruns() != 1 {
+		t.Fatalf("stalled=%t overruns=%d, want an overrun and no stall", d.Stalled(), d.Overruns())
 	}
-	if err := d.Live(t.Context()); !errors.Is(err, ErrStalled) {
-		t.Fatalf("live = %v, want ErrStalled", err)
+	d.noteProgress()
+	if err := d.Live(t.Context()); err != nil {
+		t.Fatalf("live = %v with only a query overrunning", err)
 	}
 	done(late.Err())
-	if d.Stalled() {
-		t.Fatal("a statement that returned is no stall")
+	if d.Overruns() != 0 {
+		t.Fatal("a read that returned still overruns")
 	}
-	within := d.begin(shortContext(t))
+	within := d.begin(shortContext(t), "SELECT 1")
 	defer within(nil)
-	if d.Stalled() {
-		t.Fatal("a statement within its deadline and grace is no stall")
+	if d.Overruns() != 0 {
+		t.Fatal("a read within its deadline and grace overruns")
 	}
 	if overrunGrace < maxQueryTimeoutMs*time.Millisecond {
 		t.Fatalf("grace %s is shorter than the longest read", overrunGrace)
+	}
+}
+
+// An overrun is logged and counted once, by fingerprint, never by its text.
+func TestAnOverrunIsReportedOnceWithoutItsText(t *testing.T) {
+	d, _ := mockDuck(t)
+	var logs strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+	before := testutil.ToFloat64(metrics.DuckDBStatementOverruns)
+	late, cancel := context.WithDeadline(t.Context(), time.Now().Add(-overrunGrace-time.Second))
+	defer cancel()
+	query := "SELECT 'secret-literal'"
+	defer d.begin(late, query)(nil)
+	d.reportOverruns()
+	d.reportOverruns()
+	if got := testutil.ToFloat64(metrics.DuckDBStatementOverruns) - before; got != 1 {
+		t.Fatalf("counted %v overruns, want 1", got)
+	}
+	if strings.Contains(logs.String(), "secret-literal") || !strings.Contains(logs.String(), fingerprint(query)) {
+		t.Fatalf("log = %q, want the fingerprint and not the text", logs.String())
 	}
 }
 
@@ -106,7 +134,7 @@ func TestASaturatedPoolIsAlive(t *testing.T) {
 	defer held.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	done := d.begin(ctx)
+	done := d.begin(ctx, "SELECT 1")
 	defer done(nil)
 	d.progress.Store(time.Now().Add(-idleLimit - time.Second).UnixNano())
 	if err := d.Live(shortContext(t)); err != nil {
@@ -144,13 +172,13 @@ func TestEngineErrorsAreNoProgress(t *testing.T) {
 	}
 }
 
-// A read without a deadline has none to overrun, so it is not tracked, and
-// rows a caller holds after the engine produced them are its own time.
-func TestOnlyEngineTimeOnADeadlineIsTracked(t *testing.T) {
+// A read without a deadline holds the pool but has none to overrun, and rows
+// a caller holds after the engine produced them are its own time.
+func TestOnlyEngineTimeIsTracked(t *testing.T) {
 	d, mock := mockDuck(t)
-	done := d.begin(t.Context())
-	if d.inFlight() != 0 {
-		t.Fatal("a read without a deadline is tracked")
+	done := d.begin(t.Context(), "SELECT 1")
+	if d.inFlight() != 1 || d.Overruns() != 0 {
+		t.Fatalf("in flight=%d overruns=%d for a read without a deadline", d.inFlight(), d.Overruns())
 	}
 	done(nil)
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1).AddRow(2))
@@ -164,9 +192,10 @@ func TestOnlyEngineTimeOnADeadlineIsTracked(t *testing.T) {
 	}
 }
 
-// A publisher holding readers out past its swap budget and the grace has
-// stopped honouring its deadline too; reads then fail before the engine.
-func TestAPublicationHeldPastItsBudgetIsAStall(t *testing.T) {
+// A publisher holding readers out for publishStall has stopped being served
+// by storage; reads then fail before the engine. Slow storage within the
+// bound is no stall.
+func TestAPublicationHeldPastItsBoundIsAStall(t *testing.T) {
 	d, _ := mockDuck(t)
 	held := false
 	if err := d.PublishParquet(t.Context(), func(context.Context) error { held = d.publishing.Load() != 0; return nil }); err != nil {
@@ -175,8 +204,15 @@ func TestAPublicationHeldPastItsBudgetIsAStall(t *testing.T) {
 	if !held || d.publishing.Load() != 0 || d.Stalled() {
 		t.Fatalf("held=%t publishing=%d stalled=%t", held, d.publishing.Load(), d.Stalled())
 	}
-	d.publishing.Store(time.Now().Add(-parquetSwapBudget - overrunGrace - time.Second).UnixNano())
-	if !d.Stalled() {
-		t.Fatal("a publication held past its budget and grace is a stall")
+	d.publishing.Store(time.Now().Add(-3 * time.Minute).UnixNano())
+	if d.Stalled() {
+		t.Fatal("a publication within an NFS major timeout is a stall")
+	}
+	d.publishing.Store(time.Now().Add(-publishStall - time.Second).UnixNano())
+	if !d.Stalled() || !errors.Is(d.Live(t.Context()), ErrStalled) {
+		t.Fatal("a publication held past its bound is a stall")
+	}
+	if publishStall < parquetSwapBudget+overrunGrace {
+		t.Fatalf("publishStall %s is shorter than the swap budget and grace", publishStall)
 	}
 }

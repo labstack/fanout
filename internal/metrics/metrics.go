@@ -271,6 +271,13 @@ var (
 		Buckets: []float64{.0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
 	})
 
+	// DuckDB checks for interrupts only between chunks, so a costly
+	// expression can run a statement long past its deadline.
+	DuckDBStatementOverruns = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_duckdb_statement_overruns_total",
+		Help: "Read statements seen running more than 25 seconds past their deadline",
+	})
+
 	// An explicit CHECKPOINT blocks new transactions for its duration, and the
 	// non-FORCE form refuses while another write transaction is open — so both
 	// how long it takes and how often it does not happen are worth knowing.

@@ -273,17 +273,19 @@ func TestReadinessReportsAFailingEngineAsUnhealthy(t *testing.T) {
 }
 
 type fakePool struct {
-	stalled bool
-	live    error
+	stalled  bool
+	overruns int
+	live     error
 }
 
 func (p *fakePool) Stalled() bool              { return p.stalled }
+func (p *fakePool) Overruns() int              { return p.overruns }
 func (p *fakePool) Live(context.Context) error { return p.live }
 
-// Probes time out alike on an overloaded engine and a wedged one. Only an
-// engine that stopped honouring deadlines fails readiness and liveness, so
-// the supervisor restarts it; an overloaded one stays alive and reads as
-// degraded.
+// Probes time out alike on an overloaded engine and a stalled one. Only a
+// stall in Fanout's own work fails readiness and liveness, so the supervisor
+// restarts it; an overloaded engine, or one running a query past its
+// deadline, stays alive and reads as degraded.
 func TestOnlyAStalledEngineFailsReadinessAndLiveness(t *testing.T) {
 	original := readinessTimeout
 	readinessTimeout = 20 * time.Millisecond
@@ -293,9 +295,11 @@ func TestOnlyAStalledEngineFailsReadinessAndLiveness(t *testing.T) {
 		pool            *fakePool
 		ready, live     int
 		status, details string
+		queries         string
 	}{
-		{"stalled", &fakePool{stalled: true, live: engine.ErrStalled}, http.StatusServiceUnavailable, http.StatusServiceUnavailable, "unhealthy", "engine stalled"},
-		{"overloaded", &fakePool{}, http.StatusOK, http.StatusOK, "degraded", "engine busy"},
+		{"stalled", &fakePool{stalled: true, live: engine.ErrStalled}, http.StatusServiceUnavailable, http.StatusServiceUnavailable, "unhealthy", "engine stalled", "ok"},
+		{"overloaded", &fakePool{}, http.StatusOK, http.StatusOK, "degraded", "engine busy", "ok"},
+		{"overrunning", &fakePool{overruns: 1}, http.StatusOK, http.StatusOK, "degraded", "engine busy", "degraded"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
@@ -320,6 +324,9 @@ func TestOnlyAStalledEngineFailsReadinessAndLiveness(t *testing.T) {
 			}
 			if check := resp.Checks["duckdb"]; rec.Code != test.ready || check.Status != test.status || check.Detail != test.details {
 				t.Fatalf("readiness = %d %+v, want %d %s %s", rec.Code, check, test.ready, test.status, test.details)
+			}
+			if check := resp.Checks["queries"]; check.Status != test.queries {
+				t.Fatalf("queries check = %+v, want %s", check, test.queries)
 			}
 			live := httptest.NewRecorder()
 			if err := h.Liveness(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/healthz", nil), live)); err != nil {

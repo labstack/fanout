@@ -28,6 +28,7 @@ type HealthHandler struct {
 
 type readPool interface {
 	Stalled() bool
+	Overruns() int
 	Live(context.Context) error
 }
 
@@ -61,9 +62,11 @@ type HealthResponse struct {
 const livenessPingTimeout = time.Second
 
 // Liveness returns 200 while the process can serve (Kubernetes liveness
-// probe). It fails only for an engine that a restart would free: one that
-// stopped honouring statement deadlines, or an idle one that cannot answer a
-// ping. An overloaded engine, however saturated, is alive.
+// probe). It fails only for a stall in Fanout's own work that a restart would
+// free: a Parquet publication holding reads out past its bound, or an idle
+// engine that cannot answer a ping. An overloaded engine, however saturated,
+// is alive, and so is one running a costly query past its deadline: a
+// restart would only let the query run again.
 func (h *HealthHandler) Liveness(c *echo.Context) error {
 	if h.pool != nil {
 		ctx, cancel := context.WithTimeout(c.Request().Context(), livenessPingTimeout)
@@ -117,6 +120,7 @@ collect:
 
 	resp.Checks["data"] = h.checkDataDir()
 	resp.Checks["maintenance"] = h.checkMaintenance()
+	resp.Checks["queries"] = h.checkQueries()
 
 	// Determine overall status
 	hasUnhealthy := false
@@ -160,6 +164,19 @@ func (h *HealthHandler) checkDuckDB(ctx context.Context) CheckResult {
 		Status:    "ok",
 		LatencyMs: time.Since(start).Milliseconds(),
 	}
+}
+
+// checkQueries reports reads still running long past their deadlines. DuckDB
+// checks for interrupts only between chunks, so a costly expression can hold
+// a connection well after its caller gave up; the rest of the pool serves.
+func (h *HealthHandler) checkQueries() CheckResult {
+	if h.pool == nil {
+		return CheckResult{Status: "ok"}
+	}
+	if n := h.pool.Overruns(); n > 0 {
+		return CheckResult{Status: "degraded", Detail: fmt.Sprintf("%d queries running past their deadlines", n)}
+	}
+	return CheckResult{Status: "ok"}
 }
 
 // diskDegradedPct is the free-space fraction below which the data dir reports
@@ -230,9 +247,8 @@ var readinessTimeout = 800 * time.Millisecond
 // failedCheck classifies a probe error. A probe that ran out its deadline
 // waited behind long reads holding the engine's connections: the instance
 // still serves, so it is degraded rather than unready, and /readyz does not
-// flap out of rotation under load. An engine that stopped honouring statement
-// deadlines times out the same way but never recovers, so it fails readiness,
-// as /healthz does. Any other error is a failing engine. The deadline is checked on ctx as well: a driver
+// flap out of rotation under load. A stalled Parquet publication times out
+// the same way but does not recover, so it fails readiness, as /healthz does. Any other error is a failing engine. The deadline is checked on ctx as well: a driver
 // may report the cancelled statement in its own words.
 func (h *HealthHandler) failedCheck(ctx context.Context, start time.Time, err error) CheckResult {
 	res := CheckResult{Status: "unhealthy", LatencyMs: time.Since(start).Milliseconds(), Error: err.Error()}

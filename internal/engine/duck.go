@@ -1934,7 +1934,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	started := time.Now()
 	// Tracked while the engine runs the statement; rows a caller then holds
 	// are its own time.
-	done := d.begin(ctx)
+	done := d.begin(ctx, query)
 	rows, err := db.QueryContext(ctx, query, args...)
 	done(err)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
@@ -2042,7 +2042,7 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
 	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
-	done := d.begin(ctx)
+	done := d.begin(ctx, query)
 	err = conn.QueryRowContext(ctx, query, args...).Scan(dest...)
 	done(err)
 	return err

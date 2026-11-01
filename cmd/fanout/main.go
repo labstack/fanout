@@ -147,7 +147,14 @@ func main() {
 		slog.Error("duckdb init failed", "err", err)
 		os.Exit(1)
 	}
-	defer q.Close()
+	// A stalled engine may still be running native code, so its handles stay
+	// open; the process exits instead.
+	stalled := false
+	defer func() {
+		if !stalled {
+			_ = q.Close()
+		}
+	}()
 
 	writer := telemetrystore.NewWriter(repository, cfg.IngestBatchSize)
 	writer.SetInFlightBudget(cfg.IngestMaxInFlightBytes)
@@ -427,10 +434,11 @@ func main() {
 		failed = true
 		slog.Error("fatal error, shutting down", "err", err)
 	case err := <-q.Fatal():
-		// DuckDB invalidated its database or stopped honouring deadlines. Flush
-		// ingest and exit nonzero so the supervisor restarts Fanout, which
-		// rebuilds the query cache from Parquet.
+		// DuckDB invalidated its database, or Fanout's own work on it stalled.
+		// Flush ingest and exit nonzero so the supervisor restarts Fanout,
+		// which rebuilds the query cache from Parquet.
 		failed = true
+		stalled = errors.Is(err, engine.ErrStalled)
 		slog.Error("query engine failed, shutting down for a restart", "err", err)
 	}
 
