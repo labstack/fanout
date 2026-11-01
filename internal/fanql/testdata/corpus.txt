@@ -1903,13 +1903,17 @@
 
 {
   "text": "metrics | avg(value)",
-  "query": {
-    "from": "metrics",
-    "measures": [
-      "avg(value)"
-    ]
-  },
-  "gate_problems": true
+  "problems": [
+    {
+      "path": "where",
+      "message": "metric aggregates need one metric per group",
+      "hint": "filter name to one literal or a single-value variable without All, or group by name",
+      "span": {
+        "start": 10,
+        "end": 20
+      }
+    }
+  ]
 }
 
 {
@@ -1942,16 +1946,17 @@
 
 {
   "text": "metrics | last(value) by resource.k8s.pod.name",
-  "query": {
-    "from": "metrics",
-    "measures": [
-      "last(value)"
-    ],
-    "by": [
-      "resource['k8s.pod.name']"
-    ]
-  },
-  "gate_problems": true
+  "problems": [
+    {
+      "path": "where",
+      "message": "metric aggregates need one metric per group",
+      "hint": "filter name to one literal or a single-value variable without All, or group by name",
+      "span": {
+        "start": 10,
+        "end": 21
+      }
+    }
+  ]
 }
 
 {

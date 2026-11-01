@@ -3,11 +3,13 @@ package fanql
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/sqlscan"
@@ -137,6 +139,77 @@ func (r *resolver) check(q *queryTree) {
 		}
 		aliases[name] = true
 	}
+	r.metricGroups(q)
+}
+
+// metricGroups reports, as a run would, metric aggregates that would combine
+// several metrics in one group: a measure other than a count needs one name
+// literal, a single-value variable, or grouping by name.
+func (r *resolver) metricGroups(q *queryTree) {
+	s := q.Stage
+	if q.Source != "metrics" || s.Histogram != nil || len(r.problems) > 0 {
+		return
+	}
+	at := span{-1, -1}
+	for _, m := range s.Measures {
+		if f := m.Parsed.Func; f != "count" && f != "count_distinct" && at.Start < 0 {
+			at = m.At
+		}
+	}
+	for _, f := range s.By {
+		if f.Ref != nil && f.Ref.Column == "name" && f.Ref.Key == "" {
+			return
+		}
+	}
+	if at.Start < 0 {
+		return
+	}
+	for _, e := range q.Where {
+		var field fieldName
+		var value literalValue
+		switch x := e.(type) {
+		case *comparison:
+			if x.Op != ":" && x.Op != "=" {
+				continue
+			}
+			field, value = x.Field, x.Value
+		case *inExpr:
+			if x.Negated || x.Variable == "" && len(x.Values) != 1 {
+				continue
+			}
+			field = x.Field
+			if x.Variable != "" {
+				value = literalValue{Kind: variableValue, Text: "$" + x.Variable}
+			} else {
+				value = x.Values[0]
+			}
+		default:
+			continue
+		}
+		if field.Ref == nil || field.Ref.Column != "name" || field.Ref.Key != "" {
+			continue
+		}
+		if value.Kind != variableValue {
+			return
+		}
+		known := false
+		for _, v := range r.opts.Variables {
+			if "$"+v.Name == value.Text {
+				known = true
+				if !v.Multi && !v.IncludeAll {
+					return
+				}
+			}
+		}
+		if !known {
+			// Without the declaration the run decides.
+			return
+		}
+		at = e.Span()
+	}
+	r.path = "where"
+	r.problems = append(r.problems, query.Problem{Path: r.path, Message: "metric aggregates need one metric per group",
+		Hint: "filter name to one literal or a single-value variable without All, or group by name", Span: textSpan(at)})
 }
 
 // shape lowers the query and checks it against the requested viz, or against
@@ -215,6 +288,10 @@ func (r *resolver) notice(at span, message string, fixes ...query.FixIt) {
 	r.out.Notices = append(r.out.Notices, Notice{Path: r.path, Message: message, Span: textSpan(at), FixIts: fixes})
 }
 
+// resourceNamespaces are the OpenTelemetry semantic convention namespaces
+// whose keys describe the resource, not a span, log or metric point.
+var resourceNamespaces = wordSet("host k8s container cloud os service deployment telemetry")
+
 func (r *resolver) field(f *fieldName) {
 	if f.Ref != nil {
 		return
@@ -268,6 +345,13 @@ func (r *resolver) field(f *fieldName) {
 		r.problems = append(r.problems, query.Problem{Path: r.path, Message: fmt.Sprintf("%q needs brackets", key), Span: textSpan(f.At), FixIts: fixes})
 	}
 	f.Ref = &fieldRef{Column: scope, Key: key, Type: query.TypeString, Unit: "none"}
+	if prefix, _, _ := strings.Cut(key, "."); f.Scope == "" && !f.Bracket && strings.Contains(key, ".") && resourceNamespaces[prefix] {
+		// A bare key always reads attributes; one OpenTelemetry defines for
+		// the resource would read nothing there, so offer the resource.
+		name := "resource." + key
+		r.notice(f.At, fmt.Sprintf("%s is usually a resource attribute; reading attributes['%s']. For the resource, write %s", key, key, name), query.FixIt{Label: name, Span: *textSpan(f.At), Text: name})
+		return
+	}
 	if f.Scope == "" && !f.Bracket && !strings.Contains(key, ".") {
 		message := fmt.Sprintf("%q is not a %s column; reading attributes['%s']", key, r.out.Query.Source, key)
 		for _, m := range r.vocab.measures() {
@@ -658,7 +742,7 @@ func (r *resolver) measure(e query.MeasureExpr, infos map[query.MeasureExpr]*mea
 			}
 		}
 		if spec == nil {
-			r.issue(at, "unknown function "+x.Func)
+			r.unknownMeasure(x.Func, at, args)
 			return e
 		}
 		if len(spec.Signals) > 0 && !slices.Contains(spec.Signals, r.out.Query.Source) {
@@ -723,6 +807,59 @@ func (r *resolver) measure(e query.MeasureExpr, infos map[query.MeasureExpr]*mea
 		return x
 	}
 	return e
+}
+
+var percentileName = regexp.MustCompile(`^p([0-9]{1,2})$`)
+
+// unknownMeasure reports a measure function that does not exist. A near miss
+// of a function for this source is offered as a fix; otherwise the problem
+// lists the functions.
+func (r *resolver) unknownMeasure(name string, at span, args []measureArgument) {
+	var names []string
+	for _, s := range r.vocab.measures() {
+		if len(s.Signals) == 0 || slices.Contains(s.Signals, r.out.Query.Source) {
+			names = append(names, s.Name)
+		}
+	}
+	if r.out.Query.Source != "metrics" {
+		names = append(names, "count_if")
+	}
+	nameAt := query.TextSpan{Start: at.Start, End: at.Start + utf8.RuneCountInString(name)}
+	message := "unknown function " + name
+	var fixes []query.FixIt
+	if m := percentileName.FindStringSubmatch(name); m != nil {
+		field := "duration"
+		if len(args) > 0 && args[0].Field != nil {
+			if f := args[0].Field; f.Scope == "" && !f.Bracket {
+				field = f.Key
+			} else {
+				field = printField(*f)
+			}
+		}
+		n, _ := strconv.Atoi(m[1])
+		quantile := fmt.Sprintf("quantile(%s, %s)", field, strconv.FormatFloat(float64(n)/100, 'f', -1, 64))
+		var percentiles []string
+		for _, s := range names {
+			if percentileName.MatchString(s) {
+				percentiles = append(percentiles, s)
+			}
+		}
+		message += "; percentiles are " + strings.Join(percentiles, ", ") + ", or write " + quantile
+		// Swapped digits are the likeliest typo: p59 for p95.
+		if swapped := "p" + m[1][1:] + m[1][:1]; len(m[1]) == 2 && slices.Contains(percentiles, swapped) {
+			fixes = append(fixes, query.FixIt{Label: swapped, Span: nameAt, Text: swapped})
+		}
+		if n > 0 {
+			fixes = append(fixes, query.FixIt{Label: quantile, Span: *textSpan(at), Text: quantile})
+		}
+	} else if hint := suggest.Spelling(name, names); hint != "" {
+		fix := strings.TrimSuffix(strings.TrimPrefix(hint, "did you mean "), "?")
+		message += "; " + hint
+		fixes = append(fixes, query.FixIt{Label: fix, Span: nameAt, Text: fix})
+	} else {
+		message += "; use " + strings.Join(names, ", ")
+	}
+	r.problems = append(r.problems, query.Problem{Path: r.path, Message: message, Span: textSpan(at), FixIts: fixes})
 }
 
 func measureAlias(m measureNode, all []measureNode) string {

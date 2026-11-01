@@ -70,7 +70,7 @@ func TestResolveDottedAndPrefixedKeys(t *testing.T) {
 	if r.Query.Stage.Measures[0].Parsed.Field.Key != "user.id" || r.Query.Stage.Measures[1].Parsed.Field.Column != "resource" {
 		t.Fatal(r.Query.Stage)
 	}
-	r, ps = resolvedText(t, "metrics | last(value) by resource.k8s.pod.name", Options{})
+	r, ps = resolvedText(t, "metrics where name:a | last(value) by resource.k8s.pod.name", Options{})
 	if len(ps) > 0 || r.Query.Stage.By[0].Ref.Key != "k8s.pod.name" {
 		t.Fatal(r, ps)
 	}
@@ -309,5 +309,21 @@ func TestResolveCompatibleVizzesAndEdits(t *testing.T) {
 	}
 	if !reflect.DeepEqual(names, []string{"stat", "gauge", "table"}) {
 		t.Fatal(names)
+	}
+}
+
+// A bare dotted key reads attributes on every signal. Keys OpenTelemetry
+// defines for resources are rarely there, so the notice offers the resource.
+func TestResolveResourceKeyNotice(t *testing.T) {
+	for _, text := range []string{"metrics where name:a | avg(value) by host.name", "spans where k8s.pod.name:x | count()"} {
+		c, ps := Compile(text, Options{})
+		if c == nil || len(c.Notices) != 1 || len(c.Notices[0].FixIts) != 1 || !strings.HasPrefix(c.Notices[0].FixIts[0].Text, "resource.") {
+			t.Fatalf("%q: %+v %+v", text, c, ps)
+		}
+	}
+	for _, text := range []string{"metrics where name:a | avg(value) by resource.host.name", "spans where http.route:x | count()", "spans where attributes['host.name']:x"} {
+		if c, ps := Compile(text, Options{}); c == nil || len(c.Notices) != 0 {
+			t.Fatalf("%q: %+v %+v", text, c, ps)
+		}
 	}
 }

@@ -191,3 +191,104 @@ func TestSortProblemsPutsUnlocatedLast(t *testing.T) {
 		t.Fatalf("order %v", got)
 	}
 }
+
+// A metric aggregate over several metrics fails when run, so parse says so
+// with the run's wording. Counting points, grouping by name, or one name
+// literal is fine.
+func TestCompileMetricAggregateNeedsOneMetric(t *testing.T) {
+	const want = "metric aggregates need one metric per group"
+	for _, text := range []string{
+		"metrics where name in (a, b, c) | avg(value) by resource.host.name",
+		"metrics | sum(value)",
+		"metrics where service:cart | p95(value) every 1m",
+	} {
+		_, ps := Compile(text, Options{})
+		if len(ps) != 1 || ps[0].Message != want || ps[0].Span == nil {
+			t.Errorf("%q: %+v", text, ps)
+		}
+	}
+	vars := []query.Variable{{Name: "one", Kind: "custom", Options: []string{"a"}}, {Name: "many", Kind: "custom", Options: []string{"a", "b"}, Multi: true}}
+	for _, text := range []string{
+		"metrics where name in (a, b, c) | avg(value) by name",
+		"metrics where name in (a, b) | count()",
+		"metrics where name:a | avg(value) by service",
+		"metrics where name=a service:cart | last(value)",
+		"metrics where name:$one | avg(value)",
+	} {
+		if c, ps := Compile(text, Options{Variables: vars}); c == nil {
+			t.Errorf("%q: %+v", text, ps)
+		}
+	}
+	if _, ps := Compile("metrics where name in $many | avg(value)", Options{Variables: vars}); len(ps) != 1 || ps[0].Message != want {
+		t.Errorf("multi variable: %+v", ps)
+	}
+}
+
+// A misspelled measure function offers the nearest function as a fix-it on
+// its name; a percentile FanQL lacks offers swapped digits and quantile.
+func TestCompileUnknownMeasureOffersFix(t *testing.T) {
+	for _, tt := range []struct{ text, message string }{
+		{"spans | cuont()", "unknown function cuont; did you mean count?"},
+		{"spans | avgg(duration)", "unknown function avgg; did you mean avg?"},
+		{"spans | cnt()", "unknown function cnt; did you mean count?"},
+		{"spans | count_distnct(trace_id)", "unknown function count_distnct; did you mean count_distinct?"},
+		{"spans | error_rat()", "unknown function error_rat; did you mean error_rate?"},
+		{"metrics where name:a | lst(value)", "unknown function lst; did you mean last?"},
+	} {
+		_, ps := Compile(tt.text, Options{})
+		if len(ps) != 1 || ps[0].Message != tt.message || len(ps[0].FixIts) != 1 {
+			t.Errorf("%q: %+v", tt.text, ps)
+			continue
+		}
+		fix := ps[0].FixIts[0]
+		fixed := string([]rune(tt.text)[:fix.Span.Start]) + fix.Text + string([]rune(tt.text)[fix.Span.End:])
+		if c, ps := Compile(fixed, Options{}); c == nil {
+			t.Errorf("fix %q: %+v", fixed, ps)
+		}
+	}
+	_, ps := Compile("spans | p59(duration)", Options{})
+	if len(ps) != 1 || ps[0].Message != "unknown function p59; percentiles are p50, p75, p90, p95, p99, or write quantile(duration, 0.59)" ||
+		len(ps[0].FixIts) != 2 || ps[0].FixIts[0].Text != "p95" || ps[0].FixIts[1].Text != "quantile(duration, 0.59)" {
+		t.Errorf("p59: %+v", ps)
+	}
+	// error_rate is not offered for metrics, and nothing near zzz exists.
+	_, ps = Compile("metrics where name:a | zzzzzz()", Options{})
+	if len(ps) != 1 || !strings.HasPrefix(ps[0].Message, "unknown function zzzzzz; use avg, count,") || strings.Contains(ps[0].Message, "error_rate") || len(ps[0].FixIts) != 0 {
+		t.Errorf("no near function: %+v", ps)
+	}
+}
+
+// PromQL and Kusto get one message for the whole query, not a cascade.
+func TestCompileForeignQueryLanguages(t *testing.T) {
+	const promql = "PromQL is not FanQL; start with the source, e.g. metrics where name:http.server.duration | rate() by service"
+	for _, tt := range []struct{ text, message string }{
+		{"sum(rate(http_server_requests_total[5m])) by (service)", promql},
+		{"http_server_duration_seconds_bucket", promql},
+		{`rate(traces_span_metrics_calls_total{service="cart"}[1m])`, promql},
+		{`up{job="api"}`, promql},
+		{"spans | where service == 'cart' | summarize count() by service", "Kusto is not FanQL; filters follow the source and measures follow one |, e.g. spans where service:api | count() by service"},
+		{"logs | where service:cart | project body", "Kusto is not FanQL; filters follow the source and measures follow one |, e.g. logs where service:api | count() by service"},
+	} {
+		_, ps := Compile(tt.text, Options{})
+		if len(ps) != 1 || ps[0].Message != tt.message {
+			t.Errorf("%q: %+v", tt.text, ps)
+		}
+	}
+	// Only the pipe is wrong: the fix-it removes it and the rest still parses.
+	_, ps := Compile("spans | where service:cart | count() by service", Options{})
+	if len(ps) != 1 || ps[0].Message != "| where is not FanQL; filters follow the source, e.g. spans where service:api | count()" ||
+		len(ps[0].FixIts) != 1 || ps[0].FixIts[0].Text != "where" || *ps[0].Span != (query.TextSpan{Start: 6, End: 13}) {
+		t.Errorf("pipe where: %+v", ps)
+	}
+	if c, ps := Compile("spans where service:cart | count() by service", Options{}); c == nil {
+		t.Errorf("fixed: %+v", ps)
+	}
+	_, ps = Compile("spans where kind:server | where service:cart | count()", Options{})
+	if len(ps) != 1 || ps[0].FixIts[0].Text != "and" {
+		t.Errorf("second where: %+v", ps)
+	}
+	// An unknown source that does not read as PromQL keeps its own message.
+	if _, ps := Compile("spams | count()", Options{}); len(ps) != 1 || ps[0].Message != `unknown source "spams"` {
+		t.Errorf("spams: %+v", ps)
+	}
+}

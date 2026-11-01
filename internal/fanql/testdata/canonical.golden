@@ -120,8 +120,6 @@
   "metrics where type:summary | count()": "metrics where type:summary | count()",
   "metrics where type:updown | count()": "metrics where type:updown | count()",
   "metrics where value>-3": "metrics where value>-3",
-  "metrics | avg(value)": "metrics | avg(value)",
-  "metrics | last(value) by resource.k8s.pod.name": "metrics | last(value) by resource.k8s.pod.name",
   "spans": "spans",
   "spans ": "spans",
   "spans sort +duration": "spans sort +duration",

@@ -290,6 +290,13 @@ func (p *parser) query(source string) *queryTree {
 			}
 			return q
 		default:
+			if p.promQL(first) {
+				p.report(first.Span, diagPromQL)
+				for p.peek().Kind != eof {
+					p.take()
+				}
+				return q
+			}
 			suggestion := hint(diagSource)
 			if q.Source == "traces" {
 				suggestion = hint(diagTraces)
@@ -318,6 +325,26 @@ func (p *parser) query(source string) *queryTree {
 				op := p.take()
 				p.report(span{pipe.Span.Start, op.Span.End}, diagPipeOp, "|"+op.Text)
 				p.skipRun()
+				continue
+			}
+			if q.Stage == nil && p.is("where") {
+				if p.kusto() {
+					p.report(span{pipe.Span.Start, p.peek().Span.End}, diagKusto, q.Source)
+					for p.peek().Kind != eof {
+						p.take()
+					}
+					return q
+				}
+				// A pipe before where is the only mistake: the filters
+				// still parse, so later clauses are checked as usual.
+				where := p.take()
+				at := span{pipe.Span.Start, where.Span.End}
+				text := "where"
+				if q.WhereWord || len(q.Where) > 0 {
+					text = "and"
+				}
+				p.fix(at, diagnostic(diagPipeWhere, q.Source), "", query.FixIt{Label: text, Span: query.TextSpan{Start: at.Start, End: at.End}, Text: text})
+				q.Where = append(q.Where, p.filters(false)...)
 				continue
 			}
 			if p.is("sort") && grammarText(p.ahead(1)) == "by" || q.Stage != nil && (p.is("head") || p.is("take") || (p.is("order") || p.is("group")) && grammarText(p.ahead(1)) == "by") {
@@ -1248,6 +1275,36 @@ func (p *parser) foreignCall() {
 		return
 	}
 	p.fix(at, diagnostic(diagForeignMeasure, word, suggestion), "", query.FixIt{Label: suggestion, Span: query.TextSpan{Start: at.Start, End: at.End}, Text: suggestion})
+}
+
+var promFunctions = wordSet("sum avg min max count group stddev stdvar topk bottomk quantile count_values rate irate increase delta idelta deriv predict_linear changes resets histogram_quantile absent abs ceil floor round sort sort_desc label_replace label_join avg_over_time sum_over_time min_over_time max_over_time count_over_time quantile_over_time last_over_time")
+var promMetric = regexp.MustCompile(`(?i)^[a-z_:][a-z0-9_:]*_(total|bucket|count|sum|seconds|bytes|ratio|info|created)$`)
+
+// promQL reports whether a query starting with first, which is not a source,
+// reads as PromQL: a PromQL function call, a selector or range directly after
+// a name, or a Prometheus metric name.
+func (p *parser) promQL(first lexToken) bool {
+	next := p.peek()
+	word := strings.ToLower(first.Text)
+	adjacent := next.Span.Start == first.Span.End
+	switch {
+	case next.Text == "(" && adjacent:
+		return promFunctions[word]
+	case (next.Text == "{" || next.Text == "[") && adjacent:
+		return true
+	}
+	return promMetric.MatchString(word)
+}
+
+// kusto reports whether a query piped into where goes on to a Kusto stage
+// such as summarize, so one message can cover the whole query.
+func (p *parser) kusto() bool {
+	for i := p.i; p.tokens[i].Kind != eof; i++ {
+		if p.tokens[i].Text == "|" && kustoStages[grammarText(p.tokens[i+1])] {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *parser) unexpected() {

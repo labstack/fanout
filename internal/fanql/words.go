@@ -12,6 +12,7 @@ var expressionWords = wordSet("and or not in between is null like ilike")
 var modifiers = wordSet("as asc desc")
 var reserved = wordSet("let join correlate compare since until top eval extend having fields rename over window")
 var foreignStages = wordSet("stats summarize select project extend eval fields rename take head top order sort")
+var kustoStages = wordSet("summarize project extend")
 var foreignCalls = wordSet("bin span percentile perc95 pct count_over_time quantile_over_time mean median dc distinct_count cardinality")
 
 func wordSet(s string) map[string]bool {
@@ -107,6 +108,9 @@ const (
 	diagCompoundDuration
 	diagRangeOrder
 	diagBracketOperator
+	diagPromQL
+	diagKusto
+	diagPipeWhere
 )
 
 func message(code diagnosticCode) string {
@@ -131,6 +135,12 @@ func message(code diagnosticCode) string {
 		return "%q is not FanQL; start with the source: %s where ..."
 	case diagSQL:
 		return "SQL is not FanQL; start with the source, e.g. spans | count() by service"
+	case diagPromQL:
+		return "PromQL is not FanQL; start with the source, e.g. metrics where name:http.server.duration | rate() by service"
+	case diagKusto:
+		return "Kusto is not FanQL; filters follow the source and measures follow one |, e.g. %s where service:api | count() by service"
+	case diagPipeWhere:
+		return "| where is not FanQL; filters follow the source, e.g. %s where service:api | count()"
 	case diagForeignSort:
 		return "%q is not FanQL; use sort, e.g. sort %s"
 	case diagForeignLimit:
