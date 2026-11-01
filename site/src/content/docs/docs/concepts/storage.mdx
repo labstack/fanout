@@ -50,7 +50,9 @@ occurs only after publication and parent-directory fsync complete.
 
 A request whose sender stops waiting (it cancels or its deadline passes) before
 the commit of its batch starts is dropped unwritten and counted in
-`fanout_ingest_abandoned_total`; the sender's retry is the only copy. Other
+`fanout_ingest_abandoned_total`, which also counts requests the server cuts off
+while shutting down. Its memory reservation is released at once, so the
+sender's retry is admitted and is the only copy. Other
 requests sharing that group commit are unaffected. Once a commit has started it
 completes, so a sender that gives up during it and retries stores those rows
 twice. Delivery is therefore at least once only within that commit window: OTLP

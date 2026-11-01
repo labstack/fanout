@@ -80,11 +80,12 @@ var (
 	})
 
 	// IngestAbandonedTotal counts requests dropped before their commit
-	// started because the sender had already stopped waiting. The sender
-	// resends, so storing the abandoned copy too would duplicate its rows.
+	// started because the request had already ended: the sender timed out or
+	// cancelled, or the server cut the request off while shutting down. The
+	// sender resends, so storing the abandoned copy too would duplicate rows.
 	IngestAbandonedTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "fanout_ingest_abandoned_total",
-		Help: "Telemetry requests dropped before commit because the sender stopped waiting",
+		Help: "Telemetry requests dropped before commit because the request ended (sender timeout or cancel, or server shutdown)",
 	})
 
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{

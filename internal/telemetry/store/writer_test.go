@@ -35,7 +35,7 @@ func (c *recordingCommitter) Commit(_ context.Context, batch Batch) error {
 func testWriter(committer batchCommitter, batchSize int) *Writer {
 	return &Writer{
 		repository: committer, batchSize: batchSize, groupWindow: groupAdmissionWindow, done: make(chan struct{}), stopping: make(chan struct{}),
-		submissions: make(chan submission, submissionQueueDepth),
+		submissions: make(chan *submission, submissionQueueDepth),
 	}
 }
 
@@ -118,8 +118,8 @@ func TestWriterAdmitsSubmissionArrivingDuringBoundedWindow(t *testing.T) {
 	committer := &recordingCommitter{}
 	w := testWriter(committer, maxGroupBatchRows)
 	w.groupWindow = 100 * time.Millisecond
-	first := submission{ctx: context.Background(), batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
-	second := submission{ctx: context.Background(), batch: Batch{Spans: []telemetry.Span{{SpanID: "second"}}}, ack: make(chan error, 1)}
+	first := newSubmission(context.Background(), Batch{Spans: []telemetry.Span{{SpanID: "first"}}})
+	second := newSubmission(context.Background(), Batch{Spans: []telemetry.Span{{SpanID: "second"}}})
 	out := make(chan commitJob, 1)
 	started := make(chan struct{})
 	go func() {
@@ -330,11 +330,11 @@ func TestWriterDropsSubmissionAbandonedBeforeCommit(t *testing.T) {
 		results <- w.Submit(ctx, Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "abandoned"}}})
 	}()
 	waitForQueue(t, w, 1)
+	before := testutil.ToFloat64(metrics.IngestAbandonedTotal)
 	cancel()
 	if err := <-results; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Submit = %v, want context.Canceled", err)
 	}
-	before := testutil.ToFloat64(metrics.IngestAbandonedTotal)
 	runCtx, stop := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- w.Run(runCtx) }()

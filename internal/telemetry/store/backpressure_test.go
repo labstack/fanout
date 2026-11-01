@@ -49,6 +49,7 @@ func TestWriterBackpressureKeepsSubmissionsQueuedAndHonorsContexts(t *testing.T)
 	done := make(chan error, 1)
 	go func() { done <- w.Run(ctx) }()
 	<-s.entered
+	abandoned := testutil.ToFloat64(metrics.IngestAbandonedTotal)
 	submitCtx, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer stop()
 	if err := w.Submit(submitCtx, testBatch()); err != context.DeadlineExceeded {
@@ -62,7 +63,6 @@ func TestWriterBackpressureKeepsSubmissionsQueuedAndHonorsContexts(t *testing.T)
 		t.Fatal("committed while debt blocked")
 	default:
 	}
-	abandoned := testutil.ToFloat64(metrics.IngestAbandonedTotal)
 	close(s.release)
 	// The sender gave up while queued, so its request is dropped unwritten and
 	// its retry is the only copy.
@@ -253,11 +253,12 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 				c.debt.Store(telemetry.CompactionDebtLimit / 2)
 				w := testWriter(c, maxGroupBatchRows)
 				w.compaction = c
-				w.submissions = make(chan submission, maxAdmissionRequests)
-				request := submission{ctx: context.Background(), batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
+				w.submissions = make(chan *submission, maxAdmissionRequests)
+				request := newSubmission(context.Background(), Batch{Spans: []telemetry.Span{{SpanID: "first"}}})
 				switch bound {
 				case "rows":
 					request.batch.Spans = make([]telemetry.Span, maxGroupBatchRows)
+					request.rows = maxGroupBatchRows
 				case "requests":
 					for range maxAdmissionRequests - 1 {
 						w.submissions <- request
@@ -294,7 +295,7 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 				c.debt.Store(telemetry.CompactionDebtLimit / 2)
 				w := testWriter(c, maxGroupBatchRows)
 				w.compaction = c
-				request := submission{ctx: context.Background(), batch: testBatch(), ack: make(chan error, 1)}
+				request := newSubmission(context.Background(), testBatch())
 				out := make(chan commitJob, 1)
 				done := make(chan error, 1)
 				at := time.Now()
@@ -329,5 +330,53 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+type countingCompactionCommitter struct {
+	*blockedCompactionCommitter
+	commits atomic.Int32
+}
+
+func (s *countingCompactionCommitter) Commit(ctx context.Context, batch Batch) error {
+	s.commits.Add(1)
+	return s.blockedCompactionCommitter.Commit(ctx, batch)
+}
+
+// A sender that times out behind backpressure resends at once. The abandoned
+// copy must not hold the budget, or the retry is shed and the rows are lost.
+func TestWriterAbandonReleasesBudgetForRetry(t *testing.T) {
+	s := &countingCompactionCommitter{blockedCompactionCommitter: &blockedCompactionCommitter{
+		entered: make(chan struct{}, 1), release: make(chan struct{}), committed: make(chan struct{}),
+	}}
+	w := NewWriter(nil, 50000)
+	w.repository = s
+	w.SetInFlightBudget(batchBytes(testBatch()) + 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	<-s.entered
+	submitCtx, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer stop()
+	if err := w.Submit(submitCtx, testBatch()); err != context.DeadlineExceeded {
+		t.Fatalf("submit=%v", err)
+	}
+	if got := w.inFlightBytes.Load(); got != 0 {
+		t.Fatalf("abandoned request retained %d bytes", got)
+	}
+	retry := make(chan error, 1)
+	go func() { retry <- w.Submit(t.Context(), testBatch()) }()
+	time.Sleep(20 * time.Millisecond)
+	close(s.release)
+	if err := <-retry; err != nil {
+		t.Fatalf("retry=%v", err)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := s.commits.Load(); got != 1 {
+		t.Fatalf("commits=%d want 1", got)
 	}
 }
