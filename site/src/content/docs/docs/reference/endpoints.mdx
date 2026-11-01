@@ -22,6 +22,13 @@ Everything below is served by the same HTTP listener as the browser client, on
 
 Use `/healthz` for restart decisions and `/readyz` for traffic decisions.
 
+Fanout exits with status 1 on a fatal query engine error, or when the engine
+stays stalled for 25 seconds after `/healthz` starts failing. Run it under a
+supervisor that restarts on exit: Docker or Compose with
+`restart: unless-stopped`, systemd with `Restart=on-failure`, or Kubernetes.
+Docker's `HEALTHCHECK` alone marks a container unhealthy but does not restart
+it.
+
 ## Operations
 
 | Path | Requires |

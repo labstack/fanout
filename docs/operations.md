@@ -44,7 +44,7 @@ Unselected AI providers' value and file forms are ignored.
 For Docker, mount a provisioned secret and inject its path:
 
 ```sh
-docker run --name fanout -p 7520:7520 \
+docker run --name fanout --restart unless-stopped -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   --mount type=bind,src="$AUTH_SECRET_PATH",dst=/run/secrets/auth_code,readonly \
   -e FANOUT_AUTH_CODE_SECRET_FILE=/run/secrets/auth_code \
@@ -187,18 +187,22 @@ secrets. An explicit `fanout healthcheck <url>` uses default proxy and
 certificate verification behaviour.
 
 - `/healthz` is the liveness check. It fails when a query runs 25 seconds
-  past its deadline, or when an idle engine does not answer a ping. An
-  overloaded engine stays alive.
+  past its deadline, when a Parquet publication holds reads 25 seconds past
+  its budget, or when an idle engine does not answer a ping. An overloaded
+  engine stays alive.
 - `/readyz` includes storage readiness and resolved runtime sizing. A busy
   engine reports `degraded` with 200; a stalled one reports 503.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
-Run Fanout under a supervisor that restarts it, such as a container restart
-policy. If the query engine fails beyond recovery, for example when it runs out
-of memory while writing its cache, Fanout finishes writing received telemetry
-and exits with status 1; the restart rebuilds the query cache from stored
-telemetry.
+Run Fanout under a supervisor that restarts it on exit: Docker or Compose with
+`restart: unless-stopped` (`--restart unless-stopped`), systemd with
+`Restart=on-failure`, or Kubernetes. Docker's `HEALTHCHECK` only marks a
+container unhealthy; it does not restart it. Fanout exits with status 1 when
+the query engine fails beyond recovery, for example when it runs out of memory
+while writing its cache, or when it stays stalled for another 25 seconds after
+`/healthz` starts failing. It first finishes writing received telemetry; the
+restart rebuilds the query cache from stored telemetry.
 
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention
