@@ -3,9 +3,7 @@ package alert
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
-	"math/big"
 	"regexp"
 	"runtime/debug"
 	"sort"
@@ -497,7 +495,7 @@ WITH current AS (
            avg(error_rate) as error_rate,
            COALESCE(avg(p50_ms) FILTER (WHERE served_spans > 0), avg(p50_ms)) as p50,
            COALESCE(avg(p95_ms) FILTER (WHERE served_spans > 0), avg(p95_ms)) as p95,
-           sum(spans) as throughput, sum(log_count) as log_count
+           sum(spans)::DOUBLE as throughput, sum(log_count)::DOUBLE as log_count
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
     GROUP BY service
@@ -506,23 +504,30 @@ previous AS (
     SELECT service,
            avg(error_rate) as error_rate,
            COALESCE(avg(p95_ms) FILTER (WHERE served_spans > 0), avg(p95_ms)) as p95,
-           sum(spans) as throughput
+           sum(spans)::DOUBLE as throughput
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '10 minutes'
       AND bucket < (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
     GROUP BY service
 )
-SELECT c.service, c.error_rate, c.p50, c.p95, c.throughput, c.log_count,
-    ((c.error_rate - p.error_rate) / NULLIF(p.error_rate, 0)) * 100 as error_rate_delta,
-    ((c.p95 - p.p95) / NULLIF(p.p95, 0)) * 100 as p95_delta,
-    ((c.throughput - p.throughput) / NULLIF(p.throughput, 0)) * 100 as throughput_delta
-FROM current c LEFT JOIN previous p ON c.service = p.service`
+SELECT c.service, coalesce(c.error_rate, 0), coalesce(c.p50, 0), coalesce(c.p95, 0),
+    coalesce(c.throughput, 0), coalesce(c.log_count, 0),
+    coalesce(((c.error_rate - p.error_rate) / NULLIF(p.error_rate, 0)) * 100, 0),
+    coalesce(((c.p95 - p.p95) / NULLIF(p.p95, 0)) * 100, 0),
+    coalesce(((c.throughput - p.throughput) / NULLIF(p.throughput, 0)) * 100, 0)
+FROM current c LEFT JOIN previous p ON c.service = p.service
+WHERE c.service <> ''`
 
-	resp := e.duck.ExecuteSQL(ctx, engine.SQLRequest{Query: envSQL})
-	if resp.Error != "" {
-		slog.Error("alert: buildEnvs query failed", "err", resp.Error)
+	// A fixed statement over the rollup cache: the typed read path, not the
+	// untrusted-SQL one.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	rows, err := e.duck.QueryContext(ctx, envSQL)
+	if err != nil {
+		slog.Error("alert: buildEnvs query failed", "err", err)
 		return nil
 	}
+	defer rows.Close()
 
 	// Collect health score and z-scores from the detector snapshot.
 	var healthScore float64
@@ -539,26 +544,20 @@ FROM current c LEFT JOIN previous p ON c.service = p.service`
 		}
 	}
 
-	envs := make(map[string]Env, len(resp.Results))
-	for _, row := range resp.Results {
-		svc, _ := row["service"].(string)
-		if svc == "" {
-			continue
+	envs := map[string]Env{}
+	for rows.Next() {
+		env := Env{HealthScore: healthScore}
+		if err := rows.Scan(&env.Service, &env.ErrorRate, &env.P50, &env.P95, &env.Throughput, &env.LogCount,
+			&env.ErrorRateDelta, &env.P95Delta, &env.ThroughputDelta); err != nil {
+			slog.Error("alert: buildEnvs scan failed", "err", err)
+			return nil
 		}
-		env := Env{
-			Service:         svc,
-			ErrorRate:       toFloat(row["error_rate"]),
-			P50:             toFloat(row["p50"]),
-			P95:             toFloat(row["p95"]),
-			Throughput:      toFloat(row["throughput"]),
-			LogCount:        toFloat(row["log_count"]),
-			ErrorRateDelta:  toFloat(row["error_rate_delta"]),
-			P95Delta:        toFloat(row["p95_delta"]),
-			ThroughputDelta: toFloat(row["throughput_delta"]),
-			HealthScore:     healthScore,
-			ZScore:          zScores[svc],
-		}
-		envs[svc] = env
+		env.ZScore = zScores[env.Service]
+		envs[env.Service] = env
+	}
+	if err := rows.Err(); err != nil {
+		slog.Error("alert: buildEnvs query failed", "err", err)
+		return nil
 	}
 	return envs
 }
@@ -583,37 +582,6 @@ func (e *Engine) pruneOldAlerts() {
 		slog.Info("alert: pruned resolved alerts", "count", n)
 	}
 }
-
-// toFloat converts an interface{} value to float64. Returns 0 for unknown types.
-func toFloat(v interface{}) float64 {
-	switch n := v.(type) {
-	case float64:
-		return n
-	case int64:
-		return float64(n)
-	case int:
-		return float64(n)
-	case *big.Int:
-		// DuckDB widens SUM over integer columns to HUGEINT, which the driver
-		// scans as *big.Int — sum(spans)/sum(log_count) arrive here.
-		f, _ := new(big.Float).SetInt(n).Float64()
-		return f
-	case nil:
-		// NULL from SQL (e.g. delta columns when no previous window) — 0 is
-		// the intended semantics, not a conversion loss.
-		return 0
-	default:
-		// A type this switch doesn't know silently zeroed throughput/log_count
-		// for months (the *big.Int case above). Never let the next widened
-		// type hide the same way — but log once, not on every 30s eval tick.
-		toFloatUnknownOnce.Do(func() {
-			slog.Warn("alert: env value of unhandled type coerced to 0", "type", fmt.Sprintf("%T", v))
-		})
-		return 0
-	}
-}
-
-var toFloatUnknownOnce sync.Once
 
 // abs returns the absolute value of f.
 func abs(f float64) float64 {

@@ -5,51 +5,6 @@ import (
 	"time"
 )
 
-func TestToInt64(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected int64
-	}{
-		{"int64 value", int64(42), 42},
-		{"float64 value", float64(42.5), 42},
-		{"int value", int(42), 42},
-		{"string value", "42", 0},
-		{"nil value", nil, 0},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := toInt64(tc.input)
-			if result != tc.expected {
-				t.Errorf("toInt64(%v) = %d, want %d", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
-
-func TestToInt(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected int
-	}{
-		{"int64 value", int64(42), 42},
-		{"float64 value", float64(42.9), 42},
-		{"int value", int(100), 100},
-		{"negative", float64(-10.5), -10},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			result := toInt(tc.input)
-			if result != tc.expected {
-				t.Errorf("toInt(%v) = %d, want %d", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
-
 func TestCalculateHealthScore(t *testing.T) {
 	d := &Detector{config: DetectorConfig{}}
 

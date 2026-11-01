@@ -1,11 +1,4 @@
 // Package intelligence derives anomalies and log patterns from telemetry.
-//
-// Public log-pattern SQL goes through internal/engine's validator, which
-// rejects "--" outright. A SQL comment in one of these statements therefore
-// fails the query at runtime, on a background goroutine, as a logged error
-// nobody is watching -- that is how latency detection stopped reporting for
-// half an hour. Rationale goes in Go comments; TestNoSQLCommentsInQueryStrings
-// enforces it.
 package intelligence
 
 import (
@@ -21,6 +14,7 @@ import (
 
 	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/queryrows"
 )
 
 // Detector runs intelligence detection on observability data
@@ -650,9 +644,9 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 
 	sql := fmt.Sprintf(`
 		SELECT
-			body_template AS template,
+			coalesce(body_template, '') AS template,
 			severity,
-			service as service_name,
+			coalesce(service, '') AS service_name,
 			COUNT(*) AS occurrence_count,
 			epoch_ns(MIN(time)::TIMESTAMP_NS) AS first_seen_nano,
 			epoch_ns(MAX(time)::TIMESTAMP_NS) AS last_seen_nano
@@ -666,30 +660,29 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		LIMIT 50
 	`, startNano, endNano, scope)
 
-	resp := d.duck.ExecuteSQL(ctx, engine.SQLRequest{Query: sql})
-	if resp.Error != "" {
-		return nil, fmt.Errorf("pattern detection: %s", resp.Error)
+	// A fixed internal statement: the typed read path with the detector's
+	// window, so the snapshot binds only the log files that can overlap it.
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end, Namespace: namespace})
+	rows, err := d.duck.QueryContext(ctx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("pattern detection: %w", err)
 	}
-
+	defer rows.Close()
 	var patterns []Pattern
-	for _, row := range resp.Results {
-		template, _ := row["template"].(string)
-		severity, _ := row["severity"].(string)
-		serviceName, _ := row["service_name"].(string)
-		count := toInt(row["occurrence_count"])
-		firstSeenNano := toInt64(row["first_seen_nano"])
-		lastSeenNano := toInt64(row["last_seen_nano"])
-
-		patterns = append(patterns, Pattern{
-			Template:    template,
-			Count:       count,
-			FirstSeen:   time.Unix(0, firstSeenNano),
-			LastSeen:    time.Unix(0, lastSeenNano),
-			Severity:    severity,
-			ServiceName: serviceName,
-		})
+	for rows.Next() {
+		var p Pattern
+		var first, last int64
+		if err := rows.Scan(&p.Template, &p.Severity, &p.ServiceName, &p.Count, &first, &last); err != nil {
+			return nil, fmt.Errorf("pattern detection: %w", err)
+		}
+		p.FirstSeen, p.LastSeen = time.Unix(0, first), time.Unix(0, last)
+		patterns = append(patterns, p)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pattern detection: %w", err)
+	}
 	return patterns, nil
 }
 
@@ -791,25 +784,6 @@ func detectorScopeClause(namespace string) string {
 
 func detectorSQLLiteral(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
-}
-
-// toInt64 converts interface{} to int64, handling both int64 and float64
-func toInt64(v interface{}) int64 {
-	switch n := v.(type) {
-	case int64:
-		return n
-	case float64:
-		return int64(n)
-	case int:
-		return int64(n)
-	default:
-		return 0
-	}
-}
-
-// toInt converts interface{} to int, handling both int64 and float64
-func toInt(v interface{}) int {
-	return int(toInt64(v))
 }
 
 func detectorAnnotations(snapshot Snapshot, namespace string) []annotations.Anomaly {
