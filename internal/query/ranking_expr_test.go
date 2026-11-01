@@ -133,7 +133,7 @@ func TestApdexFixtures(t *testing.T) {
 		p.Reduce = "window"
 		p.Query.Where = []string{"service = '" + tc.service + "'"}
 		r, err := e.Run(t.Context(), RunRequest{Dashboard: d})
-		if err != nil || len(r) != 1 || r[0].Status == StatusError || r[0].Frame.Totals[1] != tc.want || (tc.want == nil && r[0].Status != StatusEmpty) {
+		if err != nil || len(r) != 1 || r[0].Status == StatusError || tc.want == nil && r[0].Status != StatusEmpty || tc.want != nil && r[0].Frame.Totals[1] != tc.want {
 			t.Fatalf("%s: %+v %v", tc.service, r, err)
 		}
 	}

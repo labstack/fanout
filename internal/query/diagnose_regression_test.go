@@ -203,3 +203,25 @@ func TestDiagnosisNamesTextAndNegatedFilters(t *testing.T) {
 		t.Fatalf("negated result = %+v", r)
 	}
 }
+
+// An empty stat reads no totals and no previous range, so its diagnosis has
+// the deadline a table's has: both issue the same statements.
+func TestEmptyStatSkipsTotalsAndPrevious(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	commit(t, repo, shopSpans(), nil)
+	queries, compare := map[string]int{}, true
+	for _, viz := range []string{"stat", "table"} {
+		counting := &countingEngine{Engine: engine}
+		e := NewExecutor(counting, 30)
+		e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+		d := Dashboard{Name: "Empty", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "p", Title: "Empty", Viz: viz, Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'nope'"}}}}}
+		got, err := e.Run(t.Context(), RunRequest{Dashboard: d, Compare: &compare})
+		if err != nil || got[0].Status != StatusEmpty {
+			t.Fatalf("%s: %v %+v", viz, err, got)
+		}
+		queries[viz] = counting.queries
+	}
+	if queries["stat"] != queries["table"] {
+		t.Fatalf("statements %v", queries)
+	}
+}

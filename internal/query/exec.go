@@ -479,14 +479,16 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if frame.Trend != nil {
 		res.Interval = formatInterval(time.Duration(frame.Trend.StepMS) * time.Millisecond)
 	}
-	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil {
+	// With no rows the panel is empty: totals and the previous range would
+	// cost scans the diagnosis needs, and nothing shows them.
+	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil && frame.Rows > 0 {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
 		if err != nil {
 			return failed(res, err, parent.Err())
 		}
 		frame.Totals = totals
 	}
-	if compare && (p.Viz == "stat" || p.Viz == "timeseries") {
+	if compare && (p.Viz == "stat" || p.Viz == "timeseries") && frame.Rows > 0 {
 		shift := end.Sub(start)
 		previous := scope
 		previous.Start, previous.End = start.Add(-shift), end.Add(-shift)
