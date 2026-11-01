@@ -93,7 +93,7 @@ func (f *fakeSchemas) Schema(ctx context.Context, req query.SchemaRequest) (*que
 func completionFixtureSchema() *query.Schema {
 	return &query.Schema{Signals: map[string]query.SignalSchema{
 		"logs": {Columns: []query.ColumnSchema{
-			{Field: query.Field{Name: "severity"}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}}},
+			{Field: query.Field{Name: "severity"}, Values: []query.Option{{Value: "ERROR"}, {Value: "INFO"}, {Value: "WARN"}, {Value: "UNSPECIFIED"}}},
 			{Field: query.Field{Name: "service"}, Values: []query.Option{{Value: "api"}, {Value: "checkout"}}},
 		}},
 		"spans": {Attributes: []query.AttributeSchema{
@@ -201,7 +201,7 @@ func TestCompleteFixtures(t *testing.T) {
 		replace                   *query.TextSpan
 	}{
 		{text: "logs where sev¦erity:error", first: "severity", replace: &query.TextSpan{Start: 11, End: 19}},
-		{text: "logs where severity:¦", includes: []string{"trace", "debug", "info", "warn", "error", "fatal", "*"}, excludes: []string{"ERROR", "INFO", "WARN"}},
+		{text: "logs where severity:¦", includes: []string{"trace", "debug", "info", "warn", "error", "fatal", "unspecified", "*"}, excludes: []string{"ERROR", "INFO", "WARN", "UNSPECIFIED"}},
 		{text: "logs where severity>=¦", exact: []string{"trace", "debug", "info", "warn", "error", "fatal"}},
 		{text: "spans where http.¦", exact: []string{"http.target", "http.method"}, insert: "http.target"},
 		{text: "spans where attributes['htt¦", first: "http.target", insert: "http.target']", replace: &query.TextSpan{Start: 24, End: 27}},
@@ -413,7 +413,7 @@ func TestCompleteVocabularyPrecedesSampledValues(t *testing.T) {
 	schema.Signals["logs"] = logs
 	c := NewCompleter(completionSchemaFunc(func(context.Context, query.SchemaRequest) (*query.Schema, error) { return schema, nil }))
 	r := waitCompletion(t, c, completionRequest("logs where severity:¦"), func(r CompleteResponse) bool { return r.Schema.Warm })
-	if got := completionLabels(r); len(got) < 7 || !slices.Equal(got[:7], []string{"trace", "debug", "info", "warn", "error", "fatal", "CUSTOM"}) {
+	if got := completionLabels(r); len(got) < 7 || !slices.Equal(got[:7], []string{"trace", "debug", "info", "warn", "error", "fatal", "custom"}) {
 		t.Fatalf("vocabulary before samples: %v", got)
 	}
 }

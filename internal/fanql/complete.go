@@ -607,6 +607,12 @@ func (s *completionCandidates) values(e expect) {
 		for _, column := range s.signal.Columns {
 			if column.Name == key {
 				for _, v := range column.Values {
+					if key == "severity" {
+						// Stored levels are uppercase; FanQL spells them in
+						// lowercase, as it does the standard bands.
+						addValue(strings.ToLower(v.Value), v.Value, printValue(literalValue{Kind: stringValue, Text: strings.ToLower(v.Value)}, *f, false), v.Count)
+						continue
+					}
 					sampledValue(v.Value, stringValue, v.Count)
 				}
 			}
