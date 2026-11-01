@@ -64,7 +64,7 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 func TestSchemaRollupColumnsMatchEngine(t *testing.T) {
 	_, db := metricFixture(t)
 	for _, name := range []string{"service_rollup", "edge_rollup"} {
-		rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+name+" LIMIT 0")
+		rows, err := db.db().QueryContext(t.Context(), "SELECT * FROM "+name+" LIMIT 0")
 		if err != nil {
 			t.Fatal(err)
 		}

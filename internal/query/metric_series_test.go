@@ -251,9 +251,7 @@ func TestHistogramPanelsShareResetIncreases(t *testing.T) {
 		}
 	}
 	// Single delta without elapsed still contributes observations.
-	if _, err := db.Exec("DELETE FROM telemetry.metrics"); err != nil {
-		t.Fatal(err)
-	}
+	db.clear()
 	m := metricHistogram(fixtureStart, "[10]", "[3,2]", 5, 30, "a")
 	m.Temporality = "delta"
 	insertMetrics(t, db, m)
@@ -324,15 +322,17 @@ func TestMetricIncreaseSkipsInvalidValuesAndResolvesTiedRetries(t *testing.T) {
 	}
 }
 
-func TestMetricIncreaseKeepsSignedNanosecondBoundaries(t *testing.T) {
+// Stored metric times are always after the epoch (ingestion replaces a
+// nonpositive one), so the boundaries are nanoseconds just after it.
+func TestMetricIncreaseKeepsNanosecondBoundaries(t *testing.T) {
 	e, db := metricFixture(t)
-	at := time.Unix(0, -17).UTC()
+	at := time.Unix(0, 17).UTC()
 	for i, value := range []float64{100, 105, 108, 999} {
 		insertMetrics(t, db, metricCounter(at.Add(time.Duration(i-1)*time.Nanosecond), value))
 	}
 	r := metricIncreaseResult(t, e, Scope{Start: at, End: at.Add(2 * time.Nanosecond)},
 		" SELECT epoch_ns(time::TIMESTAMP_NS) AS nanos,increase,elapsed_s FROM metric_increases ORDER BY time")
-	if !reflect.DeepEqual(metricValues(t, r, "nanos"), []any{-17.0, -16.0}) ||
+	if !reflect.DeepEqual(metricValues(t, r, "nanos"), []any{17.0, 18.0}) ||
 		!reflect.DeepEqual(metricValues(t, r, "increase"), []any{5.0, 3.0}) ||
 		!reflect.DeepEqual(metricValues(t, r, "elapsed_s"), []any{1e-9, 1e-9}) {
 		t.Fatalf("nanosecond window/elapsed: %+v", r.Frame)
@@ -565,7 +565,7 @@ func TestMetricHistogramJSONPreservesSubnormalZeroBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got float64
-	if err := db.QueryRow(`SELECT (from_json(?,'["DOUBLE"]'))[1]`, string(bounds)).Scan(&got); err != nil {
+	if err := db.db().QueryRow(`SELECT (from_json(?,'["DOUBLE"]'))[1]`, string(bounds)).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if math.Float64bits(got) != math.Float64bits(-math.SmallestNonzeroFloat64) {

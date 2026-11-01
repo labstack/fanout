@@ -1,16 +1,16 @@
 package query
 
 import (
+	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"strconv"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/engine/querytest"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -74,51 +74,73 @@ func shopSpans() []telemetry.Span {
 	return out
 }
 
-func metricFixture(t *testing.T) (*Executor, *sql.DB) {
-	t.Helper()
-	db, err := sql.Open("duckdb", "?threads=2&memory_limit=256MB")
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.Exec("SET TimeZone='UTC'"); err != nil {
-		t.Fatal(err)
-	}
-	if err := querytest.CreateTables(db, engine.CreateCacheTables); err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.CreateViews(db); err != nil {
-		t.Fatal(err)
-	}
-	e := NewExecutor(&engine.Duck{DB: db}, 30)
-	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	return e, db
+// metricStore commits fixture metrics as real telemetry batches. Inserts
+// buffer until the next read, so each read sees one batch per write burst.
+type metricStore struct {
+	t       *testing.T
+	duck    *engine.Duck
+	repo    *telemetrystore.Repository
+	pending []telemetry.Metric
+	batches int
 }
 
-func insertMetrics(t *testing.T, db *sql.DB, m telemetry.Metric) {
-	t.Helper()
-	encode := func(v map[string]any) string {
-		if v == nil {
-			return "{}"
-		}
-		b, err := json.Marshal(v)
+func (s *metricStore) flush() {
+	s.t.Helper()
+	if len(s.pending) == 0 {
+		return
+	}
+	s.batches++
+	if err := s.repo.Commit(s.t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("metrics-%d", s.batches), Metrics: s.pending}); err != nil {
+		s.t.Fatal(err)
+	}
+	s.pending = nil
+}
+
+// db is the engine's own handle, for oracle reads over every committed row.
+func (s *metricStore) db() *sql.DB {
+	s.flush()
+	return s.duck.DB
+}
+
+// clear retires every committed batch through the engine's publication.
+func (s *metricStore) clear() {
+	s.t.Helper()
+	s.pending = nil
+	for {
+		n, err := s.repo.PruneParquet(s.t.Context(), s.duck, math.MaxInt64, 1000)
 		if err != nil {
-			t.Fatal(err)
+			s.t.Fatal(err)
 		}
-		return string(b)
+		if n == 0 {
+			return
+		}
 	}
-	_, err := db.Exec(`INSERT INTO telemetry.metrics
-      (series_id,namespace,service,name,unit,metric_type,temporality,monotonic,start_time_unix_nano,
-       metric_time,time_unix_nano,value,hist_bounds_json,hist_counts_json,hist_count,hist_sum,
-       scope_name,scope_version,attributes,resource,ingested_at,ingested_unix_nano)
-      VALUES (?::UBIGINT, ?,?,?,?,?,?,?,?,?::TIMESTAMP_NS,?,?,?,?,?,?,?, ?,?::JSON::VARIANT,?::JSON::VARIANT,?::TIMESTAMP_NS,?)`,
-		strconv.FormatUint(telemetry.MetricSeriesID(m), 10), m.Namespace, m.ServiceName, m.Name, m.Unit, m.Type, m.Temporality, m.Monotonic, m.StartTimeUnixNanos,
-		time.Unix(0, m.TimeUnixNanos).UTC(), m.TimeUnixNanos, m.Value, m.HistBoundsJSON, m.HistCountsJSON, m.HistCount, m.HistSum,
-		m.ScopeName, m.ScopeVersion, encode(m.Attributes), encode(m.Resource), time.Unix(0, m.IngestedAt).UTC(), m.IngestedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
+}
+
+// flushingEngine commits buffered fixture metrics before every read.
+type flushingEngine struct {
+	*engine.Duck
+	store *metricStore
+}
+
+func (f flushingEngine) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
+	f.store.flush()
+	return f.Duck.QueryContext(ctx, query, args...)
+}
+
+func metricFixture(t *testing.T) (*Executor, *metricStore) {
+	t.Helper()
+	d, repo := newTestEngine(t)
+	store := &metricStore{t: t, duck: d, repo: repo}
+	e := NewExecutor(flushingEngine{Duck: d, store: store}, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	return e, store
+}
+
+func insertMetrics(t *testing.T, s *metricStore, m telemetry.Metric) {
+	t.Helper()
+	m.SeriesID = telemetry.MetricSeriesID(m)
+	s.pending = append(s.pending, m)
 }
 
 func metricCounter(at time.Time, value float64) telemetry.Metric {

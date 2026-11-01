@@ -38,7 +38,7 @@ func TestMetricViewMapsKindsAndKeepsNanosecondStart(t *testing.T) {
 		t.Fatalf("temporality: %v", got)
 	}
 	var signed int64
-	if err := db.QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='metric4'").Scan(&signed); err != nil || signed != -17 {
+	if err := db.db().QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='metric4'").Scan(&signed); err != nil || signed != -17 {
 		t.Fatalf("signed start=%d err=%v", signed, err)
 	}
 	if metricValues(t, r, "start_nanos")[0] != nil {
@@ -50,7 +50,7 @@ func TestMetricViewMapsKindsAndKeepsNanosecondStart(t *testing.T) {
 		}
 	}
 	var exact int64
-	if err := db.QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='metric1'").Scan(&exact); err != nil || exact != fixtureStart.Add(-time.Minute).UnixNano()+17 {
+	if err := db.db().QueryRow("SELECT epoch_ns(start_time) FROM metrics WHERE name='metric1'").Scan(&exact); err != nil || exact != fixtureStart.Add(-time.Minute).UnixNano()+17 {
 		t.Fatalf("nanoseconds=%d err=%v", exact, err)
 	}
 }

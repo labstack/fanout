@@ -3,53 +3,46 @@
 package query
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
-	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 // This small review fixture is separate from the Phase B scale generator.
 // Each kind has 420,000 real Parquet rows: 1,000 series, six points per
 // minute, 70 one-minute batches, including ten minutes before a one-hour window.
 func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
-	db, err := sql.Open("duckdb", "") // pinned engine defaults, without tuning
-	if err != nil {
-		t.Fatal(err)
-	}
-	db.SetMaxOpenConns(1)
-	defer db.Close()
-	if _, err := db.Exec("SET TimeZone='UTC'"); err != nil {
-		t.Fatal(err)
-	}
-	if err := querytest.CreateTables(db, engine.CreateCacheTables); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("DROP TABLE telemetry.metrics"); err != nil {
-		t.Fatal(err)
-	}
-	var version, threads, memory string
-	if err := db.QueryRow("SELECT version(),current_setting('threads')::VARCHAR,current_setting('memory_limit')::VARCHAR").Scan(&version, &threads, &memory); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("engine=%s threads=%s memory_limit=%s (defaults)", version, threads, memory)
-	e := NewExecutor(&engine.Duck{DB: db}, 30)
 	start, end := fixtureStart, fixtureStart.Add(time.Hour)
-	e.now = func() time.Time { return end }
 	for _, kind := range []string{"gauge", "counter", "histogram"} {
-		store, err := telemetry.OpenParquetStore(t.TempDir())
+		// Pinned engine defaults, without tuning; one connection keeps the
+		// profiling settings below on the connection that reads.
+		cfg := config.Config{DataDir: t.TempDir(), DuckDBMaxConns: 1, RollupInterval: time.Hour}
+		repo, err := telemetrystore.Open(cfg.TelemetryDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer store.Close()
+		defer repo.Close()
+		duck, err := engine.NewDuck(t.Context(), cfg, repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer duck.Close()
+		db := duck.DB
+		var version, threads, memory string
+		if err := db.QueryRow("SELECT version(),current_setting('threads')::VARCHAR,current_setting('memory_limit')::VARCHAR").Scan(&version, &threads, &memory); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("engine=%s threads=%s memory_limit=%s (defaults)", version, threads, memory)
+		e := NewExecutor(duck, 30)
+		e.now = func() time.Time { return end }
 		base := make([]telemetry.Metric, 1000)
 		for series := range base {
 			m := metricCounter(start, 0)
@@ -81,16 +74,9 @@ func TestMetricMeasuresExecuteAtReviewScale(t *testing.T) {
 					points = append(points, m)
 				}
 			}
-			if err := store.CommitBatch(t.Context(), &telemetry.BatchMetadata{ID: fmt.Sprintf("minute%d", minute+10)}, nil, nil, points); err != nil {
+			if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("minute%d", minute+10), Metrics: points}); err != nil {
 				t.Fatal(err)
 			}
-		}
-		pattern := "'" + strings.ReplaceAll(store.Pattern("metrics"), "'", "''") + "'"
-		if _, err := db.Exec("CREATE OR REPLACE VIEW telemetry.metrics AS SELECT * FROM read_parquet(" + pattern + ",hive_partitioning=false,union_by_name=false)"); err != nil {
-			t.Fatal(err)
-		}
-		if err := engine.CreateViews(db); err != nil {
-			t.Fatal(err)
 		}
 		var rows, series int64
 		if err := db.QueryRow("SELECT count(*),count(DISTINCT series_id) FROM metrics").Scan(&rows, &series); err != nil || rows != 420000 || series != 1000 {

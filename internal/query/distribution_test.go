@@ -446,24 +446,19 @@ func TestMetricDistributionMixedKinds(t *testing.T) {
 		insertMetrics(t, db, m)
 	}
 	// 419,996 scalar rows plus four histogram points: exactly 420,000 rows.
-	// Generate locally in SQL so fixture setup does not dominate the query.
-	if _, err := db.Exec(`INSERT INTO telemetry.metrics
-		SELECT * EXCLUDE (i) REPLACE (
-		  metric_time + (i % 60) * INTERVAL '1 minute' AS metric_time,
-		  time_unix_nano + (i % 60) * 60000000000 AS time_unix_nano,
-		  ingested_at + (i % 60) * INTERVAL '1 minute' AS ingested_at,
-		  ingested_unix_nano + (i % 60) * 60000000000 AS ingested_unix_nano,
-		  'svc' || (i // 60)::VARCHAR AS service,
-		  value + i AS value)
-		FROM telemetry.metrics, range(1,209998) AS r(i)`); err != nil {
-		t.Fatal(err)
+	for i := 1; i < 209998; i++ {
+		for _, kind := range []string{"gauge", "sum"} {
+			m := metricCounter(fixtureStart.Add(time.Duration(i%60)*time.Minute), float64(100+i))
+			m.Type, m.Name, m.ServiceName = kind, kind, fmt.Sprintf("svc%d", i/60)
+			insertMetrics(t, db, m)
+		}
 	}
 	for _, series := range []string{"a", "b"} {
 		insertMetrics(t, db, metricHistogram(fixtureStart, "[10,20]", "[10,20,30]", 60, 100, series))
 		insertMetrics(t, db, metricHistogram(fixtureStart.Add(time.Minute), "[10,20]", "[12,23,35]", 70, 130, series))
 	}
 	var rows int
-	if err := db.QueryRow("SELECT count(*) FROM metrics").Scan(&rows); err != nil || rows != 420000 {
+	if err := db.db().QueryRow("SELECT count(*) FROM metrics").Scan(&rows); err != nil || rows != 420000 {
 		t.Fatalf("rows=%d err=%v", rows, err)
 	}
 	for _, viz := range []string{"histogram", "heatmap"} {

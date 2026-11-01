@@ -90,9 +90,7 @@ func TestMetricRateSumsPerSeriesAndIgnoresMissingElapsed(t *testing.T) {
 	if got := metricValues(t, r, "rate"); !reflect.DeepEqual(got, []any{want}) {
 		t.Fatalf("rates=%v", got)
 	}
-	if _, err := db.Exec("DELETE FROM telemetry.metrics"); err != nil {
-		t.Fatal(err)
-	}
+	db.clear()
 	for i := range 2 {
 		m := metricCounter(fixtureStart.Add(time.Duration(i)*time.Minute), 12)
 		m.Temporality = "delta"
