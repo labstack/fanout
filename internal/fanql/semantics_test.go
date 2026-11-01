@@ -457,3 +457,43 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 		})
 	}
 }
+
+// A standard key reads its typed column, and a value sent with another type
+// reads as the key's type (proposal 0005). Format 4 compared the raw VARIANT,
+// where the text "200" sorted above 500.
+func TestStandardKeysCompareByType(t *testing.T) {
+	d, repo := newTestEngine(t)
+	var spans []telemetry.Span
+	for i, status := range []any{int64(500), "200", 503.0, int64(404), "abc"} {
+		spans = append(spans, semanticSpan("typed", i, map[string]any{"http.response.status_code": status}))
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "typed", Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	executor := query.NewExecutor(d, 30)
+	code := []query.Variable{{Name: "code", Kind: "text"}}
+	for _, tc := range []struct {
+		filter string
+		vars   map[string]query.Value
+		want   int
+	}{
+		{"http.response.status_code>=500", nil, 2},
+		{"http.response.status_code:200", nil, 1},
+		{"http.response.status_code<500", nil, 2},
+		{"http.response.status_code:*", nil, 4},
+		{"http.response.status_code>=$code", map[string]query.Value{"code": {Values: []string{"500"}}}, 2},
+		{"http.response.status_code:$code", map[string]query.Value{"code": {Values: []string{"503"}}}, 1},
+	} {
+		t.Run(tc.filter, func(t *testing.T) {
+			var variables []query.Variable
+			if tc.vars != nil {
+				variables = code
+			}
+			q := semanticCompile(t, "spans where namespace:typed "+tc.filter+" | count()", variables)
+			result := semanticRun(t, executor, q, variables, tc.vars)
+			if got := semanticValue(t, result, "count"); got != float64(tc.want) {
+				t.Fatalf("got %v, want %d; %s", got, tc.want, result.SQL)
+			}
+		})
+	}
+}

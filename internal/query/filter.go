@@ -597,8 +597,9 @@ func groupType(sig *signal, operands ...any) string {
 }
 
 // operandType classifies an operand as a number (paramNumber) or a time
-// (paramTime), or returns "" for text, attribute lookups, parameters and
-// anything else.
+// (paramTime), or returns "" for text, parameters and anything else. A
+// lookup of a standard integer key is a number: the engine reads its typed
+// column (proposal 0005). Other attribute lookups are text.
 func operandType(n any, sig *signal) string {
 	v, _ := n.(map[string]any)
 	switch v["class"] {
@@ -632,6 +633,11 @@ func operandType(n any, sig *signal) string {
 			return paramNumber
 		}
 	case "OPERATOR":
+		if field := fieldText(SQLExpression(v)); v["type"] == "ARRAY_EXTRACT" && field != "" {
+			if ref, err := sig.field(field); err == nil && ref.Type == TypeNumber {
+				return paramNumber
+			}
+		}
 		if v["type"] == "OPERATOR_COALESCE" {
 			children, _ := v["children"].([]any)
 			return groupType(sig, children...)

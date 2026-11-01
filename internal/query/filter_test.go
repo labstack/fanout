@@ -77,6 +77,8 @@ func TestCheckFilterRejectsUnsafeExpressions(t *testing.T) {
 		"lower(service) FILTER (WHERE true) = 'x'":         "FILTER",
 		"service = $1":                                     "positional",
 		"getenv('HOME') = 'x'":                             "getenv",
+		"_a_http_route = '/cart'":                          "_a_http_route is internal; write attributes['http.route']",
+		"_r_service_version IS NULL":                       "write resource['service.version']",
 	}
 	for expr, want := range cases {
 		_, err := checkFilter(t.Context(), d, spans, vars, expr)
@@ -101,6 +103,11 @@ func TestCheckFilterStoresDuckDBsCanonicalText(t *testing.T) {
 		{"service = 'a' /* c */", []string{"'a'"}, 0},
 		{"service = 'a') WINDOW w AS (", []string{"(service = 'a')"}, 0},
 		{"1=1) OR (1=1", []string{"((1 = 1) OR (1 = 1))"}, 0},
+		// A standard integer key reads its typed column, so a variable
+		// compared with it binds as a number; other keys stay text.
+		{"attributes['http.response.status_code'] >= $service", []string{"CAST($service AS DOUBLE)"}, 1},
+		{"attributes['http.route'] = $service", []string{"CAST($service AS VARCHAR)"}, 1},
+		{"attributes['http.status_code'] >= $service", []string{"CAST($service AS VARCHAR)"}, 1},
 	}
 	for _, tc := range cases {
 		f, err := checkFilter(t.Context(), d, spans, vars, tc.expr)

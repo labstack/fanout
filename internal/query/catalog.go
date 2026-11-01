@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/fanout/internal/suggest"
 	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 type FieldType string
@@ -30,6 +31,7 @@ type Field struct {
 }
 
 type signal struct {
+	source  *telemetry.Signal
 	name    string
 	time    string
 	fields  []Field
@@ -51,7 +53,7 @@ var fieldTypes = map[telemetry.Type]FieldType{
 }
 
 func newSignal(source *telemetry.Signal, lowCard []string, columns ...column) *signal {
-	s := &signal{name: source.Name, time: source.Clock(), index: map[string]Field{}, lowCard: lowCard}
+	s := &signal{source: source, name: source.Name, time: source.Clock(), index: map[string]Field{}, lowCard: lowCard}
 	for _, c := range columns {
 		f, ok := source.Field(c.name)
 		typ, known := fieldTypes[f.Type]
@@ -163,10 +165,14 @@ var attributePattern = regexp.MustCompile(`(?s)^(attributes|resource)\['((?:[^']
 func (s *signal) field(text string) (FieldRef, error) {
 	text = strings.TrimSpace(text)
 	if m := attributePattern.FindStringSubmatch(text); m != nil {
-		return FieldRef{Text: text, Column: m[1], Key: strings.ReplaceAll(m[2], "''", "'"), Type: TypeString, Unit: "none"}, nil
+		key := strings.ReplaceAll(m[2], "''", "'")
+		return FieldRef{Text: text, Column: m[1], Key: key, Type: s.keyType(m[1], key), Unit: "none"}, nil
 	}
 	f, ok := s.index[text]
 	if !ok {
+		if k, internal := internalKey(text); internal {
+			return FieldRef{}, fmt.Errorf("%s is internal; write %s", text, k)
+		}
 		message := fmt.Sprintf("%q is not a %s field", text, s.name)
 		if hint := suggest.Spelling(text, s.names()); hint != "" {
 			return FieldRef{}, errors.New(message + "; " + hint)
@@ -181,6 +187,29 @@ func (s *signal) field(text string) (FieldRef, error) {
 		unit = "none"
 	}
 	return FieldRef{Text: text, Column: f.Name, Type: f.Type, Unit: unit}, nil
+}
+
+// keyType is the type of a map lookup: a standard key with a dedicated
+// column reads as the column's type (proposal 0005), any other key as text.
+func (s *signal) keyType(column, key string) FieldType {
+	if k, ok := s.source.Dedicated(column, key); ok && k.Type == semconv.Int {
+		return TypeNumber
+	}
+	return TypeString
+}
+
+// internalKey returns the lookup to write instead of a storage column.
+func internalKey(name string) (string, bool) {
+	for _, k := range semconv.Keys {
+		if strings.EqualFold(k.Column, name) {
+			column := "attributes"
+			if k.Scope == semconv.Resource {
+				column = "resource"
+			}
+			return column + "[" + sqlString(k.Name) + "]", true
+		}
+	}
+	return "", false
 }
 
 func quoteIdent(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
