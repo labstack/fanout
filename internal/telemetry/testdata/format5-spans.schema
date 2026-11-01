@@ -46,7 +46,6 @@ message spans {
 	optional binary _r_k8s_statefulset_uid (STRING);
 	optional binary _r_service_instance_id (STRING);
 	optional binary _r_service_version (STRING);
-	required int64 _spill (INT(64,false));
 	required int64 _trace_hash (INT(64,false));
 	optional group attributes (VARIANT) {
 		required binary metadata;

@@ -150,11 +150,10 @@ func (v *BatchVerifier) decode(ctx context.Context, path string, expected int) e
 }
 
 // values checks what the physical schema cannot state: every dedicated
-// column equals its map value of the key's type, or is NULL with the row's
-// spill bit set and a value of another type left in the map; spill bits
-// name only the signal's own keys; the footer counts each key's
-// spill bits; the parallel lists of a row have equal lengths; and metric
-// points carry exactly the columns of their kind.
+// column holds its map value converted to the key's type (coerce), NULL
+// when the value has no conversion; the footer counts each key's non-null
+// values without one; the parallel lists of a row have equal lengths; and
+// metric points carry exactly the columns of their kind.
 func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) error {
 	type check struct {
 		name string
@@ -162,27 +161,8 @@ func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) erro
 	}
 	var checks []check
 	keys := s.Keys()
-	var mask uint64
 	for _, key := range keys {
-		mask |= 1 << key.Bit
-		column, _ := s.Column(key.Column)
-		source, cast, kind := "attributes", "VARCHAR", "VARCHAR"
-		if key.Scope == semconv.Resource {
-			source = "resource"
-		}
-		if column.Type == Int64 {
-			cast, kind = "BIGINT", "INT64"
-		}
-		value := fmt.Sprintf("%s[%s]", source, sqlString(key.Name))
-		// An absent key and a null value both read as VARIANT_NULL: no
-		// type, so no spill and a NULL column.
-		checks = append(checks, check{key.Column, fmt.Sprintf(`CASE WHEN (_spill>>%d)&1=1 THEN %s IS NULL AND variant_typeof(%s) NOT IN ('VARIANT_NULL','%s')
-WHEN variant_typeof(%s)='VARIANT_NULL' THEN %s IS NULL
-ELSE variant_typeof(%s)='%s' AND %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) END`,
-			key.Bit, key.Column, value, kind, value, key.Column, value, kind, key.Column, value, cast)})
-	}
-	if len(keys) > 0 {
-		checks = append(checks, check{"_spill", fmt.Sprintf("_spill & %d = _spill", mask)})
+		checks = append(checks, check{key.Column, coercedSQL(key)})
 	}
 	groups := map[string][]string{}
 	var names []string
@@ -210,8 +190,10 @@ ELSE variant_typeof(%s)='%s' AND %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) END`
 	for _, c := range checks {
 		selects = append(selects, "count(*) FILTER (WHERE NOT coalesce("+c.sql+", false))")
 	}
+	// An absent key and a null value both read as VARIANT_NULL: no value,
+	// so no spill.
 	for _, key := range keys {
-		selects = append(selects, fmt.Sprintf("coalesce(sum((_spill>>%d)&1), 0)::UBIGINT", key.Bit))
+		selects = append(selects, fmt.Sprintf("count(*) FILTER (WHERE %s IS NULL AND variant_typeof(%s)<>'VARIANT_NULL')::UBIGINT", key.Column, keyValueSQL(key)))
 	}
 	query := "SELECT " + strings.Join(selects, ", ") + " FROM read_parquet(" + sqlString(filepath.ToSlash(path)) + ", hive_partitioning=false)"
 	results := make([]uint64, len(selects))
@@ -237,6 +219,37 @@ ELSE variant_typeof(%s)='%s' AND %s IS NOT DISTINCT FROM TRY_CAST(%s AS %s) END`
 		}
 	}
 	return nil
+}
+
+func keyValueSQL(key semconv.Key) string {
+	source := "attributes"
+	if key.Scope == semconv.Resource {
+		source = "resource"
+	}
+	return fmt.Sprintf("%s[%s]", source, sqlString(key.Name))
+}
+
+// coercedSQL holds when a key's column equals coerce of its map value. A
+// float64 converted to text is compared by the number it reads back as:
+// strconv's shortest form reads back exactly, and DuckDB does not print it.
+func coercedSQL(key semconv.Key) string {
+	v, c := keyValueSQL(key), key.Column
+	// DuckDB may evaluate a CASE branch over rows that do not take it, so
+	// every branch casts with TRY_CAST.
+	if key.Type == semconv.Int {
+		return fmt.Sprintf(`%[2]s IS NOT DISTINCT FROM CASE variant_typeof(%[1]s)
+WHEN 'INT64' THEN TRY_CAST(%[1]s AS BIGINT)
+WHEN 'DOUBLE' THEN CASE WHEN TRY_CAST(%[1]s AS DOUBLE)>=-9223372036854775808::DOUBLE AND TRY_CAST(%[1]s AS DOUBLE)<9223372036854775808::DOUBLE
+ AND TRY_CAST(%[1]s AS DOUBLE)=trunc(TRY_CAST(%[1]s AS DOUBLE)) THEN TRY_CAST(TRY_CAST(%[1]s AS DOUBLE) AS BIGINT) END
+WHEN 'VARCHAR' THEN CASE WHEN regexp_full_match(TRY_CAST(%[1]s AS VARCHAR),'[+-]?[0-9]+') THEN TRY_CAST(TRY_CAST(%[1]s AS VARCHAR) AS BIGINT) END END`, v, c)
+	}
+	return fmt.Sprintf(`CASE variant_typeof(%[1]s)
+WHEN 'VARCHAR' THEN %[2]s IS NOT DISTINCT FROM TRY_CAST(%[1]s AS VARCHAR)
+WHEN 'INT64' THEN %[2]s IS NOT DISTINCT FROM TRY_CAST(TRY_CAST(%[1]s AS BIGINT) AS VARCHAR)
+WHEN 'BOOL_TRUE' THEN %[2]s IS NOT DISTINCT FROM 'true'
+WHEN 'BOOL_FALSE' THEN %[2]s IS NOT DISTINCT FROM 'false'
+WHEN 'DOUBLE' THEN TRY_CAST(%[2]s AS DOUBLE) IS NOT DISTINCT FROM TRY_CAST(%[1]s AS DOUBLE)
+ELSE %[2]s IS NULL END`, v, c)
 }
 
 // kindChecks hold for every metric point: the columns of its kind are set and

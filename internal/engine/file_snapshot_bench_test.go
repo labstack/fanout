@@ -47,9 +47,9 @@ func TestSnapshotFileBindingBenchmark(t *testing.T) {
 			}
 		}
 		for _, mode := range []string{"list", "snapshot_glob", "glob"} {
-			source := d.physicalSource("logs", selected, 0)
+			source := d.physicalSource("logs", selected)
 			if mode == "snapshot_glob" {
-				source = d.snapshotSource("logs", selected, active, 0)
+				source = d.snapshotSource("logs", selected, active)
 			}
 			if mode == "glob" {
 				source = "SELECT * FROM read_parquet(" + sqlLiteral(repo.Parquet.Pattern("logs")) + ", union_by_name=false, hive_partitioning=false)"

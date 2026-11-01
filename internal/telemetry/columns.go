@@ -97,7 +97,7 @@ func (s *Signal) Clock() string {
 	return c.View.Name
 }
 
-// Keys lists the signal's dedicated columns in spill-bit order.
+// Keys lists the signal's dedicated columns in key-bit order.
 func (s *Signal) Keys() []semconv.Key {
 	var keys []semconv.Key
 	for _, c := range s.Columns {
@@ -168,18 +168,20 @@ func LookupSignal(name string) (*Signal, bool) {
 // 8 bytes a row plain and under 2 delta-encoded; span times, in trace order,
 // shrank too.
 
-// Dedicated columns copy a standard key's value out of its map when the value
-// has the key's semconv type; the map keeps every key. A value of another
-// type stays only in the map and sets the key's bit in _spill, and the file
-// footer counts each key's spilled rows (spillPrefix). Keys with a column are
-// not shredded, which would store a third copy. The read views project the
-// messaging keys from their shredded fields.
+// Dedicated columns hold a standard key's value converted to the key's
+// semconv type (coerce), and that column is the key's read value; the map
+// keeps every value as sent. A value with no such conversion leaves the
+// column NULL, and the file footer counts those rows for each key
+// (spillPrefix). Keys with a column are not shredded, which would store a
+// third copy. The read views project the messaging keys from their shredded
+// fields.
 var (
 	attributeShred = []string{"messaging.system", "messaging.destination.name"}
 	resourceShred  = []string{"service.name", "service.namespace"}
 )
 
-// spillPrefix starts the footer key whose value counts a key's spilled rows.
+// spillPrefix starts the footer key whose value counts the rows whose value
+// of a key could not be converted to its type.
 const spillPrefix = "fanout.spill."
 
 // Spans keep trace locality, which the trace index depends on. Logs and
@@ -264,7 +266,6 @@ var Spans = &Signal{
 		str("exception_message", func(r *Span) string { return r.ExceptionMessage }),
 		derived("messaging_system", String, "TRY_CAST(attributes['messaging.system'] AS VARCHAR)"),
 		derived("messaging_destination", String, "TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR)"),
-		spill(),
 	}, dedicated(semconv.Span, semconv.Resource)...),
 }
 
@@ -296,7 +297,6 @@ var Logs = &Signal{
 		ts("ingested_at", func(r *Log) int64 { return r.IngestedAt }),
 		nanos("ingested_unix_nano", func(r *Log) int64 { return r.IngestedAt }),
 		str("body_template", func(r *Log) string { return r.BodyTemplate }).dict(),
-		spill(),
 	}, dedicated(semconv.Resource)...),
 }
 
@@ -390,7 +390,6 @@ var Metrics = &Signal{
 		str("scope_version", func(r *Metric) string { return r.ScopeVersion }).dict(),
 		ts("ingested_at", func(r *Metric) int64 { return r.IngestedAt }),
 		nanos("ingested_unix_nano", func(r *Metric) int64 { return r.IngestedAt }),
-		spill(),
 	}, dedicated(semconv.Resource)...),
 }
 
@@ -442,12 +441,6 @@ func dedicated(scopes ...semconv.Scope) []Column {
 		}
 	}
 	return columns
-}
-
-// spill is the per-row mask of keys whose value had another type than the
-// key's dedicated column; bit i is semconv.Keys[i].
-func spill() Column {
-	return Column{Name: "_spill", Type: Uint64, Dict: true, Private: true}
 }
 
 func (c Column) dict() Column                 { c.Dict = true; return c }

@@ -3,6 +3,7 @@ package telemetry
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/bits"
 	"reflect"
 	"runtime"
@@ -86,8 +87,6 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 		case !c.Stored():
 		case c.Key != nil:
 			keys.add(c, cell(own(shared, c), c.Name))
-		case c.Name == "_spill" && c.get == nil:
-			keys.spill = cell(own(shared, c), c.Name)
 		case c.List && c.Type == Variant:
 			get, ok := c.get.(func(*R, []map[string]any) ([]map[string]any, bool))
 			if !ok {
@@ -459,8 +458,8 @@ func variantList[R any](encoder *variantEncoder, metadata, value *cellWriter, ge
 	}
 }
 
-// keyWriter fills the dedicated columns and _spill from each row's
-// attributes and resource. A resource map is shared by the rows of its OTLP
+// keyWriter fills the dedicated columns from each row's attributes and
+// resource. A resource map is shared by the rows of its OTLP
 // block, so its part of the projection is computed once per map. A row's
 // attributes are gathered once, in key order, for both its dedicated columns
 // and its attributes variant. Most rows
@@ -473,7 +472,6 @@ type keyWriter[R any] struct {
 	filled               []int // by column position: chunk rows written
 	keys                 []semconv.Key
 	byName               [2]map[string]int // by scope: key name to column position
-	spill                *cellWriter
 	counts               *spills
 	resources            map[reflect.Value]*keyRow
 	entries              []field // the chunk's attribute entries, in key order by row
@@ -493,8 +491,8 @@ func (k *keyWriter[R]) fields(i int) ([]field, bool) {
 	return k.entries[start:k.ends[i]], true
 }
 
-// keyRow is a map's projection: the values of the keys it holds with their
-// semconv types, and the spill bits of those it holds with other types.
+// keyRow is a map's projection: the values of the keys it holds, converted
+// to their semconv types, and the bits of those whose values do not convert.
 type keyRow struct {
 	values [64]any
 	has    uint64 // by column position
@@ -517,7 +515,8 @@ func (k *keyWriter[R]) project(row *keyRow, scope semconv.Scope, fields []field)
 		if !ok || v == nil {
 			continue
 		}
-		if !typed(v, k.keys[position].Type) {
+		v, ok = coerce(v, k.keys[position].Type)
+		if !ok {
 			row.spill |= 1 << k.keys[position].Bit
 			continue
 		}
@@ -526,15 +525,44 @@ func (k *keyWriter[R]) project(row *keyRow, scope semconv.Scope, fields []field)
 	}
 }
 
-// typed reports whether an attribute value has the key's semconv type exactly.
-func typed(v any, t semconv.Type) bool {
-	switch v.(type) {
-	case string:
-		return t == semconv.String
-	case int64:
-		return t == semconv.Int
+// coerce converts an attribute value to a standard key's semconv type, which
+// defines the key's read value; false means the value has no conversion. An
+// integer key takes an int64, a float64 that is integral and within int64
+// range, and a string that strconv.ParseInt reads in base 10 as it stands. A
+// string key takes a string and the decimal text of an int64, bool or
+// float64 (strconv's shortest 'g' form). Bytes, maps, lists and the other
+// combinations have no conversion. verify.go restates these rules in SQL.
+func coerce(value any, t semconv.Type) (any, bool) {
+	if t == semconv.Int {
+		switch v := value.(type) {
+		case int64:
+			return value, true
+		case int:
+			return int64(v), true
+		case float64:
+			if v == math.Trunc(v) && v >= -1<<63 && v < 1<<63 {
+				return int64(v), true
+			}
+		case string:
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return n, true
+			}
+		}
+		return nil, false
 	}
-	return false
+	switch v := value.(type) {
+	case string:
+		return value, true
+	case int64:
+		return strconv.FormatInt(v, 10), true
+	case int:
+		return strconv.Itoa(v), true
+	case bool:
+		return strconv.FormatBool(v), true
+	case float64:
+		return strconv.FormatFloat(v, 'g', -1, 64), true
+	}
+	return nil, false
 }
 
 func (k *keyWriter[R]) fill(chunk []R) {
@@ -576,9 +604,6 @@ func (k *keyWriter[R]) fill(chunk []R) {
 				putInt64(w, v, 0, 1)
 			}
 		}
-		if k.spill != nil { // a layout may fill _spill from its own accessor
-			putUint64(k.spill, row.spill, 0, 0)
-		}
 		for spill := row.spill; spill != 0; spill &= spill - 1 {
 			k.counts[bits.TrailingZeros64(spill)]++
 		}
@@ -589,11 +614,11 @@ func (k *keyWriter[R]) fill(chunk []R) {
 	}
 }
 
-// spills counts each key's spilled rows by key bit, across every write
-// into one file.
+// spills counts, by key bit, the rows whose value of the key has no
+// conversion to its type (a spill), across every write into one file.
 type spills [64]uint64
 
-// footer records each key's count of spilled rows in the file footer.
+// footer records each key's count of spills in the file footer.
 func (c *spills) footer(writer *parquet.GenericWriter[any], s *Signal) {
 	for _, key := range s.Keys() {
 		if n := c[key.Bit]; n > 0 {

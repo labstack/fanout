@@ -11,39 +11,23 @@ import (
 )
 
 // Batch format 5 copies the standard keys into typed dedicated columns
-// (proposal 0005). Telemetry SQL keeps writing attributes['k'] and
+// (proposal 0005), converted at ingest to the key's type; the column is the
+// key's read value. Telemetry SQL keeps writing attributes['k'] and
 // resource['k'] with a literal key, and rewriteKeys replaces each such
-// subscript with the key's read value, TRY_CAST(map['k'] AS type):
+// subscript with the dedicated column when the map belongs to a signal
+// relation whose columns are visible where the subscript binds: the relation
+// itself, or a subquery or CTE that passes it through *.
 //
-//   - the dedicated column, when the map belongs to a signal relation whose
-//     columns are visible where the subscript binds: the relation itself, or
-//     a subquery or CTE that passes it through *;
-//   - TRY_CAST of the subscript, when a subquery or CTE projects the map
-//     without the columns.
-//
-// Both read the same value. A column holds exactly the values of its type,
-// and snapshot sources read coalesce(column, keyValue) in the files whose
-// footers count spills of the key (rawProjection). Keys outside the list, the
-// attributes of logs and metrics, and subscripts whose relation the AST does
-// not tell keep reading the map.
-
-// keyValue is a key's read value from its map, typed like its column.
-func keyValue(k semconv.Key) string {
-	return "TRY_CAST(" + keyMap(k) + "[" + sqlLiteral(k.Name) + "] AS " + keyType(k) + ")"
-}
+// Every other subscript reads the map unchanged, the value as sent: keys
+// outside the list, the attributes of logs and metrics, subscripts whose
+// relation the AST does not tell, and subscripts of a map that a subquery or
+// CTE projects without its columns.
 
 func keyMap(k semconv.Key) string {
 	if k.Scope == semconv.Span {
 		return "attributes"
 	}
 	return "resource"
-}
-
-func keyType(k semconv.Key) string {
-	if k.Type == semconv.Int {
-		return "BIGINT"
-	}
-	return "VARCHAR"
 }
 
 // internalColumn reports whether a column name is part of the file layout
@@ -55,13 +39,14 @@ func internalColumn(name string) (semconv.Key, bool) {
 			return k, true
 		}
 	}
-	return semconv.Key{}, name == "_spill" || name == "_trace_hash"
+	return semconv.Key{}, name == "_trace_hash"
 }
 
 // keyMapSource is the origin of a relation's attributes or resource column.
 type keyMapSource struct {
-	signal  *telemetry.Signal // nil: no signal's map, or unknown
-	columns bool              // the signal's dedicated columns are visible beside it
+	// signal's map, with its dedicated columns visible beside it; nil: no
+	// signal's map, a map projected without its columns, or unknown.
+	signal *telemetry.Signal
 }
 
 // keyRelation is what a FROM binding exposes of the signal maps.
@@ -146,7 +131,6 @@ func (s *keyScope) lookup(qualifier []string, column string) (keyMapSource, bool
 }
 
 type keyRewriter struct {
-	used     map[string]uint64 // signal name → bits of the dedicated columns read
 	rewrites int
 	named    []namedItem
 }
@@ -158,21 +142,17 @@ type namedItem struct {
 	item, original map[string]any
 }
 
-// rewriteKeys rewrites the subscripts of one parsed statement in place and
-// returns, per signal, the dedicated columns it reads.
-func rewriteKeys(ctx context.Context, db snapshotSQL, statement map[string]any) (map[string]uint64, error) {
-	r := &keyRewriter{used: map[string]uint64{}}
+// rewriteKeys rewrites the subscripts of one parsed statement in place.
+func rewriteKeys(ctx context.Context, db snapshotSQL, statement map[string]any) error {
+	r := &keyRewriter{}
 	r.query(statement, nil)
-	if err := r.name(ctx, db); err != nil {
-		return nil, err
-	}
-	return r.used, nil
+	return r.name(ctx, db)
 }
 
 func signalRelation(s *telemetry.Signal) *keyRelation {
 	return &keyRelation{maps: map[string]keyMapSource{
-		"attributes": {signal: s, columns: true},
-		"resource":   {signal: s, columns: true},
+		"attributes": {signal: s},
+		"resource":   {signal: s},
 	}}
 }
 
@@ -389,27 +369,14 @@ func (r *keyRewriter) output(value any, scope *keyScope) *keyRelation {
 					out.add(name, m)
 				}
 			}
-		case "COLUMN_REF":
-			names := stringList(item["column_names"])
-			if len(names) == 0 {
-				continue
-			}
-			column := names[len(names)-1]
-			name := alias
-			if name == "" {
-				name = column
-			}
-			if !mapColumn(name) {
-				continue
-			}
-			m, ok := scope.lookup(names[:len(names)-1], column)
-			if !ok || !strings.EqualFold(name, column) {
-				m = keyMapSource{}
-			}
-			out.add(name, keyMapSource{signal: m.signal})
 		default:
-			if mapColumn(alias) {
-				out.add(alias, keyMapSource{})
+			name := alias
+			if names := stringList(item["column_names"]); name == "" && item["class"] == "COLUMN_REF" && len(names) > 0 {
+				name = names[len(names)-1]
+			}
+			// A map projected by name passes on without its columns.
+			if mapColumn(name) {
+				out.add(name, keyMapSource{})
 			}
 		}
 	}
@@ -470,27 +437,9 @@ func (r *keyRewriter) expr(value any, scope *keyScope) {
 			}
 			r.expr(v["child"], scope)
 			return
-		case "STAR":
-			for _, rel := range starRelations(v, scope) {
-				r.star(rel)
-			}
 		}
 		for _, child := range v {
 			r.expr(child, scope)
-		}
-	}
-}
-
-// star marks every dedicated column a star reads as used.
-func (r *keyRewriter) star(rel *keyRelation) {
-	if rel == nil {
-		return
-	}
-	for _, m := range rel.maps {
-		if m.signal != nil && m.columns {
-			for _, k := range m.signal.Keys() {
-				r.used[m.signal.Name] |= 1 << k.Bit
-			}
 		}
 	}
 }
@@ -521,20 +470,11 @@ func (r *keyRewriter) subscript(node map[string]any, scope *keyScope) bool {
 		return false
 	}
 	alias, _ := node["alias"].(string)
-	var replacement map[string]any
-	if m.columns {
-		r.used[m.signal.Name] |= 1 << k.Bit
-		path := make([]any, 0, len(names))
-		for _, n := range names[:len(names)-1] {
-			path = append(path, n)
-		}
-		replacement = map[string]any{"class": "COLUMN_REF", "type": "COLUMN_REF", "alias": alias, "column_names": append(path, k.Column)}
-	} else {
-		subscript := clone(node)
-		subscript["alias"] = ""
-		replacement = castNode(subscript, keyType(k), true)
-		replacement["alias"] = alias
+	path := make([]any, 0, len(names))
+	for _, n := range names[:len(names)-1] {
+		path = append(path, n)
 	}
+	replacement := map[string]any{"class": "COLUMN_REF", "type": "COLUMN_REF", "alias": alias, "column_names": append(path, k.Column)}
 	for field := range node {
 		delete(node, field)
 	}
@@ -542,16 +482,6 @@ func (r *keyRewriter) subscript(node map[string]any, scope *keyScope) bool {
 		node[field] = value
 	}
 	return true
-}
-
-func castNode(child map[string]any, typeName string, try bool) map[string]any {
-	return map[string]any{
-		"class": "CAST", "type": "OPERATOR_CAST", "alias": "", "child": child, "try_cast": try,
-		"type_expr": map[string]any{
-			"class": "TYPE", "type": "TYPE", "alias": "", "catalog": "", "schema": "", "type_name": typeName,
-			"children": []any{}, "qualified_name": map[string]any{"path": []any{typeName}},
-		},
-	}
 }
 
 // name aliases each rewritten select item with the name DuckDB gives its

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	"github.com/labstack/fanout/internal/telemetry/semconv"
 )
 
 // List columns hold a row's elements as consecutive values. Compaction
@@ -26,7 +28,7 @@ func TestMergeCopiesListColumnsByWholeRows(t *testing.T) {
 			}
 			rows[i] = Metric{Namespace: "ns", ServiceName: fmt.Sprint(i % 3), Name: "latency", Type: "histogram", Temporality: "delta",
 				SeriesID: uint64(i), TimeUnixNanos: int64(file*1000 + i + 1), Histogram: Histogram{Count: uint64(n), Bounds: bounds, Counts: counts},
-				Exemplars: make([]Exemplar, i%4), Resource: map[string]any{"k8s.container.restart_count": fmt.Sprint(file)}}
+				Exemplars: make([]Exemplar, i%4), Resource: map[string]any{"k8s.container.restart_count": fmt.Sprintf("r%d", file)}}
 			for e := range rows[i].Exemplars {
 				rows[i].Exemplars[e] = Exemplar{TraceID: fmt.Sprintf("%d-%d", i, e), Attributes: map[string]any{"e": int64(e)}}
 			}
@@ -97,8 +99,7 @@ func ids(exemplars []Exemplar) string {
 	return out + "]"
 }
 
-// The verifier rejects a dedicated column that disagrees with its map and a
-// footer whose spill count disagrees with the rows.
+// The verifier rejects a dedicated column that disagrees with its map.
 func TestVerifierRejectsDedicatedColumnMismatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spans.parquet")
@@ -125,7 +126,7 @@ func TestVerifierRejectsDedicatedColumnMismatch(t *testing.T) {
 }
 
 // A null attribute value has no type: the batch commits with the key's
-// column NULL and no spill bit, and verifies.
+// column NULL and no spill, and verifies.
 func TestNullStandardKeyValueIsNotSpilled(t *testing.T) {
 	store, err := OpenParquetStore(t.TempDir())
 	if err != nil {
@@ -139,30 +140,39 @@ func TestNullStandardKeyValueIsNotSpilled(t *testing.T) {
 	if err := ValidatePublishedBatch(store.BatchPath("null")); err != nil {
 		t.Fatal(err)
 	}
-	row := engineRows(t, filepath.Join(store.BatchPath("null"), "spans.parquet"))[0]
-	if row["_a_http_route"] != "NULL" || row["_spill"] != "16777216" {
-		t.Fatalf("route %s spill %s", row["_a_http_route"], row["_spill"])
+	path := filepath.Join(store.BatchPath("null"), "spans.parquet")
+	if row := engineRows(t, path)[0]; row["_a_http_route"] != "NULL" {
+		t.Fatalf("route %s", row["_a_http_route"])
+	}
+	counts, err := fileSpills(path, Spans)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, _ := semconv.Lookup(semconv.Span, "http.route")
+	restarts, _ := semconv.Lookup(semconv.Resource, "k8s.container.restart_count")
+	if counts[route.Bit] != 0 || counts[restarts.Bit] != 1 {
+		t.Fatalf("route spills %d, restart count spills %d", counts[route.Bit], counts[restarts.Bit])
 	}
 }
 
-// Spill bits outside the signal's keys, and a dedicated column whose map
-// value has another type without a spill bit, are corruption.
-func TestVerifierRejectsForeignSpillBitsAndUntypedValues(t *testing.T) {
+// A dedicated column that misses a value its map converts, and a footer that
+// misses a value with no conversion, are corruption.
+func TestVerifierRejectsUnconvertedAndUncountedValues(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		change func(*Column)
 	}{
-		{"foreign bit", func(c *Column) {
-			if c.Name == "_spill" { // bit 0 is a span key
-				*c = column("_spill", Uint64, func(*Log) uint64 { return 1 }).dict()
-			}
-		}},
-		{"untyped value", func(c *Column) {
-			if c.Name == "attributes" {
-				*c = object("attributes", func(*Log) map[string]any { return map[string]any{"k8s.pod.name": int64(1)} }, attributeShred)
-			}
+		{"unconverted value", func(c *Column) {
 			if c.Name == "resource" {
 				*c = object("resource", func(*Log) map[string]any { return map[string]any{"k8s.pod.name": int64(1)} }, resourceShred)
+			}
+			if c.Name == "_r_k8s_pod_name" {
+				*c = nullable(c.Name, String, func(*Log) (string, bool) { return "", false }).dict()
+			}
+		}},
+		{"uncounted spill", func(c *Column) {
+			if c.Name == "resource" {
+				*c = object("resource", func(*Log) map[string]any { return map[string]any{"k8s.pod.name": []byte("x")} }, resourceShred)
 			}
 			if c.Name == "_r_k8s_pod_name" {
 				*c = nullable(c.Name, String, func(*Log) (string, bool) { return "", false }).dict()

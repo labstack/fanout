@@ -158,7 +158,7 @@ func selectKeys(reg registry) ([]semconv.Key, error) {
 	slices.SortFunc(resource, byName)
 	keys := append(span, resource...)
 	if len(keys) > 64 {
-		return nil, fmt.Errorf("%d keys exceed the 64-bit spill mask", len(keys))
+		return nil, fmt.Errorf("%d keys exceed the 64-key limit", len(keys))
 	}
 	for i := range keys {
 		prefix := "_a_"

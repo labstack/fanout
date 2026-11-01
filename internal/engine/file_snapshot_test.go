@@ -386,7 +386,7 @@ func TestBroadGlobRetainsCapturedFileSet(t *testing.T) {
 		}
 	}
 	captured := repo.Parquet.BatchMetadata()
-	source := d.snapshotSource("spans", captured, captured, 0)
+	source := d.snapshotSource("spans", captured, captured)
 	if !strings.Contains(source, "*.batch") {
 		t.Fatal("broad selection did not use glob")
 	}
@@ -397,7 +397,7 @@ func TestBroadGlobRetainsCapturedFileSet(t *testing.T) {
 	if err := d.DB.QueryRow("SELECT count(*) FROM (" + source + ")").Scan(&count); err != nil || count != 64 {
 		t.Fatalf("captured rows=%d: %v", count, err)
 	}
-	narrow := d.snapshotSource("spans", captured[:1], captured, 0)
+	narrow := d.snapshotSource("spans", captured[:1], captured)
 	if strings.Contains(narrow, "*.batch") {
 		t.Fatal("narrow selection used glob")
 	}
@@ -429,7 +429,7 @@ func TestBatchFilenameIdentityWithRelativeDataDir(t *testing.T) {
 		t.Fatalf("relative cache batch identity=%d: %v", count, err)
 	}
 	active := repo.Parquet.BatchMetadata()
-	if err := d.DB.QueryRow(`SELECT count(*) FROM (` + d.snapshotSource("logs", active, active, 0) + `)`).Scan(&count); err != nil || count != readCacheBatchLimit {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM (` + d.snapshotSource("logs", active, active) + `)`).Scan(&count); err != nil || count != readCacheBatchLimit {
 		t.Fatalf("relative glob identity=%d: %v", count, err)
 	}
 }

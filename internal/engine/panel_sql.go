@@ -34,7 +34,7 @@ func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, 
 	trim := func(s string) string { return strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), ";")) }
 	// Describe the statement as snapshot binding will run it, with standard
 	// keys read through their columns.
-	described, _, err := compileRelations(ctx, conn, trim(describe), nil, map[string]string{})
+	described, err := compileRelations(ctx, conn, trim(describe), nil, map[string]string{})
 	if err != nil {
 		return "", nil, err
 	}
@@ -47,7 +47,7 @@ func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, 
 		// Timeline validation inspects driver column types with a zero-row
 		// execution. Bind its descriptor explicitly; real readers still require
 		// a repository and a logical inventory window.
-		execution, _, err = compileRelations(ctx, conn, execution, map[string]string{"resource_inventory": emptyResourceInventory}, map[string]string{})
+		execution, err = compileRelations(ctx, conn, execution, map[string]string{"resource_inventory": emptyResourceInventory}, map[string]string{})
 		if err != nil {
 			return "", nil, err
 		}

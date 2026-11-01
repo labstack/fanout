@@ -64,9 +64,7 @@ func CreateParquetViews(db *sql.DB, parquetDir string) error {
 	}
 	for _, signal := range telemetry.Signals {
 		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal.Name+".parquet"))
-		// Unpinned reads cannot see which files spilled, so every key reads
-		// its map where the column is NULL.
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=false, hive_partitioning=false)`, signal.Name, rawProjection(signal, ^uint64(0)), sqlLiteral(pattern))
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=false, hive_partitioning=false)`, signal.Name, rawProjection(signal), sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal.Name, err)
 		}
@@ -89,27 +87,20 @@ func CreateViews(db *sql.DB) error {
 }
 
 // rawProjection selects a signal's raw relation from its files: every stored
-// column except private ones, then the derived columns. The dedicated columns
-// of keys in spilled read coalesce(column, typed map value), which restores
-// the values a file holds only in its map; see keyValue.
-func rawProjection(s *telemetry.Signal, spilled uint64) string {
-	var private, replaced, derived []string
+// column except private ones, then the derived columns.
+func rawProjection(s *telemetry.Signal) string {
+	var private, derived []string
 	for _, c := range s.Columns {
 		switch {
 		case c.Private:
 			private = append(private, c.Name)
 		case !c.Stored():
 			derived = append(derived, c.Expr+" AS "+c.Name)
-		case c.Key != nil && spilled&(1<<c.Key.Bit) != 0:
-			replaced = append(replaced, "coalesce("+c.Name+","+keyValue(*c.Key)+") AS "+c.Name)
 		}
 	}
 	projection := "*"
 	if len(private) > 0 {
 		projection += " EXCLUDE (" + strings.Join(private, ", ") + ")"
-	}
-	if len(replaced) > 0 {
-		projection += " REPLACE (" + strings.Join(replaced, ", ") + ")"
 	}
 	for _, column := range derived {
 		projection += ", " + column

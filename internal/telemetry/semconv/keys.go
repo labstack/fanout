@@ -12,7 +12,7 @@ const (
 	Resource
 )
 
-// Type is the semconv value type; a column holds only values of this type.
+// Type is the semconv value type; a column holds values converted to it.
 type Type uint8
 
 const (
@@ -20,8 +20,8 @@ const (
 	Int
 )
 
-// Key is one dedicated column. Bit is the key's position in Keys and in the
-// per-row spill mask; Source is the semconv group that selected it.
+// Key is one dedicated column. Bit is the key's position in Keys, which
+// indexes per-key spill counts; Source is the semconv group that selected it.
 type Key struct {
 	Name   string
 	Scope  Scope

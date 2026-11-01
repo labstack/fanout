@@ -115,7 +115,7 @@ func writeDigestFile[R any](path string, s *Signal, rows []R) error {
 }
 
 // digestRows covers the writer's paths: chunks and sparse dedicated keys,
-// spilled and NULL values, shared, unique and absent resources, nested
+// converted, unconverted and NULL values, shared, unique and absent resources, nested
 // variants, lists, signed times and every metric layout.
 func digestRows(n int) ([]Span, []Log, []Metric) {
 	r := rand.New(rand.NewSource(5))
@@ -216,7 +216,11 @@ func digestMap(r *rand.Rand, scope semconv.Scope, i int) map[string]any {
 		case n == 0:
 			m[key.Name] = nil
 		case n == 1:
-			m[key.Name] = true // wrong type: spills
+			m[key.Name] = true // text on string keys, a spill on integer keys
+		case n == 2 && key.Type == semconv.Int:
+			m[key.Name] = fmt.Sprint(r.Intn(600)) // an integer sent as text
+		case n == 3:
+			m[key.Name] = float64(r.Intn(4)) / 2 // a spill on integer keys when not integral
 		case key.Type == semconv.Int:
 			m[key.Name] = int64(r.Intn(600))
 		default:

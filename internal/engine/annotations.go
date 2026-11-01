@@ -26,8 +26,8 @@ const createAnomalyLogTable = `CREATE TABLE IF NOT EXISTS anomaly_log (
  namespace VARCHAR,service VARCHAR,kind VARCHAR,start_time TIMESTAMPTZ_NS,end_time TIMESTAMPTZ_NS,
  title VARCHAR,severity VARCHAR,PRIMARY KEY(namespace,service,kind,start_time))`
 
-// serviceVersion is read through the spill path, so a version sent as a
-// number is still a version.
+// serviceVersion reads its dedicated column, which holds a version sent as a
+// number as its text.
 var serviceVersion, _ = semconv.Lookup(semconv.Resource, "service.version")
 
 type versionRollupFailure struct {
@@ -222,7 +222,7 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		if len(selected) == 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf(`SELECT coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,%s AS service_version,%s AS t FROM (%s)`, serviceVersion.Column, s.Clock(), cleanSource(signal, d.physicalSource(signal, selected, 1<<serviceVersion.Bit))))
+		parts = append(parts, fmt.Sprintf(`SELECT coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,%s AS service_version,%s AS t FROM (%s)`, serviceVersion.Column, s.Clock(), cleanSource(signal, d.physicalSource(signal, selected))))
 	}
 	if len(parts) > 0 {
 		statement := `INSERT INTO version_rollup SELECT namespace,service,service_version,min(t),max(t) FROM (` + strings.Join(parts, " UNION ALL ") + `) WHERE service<>'' AND service_version IS NOT NULL AND service_version<>'' GROUP BY 1,2,3

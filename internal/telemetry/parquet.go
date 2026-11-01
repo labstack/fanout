@@ -64,11 +64,6 @@ type BatchMetadata struct {
 	SpanTime   TimeRange `json:"-"`
 	LogTime    TimeRange `json:"-"`
 	MetricTime TimeRange `json:"-"`
-	// Spill masks have the bit of each standard key that some row of the
-	// signal's file holds only in its map, from the footer's spill counts.
-	SpanSpill   uint64 `json:"-"`
-	LogSpill    uint64 `json:"-"`
-	MetricSpill uint64 `json:"-"`
 }
 
 // Signal returns the signal's event-time bounds and row count.
@@ -77,25 +72,19 @@ func (m BatchMetadata) Signal(s *Signal) (TimeRange, int) {
 	return *f.time, *f.rows
 }
 
-// Spilled returns the mask of standard keys whose values some row of the
-// signal's file holds only in its map; their dedicated columns are
-// incomplete in that file.
-func (m BatchMetadata) Spilled(s *Signal) uint64 { return *m.signal(s).spill }
-
 type signalMetadata struct {
-	rows  *int
-	time  *TimeRange
-	spill *uint64
+	rows *int
+	time *TimeRange
 }
 
 func (m *BatchMetadata) signal(s *Signal) signalMetadata {
 	switch s {
 	case Spans:
-		return signalMetadata{&m.Spans, &m.SpanTime, &m.SpanSpill}
+		return signalMetadata{&m.Spans, &m.SpanTime}
 	case Logs:
-		return signalMetadata{&m.Logs, &m.LogTime, &m.LogSpill}
+		return signalMetadata{&m.Logs, &m.LogTime}
 	case Metrics:
-		return signalMetadata{&m.Metrics, &m.MetricTime, &m.MetricSpill}
+		return signalMetadata{&m.Metrics, &m.MetricTime}
 	}
 	panic("unknown signal " + s.Name)
 }
@@ -1174,15 +1163,6 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, *count)
 		}
 		*fields.time = parquetTimeRange(parquetFile, signal.Time)
-		counts, err := readSpills(parquetFile, signal)
-		if err != nil {
-			return nil, fmt.Errorf("%s Parquet: %w", signal.Name, err)
-		}
-		for _, key := range signal.Keys() {
-			if counts[key.Bit] > 0 {
-				*fields.spill |= 1 << key.Bit
-			}
-		}
 	}
 	var traces traceIndex
 	if metadata.Spans > 0 {
@@ -1194,8 +1174,8 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
 }
 
-// readSpills reads the footer's count of spilled rows for each of the
-// signal's standard keys, by key bit.
+// readSpills reads the footer's count of spills for each of the signal's
+// standard keys, by key bit.
 func readSpills(file *parquet.File, s *Signal) (spills, error) {
 	var counts spills
 	keys := map[string]uint8{}

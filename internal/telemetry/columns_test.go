@@ -112,7 +112,8 @@ func TestRegistryMatchesWrittenSchema(t *testing.T) {
 
 // A complete canonical row of each signal reads back through the native
 // engine as the values written out here by hand, column by column: required
-// and nullable scalars, dedicated columns with one spilled key, lists and
+// and nullable scalars, dedicated columns with converted values and a NULL
+// for a value with no conversion, lists and
 // lists of VARIANT.
 func TestRegistryColumnsRoundTrip(t *testing.T) {
 	span, log, metric, exponential := completeTestSpan(), completeTestLog(), completeTestMetric(), exponentialTestMetric()
@@ -147,8 +148,9 @@ func TestRegistryColumnsRoundTrip(t *testing.T) {
 			"rpc_service": "orders.v1.Orders", "peer_service": "payments",
 			"exception_type": "CardDeclined", "exception_message": "declined",
 			"_a_http_request_method": "POST", "_a_http_response_status_code": "500", "_r_service_version": "4.5.6",
-			// server.port and k8s.container.restart_count are integers sent as text.
-			"_spill": "16842752",
+			// server.port is an integer sent as text; k8s.container.restart_count
+			// is text with no integer, so its column is NULL.
+			"_a_server_port": "443",
 		}, Spans)}},
 		{Logs, func(path string) error { return writeParquet(path, Logs, []Log{log}, parquetPageSize) }, []map[string]string{nulls(map[string]string{
 			"namespace": "tenant", "log_time": "1970-01-01 00:00:00.000000011+00", "observed_time": "1970-01-01 00:00:00.000000013+00",
@@ -156,7 +158,7 @@ func TestRegistryColumnsRoundTrip(t *testing.T) {
 			"body": "declined", "service": "checkout", "trace_id": "trace", "span_id": "span", "flags": "1",
 			"resource": "{'host': one, 'k8s.pod.name': checkout-1}", "attributes": "{'attempt': 2}",
 			"scope_name": "scope", "scope_version": "1.2.3", "ingested_at": "1970-01-01 00:00:00.000000014+00",
-			"ingested_unix_nano": "14", "body_template": "declined: {reason}", "_r_k8s_pod_name": "checkout-1", "_spill": "0",
+			"ingested_unix_nano": "14", "body_template": "declined: {reason}", "_r_k8s_pod_name": "checkout-1",
 		}, Logs)}},
 		{Metrics, func(path string) error {
 			return writeParquet(path, Metrics, []Metric{metric, exponential}, parquetPageSize)
@@ -172,7 +174,7 @@ func TestRegistryColumnsRoundTrip(t *testing.T) {
 			"exemplar_times": "['1970-01-01 00:00:00.000000021+00']", "exemplar_values": "[3.0]",
 			"exemplar_trace_ids": "[trace]", "exemplar_span_ids": "[span]", "exemplar_attributes": "[{'user': 7}]",
 			"attributes": "{'route': /pay}", "resource": "{'host': one}", "scope_name": "scope", "scope_version": "1.2.3",
-			"ingested_at": "1970-01-01 00:00:00.000000024+00", "ingested_unix_nano": "24", "_spill": "0",
+			"ingested_at": "1970-01-01 00:00:00.000000024+00", "ingested_unix_nano": "24",
 		}, Metrics), nulls(map[string]string{
 			"series_id": "9223372036854775809", "namespace": "tenant", "metric_time": "1970-01-01 00:00:00.000000031+00",
 			"time_unix_nano": "31", "name": "request.duration", "description": "", "unit": "ms",
@@ -184,7 +186,7 @@ func TestRegistryColumnsRoundTrip(t *testing.T) {
 			"quantiles": "NULL", "quantile_values": "NULL",
 			"exemplar_times": "[]", "exemplar_values": "[]", "exemplar_trace_ids": "[]", "exemplar_span_ids": "[]",
 			"exemplar_attributes": "[]", "attributes": "NULL", "resource": "NULL", "scope_name": "", "scope_version": "",
-			"ingested_at": "1970-01-01 00:00:00+00", "ingested_unix_nano": "0", "_spill": "0",
+			"ingested_at": "1970-01-01 00:00:00+00", "ingested_unix_nano": "0",
 		}, Metrics)}},
 	} {
 		t.Run(test.signal.Name, func(t *testing.T) {
@@ -271,9 +273,9 @@ func engineRowsQuery(t *testing.T, query string) []map[string]string {
 func TestColumnEncodingsArePinned(t *testing.T) {
 	dict, delta := map[string][]string{
 		"spans": {"kind", "status", "event_names", "link_trace_states", "trace_state", "scope_name", "scope_version",
-			"rpc_service", "peer_service", "exception_type", "_spill"},
-		"logs":    {"namespace", "severity", "service", "scope_name", "scope_version", "body_template", "_spill"},
-		"metrics": {"namespace", "name", "description", "unit", "type", "temporality", "service", "hist_bounds", "quantiles", "scope_name", "scope_version", "_spill"},
+			"rpc_service", "peer_service", "exception_type"},
+		"logs":    {"namespace", "severity", "service", "scope_name", "scope_version", "body_template"},
+		"metrics": {"namespace", "name", "description", "unit", "type", "temporality", "service", "hist_bounds", "quantiles", "scope_name", "scope_version"},
 	}, map[string][]string{
 		"spans":   {"start_time", "end_time", "start_unix_nano", "end_unix_nano", "ingested_at", "ingested_unix_nano"},
 		"logs":    {"log_time", "observed_time", "time_unix_nano", "observed_time_unix_nano", "ingested_at", "ingested_unix_nano"},
@@ -334,7 +336,7 @@ func TestRegistryColumnsAreConsistent(t *testing.T) {
 				}
 				views[c.View.Name] = true
 			}
-			if c.Stored() == (c.get == nil) != (c.Key != nil || c.Name == "_spill") {
+			if c.Stored() == (c.get == nil) != (c.Key != nil) {
 				t.Errorf("%s.%s: stored columns need an accessor, derived and dedicated ones none", s.Name, c.Name)
 			}
 			if c.Private && c.View.Name != "" {
@@ -450,7 +452,7 @@ func fileRows(t *testing.T, path string, s *Signal) []map[string]any {
 			for _, value := range row {
 				path := columns[value.Column()]
 				c, _ := s.Column(path[0])
-				if len(path) != 1 || c.Null || c.Key != nil || c.Name == "_spill" {
+				if len(path) != 1 || c.Null || c.Key != nil {
 					continue
 				}
 				switch c.Type {
