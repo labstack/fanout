@@ -114,6 +114,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
     staleAt && !refreshError ? `Stale: last updated ${relativeTime(staleAt, now)}` : undefined,
     result?.frame?.truncated || result?.previous?.truncated ? "Truncated: showing limited data" : undefined,
     note, result?.annotation_error,
+    // A count that matched nothing shows its 0; the diagnosis says why.
+    result?.status === "ok" ? result.diagnosis : undefined,
     result?.annotation_scope?.limited ? "Annotation service scope is limited." : undefined,
   ].filter((text): text is string => Boolean(text)))];
   const body = useRef<HTMLDivElement>(null);

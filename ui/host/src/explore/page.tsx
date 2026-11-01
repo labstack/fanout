@@ -50,9 +50,9 @@ type ExploreRun = { kind: Kind; source: string; window: string; panel: Panel; re
 
 /** New panels must return rows; an edited panel may be legitimately empty now, so a clean run is enough. */
 function canKeep(run: ExploreRun | undefined, editing: boolean): boolean {
-  // A run with no rows reports "empty", not "ok".
+  // A run with no rows reports "empty", not "ok"; a stat counting nothing has a 0 total and no rows.
   if (editing) return run?.result.status === "ok" || run?.result.status === "empty";
-  return run?.result.status === "ok" && (run.result.frame?.rows ?? 0) > 0;
+  return run?.result.status === "ok" && ((run.result.frame?.rows ?? 0) > 0 || run.result.frame?.totals !== undefined);
 }
 
 /** Explore inside a dashboard: its variables resolve, and saving writes the panel there. */

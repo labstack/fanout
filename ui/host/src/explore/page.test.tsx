@@ -352,6 +352,14 @@ describe("ExplorePage", () => {
     expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("saves a count of zero", async () => {
+    runQuery = async () => json({ results: [{ id: "explore", status: "ok", elapsed_ms: 3, diagnosis: "No spans for service nope in this time range.", frame: { ...frame, values: [[], []], rows: 0, totals: [null, 0] } }] });
+    const { ui, type, click, wait } = await render();
+    await type("spans where service:nope | count()");
+    await click("Run");
+    await wait(() => expect(ui.getByRole("button", { name: "Save to dashboard" }).getAttribute("aria-disabled")).toBe("false"));
+  });
+
   it("aborts the previous run when another starts", async () => {
     let first: AbortSignal | undefined;
     parse = async body => json(parsed(body.text));

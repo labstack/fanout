@@ -382,3 +382,10 @@ it.each(["traces","logs","table","log_patterns"] as const)("reserves a separate 
   expect(body.contains(footer)).toBe(false);expect(body.nextElementSibling).toBe(footer);
   expect(footer.style.flexShrink).toBe("0");
 });
+
+it("shows a zero count's diagnosis as a note under the 0",async()=>{
+  const frame={columns:[{name:"time",type:"time" as const,role:"time" as const},{name:"count",type:"number" as const,role:"measure" as const}],values:[[],[]],rows:0,totals:[null,0]};
+  const h=await render({...p,viz:"stat"},{...r,frame,diagnosis:"No spans for service nope in this time range."});
+  expect(h.querySelector('[data-stat-value]')?.textContent).toBe("0");
+  expect([...h.querySelectorAll('[data-panel-note]')].map(n=>n.textContent)).toEqual(["No spans for service nope in this time range."]);
+});
