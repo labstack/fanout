@@ -163,6 +163,7 @@ func TestStarsHideDedicatedColumns(t *testing.T) {
 		`WITH s AS (SELECT * FROM spans) SELECT *, attributes['http.route'] AS r FROM s`,
 		`SELECT * FROM (SELECT * FROM metrics) UNION ALL SELECT * FROM metrics`,
 		`SELECT * FROM (SELECT * EXCLUDE (attributes) FROM spans)`,
+		`SELECT * FROM (SELECT * FROM spans) AS t(a)`,
 	} {
 		rows, err := d.QueryContext(ctx, query+` LIMIT 0`)
 		if err != nil {

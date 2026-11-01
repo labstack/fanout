@@ -369,9 +369,11 @@ func (r *keyRewriter) from(value any, scope *keyScope) {
 		catalog, _ := ref["catalog_name"].(string)
 		bind(name, r.table(name, schema, catalog, scope.parent))
 	case "SUBQUERY":
+		// Renamed columns cannot pass the dedicated columns on, so its stars
+		// leave them out, as a statement's result does.
 		subquery, _ := ref["subquery"].(map[string]any)
 		node, _ := subquery["node"].(map[string]any)
-		bind("", r.query(node, scope.parent))
+		bind("", r.queryAt(node, scope.parent, renamed))
 	case "JOIN":
 		r.from(ref["left"], scope)
 		r.from(ref["right"], scope)
