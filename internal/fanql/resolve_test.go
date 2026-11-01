@@ -192,6 +192,8 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"logs where severity>=custom", `"custom" has no severity rank; use trace, debug, info, warn, error or fatal`},
 		{"logs where severity>=unspecified", `"unspecified" has no severity rank`},
 		{"spans where http_status_code>500ms", "units apply to duration only; write http_status_code>500"},
+		{"spans where durationn>1s", `"durationn" is not a spans column; did you mean duration?`},
+		{"logs where durationn>1s", "durationn takes a number, not a unit; write durationn>1"},
 		{"spans where duration>500", "duration needs a unit; e.g. duration>500ms"},
 		{"spans where duration>-1ms", "durations are not negative"},
 		{"spans where duration>1h30m", "compound durations are not supported; write 90m"},

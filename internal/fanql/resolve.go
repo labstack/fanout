@@ -525,6 +525,18 @@ func (r *resolver) value(f *fieldName, v *literalValue, op string, multi bool) {
 					break
 				}
 			}
+			columns, _ := r.vocab.columns(r.out.Query.Source)
+			if !slices.ContainsFunc(columns, func(c query.Field) bool { return c.Name == "duration_ms" }) {
+				// Only spans have a duration; elsewhere a unit has no meaning.
+				r.issue(v.At, fmt.Sprintf("%s takes a number, not a unit; write %s%s%s", f.Key, f.Key, op, text))
+				return
+			}
+			if f.Scope == "" && !f.Bracket && ref.Column == "attributes" && suggest.Spelling(strings.ToLower(f.Key), []string{"duration"}) == "did you mean duration?" {
+				at := textSpan(f.At)
+				r.problems = append(r.problems, query.Problem{Path: r.path, Message: fmt.Sprintf("%q is not a %s column; did you mean duration?", f.Key, r.out.Query.Source),
+					Span: at, FixIts: []query.FixIt{{Label: "duration", Span: *at, Text: "duration"}}})
+				return
+			}
 			r.issue(v.At, "units apply to duration only; write "+f.Key+op+text)
 			return
 		}
