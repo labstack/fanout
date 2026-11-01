@@ -17,7 +17,11 @@ const oneLine = EditorView.theme({
   ".cm-content": { padding: "8px 4px" },
   // The list stays clear of the screen edge, and on a phone its descriptions wrap instead of being cut.
   ".cm-tooltip.cm-tooltip-autocomplete > ul": { maxWidth: "min(700px, calc(100vw - 40px))" },
-  "@media (max-width: 600px)": { ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { whiteSpace: "normal" } },
+  // A wrapped description hangs under the label, past the type icon.
+  "@media (max-width: 600px)": {
+    ".cm-tooltip.cm-tooltip-autocomplete > ul > li": { whiteSpace: "normal", paddingLeft: "calc(3px + 1.4em)", textIndent: "-1.4em" },
+    ".cm-tooltip.cm-tooltip-autocomplete > ul > li .cm-completionIcon": { fontSize: "inherit", width: "1em", paddingRight: "0.4em", textIndent: "0" },
+  },
 });
 /** Marks a transaction that applies the value prop, so it is not reported back as an edit. */
 const fromProp = Annotation.define<boolean>();

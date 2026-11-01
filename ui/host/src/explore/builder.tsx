@@ -168,7 +168,8 @@ export function Builder({ query, schema, variables = [], labels = {}, onChange, 
         const shown = typing?.row === index ? typing.text : c.field === durationField && !c.quoted && durationMs(c.value) !== undefined && !isDraft ? durationText(Number(c.value)) : c.value;
         return <Group key={index} gap="xs" wrap="nowrap" align="flex-start">
           <Select aria-label={`Filter ${index + 1} field`} w={260} searchable allowDeselect={false} value={c.field} data={rowField(c.field)} onChange={field => field && update({ field })} />
-          <Select aria-label={`Filter ${index + 1} operator`} w={90} allowDeselect={false} value={c.op} data={[...operators]} onChange={op => op && update({ op: op as Condition["op"] })} />
+          {/* The operator keeps its width on a narrow screen; the field and value give way. */}
+          <Select aria-label={`Filter ${index + 1} operator`} w={90} style={{ flexShrink: 0 }} allowDeselect={false} value={c.op} data={[...operators]} onChange={op => op && update({ op: op as Condition["op"] })} />
           {c.field === "service" && schema.services?.length
             ? <Select aria-label={`Filter ${index + 1} value`} w={220} searchable value={c.value || null} data={[...variables.map(name => `$${name}`), ...schema.services.map(s => s.value)]} onChange={value => update({ value: value ?? "" })} />
             : <TextInput aria-label={`Filter ${index + 1} value`} w={220} placeholder={isDraft ? "Value" : undefined} value={shown} error={wrong}
