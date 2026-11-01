@@ -191,7 +191,7 @@ Field position means a `where` term read as a field (0.3 rule 4), a measure argu
 - Registry invariant, tested: column names contain no `.`, so a dotted key is never a column. A segment that is not an identifier (`x-y.z`) is `"x-y.z" needs brackets`; in measure context, where `-` is an operator, `count_distinct(x-y)` is `unexpected - in count_distinct; write attributes['x-y']`.
 - `duration` is `duration_ms` in filters, measures and `sort`; `time`, `start_time`, `end_time` are time columns (`"time" is a time column; compare it with > or <`).
 - In measure context a dotted word is one `Path` token (`count_distinct(user.id)`, `avg(attributes.http.response_size)`, `p95(resource.k)`); a token starting with a digit is a number (`count() * 1.5`). After `by` the lexer is back in filter context, so `by resource.k8s.pod.name` is a word read as a field.
-- In value position a dotted word is a value (`name:http.server.duration`).
+- In value position a dotted word is a value (`name:http.server.request.duration`).
 
 #### 0.6 Entries and variables
 
@@ -269,7 +269,7 @@ The reference says beside `!=`: "rows without `k` are excluded; `-k:v` includes 
 | Timestamp | `"2026-10-29T10:00:00Z"`, `"2026-10-29 10:00:00"` (quoted; optional fraction and offset; no offset means UTC) | Only on time columns; lowered to `'…'::TIMESTAMPTZ_NS`. Elsewhere a string. |
 | Variable | `$service` | 0.6 |
 | Existence | `k:*` | `IS NOT NULL`; `-k:*` is `IS NULL`. The only accepted `*` in a value. |
-| Free text | `timeout`, `"connection reset"` | `contains(lower(body), lower(text))` on logs, `operation` on spans; metrics: `free text needs a field on metrics; use name:http.server.duration`. |
+| Free text | `timeout`, `"connection reset"` | `contains(lower(body), lower(text))` on logs, `operation` on spans; metrics: `free text needs a field on metrics; use name:http.server.request.duration`. |
 | Raw | `` `expr` `` | below |
 
 **`http_status_code`** is a text column. Comparisons `< <= > >=` and `between` on it lower through `TRY_CAST(http_status_code AS INTEGER)` so `>=500` is numeric; equality and `in` stay on the text column (`= '500'`) so the standalone-equality shape survives. One catalog flag (`compareAs: integer`) on one field.

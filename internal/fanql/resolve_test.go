@@ -198,7 +198,7 @@ func TestResolveDiagnostics(t *testing.T) {
 		{"spans where duration_ms:true", "duration_ms needs a number"},
 		{"logs where time:x", `"time" is a time column; compare it with > or <`},
 		{`spans where start_time>"yesterday"`, "RFC 3339"},
-		{"metrics where timeout", "free text needs a field on metrics; use name:http.server.duration"},
+		{"metrics where timeout", "free text needs a field on metrics; use name:http.server.request.duration"},
 		{"spans where P95(Duration)", "function p95 is not allowed in a filter"},
 		{"spans where starts_with(http_route, /api)", "starts_with needs a quoted string"},
 		{"logs where length(body)", "length(...) needs a comparison"},

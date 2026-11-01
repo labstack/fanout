@@ -1612,7 +1612,7 @@
   "problems": [
     {
       "path": "text",
-      "message": "name: needs a value; e.g. name:http.server.duration",
+      "message": "name: needs a value; e.g. name:http.server.request.duration",
       "span": {
         "start": 14,
         "end": 19
@@ -1730,7 +1730,7 @@
   "problems": [
     {
       "path": "where[0]",
-      "message": "free text needs a field on metrics; use name:http.server.duration",
+      "message": "free text needs a field on metrics; use name:http.server.request.duration",
       "span": {
         "start": 14,
         "end": 21

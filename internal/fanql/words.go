@@ -136,7 +136,7 @@ func message(code diagnosticCode) string {
 	case diagSQL:
 		return "SQL is not FanQL; start with the source, e.g. spans | count() by service"
 	case diagPromQL:
-		return "PromQL is not FanQL; start with the source, e.g. metrics where name:http.server.duration | rate() by service"
+		return "PromQL is not FanQL; start with the source, e.g. metrics where name:http.server.request.duration | rate() by service"
 	case diagKusto:
 		return "Kusto is not FanQL; filters follow the source and measures follow one |, e.g. %s where service:api | count() by service"
 	case diagPipeWhere:

@@ -14,7 +14,7 @@ func TestDiagnosticExamplesUseFieldVocabulary(t *testing.T) {
 		{"spans where kind:", "kind:server"},
 		{"spans where status:", "status:error"},
 		{"metrics where type:", "type:gauge"},
-		{"metrics where name:", "name:http.server.duration"},
+		{"metrics where name:", "name:http.server.request.duration"},
 		{"logs where service:", "service:api"},
 		{"spans where enabled:", "enabled:true"},
 	} {

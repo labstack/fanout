@@ -1760,7 +1760,7 @@ func fieldExample(field fieldName, op string) string {
 		}
 		return "error"
 	case "name":
-		return "http.server.duration"
+		return "http.server.request.duration"
 	case "duration":
 		return "500ms"
 	case "enabled":
@@ -1797,7 +1797,7 @@ func listExamples(field fieldName) string {
 		case "severity":
 			return "warn, error"
 		case "name":
-			return "http.server.duration, http.server.requests"
+			return "http.server.request.duration, http.client.request.duration"
 		case "duration":
 			return "500ms, 1s"
 		}
