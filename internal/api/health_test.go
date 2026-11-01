@@ -186,7 +186,12 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 }
 
 func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) {
-	duck := &engine.Duck{}
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	duck := &engine.Duck{DB: db}
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan error, 1)
