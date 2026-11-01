@@ -89,7 +89,12 @@ traces. Deploy markers and anomaly bands provide context; they do not establish
 the cause of a change.
 
 For queries that need it, a panel can use guarded SQL: one read-only `SELECT`
-over approved telemetry relations, with a required time-window filter. Logs,
+over approved telemetry relations, with a required time-window filter. It
+cannot call edit distances such as `levenshtein`, and the pattern of `LIKE`,
+`ILIKE`, `GLOB`, `SIMILAR TO` and the `regexp_` functions must be a literal of
+at most 256 bytes: DuckDB stops a query only between batches of rows, and
+these are the functions whose cost per row could keep one batch running long
+past its deadline. Logs,
 log patterns, traces and scatter use structured queries. SQL state timelines
 return timestamp `time`, a string item, one numeric measure and optional string
 `state`, with thresholds.

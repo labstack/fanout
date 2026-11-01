@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,52 @@ func TestExecuteSQLRejectsEngineMetadataReads(t *testing.T) {
 	} {
 		if response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement}); response.Error == "" {
 			t.Errorf("executed forbidden query %s", statement)
+		}
+	}
+}
+
+// DuckDB checks for interrupts only between chunks of up to 2,048 rows, so a
+// function whose per-row cost grows with the product of two input sizes can
+// run a statement for most of an hour past its deadline. Edit distances are
+// blocked; pattern matches take a short literal pattern.
+func TestSQLBoundaryRejectsQuadraticRowCosts(t *testing.T) {
+	db := openTestDuck(t)
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	long := "'" + strings.Repeat("a", maxPatternBytes+1) + "'"
+	for query, want := range map[string]string{
+		"SELECT max(levenshtein(repeat('a',20000), repeat('b',20000)||x::varchar)) FROM range(2048) t(x)": `function "levenshtein" is not available to telemetry SQL`,
+		"SELECT damerau_levenshtein(service_name, 'x') FROM spans":                                        `function "damerau_levenshtein" is not available`,
+		"SELECT editdist3(service_name, 'x') FROM spans":                                                  `function "editdist3" is not available`,
+		"SELECT * FROM spans WHERE service_name LIKE '%' || repeat('a', 10000)":                           "pattern of LIKE must be a literal",
+		"SELECT * FROM spans WHERE service_name ILIKE name":                                               "pattern of ILIKE must be a literal",
+		"SELECT * FROM spans WHERE service_name NOT LIKE name":                                            "pattern of NOT LIKE must be a literal",
+		"SELECT * FROM spans WHERE service_name GLOB name":                                                "pattern of GLOB must be a literal",
+		"SELECT * FROM spans WHERE service_name SIMILAR TO name":                                          "pattern of regexp_full_match must be a literal",
+		"SELECT * FROM spans WHERE service_name ~ name":                                                   "pattern of regexp_matches must be a literal",
+		"SELECT regexp_replace(name, service_name, '') FROM spans":                                        "pattern of regexp_replace must be a literal",
+		"SELECT * FROM spans WHERE like_escape(name, service_name, '\\')":                                 "pattern of like_escape must be a literal",
+		"SELECT * FROM spans WHERE regexp_matches(name, " + long + ")":                                    "at most 256 bytes",
+		"SELECT * FROM spans WHERE list_has_any(['x'], list_transform(['y'], s -> s LIKE name))":          "pattern of LIKE must be a literal",
+	} {
+		err := validateSQLAST(ctx, conn, query, false)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", query, err, want)
+		}
+	}
+	for _, query := range []string{
+		"SELECT * FROM spans WHERE name LIKE 'GET %' AND name NOT ILIKE '%health%'",
+		"SELECT * FROM spans WHERE regexp_matches(name, 'error.*') OR name SIMILAR TO 'a.*'",
+		"SELECT regexp_extract(name, '([a-z]+)', 1), string_split_regex(name, '[/ ]') FROM spans",
+		"SELECT * FROM spans WHERE name LIKE 'x%'::VARCHAR",
+		"SELECT jaro_winkler_similarity(name, 'checkout'), contains(name, service_name) FROM spans",
+	} {
+		if err := validateSQLAST(ctx, conn, query, false); err != nil {
+			t.Errorf("rejected %s: %v", query, err)
 		}
 	}
 }

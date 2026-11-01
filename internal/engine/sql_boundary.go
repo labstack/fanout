@@ -28,6 +28,70 @@ var blockedSQLFunctions = map[string]bool{
 	"glob": true, "http_get": true, "write_file": true, "write_log": true,
 	"current_query": true, "current_query_id": true,
 	"pg_get_viewdef": true, "pg_get_constraintdef": true, "format_type": true, "get_block_size": true,
+	// Edit distances cost the product of their inputs' lengths per row; see
+	// patternFunctions.
+	"levenshtein": true, "editdist3": true, "damerau_levenshtein": true,
+}
+
+// DuckDB checks for interrupts only between chunks of up to 2,048 rows, so
+// one chunk's work must stay within a deadline. Linear per-row work is
+// bounded by the memory the chunk's values occupy, which the memory limit
+// caps; work that grows with the product of two input sizes is not. Measured
+// per chunk of 20,000-character values: levenshtein 21 minutes and
+// damerau_levenshtein 60 (blocked: every argument is a value); a computed
+// 10,000-character LIKE pattern, compiled per row, 2.5 minutes and a computed
+// SIMILAR TO pattern 25; a literal 10,000-byte regular expression 13 to 27
+// minutes, a 1 KiB one about a second, a 256-byte one 0.06 s. Patterns must
+// therefore be literals of at most maxPatternBytes. Linear functions (jaro,
+// jaccard, hamming, contains, list set operations) took 4 to 27 s a chunk of
+// 20,000 to 40,000 elements.
+//
+// patternFunctions maps each pattern match to its name in errors.
+var patternFunctions = map[string]string{
+	"~~": "LIKE", "!~~": "NOT LIKE", "~~*": "ILIKE", "!~~*": "NOT ILIKE", "~~~": "GLOB",
+	"like_escape": "like_escape", "not_like_escape": "not_like_escape",
+	"ilike_escape": "ilike_escape", "not_ilike_escape": "not_ilike_escape",
+	"~": "regexp_matches", "regexp_matches": "regexp_matches", "regexp_full_match": "regexp_full_match",
+	"regexp_replace": "regexp_replace", "regexp_extract": "regexp_extract", "regexp_extract_all": "regexp_extract_all",
+	"regexp_split_to_array": "regexp_split_to_array", "regexp_split_to_table": "regexp_split_to_table",
+	"string_split_regex": "string_split_regex", "str_split_regex": "str_split_regex",
+}
+
+const maxPatternBytes = 256
+
+// literalPattern reports whether a pattern argument is a string literal, cast
+// or not, of at most maxPatternBytes.
+func literalPattern(node map[string]any) bool {
+	for node["class"] == "CAST" {
+		child, ok := node["child"].(map[string]any)
+		if !ok {
+			return false
+		}
+		node = child
+	}
+	if node["class"] != "CONSTANT" {
+		return false
+	}
+	literal, _ := node["literal"].(map[string]any)
+	text, _ := literal["text"].(string)
+	return len(text) <= maxPatternBytes
+}
+
+func checkPattern(node map[string]any, name string) error {
+	label, ok := patternFunctions[strings.ToLower(name)]
+	if !ok {
+		return nil
+	}
+	arguments, _ := node["arguments"].([]any)
+	if len(arguments) < 2 {
+		return nil
+	}
+	argument, _ := arguments[1].(map[string]any)
+	expression, _ := argument["expression"].(map[string]any)
+	if !literalPattern(expression) {
+		return fmt.Errorf("the pattern of %s must be a literal of at most %d bytes", label, maxPatternBytes)
+	}
+	return nil
 }
 
 func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain bool) (queryrows.Rows, []bool, error) {
@@ -59,7 +123,9 @@ func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain 
 		}
 	}
 	started := time.Now()
+	done := d.begin(ctx, query)
 	rows, err := conn.QueryContext(ctx, execQuery)
+	done(err)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
 		return nil, nil, err
@@ -250,8 +316,13 @@ func validateSQLNode(value any, ctes map[string]bool, panel bool) error {
 				return fmt.Errorf("table function %q is not available to telemetry SQL", name)
 			}
 		}
-		if name, ok := node["function_name"].(string); ok && blockedSQLFunctions[strings.ToLower(name)] {
-			return fmt.Errorf("function %q is not available to telemetry SQL", name)
+		if name, ok := node["function_name"].(string); ok {
+			if blockedSQLFunctions[strings.ToLower(name)] {
+				return fmt.Errorf("function %q is not available to telemetry SQL", name)
+			}
+			if err := checkPattern(node, name); err != nil {
+				return err
+			}
 		}
 		for key, child := range node {
 			if key == "cte_map" {
