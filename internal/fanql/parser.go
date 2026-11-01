@@ -1,6 +1,7 @@
 package fanql
 
 import (
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/suggest"
 )
 
 const (
@@ -1330,10 +1332,30 @@ func (p *parser) unexpected() {
 		p.wildcard(literalValue{Text: t.Text, At: t.Span})
 		return
 	}
+	if p.clauseTypo() {
+		p.take()
+		return
+	}
 	if !p.foreignTerm() {
 		p.report(t.Span, diagUnexpected, t.Text)
 		p.take()
 	}
+}
+
+// clauseTypo reports the next word when it misspells a clause keyword, such
+// as evry for every, with the keyword as its fix.
+func (p *parser) clauseTypo() bool {
+	t := p.peek()
+	if t.Kind != tokenIdent && t.Kind != tokenWord || len(t.Text) < 3 || clauses[p.lower()] {
+		return false
+	}
+	hint := suggest.Spelling(p.lower(), slices.Sorted(maps.Keys(clauses)))
+	if hint == "" {
+		return false
+	}
+	word := strings.TrimSuffix(strings.TrimPrefix(hint, "did you mean "), "?")
+	p.fix(t.Span, diagnostic(diagUnexpected, t.Text)+"; "+hint, "", query.FixIt{Label: word, Span: query.TextSpan{Start: t.Span.Start, End: t.Span.End}, Text: word})
+	return true
 }
 
 func (p *parser) skipStage() {
@@ -1486,7 +1508,7 @@ func (p *parser) stage(start int) *aggregation {
 			}
 			continue
 		}
-		if expr != nil && p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] && !foreignStages[p.lower()] && !p.groupBy() {
+		if expr != nil && p.peek().Kind != eof && !p.is("|") && !clauses[p.lower()] && !foreignStages[p.lower()] && !p.groupBy() && !p.clauseTypo() {
 			p.report(p.peek().Span, diagMeasureComma)
 		}
 		if p.i == before {

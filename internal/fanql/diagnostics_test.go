@@ -328,3 +328,21 @@ func TestEditSpansCountCodePoints(t *testing.T) {
 		t.Fatalf("problem span %+v covers %q", ps[0].Span, got)
 	}
 }
+
+// A misspelled clause keyword offers the keyword as a fix.
+func TestCompileClauseTypoOffersKeyword(t *testing.T) {
+	for _, tt := range []struct{ text, typo, word string }{
+		{"spans | count() by service evry 1m", "evry", "every"},
+		{"spans | count() evry 1m", "evry", "every"},
+		{"spans | count() by service sortt count", "sortt", "sort"},
+	} {
+		_, ps := Compile(tt.text, Options{})
+		if len(ps) != 1 || ps[0].Message != "unexpected "+tt.typo+"; did you mean "+tt.word+"?" || len(ps[0].FixIts) != 1 || ps[0].FixIts[0].Text != tt.word {
+			t.Errorf("%q: %+v", tt.text, ps)
+			continue
+		}
+		if s := ps[0].FixIts[0].Span; tt.text[s.Start:s.End] != tt.typo {
+			t.Errorf("%q: fix span %+v", tt.text, s)
+		}
+	}
+}
