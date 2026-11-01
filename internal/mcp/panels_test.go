@@ -113,8 +113,8 @@ func TestPreviewPanelsReportsEachPanel(t *testing.T) {
 	if out.ElapsedMS < 0 || out.Panels[0].ElapsedMS != nil || out.Panels[1].ElapsedMS != nil {
 		t.Fatalf("invalid/not_run timing = %+v", out)
 	}
-	_, out, err = s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
-	if err != nil || out.Panels[0].Status != "empty" || out.Panels[0].Diagnosis == "" {
+	result, out, err := s.previewPanels(t.Context(), nil, PreviewInput{Panels: []query.Panel{{ID: "requests", Title: "Requests", Viz: "stat", Query: &query.Spec{From: "spans", Measures: []string{"count()"}}}}})
+	if err != nil || out.Panels[0].Status != "ok" || out.Panels[0].Diagnosis == "" || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "requests counted nothing: No spans") {
 		t.Fatalf("empty store preview = %+v %v", out.Panels, err)
 	}
 }

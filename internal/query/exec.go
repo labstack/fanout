@@ -503,7 +503,20 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if frame.Rows > 0 {
 		e.applyMetricUnit(ctx, p, checked, scope, frame, res.Previous)
 	}
-	if frame.Rows > 0 && p.Query != nil && p.Query.From != "metrics" && p.Viz != "state_timeline" && hasMeasure(frame) && !measuresHaveValue(frame) {
+	zero := zeroCount(p, checked.Measures[p.ID], frame)
+	if zero && frame.Rows == 0 {
+		// The stat's buckets are empty, so its total is the count's 0.
+		frame.Totals = make([]any, len(frame.Columns))
+		for i, c := range frame.Columns {
+			if c.Role == "measure" {
+				frame.Totals[i] = 0.0
+			}
+		}
+	}
+	if zero {
+		// A count of nothing is a real 0; the diagnosis says why, as a hint.
+		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
+	} else if frame.Rows > 0 && p.Query != nil && p.Query.From != "metrics" && p.Viz != "state_timeline" && hasMeasure(frame) && !measuresHaveValue(frame) {
 		// Rows whose every measure is null have nothing to plot. A state
 		// timeline draws null buckets as unknown, so it keeps them.
 		res.Status = StatusEmpty
@@ -512,7 +525,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			noun = "these measures"
 		}
 		res.Diagnosis = fmt.Sprintf("The matching %s have no values for %s in this time range.", rowNoun(p), noun)
-	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || zeroCount(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
+	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
 	}
@@ -718,17 +731,22 @@ func measuresHaveValue(f *Frame) bool {
 	return false
 }
 
-// zeroCount reports an ungrouped count that found no rows. Such a query
-// always returns one row, so a table would show a bare 0 where a stat, whose
-// buckets are empty, explains why.
+// zeroCount reports an ungrouped count that found no rows. A table gets one
+// row holding 0; a stat or gauge totalling the window gets no buckets.
 func zeroCount(p *Panel, measures []Measure, frame *Frame) bool {
-	if p.Query == nil || len(p.Query.By) > 0 || p.Query.Bucket != "" || frame.Rows != 1 || len(measures) == 0 {
+	if p.Query == nil || len(p.Query.By) > 0 || p.Query.Bucket != "" || len(measures) == 0 {
 		return false
 	}
 	for _, m := range measures {
 		if m.Func != "count" || m.IsExpression() {
 			return false
 		}
+	}
+	if frame.Rows == 0 {
+		return vizSpecs[p.Viz].reduces && p.Reduce == "window"
+	}
+	if frame.Rows != 1 {
+		return false
 	}
 	for i, c := range frame.Columns {
 		if c.Role == "measure" {

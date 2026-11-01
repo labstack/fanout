@@ -162,6 +162,10 @@ func previewSummary(out PreviewOutput) string {
 			}
 		case "empty":
 			notes = append(notes, fmt.Sprintf("%s is empty: %s", p.ID, p.Diagnosis))
+		case "ok":
+			if p.Diagnosis != "" {
+				notes = append(notes, fmt.Sprintf("%s counted nothing: %s", p.ID, p.Diagnosis))
+			}
 		case "error":
 			notes = append(notes, fmt.Sprintf("%s failed: %s", p.ID, p.Error))
 		}

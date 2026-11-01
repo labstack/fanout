@@ -281,7 +281,8 @@ func (s *Server) checkDashboardPanels(ctx context.Context, spec query.Dashboard)
 		r, exists := byID[p.ID]
 		// Execution status records data presence before the shared batch budget
 		// truncates frames, which can remove every row from a populated panel.
-		if exists && r.Status == query.StatusOK {
+		// A count that matched nothing is a 0 with a diagnosis: no data either.
+		if exists && r.Status == query.StatusOK && r.Diagnosis == "" {
 			continue
 		}
 		diagnosis := query.PresentDiagnosis(r.Diagnosis)

@@ -77,7 +77,7 @@ func TestDiagnosisValuesSeen(t *testing.T) {
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := Dashboard{Name: "Seen", Time: Time{Range: "1h"}}
 	for i, where := range []string{"trace_id = 'nope'", "span_id = 'nope'", "http_route = '/missing'"} {
-		d.Panels = append(d.Panels, Panel{ID: fmt.Sprint("p", i), Title: "Spans", Viz: "stat", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{where}}})
+		d.Panels = append(d.Panels, Panel{ID: fmt.Sprint("p", i), Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{where}}})
 	}
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
@@ -93,25 +93,37 @@ func TestDiagnosisValuesSeen(t *testing.T) {
 	}
 }
 
-// A count of nothing is an empty panel on every viz: a table answers as a
-// stat does, with the diagnosis, rather than with a bare zero.
-func TestZeroCountIsEmptyOnEveryViz(t *testing.T) {
+// A count of nothing is a real 0 on every viz, with the diagnosis as a hint:
+// a stat answers as a table does. A grouped count with no rows has no row
+// to show and stays empty.
+func TestZeroCountIsZeroWithHint(t *testing.T) {
 	e := newFixtureExecutor(t)
 	d := Dashboard{Name: "Zero", Time: Time{Range: "1h"}}
-	for _, viz := range []string{"stat", "table"} {
+	for _, viz := range []string{"stat", "gauge", "table"} {
 		d.Panels = append(d.Panels, Panel{ID: viz, Title: "Spans", Viz: viz, Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'nope'"}}})
 	}
-	d.Panels = append(d.Panels, Panel{ID: "found", Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'frontend'"}}})
+	lo, hi := 0.0, 100.0
+	d.Panels[1].Min, d.Panels[1].Max = &lo, &hi
+	d.Panels = append(d.Panels,
+		Panel{ID: "grouped", Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{"service = 'nope'"}}},
+		Panel{ID: "found", Title: "Spans", Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}, Where: []string{"service = 'frontend'"}}})
 	got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
 	if err != nil {
 		t.Fatal(err)
 	}
+	const hint = "No spans for service nope in this time range."
 	for _, r := range got[:2] {
-		if r.Status != StatusEmpty || !strings.HasPrefix(r.Diagnosis, "No spans for service nope in this time range.") {
+		if r.Status != StatusOK || !strings.HasPrefix(r.Diagnosis, hint) || r.Frame == nil || len(r.Frame.Totals) != 2 || r.Frame.Totals[1] != 0.0 {
 			t.Errorf("%s: %+v", r.ID, r)
 		}
 	}
-	if r := got[2]; r.Status != StatusOK {
-		t.Errorf("%+v", r)
+	if r := got[2]; r.Status != StatusOK || !strings.HasPrefix(r.Diagnosis, hint) || r.Frame.Rows != 1 || r.Frame.Values[0][0] != 0.0 {
+		t.Errorf("table: %+v", r)
+	}
+	if r := got[3]; r.Status != StatusEmpty || !strings.HasPrefix(r.Diagnosis, hint) {
+		t.Errorf("grouped: %+v", r)
+	}
+	if r := got[4]; r.Status != StatusOK || r.Diagnosis != "" {
+		t.Errorf("found: %+v", r)
 	}
 }

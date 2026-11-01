@@ -173,7 +173,7 @@ func TestRunBindsHostileValuesAsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if results[0].Status != StatusEmpty {
+	if results[0].Status != StatusOK || results[0].Frame.Totals[1].(float64) != 0 {
 		t.Fatalf("hostile value = %+v", results[0])
 	}
 	again, err := e.Run(t.Context(), RunRequest{Dashboard: shopDashboard(), Panels: []string{"requests"}})
