@@ -106,7 +106,9 @@ func lex(text string) lexTokens {
 				}
 			}
 			tok.Text = string(r[start:i])
-			if depth == 0 && brackets == 0 {
+			// After as, a word is an alias, even one spelled where.
+			alias := len(ts) > 0 && strings.EqualFold(ts[len(ts)-1].Text, "as")
+			if depth == 0 && brackets == 0 && !(alias && strings.EqualFold(tok.Text, "where")) {
 				switch strings.ToLower(tok.Text) {
 				case "by", "every", "sort", "limit", "where":
 					ctx = filterContext

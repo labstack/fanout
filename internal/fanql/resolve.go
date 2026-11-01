@@ -165,30 +165,13 @@ func (r *resolver) metricGroups(q *queryTree) {
 		return
 	}
 	for _, e := range q.Where {
-		var field fieldName
-		var value literalValue
-		switch x := e.(type) {
-		case *comparison:
-			if x.Op != ":" && x.Op != "=" {
-				continue
-			}
-			field, value = x.Field, x.Value
-		case *inExpr:
-			if x.Negated || x.Variable == "" && len(x.Values) != 1 {
-				continue
-			}
-			field = x.Field
-			if x.Variable != "" {
-				value = literalValue{Kind: variableValue, Text: "$" + x.Variable}
-			} else {
-				value = x.Values[0]
-			}
-		default:
+		// The run reads only an equality: in, even with one value, does not
+		// name one metric.
+		x, ok := e.(*comparison)
+		if !ok || x.Op != ":" && x.Op != "=" || x.Field.Ref == nil || x.Field.Ref.Column != "name" || x.Field.Ref.Key != "" {
 			continue
 		}
-		if field.Ref == nil || field.Ref.Column != "name" || field.Ref.Key != "" {
-			continue
-		}
+		value := x.Value
 		if value.Kind != variableValue {
 			return
 		}

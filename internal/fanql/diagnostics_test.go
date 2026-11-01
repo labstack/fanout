@@ -219,8 +219,10 @@ func TestCompileMetricAggregateNeedsOneMetric(t *testing.T) {
 			t.Errorf("%q: %+v", text, ps)
 		}
 	}
-	if _, ps := Compile("metrics where name in $many | avg(value)", Options{Variables: vars}); len(ps) != 1 || ps[0].Message != want {
-		t.Errorf("multi variable: %+v", ps)
+	for _, text := range []string{"metrics where name in $many | avg(value)", "metrics where name in $one | avg(value)", "metrics where name in (a) | avg(value)"} {
+		if _, ps := Compile(text, Options{Variables: vars}); len(ps) != 1 || ps[0].Message != want {
+			t.Errorf("%q: %+v", text, ps)
+		}
 	}
 }
 
@@ -283,6 +285,10 @@ func TestCompileForeignQueryLanguages(t *testing.T) {
 	if c, ps := Compile("spans where service:cart | count() by service", Options{}); c == nil {
 		t.Errorf("fixed: %+v", ps)
 	}
+	// where after as is an alias, not a misplaced where.
+	if c, ps := Compile("spans where service:a | count() as where", Options{}); c == nil {
+		t.Errorf("alias where: %+v", ps)
+	}
 	_, ps = Compile("spans where kind:server | where service:cart | count()", Options{})
 	if len(ps) != 1 || ps[0].FixIts[0].Text != "and" {
 		t.Errorf("second where: %+v", ps)
@@ -290,5 +296,22 @@ func TestCompileForeignQueryLanguages(t *testing.T) {
 	// An unknown source that does not read as PromQL keeps its own message.
 	if _, ps := Compile("spams | count()", Options{}); len(ps) != 1 || ps[0].Message != `unknown source "spams"` {
 		t.Errorf("spams: %+v", ps)
+	}
+}
+
+// Spans count code points, as the editor converts them: text before the
+// fix-it with multi-byte characters does not shift it.
+func TestFixItSpansCountCodePoints(t *testing.T) {
+	text := `spans where service:"café☕" | cuont()`
+	_, ps := Compile(text, Options{})
+	if len(ps) != 1 || len(ps[0].FixIts) != 1 {
+		t.Fatalf("%+v", ps)
+	}
+	fix, r := ps[0].FixIts[0], []rune(text)
+	if got := string(r[fix.Span.Start:fix.Span.End]); got != "cuont" {
+		t.Fatalf("span %+v covers %q", fix.Span, got)
+	}
+	if got := string(r[ps[0].Span.Start:ps[0].Span.End]); got != "cuont()" {
+		t.Fatalf("problem span %+v covers %q", ps[0].Span, got)
 	}
 }
