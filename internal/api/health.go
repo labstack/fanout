@@ -28,7 +28,7 @@ type HealthHandler struct {
 
 type readPool interface {
 	Stalled() bool
-	Ping(context.Context) error
+	Live(context.Context) error
 }
 
 // NewHealthHandler creates a new health handler
@@ -56,19 +56,19 @@ type HealthResponse struct {
 	RuntimeSizing config.RuntimeSizing   `json:"runtime_sizing"`
 }
 
-// livenessPingTimeout keeps the confirming ping inside the container health
-// check's 3 s timeout.
+// livenessPingTimeout keeps the engine's confirming ping inside the
+// container health check's 3 s timeout.
 const livenessPingTimeout = time.Second
 
 // Liveness returns 200 while the process can serve (Kubernetes liveness
-// probe). A read pool that has made no progress for longer than reads may run
-// is wedged and only a restart frees it, so liveness fails once a ping
-// confirms it; an idle pool records no progress either, but answers.
+// probe). It fails only for an engine that a restart would free: one that
+// stopped honouring statement deadlines, or an idle one that cannot answer a
+// ping. An overloaded engine, however saturated, is alive.
 func (h *HealthHandler) Liveness(c *echo.Context) error {
-	if h.pool != nil && h.pool.Stalled() {
+	if h.pool != nil {
 		ctx, cancel := context.WithTimeout(c.Request().Context(), livenessPingTimeout)
 		defer cancel()
-		if err := h.pool.Ping(ctx); err != nil {
+		if err := h.pool.Live(ctx); err != nil {
 			return c.String(http.StatusServiceUnavailable, "engine stalled")
 		}
 	}
@@ -96,9 +96,23 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 	for name, probe := range probes {
 		go func() { results <- named{name, probe(ctx)} }()
 	}
+	// A probe stuck in an engine that ignores cancellation never returns, so
+	// waiting stops shortly after the deadline and names it.
+	start := time.Now()
+	late := time.After(readinessTimeout + 100*time.Millisecond)
+collect:
 	for range probes {
-		result := <-results
-		resp.Checks[result.name] = result.result
+		select {
+		case result := <-results:
+			resp.Checks[result.name] = result.result
+		case <-late:
+			break collect
+		}
+	}
+	for name := range probes {
+		if _, ok := resp.Checks[name]; !ok {
+			resp.Checks[name] = h.failedCheck(ctx, start, context.DeadlineExceeded)
+		}
 	}
 
 	resp.Checks["data"] = h.checkDataDir()
@@ -216,9 +230,9 @@ var readinessTimeout = 800 * time.Millisecond
 // failedCheck classifies a probe error. A probe that ran out its deadline
 // waited behind long reads holding the engine's connections: the instance
 // still serves, so it is degraded rather than unready, and /readyz does not
-// flap out of rotation under load. A stalled read pool times out the same
-// way but never recovers, so it fails readiness, as /healthz does. Any other
-// error is a failing engine. The deadline is checked on ctx as well: a driver
+// flap out of rotation under load. An engine that stopped honouring statement
+// deadlines times out the same way but never recovers, so it fails readiness,
+// as /healthz does. Any other error is a failing engine. The deadline is checked on ctx as well: a driver
 // may report the cancelled statement in its own words.
 func (h *HealthHandler) failedCheck(ctx context.Context, start time.Time, err error) CheckResult {
 	res := CheckResult{Status: "unhealthy", LatencyMs: time.Since(start).Milliseconds(), Error: err.Error()}

@@ -186,8 +186,9 @@ normally. Healthcheck reads only these two settings and does not require valid
 secrets. An explicit `fanout healthcheck <url>` uses default proxy and
 certificate verification behaviour.
 
-- `/healthz` is the liveness check. It fails when the query engine's read
-  pool has made no progress for 75 seconds and does not answer a ping.
+- `/healthz` is the liveness check. It fails when a query runs 25 seconds
+  past its deadline, or when an idle engine does not answer a ping. An
+  overloaded engine stays alive.
 - `/readyz` includes storage readiness and resolved runtime sizing. A busy
   engine reports `degraded` with 200; a stalled one reports 503.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure

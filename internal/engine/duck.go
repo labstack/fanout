@@ -37,9 +37,10 @@ type Duck struct {
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
-	// progress is when a read statement last completed, in Unix
-	// nanoseconds; see Stalled.
-	progress atomic.Int64
+	// progress is when a read statement last returned, in Unix
+	// nanoseconds, and statements are those in flight; see Live.
+	progress   atomic.Int64
+	statements statements
 	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
 	// second Close would call duckdb_close twice on the same instance, which
@@ -1928,9 +1929,11 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		}
 	}
 	started := time.Now()
+	done := d.begin(deadline(ctx))
 	rows, err := db.QueryContext(ctx, query, args...)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
+		done()
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
 		return nil, err
@@ -1946,11 +1949,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		// on every path; this is what it costs if one stops.
 		endRead(conn, tx)
 		d.parquetMu.RUnlock()
-		// Rows that ended without an error came from a statement that ran;
-		// a cancelled or timed-out one is no progress.
-		if rows.Err() == nil {
-			d.noteProgress()
-		}
+		done()
 	}
 	return &lockedRows{Rows: rows, unlock: release}, nil
 }
@@ -2038,11 +2037,8 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
 	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
-	err = conn.QueryRowContext(ctx, query, args...).Scan(dest...)
-	if err == nil || errors.Is(err, sql.ErrNoRows) {
-		d.noteProgress()
-	}
-	return err
+	defer d.begin(deadline(ctx))()
+	return conn.QueryRowContext(ctx, query, args...).Scan(dest...)
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
