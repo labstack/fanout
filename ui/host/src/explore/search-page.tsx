@@ -122,7 +122,7 @@ export function SearchPage({ preset, search, onSearch, onSaved, onExplore }: {
       const combined = combine(filters, picked);
       const shift = filters.trim() && picked ? 1 : 0;
       setShifted({ shift, length: Array.from(filters).length });
-      const parsed = await parseFanql({ text: combined, source: preset.source, viz: preset.viz }, abort.signal);
+      const parsed = await parseFanql({ text: combined, source: preset.source, viz: preset.viz, window: time.from && time.to ? undefined : time.range }, abort.signal);
       if (abort.signal.aborted) return;
       // Notice spans index the text that was sent, as problem spans do.
       if (current.current === filters) setNotices(parsed.notices);

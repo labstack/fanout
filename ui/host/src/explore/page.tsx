@@ -115,6 +115,8 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
   const resultBox = useRef<HTMLDivElement>(null);
   const help = useId();
   const time = exploreTime(search);
+  // Parse checks keys against the schema cached for a relative window; an absolute one has none.
+  const relative = time.from && time.to ? undefined : time.range;
   // Async continuations read the navigation as it is when they finish.
   const searchNow = useRef(search); searchNow.current = search;
   // The entry the last run wrote, so Back and Forward can tell another entry apart.
@@ -160,7 +162,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
         record({ ...searchNow.current, q: source, viz: panel.viz });
       } else if (kind === "query") {
         // Parse without the previous viz: a new query shape may not fit it.
-        const next = await parseFanql({ text: source, variables }, abort.signal);
+        const next = await parseFanql({ text: source, variables, window: relative }, abort.signal);
         if (abort.signal.aborted) return;
         setParsed({ ...next, text: source });
         // Notice spans index the text that was sent, as problem spans do.
@@ -247,7 +249,7 @@ export function ExplorePage({ search, onSearch, onSaved, context }: {
     // An empty editor starts the Builder from an example; the text stays empty until the user edits or runs it.
     if (!text.trim()) { setBuilt(starter); show(); void format(starter, false); return; }
     try {
-      const next = await parseFanql({ text, variables });
+      const next = await parseFanql({ text, variables, window: relative });
       setParsed({ ...next, text }); setBuilt(next.query); show(); void format(next.query, false);
     } catch (failure) {
       if (failure instanceof ApiError && failure.problems.length > 0) setProblems(failure.problems);

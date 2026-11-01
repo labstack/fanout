@@ -51,7 +51,7 @@ describe("SearchPage", () => {
   it("opens with the newest logs and runs the logs viz sorted by time", async () => {
     const { wait } = await render(logsPreset);
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
-    expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "", source: "logs", viz: "logs" });
+    expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "", window: "1h", source: "logs", viz: "logs" });
     expect(bodies("/api/queries/run")[0].dashboard.panels[0]).toMatchObject({ viz: "logs", query: { from: "logs", sort: "time" } });
   });
 
@@ -62,7 +62,7 @@ describe("SearchPage", () => {
     await act(async () => view.dispatch({ changes: { from: 0, insert: "service:checkout" } }));
     await act(async () => ui.getByRole("button", { name: "Search" }).click());
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
-    expect(bodies("/api/fanql/parse")[1]).toEqual({ text: "service:checkout", source: "spans", viz: "traces" });
+    expect(bodies("/api/fanql/parse")[1]).toEqual({ text: "service:checkout", window: "1h", source: "spans", viz: "traces" });
     expect(bodies("/api/queries/run")[1].dashboard.panels[0]).toMatchObject({ viz: "traces", query: { from: "spans", where: ["service = 'checkout'"], sort: "duration_ms" } });
   });
 
@@ -198,7 +198,7 @@ describe("SearchPage", () => {
     const { wait, onSearch, search, ui } = await render(logsPreset, { q: "service:b" });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => onSearch({ ...search(), q: "service:a" }));
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "service:a", source: "logs", viz: "logs" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "service:a", window: "1h", source: "logs", viz: "logs" }));
     expect(EditorView.findFromDOM(ui.getByRole("textbox", { name: "Search logs" }))!.state.doc.toString()).toBe("service:a");
   });
 
@@ -206,7 +206,7 @@ describe("SearchPage", () => {
     const { ui, wait, search } = await render(tracesPreset, { q: "operation:GET" });
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await act(async () => ui.getByRole("switch", { name: "Errors only" }).click());
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "(operation:GET) status:error", source: "spans", viz: "traces" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "(operation:GET) status:error", window: "1h", source: "spans", viz: "traces" }));
     expect(search().picks).toEqual({ errors: "1" });
     const runs = bodies("/api/queries/run").length;
     await act(async () => { fireEvent.change(ui.getByRole("textbox", { name: "Slower than (ms)" }), { target: { value: "500" } }); });
@@ -221,7 +221,7 @@ describe("SearchPage", () => {
 
   it("filters logs by service and severity from the URL", async () => {
     const { ui, wait } = await render(logsPreset, { picks: { service: "billing", severity: "warn" } });
-    await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"billing\" severity>=warn", source: "logs", viz: "logs" }));
+    await wait(() => expect(bodies("/api/fanql/parse")[0]).toEqual({ text: "service:\"billing\" severity>=warn", window: "1h", source: "logs", viz: "logs" }));
     // A service missing from the recent schema still shows as chosen.
     await wait(() => expect(ui.getByLabelText<HTMLInputElement>("Service", { selector: "input" }).value).toBe("billing"));
   });

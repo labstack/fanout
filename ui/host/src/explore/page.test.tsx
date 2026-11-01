@@ -134,7 +134,7 @@ describe("ExplorePage", () => {
     expect(onSearch.mock.calls.map(([next, replace]) => [next.q, replace])).toEqual([["spans | count()", false], ["spans | count() by service", false], ["spans | count() by service", true]]);
     // The router hands back the earlier entry.
     await act(async () => onSearch({ ...search(), q: "spans | count()" }));
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()", window: "1h" }));
     expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(4));
   });
@@ -148,6 +148,7 @@ describe("ExplorePage", () => {
     await act(async () => { fireEvent.change(field("From"), { target: { value: "2026-10-30T10:00" } }); fireEvent.change(field("To"), { target: { value: "2026-10-30T11:00" } }); });
     await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Apply range")!.click());
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(2));
+    // An absolute window sends no window name.
     expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count()" });
     expect(ui.getByRole("textbox", { name: "FanQL query" }).textContent).toBe("spans | count()");
   });
@@ -311,7 +312,7 @@ describe("ExplorePage", () => {
     const options = within(ui.getByRole("radiogroup", { name: "Visualization" })).getAllByRole<HTMLInputElement>("radio");
     expect(options.map(option => [option.value, option.disabled])).toEqual([["table", false], ["bar", false], ["state_timeline", true]]);
     await click("Time series…");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service every auto", window: "1h" }));
   });
 
   it("marks the result stale after an edit and only saves a fresh run with rows", async () => {
@@ -381,7 +382,7 @@ describe("ExplorePage", () => {
 
   it("runs a shared link on open", async () => {
     const { wait } = await render({ q: "spans | count() by service", viz: "table" });
-    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "spans | count() by service" }]));
+    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "spans | count() by service", window: "1h" }]));
     await wait(() => expect(bodies("/api/queries/run")[0].dashboard.panels[0].viz).toBe("table"));
   });
 
@@ -397,10 +398,10 @@ describe("ExplorePage", () => {
 
   it("does not pin a new query to the previous viz", async () => {
     const { type, click, wait } = await render({ q: "logs", viz: "logs" });
-    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "logs" }]));
+    await wait(() => expect(bodies("/api/fanql/parse")).toEqual([{ text: "logs", window: "1h" }]));
     await type("logs | count() by service");
     await click("Run");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "logs | count() by service" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "logs | count() by service", window: "1h" }));
   });
 
   it("reruns the edited text, not the last result, when the window changes", async () => {
@@ -410,7 +411,7 @@ describe("ExplorePage", () => {
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
     await type("spans | count() by service");
     await pick("Last 24 hours");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | count() by service", window: "24h" }));
     await wait(() => expect(bodies("/api/queries/run").at(-1).time).toEqual({ range: "24h", refresh: "off" }));
   });
 
@@ -497,7 +498,7 @@ describe("ExplorePage", () => {
     await wait(() => expect(ui.getByLabelText("Measure 1 function", { selector: "input" })).toBeTruthy());
     await wait(() => expect(bodies("/api/fanql/format")).toHaveLength(1));
     await click("Run");
-    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | p95(duration) by service" }));
+    await wait(() => expect(bodies("/api/fanql/parse").at(-1)).toEqual({ text: "spans | p95(duration) by service", window: "1h" }));
     await wait(() => expect(bodies("/api/queries/run")).toHaveLength(1));
   });
 
