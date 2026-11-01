@@ -206,7 +206,8 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		}
 	}
 	parts := []string{}
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		selected := []telemetry.BatchMetadata{}
 		for _, b := range pending {
 			if _, n := batchTime(b, signal); n > 0 {
@@ -216,12 +217,11 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		if len(selected) == 0 {
 			continue
 		}
-		version, column := `TRY_CAST(resource['service.version'] AS VARCHAR)`, "time"
+		version := `TRY_CAST(resource['service.version'] AS VARCHAR)`
 		if signal == "spans" {
 			version = "service_version"
-			column = "start_time"
 		}
-		parts = append(parts, fmt.Sprintf(`SELECT coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,%s AS service_version,%s AS t FROM (%s)`, version, column, cleanSource(signal, d.physicalSource(signal, selected))))
+		parts = append(parts, fmt.Sprintf(`SELECT coalesce(namespace,'') AS namespace,coalesce(service,'') AS service,%s AS service_version,%s AS t FROM (%s)`, version, s.Clock(), cleanSource(signal, d.physicalSource(signal, selected))))
 	}
 	if len(parts) > 0 {
 		statement := `INSERT INTO version_rollup SELECT namespace,service,service_version,min(t),max(t) FROM (` + strings.Join(parts, " UNION ALL ") + `) WHERE service<>'' AND service_version IS NOT NULL AND service_version<>'' GROUP BY 1,2,3

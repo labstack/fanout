@@ -50,8 +50,7 @@ var fieldTypes = map[telemetry.Type]FieldType{
 }
 
 func newSignal(source *telemetry.Signal, lowCard []string, columns ...column) *signal {
-	clock, _ := source.Column(source.Time)
-	s := &signal{name: source.Name, time: clock.View.Name, index: map[string]Field{}, lowCard: lowCard}
+	s := &signal{name: source.Name, time: source.Clock(), index: map[string]Field{}, lowCard: lowCard}
 	for _, c := range columns {
 		f, ok := source.Field(c.name)
 		typ, known := fieldTypes[f.Type]

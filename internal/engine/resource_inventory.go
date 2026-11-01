@@ -13,7 +13,8 @@ import (
 func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, markers map[string]bool, window queryrows.Window) string {
 	retained := window.RetainedInventory
 	var contributions []string
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	for _, s := range telemetry.Signals {
+		signal := s.Name
 		var interior []string
 		var raw []telemetry.BatchMetadata
 		for _, batch := range batches {
@@ -31,10 +32,7 @@ func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, marker
 			contributions = append(contributions, `SELECT signal,namespace,service,resource,first_seen,last_seen FROM read_resource_inventory WHERE signal=`+sqlLiteral(signal)+` AND batch_id IN (`+idsSQL(interior)+`)`)
 		}
 		if len(raw) > 0 {
-			clock := "time"
-			if signal == "spans" {
-				clock = "start_time"
-			}
+			clock := s.Clock()
 			predicate := "true"
 			if !retained {
 				predicate = windowPredicate(clock, window)

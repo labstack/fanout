@@ -72,6 +72,12 @@ func (s *Signal) Field(name string) (Field, bool) {
 	return Field{}, false
 }
 
+// Clock is the clean-view name of the event-time column.
+func (s *Signal) Clock() string {
+	c, _ := s.Column(s.Time)
+	return c.View.Name
+}
+
 // Signals lists every signal in file order.
 var Signals = []*Signal{Spans, Logs, Metrics}
 

@@ -274,13 +274,10 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		physical := strings.Replace(d.physicalSource(signal, selected), "SELECT ", "SELECT filename AS __fanout_filename,", 1)
 		return strings.Replace(cleanSource(signal, physical), "SELECT\n", "SELECT "+d.batchIDColumn(signal, "__fanout_filename")+" AS batch_id,\n", 1)
 	}
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		if rows := source(signal); rows != "" {
-			clock := "time"
-			if signal == "spans" {
-				clock = "start_time"
-			}
-			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,` + sqlLiteral(signal) + `,namespace,service,resource,min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY batch_id,namespace,service,resource`); err != nil {
+	for _, s := range telemetry.Signals {
+		if rows := source(s.Name); rows != "" {
+			clock := s.Clock()
+			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,` + sqlLiteral(s.Name) + `,namespace,service,resource,min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY batch_id,namespace,service,resource`); err != nil {
 				return 0, err
 			}
 		}
