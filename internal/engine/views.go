@@ -54,7 +54,7 @@ CREATE OR REPLACE MACRO attr(attributes, key) AS
 // A binding descriptor for panel validation, never the execution source.
 const emptyResourceInventory = `SELECT NULL::VARCHAR AS signal,NULL::VARCHAR AS namespace,NULL::VARCHAR AS service,NULL::VARIANT AS resource,NULL::TIMESTAMPTZ_NS AS first_seen,NULL::TIMESTAMPTZ_NS AS last_seen WHERE false`
 
-// CreateParquetViews exposes the fixed format-4 schema. Binding one file
+// CreateParquetViews exposes the fixed format-5 schema. Binding one file
 // rather than unioning every footer bounds binder memory. Supplying a schema
 // MAP suppresses DuckDB 2's VARIANT extraction pushdown, so read the physical
 // schema directly; startup rejects mismatched batch schemas before this point.

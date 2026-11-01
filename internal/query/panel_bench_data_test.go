@@ -107,7 +107,7 @@ func panelReplayMetadata(input string) ([]telemetry.BatchMetadata, error) {
 		out = append(out, m)
 	}
 	if len(out) == 0 {
-		return nil, errors.New("replay contains no format-4 batches")
+		return nil, errors.New("replay contains no format-5 batches")
 	}
 	return out, nil
 }
@@ -119,7 +119,7 @@ func copyMetricCrosscheckData(tb testing.TB, input string) panelBenchData {
 	tb.Helper()
 	metadata, err := panelReplayMetadata(input)
 	if err != nil {
-		tb.Fatal("cross-check input needs valid format-4 batch metadata")
+		tb.Fatal("cross-check input needs valid format-5 batch metadata")
 	}
 	data := panelBenchData{Dir: filepath.Join(panelBenchScratch(tb), "state")}
 	for _, m := range metadata {
@@ -507,7 +507,7 @@ func panelRowValue(row parquet.Row, column int) parquet.Value {
 	return parquet.Value{}
 }
 
-// Same format-4 sidecar contract as the production writer, streamed from the
+// Same format-5 sidecar contract as the production writer, streamed from the
 // sorted output. No private production symbol or new product API is needed.
 func panelTraceIndex(dir string) (err error) {
 	in, err := os.Open(filepath.Join(dir, "spans.parquet"))

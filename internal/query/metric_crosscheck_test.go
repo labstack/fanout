@@ -283,7 +283,7 @@ func TestMetricDemoDataMatchesIndependentWindowSQL(t *testing.T) {
 	names := panelBenchmarkMetricNames(t, engine, data)
 	histogram := names["histogram"]
 	if histogram == "" {
-		t.Fatal("format-4 fixture needs a histogram in the cross-check window")
+		t.Fatal("format-5 fixture needs a histogram in the cross-check window")
 	}
 	for _, tc := range []struct{ name, measure string }{
 		{"system.network.io", "rate()"}, {histogram, "p95(value)"}, {"system.memory.usage", "last(value)"},

@@ -14,11 +14,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Format 4 has one physical value per leaf column per row, including nulls:
-// nested attributes live in VARIANT, not repeated Parquet lists. Merge the
-// narrow sort keys of the signal's order once, then apply the same input-row
-// schedule to every physical column. No VARIANT reconstruction or wide-row
-// conversion is needed.
+// Merge the narrow sort keys of the signal's order once, then apply the same
+// input-row schedule to every physical column. A scalar leaf holds one value
+// per row, nulls included; a list leaf holds each row's elements as a run of
+// values, which mergeColumn copies by whole rows. No VARIANT reconstruction
+// or wide-row conversion is needed.
 // Columns own their input cursors and output buffers; only footer publication
 // is serial. At most eight columns decode/encode at once, sharing the existing
 // compression pool and preserving the ingest writer's row-group ceiling.

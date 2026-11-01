@@ -197,7 +197,7 @@ preserve candidate bounds without recomputation. Retention and incomplete
 replacements recompute only affected trace IDs from active contributions.
 A semantic version covers the cache schema and aggregation rules; a version
 change atomically discards all private
-read tables and rebuilds from authoritative format-4 Parquet. The background
+read tables and rebuilds from authoritative format-5 Parquet. The background
 worker processes bounded groups; `fanout_read_cache_pending_batches` reports its
 trace backlog independently of the service and edge rollups' publication horizon.
 Service-version observations populate their analytical rollup on a separate
