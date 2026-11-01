@@ -83,3 +83,30 @@ func TestDiagnosisSuggestsNearestMetricName(t *testing.T) {
 		t.Fatalf("diagnosis = %q", r.Diagnosis)
 	}
 }
+
+// Near misses are for names: a number or a short literal is no typo.
+func TestDiagnosisSuggestsOnlyNamedNearMisses(t *testing.T) {
+	engine, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	var spans []telemetry.Span
+	for i, svc := range []string{"ab", "abc"} {
+		id := string(rune('a' + i))
+		spans = append(spans, telemetry.Span{Namespace: "shop", ServiceName: svc, TraceID: id, SpanID: id, Name: "GET", Kind: "SPAN_KIND_SERVER",
+			StartUnixNanos: n + int64(i), EndUnixNanos: n + int64(i) + 1e6, DurationMS: 1, StatusCode: "STATUS_CODE_OK", HTTPStatusCode: "500", IngestedAt: n})
+	}
+	commit(t, repo, spans, nil)
+	e := NewExecutor(engine, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	for _, where := range []string{"http_status_code = '503'", "service = 'a'", "service = 'abd'"} {
+		d := Dashboard{Name: "Near", Time: Time{Range: "1h"}, Panels: []Panel{{ID: "a", Title: "A", Viz: "table",
+			Query: &Spec{From: "spans", Measures: []string{"count()"}, By: []string{"service"}, Where: []string{where}}}}}
+		got, err := e.Run(t.Context(), RunRequest{Dashboard: d})
+		if err != nil {
+			t.Fatal(err)
+		}
+		suggests := strings.Contains(got[0].Diagnosis, "Did you mean")
+		if want := where == "service = 'abd'"; suggests != want {
+			t.Errorf("%s: %q", where, got[0].Diagnosis)
+		}
+	}
+}

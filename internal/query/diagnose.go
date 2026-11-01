@@ -281,11 +281,14 @@ func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others
 	query := fmt.Sprintf("WITH g AS MATERIALIZED (SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1) "+
 		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5)", expr, structuredSource(sig.name), where, expr)
 	if literal := f.DisplayLiteral; literal != "" {
-		if fieldVocabularies[f.EqField].Signal != sig.name {
-			// A typo changes about one character in four; named values such
-			// as status error are already checked against their vocabulary.
-			query += " UNION ALL SELECT * FROM (SELECT v, n, 'near' FROM g WHERE v <> ? AND length(v) <= 128 AND levenshtein(v, ?) <= ? ORDER BY levenshtein(v, ?), n DESC, v LIMIT 1)"
-			args = append(args, literal, literal, utf8.RuneCountInString(literal)/4+1, literal)
+		if _, err := strconv.ParseFloat(literal, 64); err != nil && ref.Type == TypeString && utf8.RuneCountInString(literal) >= 3 && fieldVocabularies[f.EqField].Signal != sig.name {
+			// A typo changes about one character in four of a name; numbers,
+			// short literals and named values such as status error are no
+			// typos. Only the 1,000 most common values of the same length,
+			// give or take that, are compared, so an ID field stays cheap.
+			k := utf8.RuneCountInString(literal)/4 + 1
+			query += " UNION ALL SELECT * FROM (SELECT v, n, 'near' FROM (SELECT v, n, levenshtein(v, ?) AS d FROM (SELECT v, n FROM g WHERE v <> ? AND abs(length(v) - length(?)) <= ? ORDER BY n DESC, v LIMIT 1000)) WHERE d <= ? ORDER BY d, n DESC, v LIMIT 1)"
+			args = append(args, literal, literal, literal, k, k)
 		}
 		if strings.HasPrefix(f.EqField, "attributes[") || strings.HasPrefix(f.EqField, "resource[") {
 			query += " UNION ALL SELECT v, n, 'literal' FROM g WHERE v = ?"
