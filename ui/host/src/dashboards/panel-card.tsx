@@ -65,6 +65,8 @@ export function PanelCard({ panel, title, result, loading, compare, range, heigh
   const hint = panel.click ? `click to filter by ${panel.click.set_variable}`
     // A table row opens its own trace only when the row carries a trace_id; otherwise it lists exemplars.
     : panel.viz === "traces" || panel.viz === "table" && result?.frame?.columns.some(c => c.name === "trace_id") ? "click to open trace"
+    // Which of the two a traces table does depends on its columns, so it says nothing until they arrive.
+    : panel.viz === "table" && panel.drill === "traces" && !result?.frame ? undefined
     : panel.drill === "logs" ? "click for matching logs"
     : panel.drill === "traces" && ["table", "timeseries", "bar", "heatmap", "histogram", "scatter", "state_timeline"].includes(panel.viz) ? "click for exemplar traces" : undefined;
   const bodyHeight = Math.max(40, height - 88);

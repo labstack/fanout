@@ -81,6 +81,13 @@ it.each([
  const h=await render({id:"p",title:"Panel",...settings});
  expect(h.querySelector('[data-panel-subtitle]')?.textContent).toContain(hint);
 });
+it("gives a traces-drill table no hint until its columns are known",async()=>{
+ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);
+ const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanups.push(()=>root.unmount());
+ const panel:Panel={id:"p",title:"Panel",viz:"table",drill:"traces"};
+ await act(async()=>root.render(<MantineProvider><PanelCard panel={panel} title={panel.title} result={undefined} loading height={300} group="g" editing={false} agentAvailable={false} onView={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()}/></MantineProvider>));
+ expect(host.querySelector('[data-panel-subtitle]')?.textContent).toBe("table");
+});
 it("says a table row with a trace_id opens that trace",async()=>{
  const frame={columns:[{name:"trace_id",type:"string" as const,role:"dimension" as const},{name:"calls",type:"number" as const,role:"measure" as const}],values:[["abc"],[1]],rows:1};
  const h=await render({id:"p",title:"Panel",viz:"table",drill:"traces"},{...result,frame});
