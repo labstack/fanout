@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -26,6 +28,9 @@ import (
 //
 // The dedicated columns are part of the file layout, so the outermost SELECT
 // excludes them from its stars: users see the attributes and resource maps.
+// Stars inside expressions and COLUMNS(*) exclude them at every level,
+// COLUMNS patterns that match them and whole-row references to relations
+// that carry them are rejected.
 
 func keyMap(k semconv.Key) string {
 	if k.Scope == semconv.Span {
@@ -149,6 +154,7 @@ func (s *keyScope) lookup(qualifier []string, column string) (keyMapSource, bool
 type keyRewriter struct {
 	rewrites int
 	named    []namedItem
+	err      error
 }
 
 // namedItem keeps a rewritten select item's original expression: DuckDB names
@@ -162,6 +168,9 @@ type namedItem struct {
 func rewriteKeys(ctx context.Context, db snapshotSQL, statement map[string]any) error {
 	r := &keyRewriter{}
 	r.queryAt(statement, nil, true)
+	if r.err != nil {
+		return r.err
+	}
 	return r.name(ctx, db)
 }
 
@@ -280,6 +289,13 @@ func (r *keyRewriter) selectNode(node map[string]any, outer *keyScope, outermost
 			for _, item := range items {
 				item, _ := item.(map[string]any)
 				alias, _ := item["alias"].(string)
+				if item["class"] == "STAR" && item["columns"] != true {
+					// A plain star passes the columns on; its modifiers are
+					// expressions.
+					r.expr(item["replace_list"], scope)
+					r.expr(item["expr"], scope)
+					continue
+				}
 				if alias != "" || item["class"] == "STAR" {
 					r.expr(item, scope)
 					continue
@@ -301,36 +317,129 @@ func (r *keyRewriter) selectNode(node map[string]any, outer *keyScope, outermost
 	return out
 }
 
-// excludeHidden adds the dedicated columns each star passes on to its
-// exclude list.
+// excludeHidden adds the dedicated columns each plain star of a select list
+// passes on to its exclude list.
 func excludeHidden(value any, scope *keyScope) {
 	items, _ := value.([]any)
 	for _, item := range items {
 		item, _ := item.(map[string]any)
-		if item["class"] != "STAR" || item["columns"] == true || item["expr"] != nil {
-			continue
+		if item["class"] == "STAR" && item["columns"] != true && item["expr"] == nil {
+			excludeStar(item, scope)
 		}
-		star := &keyRelation{}
-		excluded := starExclusions(item)
-		for _, rel := range starRelations(item, scope) {
-			if rel != nil {
-				star.hide(rel.hidden, excluded)
+	}
+}
+
+// starHidden lists the dedicated columns a star would expand to.
+func starHidden(star map[string]any, scope *keyScope) []string {
+	hidden := &keyRelation{}
+	excluded := starExclusions(star)
+	for _, rel := range starRelations(star, scope) {
+		if rel != nil {
+			hidden.hide(rel.hidden, excluded)
+		}
+	}
+	names := make([]string, 0, len(hidden.hidden))
+	for name := range hidden.hidden {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+func excludeStar(star map[string]any, scope *keyScope) {
+	names := starHidden(star, scope)
+	if len(names) == 0 {
+		return
+	}
+	list, _ := star["exclude_list"].([]any)
+	for _, name := range names {
+		list = append(list, name)
+	}
+	star["exclude_list"] = list
+}
+
+// expressionStar hides the dedicated columns from a star inside an
+// expression, or from COLUMNS. A COLUMNS pattern cannot carry an exclude
+// list, so one that matches a dedicated column is rejected; a lambda filters
+// the star it is given, which excludes them itself.
+func (r *keyRewriter) expressionStar(star map[string]any, scope *keyScope) {
+	pattern, _ := star["expr"].(map[string]any)
+	if pattern == nil {
+		excludeStar(star, scope)
+		return
+	}
+	names := starHidden(star, scope)
+	if len(names) == 0 || r.err != nil {
+		return
+	}
+	literal, _ := pattern["literal"].(map[string]any)
+	text, _ := literal["text"].(string)
+	if pattern["class"] == "CONSTANT" && literal["kind"] == "STRING" {
+		re, err := regexp.Compile("(?i)" + text)
+		if err != nil {
+			r.err = fmt.Errorf("COLUMNS pattern %q is not available to telemetry SQL", text)
+			return
+		}
+		for _, name := range names {
+			if re.MatchString(name) {
+				r.err = fmt.Errorf("COLUMNS pattern %q matches internal column %q; use a pattern that leaves out names starting with _", text, name)
+				return
 			}
 		}
-		names := make([]string, 0, len(star.hidden))
-		for name := range star.hidden {
-			names = append(names, name)
-		}
-		if len(names) == 0 {
-			continue
-		}
-		slices.Sort(names)
-		list, _ := item["exclude_list"].([]any)
-		for _, name := range names {
-			list = append(list, name)
-		}
-		item["exclude_list"] = list
+		return
 	}
+	if !containsStar(pattern) {
+		r.err = errors.New("this COLUMNS expression is not available to telemetry SQL; use *, a pattern or a lambda")
+	}
+}
+
+func containsStar(value any) bool {
+	switch v := value.(type) {
+	case []any:
+		return slices.ContainsFunc(v, containsStar)
+	case map[string]any:
+		if v["class"] == "STAR" {
+			return true
+		}
+		for _, child := range v {
+			if containsStar(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// rowReference rejects a bare reference to a FROM binding that carries
+// dedicated columns: DuckDB reads it as the whole row, as a struct.
+func (r *keyRewriter) rowReference(node map[string]any, scope *keyScope) {
+	names := stringList(node["column_names"])
+	if len(names) != 1 || r.err != nil || signalColumn(names[0]) {
+		return
+	}
+	name := strings.ToLower(names[0])
+	for s := scope; s != nil; s = s.parent {
+		if rel, ok := s.relations[name]; ok {
+			if rel != nil && len(rel.hidden) > 0 {
+				r.err = fmt.Errorf("row reference %q is not available to telemetry SQL; select its columns", names[0])
+			}
+			return
+		}
+	}
+}
+
+// signalColumn reports whether a name is a column of some signal relation,
+// which DuckDB binds before a row reference.
+func signalColumn(name string) bool {
+	for _, s := range telemetry.Signals {
+		if _, ok := s.Column(name); ok {
+			return true
+		}
+		if _, ok := s.Field(name); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func starExclusions(star map[string]any) map[string]bool {
@@ -478,6 +587,17 @@ func starRelations(star map[string]any, scope *keyScope) []*keyRelation {
 	return scope.order
 }
 
+// selectScope is the nearest scope with FROM bindings, which an
+// unqualified star expands.
+func selectScope(scope *keyScope) *keyScope {
+	for s := scope; s != nil; s = s.parent {
+		if s.relations != nil {
+			return s
+		}
+	}
+	return scope
+}
+
 // collectNames gathers every string below a star's modifier lists; a name
 // that appears there no longer passes through unchanged.
 func collectNames(value any, names map[string]bool) {
@@ -516,6 +636,10 @@ func (r *keyRewriter) expr(value any, scope *keyScope) {
 			}
 			r.expr(v["child"], scope)
 			return
+		case "STAR":
+			r.expressionStar(v, selectScope(scope))
+		case "COLUMN_REF":
+			r.rowReference(v, scope)
 		}
 		for _, child := range v {
 			r.expr(child, scope)

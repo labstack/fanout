@@ -220,3 +220,49 @@ func TestLateralSubscriptsReadTheirSiblings(t *testing.T) {
 		}
 	}
 }
+
+// Expression stars and COLUMNS(*) leave the dedicated columns out at every
+// level; patterns that match them and whole-row references are rejected.
+func TestDedicatedColumnsStayHidden(t *testing.T) {
+	d, _ := newBatchCacheTest(t)
+	at := time.Now().UTC()
+	ctx := queryrows.WithWindow(t.Context(), queryrows.Window{Start: at.Add(-time.Hour), End: at})
+	for query, want := range map[string]string{
+		`SELECT COLUMNS('_a_http_route') FROM spans`:                  `matches internal column "_a_http_route"`,
+		`SELECT COLUMNS('.*route') FROM spans`:                        `matches internal column "_a_http_route"`,
+		`SELECT struct_extract(s, '_a_http_route') FROM spans s`:      `row reference "s" is not available`,
+		`SELECT s FROM spans s`:                                       `row reference "s" is not available`,
+		`WITH t AS (SELECT * FROM spans) SELECT to_json(t) FROM t`:    `row reference "t" is not available`,
+		`SELECT (SELECT max(length(spans::VARCHAR)) FROM spans) AS n`: `row reference "spans" is not available`,
+	} {
+		if _, err := d.QueryContext(ctx, query); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: %v, want %q", query, err, want)
+		}
+	}
+	for _, query := range []string{
+		`SELECT COLUMNS(*) FROM spans`,
+		`SELECT * FROM (SELECT COLUMNS(*) FROM logs)`,
+		`SELECT COLUMNS(lambda c: c LIKE '%e%') FROM spans`,
+		`SELECT COLUMNS('^res') FROM metrics`,
+		`SELECT * FROM (SELECT * FROM spans) WHERE COLUMNS(*) IS NOT NULL`,
+	} {
+		rows, err := d.QueryContext(ctx, query+` LIMIT 0`)
+		if err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		columns, err := rows.Columns()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range columns {
+			if _, internal := internalColumn(c); internal {
+				t.Fatalf("%s returns %s", query, c)
+			}
+		}
+	}
+	compiled, err := compileRelations(t.Context(), d.DB, `SELECT COLUMNS(lambda c: c LIKE '%e%') FROM (SELECT * FROM spans)`, nil, map[string]string{})
+	if err != nil || !strings.Contains(compiled, `list_filter(* EXCLUDE (`) {
+		t.Fatalf("%s: %v", compiled, err)
+	}
+}
