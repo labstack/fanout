@@ -293,6 +293,14 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 			if !cte && (catalog != "" || (schema != "" && schema != "main" && schema != "telemetry") || !allowed[strings.ToLower(name)]) {
 				return fmt.Errorf("table %q is not available to telemetry SQL", name)
 			}
+		case "SELECT_NODE":
+			// DuckDB 2.0.0 groups GROUP BY ALL keys without VARIANT collation, so
+			// equal attribute values split into separate groups. Explicit keys
+			// are collated; TestVariantGroupByAllSplitsEqualValues tracks the
+			// upstream fix case by case.
+			if node["aggregate_handling"] == "FORCE_AGGREGATES" {
+				return fmt.Errorf("GROUP BY ALL is not available to telemetry SQL; list the grouping keys explicitly")
+			}
 		case "TABLE_FUNCTION":
 			function, _ := node["function"].(map[string]any)
 			name, _ := function["function_name"].(string)

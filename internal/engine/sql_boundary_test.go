@@ -170,3 +170,57 @@ func TestSQLBoundaryRejectsQuadraticRowCosts(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLBoundaryRejectsGroupByAll(t *testing.T) {
+	db := openTestDuck(t)
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, query := range []string{
+		"SELECT attributes['k'] AS k, count(*) FROM spans GROUP BY ALL",
+		"SELECT * FROM (SELECT service_name, count(*) FROM spans GROUP BY ALL)",
+		"WITH t AS (SELECT name, count(*) n FROM spans GROUP BY ALL) SELECT * FROM t",
+	} {
+		err := validateSQLAST(ctx, conn, query)
+		if err == nil || !strings.Contains(err.Error(), "GROUP BY ALL is not available") {
+			t.Errorf("%s: err = %v", query, err)
+		}
+	}
+	for _, query := range []string{
+		"SELECT attributes['k'] AS k, count(*) FROM spans GROUP BY k",
+		"SELECT attributes['k'], count(*) FROM spans GROUP BY 1",
+		"SELECT DISTINCT attributes['k'] FROM spans",
+	} {
+		if err := validateSQLAST(ctx, conn, query); err != nil {
+			t.Errorf("rejected %s: %v", query, err)
+		}
+	}
+}
+
+// TestVariantGroupByAllSplitsEqualValues pins the upstream defect behind the
+// GROUP BY ALL rejection and the hashing caveat in the dashboards guide. When
+// a case fails, the engine fixed it: remove the matching rejection or caveat.
+func TestVariantGroupByAllSplitsEqualValues(t *testing.T) {
+	db := openTestDuck(t)
+	if _, err := db.Exec(`CREATE TABLE t AS SELECT * FROM (VALUES
+		('x'::VARIANT), (({'k':'x'}::VARIANT)['k']), (({'a':1,'k':'x'}::VARIANT)['k'])) v(k)`); err != nil {
+		t.Fatal(err)
+	}
+	for query, want := range map[string]int{
+		"SELECT count(*) FROM (SELECT k FROM t GROUP BY k)":   1,
+		"SELECT count(*) FROM (SELECT k FROM t GROUP BY ALL)": 3,
+		"SELECT approx_count_distinct(k) FROM t":              3,
+		"SELECT len(list_distinct(list(k))) FROM t":           3,
+	} {
+		var got int
+		if err := db.QueryRow(query).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("%s = %d groups, want %d", query, got, want)
+		}
+	}
+}

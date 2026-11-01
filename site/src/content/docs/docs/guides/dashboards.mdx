@@ -95,7 +95,14 @@ and the pattern of `LIKE`, `ILIKE`, `GLOB`, `SIMILAR TO` and the `regexp_`
 functions, in SQL or a filter, must be a literal or a variable, never a
 column, and at most 256 bytes: DuckDB stops a query only between batches of rows, and
 these are the functions whose cost per row could keep one batch running long
-past its deadline. Logs,
+past its deadline. Name grouping keys explicitly: the pinned DuckDB release
+splits equal attribute values into separate groups under `GROUP BY ALL`, so
+SQL rejects it. For the same reason, functions that hash or deduplicate
+`attributes` or `resource` values outside `GROUP BY` and `DISTINCT`, such as
+`approx_count_distinct`, `approx_top_k`, `histogram`, `mode`, `entropy`,
+`list_distinct` and `list_unique`, can treat equal values as different, and
+`hash` can return different results for them. Cast the value first, for
+example `attributes['http.route']::VARCHAR`. Logs,
 log patterns, traces and scatter use structured queries. SQL state timelines
 return timestamp `time`, a string item, one numeric measure and optional string
 `state`, with thresholds.
