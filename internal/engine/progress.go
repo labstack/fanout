@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -77,18 +79,21 @@ func (d *Duck) noteProgress() { d.progress.Store(time.Now().UnixNano()) }
 // Stalled reports whether a read statement is still running more than
 // overrunGrace past its deadline, or a Parquet publication has held readers
 // out that long past its swap budget: reads then fail before the engine.
-func (d *Duck) Stalled() bool {
+func (d *Duck) Stalled() bool { return d.stall() != "" }
+
+// stall names what stalls the engine, or is empty; see Stalled.
+func (d *Duck) stall() string {
 	if since := d.publishing.Load(); since != 0 && time.Since(time.Unix(0, since)) > parquetSwapBudget+overrunGrace {
-		return true
+		return "a Parquet publication held reads past its budget"
 	}
 	d.statements.mu.Lock()
 	defer d.statements.mu.Unlock()
 	for _, due := range d.statements.due {
 		if time.Since(due) > overrunGrace {
-			return true
+			return "a read statement ran past its deadline"
 		}
 	}
-	return false
+	return ""
 }
 
 // Live reports whether the engine can still serve. A stall fails it. A pool
@@ -122,4 +127,57 @@ func (d *Duck) Ping(ctx context.Context) error {
 	}
 	d.noteProgress()
 	return nil
+}
+
+// stallExit is how long the engine must stay stalled before Fanout exits for a
+// restart: another overrunGrace, so a liveness probe acts first where there
+// is one, and supervisors that restart only on exit still recover.
+const stallExit = overrunGrace
+
+// stallWatch fires once when a stall lasts stallExit without clearing.
+type stallWatch struct {
+	since time.Time
+	fired bool
+}
+
+func (w *stallWatch) observe(now time.Time, stall string) bool {
+	if w.fired {
+		return false
+	}
+	if stall == "" {
+		w.since = time.Time{}
+		return false
+	}
+	if w.since.IsZero() {
+		w.since = now
+	}
+	w.fired = now.Sub(w.since) >= stallExit
+	return w.fired
+}
+
+// Watch delivers ErrStalled on Fatal once the engine has stayed stalled for
+// stallExit, so the process exits and its supervisor restarts it. Overload
+// is no stall. It stops with ctx, so shutdown cannot fire it.
+func (d *Duck) Watch(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	d.watch(ctx, ticker.C)
+}
+
+func (d *Duck) watch(ctx context.Context, ticks <-chan time.Time) {
+	var w stallWatch
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticks:
+			stall := d.stall()
+			if !w.observe(now, stall) {
+				continue
+			}
+			slog.Error("query engine stalled, exiting for a restart", "reason", stall, "after", stallExit)
+			d.fatalOnce.Do(func() { d.fatal <- fmt.Errorf("%w: %s", ErrStalled, stall) })
+			return
+		}
+	}
 }

@@ -164,6 +164,7 @@ func main() {
 	}()
 
 	go q.RunRollups(ctx)
+	go q.Watch(ctx)
 
 	// Start intelligence detector
 	detector := intelligence.NewDetector(q, intelligence.DefaultDetectorConfig())
@@ -426,8 +427,9 @@ func main() {
 		failed = true
 		slog.Error("fatal error, shutting down", "err", err)
 	case err := <-q.Fatal():
-		// DuckDB invalidated its database. Flush ingest and exit nonzero so the
-		// supervisor restarts Fanout, which rebuilds the query cache from Parquet.
+		// DuckDB invalidated its database or stopped honouring deadlines. Flush
+		// ingest and exit nonzero so the supervisor restarts Fanout, which
+		// rebuilds the query cache from Parquet.
 		failed = true
 		slog.Error("query engine failed, shutting down for a restart", "err", err)
 	}
