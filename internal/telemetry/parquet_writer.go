@@ -31,7 +31,9 @@ import (
 // buffers come from a BufferPool that must be safe for concurrent use
 // (buffer_pool.go), and data page scratch and parquetCodec's encoders are
 // sync.Pools. writer_test.go writes each column from its own goroutine in its
-// "Parallel ColumnWriter.WriteRowValues" case.
+// "Parallel ColumnWriter.WriteRowValues" case. Lanes flush their own pages
+// before the row group closes, which is equivalent only while the writer has
+// no bloom filters or encryption.
 func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R, perm []int32, spilled *spills) error {
 	type variantColumn struct {
 		get        func(*R) map[string]any

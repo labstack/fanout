@@ -77,7 +77,7 @@ func TestLanesWriteTheSingleLaneBytes(t *testing.T) {
 	for _, s := range Signals {
 		t.Run(s.Name, func(t *testing.T) {
 			files := map[int][]byte{}
-			for _, procs := range []int{1, maxWriteLanes} {
+			for _, procs := range []int{1, 2, maxWriteLanes} {
 				path := filepath.Join(dir, fmt.Sprintf("%s-%d.parquet", s.Name, procs))
 				previous := runtime.GOMAXPROCS(procs)
 				err := write[s.Name](path)
@@ -101,8 +101,10 @@ func TestLanesWriteTheSingleLaneBytes(t *testing.T) {
 			if groups := len(file.RowGroups()); groups != 3 {
 				t.Fatalf("%d row groups, want 3", groups)
 			}
-			if !bytes.Equal(files[1], files[maxWriteLanes]) {
-				t.Fatalf("%d lanes wrote a different file than one lane", maxWriteLanes)
+			for _, procs := range []int{2, maxWriteLanes} {
+				if !bytes.Equal(files[1], files[procs]) {
+					t.Fatalf("%d lanes wrote a different file than one lane", procs)
+				}
 			}
 		})
 	}

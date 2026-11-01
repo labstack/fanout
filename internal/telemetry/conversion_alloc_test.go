@@ -55,7 +55,7 @@ func TestSpanOrderingDoesNotCopyRows(t *testing.T) {
 	// The keys and permutation plus a margin, and the span ID's rank map,
 	// which stops at maxRanked values whatever the batch size: no copy of the
 	// rows, and nothing like the payload again.
-	limit := order + order/4 + 1<<20
+	limit := order + order/4 + 512<<10
 	if allocated > limit {
 		t.Errorf("ordering allocated %.1f MiB for %.1f MiB of keys; it is copying rows or payload rather than referencing them",
 			float64(allocated)/(1<<20), float64(order)/(1<<20))
