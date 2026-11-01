@@ -8,7 +8,9 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -116,6 +118,12 @@ func (h *httpIngestHandler) handleExport(
 		// Invalid payloads are permanent failures; exporters must not retry them.
 		if status.Code(err) == codes.InvalidArgument {
 			http.Error(w, status.Convert(err).Message(), http.StatusBadRequest)
+			return
+		}
+		// Shedding is throttling: OTLP/HTTP senders retry 429 after Retry-After.
+		if status.Code(err) == codes.ResourceExhausted {
+			w.Header().Set("Retry-After", strconv.Itoa(int(shedRetryDelay/time.Second)))
+			http.Error(w, "telemetry ingest is over its in-flight budget", http.StatusTooManyRequests)
 			return
 		}
 		// Cancellation/backpressure remains retryable. Never acknowledge rows

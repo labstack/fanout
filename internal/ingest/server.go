@@ -11,6 +11,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -24,8 +25,10 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 type batchSubmitter interface {
@@ -157,13 +160,22 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 	return &collectortrace.ExportTraceServiceResponse{}, nil
 }
 
+// shedRetryDelay is how long a shed sender is asked to wait before resending.
+const shedRetryDelay = time.Second
+
 // ingestStatusError maps a refusal to a status a sender knows how to act on.
 // RESOURCE_EXHAUSTED is what the OTLP specification tells an exporter to back
 // off and retry on, which is the entire point of shedding rather than dying:
-// the data is not lost, it arrives a moment later.
+// the data is not lost, it arrives a moment later. Exporters retry it only
+// when it carries RetryInfo, so it always does.
 func ingestStatusError(err error) error {
 	if errors.Is(err, telemetrystore.ErrIngestOverBudget) {
-		return status.Error(codes.ResourceExhausted, err.Error())
+		st, detailErr := status.New(codes.ResourceExhausted, err.Error()).
+			WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(shedRetryDelay)})
+		if detailErr != nil {
+			return status.Error(codes.ResourceExhausted, err.Error())
+		}
+		return st.Err()
 	}
 	return err
 }
