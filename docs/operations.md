@@ -186,12 +186,16 @@ normally. Healthcheck reads only these two settings and does not require valid
 secrets. An explicit `fanout healthcheck <url>` uses default proxy and
 certificate verification behaviour.
 
-- `/healthz` is the liveness check. It fails when a query runs 25 seconds
-  past its deadline, when a Parquet publication holds reads 25 seconds past
-  its budget, or when an idle engine does not answer a ping. An overloaded
-  engine stays alive.
+- `/healthz` is the liveness check. It fails only when Fanout's own work on
+  the query engine stalls: a Parquet publication holds reads for 10 minutes,
+  or an idle engine does not answer a ping while no read holds it. An
+  overloaded engine stays alive, and so does one running a query past its
+  deadline.
 - `/readyz` includes storage readiness and resolved runtime sizing. A busy
-  engine reports `degraded` with 200; a stalled one reports 503.
+  engine reports `degraded` with 200; a stalled one reports 503. A query still
+  running 25 seconds past its deadline reports `queries` as `degraded`, logs
+  a warning with a hash of the query (never its text), and increments
+  `fanout_duckdb_statement_overruns_total`.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
@@ -200,9 +204,9 @@ Run Fanout under a supervisor that restarts it on exit: Docker or Compose with
 `Restart=on-failure`, or Kubernetes. Docker's `HEALTHCHECK` only marks a
 container unhealthy; it does not restart it. Fanout exits with status 1 when
 the query engine fails beyond recovery, for example when it runs out of memory
-while writing its cache, or when it stays stalled for another 25 seconds after
-`/healthz` starts failing. It first finishes writing received telemetry; the
-restart rebuilds the query cache from stored telemetry.
+while writing its cache, or when a stall that fails `/healthz` lasts another
+25 seconds. It first finishes writing received telemetry; the restart
+rebuilds the query cache from stored telemetry.
 
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention
