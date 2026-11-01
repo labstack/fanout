@@ -186,7 +186,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	svc, mock, repository := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(completedTraceQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
 	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{

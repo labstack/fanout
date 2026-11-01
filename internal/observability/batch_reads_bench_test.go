@@ -64,7 +64,6 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	}
 	defer d.Close()
 	svc := New(d, d, 30)
-	raw := New(SQLDB(d.DB), d, 30)
 	if _, err := d.DB.Exec(`CHECKPOINT`); err != nil {
 		t.Fatal(err)
 	}
@@ -110,14 +109,21 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	broad := Scope{Start: at.Add(-24 * time.Hour), End: at.Add(time.Second), Namespace: "prod"}
 	narrow := Scope{Start: at.Add(-20 * time.Minute), End: at.Add(time.Second), Namespace: "prod"}
 	for _, scope := range []Scope{broad, narrow} {
-		for name, method := range map[string]func(*Service) error{
-			"trace": func(s *Service) error { _, err := s.Trace(t.Context(), scope, "", "", 100); return err },
+		for name, method := range map[string]func(bool) error{
+			"trace": func(raw bool) error {
+				if raw {
+					_, err := rawTraceID(t, d, scope, "")
+					return err
+				}
+				_, err := svc.Trace(t.Context(), scope, "", "", 100)
+				return err
+			},
 		} {
 			for _, implementation := range []struct {
-				name    string
-				service *Service
-			}{{"raw", raw}, {"completed", svc}} {
-				if err := method(implementation.service); err != nil {
+				name string
+				raw  bool
+			}{{"raw", true}, {"completed", false}} {
+				if err := method(implementation.raw); err != nil {
 					t.Fatal(err)
 				}
 				runtime.GC()
@@ -125,7 +131,7 @@ func TestCompletedReadBenchmark(t *testing.T) {
 				timings := []float64{}
 				for range 10 {
 					start := time.Now()
-					if err := method(implementation.service); err != nil {
+					if err := method(implementation.raw); err != nil {
 						t.Fatal(err)
 					}
 					timings = append(timings, float64(time.Since(start))/float64(time.Millisecond))

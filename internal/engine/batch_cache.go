@@ -131,9 +131,6 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 		metrics.RecordRollupComponent(metrics.RollupReadCache, result, rows, time.Since(started).Seconds())
 	}()
 
-	if d.repository == nil {
-		return 0, nil
-	}
 	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
 	if err != nil {
 		return 0, err

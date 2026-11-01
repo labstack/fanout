@@ -487,7 +487,7 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	mock.ExpectExec("DROP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO rollup_state").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 200, 200, 100 }}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return 200, 200, 100 }}
 	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -619,7 +619,7 @@ func TestMaintenanceTracksConsecutiveFailures(t *testing.T) {
 		mock.ExpectExec("CHECKPOINT").WillReturnError(errors.New("injected checkpoint failure"))
 	}
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, writeDB: db}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t)}
 	for range 3 {
 		if err := d.runRepositoryMaintenance(context.Background()); err == nil {
 			t.Fatal("maintenance succeeded despite checkpoint failure")
@@ -811,7 +811,7 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			}
 			defer db.Close()
 
-			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return sourceNanos, sourceNanos, 1 }, cfg: config.Config{}}
+			d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return sourceNanos, sourceNanos, 1 }, cfg: config.Config{}}
 			watermarkRows := func(value int64) *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
 			}
@@ -854,7 +854,7 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 	defer db.Close()
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, writeDB: db, cfg: config.Config{MaintenanceInterval: time.Hour}}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), cfg: config.Config{MaintenanceInterval: time.Hour}}
 	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
 		t.Fatal(err)
 	}

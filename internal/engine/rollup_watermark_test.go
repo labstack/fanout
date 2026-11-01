@@ -23,7 +23,7 @@ func TestRollupHorizonDoesNotSkipInFlightRows(t *testing.T) {
 	}
 	horizon := int64(99)
 	minimum := int64(200)
-	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return horizon, 200, minimum }}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return horizon, 200, minimum }}
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
 	insert := func(id string, stamp int64) {
 		insertRollupTestSpan(t, db, rollupTestSpan{namespace: "ns", traceID: "trace", spanID: id, parentSpanID: "parent", service: id, start: bucket, ingested: stamp})
@@ -58,7 +58,7 @@ func TestRollupIdleHorizonExecutesNoSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 100, 200, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 100, edgeRollupStateKey: 100}}
+	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return 100, 200, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 100, edgeRollupStateKey: 100}}
 	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}

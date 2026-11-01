@@ -768,9 +768,6 @@ func runMaintenanceSchedule(ctx context.Context, every time.Duration, run func()
 }
 
 func (d *Duck) runParquetCompactionCycle(ctx context.Context) (int, error) {
-	if d.repository == nil {
-		return 0, nil
-	}
 	started := time.Now()
 	if err := d.repository.RecoverParquet(ctx, d); err != nil {
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, metrics.TelemetryError, time.Since(started).Seconds())
@@ -789,28 +786,25 @@ func (d *Duck) runParquetCompactionCycle(ctx context.Context) (int, error) {
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
-	var pruneErr error
-	if d.repository != nil {
-		recoveryErr := d.repository.RecoverParquet(ctx, d)
-		compactStart := time.Now()
-		var cleanupErr, parquetErr, compactErr error
-		compacted := 0
-		if recoveryErr == nil {
-			cleanupErr = d.repository.CleanupParquet()
-			if d.cfg.RetentionDays > 0 {
-				_, parquetErr = d.repository.PruneParquetPass(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
-			}
-			compacted, compactErr = d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
+	recoveryErr := d.repository.RecoverParquet(ctx, d)
+	compactStart := time.Now()
+	var cleanupErr, parquetErr, compactErr error
+	compacted := 0
+	if recoveryErr == nil {
+		cleanupErr = d.repository.CleanupParquet()
+		if d.cfg.RetentionDays > 0 {
+			_, parquetErr = d.repository.PruneParquetPass(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
 		}
-		compactResult := metrics.TelemetryNoop
-		if recoveryErr != nil || compactErr != nil {
-			compactResult = metrics.TelemetryError
-		} else if compacted > 0 {
-			compactResult = metrics.TelemetrySuccess
-		}
-		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
-		pruneErr = errors.Join(pruneErr, recoveryErr, cleanupErr, parquetErr, compactErr)
+		compacted, compactErr = d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
 	}
+	compactResult := metrics.TelemetryNoop
+	if recoveryErr != nil || compactErr != nil {
+		compactResult = metrics.TelemetryError
+	} else if compacted > 0 {
+		compactResult = metrics.TelemetrySuccess
+	}
+	metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
+	pruneErr := errors.Join(recoveryErr, cleanupErr, parquetErr, compactErr)
 	cacheErr := func() error {
 		unlock, err := d.writeGate.LockContext(ctx, writegate.Maintenance)
 		if err != nil {
@@ -1920,7 +1914,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	}
 	var tx *sql.Tx
 	var db snapshotSQL = conn
-	if window, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+	if window, ok := queryrows.ReadWindow(ctx); ok {
 		tx, err = beginRead(ctx, conn)
 		if err == nil {
 			db = tx
@@ -1937,7 +1931,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		compiled, compileErr := d.compileSnapshot(ctx, conn, query)
 		if compileErr == nil {
 			if _, inventory := compiled.names["resource_inventory"]; inventory {
-				compileErr = fmt.Errorf("resource_inventory requires a repository and logical panel window")
+				compileErr = fmt.Errorf("resource_inventory requires a logical panel window")
 			}
 		}
 		if compileErr != nil {
@@ -2028,7 +2022,7 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
-	if _, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+	if _, ok := queryrows.ReadWindow(ctx); ok {
 		rows, err := d.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err

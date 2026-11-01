@@ -46,6 +46,3 @@ const (
 	RawRead ReadKind = iota
 	TraceCandidateRead
 )
-
-// BatchReader exposes the completed-batch accelerators to internal callers.
-type BatchReader interface{ CompletedBatchReads() bool }

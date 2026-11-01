@@ -119,9 +119,6 @@ func (d *Duck) RefreshVersionRollup(ctx context.Context) (int64, error) {
 }
 
 func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duration) (processed int64, retErr error) {
-	if d.repository == nil {
-		return 0, nil
-	}
 	start := time.Now()
 	var materialized int64
 	defer func() {

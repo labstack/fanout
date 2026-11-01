@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 // A reader queued for a pool connection does not yet read Parquet, so it must
@@ -57,4 +59,15 @@ func TestReadersQueuedForAConnectionDoNotHoldPublication(t *testing.T) {
 			}
 		})
 	}
+}
+
+// emptyRepository is the telemetry repository every Duck has, with no batches.
+func emptyRepository(t testing.TB) *telemetrystore.Repository {
+	t.Helper()
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	return repository
 }

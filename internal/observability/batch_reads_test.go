@@ -1,6 +1,8 @@
 package observability
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -26,6 +28,27 @@ func newCompletedReadTest(t *testing.T) (*engine.Duck, *telemetrystore.Repositor
 	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
 	return d, repo, New(d, d, 30)
 }
+
+// rawTraceQuery ranks a window's traces straight from its spans: the oracle
+// the completed-batch candidates must match.
+const rawTraceQuery = `SELECT trace_id FROM spans
+WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
+GROUP BY trace_id
+ORDER BY MAX(CASE WHEN status = 'STATUS_CODE_ERROR' THEN 1 ELSE 0 END) DESC,
+ MAX(end_unix_nano) - MIN(start_unix_nano) DESC, trace_id ASC
+LIMIT 1`
+
+func rawTraceID(t testing.TB, d *engine.Duck, scope Scope, service string) (string, error) {
+	t.Helper()
+	var id string
+	err := d.DB.QueryRowContext(t.Context(), rawTraceQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return id, err
+}
+
 func warmCompletedReads(t *testing.T, d *engine.Duck, want int) {
 	t.Helper()
 	for attempt := 0; attempt <= want; attempt++ {
@@ -81,7 +104,6 @@ func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 	scope := Scope{Start: at.Add(10 * time.Second), End: at.Add(150 * time.Second), Namespace: "prod"}
 	warmCompletedReads(t, d, 1)
 	commit("late", 5)
-	raw := New(SQLDB(d.DB), d, 30)
 	for _, ns := range []string{"", "prod", "other"} {
 		for _, service := range []string{"", "api", "worker"} {
 			for _, window := range [][2]int{{-60, 300}, {10, 150}, {65, 95}} {
@@ -90,12 +112,12 @@ func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				want, err := raw.Trace(t.Context(), selected, "", service, 100)
+				want, err := rawTraceID(t, d, selected, service)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got.Data.TraceID != want.Data.TraceID {
-					t.Fatalf("candidate ns=%s service=%s window=%v: %s != %s", ns, service, window, got.Data.TraceID, want.Data.TraceID)
+				if got.Data.TraceID != want {
+					t.Fatalf("candidate ns=%s service=%s window=%v: %s != %s", ns, service, window, got.Data.TraceID, want)
 				}
 			}
 		}
@@ -105,9 +127,9 @@ func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := raw.Trace(t.Context(), scope, "", "", 100)
-	if err != nil || got.Data.TraceID != want.Data.TraceID {
-		t.Fatalf("fully warm trace: %s != %s: %v", got.Data.TraceID, want.Data.TraceID, err)
+	want, err := rawTraceID(t, d, scope, "")
+	if err != nil || got.Data.TraceID != want {
+		t.Fatalf("fully warm trace: %s != %s: %v", got.Data.TraceID, want, err)
 	}
 }
 
@@ -116,7 +138,6 @@ func TestCompletedTraceReadsMatchColdAndLateData(t *testing.T) {
 // its in-window spans decide the ranking, as they do for the raw query.
 func TestCompletedTraceKeepsTraceWithSpansOutsideWindow(t *testing.T) {
 	d, repo, svc := newCompletedReadTest(t)
-	raw := New(SQLDB(d.DB), d, 30)
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	span := func(trace, id string, at time.Time, dur time.Duration, status string) telemetry.Span {
 		return telemetry.Span{Namespace: "prod", ServiceName: "api", TraceID: trace, SpanID: id, StartUnixNanos: at.UnixNano(), EndUnixNanos: at.Add(dur).UnixNano(),
@@ -134,7 +155,7 @@ func TestCompletedTraceKeepsTraceWithSpansOutsideWindow(t *testing.T) {
 	warmCompletedReads(t, d, 2)
 	for _, service := range []string{"", "api"} {
 		scope := Scope{Start: t0, End: t0.Add(time.Minute)}
-		want, err := raw.Trace(t.Context(), scope, "", service, 100)
+		want, err := rawTraceID(t, d, scope, service)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -142,8 +163,8 @@ func TestCompletedTraceKeepsTraceWithSpansOutsideWindow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want.Data.TraceID != "T" || got.Data.TraceID != want.Data.TraceID {
-			t.Fatalf("service=%q: completed trace %q, raw %q, want T", service, got.Data.TraceID, want.Data.TraceID)
+		if want != "T" || got.Data.TraceID != want {
+			t.Fatalf("service=%q: completed trace %q, raw %q, want T", service, got.Data.TraceID, want)
 		}
 	}
 }
@@ -152,7 +173,6 @@ func TestCompletedTraceKeepsTraceWithSpansOutsideWindow(t *testing.T) {
 // must combine index rows with the in-window parts of partially covered traces.
 func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 	d, repo, svc := newCompletedReadTest(t)
-	raw := New(SQLDB(d.DB), d, 30)
 	rng := rand.New(rand.NewPCG(11, 104729))
 	t0 := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	statuses := []string{"STATUS_CODE_OK", "STATUS_CODE_ERROR", "STATUS_CODE_UNSET"}
@@ -192,7 +212,7 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 			for _, ns := range []string{"", "prod"} {
 				for _, service := range []string{"", "api"} {
 					scope := Scope{Namespace: ns, Start: start, End: end}
-					want, err := raw.Trace(t.Context(), scope, "", service, 100)
+					want, err := rawTraceID(t, d, scope, service)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -200,9 +220,9 @@ func TestCompletedTraceMatchesRawAcrossTimeLocalBatches(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if got.Data.TraceID != want.Data.TraceID {
+					if got.Data.TraceID != want {
 						t.Fatalf("%s ns=%q service=%q [%s, %s): completed %q, raw %q", stage, ns, service,
-							start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano), got.Data.TraceID, want.Data.TraceID)
+							start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano), got.Data.TraceID, want)
 					}
 				}
 			}

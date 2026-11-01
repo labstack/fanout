@@ -19,8 +19,6 @@ type snapshotSQL interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (d *Duck) CompletedBatchReads() bool { return d.repository != nil }
-
 func batchTime(b telemetry.BatchMetadata, signal string) (telemetry.TimeRange, int) {
 	switch signal {
 	case "spans":
@@ -101,6 +99,8 @@ func cleanSource(signal, physical string) string {
 // rows and immutable files all belong to the same snapshot. No session views
 // survive a pooled connection, and parameter indices are preserved by the AST.
 func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w queryrows.Window) (string, error) {
+	// NewDuck always has a repository. Only test fixtures built over mutable
+	// querytest tables lack one, and they read those tables unbound.
 	if d.repository == nil {
 		return query, nil
 	}
