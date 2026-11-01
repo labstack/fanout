@@ -1,4 +1,4 @@
-import { MantineProvider } from "@mantine/core";
+import { Drawer, MantineProvider } from "@mantine/core";
 import { within } from "@testing-library/dom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -125,5 +125,69 @@ it("keeps flame ticks on one line and folds services past the palette into one l
     expect(others.tabIndex).toBe(0);
     await act(async () => others.focus());
     await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("puts the truncation notice beside the chart and says the timeline covers the loaded spans", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [span] = traceFixture.data.spans;
+  // 500 of 1300 spans loaded: the loaded spans run 35 hours of a 102-hour trace.
+  const spans = [{ ...span, duration_ms: 35 * 3_600_000 }];
+  const data = { ...traceFixture.data, spans, duration_ms: 102 * 3_600_000, span_count: 1300 };
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data }} dark={false} /></QueryClientProvider></MantineProvider>));
+    const notice = node.querySelector<HTMLElement>("[data-trace-truncated]")!;
+    expect(notice.textContent).toContain(`The timeline shows the loaded spans: ${duration(35 * 3_600_000)} of the trace's ${duration(102 * 3_600_000)}.`);
+    // Above the chart, not under the correlated logs.
+    expect(notice.compareDocumentPosition(node.querySelector("[data-waterfall]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    expect(node.querySelector("[data-flame-duration]")?.textContent).toBe(`${duration(35 * 3_600_000)} of ${duration(102 * 3_600_000)} shown`);
+    expect(notice.compareDocumentPosition(node.querySelector("[data-flame-graph]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("drops flame ticks whose labels would touch on a narrow axis", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let resize: ResizeObserverCallback = () => {};
+  vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { resize = callback; } observe() {} unobserve() {} disconnect() {} });
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [span] = traceFixture.data.spans;
+  const data = { ...traceFixture.data, spans: [{ ...span, duration_ms: 35 * 3_600_000 + 57 * 60_000 }] };
+  const ticks = () => [...node.querySelectorAll<HTMLElement>("[data-flame-graph] > div:first-child > *")].map(tick => tick.textContent);
+  const width = (px: number) => act(async () => resize([{ contentRect: { width: px } } as ResizeObserverEntry], {} as ResizeObserver));
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><TraceDetailView result={{ ...traceFixture, data }} dark={false} /></QueryClientProvider></MantineProvider>));
+    await act(async () => [...node.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    await width(800);
+    expect(ticks()).toHaveLength(5);
+    // The flame axis inside a 400 px drawer: the 75% and end labels came within 3 px.
+    await width(330);
+    expect(ticks()).toHaveLength(3);
+    expect(ticks().at(-1)).toBe(duration(data.spans[0].duration_ms));
+    await width(120);
+    expect(ticks()).toHaveLength(2);
+    expect(node.querySelectorAll("[data-flame-graph] > div:last-child > div[style*='border-left']")).toHaveLength(2);
+  } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
+});
+
+it("dismisses the other-services names with Escape before the drawer closes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  const [first] = traceFixture.data.spans;
+  const spans = Array.from({ length: 8 }, (_, i) => ({ ...first, span_id: `s${i}`, parent_span_id: i ? "s0" : undefined, service: `svc${i}` }));
+  const onClose = vi.fn();
+  const escape = (target: Element) => act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  try {
+    await act(async () => root.render(<MantineProvider><QueryClientProvider client={new QueryClient()}><Drawer opened onClose={onClose} transitionProps={{ duration: 0 }}><TraceDetailView result={{ ...traceFixture, data: { ...traceFixture.data, spans } }} dark={false} /></Drawer></QueryClientProvider></MantineProvider>));
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Flame graph")!.click());
+    const others = document.querySelector<HTMLElement>("[data-flame-others]")!;
+    await act(async () => others.focus());
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")?.textContent).toBe("svc6, svc7"));
+    await escape(others);
+    await vi.waitFor(() => expect(document.querySelector("[role=tooltip]")).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+    await escape(others);
+    expect(onClose).toHaveBeenCalledOnce();
   } finally { await act(async () => root.unmount()); node.remove(); vi.unstubAllGlobals(); }
 });
