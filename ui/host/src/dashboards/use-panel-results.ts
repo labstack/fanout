@@ -99,8 +99,9 @@ export function usePanelResults({ dashboardId, spec, time, vars, compare, widths
   }, [key, query.data, query.dataUpdatedAt, query.isPlaceholderData, query.error, query.errorUpdatedAt]);
   const staleAt = new Map([...snapshot.stale].flatMap((id) => { const at = snapshot.updated.get(id); return at ? [[id, at] as const] : []; }));
   const panelError = (query.data?.results ?? []).find((r) => r.status === "error" && snapshot.stale.has(r.id));
-  // Updated is when a panel last ran; a panel the server turned away did not.
-  const ranAt = Math.max(0, ...[...snapshot.updated].filter(([id]) => snapshot.results.get(id)?.reason !== "busy").map(([, at]) => at));
+  // Updated is when a panel last ran. A panel the server turned away did not,
+  // unless it still shows a frame from a run, whose time merge kept.
+  const ranAt = Math.max(0, ...[...snapshot.updated].filter(([id]) => { const r = snapshot.results.get(id); return r?.reason !== "busy" || r.frame !== undefined; }).map(([, at]) => at));
   // A panel scrolled into view that has never loaded under this key is
   // fetched now, including when visibility changed during the previous batch.
   useEffect(() => {

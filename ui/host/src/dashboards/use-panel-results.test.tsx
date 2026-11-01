@@ -598,5 +598,12 @@ it("claims no update while every panel the server turned away has not run", asyn
     await act(async () => host.current.refetch());
     await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.status).toBe("ok");});
     expect(host.current.updatedAt).toEqual(expect.any(Number));
+    // A refresh the server turns away entirely keeps a's frame, and the time it really ran.
+    const ran = host.current.updatedAt;
+    wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(busy)));
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(host.current.results.get("a")?.reason).toBe("busy");});
+    expect(host.current.results.get("a")?.frame).toBeDefined();
+    expect(host.current.updatedAt).toBe(ran);
   } finally { await host.dispose(); }
 });
