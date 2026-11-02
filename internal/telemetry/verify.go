@@ -271,7 +271,7 @@ ELSE %[2]s IS NULL END`, v, c)
 // the others NULL, and its lists have the lengths their kind requires.
 var kindChecks = map[*Signal][]string{
 	Metrics: {
-		`(value IS NOT NULL) = (type NOT IN ('histogram','summary'))`,
+		`(value IS NOT NULL) = (type NOT IN ('histogram','summary') AND (flags & 1) = 0)`,
 		`(hist_count IS NOT NULL) = (type IN ('histogram','summary'))`,
 		`(temporality IS NOT NULL) = (type IN ('counter','updown','histogram'))`,
 		`(hist_bounds IS NOT NULL) = (type='histogram' AND exp_scale IS NULL)`,

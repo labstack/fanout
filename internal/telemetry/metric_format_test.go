@@ -256,6 +256,48 @@ func TestMetricPhysicalRowsReadBackThroughDuckDB(t *testing.T) {
 	}
 }
 
+// A gauge or sum point flagged as having no recorded value stores NULL, which
+// verification accepts and aggregates skip; an unflagged point keeps its value.
+func TestMetricNoRecordedValueStoresNull(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var metrics []Metric
+	for i, flags := range []uint32{0, metricNoRecordedValue, 0, metricNoRecordedValue | 2} {
+		m := Metric{Name: "level", Type: []string{"gauge", "counter"}[i/2], Flags: flags, Value: 4,
+			TimeUnixNanos: 1790856000000000000 + int64(i), IngestedAt: 1790856000000000000 + int64(i)}
+		if m.Type == "counter" {
+			m.Temporality = "cumulative"
+		}
+		m.SeriesID = MetricSeriesID(m)
+		metrics = append(metrics, m)
+	}
+	if err := store.CommitBatch(t.Context(), &BatchMetadata{ID: "flagged"}, nil, nil, metrics); err != nil {
+		t.Fatal(err)
+	}
+	dir := store.BatchPath("flagged")
+	if err := ValidatePublishedBatch(dir); err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := NewBatchVerifier(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verifier.Close()
+	var nulls, points int
+	var avg float64
+	if err := verifier.db.QueryRowContext(t.Context(), `SELECT count(*) FILTER (WHERE value IS NULL AND flags & 1 = 1), count(value), avg(value)
+		FROM read_parquet(?, hive_partitioning=false, union_by_name=false)`,
+		filepath.ToSlash(filepath.Join(dir, "metrics.parquet"))).Scan(&nulls, &points, &avg); err != nil {
+		t.Fatal(err)
+	}
+	if nulls != 2 || points != 2 || avg != 4 {
+		t.Fatalf("flagged NULL values=%d, values=%d, avg=%v", nulls, points, avg)
+	}
+}
+
 // metricLayout is the metric layout with columns replaced or, where the
 // replacement is nil, removed.
 func metricLayout(replace map[string]*Column) *Signal {

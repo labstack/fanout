@@ -180,6 +180,9 @@ var (
 	resourceShred  = []string{"service.name", "service.namespace"}
 )
 
+// metricNoRecordedValue is OTLP's DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK.
+const metricNoRecordedValue = 1
+
 // spillPrefix starts the footer key whose value counts the rows whose value
 // of a key could not be converted to its type.
 const spillPrefix = "fanout.spill."
@@ -326,7 +329,12 @@ var Metrics = &Signal{
        ELSE TRY(make_timestamp_ns(start_time_unix_nano)::TIMESTAMPTZ_NS) END`}),
 		str("service", func(r *Metric) string { return r.ServiceName }).dict(),
 		column("flags", Uint32, func(r *Metric) uint32 { return r.Flags }),
-		nullable("value", Float64, func(r *Metric) (float64, bool) { return r.Value, r.Type != "histogram" && r.Type != "summary" }),
+		// A gauge or sum point flagged as having no recorded value
+		// (DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK) stores NULL, so aggregates
+		// skip it rather than read 0.
+		nullable("value", Float64, func(r *Metric) (float64, bool) {
+			return r.Value, r.Type != "histogram" && r.Type != "summary" && r.Flags&metricNoRecordedValue == 0
+		}),
 		nullable("hist_count", Uint64, func(r *Metric) (uint64, bool) { return r.Count, r.Type == "histogram" || r.Type == "summary" }),
 		nullable("hist_sum", Float64, func(r *Metric) (float64, bool) { return r.Sum, r.HasSum }),
 		nullable("hist_min", Float64, func(r *Metric) (float64, bool) { return r.Min, r.HasMin }),
