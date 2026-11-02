@@ -146,13 +146,18 @@ func (h *QueryHandler) schema(c *echo.Context) error {
 }
 
 // panelError maps an engine failure to a response: spec problems are 400, a
-// blown deadline is 504, a departed client gets no body, and anything else is
-// a 500.
+// full panel queue is 503, a blown deadline is 504, a departed client gets no
+// body, and anything else is a 500.
 func panelError(c *echo.Context, err error, unavailable string) error {
 	if handled, writeErr := writeProblems(c, err); handled {
 		return writeErr
 	}
 	switch {
+	case errors.Is(err, query.ErrBusy):
+		// Every panel was turned away before any started: tell the client to
+		// come back rather than answer a page of busy panels.
+		c.Response().Header().Set("Retry-After", "2")
+		return newAPIError(http.StatusServiceUnavailable, "busy", query.BusyMessage)
 	case errors.Is(err, context.DeadlineExceeded):
 		return echo.NewHTTPError(http.StatusGatewayTimeout, "Panels took longer than 20 seconds. Narrow the time range or reduce the number of panels.").Wrap(err)
 	case errors.Is(err, context.Canceled):

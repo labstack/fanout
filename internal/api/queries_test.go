@@ -136,6 +136,27 @@ func TestPanelQueryOperationalErrors(t *testing.T) {
 	}
 }
 
+// Every panel turned away at the queue bound is one retryable 503, streamed
+// or not, like the schema's busy answer.
+func TestPanelQueryBusyIs503(t *testing.T) {
+	for _, accept := range []string{"application/json", "application/x-ndjson"} {
+		s := newTestAuthServer(t)
+		viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		RegisterQueryRoutes(s.e, &fakePanels{err: query.ErrBusy})
+		req := sessionRequest(http.MethodPost, "/api/queries/run", strings.NewReader(`{"dashboard":{"name":"x","panels":[]}}`), s.login(t, viewer))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", accept)
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "2" || !strings.Contains(rec.Body.String(), `"code":"busy"`) {
+			t.Fatalf("%s: %d %q %s", accept, rec.Code, rec.Header().Get("Retry-After"), rec.Body)
+		}
+	}
+}
+
 func TestPanelQueryRejectsUnknownHistogramTemporality(t *testing.T) {
 	engine := &fakePanels{}
 	rec := servePanels(t, engine, http.MethodPost, "/api/queries/run", `{"dashboard":{"name":"Hist","panels":[{"id":"h","title":"Hist","viz":"histogram","query":{"from":"metrics","measures":["count()"],"histogram":{"field":"value","buckets":"explicit","temporality":"delta"}}}]}}`)

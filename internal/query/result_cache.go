@@ -260,10 +260,11 @@ type panelCacheKey struct {
 	Compare bool             `json:"compare"`
 }
 
-// panelOutcome is a cached panel run. busy marks a panel that never started.
+// panelOutcome is a shared panel run. refused marks a panel turned away at
+// the queue bound.
 type panelOutcome struct {
 	Result
-	busy bool
+	refused bool
 }
 
 // clone returns r with frames the caller may mutate: limitBatchFrames

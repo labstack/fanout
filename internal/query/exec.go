@@ -9,9 +9,11 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
@@ -77,8 +79,11 @@ type Executor struct {
 	batchTimeout time.Duration
 	parallel     int
 	// slots admits panels to the engine's read connections in arrival order;
-	// a panel's own timeout starts once it holds one.
-	slots *semaphore.Weighted
+	// a panel's own timeout starts once it holds one. At most queueBound
+	// panels wait for a slot; more are refused at once as busy.
+	slots      *semaphore.Weighted
+	queueBound int64
+	waiting    atomic.Int64
 
 	memo    checkMemo
 	cache   resultCache
@@ -104,14 +109,15 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 		maxWindow = time.Duration(retentionDays) * 24 * time.Hour
 	}
 	// A panel admitted beyond the engine's read connections would only wait
-	// for one inside the engine, with its own timeout already running.
-	slots := 4
+	// for one inside the engine, with its own timeout already running. Two
+	// connections stay free for reads that do not queue behind dashboards.
+	slots, queue := 4, 32
 	if pool, ok := engine.(interface{ ReadConnections() int }); ok {
-		slots = max(1, pool.ReadConnections())
+		slots, queue = config.QueryAdmission(pool.ReadConnections())
 	}
 	life, stop := context.WithCancel(context.Background())
 	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: 10 * time.Second, batchTimeout: 20 * time.Second, parallel: 4,
-		slots: semaphore.NewWeighted(int64(slots)), cache: newResultCache(), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
+		slots: semaphore.NewWeighted(int64(slots)), queueBound: int64(queue), cache: newResultCache(), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
 		life: life, stop: stop, discoveries: make(chan struct{}, 2), discoverWait: time.Minute, discoverRun: 25 * time.Second}
 }
 
@@ -250,11 +256,35 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	// charged to it.
 	ctx, cancel := context.WithTimeout(ctx, e.batchTimeout)
 	defer cancel()
+	// Panels refused at the queue bound are held back until anything else
+	// is sent: a request turned away whole is answered as ErrBusy instead.
+	type held struct {
+		i int
+		r Result
+	}
 	var mu sync.Mutex
+	var refused []held
+	sent := false
 	send := func(i int, r Result) {
 		mu.Lock()
 		defer mu.Unlock()
+		if !sent {
+			sent = true
+			for _, h := range refused {
+				emit(h.i, h.r)
+			}
+			refused = nil
+		}
 		emit(i, r)
+	}
+	refuse := func(i int, r Result) {
+		mu.Lock()
+		defer mu.Unlock()
+		if sent {
+			emit(i, r)
+			return
+		}
+		refused = append(refused, held{i, r})
 	}
 	notRun := func(i int, p *Panel) {
 		send(i, busyResult(p))
@@ -328,8 +358,11 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				defer cancel()
 				// Turns are first come, first served across every request, so
 				// a search is not starved by a dashboard that started earlier.
-				if e.slots.Acquire(wait, 1) != nil {
-					return panelOutcome{Result: busyResult(p), busy: true}, 0, false, nil
+				switch err := e.acquire(wait); {
+				case errors.Is(err, errQueueFull):
+					return panelOutcome{Result: refusedResult(p), refused: true}, 0, false, nil
+				case err != nil:
+					return panelOutcome{Result: busyResult(p)}, 0, false, nil
 				}
 				r := func() Result {
 					defer e.slots.Release(1)
@@ -348,12 +381,58 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 			r.Cached = outcome == cacheHit || outcome == cacheStale
 			// The result is sent after the run released its slot: a stream
 			// client that stops reading must not hold the engine from others.
-			send(i, r)
+			if out.refused {
+				refuse(i, r)
+			} else {
+				send(i, r)
+			}
 			return nil
 		})
 	}
 	_ = group.Wait()
-	return caller.Err()
+	if err := caller.Err(); err != nil {
+		return err
+	}
+	if len(refused) == len(targets) && len(refused) > 0 {
+		return ErrBusy
+	}
+	for _, h := range refused {
+		emit(h.i, h.r)
+	}
+	return nil
+}
+
+// acquire takes a read slot, waiting in line unless queueBound panels
+// already are: past that, waiting would only end at the batch deadline.
+func (e *Executor) acquire(ctx context.Context) error {
+	if e.slots.TryAcquire(1) {
+		return nil
+	}
+	if e.waiting.Add(1) > e.queueBound {
+		e.waiting.Add(-1)
+		return errQueueFull
+	}
+	defer e.waiting.Add(-1)
+	return e.slots.Acquire(ctx, 1)
+}
+
+var errQueueFull = errors.New("panel queue is full")
+
+// ErrBusy answers a request whose every panel was refused at the queue
+// bound before any started. HTTP answers it 503 with Retry-After.
+var ErrBusy = errors.New("every panel was refused: the panel queue is full")
+
+// BusyMessage presents ErrBusy to clients.
+const BusyMessage = "The server is busy with other queries. Try again in a few seconds."
+
+// QueueFullError is a panel refused at the queue bound; like
+// BatchDeadlineError it never started and is retryable.
+const QueueFullError = "Not run: the server is busy with other queries. Refresh to try again."
+
+func refusedResult(p *Panel) Result {
+	r := busyResult(p)
+	r.Error = QueueFullError
+	return r
 }
 
 // BatchDeadlineError is shared by HTTP and MCP batch callers. It means the

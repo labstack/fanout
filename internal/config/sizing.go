@@ -48,6 +48,19 @@ const (
 	QueryCacheMaxBytes   = 64 << 20
 )
 
+// QueryAdmission derives the panel executor's admission from the read pool:
+// slots panels hold read connections at once, and at most queue more wait
+// for one before further panels are refused as busy. A pool of four or more
+// keeps two connections for annotations, trace detail, exemplars and
+// readiness checks, which do not queue behind dashboards.
+func QueryAdmission(pool int) (slots, queue int) {
+	slots = max(1, pool)
+	if pool >= 4 {
+		slots = pool - 2
+	}
+	return slots, 8 * slots
+}
+
 // sizingSource records which values the machine chose, so the startup log can
 // distinguish a resolved value from one the operator pinned. Without that
 // distinction an adaptive default is unfalsifiable in support: nobody can say
@@ -139,6 +152,7 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		// logging an empty string that reads like "nothing to see here".
 		memory = "duckdb-default(80% of detected RAM)"
 	}
+	slots, queue := QueryAdmission(c.DuckDBMaxConns)
 	slog.Info("runtime sizing resolved",
 		"duckdb_memory", memory,
 		"duckdb_memory_auto", src.MemoryAuto,
@@ -152,6 +166,12 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		"memory_source", src.MemorySource,
 		"memory_detection_incomplete", src.MemoryDetectionIncomplete,
 		"gomaxprocs", runtime.GOMAXPROCS(0),
+		"query_slots", slots,
+		"query_reserved_connections", c.DuckDBMaxConns-slots,
+		"query_queue_bound", queue,
+		"query_cache_ttl", c.QueryCacheTTL.String(),
+		"query_cache_max_entries", QueryCacheMaxEntries,
+		"query_cache_max_bytes", QueryCacheMaxBytes,
 	)
 	if src.MemoryAuto && src.MemoryDetectionIncomplete {
 		slog.Warn("memory limit detection was incomplete; automatic DuckDB sizing may exceed a container limit — configure FANOUT_DUCKDB_MEMORY explicitly",
