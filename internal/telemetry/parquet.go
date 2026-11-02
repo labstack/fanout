@@ -1151,7 +1151,12 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if err != nil {
 			return nil, err
 		}
-		parquetFile, openErr := parquet.OpenFile(file, info.Size())
+		// The footer alone says what this validation checks: schema, row
+		// count and the time column's chunk statistics. The page index
+		// behind it holds a column index and offset index per leaf, and the
+		// format has many leaves, so reading them cost as much as the
+		// footer on every commit.
+		parquetFile, openErr := parquet.OpenFile(file, info.Size(), parquet.SkipPageIndex(true), parquet.SkipBloomFilters(true))
 		closeErr := file.Close()
 		if err := errors.Join(openErr, closeErr); err != nil {
 			return nil, fmt.Errorf("open %s Parquet: %w", signal.Name, err)
