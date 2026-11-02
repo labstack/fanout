@@ -423,6 +423,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 // already are: past that, waiting would only end at the batch deadline.
 func (e *Executor) acquire(ctx context.Context) error {
 	if e.slots.TryAcquire(1) {
+		markStarted(ctx)
 		return nil
 	}
 	if e.waiting.Add(1) > e.queueBound {
@@ -430,7 +431,11 @@ func (e *Executor) acquire(ctx context.Context) error {
 		return errQueueFull
 	}
 	defer e.waiting.Add(-1)
-	return e.slots.Acquire(ctx, 1)
+	if err := e.slots.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	markStarted(ctx)
+	return nil
 }
 
 var errQueueFull = errors.New("panel queue is full")

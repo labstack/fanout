@@ -502,6 +502,7 @@ func TestResultCacheAbandonedRunsCompleteAndAreReused(t *testing.T) {
 	left := make(chan error, 1)
 	go func() {
 		_, _, err := loadCached(e, gone, cacheKey{3}, e.now(), func(run context.Context) (int, int64, bool, error) {
+			markStarted(run) // the run holds a read slot
 			select {
 			case <-release:
 				return 5, 8, true, nil
@@ -522,6 +523,32 @@ func TestResultCacheAbandonedRunsCompleteAndAreReused(t *testing.T) {
 		return 0, 0, false, errors.New("ran again")
 	}); err != nil || v != 5 || outcome != cacheHit {
 		t.Fatalf("v=%d outcome=%s err=%v", v, outcome, err)
+	}
+}
+
+// A cacheable run abandoned while still waiting for a read slot is
+// cancelled: only a started run outlives its callers, so requests that leave
+// cannot fill the queue with work nobody waits for.
+func TestResultCacheCancelsAbandonedQueuedRuns(t *testing.T) {
+	e, _, _ := cachedExecutor(t)
+	gone, leave := context.WithCancel(t.Context())
+	cancelled := make(chan error, 1)
+	go func() {
+		_, _, _ = loadCached(e, gone, cacheKey{4}, e.now(), func(run context.Context) (int, int64, bool, error) {
+			<-run.Done() // never gets a slot
+			cancelled <- run.Err()
+			return 0, 0, false, run.Err()
+		})
+	}()
+	waitForFlight(t, e, cacheKey{4})
+	leave()
+	select {
+	case err := <-cancelled:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("queued run ended with %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an abandoned run kept its place in the queue")
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
@@ -83,9 +84,24 @@ type cacheFlight struct {
 	value   any
 	err     error
 	waiters int
-	// detached runs outlive their callers.
+	// detached runs outlive their callers once started, that is once they
+	// hold a read slot. One still waiting in line when its last caller
+	// leaves is cancelled, so abandoned requests cannot fill the queue.
 	detached bool
-	cancel   context.CancelFunc
+	// background runs are revalidations no caller started; they always
+	// complete.
+	background bool
+	started    atomic.Bool
+	cancel     context.CancelFunc
+}
+
+type flightContextKey struct{}
+
+// markStarted records that the run ctx belongs to, if any, holds a slot.
+func markStarted(ctx context.Context) {
+	if flight, ok := ctx.Value(flightContextKey{}).(*cacheFlight); ok {
+		flight.started.Store(true)
+	}
 }
 
 // flightFunc runs one cached computation under ctx, which keeps the starting
@@ -193,7 +209,7 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, stamp tim
 	case <-ctx.Done():
 		c.mu.Lock()
 		flight.waiters--
-		if flight.waiters == 0 && !flight.detached {
+		if flight.waiters == 0 && (!flight.detached || !flight.started.Load() && !flight.background) {
 			flight.cancel()
 			if c.flights[key] == flight {
 				delete(c.flights, key)
@@ -227,7 +243,8 @@ func (e *Executor) joinable(flight *cacheFlight, stamp time.Time, bypass bool) b
 func (e *Executor) startFlight(caller context.Context, key cacheKey, stamp time.Time, background bool, fn flightFunc[any]) *cacheFlight {
 	c := &e.cache
 	run, cancel := context.WithCancel(context.WithoutCancel(caller))
-	flight := &cacheFlight{done: make(chan struct{}), stamp: stamp, detached: background, cancel: cancel}
+	flight := &cacheFlight{done: make(chan struct{}), stamp: stamp, detached: background, background: background, cancel: cancel}
+	run = context.WithValue(run, flightContextKey{}, flight)
 	c.flights[key] = flight
 	e.mu.Lock()
 	if err := e.life.Err(); err != nil {
