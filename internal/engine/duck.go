@@ -1905,16 +1905,6 @@ func (d *Duck) retirementWaiting(pin telemetry.SnapshotPin) bool {
 	return d.repository != nil && d.repository.Parquet != nil && d.repository.Parquet.RetirementWaiting(pin)
 }
 
-// catalogBound reports whether reads must name the captured catalog. With no
-// published or retiring batch, the glob views match only the empty schema
-// batch, which is exactly that catalog, so binding would change nothing.
-func (d *Duck) catalogBound() bool {
-	if d.repository == nil || d.repository.Parquet == nil {
-		return false
-	}
-	return len(d.repository.Parquet.BatchMetadata()) > 0 || d.repository.Parquet.RetiringBatches() > 0
-}
-
 // allTime is the read window for statements that carry none. It selects every
 // batch, so binding such a statement to the catalog keeps its result and only
 // removes the files of uncommitted outputs and retired inputs from its scan.
@@ -1922,7 +1912,7 @@ var allTime = queryrows.Window{Start: time.Unix(0, math.MinInt64).UTC(), End: ti
 
 // unboundTelemetry is a cheap filter before parsing a statement that carries
 // no read window: only text naming resource_inventory can reference it, and
-// only text naming a signal can need binding to a non-empty catalog.
+// only text naming a signal can need binding to the captured catalog.
 func (d *Duck) unboundTelemetry(query string) bool {
 	lower := strings.ToLower(query)
 	if strings.Contains(lower, "resource_inventory") {
@@ -1930,7 +1920,7 @@ func (d *Duck) unboundTelemetry(query string) bool {
 	}
 	for _, s := range telemetry.Signals {
 		if strings.Contains(lower, s.Name) {
-			return d.catalogBound()
+			return d.repository != nil && d.repository.Parquet != nil
 		}
 	}
 	return false
@@ -1947,6 +1937,14 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		return nil, err
 	}
 	var tx *sql.Tx
+	// Setup owns both resources until lockedRows takes over, including on panic.
+	setup := true
+	defer func() {
+		if setup {
+			endRead(conn, tx)
+			d.unpinParquet(pin)
+		}
+	}()
 	var db snapshotSQL = conn
 	window, windowed := queryrows.ReadWindow(ctx)
 	if !windowed && d.unboundTelemetry(query) {
@@ -1960,8 +1958,6 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 			}
 		}
 		if compileErr != nil {
-			endRead(conn, nil)
-			d.unpinParquet(pin)
 			return nil, compileErr
 		}
 		for _, s := range telemetry.Signals {
@@ -1980,8 +1976,6 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 			query, err = d.bindSnapshot(ctx, tx, query, window)
 		}
 		if err != nil {
-			endRead(conn, tx)
-			d.unpinParquet(pin)
 			return nil, err
 		}
 	}
@@ -1993,8 +1987,6 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	done(err)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
-		endRead(conn, tx)
-		d.unpinParquet(pin)
 		return nil, err
 	}
 	release := func() {
@@ -2010,7 +2002,9 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		d.unpinParquet(pin)
 		d.answered(ctx, rows.Err())
 	}
-	return &lockedRows{Rows: rows, unlock: release}, nil
+	owned := &lockedRows{Rows: rows, unlock: release}
+	setup = false
+	return owned, nil
 }
 
 // beginRead opens a read transaction that only its owner ends. A transaction
