@@ -162,18 +162,31 @@ func TestDrainBudgetBounded(t *testing.T) {
 	defer cancel()
 	started := time.Now()
 	var passes int
-	n, err := drainVersionRollup(ctx, func(ctx context.Context) (int64, error) {
+	n, backlog, err := drainVersionRollup(ctx, func(ctx context.Context) (int64, bool, error) {
 		passes++
 		select {
 		case <-time.After(25 * time.Millisecond):
-			return 1, nil
+			return 1, true, nil
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return 0, false, ctx.Err()
 		}
 	})
 	elapsed := time.Since(started)
-	if err != nil || elapsed < 1900*time.Millisecond || elapsed > 2500*time.Millisecond || n != int64(passes) {
-		t.Fatalf("unbounded/incorrect drain: passes=%d n=%d elapsed=%v err=%v", passes, n, elapsed, err)
+	if err != nil || !backlog || elapsed < 1900*time.Millisecond || elapsed > 2500*time.Millisecond || n != int64(passes) {
+		t.Fatalf("unbounded/incorrect drain: passes=%d n=%d backlog=%v elapsed=%v err=%v", passes, n, backlog, elapsed, err)
+	}
+}
+
+// A pass that caught up ends the drain, so steady ingest gets one pass per
+// worker cadence rather than a pass for every few published files.
+func TestDrainStopsWhenCaughtUp(t *testing.T) {
+	passes := 0
+	n, backlog, err := drainVersionRollup(t.Context(), func(context.Context) (int64, bool, error) {
+		passes++
+		return 3, passes < 3, nil
+	})
+	if err != nil || backlog || passes != 3 || n != 9 {
+		t.Fatalf("passes=%d n=%d backlog=%v err=%v", passes, n, backlog, err)
 	}
 }
 
@@ -187,23 +200,24 @@ func TestDrainReleasesGateBetweenPasses(t *testing.T) {
 	defer cancel()
 	serviceDone := make(chan error, 1)
 	passes := 0
-	n, err := drainVersionRollup(ctx, func(ctx context.Context) (int64, error) {
+	n, _, err := drainVersionRollup(ctx, func(ctx context.Context) (int64, bool, error) {
 		passes++
 		if passes == 2 {
 			select {
 			case err := <-serviceDone:
 				if err != nil {
-					return 0, err
+					return 0, false, err
 				}
 			case <-ctx.Done():
-				return 0, ctx.Err()
+				return 0, false, ctx.Err()
 			}
 		}
 		n, err := d.RefreshVersionRollup(ctx)
 		if passes == 1 {
 			go func() { _, err := d.refreshServiceRollup(ctx); serviceDone <- err }()
 		}
-		return n, err
+		// Report a backlog after the first pass so the drain runs a second one.
+		return n, passes == 1, err
 	})
 	if err != nil || n != 1 || passes != 2 {
 		t.Fatalf("service could not acquire gate: %d passes=%d %v", n, passes, err)
@@ -272,7 +286,7 @@ func TestSlowVersionPassCommits(t *testing.T) {
 			unlock()
 		}
 	}()
-	n, err := d.DrainVersionRollup(t.Context())
+	n, _, err := d.DrainVersionRollup(t.Context())
 	if err != nil || n != 1 {
 		t.Fatalf("slow pass must commit: batches=%d err=%v", n, err)
 	}

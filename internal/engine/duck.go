@@ -648,8 +648,8 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 // Drain bounded transactions promptly, yielding to other writers between passes.
 func (d *Duck) runReadCacheLoop(ctx context.Context) {
 	runBackgroundLoop(ctx, func(ctx context.Context) (bool, error) {
-		rows, err := d.RefreshReadCaches(ctx)
-		return rows > 0, err
+		_, backlog, err := d.refreshReadCaches(ctx)
+		return backlog, err
 	}, func(err error) {
 		d.noteFailure(err)
 		slog.Warn("completed batch read cache failed", "err", err)
@@ -669,10 +669,13 @@ func (d *Duck) noteFailure(err error) {
 	d.fatalOnce.Do(func() { d.fatal <- err })
 }
 
-// runBackgroundLoop repeats a pass promptly while it makes progress and each
-// second while idle. Consecutive failures double the wait up to a minute: a
-// pass that failed out of memory would otherwise reclaim the memory limit
-// every second and starve the queries that need it.
+// runBackgroundLoop repeats a pass promptly while it reports a backlog its
+// budget could not finish, and each second otherwise. A pass that caught up
+// is not repeated at once: under steady ingest that ran a pass for every few
+// published files, and each pass pays per-file and per-table costs that a
+// second's worth of files amortizes. Consecutive failures double the wait up
+// to a minute: a pass that failed out of memory would otherwise reclaim the
+// memory limit every second and starve the queries that need it.
 func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, error), failed func(error)) {
 	delay := time.Second
 	failures := 0
@@ -684,7 +687,7 @@ func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, er
 			return
 		case <-timer.C:
 		}
-		progress, err := pass(ctx)
+		backlog, err := pass(ctx)
 		delay = time.Second
 		if err != nil && ctx.Err() == nil {
 			failed(err)
@@ -693,7 +696,7 @@ func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, er
 			continue
 		}
 		failures = 0
-		if progress {
+		if backlog {
 			delay = 100 * time.Millisecond
 		}
 	}
@@ -703,8 +706,8 @@ func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, er
 // must never delay complete-file caching on the independent cache gate.
 func (d *Duck) runVersionRollupLoop(ctx context.Context) {
 	runBackgroundLoop(ctx, func(ctx context.Context) (bool, error) {
-		batches, err := d.DrainVersionRollup(ctx)
-		return batches > 0, err
+		_, backlog, err := d.DrainVersionRollup(ctx)
+		return backlog, err
 	}, func(err error) {
 		d.noteFailure(err)
 		slog.Warn("version rollup failed", "err", err)

@@ -46,6 +46,37 @@ func TestBackgroundLoopBacksOffAfterFailures(t *testing.T) {
 	})
 }
 
+// A pass repeats at once only while its budget left work behind. One that
+// caught up waits the idle second, so steady ingest is cached in one pass per
+// second rather than one pass per few published files.
+func TestBackgroundLoopRepeatsOnlyWhileBehind(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		start := time.Now()
+		var at []time.Duration
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			runBackgroundLoop(ctx, func(context.Context) (bool, error) {
+				at = append(at, time.Since(start))
+				return len(at) == 2 || len(at) == 3, nil
+			}, func(error) {})
+		}()
+		time.Sleep(3500 * time.Millisecond)
+		synctest.Wait()
+		cancel()
+		<-done
+		var gaps []time.Duration
+		for i := 1; i < len(at); i++ {
+			gaps = append(gaps, at[i]-at[i-1])
+		}
+		want := []time.Duration{time.Second, 100 * time.Millisecond, 100 * time.Millisecond, time.Second}
+		if !slices.Equal(gaps, want) {
+			t.Fatalf("gaps=%v want %v", gaps, want)
+		}
+	})
+}
+
 // DuckDB refuses all work after a fatal error until the process restarts, so
 // the first one a background pass sees is reported once for shutdown.
 func TestFatalEngineErrorIsReportedOnce(t *testing.T) {

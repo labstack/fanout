@@ -128,7 +128,14 @@ func idsSQL(ids []string) string {
 // RefreshReadCaches acknowledges complete immutable files, not an ingest-time
 // watermark. A pass only aggregates its selected batches: it never rebuilds a
 // retained-history index. Contributions and acknowledgements commit together.
-func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
+func (d *Duck) RefreshReadCaches(ctx context.Context) (int64, error) {
+	rows, _, err := d.refreshReadCaches(ctx)
+	return rows, err
+}
+
+// refreshReadCaches also reports whether pending files remain beyond the
+// pass's budget, so the worker repeats at once only while it is behind.
+func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool, err error) {
 	started := time.Now()
 	didWork := false
 	defer func() {
@@ -143,7 +150,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 
 	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer unlock()
 	// Cache retries are frequent. A queued publication must not park the cache
@@ -151,13 +158,13 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	admitted := d.parquetMu.TryRLock(parquetReadBackground)
 	metrics.RecordParquetRead(readerRollup, 0, admitted)
 	if !admitted {
-		return 0, nil
+		return 0, false, nil
 	}
 	defer d.parquetMu.RUnlock()
 	batches := d.repository.Parquet.BatchMetadata()
 	markers, err := batchMarkers(ctx, d.writer())
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	active := map[string]bool{}
 	for _, b := range batches {
@@ -183,7 +190,7 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 	}
 	metrics.ReadCachePendingBatches.Set(float64(pendingCount))
 	pending := []telemetry.BatchMetadata{}
-	pendingRows := 0
+	pendingRows, selected := 0, 0
 	for i := len(batches) - 1; i >= 0; i-- {
 		if !markers[batches[i].ID] {
 			rows := batches[i].Spans + batches[i].Logs + batches[i].Metrics
@@ -194,20 +201,24 @@ func (d *Duck) RefreshReadCaches(ctx context.Context) (rows int64, err error) {
 			}
 			pending = append(pending, batches[i])
 			pendingRows += rows
+			if rows > 0 {
+				selected++
+			}
 			if len(pending) == readCacheBatchLimit {
 				break
 			}
 		}
 	}
 	if len(pending) == 0 && len(stale) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
 	didWork = true
 	changed, err := changedRetiredBatches(ctx, d.writer(), markers, active, stale)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return d.cacheBatches(ctx, pending, stale, changed)
+	rows, err = d.cacheBatches(ctx, pending, stale, changed)
+	return rows, err == nil && selected < pendingCount, err
 }
 
 func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetadata, stale, changed []string) (int64, error) {

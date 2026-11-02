@@ -132,7 +132,7 @@ func TestAnnotationSourcesNoRawScan(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.DrainVersionRollup(t.Context()); err != nil {
+	if _, _, err := d.DrainVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	counter := &annotationCountingEngine{Duck: d}
@@ -211,7 +211,7 @@ func TestVersionDrainAndLimitedReset(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 1 {
 		t.Fatalf("backlog flag=%d %v", limited, err)
 	}
-	if n, err := d.DrainVersionRollup(t.Context()); err != nil || n != 6 {
+	if n, _, err := d.DrainVersionRollup(t.Context()); err != nil || n != 6 {
 		t.Fatalf("drain=%d %v", n, err)
 	}
 	if err := d.DB.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key='version_rollup_v1_limited'`).Scan(&limited); err != nil || limited != 0 {
@@ -244,7 +244,7 @@ func TestVersionLargeBatchDrains(t *testing.T) {
 	d, repo := versionEngine(t)
 	at := time.Now().UTC().Add(-time.Hour)
 	commitVersionLogs(t, repo, "oversized", at, 64001)
-	if n, err := d.DrainVersionRollup(t.Context()); err != nil || n != 1 {
+	if n, _, err := d.DrainVersionRollup(t.Context()); err != nil || n != 1 {
 		t.Fatalf("oversized drain=%d %v", n, err)
 	}
 	var marked, limited int
@@ -267,7 +267,7 @@ func TestVersionResourceLogsAndMetrics(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "resources", Logs: []telemetry.Log{{Namespace: "shop", ServiceName: "logsvc", Resource: map[string]any{"service.version": "log-v"}, EventUnixNanos: n, IngestedAt: n}}, Metrics: []telemetry.Metric{{Namespace: "shop", ServiceName: "metricsvc", Name: "n", Type: "gauge", Resource: map[string]any{"service.version": "metric-v"}, EventUnixNanos: n, IngestedAt: n}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DrainVersionRollup(t.Context()); err != nil {
+	if _, _, err := d.DrainVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := d.DB.Query(`SELECT service,service_version,first_seen::TIMESTAMP_NS FROM version_rollup ORDER BY service`)
@@ -298,7 +298,7 @@ func TestVersionMarkersCompactionRetention(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.DrainVersionRollup(t.Context()); err != nil {
+	if _, _, err := d.DrainVersionRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := repo.CompactParquet(t.Context(), d, 8); err != nil || n != 8 {

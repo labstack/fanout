@@ -149,7 +149,7 @@ FROM rollup_state`, edgeRollupStateKey, edgeRollupSubCursorKey).Scan(&watermark,
 	if _, err := d.RefreshReadCaches(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.DrainVersionRollup(ctx); err != nil {
+	if _, _, err := d.DrainVersionRollup(ctx); err != nil {
 		t.Fatal(err)
 	}
 	assertBacklogMarkers(t, d, repo)

@@ -263,6 +263,26 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 	}
 }
 
+// A pass reports a backlog only while unmarked files remain beyond its
+// budget; a pass that caught up lets the worker wait its idle cadence.
+func TestReadCacheReportsBacklogOnlyBeyondBudget(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	for i := range readCacheBatchLimit + 1 {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("file-%03d", i), Logs: []telemetry.Log{{TimeUnixNanos: int64(i + 1), IngestedAt: int64(i + 1)}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for pass, want := range []bool{true, false, false} {
+		if _, backlog, err := d.refreshReadCaches(t.Context()); err != nil || backlog != want {
+			t.Fatalf("pass %d: backlog=%v want=%v err=%v", pass, backlog, want, err)
+		}
+	}
+	var marked int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&marked); err != nil || marked != readCacheBatchLimit+1 {
+		t.Fatalf("marked=%d err=%v", marked, err)
+	}
+}
+
 func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	release := d.writeGate.Lock(writegate.RollupService)

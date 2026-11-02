@@ -75,9 +75,12 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 		}
 		commitMixedVersionBatch(t, repo, fmt.Sprintf("mixed-%03d", i), size)
 	}
+	// Only a pass whose budget left batches behind reports a backlog: the
+	// worker repeats at once after those and waits its cadence after the rest.
 	for pass, want := range []int64{12, 12, 12, 12, 12, 0} {
-		if n, err := d.RefreshVersionRollup(t.Context()); err != nil || n != want {
-			t.Fatalf("pass %d: batches=%d want=%d err=%v", pass, n, want, err)
+		n, backlog, err := d.refreshVersionRollup(t.Context(), versionRollupWaitBudget)
+		if err != nil || n != want || backlog != (pass < 4) {
+			t.Fatalf("pass %d: batches=%d want=%d backlog=%v err=%v", pass, n, want, backlog, err)
 		}
 	}
 	var marked, limited int

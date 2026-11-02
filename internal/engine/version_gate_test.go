@@ -63,7 +63,7 @@ func TestVersionRollupWaitIsBoundedWithoutCallerDeadline(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&log, nil)))
 	defer slog.SetDefault(logger)
 	start := time.Now()
-	_, err := d.refreshVersionRollup(context.Background(), 20*time.Millisecond)
+	_, _, err := d.refreshVersionRollup(context.Background(), 20*time.Millisecond)
 	elapsed := time.Since(start)
 	release()
 	if !errors.Is(err, context.DeadlineExceeded) || elapsed > 500*time.Millisecond {
@@ -93,7 +93,7 @@ func TestVersionRollupWaitHonorsCallerCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	finished := make(chan error, 1)
-	go func() { _, err := d.refreshVersionRollup(ctx, time.Second); finished <- err }()
+	go func() { _, _, err := d.refreshVersionRollup(ctx, time.Second); finished <- err }()
 	blocked, stop := make(chan struct{}), make(chan struct{})
 	defer close(stop)
 	go signalVersionGateWait(blocked, stop)
