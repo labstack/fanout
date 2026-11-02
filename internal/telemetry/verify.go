@@ -107,20 +107,23 @@ func (v *BatchVerifier) Validate(ctx context.Context, dir string) error {
 	return nil
 }
 
-// decode forces native decoding of every page of every column. COUNT alone
-// can use footer metadata, so the queries hash every column, including
-// shredded and residual VARIANT values; the XORs are discarded: this is
-// readability validation, not a checksum. A query buffers the row-group
-// chunks of every column it reads, and a variant column of wide metadata
-// alone can approach the verifier's memory limit, so each variant column has
-// its own query and the remaining columns share one.
+// decode forces native decoding of every page of every column that values
+// does not read. COUNT alone can use footer metadata, so the queries hash
+// every column, including shredded and residual VARIANT values; the XORs are
+// discarded: this is readability validation, not a checksum. A query buffers
+// the row-group chunks of every column it reads, and a variant column of wide
+// metadata alone can approach the verifier's memory limit, so each variant
+// column has its own query and the remaining columns share one.
 func (v *BatchVerifier) decode(ctx context.Context, path string, s *Signal, expected int) error {
 	var scalars []string
 	var queries [][]string
+	checked := keysByMap(s)
 	for _, field := range s.schema.Fields() {
 		name := sqlIdentifier(field.Name())
 		if c, ok := s.Column(field.Name()); ok && c.Type == Variant {
-			queries = append(queries, []string{name})
+			if len(checked[field.Name()]) == 0 {
+				queries = append(queries, []string{name})
+			}
 		} else {
 			scalars = append(scalars, name)
 		}
@@ -156,31 +159,53 @@ func (v *BatchVerifier) decode(ctx context.Context, path string, s *Signal, expe
 // values without one; the parallel lists of a row have equal lengths; and
 // metric points carry exactly the columns of their kind.
 //
-// Every row is checked. Each key has its own query: extracting a key decodes
-// the row's whole variant metadata, and a query holds one decoded vector per
-// extract, so checking every key at once outgrows the verifier's memory
-// limit on files with wide metadata. The list and kind checks read no
-// variant and share one query.
+// Every row is checked. Each map has one query that decodes it (the discarded
+// hash, as in decode) and checks all of its keys. A compacted file gives every
+// row the unified key dictionary of its inputs, and extracting a key walks
+// that whole dictionary, so each key once cost a scan of the map;
+// variant_normalize first rewrites each row with only the keys it uses. Each
+// key is then read as its type name and its text, a few bytes a row: a
+// VARIANT result keeps the row's dictionary, and the engine holds one result
+// vector per expression outside its memory limit, so VARIANT extracts of
+// every key grew the process by a gigabyte on files of wide metadata. The
+// list and kind checks read no variant and share one query.
 func (v *BatchVerifier) values(ctx context.Context, path string, s *Signal) error {
 	source := parquetSource(path)
 	counts, err := fileSpills(path, s)
 	if err != nil {
 		return batchDataError(err)
 	}
-	for _, key := range s.Keys() {
-		// An absent key and a null value both read as VARIANT_NULL: no value,
-		// so no spill.
-		query := fmt.Sprintf("SELECT count(*) FILTER (WHERE NOT coalesce(%s, false)), count(*) FILTER (WHERE %s IS NULL AND variant_typeof(%s)<>'VARIANT_NULL')::UBIGINT FROM %s",
-			coercedSQL(key), key.Column, keyValueSQL(key), source)
-		var broken, spilled uint64
-		if err := v.db.QueryRowContext(ctx, query).Scan(&broken, &spilled); err != nil {
+	checked := keysByMap(s)
+	for _, m := range mapColumns {
+		keys := checked[m]
+		if len(keys) == 0 {
+			continue
+		}
+		columns := []string{m, "variant_normalize(" + m + ") AS " + normalizedMap}
+		selects := []string{"bit_xor(hash(" + m + "))"}
+		for _, key := range keys {
+			// An absent key reads as no type and a null value as VARIANT_NULL:
+			// neither is a value, so neither spills.
+			columns = append(columns, key.Column)
+			selects = append(selects, fmt.Sprintf("count(*) FILTER (WHERE NOT coalesce(%s, false))", coercedSQL(key)),
+				fmt.Sprintf("count(*) FILTER (WHERE %s IS NULL AND %s<>'VARIANT_NULL')::UBIGINT", key.Column, keyTypeSQL(key)))
+		}
+		query := "SELECT " + strings.Join(selects, ", ") + " FROM (SELECT " + strings.Join(columns, ", ") + " FROM " + source + ")"
+		results := make([]uint64, 2*len(keys))
+		dest := []any{new(any)}
+		for i := range results {
+			dest = append(dest, &results[i])
+		}
+		if err := v.db.QueryRowContext(ctx, query).Scan(dest...); err != nil {
 			return nativeVerificationError(err)
 		}
-		if broken > 0 {
-			return &CorruptBatchError{fmt.Errorf("%d rows break the %s check", broken, key.Column)}
-		}
-		if spilled != counts[key.Bit] {
-			return &CorruptBatchError{fmt.Errorf("%d rows spill %s; the footer counts %d", spilled, key.Name, counts[key.Bit])}
+		for i, key := range keys {
+			if broken := results[2*i]; broken > 0 {
+				return &CorruptBatchError{fmt.Errorf("%d rows break the %s check", broken, key.Column)}
+			}
+			if spilled := results[2*i+1]; spilled != counts[key.Bit] {
+				return &CorruptBatchError{fmt.Errorf("%d rows spill %s; the footer counts %d", spilled, key.Name, counts[key.Bit])}
+			}
 		}
 	}
 	type check struct {
@@ -236,35 +261,62 @@ func parquetSource(path string) string {
 
 func sqlIdentifier(name string) string { return `"` + strings.ReplaceAll(name, `"`, `""`) + `"` }
 
-func keyValueSQL(key semconv.Key) string {
-	source := "attributes"
-	if key.Scope == semconv.Resource {
-		source = "resource"
+// mapColumns are the maps whose standard keys have dedicated columns, in
+// column order; normalizedMap names the normalized map in a values query.
+var mapColumns = [...]string{"attributes", "resource"}
+
+const normalizedMap = "normalized"
+
+// keysByMap groups the signal's dedicated keys by the map that holds them,
+// in key-bit order.
+func keysByMap(s *Signal) map[string][]semconv.Key {
+	keys := map[string][]semconv.Key{}
+	for _, key := range s.Keys() {
+		m := mapColumns[0]
+		if key.Scope == semconv.Resource {
+			m = mapColumns[1]
+		}
+		keys[m] = append(keys[m], key)
 	}
-	return fmt.Sprintf("%s[%s]", source, sqlString(key.Name))
+	return keys
+}
+
+// keyTypeSQL names the type of a key's value in the normalized map of a
+// values query: the variant type names, VARIANT_NULL for a null value and
+// NULL for an absent key.
+func keyTypeSQL(key semconv.Key) string {
+	return fmt.Sprintf("variant_type(%s, %s)", normalizedMap, sqlString(key.Name))
+}
+
+// keyStringSQL reads a key's value from the normalized map as text: a string
+// as itself, an integer in decimal, a boolean as true or false, and a double
+// in the shortest form that reads back as the same number.
+func keyStringSQL(key semconv.Key) string {
+	return fmt.Sprintf("variant_extract_string(%s, %s)", normalizedMap, sqlString(key.Name))
 }
 
 // coercedSQL holds when a key's column equals coerce of its map value. A
 // float64 converted to text is compared by the number it reads back as:
 // strconv's shortest form reads back exactly, and DuckDB does not print it.
 func coercedSQL(key semconv.Key) string {
-	v, c := keyValueSQL(key), key.Column
+	t, v, c := keyTypeSQL(key), keyStringSQL(key), key.Column
 	// DuckDB may evaluate a CASE branch over rows that do not take it, so
-	// every branch casts with TRY_CAST.
+	// every branch casts with TRY_CAST. Its BIGINT cast accepts surrounding
+	// spaces, which coerce does not, so digits are matched first.
 	if key.Type == semconv.Int {
-		return fmt.Sprintf(`%[2]s IS NOT DISTINCT FROM CASE variant_typeof(%[1]s)
-WHEN 'INT64' THEN TRY_CAST(%[1]s AS BIGINT)
-WHEN 'DOUBLE' THEN CASE WHEN TRY_CAST(%[1]s AS DOUBLE)>=-9223372036854775808::DOUBLE AND TRY_CAST(%[1]s AS DOUBLE)<9223372036854775808::DOUBLE
- AND TRY_CAST(%[1]s AS DOUBLE)=trunc(TRY_CAST(%[1]s AS DOUBLE)) THEN TRY_CAST(TRY_CAST(%[1]s AS DOUBLE) AS BIGINT) END
-WHEN 'VARCHAR' THEN CASE WHEN regexp_full_match(TRY_CAST(%[1]s AS VARCHAR),'[+-]?[0-9]+') THEN TRY_CAST(TRY_CAST(%[1]s AS VARCHAR) AS BIGINT) END END`, v, c)
+		return fmt.Sprintf(`%[3]s IS NOT DISTINCT FROM CASE %[1]s
+WHEN 'INT64' THEN TRY_CAST(%[2]s AS BIGINT)
+WHEN 'DOUBLE' THEN CASE WHEN TRY_CAST(%[2]s AS DOUBLE)>=-9223372036854775808::DOUBLE AND TRY_CAST(%[2]s AS DOUBLE)<9223372036854775808::DOUBLE
+ AND TRY_CAST(%[2]s AS DOUBLE)=trunc(TRY_CAST(%[2]s AS DOUBLE)) THEN TRY_CAST(TRY_CAST(%[2]s AS DOUBLE) AS BIGINT) END
+WHEN 'VARCHAR' THEN CASE WHEN regexp_full_match(%[2]s,'[+-]?[0-9]+') THEN TRY_CAST(%[2]s AS BIGINT) END END`, t, v, c)
 	}
-	return fmt.Sprintf(`CASE variant_typeof(%[1]s)
-WHEN 'VARCHAR' THEN %[2]s IS NOT DISTINCT FROM TRY_CAST(%[1]s AS VARCHAR)
-WHEN 'INT64' THEN %[2]s IS NOT DISTINCT FROM TRY_CAST(TRY_CAST(%[1]s AS BIGINT) AS VARCHAR)
-WHEN 'BOOL_TRUE' THEN %[2]s IS NOT DISTINCT FROM 'true'
-WHEN 'BOOL_FALSE' THEN %[2]s IS NOT DISTINCT FROM 'false'
-WHEN 'DOUBLE' THEN TRY_CAST(%[2]s AS DOUBLE) IS NOT DISTINCT FROM TRY_CAST(%[1]s AS DOUBLE)
-ELSE %[2]s IS NULL END`, v, c)
+	return fmt.Sprintf(`CASE %[1]s
+WHEN 'VARCHAR' THEN %[3]s IS NOT DISTINCT FROM %[2]s
+WHEN 'INT64' THEN %[3]s IS NOT DISTINCT FROM %[2]s
+WHEN 'BOOL_TRUE' THEN %[3]s IS NOT DISTINCT FROM 'true'
+WHEN 'BOOL_FALSE' THEN %[3]s IS NOT DISTINCT FROM 'false'
+WHEN 'DOUBLE' THEN TRY_CAST(%[3]s AS DOUBLE) IS NOT DISTINCT FROM TRY_CAST(%[2]s AS DOUBLE)
+ELSE %[3]s IS NULL END`, t, v, c)
 }
 
 // kindChecks hold for every metric point: the columns of its kind are set and

@@ -251,10 +251,10 @@ func TestNativeVerifierRejectsLogAndMetricOrder(t *testing.T) {
 }
 
 // Field-name churn makes every row carry a variant metadata dictionary of up
-// to 4 KiB, as compacted files of high-cardinality attributes do. Each
-// extract of a standard key decodes that dictionary for every row, so the
-// verifier must still decode every column and check every key and row within
-// its fixed, non-spilling memory limit.
+// to 4 KiB, as compacted files of high-cardinality attributes do. The
+// verifier checks all of a map's keys in one query over that dictionary, so
+// it must still decode every column and check every key and row within its
+// fixed, non-spilling memory limit.
 func TestNativeVerifierFitsChurnedVariantMetadata(t *testing.T) {
 	if testing.Short() {
 		t.Skip("writes and verifies a batch of wide variant metadata")

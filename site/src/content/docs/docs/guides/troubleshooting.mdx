@@ -72,12 +72,13 @@ authoritative set:
 fanout repair verify
 ```
 
-The command is read-only and reports confirmed corrupt batches. Unsupported
-formats and operational errors stop verification; they do not authorize
-quarantine. Restore each reported corrupt batch from backup when possible. If
-one cannot be recovered and discarding only its telemetry is preferable to
-leaving the instance offline, set it aside
-explicitly:
+The command is read-only and reports confirmed corrupt batches. It verifies
+batches concurrently, one two-thread engine with a fixed memory limit per two
+CPUs; `GOMAXPROCS` bounds both. Unsupported formats and operational errors
+stop verification; they do not authorize quarantine. Restore each reported
+corrupt batch from backup when possible. If one cannot be recovered and
+discarding only its telemetry is preferable to leaving the instance offline,
+set it aside explicitly:
 
 ```sh
 fanout repair quarantine --batch <id>

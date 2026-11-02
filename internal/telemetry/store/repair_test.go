@@ -14,13 +14,15 @@ import (
 	"github.com/parquet-go/parquet-go"
 )
 
+// Batches verify concurrently; the issues still name the corrupt ones alone,
+// in directory order.
 func TestVerifyBatchesReportsOnlyUnreadableBatches(t *testing.T) {
 	root := t.TempDir()
 	repository, err := Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"good", "broken"} {
+	for _, id := range []string{"a-good", "b-broken", "c-good", "d-broken", "e-good"} {
 		if err := repository.Commit(context.Background(), Batch{
 			ID: id, Spans: []telemetry.Span{{TraceID: id, SpanID: "span"}},
 		}); err != nil {
@@ -30,13 +32,14 @@ func TestVerifyBatchesReportsOnlyUnreadableBatches(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	corruptBatchFile(t, root, "broken", "spans.parquet")
+	corruptBatchFile(t, root, "b-broken", "spans.parquet")
+	corruptBatchFile(t, root, "d-broken", "spans.parquet")
 
 	issues, err := VerifyBatches(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(issues) != 1 || issues[0].ID != "broken" || issues[0].Err == nil {
+	if len(issues) != 2 || issues[0].ID != "b-broken" || issues[1].ID != "d-broken" || issues[0].Err == nil || issues[1].Err == nil {
 		t.Fatalf("issues = %#v", issues)
 	}
 }
