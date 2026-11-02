@@ -1465,7 +1465,8 @@ WHERE bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 // Aggregate each bounded signal scan before the final affected-bucket joins.
 // Schema-first Parquet scans can have a zero cardinality estimate in DuckDB 2;
 // joining raw events to the affected table can then build a hash table of every
-// event. The final joins already restrict the result to the affected keys.
+// event. Logs and metrics aggregate before joining. Spans must semi-join first:
+// each unaffected service-minute otherwise allocates its own t-digest states.
 var serviceRollupInsertSQL = `
 WITH span_agg AS (
   SELECT
@@ -1489,6 +1490,10 @@ WITH span_agg AS (
     ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
+  SEMI JOIN service_pass_affected a
+    ON a.namespace = s.namespace
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
+   AND a.service = s.service
   -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
   -- start_time stats instead of scanning all history. The final join on a
   -- computed bucket alone does not prune. The range is a provable superset
@@ -1622,6 +1627,45 @@ WHERE EXISTS (
     AND affected.bucket = edge_rollup.bucket
 );`
 
+// Materialize the narrow affected child window before planning parent joins.
+// Schema-first Parquet scans estimate zero rows; the resulting table has real
+// statistics. Embed the small key list as a constant vector filter: a scalar
+// subquery or semi-join can itself reverse into a build of all raw children.
+func createEdgeChildren(ctx context.Context, tx *sql.Tx, lo, hi time.Time) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT namespace,epoch_ns(bucket) FROM edge_pass_buckets
+ WHERE namespace IS NOT NULL AND bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ AND bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, lo, hi)
+	if err != nil {
+		return err
+	}
+	keys := []string{}
+	for rows.Next() {
+		var namespace string
+		var bucket int64
+		if err := rows.Scan(&namespace, &bucket); err != nil {
+			rows.Close()
+			return err
+		}
+		keys = append(keys, fmt.Sprintf("struct_pack(namespace := %s, bucket := make_timestamp_ns(%d))", sqlLiteral(namespace), bucket))
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	list := "[" + strings.Join(keys, ",") + "]::STRUCT(namespace VARCHAR,bucket TIMESTAMP_NS)[]"
+	_, err = tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE edge_pass_children AS
+ SELECT child.namespace, child.trace_id, child.parent_span_id, child.service,
+        child.start_time, child.duration_ms, child.status
+ FROM spans child
+ WHERE child.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND child.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND child.service IS NOT NULL AND child.service != ''
+   AND list_contains(`+list+`,struct_pack(namespace := child.namespace,
+       bucket := date_trunc('minute',child.start_time::TIMESTAMP_NS)))`, lo, hi)
+	return err
+}
+
 const edgeChildTracesSQL = edgeAffectedBucketsSQL + `,
 -- Compute the affected bucket range once for the child and parent filters.
 bounds AS (
@@ -1632,10 +1676,7 @@ bounds AS (
 -- building the parent side. Namespace is part of the trace identity.
 child_traces AS (
   SELECT DISTINCT child.namespace, child.trace_id
-  FROM spans child
-  JOIN affected a
-    ON a.namespace = child.namespace
-   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
+  FROM edge_pass_children child
   CROSS JOIN bounds
   WHERE child.service IS NOT NULL
     AND child.service != ''
@@ -1647,6 +1688,10 @@ child_traces AS (
 // The wide scan is issued only after an explicit unmatched-trace check.
 // The result reports whether that scan ran.
 func prepareEdgeParents(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (bool, error) {
+	if err := createEdgeChildren(ctx, tx, lo, hi); err != nil {
+		return false, err
+	}
+
 	if _, err := tx.ExecContext(ctx, createEdgeParentsSQL, lo, hi); err != nil {
 		return false, err
 	}
@@ -1682,6 +1727,9 @@ func insertEdgeRollup(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (sql.Re
 	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_parents"); err != nil {
 		return nil, err
 	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_children"); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -1702,10 +1750,7 @@ bounds AS (
   SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
 )
 SELECT DISTINCT child.namespace, child.trace_id
-FROM spans child
-JOIN affected a
-  ON a.namespace = child.namespace
- AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
+FROM edge_pass_children child
 ANTI JOIN edge_pass_parents parent
   ON parent.namespace = child.namespace
  AND parent.trace_id = child.trace_id
@@ -1759,14 +1804,11 @@ call_edges AS (
     AVG(child.duration_ms) AS avg_ms,
     AVG(CASE WHEN child.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate,
     'call' AS edge_type
-  FROM spans child
+  FROM edge_pass_children child
   JOIN parent_scope parent
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
    AND child.namespace = parent.namespace
-  JOIN affected a
-    ON a.namespace = child.namespace
-   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
   -- Keep bounds as an explicit CROSS JOIN after the keyed joins, so the
   -- planner can fold its single row into the child filters. The plan test
   -- guards against Cartesian or correlated span-to-span joins.
@@ -1784,7 +1826,7 @@ call_edges AS (
 -- span count. calls = consumed messages on the destination, attributed to
 -- each producer service publishing to it (a message consumed once appears on
 -- every producer's edge).
-producers AS (
+producer_agg AS (
   SELECT DISTINCT
     s.namespace,
     date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
@@ -1792,9 +1834,6 @@ producers AS (
     s.messaging_destination AS destination,
     s.messaging_system AS msg_system
   FROM spans s
-  JOIN affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
     AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
@@ -1802,7 +1841,7 @@ producers AS (
     AND s.service != ''
     AND s.messaging_destination IS NOT NULL
 ),
-consumers AS (
+consumer_agg AS (
   SELECT
     s.namespace,
     date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
@@ -1811,9 +1850,6 @@ consumers AS (
     s.messaging_system AS msg_system,
     COUNT(*) AS calls
   FROM spans s
-  JOIN affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
     AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
@@ -1823,6 +1859,14 @@ consumers AS (
   GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
     s.messaging_destination,
     s.messaging_system
+),
+producers AS (
+  SELECT p.* FROM producer_agg p
+  SEMI JOIN affected a USING (namespace, bucket)
+),
+consumers AS (
+  SELECT c.* FROM consumer_agg c
+  SEMI JOIN affected a USING (namespace, bucket)
 ),
 messaging_edges AS (
   SELECT
