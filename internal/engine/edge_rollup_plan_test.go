@@ -45,8 +45,8 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 			t.Errorf("edge rollup plans a %s; the span joins must stay hash joins:\n%s", bad, shippedPlan)
 		}
 	}
-	if !strings.Contains(strings.ToUpper(parentPlan), "SEMI") {
-		t.Errorf("edge rollup lost the child-trace semi-join:\n%s", parentPlan)
+	if !strings.Contains(strings.ToUpper(parentPlan), "MARK") {
+		t.Errorf("edge rollup lost the child-trace mark join:\n%s", parentPlan)
 	}
 	if !strings.Contains(shippedPlan, "Hash Join") {
 		t.Errorf("edge rollup plans no HASH_JOIN at all:\n%s", shippedPlan)

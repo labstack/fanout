@@ -1827,14 +1827,19 @@ func insertEdgeRollup(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (sql.Re
 	return res, nil
 }
 
+// Keep the membership predicate as a MARK join. IS TRUE prevents DuckDB from
+// rewriting it to a reversible semi-join: schema-first Parquet estimates zero
+// rows and would put the entire parent history on the hash build side. Filter
+// NULL keys so row-value membership preserves the original equality semantics.
 const createEdgeParentsSQL = `CREATE TEMP TABLE edge_pass_parents AS ` + edgeChildTracesSQL + `
 SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
 FROM spans parent
-SEMI JOIN child_traces child
-  ON parent.namespace = child.namespace
- AND parent.trace_id = child.trace_id
 CROSS JOIN bounds
-WHERE parent.start_time >= (bounds.lo - INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+WHERE ((parent.namespace, parent.trace_id) IN (
+  SELECT (child.namespace, child.trace_id) FROM child_traces child
+  WHERE child.namespace IS NOT NULL AND child.trace_id IS NOT NULL
+)) IS TRUE
+  AND parent.start_time >= (bounds.lo - INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.start_time <= (bounds.hi + INTERVAL 5 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.service IS NOT NULL
   AND parent.service != ''`
@@ -1872,11 +1877,12 @@ bounds AS (
 INSERT INTO edge_pass_parents
 SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
 FROM spans parent
-SEMI JOIN edge_pass_unmatched child
-  ON parent.namespace = child.namespace
- AND parent.trace_id = child.trace_id
 CROSS JOIN bounds
-WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+WHERE ((parent.namespace, parent.trace_id) IN (
+  SELECT (child.namespace, child.trace_id) FROM edge_pass_unmatched child
+  WHERE child.namespace IS NOT NULL AND child.trace_id IS NOT NULL
+)) IS TRUE
+  AND parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND parent.service IS NOT NULL
   AND parent.service != ''`
