@@ -208,3 +208,93 @@ func TestCompactedVariantFastPathMatchesRewrite(t *testing.T) {
 		t.Fatal("the fast path wrote a different file from the rewrite")
 	}
 }
+
+// Partial groups with disjoint complete tuples must survive compaction as
+// compressed chunks, even when the preceding group did not fill the row target.
+func TestMergeCopiesDisjointSignalGroups(t *testing.T) {
+	for _, signal := range []*Signal{Metrics, Spans} {
+		t.Run(signal.Name, func(t *testing.T) {
+			dir := t.TempDir()
+			var inputs []string
+			const rows = 30_000
+			for file := range 2 {
+				inputDir := filepath.Join(dir, fmt.Sprint(file))
+				if err := os.Mkdir(inputDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				raw := filepath.Join(inputDir, "raw.parquet")
+				var err error
+				switch signal {
+				case Metrics:
+					values := make([]Metric, rows)
+					for i := range values {
+						values[i] = Metric{ServiceName: fmt.Sprint(file), Name: "latency", SeriesID: uint64(i), TimeUnixNanos: int64(i + 1), Resource: map[string]any{"z": int64(1), "a": "value"}}
+					}
+					err = writeParquet(raw, signal, values, parquetPageSize)
+				case Spans:
+					values := make([]Span, rows)
+					for i := range values {
+						values[i] = Span{TraceID: fmt.Sprintf("%032x", file+1), SpanID: fmt.Sprintf("%016x", i+1), StartUnixNanos: int64(i + 1), Resource: map[string]any{"z": int64(1), "a": "value"}}
+					}
+					err = writeParquet(raw, signal, values, parquetPageSize)
+				case Logs:
+					values := make([]Log, rows)
+					for i := range values {
+						values[i] = Log{EventUnixNanos: int64(file+1)*int64(3_600_000_000_000) + int64(i), Resource: map[string]any{"z": int64(1), "a": "value"}}
+					}
+					err = writeParquet(raw, signal, values, parquetPageSize)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				canonical := filepath.Join(inputDir, "canonical.parquet")
+				if err := mergeParquet(t.Context(), signal, []string{raw}, canonical, &ParquetMergeStats{}); err != nil {
+					t.Fatal(err)
+				}
+				inputs = append(inputs, canonical)
+			}
+			out := filepath.Join(dir, "merged.parquet")
+			if err := mergeParquet(t.Context(), signal, inputs, out, &ParquetMergeStats{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyOrder(out, signal, rows*2); err != nil {
+				t.Fatal(err)
+			}
+			merged := openParquetFile(t, out)
+			if len(merged.RowGroups()) != 2 {
+				t.Fatalf("got %d groups, want copied partial groups", len(merged.RowGroups()))
+			}
+			// Compare every compressed chunk, allowing the span hash order to choose
+			// which input is first. This catches a silent decode/re-encode fallback.
+			chunk := func(pf *parquet.File, g, col int) []byte {
+				m := pf.Metadata().RowGroups[g].Columns[col].MetaData
+				start := m.DataPageOffset
+				if m.DictionaryPageOffset > 0 {
+					start = min(start, m.DictionaryPageOffset)
+				}
+				b := make([]byte, m.TotalCompressedSize)
+				if _, err := pf.ReadAt(b, start); err != nil {
+					t.Fatal(err)
+				}
+				return b
+			}
+			sources := []*parquet.File{openParquetFile(t, inputs[0]), openParquetFile(t, inputs[1])}
+			for g := range 2 {
+				found := false
+				for _, src := range sources {
+					same := true
+					for col := range signal.schema.Columns() {
+						same = same && bytes.Equal(chunk(src, 0, col), chunk(merged, g, col))
+					}
+					found = found || same
+				}
+				if !found {
+					t.Fatalf("group %d was re-encoded", g)
+				}
+			}
+			if got := len(engineRows(t, out)); got != rows*2 {
+				t.Fatalf("decoded %d rows", got)
+			}
+		})
+	}
+}

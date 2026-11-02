@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"bufio"
+	"bytes"
 	"container/heap"
 	"context"
 	"errors"
@@ -9,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/format"
@@ -92,13 +96,11 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	if s == Logs {
 		pageSize = 128 << 10
 	}
-	writer := parquet.NewGenericWriter[any](out, parquetWriterOptions(pageSize, s.writerOptions()...)...)
-	// Close on failure too: it returns the column page buffers to their pool.
-	defer func() {
-		if !ok {
-			_ = writer.Close()
-		}
-	}()
+	bufferedOutput := bufio.NewWriterSize(out, 256<<10)
+	assembler, err := newMergeAssembler(bufferedOutput, s, spilled)
+	if err != nil {
+		return err
+	}
 	var index *traceIndexWriter
 	if s.Traces {
 		index, err = newTraceIndexWriter(filepath.Join(filepath.Dir(output), "trace.fidx"))
@@ -137,7 +139,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	columns := make([]mergeColumn, len(schema.Columns()))
 	for i, path := range schema.Columns() {
 		leaf, _ := schema.Lookup(path...)
-		columns[i] = mergeColumn{column: i, repeated: leaf.MaxRepetitionLevel > 0, groups: groups, files: groupFiles, meta: chunkBytes,
+		columns[i] = mergeColumn{column: i, repeated: leaf.MaxRepetitionLevel > 0, maxDefinition: leaf.MaxDefinitionLevel, flatNull: leaf.MaxRepetitionLevel == 0 && leaf.MaxDefinitionLevel == 1, groups: groups, files: groupFiles, meta: chunkBytes,
 			readers: make([]parquet.ColumnChunkValueReader, len(groups)), remaining: make([]int64, len(groups)), started: make([]bool, len(groups))}
 		if columns[i].repeated {
 			columns[i].pending = make([][]parquet.Value, len(groups))
@@ -162,6 +164,20 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			variants = append(variants, v)
 		}
 	}
+	// Identical canonical metadata gives every input the same field IDs.
+	// Their leaves can follow the ordinary column schedule without rebuilding
+	// the VARIANT objects, including sparse leaves that are constant.
+	rewriting := variants[:0]
+	for _, v := range variants {
+		keep, e := mergeVariantKeepsMetadata(groups, v)
+		if e != nil {
+			return e
+		}
+		if !keep {
+			rewriting = append(rewriting, v)
+		}
+	}
+	variants = rewriting
 	owned := make([]bool, len(columns))
 	// rowBytes[group][variant] is a row's share of the variant's uncompressed
 	// input bytes, which bounds an output row group's buffered variant state.
@@ -198,6 +214,40 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			}
 		}
 	}
+	// Columns certified constant across the complete merge are encoded once
+	// per output size. They do not need a value reader or an output buffer for
+	// every row group. VARIANT leaves remain owned by their group rewriter.
+	constants := make([]*mergeConstant, len(columns))
+	allRuns := make([]mergeRun, len(groups))
+	for i, g := range groups {
+		allRuns[i] = mergeRun{i, int(g.NumRows())}
+	}
+	for i := range columns {
+		if !owned[i] {
+			if value, ok := columns[i].constantValue(allRuns); ok {
+				constants[i] = newMergeConstant(schema, i, value)
+				continue
+			}
+		}
+	}
+	// Price only columns that actually open readers. Counting the sparse
+	// constants would needlessly split wide format-5 merges into extra windows.
+	activeUnits := units[:0]
+	for _, u := range units {
+		if u.variant != nil || constants[u.column] == nil {
+			activeUnits = append(activeUnits, u)
+		}
+	}
+	units = activeUnits
+	var rowGroups []*mergeOutput
+	defer func() {
+		for _, o := range rowGroups {
+			if o != nil {
+				_ = o.writer.Close()
+			}
+		}
+	}()
+
 	active := make([]bool, len(groups))
 	// groupRowBytes is a row's share of its input's compressed bytes.
 	groupRowBytes := make([]int64, len(groups))
@@ -230,10 +280,76 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 				rows += group.NumRows()
 			}
 			window = mergeLogWindowLimit(rows, pageSize)
+			// Assembly also retains the compressed bytes of each slot. Keep
+			// that scratch within the original window's memory allowance.
+			window = max(1, window/2)
 		}
 	}
-	var rowGroups []*parquet.ConcurrentRowGroupWriter
 	copyable := make([]int8, len(groups)) // unknown, -1 requires rewrite, +1 copyable
+	// Preserve a large input group as a unit when its complete key range is
+	// before every competing cursor. This also works when a preceding overlap
+	// consumed only part of an output group: finish that group first.
+	canCopyNext := func() (bool, error) {
+		if len(keys) == 0 || s == Logs {
+			return false, nil
+		}
+		c := keys[0]
+		g := groups[c.input]
+		rows := g.NumRows()
+		if c.remaining != rows-1 || rows < parquetRowGroupRows/2 || rows > parquetRowGroupRows {
+			return false, nil
+		}
+		for _, n := range rowBytes[c.input] {
+			if n*rows > maxVariantRowGroupBytes {
+				return false, nil
+			}
+		}
+		if copyable[c.input] == 0 {
+			keep, e := mergeGroupKeepsVariantMetadata(g, variants)
+			if e != nil {
+				return false, e
+			}
+			copyable[c.input] = -1
+			if keep {
+				copyable[c.input] = 1
+			}
+		}
+		if copyable[c.input] < 0 {
+			return false, nil
+		}
+		if len(keys) == 1 {
+			return true, nil
+		}
+		other := keys[1]
+		if len(keys) > 2 && keys.Less(2, 1) {
+			other = keys[2]
+		}
+		last, e := mergeLastKey(s, g)
+		if e != nil {
+			return false, e
+		}
+		cmp := s.order.compare(&last, &other.key)
+		return cmp < 0 || cmp == 0 && c.input < other.input, nil
+	}
+	// Wide metric VARIANT rewrites retain row-local metadata. Smaller rewrite
+	// groups offset the assembly scratch without changing the ingest ceiling or
+	// splitting the already-ordered groups copied below. Small merges retain
+	// ingest-sized groups to avoid spending their savings on extra footers.
+	rowTarget := parquetRowGroupRows
+	var totalRows int64
+	for _, group := range groups {
+		totalRows += group.NumRows()
+	}
+	if s == Metrics && totalRows >= 1_000_000 && len(inputs) > 1 && len(variants) > 0 {
+		rowTarget = 30_000
+		// A lower reader allowance must not multiply buffered output groups
+		// on wide, overlapping compacted inputs. Their indexed pages can
+		// resume per group; tiny ingest inputs still share a bounded window.
+		window = 1
+	}
+	// Small merges amortize less decoding work over each projected schema.
+	// Reuse one projection there; large merges also elide local constants.
+	localConstants := totalRows >= 1_000_000
 	var pending []mergeRowGroup
 	for done := false; !done; {
 		pending = pending[:0]
@@ -249,8 +365,25 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			count := 0
 			clear(buffered)
 			full := false
-			for count < parquetRowGroupRows && len(keys) > 0 && !full {
+			for count < rowTarget && len(keys) > 0 && !full {
+				copyNext, e := canCopyNext()
+				if e != nil {
+					return e
+				}
+				if copyNext && count > 0 {
+					break
+				}
 				c := keys[0]
+				if copyNext && !s.Traces {
+					count = int(groups[c.input].NumRows())
+					runs = appendMergeRun(runs, c.input, count)
+					inputBytes += int64(count) * groupRowBytes[c.input]
+					if e := c.close(); e != nil {
+						return e
+					}
+					heap.Pop(&keys)
+					break
+				}
 				if s.Traces {
 					// The span order leads with the trace hash, then start time.
 					hash, start := c.key.n[0], int64(c.key.n[1]^1<<63)
@@ -277,20 +410,64 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 					heap.Fix(&keys, 0)
 				} else {
 					heap.Pop(&keys)
+					if len(runs) == 1 && int64(count) == groups[c.input].NumRows() && copyable[c.input] > 0 {
+						break
+					}
 				}
 			}
 			if count == 0 {
 				done = true
 				break
 			}
-			if len(rowGroups) == len(pending) {
-				rowGroups = append(rowGroups, writer.BeginRowGroup())
+			rg := mergeRowGroup{runs: runs, rows: count, chunks: make([]mergeChunk, len(columns)), constant: make([]bool, len(columns)), values: make([]parquet.Value, len(columns))}
+			var paths [][]string
+			for i := range columns {
+				if !owned[i] {
+					var value parquet.Value
+					var constant bool
+					if localConstants {
+						value, constant = columns[i].constantValue(runs)
+					} else if c := constants[i]; c != nil {
+						value, constant = c.value, true
+					}
+					if constant {
+						rg.constant[i] = true
+						rg.values[i] = value
+						continue
+					}
+				}
+				paths = append(paths, schema.Columns()[i])
 			}
-			rg := mergeRowGroup{runs: runs, rows: count, writer: rowGroups[len(pending)]}
+			slot := len(pending)
+			if slot == len(rowGroups) {
+				rowGroups = append(rowGroups, nil)
+			}
+			output := rowGroups[slot]
+			if len(paths) > 0 && (output == nil || !slices.Equal(output.constant, rg.constant)) {
+				if output != nil {
+					_ = output.writer.Close()
+				}
+				projected := parquet.NewSchema(schema.Name(), mergeProjectedNode{schema, mergeProjection(schema, paths)})
+				output = &mergeOutput{constant: slices.Clone(rg.constant)}
+				output.writer = parquet.NewGenericWriter[any](&output.encoded, parquetWriterOptions(pageSize, projected)...)
+				output.group = output.writer.BeginRowGroup()
+				rowGroups[slot] = output
+			}
+			if len(paths) > 0 {
+				rg.output = output
+			}
+			rg.writers = make([]*parquet.ColumnWriter, len(columns))
+			j := 0
+			for i := range columns {
+				if !rg.constant[i] {
+					rg.writers[i] = output.group.ColumnWriters()[j]
+					j++
+				}
+			}
 			// A whole input row group already in output order needs neither
-			// decoding nor VARIANT dictionary rewriting. WriteRowGroup preserves
-			// its compressed chunks and indexes when the writer settings match.
-			if s == Logs && len(runs) == 1 && int64(count) == groups[runs[0].input].NumRows() {
+			// decoding nor VARIANT dictionary rewriting. Assembly retains its
+			// compressed chunks and relocates their page indexes.
+			if len(runs) == 1 && int64(count) == groups[runs[0].input].NumRows() {
 				input := runs[0].input
 				if copyable[input] == 0 {
 					canCopy, e := mergeGroupKeepsVariantMetadata(groups[input], variants)
@@ -331,12 +508,13 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 						if rg.source != nil {
 							continue
 						}
-						writers := rg.writer.ColumnWriters()
 						var err error
 						if u.variant != nil {
-							err = u.variant.write(workerCtx, writers, rg.runs)
+							err = u.variant.write(workerCtx, rg.writers, rg.runs)
+						} else if !rg.constant[u.column] {
+							err = columns[u.column].write(workerCtx, rg.writers[u.column], rg.runs)
 						} else {
-							err = columns[u.column].write(workerCtx, writers[u.column], rg.runs)
+							err = columns[u.column].skip(rg.runs)
 						}
 						if err != nil {
 							return err
@@ -364,20 +542,58 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			if e := ctx.Err(); e != nil {
 				return e
 			}
-			var e error
-			if rg.source != nil {
-				_, e = writer.WriteRowGroup(rg.source)
-			} else {
-				_, e = rg.writer.Commit()
+			if rg.source == nil {
+				output := rg.output
+				var pf *parquet.File
+				if output != nil {
+					output.encoded.Reset()
+					output.writer.Reset(&output.encoded)
+					if _, e := output.group.Commit(); e != nil {
+						return e
+					}
+					if e := output.writer.Close(); e != nil {
+						return e
+					}
+					var e error
+					pf, e = parquet.OpenFile(bytes.NewReader(output.encoded.Bytes()), int64(output.encoded.Len()))
+					if e != nil {
+						return e
+					}
+				}
+				j := 0
+				for i := range columns {
+					if rg.constant[i] {
+						if constants[i] == nil {
+							constants[i] = newMergeConstant(schema, i, rg.values[i])
+						}
+						c := constants[i]
+						value := rg.values[i].Level(0, rg.values[i].DefinitionLevel(), 0)
+						if !parquet.Equal(c.value, value) || c.value.DefinitionLevel() != value.DefinitionLevel() {
+							c.value = value
+							c.rows = 0
+						}
+						chunk, e := c.chunk(ctx, rg.rows)
+						if e != nil {
+							return e
+						}
+						rg.chunks[i] = chunk
+					} else {
+						rg.chunks[i] = encodedMergeChunk(pf, output.encoded.Bytes(), j)
+						j++
+					}
+				}
 			}
+			e := assembler.append(rg)
 			if e != nil {
 				return e
 			}
 			stats.Rows += int64(rg.rows)
 		}
 	}
-	spilled.footer(writer, s)
-	if err := writer.Close(); err != nil {
+	if err := assembler.close(); err != nil {
+		return err
+	}
+	if err := bufferedOutput.Flush(); err != nil {
 		return err
 	}
 	if err := out.Close(); err != nil {
@@ -401,33 +617,25 @@ func mergeLogWindowLimit(rows int64, pageSize int) int {
 // normal rewrite; only already shared, sorted, bounded dictionaries qualify
 // for copying. Inspect the dictionary pages without decoding the row values.
 func mergeGroupKeepsVariantMetadata(group parquet.RowGroup, variants []*variantMerge) (bool, error) {
-	for _, v := range variants {
-		chunk := group.ColumnChunks()[v.columns[v.metadata].column]
-		pages := chunk.Pages()
-		reader, ok := pages.(interface {
-			ReadDictionary() (parquet.Dictionary, error)
-		})
-		if !ok {
-			return false, pages.Close()
-		}
-		dictionary, err := reader.ReadDictionary()
-		if err != nil {
-			return false, errors.Join(err, pages.Close())
-		}
-		keep := false
-		if dictionary != nil && dictionary.Len() == 1 {
-			names, sorted, e := variantMetadataNames(dictionary.Index(0).ByteArray())
-			size := 0
-			for _, name := range names {
-				size += len(name)
-			}
-			keep = e == nil && sorted && len(names) <= 256 && size <= variantMetadataBytes
-		}
-		if err := pages.Close(); err != nil {
-			return false, err
-		}
-		if !keep {
+	source, ok := group.(*parquet.FileRowGroup)
+	if !ok {
+		return false, nil
+	}
+	pf := source.File()
+	ordinal := 0
+	for pf.RowGroups()[ordinal] != group {
+		ordinal++
+	}
+	for _, c := range pf.Metadata().RowGroups[ordinal].Columns {
+		if c.ColumnIndexLength <= 0 || c.OffsetIndexLength <= 0 || c.FilePath != "" || len(c.EncryptedColumnMetadata) > 0 {
 			return false, nil
+		}
+	}
+
+	for _, v := range variants {
+		_, keep, err := mergeMetadataBlob(group.ColumnChunks()[v.columns[v.metadata].column])
+		if err != nil || !keep {
+			return false, err
 		}
 	}
 	return true, nil
@@ -444,7 +652,9 @@ func mergeGroupKeepsVariantMetadata(group parquet.RowGroup, variants []*variantM
 // offset index, decoding its page again. On that merge the heap peak fell to
 // about 300 MB for 6% more CPU time. Merges of a few compacted files stay
 // within the budget and never reopen.
-var mergeReaderBudget = 1024
+// Assembly and projected schemas share the original live-memory envelope
+// with decoded pages. Reserve most of the former reader allowance for them.
+var mergeReaderBudget = 256
 
 // mergeUnit is a column, or a VARIANT group, written by one worker.
 type mergeUnit struct {
@@ -498,10 +708,14 @@ const mergeWindowBytes = 64 << 20
 
 // mergeRowGroup is an output row group of a window: its schedule and writer.
 type mergeRowGroup struct {
-	runs   []mergeRun
-	rows   int
-	writer *parquet.ConcurrentRowGroupWriter
-	source parquet.RowGroup // a whole, already ordered input group
+	runs     []mergeRun
+	rows     int
+	chunks   []mergeChunk
+	output   *mergeOutput
+	constant []bool
+	values   []parquet.Value
+	writers  []*parquet.ColumnWriter
+	source   parquet.RowGroup // a whole, already ordered input group
 }
 
 // maxVariantRowGroupBytes ends an output row group early once the input
@@ -527,18 +741,20 @@ func appendMergeRun(runs []mergeRun, input, rows int) []mergeRun {
 // level 0, so it advances by whole rows: values read past the rows a run
 // needs wait in pending until that input's next run.
 type mergeColumn struct {
-	column    int
-	repeated  bool
-	groups    []parquet.RowGroup
-	files     []io.ReaderAt     // by input: the file its group is read from
-	meta      []format.RowGroup // by input: its footer metadata
-	readers   []parquet.ColumnChunkValueReader
-	remaining []int64 // by input: rows not yet written, once started
-	started   []bool  // by input: its reader has been opened
-	values    [256]parquet.Value
-	pending   [][]parquet.Value // repeated: read values not yet written, by input
-	buffers   [][]parquet.Value // repeated: the storage pending slices, by input
-	eof       []bool            // repeated: the input's reader is exhausted
+	column        int
+	repeated      bool
+	flatNull      bool
+	maxDefinition int
+	groups        []parquet.RowGroup
+	files         []io.ReaderAt     // by input: the file its group is read from
+	meta          []format.RowGroup // by input: its footer metadata
+	readers       []parquet.ColumnChunkValueReader
+	remaining     []int64 // by input: rows not yet written, once started
+	started       []bool  // by input: its reader has been opened
+	values        [256]parquet.Value
+	pending       [][]parquet.Value // repeated: read values not yet written, by input
+	buffers       [][]parquet.Value // repeated: the storage pending slices, by input
+	eof           []bool            // repeated: the input's reader is exhausted
 }
 
 func (c *mergeColumn) close() (err error) {
@@ -548,6 +764,29 @@ func (c *mergeColumn) close() (err error) {
 		}
 	}
 	return err
+}
+
+// A locally constant output group still consumes input rows. Release any
+// earlier reader and preserve its resume position for a later mixed group.
+func (c *mergeColumn) skip(runs []mergeRun) error {
+	for _, run := range runs {
+		i := run.input
+		if c.readers[i] != nil {
+			if err := c.readers[i].Close(); err != nil {
+				return err
+			}
+			c.readers[i] = nil
+		}
+		if !c.started[i] {
+			c.started[i] = true
+			c.remaining[i] = c.groups[i].NumRows()
+		}
+		c.remaining[i] -= int64(run.rows)
+		if c.repeated {
+			c.pending[i], c.buffers[i], c.eof[i] = nil, nil, false
+		}
+	}
+	return nil
 }
 
 func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, runs []mergeRun) error {
@@ -735,4 +974,101 @@ func (c *mergeColumn) copyRows(writer *parquet.ColumnWriter, run mergeRun) error
 	}
 	c.pending[run.input] = pending
 	return nil
+}
+
+// Read the last complete tuple, rather than combining independent footer
+// bounds (which need not belong to the same row for compound metric keys).
+func mergeLastKey(s *Signal, group parquet.RowGroup) (sortKey, error) {
+	c := newKeyCursor(s, 0, group)
+	defer c.close()
+	for _, r := range c.readers {
+		if err := r.SeekToRow(group.NumRows() - 1); err != nil {
+			return sortKey{}, err
+		}
+	}
+	c.remaining = 1
+	if _, err := c.next(); err != nil {
+		return sortKey{}, err
+	}
+	key := c.key
+	for i := range key.s {
+		key.s[i] = strings.Clone(key.s[i])
+	}
+	return key, nil
+}
+
+// A dictionary alone does not prove all data pages use it: a writer may
+// fall back to plain encoding. Require page encoding statistics as well.
+func mergeMetadataBlob(chunk parquet.ColumnChunk) (blob []byte, keep bool, err error) {
+	fc, ok := chunk.(*parquet.FileColumnChunk)
+	if !ok {
+		return nil, false, nil
+	}
+	if fc.NumValues() > 0 && fc.NullCount() == fc.NumValues() {
+		return nil, true, nil
+	}
+	pf := fc.File()
+	var meta *format.ColumnMetaData
+	for g, rg := range pf.RowGroups() {
+		if rg.ColumnChunks()[fc.Column()] == chunk {
+			meta = &pf.Metadata().RowGroups[g].Columns[fc.Column()].MetaData
+			break
+		}
+	}
+	if meta == nil || len(meta.EncodingStats) == 0 {
+		return nil, false, nil
+	}
+	pagesCount := int32(0)
+	for _, stat := range meta.EncodingStats {
+		if stat.PageType == format.DataPage || stat.PageType == format.DataPageV2 {
+			if stat.Encoding != format.RLEDictionary {
+				return nil, false, nil
+			}
+			pagesCount += stat.Count
+		}
+	}
+	if pagesCount == 0 {
+		return nil, false, nil
+	}
+	pages := chunk.Pages()
+	defer func() { err = errors.Join(err, pages.Close()) }()
+	reader, ok := pages.(interface {
+		ReadDictionary() (parquet.Dictionary, error)
+	})
+	if !ok {
+		return nil, false, nil
+	}
+	dictionary, err := reader.ReadDictionary()
+	if err != nil {
+		return nil, false, err
+	}
+	if dictionary == nil || dictionary.Len() != 1 {
+		return nil, false, nil
+	}
+	blob = bytes.Clone(dictionary.Index(0).ByteArray())
+	names, sorted, e := variantMetadataNames(blob)
+	size := 0
+	for _, name := range names {
+		size += len(name)
+	}
+	return blob, e == nil && sorted && len(names) <= 256 && size <= variantMetadataBytes, nil
+}
+
+func mergeVariantKeepsMetadata(groups []parquet.RowGroup, v *variantMerge) (bool, error) {
+	var shared []byte
+	for _, g := range groups {
+		blob, keep, err := mergeMetadataBlob(g.ColumnChunks()[v.columns[v.metadata].column])
+		if err != nil || !keep {
+			return false, err
+		}
+		if blob == nil {
+			continue
+		}
+		if shared == nil {
+			shared = blob
+		} else if !bytes.Equal(shared, blob) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
