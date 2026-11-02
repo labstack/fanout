@@ -43,7 +43,7 @@ Caps DuckDB's memory (e.g. "8GB"). Empty selects 60% of detected available memor
 
 ### `FANOUT_DUCKDB_THREADS`
 
-Caps DuckDB's global query worker pool. Zero leaves DuckDB's own default in place (one worker per core). Set it to leave cores free for ingest on a query-heavy co-tenant host.
+Caps DuckDB's global query worker pool. Zero selects one worker per CPU the process may run on (the affinity mask and cgroup quota, as GOMAXPROCS resolves them) rather than DuckDB's count of the machine's hardware threads. Set it to leave cores free for ingest on a query-heavy co-tenant host.
 
 ### `FANOUT_MAINTENANCE_INTERVAL`
 

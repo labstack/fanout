@@ -48,6 +48,7 @@ const (
 type sizingSource struct {
 	MemoryAuto                bool
 	MaxConnsAuto              bool
+	ThreadsAuto               bool
 	DetectedRAM               uint64
 	DetectedHostRAM           uint64
 	DetectedCgroupLimit       uint64
@@ -64,6 +65,7 @@ type RuntimeSizing struct {
 	DuckDBMaxConns            int    `json:"duckdb_max_conns"`
 	DuckDBMaxConnsAuto        bool   `json:"duckdb_max_conns_auto"`
 	DuckDBThreads             int    `json:"duckdb_threads"`
+	DuckDBThreadsAuto         bool   `json:"duckdb_threads_auto"`
 	DetectedMemoryBytes       uint64 `json:"detected_memory_bytes"`
 	DetectedHostMemoryBytes   uint64 `json:"detected_host_memory_bytes"`
 	DetectedCgroupLimitBytes  uint64 `json:"detected_cgroup_limit_bytes"`
@@ -90,6 +92,14 @@ func (c *Config) resolveSizing() sizingSource {
 		src.MaxConnsAuto = true
 		c.DuckDBMaxConns = resolveDuckDBMaxConns(runtime.GOMAXPROCS(0))
 	}
+	if c.DuckDBThreads == 0 {
+		// DuckDB sizes its worker pool from the machine's hardware threads, not
+		// from the CPUs this process may run on. Pinned by taskset or a cpuset,
+		// that ran twice as many workers as CPUs; GOMAXPROCS already honors the
+		// affinity mask and the cgroup quota.
+		src.ThreadsAuto = true
+		c.DuckDBThreads = runtime.GOMAXPROCS(0)
+	}
 	c.resolvedSizing = src
 	return src
 }
@@ -103,6 +113,7 @@ func (c Config) RuntimeSizing() RuntimeSizing {
 		DuckDBMaxConns:            c.DuckDBMaxConns,
 		DuckDBMaxConnsAuto:        c.resolvedSizing.MaxConnsAuto,
 		DuckDBThreads:             c.DuckDBThreads,
+		DuckDBThreadsAuto:         c.resolvedSizing.ThreadsAuto,
 		DetectedMemoryBytes:       c.resolvedSizing.DetectedRAM,
 		DetectedHostMemoryBytes:   c.resolvedSizing.DetectedHostRAM,
 		DetectedCgroupLimitBytes:  c.resolvedSizing.DetectedCgroupLimit,
@@ -126,6 +137,8 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		"duckdb_memory_auto", src.MemoryAuto,
 		"duckdb_max_conns", c.DuckDBMaxConns,
 		"duckdb_max_conns_auto", src.MaxConnsAuto,
+		"duckdb_threads", c.DuckDBThreads,
+		"duckdb_threads_auto", src.ThreadsAuto,
 		"detected_memory_bytes", src.DetectedRAM,
 		"detected_host_memory_bytes", src.DetectedHostRAM,
 		"detected_cgroup_limit_bytes", src.DetectedCgroupLimit,

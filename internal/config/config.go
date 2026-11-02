@@ -102,9 +102,11 @@ type Config struct {
 	// report the resolved budget and detection status. Set an explicit cap when
 	// memory limit detection is incomplete.
 	DuckDBMemory string `group:"storage" env:"FANOUT_DUCKDB_MEMORY"`
-	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
-	// DuckDB's own default in place (one worker per core). Set it to leave
-	// cores free for ingest on a query-heavy co-tenant host.
+	// DuckDBThreads caps DuckDB's global query worker pool. Zero selects one
+	// worker per CPU the process may run on (the affinity mask and cgroup
+	// quota, as GOMAXPROCS resolves them) rather than DuckDB's count of the
+	// machine's hardware threads. Set it to leave cores free for ingest on a
+	// query-heavy co-tenant host.
 	DuckDBThreads int `group:"storage" env:"FANOUT_DUCKDB_THREADS" default:"0"`
 	// DuckDBMaxConns caps the DuckDB read connection pool. Reads scan immutable
 	// Parquet concurrently; analytical and completed-batch writes use separate
