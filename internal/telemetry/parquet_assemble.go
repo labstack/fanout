@@ -467,6 +467,7 @@ func (c *mergeConstant) constantChunk(rows int) (mergeChunk, error) {
 // unchanged. Constants are omitted before decoding and added during assembly.
 type mergeOutput struct {
 	constant []bool
+	schema   *parquet.Schema
 	encoded  bytes.Buffer
 	writer   *parquet.GenericWriter[any]
 	group    *parquet.ConcurrentRowGroupWriter

@@ -242,7 +242,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	var rowGroups []*mergeOutput
 	defer func() {
 		for _, o := range rowGroups {
-			if o != nil {
+			if o != nil && o.writer != nil {
 				_ = o.writer.Close()
 			}
 		}
@@ -443,17 +443,23 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 				rowGroups = append(rowGroups, nil)
 			}
 			output := rowGroups[slot]
-			if len(paths) > 0 && (output == nil || !slices.Equal(output.constant, rg.constant)) {
-				if output != nil {
-					_ = output.writer.Close()
-				}
-				projected := parquet.NewSchema(schema.Name(), mergeProjectedNode{schema, mergeProjection(schema, paths)})
-				output = &mergeOutput{constant: slices.Clone(rg.constant)}
-				output.writer = parquet.NewGenericWriter[any](&output.encoded, parquetWriterOptions(pageSize, projected)...)
-				output.group = output.writer.BeginRowGroup()
-				rowGroups[slot] = output
-			}
 			if len(paths) > 0 {
+				if output == nil || !slices.Equal(output.constant, rg.constant) {
+					if output != nil && output.writer != nil {
+						_ = output.writer.Close()
+					}
+					projected := parquet.NewSchema(schema.Name(), mergeProjectedNode{schema, mergeProjection(schema, paths)})
+					output = &mergeOutput{constant: slices.Clone(rg.constant), schema: projected}
+					rowGroups[slot] = output
+				}
+				// Each committed group gets a fresh writer. Resetting a closed
+				// parquet-go v0.32.0 writer clears the column paths its footer
+				// metadata aliases, so later groups would lose PathInSchema.
+				if output.writer == nil {
+					output.encoded.Reset()
+					output.writer = parquet.NewGenericWriter[any](&output.encoded, parquetWriterOptions(pageSize, output.schema)...)
+					output.group = output.writer.BeginRowGroup()
+				}
 				rg.output = output
 			}
 			rg.writers = make([]*parquet.ColumnWriter, len(columns))
@@ -546,15 +552,14 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 				output := rg.output
 				var pf *parquet.File
 				if output != nil {
-					output.encoded.Reset()
-					output.writer.Reset(&output.encoded)
 					if _, e := output.group.Commit(); e != nil {
 						return e
 					}
-					if e := output.writer.Close(); e != nil {
+					e := output.writer.Close()
+					output.writer, output.group = nil, nil
+					if e != nil {
 						return e
 					}
-					var e error
 					pf, e = parquet.OpenFile(bytes.NewReader(output.encoded.Bytes()), int64(output.encoded.Len()))
 					if e != nil {
 						return e

@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1164,6 +1165,9 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if !parquet.EqualNodes(parquetFile.Schema(), signal.schema) {
 			return nil, fmt.Errorf("%w: %s parquet schema does not match telemetry format %d", ErrUnsupportedBatchFormat, signal.Name, batchMetadataVersion)
 		}
+		if err := checkColumnPaths(parquetFile, signal); err != nil {
+			return nil, fmt.Errorf("%s Parquet: %w", signal.Name, err)
+		}
 		if rows := parquetFile.NumRows(); rows != int64(*count) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.Name, rows, *count)
 		}
@@ -1177,6 +1181,24 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		}
 	}
 	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
+}
+
+// checkColumnPaths requires every column chunk to name its schema leaf.
+// Readers find a chunk's statistics by PathInSchema, so a wrong path silently
+// loses the file's event-time bounds rather than failing.
+func checkColumnPaths(file *parquet.File, s *Signal) error {
+	leaves := s.schema.Columns()
+	for g, group := range file.Metadata().RowGroups {
+		if len(group.Columns) != len(leaves) {
+			return fmt.Errorf("row group %d has %d column chunks; schema has %d", g, len(group.Columns), len(leaves))
+		}
+		for i, chunk := range group.Columns {
+			if !slices.Equal(chunk.MetaData.PathInSchema, leaves[i]) {
+				return fmt.Errorf("row group %d column %d path %q; schema path %q", g, i, chunk.MetaData.PathInSchema, leaves[i])
+			}
+		}
+	}
+	return nil
 }
 
 // readSpills reads the footer's count of spills for each of the signal's
