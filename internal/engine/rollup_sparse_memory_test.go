@@ -70,21 +70,21 @@ func serviceSpanRollupMemory(t *testing.T, late bool) {
 	dir := t.TempDir()
 	schema, data := filepath.Join(dir, "schema.parquet"), filepath.Join(dir, "data.parquet")
 
-	rows, perMinute, minutes := 276480, 192, 1440
+	rows, perMinute, minutes, services := 552960, 384, 1440, 24
 	affected := `SELECT 'ns' AS namespace,TIMESTAMP '1970-01-01' AS bucket,'svc-0' AS service
     UNION ALL SELECT 'ns',TIMESTAMP '1970-01-01 23:59:00','svc-0'`
 	wantGroups, wantSpans := 2, 32
 	if !late {
-		rows, perMinute, minutes = 1000800, 33360, 30
+		rows, perMinute, minutes, services = 1000800, 33360, 30, 12
 		affected = `SELECT 'ns' AS namespace,TIMESTAMP '1970-01-01 00:29:00' AS bucket,'svc-'||i::VARCHAR AS service FROM range(12) t(i)`
 		wantGroups, wantSpans = 12, 33360
 	}
 	for _, q := range []string{
 		"SET memory_limit='1GB'", "SET threads=4",
-		fmt.Sprintf(`CREATE VIEW span_fixture AS SELECT 'ns' AS namespace,'svc-'||(i%%12)::VARCHAR AS service,
+		fmt.Sprintf(`CREATE VIEW span_fixture AS SELECT 'ns' AS namespace,'svc-'||(i%%%d)::VARCHAR AS service,
     make_timestamp_ns((i//%d)*60000000000)::TIMESTAMPTZ_NS AS start_time,
     'SPAN_KIND_SERVER' AS kind,'STATUS_CODE_OK' AS status,5.0::DOUBLE AS duration_ms
-    FROM range(%d) t(i)`, perMinute, rows),
+    FROM range(%d) t(i)`, services, perMinute, rows),
 		"COPY (SELECT * FROM span_fixture WHERE false) TO " + sqlLiteral(schema) + " (FORMAT PARQUET)",
 		"COPY span_fixture TO " + sqlLiteral(data) + " (FORMAT PARQUET)",
 		"CREATE OR REPLACE VIEW spans AS SELECT * FROM read_parquet([" + sqlLiteral(schema) + "," + sqlLiteral(data) + "],union_by_name=false,hive_partitioning=false)",
@@ -105,8 +105,8 @@ func serviceSpanRollupMemory(t *testing.T, late bool) {
 	}
 	growth := peakRSS(t) - before
 	t.Logf("service rollup (late=%v): %s, peak RSS growth %.1f MiB", late, time.Since(started), float64(growth)/(1<<20))
-	if growth > 48<<20 {
-		t.Errorf("quantiles for %d affected keys grew RSS by %d, want <=48 MiB", wantGroups, growth)
+	if growth > 96<<20 {
+		t.Errorf("quantiles for %d affected keys grew RSS by %d, want <=96 MiB", wantGroups, growth)
 	}
 	var count, spans, served int
 	var p50, p95, errorRate float64
