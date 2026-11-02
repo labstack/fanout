@@ -105,9 +105,10 @@ func (d *Duck) inFlight() int {
 }
 
 // held reports whether reads, or connections other than pings', hold the
-// read pool. A ping that fails then may only have waited for them.
+// read pool. A ping that fails then may only have waited for them. A
+// connection a panic abandoned may never return, so it is not counted.
 func (d *Duck) held() bool {
-	return d.inFlight() > 0 || int64(d.DB.Stats().InUse) > d.pings.Load()
+	return d.inFlight() > 0 || int64(d.DB.Stats().InUse)-d.abandoned.Load() > d.pings.Load()
 }
 
 // noteProgress records that the engine answered.
