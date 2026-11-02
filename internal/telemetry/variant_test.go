@@ -123,6 +123,51 @@ func checkVariantRows(t *testing.T, path string, want []Log) {
 	}
 }
 
+// Shredded resource cells are kept across files by their encoded bytes. A
+// resource seen again in a later file, as a new map, must write the same
+// cells, and the cache must stay bounded under resource churn.
+func TestShreddedResourcesAreSharedAcrossFilesAndBounded(t *testing.T) {
+	rows := func(n int, resource func(int) map[string]any) []Log {
+		out := make([]Log, n)
+		for i := range out {
+			out[i] = Log{EventUnixNanos: int64(i + 1), ServiceName: "svc", Resource: resource(i), Attributes: map[string]any{"i": int64(i)}}
+		}
+		return out
+	}
+	// Two rows per resource make it shared, so the cells go through the cache.
+	same := func(i int) map[string]any {
+		return map[string]any{"service.name": "svc", "service.namespace": "ns", "host.name": fmt.Sprint("host-", i/2%8)}
+	}
+	dir := t.TempDir()
+	var files [][]byte
+	for i := range 2 {
+		path := filepath.Join(dir, fmt.Sprintf("%d.parquet", i))
+		if err := writeParquet(path, Logs, rows(64, same), parquetPageSize); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, data)
+	}
+	if !bytes.Equal(files[0], files[1]) {
+		t.Fatal("a file written from cached resource cells differs from the first")
+	}
+	churn := func(i int) map[string]any {
+		return map[string]any{"service.name": "svc", "k8s.pod.name": fmt.Sprint("pod-", i/2)}
+	}
+	if err := writeParquet(filepath.Join(dir, "churn.parquet"), Logs, rows(2*(maxShreddedResources+100), churn), parquetPageSize); err != nil {
+		t.Fatal(err)
+	}
+	shreddedResources.Lock()
+	cached := len(shreddedResources.rows)
+	shreddedResources.Unlock()
+	if cached > maxShreddedResources {
+		t.Fatalf("%d shredded resources cached, limit %d", cached, maxShreddedResources)
+	}
+}
+
 func TestUnsupportedFormatLeavesStoreUntouched(t *testing.T) {
 	for _, suffix := range []string{BatchSuffix, ".retired", ".retired-replacement"} {
 		t.Run(suffix, func(t *testing.T) { testUnsupportedFormatLeavesStoreUntouched(t, suffix) })

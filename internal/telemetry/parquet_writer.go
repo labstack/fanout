@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/labstack/fanout/internal/telemetry/semconv"
 	"github.com/parquet-go/parquet-go"
@@ -51,7 +52,7 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 		leaves[strings.Join(path, ".")] = i
 		byColumn[path[0]] = append(byColumn[path[0]], i)
 	}
-	lanes := make([]*lane[R], min(maxWriteLanes, runtime.GOMAXPROCS(0)))
+	lanes := make([]*lane[R], laneCount(len(perm)))
 	for i := range lanes {
 		lanes[i] = &lane[R]{chunk: make([]R, chunkRows)}
 	}
@@ -208,6 +209,17 @@ func writeColumns[R any](writer *parquet.GenericWriter[any], s *Signal, rows []R
 // maxWriteLanes caps the lanes that write one file. Commit workers write
 // files concurrently, so a few lanes each already cover the cores.
 const maxWriteLanes = 4
+
+// laneRows is the rows a lane must have before another lane pays for itself:
+// below it, waking and joining the lane goroutines at every row group costs
+// more than the columns they would write, and group commits of a few thousand
+// rows are what ingest writes most.
+const laneRows = 8192
+
+// laneCount is how many lanes write a file of rows rows; at least one.
+func laneCount(rows int) int {
+	return max(1, min(maxWriteLanes, runtime.GOMAXPROCS(0), rows/laneRows))
+}
 
 // lane writes its columns for the rows of one row group at a time.
 type lane[R any] struct {
@@ -811,21 +823,10 @@ func (r *resourceColumns) append(encoder *variantEncoder, value map[string]any, 
 	}
 	encoded, ok := r.cache[key]
 	if !ok {
-		row := resourceRow{}
-		if value != nil {
-			// Deconstruct shreds a Go map in map order; pre-encoded variant
-			// bytes keep the encoder's sorted order.
-			var builder variant.Builder
-			if err := encoder.write(&builder, value); err != nil {
-				return err
-			}
-			metadata, data, err := builder.Finish()
-			if err != nil {
-				return err
-			}
-			row.Resource = rawVariant{Metadata: metadata, Value: data}
+		var err error
+		if encoded, err = r.shred(encoder, value); err != nil {
+			return err
 		}
-		encoded = r.schema.Deconstruct(nil, row).Clone()
 		r.cache[key] = encoded
 	}
 	if len(encoded) != len(r.columns) {
@@ -838,6 +839,56 @@ func (r *resourceColumns) append(encoder *variantEncoder, value map[string]any, 
 	r.pending++
 	return nil
 }
+
+// shred returns the physical cells of a canonical resource object. Each
+// file sees its resources as new objects, but the services sending them
+// change rarely, so the cells are kept across files by the object's encoded
+// bytes: shredding one through the schema costs about a hundred microseconds,
+// which a small file paid once per resource.
+func (r *resourceColumns) shred(encoder *variantEncoder, value map[string]any) (parquet.Row, error) {
+	row := resourceRow{}
+	var key string
+	if value != nil {
+		// Deconstruct shreds a Go map in map order; pre-encoded variant
+		// bytes keep the encoder's sorted order.
+		var builder variant.Builder
+		if err := encoder.write(&builder, value); err != nil {
+			return nil, err
+		}
+		metadata, data, err := builder.Finish()
+		if err != nil {
+			return nil, err
+		}
+		row.Resource = rawVariant{Metadata: metadata, Value: data}
+		key = string(metadata) + string(data)
+	}
+	shreddedResources.Lock()
+	defer shreddedResources.Unlock()
+	if encoded, ok := shreddedResources.rows[key]; ok {
+		return encoded, nil
+	}
+	encoded := r.schema.Deconstruct(nil, row).Clone()
+	if len(shreddedResources.rows) >= maxShreddedResources {
+		clear(shreddedResources.rows)
+	}
+	if shreddedResources.rows == nil {
+		shreddedResources.rows = make(map[string]parquet.Row)
+	}
+	shreddedResources.rows[key] = encoded
+	return encoded, nil
+}
+
+// shreddedResources holds the cells of recently shredded resources by their
+// encoded bytes, for every signal: all signals shred resources the same way
+// (resourceShred), and append checks the cell count against its columns. The
+// rows are read only, and their bytes are cloned, so files share them.
+var shreddedResources struct {
+	sync.Mutex
+	rows map[string]parquet.Row
+}
+
+// maxShreddedResources bounds the cache; a full cache starts over.
+const maxShreddedResources = 1024
 
 func (r *resourceColumns) flush(columns []*parquet.ColumnWriter) error {
 	if r.pending == 0 {
