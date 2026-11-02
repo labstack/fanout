@@ -274,16 +274,9 @@ func (h *HealthHandler) checkTelemetry(ctx context.Context) CheckResult {
 	start := time.Now()
 
 	var one int
-	// Use the same snapshot gate as public reads so a short compaction/retention
-	// publication cannot race the Parquet scan and report a false outage.
+	// Bound to the captured catalog like public reads, so a compaction or
+	// retention swap cannot race the Parquet scan and report a false outage.
 	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM telemetry.spans LIMIT 1")
-	if errors.Is(err, engine.ErrParquetReadWait) {
-		return CheckResult{
-			Status:    "degraded",
-			LatencyMs: time.Since(start).Milliseconds(),
-			Error:     err.Error(),
-		}
-	}
 	if err != nil && err != sql.ErrNoRows {
 		return h.failedCheck(ctx, start, err)
 	}

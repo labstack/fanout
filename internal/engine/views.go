@@ -3,7 +3,6 @@ package engine
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/labstack/fanout/internal/telemetry"
@@ -58,13 +57,15 @@ const emptyResourceInventory = `SELECT NULL::VARCHAR AS signal,NULL::VARCHAR AS 
 // rather than unioning every footer bounds binder memory. Supplying a schema
 // MAP suppresses DuckDB 2's VARIANT extraction pushdown, so read the physical
 // schema directly; startup rejects mismatched batch schemas before this point.
+// The bound file is the schema batch, listed first: a retired batch may be
+// deleted between DuckDB's glob expansion and its bind. Reads of these views
+// are bound to the captured catalog whenever it is not empty.
 func CreateParquetViews(db *sql.DB, parquetDir string) error {
 	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
 		return err
 	}
 	for _, signal := range telemetry.Signals {
-		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal.Name+".parquet"))
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=false, hive_partitioning=false)`, signal.Name, rawProjection(signal), sqlLiteral(pattern))
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=false, hive_partitioning=false)`, signal.Name, rawProjection(signal), parquetGlob(parquetDir, signal.Name))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal.Name, err)
 		}

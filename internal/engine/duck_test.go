@@ -192,91 +192,60 @@ func TestReadTransactionRollbackFailureDiscardsTheConnection(t *testing.T) {
 	}
 }
 
-func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
+// Open rows keep their snapshot pinned: a batch retired meanwhile keeps its
+// files until the rows finish.
+func TestQueryContextHoldsParquetPinUntilRowsFinish(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	defer db.Close()
+	repository := emptyRepository(t)
+	if err := commitRestoredFixture(repository, context.Background(), telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
+		t.Fatal(err)
+	}
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
-	d := &Duck{DB: db, writeDB: db}
+	d := &Duck{DB: db, writeDB: db, repository: repository}
 	rows, err := d.QueryContext(context.Background(), "SELECT 1")
 	if err != nil {
 		t.Fatalf("QueryContext: %v", err)
 	}
-	lockAcquired := make(chan struct{})
-	go func() {
-		mustLock(&d.parquetMu)
-		close(lockAcquired)
-		d.parquetMu.Unlock()
-	}()
-	select {
-	case <-lockAcquired:
-		t.Fatal("Parquet write lock acquired while query rows were still open")
-	case <-time.After(25 * time.Millisecond):
+	if n, err := repository.PruneParquet(context.Background(), d, time.Now().UnixNano(), 10); err != nil || n != 1 {
+		t.Fatalf("retention while rows are open: pruned=%d err=%v", n, err)
 	}
-	if !rows.Next() {
-		t.Fatalf("rows.Next() = false: %v", rows.Err())
+	dir := repository.Parquet.BatchPath("expired")
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 0 {
+		t.Fatalf("collected %d retired batches under open rows: %v", n, err)
 	}
-	var value int
-	if err := rows.Scan(&value); err != nil {
-		t.Fatalf("rows.Scan: %v", err)
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("retired files removed while rows were open: %v", err)
 	}
-	if rows.Next() {
-		t.Fatal("rows.Next() returned an unexpected second row")
+	for rows.Next() {
 	}
-	select {
-	case <-lockAcquired:
-	case <-time.After(time.Second):
-		t.Fatal("Parquet write lock remained blocked after row iteration completed")
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 1 {
+		t.Fatalf("collected %d retired batches after rows finished: %v", n, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("retired files remain after rows finished: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
-	d := &Duck{DB: openTestDuck(t)}
-	mustLock(&d.parquetMu)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	err := d.QueryRowScan(ctx, []any{new(int)}, "SELECT 1")
-	d.parquetMu.Unlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("QueryRowScan error = %v, want deadline exceeded", err)
-	}
-	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
-		t.Fatalf("QueryRowScan ignored lock deadline for %s", elapsed)
-	}
-}
-
-func TestPublishParquetHonorsContext(t *testing.T) {
-	d := &Duck{}
-	mustRLock(t, &d.parquetMu)
-	timeoutsBefore := testutil.ToFloat64(metrics.ParquetPublishTimeouts)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+// Publication never waits for readers, however long they hold a snapshot.
+func TestPublishParquetDoesNotWaitForReaders(t *testing.T) {
+	d := &Duck{repository: emptyRepository(t)}
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	called := false
-	err := d.PublishParquet(ctx, func(context.Context) error {
-		called = true
-		return nil
-	})
-	d.parquetMu.RUnlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("PublishParquet error = %v, want deadline exceeded", err)
+	if err := d.PublishParquet(ctx, func(context.Context) error { called = true; return nil }); err != nil {
+		t.Fatalf("publication waited for a pinned reader: %v", err)
 	}
-	if called {
-		t.Fatal("publication ran after its context expired")
-	}
-	if got := waitingParquetWriters(&d.parquetMu); got != 0 {
-		t.Fatalf("canceled publication remained queued: %d", got)
-	}
-	if got := testutil.ToFloat64(metrics.ParquetPublishTimeouts); got != timeoutsBefore+1 {
-		t.Fatalf("publication timeouts = %v, want %v", got, timeoutsBefore+1)
-	}
-	if got := testutil.ToFloat64(metrics.ParquetPublishWaiters); got != 0 {
-		t.Fatalf("publication waiters after timeout = %v, want 0", got)
+	if !called {
+		t.Fatal("publication callback did not run")
 	}
 }
 
@@ -292,74 +261,6 @@ func TestParquetPublicationDoesNotWaitForDuckDBWriteGate(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("publication callback did not run")
-	}
-}
-
-func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
-	d := &Duck{DB: db, writeDB: db}
-	mustRLock(t, &d.parquetMu)
-	writerAcquired := make(chan struct{})
-	releaseWriter := make(chan struct{})
-	writerDone := make(chan struct{})
-	go func() {
-		mustLock(&d.parquetMu)
-		close(writerAcquired)
-		<-releaseWriter
-		d.parquetMu.Unlock()
-		close(writerDone)
-	}()
-	deadline := time.Now().Add(time.Second)
-	for waitingParquetWriters(&d.parquetMu) == 0 {
-		if time.Now().After(deadline) {
-			d.parquetMu.RUnlock()
-			t.Fatal("maintenance writer did not begin waiting")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	var value int
-	if err := d.QueryRowScan(context.Background(), []any{&value}, "SELECT 1"); err != nil {
-		d.parquetMu.RUnlock()
-		t.Fatalf("new read blocked behind waiting maintenance: %v", err)
-	}
-	if value != 1 {
-		d.parquetMu.RUnlock()
-		t.Fatalf("value = %d, want 1", value)
-	}
-	d.parquetMu.RUnlock()
-	select {
-	case <-writerAcquired:
-	case <-time.After(time.Second):
-		t.Fatal("maintenance writer did not run after readers drained")
-	}
-	close(releaseWriter)
-	select {
-	case <-writerDone:
-	case <-time.After(time.Second):
-		t.Fatal("maintenance writer did not release")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRollupReadAdmissionSkipsPublication(t *testing.T) {
-	d := &Duck{publicationBounds: func() (int64, int64, int64) { return 2, 2, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 1}}
-	mustLock(&d.parquetMu)
-	defer d.parquetMu.Unlock()
-	if rows, err := d.refreshServiceRollup(t.Context()); err != nil || rows != 0 {
-		t.Fatalf("service skip rows=%d error=%v", rows, err)
-	}
-	if rows, pending, err := d.refreshEdgeRollupPass(t.Context()); err != nil || rows != 0 || pending {
-		t.Fatalf("edge skip rows=%d pending=%v error=%v", rows, pending, err)
-	}
-	if d.rollupWatermarks[serviceRollupStateKey] != 1 {
-		t.Fatal("skipped pass moved watermark")
 	}
 }
 
@@ -388,51 +289,9 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	}
 }
 
-func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
-	repository, err := telemetrystore.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	d := &Duck{repository: repository}
-	mustLock(&d.parquetMu)
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	_, _, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
-	d.parquetMu.Unlock()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Trace error = %v, want deadline exceeded", err)
-	}
-}
-
-func TestParquetStatsWaitForStableNamespace(t *testing.T) {
-	repository, err := telemetrystore.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	d := &Duck{repository: repository}
-	mustLock(&d.parquetMu)
-	done := make(chan struct{})
-	go func() {
-		d.updateParquetStats(context.Background())
-		close(done)
-	}()
-	select {
-	case <-done:
-		d.parquetMu.Unlock()
-		t.Fatal("Parquet stats read while the batch namespace was changing")
-	case <-time.After(25 * time.Millisecond):
-	}
-	d.parquetMu.Unlock()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("Parquet stats did not resume after publication")
-	}
-}
-
-func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
+// Retention publishes while a reader is pinned and the DuckDB write gate is
+// held; only the rollup pruning that needs the gate waits for it.
+func TestRepositoryPublicationDoesNotWaitForReadersOrDuckDBWrites(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -450,23 +309,29 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	d := &Duck{DB: db, writeDB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
-	mustRLock(t, &d.parquetMu)
+	pin := d.pinParquet()
 	release := d.writeGate.Lock(writegate.RollupService)
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
-	deadline := time.Now().Add(time.Second)
-	for waitingParquetWriters(&d.parquetMu) == 0 && time.Now().Before(deadline) {
+	deadline := time.Now().Add(5 * time.Second)
+	for len(repository.Parquet.BatchMetadata()) != 0 {
+		if time.Now().After(deadline) {
+			release()
+			d.unpinParquet(pin)
+			t.Fatal("retention waited for a pinned reader or the DuckDB write gate")
+		}
 		time.Sleep(time.Millisecond)
 	}
-	if waiting := waitingParquetWriters(&d.parquetMu); waiting != 1 {
-		d.parquetMu.RUnlock()
-		release()
-		t.Fatalf("publication waiters = %d, want 1 while DuckDB write gate is independently held", waiting)
+	if _, err := os.Stat(repository.Parquet.BatchPath("expired")); err != nil {
+		t.Fatalf("retention deleted files a pinned reader may open: %v", err)
 	}
-	d.parquetMu.RUnlock()
 	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+	d.unpinParquet(pin)
+	if n, err := repository.CollectRetiredParquet(); err != nil || n != 1 {
+		t.Fatalf("collected %d retired batches after the reader left: %v", n, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -759,31 +624,5 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// TestUpdateParquetStatsDoesNotParkOnAStalledPublication pins that the gauge
-// refresh gives up rather than waiting out a stuck publication. It is the only
-// Parquet reader that runs on the rollup and maintenance loop goroutines under
-// the process context, so an unbounded wait here stops those loops entirely —
-// the same failure this storage layer has produced repeatedly, one level down.
-func TestUpdateParquetStatsDoesNotParkOnAStalledPublication(t *testing.T) {
-	originalWait := parquetStatsWait
-	parquetStatsWait = 25 * time.Millisecond
-	t.Cleanup(func() { parquetStatsWait = originalWait })
-
-	d := &Duck{}
-	mustLock(&d.parquetMu)
-	defer d.parquetMu.Unlock()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		d.updateParquetStats(context.Background())
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("stats refresh parked on a stalled publication instead of giving up")
 	}
 }

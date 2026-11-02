@@ -219,47 +219,17 @@ var (
 		Help: "Number of telemetry Parquet files per signal",
 	}, []string{"signal"})
 
-	ParquetPublishWaiters = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "fanout_parquet_publish_waiters",
-		Help: "Current Parquet publications waiting for active readers",
-	})
-
-	ParquetPublishWait = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "fanout_parquet_publish_wait_seconds",
-		Help:    "Time spent waiting to publish a new Parquet file set",
-		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
-	})
-
-	ParquetPublishTimeouts = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_parquet_publish_timeouts_total",
-		Help: "Parquet publications abandoned after reader wait timeout",
-	})
-
-	// The publisher's side of Parquet publication was measured and the
-	// reader's side was not, which left the one question a stalled query asks
-	// — "how long did I wait to enter the snapshot?" — unanswerable. These
-	// three complete the pair.
-	// An uncontended admission costs single-digit microseconds, so the ladder
-	// starts below that: a histogram whose healthy traffic all lands in the
-	// first bucket can tell you a stall happened but not what normal was.
-	snapshotBuckets = []float64{.000001, .000005, .00002, .0001, .0005, .001, .005, .025, .1, .5, 1, 2.5, 5, 10, 30, 60}
-
+	// A swap is a rename and an fsync, so the ladder starts in microseconds.
 	ParquetPublishHold = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "fanout_parquet_publish_hold_seconds",
-		Help:    "Time readers were excluded while a new Parquet file set was swapped in",
-		Buckets: snapshotBuckets,
+		Help:    "Time one Parquet publication took to swap a new file set into the catalog; readers never wait for it",
+		Buckets: []float64{.000001, .000005, .00002, .0001, .0005, .001, .005, .025, .1, .5, 1, 2.5, 5, 10, 30, 60},
 	})
 
-	parquetReadWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_parquet_read_wait_seconds",
-		Help:    "Time a reader spent waiting to enter the Parquet snapshot",
-		Buckets: snapshotBuckets,
-	}, []string{"reader"})
-
-	parquetReadRefusals = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_parquet_read_refusals_total",
-		Help: "Readers that gave up waiting to enter the Parquet snapshot",
-	}, []string{"reader"})
+	ParquetRetiringBatches = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_parquet_retiring_batches",
+		Help: "Batches compaction or retention replaced whose files wait for earlier readers to finish",
+	})
 
 	// The wait to enter the snapshot and the wait for a connection are both
 	// measured; how long the statement itself takes was not, so a slow request
@@ -466,19 +436,6 @@ var (
 		Help: "Total time callers spent waiting for a free DuckDB read connection",
 	}, func() float64 { return poolStats().WaitDuration.Seconds() })
 )
-
-// RecordParquetRead records one attempt to enter the Parquet snapshot.
-//
-// Both series are behind this function for the same reason RecordWriteGate
-// exists: the label is a fixed reader class, and a vector left exported is a
-// vector something eventually calls with a service name in it.
-func RecordParquetRead(reader string, waitSec float64, admitted bool) {
-	if admitted {
-		parquetReadWait.WithLabelValues(reader).Observe(waitSec)
-		return
-	}
-	parquetReadRefusals.WithLabelValues(reader).Inc()
-}
 
 // RecordWriteGate records one complete Telemetry catalog write critical section.
 // Callers constrain operation to the fixed writegate.Operation set so this

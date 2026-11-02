@@ -111,10 +111,8 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 	if err := waitCtx.Err(); err != nil {
 		return 0, false, err
 	}
-	if !d.tryRollupParquetRead() {
-		return 0, false, nil
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	cancelWait()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

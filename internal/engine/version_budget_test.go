@@ -94,27 +94,15 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	if err := d.DB.QueryRow(`SELECT count(*) FROM version_rollup`).Scan(&versions); err != nil || versions != 120 {
 		t.Fatalf("versions=%d err=%v", versions, err)
 	}
-	// Requeue the real backlog while publication blocks admission. Anomalies
-	// must persist before publication releases, and the loop must retry later.
+	// Requeue the real backlog. Anomalies must persist while the version loop
+	// works through it, and the loop must mark it again.
 	if _, err := d.writer().Exec(`DELETE FROM version_rollup_batches`); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.parquetMu.LockContext(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	locked := true
-	defer func() {
-		if locked {
-			d.parquetMu.Unlock()
-		}
-	}()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	done := make(chan struct{})
 	go func() { defer close(done); d.runVersionRollupLoop(ctx) }()
 	defer func() { cancel(); <-done }()
-	if n, err := d.RefreshVersionRollup(ctx); err != nil || n != 0 {
-		t.Fatalf("publication skip=%d %v", n, err)
-	}
 	now := time.Now().UTC()
 	finding := annotations.Anomaly{Namespace: "namespace-0", Service: "service-0", Kind: "volume", From: now.Add(-time.Minute), To: now, Title: "Low volume", Severity: "warn"}
 	persisted := make(chan error, 1)
@@ -128,9 +116,7 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("anomaly persistence starved behind busy version loop")
 	}
-	d.parquetMu.Unlock()
-	locked = false
-	t.Logf("anomaly persisted during blocked Parquet admission in %v", time.Since(start))
+	t.Logf("anomaly persisted during the version loop in %v", time.Since(start))
 	var count int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM anomaly_log WHERE title='Low volume'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("persisted=%d err=%v", count, err)

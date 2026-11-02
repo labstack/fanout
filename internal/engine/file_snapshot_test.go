@@ -462,17 +462,16 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	// Pin a reader so publication has to drain. Preparation must release the
-	// cache write gate; new cache passes skip until the publisher is gone.
-	if err := d.parquetMu.RLockContext(t.Context(), parquetReadQuery); err != nil {
-		t.Fatal(err)
-	}
-	defer d.parquetMu.RUnlock()
+	// Hold the swap open. Preparation must release the cache write gate, and
+	// cache passes keep running while the publication is in flight.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- d.PublishParquetReplacement(ctx, telemetry.BatchMetadata{ID: "output"}, []string{"input"}, func(context.Context) error { return nil })
+		done <- d.PublishParquetReplacement(ctx, telemetry.BatchMetadata{ID: "output"}, []string{"input"}, func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -491,7 +490,6 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new-input", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
 		t.Fatal(err)
 	}
-	waitForQueuedWriter(t, &d.parquetMu)
 	passCtx, stop := context.WithTimeout(t.Context(), time.Second)
 	defer stop()
 	unlock, err := d.cacheGate.LockContext(passCtx, writegate.ReadCache)
@@ -503,8 +501,8 @@ func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
 		t.Fatalf("worker blocked behind publication: %v", err)
 	}
 	markers, err := batchMarkers(t.Context(), d.DB)
-	if err != nil || !markers["output"] || markers["new-input"] {
-		t.Fatalf("prepared output lost or cache entered ahead of publisher: %v %v", markers, err)
+	if err != nil || !markers["output"] || !markers["new-input"] {
+		t.Fatalf("prepared output lost or cache stalled behind publication: %v %v", markers, err)
 	}
 	cancel()
 	if err := <-done; err == nil {

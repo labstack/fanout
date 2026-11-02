@@ -61,6 +61,10 @@ func Open(root string) (*Repository, error) {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean Parquet compaction staging: %w", err)
 	}
+	if _, err := parquetStore.CollectRetired(); err != nil {
+		_ = r.Close()
+		return nil, fmt.Errorf("delete retired Parquet batches: %w", err)
+	}
 	if err := r.cleanupRetired(); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean retired Parquet batches: %w", err)
@@ -142,7 +146,17 @@ func (r *Repository) CompactionDebt() int { return r.Parquet.CompactionDebt() }
 func (r *Repository) CleanupParquet() error {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.cleanupRetired()
+	_, err := r.Parquet.CollectRetired()
+	return errors.Join(err, r.cleanupRetired())
+}
+
+// CollectRetiredParquet deletes batches that retention or compaction retired
+// once no reader that captured them remains. Serialized with both, so a
+// directory is never deleted while a publication or recovery inspects it.
+func (r *Repository) CollectRetiredParquet() (int, error) {
+	r.compactionMu.Lock()
+	defer r.compactionMu.Unlock()
+	return r.Parquet.CollectRetired()
 }
 
 func (r *Repository) cleanupRetired() error {

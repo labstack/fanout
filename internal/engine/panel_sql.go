@@ -20,11 +20,13 @@ func (d *Duck) ParseSQL(ctx context.Context, query string) (map[string]any, erro
 // by NULL, which DESCRIBE can bind; the returned statement keeps query's
 // placeholders and is run with QueryContext under the panel's read window.
 func (d *Duck) PrepareTelemetrySQL(ctx context.Context, query, describe string, maxRows int) (string, []bool, error) {
-	conn, err := d.readConn(ctx)
+	// Describing binds the views without reading rows. Their file list starts
+	// with the schema batch, the only file binding opens, so no pin is needed.
+	conn, err := d.acquireRead(ctx)
 	if err != nil {
 		return "", nil, err
 	}
-	defer func() { _ = conn.Close(); d.parquetMu.RUnlock() }()
+	defer func() { _ = conn.Close() }()
 	if err := validateSQLAST(ctx, conn, query); err != nil {
 		return "", nil, err
 	}

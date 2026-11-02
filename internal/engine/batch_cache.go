@@ -153,14 +153,8 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 		return 0, false, err
 	}
 	defer unlock()
-	// Cache retries are frequent. A queued publication must not park the cache
-	// gate for the analytical rollup's much longer admission lease.
-	admitted := d.parquetMu.TryRLock(parquetReadBackground)
-	metrics.RecordParquetRead(readerRollup, 0, admitted)
-	if !admitted {
-		return 0, false, nil
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	batches := d.repository.Parquet.BatchMetadata()
 	markers, err := batchMarkers(ctx, d.writer())
 	if err != nil {

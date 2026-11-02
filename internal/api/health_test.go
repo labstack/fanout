@@ -185,40 +185,6 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	}
 }
 
-func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) {
-	db, _, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	duck := &engine.Duck{DB: db}
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- duck.PublishParquet(context.Background(), func(context.Context) error {
-			close(entered)
-			<-release
-			return nil
-		})
-	}()
-	<-entered
-	original := readinessTimeout
-	readinessTimeout = 20 * time.Millisecond
-	t.Cleanup(func() { readinessTimeout = original })
-
-	ctx, cancel := context.WithTimeout(t.Context(), readinessTimeout)
-	defer cancel()
-	result := NewHealthHandler(duck, config.Config{}).checkTelemetry(ctx)
-	if result.Status != "degraded" {
-		t.Fatalf("telemetry status = %q, want degraded: %+v", result.Status, result)
-	}
-	close(release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
-
 // A long query holding the engine's connections made /readyz answer 503
 // once: a busy engine is still ready and must not flap out of rotation.
 func TestReadinessReportsABusyEngineAsDegraded(t *testing.T) {

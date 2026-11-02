@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -243,8 +242,6 @@ func exemplarHTTPError(c *echo.Context, err error) error {
 		return echo.NewHTTPError(http.StatusGatewayTimeout, "Exemplars took longer than 10 seconds").Wrap(err)
 	case errors.Is(err, context.Canceled):
 		return nil
-	case errors.Is(err, engine.ErrParquetReadWait):
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "exemplars unavailable").Wrap(err)
 	default:
 		return echo.NewHTTPError(http.StatusInternalServerError, "exemplars unavailable").Wrap(err)
 	}

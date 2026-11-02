@@ -123,6 +123,13 @@ type ParquetStore struct {
 	compactionDebt      int
 	debtChanged         chan struct{}
 	debtLimitReached    chan struct{}
+
+	// pinMu guards reader epochs and the batches retired at each epoch.
+	pinMu       sync.Mutex
+	epoch       uint64
+	pinned      map[uint64]int
+	retiring    []retirement
+	retiringIDs map[string]BatchMetadata
 }
 
 type ParquetStats struct {
@@ -256,6 +263,12 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 		*metadata = existing
 		return nil
 	}
+	// A retried commit of a batch already compacted away is published: its
+	// rows live in the replacement. Adopting its directory would count them twice.
+	if retired, ok := p.retiredMetadata(metadata.ID); ok {
+		*metadata = retired
+		return nil
+	}
 	if info, err := os.Stat(final); err == nil && info.IsDir() {
 		// Adopting a directory left by an interrupted commit means validating
 		// it — Parquet footers plus a full trace-index walk. That is done
@@ -269,12 +282,11 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 			return err
 		}
 		defer p.unlockPublish()
-		if err := syncDirectory(p.batchesDir); err != nil {
-			return err
-		}
+		// The directory is already in the namespace, so the catalog includes
+		// it even if the fsync fails; see the rename below.
 		p.installBatch(adopted)
 		*metadata = adopted.metadata
-		return nil
+		return syncDirectory(p.batchesDir)
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -356,14 +368,15 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 		return fmt.Errorf("publish Parquet batch: %w", err)
 	}
 	complete = true
-	if err := syncDirectory(p.batchesDir); err != nil {
-		return err
-	}
+	// A renamed directory is published even if the fsync below fails: it is
+	// in the namespace now and loads at the next open if it survives. Readers
+	// see exactly the catalog, so it joins the catalog; the failed commit's
+	// stamp then cannot pass the rollup horizon unread, and a retry adopts it.
 	p.mu.Lock()
 	p.setBatchLocked(metadata.ID, prepared)
 	p.mu.Unlock()
 	*metadata = prepared.metadata
-	return nil
+	return syncDirectory(p.batchesDir)
 }
 
 func (p *ParquetStore) lockPublish(ctx context.Context) error {
@@ -384,7 +397,7 @@ func (p *ParquetStore) lockCommitPublish(ctx context.Context) error {
 func (p *ParquetStore) unlockPublish() { p.publishGate <- struct{}{} }
 
 // RestoreRetiredInputs rolls back a compaction whose durable output vanished.
-// The complete namespace change is hidden from readers by publish.
+// Readers see the inputs only once the catalog installs them.
 func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID string, publish func(func(context.Context) error) error) error {
 	if err := ValidateBatchID(replacementID); err != nil {
 		return err
@@ -657,8 +670,10 @@ func indexedSpanEarlier(left, right IndexedSpan) bool {
 	return left.SpanID < right.SpanID
 }
 
-// PruneBefore hides complete batches while readers are pinned, then deletes
-// the retired directories after publication.
+// PruneBefore removes complete batches from the catalog in one swap. Readers
+// never wait: directories stay in place until CollectRetired finds no reader
+// that could still open them. A crash before then leaves them published, and
+// the next pass prunes them again.
 func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(func(context.Context) error) error) (int, error) {
 	if maxBatches <= 0 {
 		return 0, nil
@@ -687,62 +702,26 @@ func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(fu
 	if len(candidates) == 0 {
 		return 0, nil
 	}
-	var retired []string
-	var pruneErr error
+	pruned := 0
 	err := publish(func(ctx context.Context) error {
 		if err := p.lockPublish(ctx); err != nil {
 			return err
 		}
 		defer p.unlockPublish()
-		// p.mu is taken only to mutate the in-memory set, never across the
-		// renames and fsync. Holding it for filesystem work made it a second,
-		// undeadlined serialization point on the ingest path — CommitBatch's
-		// first action is a hasBatch read of this same mutex — and one
-		// invisible to the publish gate's accounting. The renames themselves
-		// need no additional exclusion: readers are already outside the
-		// snapshot for the length of this callback, and the publish gate
-		// serializes this against every other publisher.
-		p.mu.RLock()
-		planned := make(map[string]*storedBatch, len(candidates))
+		retired := make([]BatchMetadata, 0, len(candidates))
+		p.mu.Lock()
 		for _, candidate := range candidates {
 			if batch, exists := p.batches[candidate.id]; exists {
-				planned[candidate.id] = batch
+				retired = append(retired, batch.metadata)
+				p.setBatchLocked(candidate.id, nil)
 			}
-		}
-		p.mu.RUnlock()
-
-		retiredIDs := make([]string, 0, len(planned))
-		for _, candidate := range candidates {
-			batch, exists := planned[candidate.id]
-			if !exists {
-				continue
-			}
-			path := filepath.Join(p.batchesDir, candidate.id+".retired")
-			if err := os.Rename(batch.dir, path); err != nil {
-				pruneErr = errors.Join(pruneErr, err)
-				continue
-			}
-			retiredIDs = append(retiredIDs, candidate.id)
-			retired = append(retired, path)
-		}
-		if len(retired) > 0 {
-			pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
-		}
-		p.mu.Lock()
-		for _, id := range retiredIDs {
-			p.setBatchLocked(id, nil)
 		}
 		p.mu.Unlock()
+		p.retire(retired)
+		pruned = len(retired)
 		return nil
 	})
-	pruneErr = errors.Join(pruneErr, err)
-	for _, path := range retired {
-		pruneErr = errors.Join(pruneErr, os.RemoveAll(path))
-	}
-	if len(retired) > 0 {
-		pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
-	}
-	return len(retired), pruneErr
+	return pruned, err
 }
 
 func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
@@ -784,8 +763,11 @@ func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) er
 	return syncDirectory(dir)
 }
 
-// PublishReplacement validates a prepared compacted batch, atomically swaps it
-// for its inputs while readers are pinned, then deletes retired inputs.
+// PublishReplacement validates a prepared compacted batch and swaps it for its
+// inputs. The output's rename commits the replacement: its replaces list
+// retires the inputs, whose directories stay in place for readers that
+// captured the old catalog until CollectRetired deletes them. No reader is
+// excluded or waited for.
 func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string, publish func(func(context.Context) error) error) error {
 	if err := ValidateBatchID(metadata.ID); err != nil {
 		return err
@@ -802,6 +784,11 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 	} else if err != nil {
 		return err
 	}
+	if source == stage {
+		if err := writeReplaces(stage, inputs); err != nil {
+			return fmt.Errorf("record compaction inputs: %w", err)
+		}
+	}
 	replacement, err := loadStoredBatch(source)
 	if err != nil {
 		return err
@@ -810,130 +797,45 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 	if replacement.metadata.Spans > 0 {
 		replacement.traces.path = filepath.Join(final, "trace.fidx")
 	}
-	inputBatches := make(map[string]*storedBatch, len(inputs))
-	for _, id := range inputs {
-		p.mu.RLock()
-		batch, exists := p.batches[id]
-		p.mu.RUnlock()
-		if exists {
-			inputBatches[id] = batch
-			continue
-		}
-		active := p.BatchPath(id)
-		path := active
-		if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
-			path = filepath.Join(p.batchesDir, id+".retired-"+metadata.ID)
-		} else if statErr != nil {
-			return statErr
-		}
-		batch, loadErr := loadStoredBatch(path)
-		if errors.Is(loadErr, os.ErrNotExist) {
-			continue
-		}
-		if loadErr != nil {
-			return fmt.Errorf("load compaction input %s: %w", id, loadErr)
-		}
-		batch.dir = active
-		if batch.metadata.Spans > 0 {
-			batch.traces.path = filepath.Join(active, "trace.fidx")
-		}
-		inputBatches[id] = batch
-	}
-	retired := make([][2]string, 0, len(inputs))
-	err = publish(func(ctx context.Context) error {
+	return publish(func(ctx context.Context) error {
 		if err := p.lockPublish(ctx); err != nil {
 			return err
 		}
 		defer p.unlockPublish()
-		// p.mu covers only the in-memory set, never the renames and fsync
-		// below. CommitBatch's first action reads this same mutex, so holding
-		// it across filesystem work would put ingest behind I/O that the
-		// publish gate cannot see or bound — the reason PruneBefore keeps its
-		// own critical section down to the map mutation.
-		installReplacement := func() {
-			p.mu.Lock()
-			defer p.mu.Unlock()
-			for _, id := range inputs {
-				p.setBatchLocked(id, nil)
-			}
-			p.setBatchLocked(metadata.ID, replacement)
-		}
-		rollback := func() error {
-			var rollbackErr error
-			for i := len(retired) - 1; i >= 0; i-- {
-				rollbackErr = errors.Join(rollbackErr, os.Rename(retired[i][1], retired[i][0]))
-			}
-			restore := make(map[string]*storedBatch, len(inputBatches))
-			for id, batch := range inputBatches {
-				if _, err := os.Stat(batch.dir); err == nil {
-					restore[id] = batch
-				}
-			}
-			p.mu.Lock()
-			p.setBatchLocked(metadata.ID, nil)
-			for id := range inputBatches {
-				p.setBatchLocked(id, nil)
-			}
-			for id, batch := range restore {
-				p.setBatchLocked(id, batch)
-			}
-			p.mu.Unlock()
-			return errors.Join(rollbackErr, syncDirectory(p.batchesDir))
-		}
-		// Recovery may resume with the output already published. Move it back
-		// to staging before touching inputs, so rollback can only expose the
-		// complete old set or the complete replacement, never both.
-		if source == final {
-			if err := os.MkdirAll(filepath.Dir(stage), 0o755); err != nil {
-				return err
-			}
-			if err := os.Rename(final, stage); err != nil {
-				return err
-			}
-			source = stage
-			p.mu.Lock()
-			p.setBatchLocked(metadata.ID, nil)
-			p.mu.Unlock()
-		}
-		for _, id := range inputs {
-			active := p.BatchPath(id)
-			retiredPath := filepath.Join(p.batchesDir, id+".retired-"+metadata.ID)
-			if _, statErr := os.Stat(active); statErr == nil {
-				if err := os.Rename(active, retiredPath); err != nil {
-					return errors.Join(err, rollback())
-				}
-				retired = append(retired, [2]string{active, retiredPath})
-			} else if !errors.Is(statErr, os.ErrNotExist) {
-				return errors.Join(statErr, rollback())
-			} else if _, retiredErr := os.Stat(retiredPath); retiredErr == nil {
-				retired = append(retired, [2]string{active, retiredPath})
-			} else if !errors.Is(retiredErr, os.ErrNotExist) {
-				return errors.Join(retiredErr, rollback())
-			}
-		}
 		if source != final {
 			if err := os.Rename(stage, final); err != nil {
-				return errors.Join(err, rollback())
+				return fmt.Errorf("publish compacted Parquet batch: %w", err)
 			}
 			source = final
 		}
-		if err := syncPublishedDirectory(p.batchesDir); err != nil {
-			// The namespace already contains only the replacement. Keep the
-			// in-memory view consistent and let marker recovery retry the fsync.
-			installReplacement()
-			return err
+		syncErr := syncPublishedDirectory(p.batchesDir)
+		// The namespace already holds the replacement, and its replaces list
+		// retires the inputs at the next open whatever happens here, so the
+		// catalog follows it. Inputs are queued for deletion only once the
+		// output is durable; until then marker recovery retries the fsync.
+		retired := make([]BatchMetadata, 0, len(inputs))
+		p.mu.Lock()
+		for _, id := range inputs {
+			if batch, exists := p.batches[id]; exists {
+				retired = append(retired, batch.metadata)
+			}
+			p.setBatchLocked(id, nil)
 		}
-		installReplacement()
+		p.setBatchLocked(metadata.ID, replacement)
+		p.mu.Unlock()
+		if syncErr != nil {
+			return syncErr
+		}
+		for _, id := range inputs {
+			if !slices.ContainsFunc(retired, func(b BatchMetadata) bool { return b.ID == id }) {
+				if _, statErr := os.Stat(p.BatchPath(id)); statErr == nil {
+					retired = append(retired, BatchMetadata{ID: id})
+				}
+			}
+		}
+		p.retire(retired)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	var removeErr error
-	for _, pair := range retired {
-		removeErr = errors.Join(removeErr, os.RemoveAll(pair[1]))
-	}
-	return errors.Join(removeErr, syncDirectory(p.batchesDir))
 }
 
 // ensureSchemaBatch writes _schema.batch: an empty Parquet batch whose only
@@ -986,13 +888,49 @@ func (p *ParquetStore) loadBatches() error {
 	if err != nil {
 		return err
 	}
+	present := map[string]bool{}
+	replaces := map[string][]string{}
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == SchemaBatch || !strings.HasSuffix(entry.Name(), BatchSuffix) {
+			continue
+		}
+		id := strings.TrimSuffix(entry.Name(), BatchSuffix)
+		present[id] = true
+		ids, err := readReplaces(filepath.Join(p.batchesDir, entry.Name()))
+		if err != nil {
+			return fmt.Errorf("load Parquet batch %s: %w", entry.Name(), err)
+		}
+		if len(ids) > 0 {
+			replaces[id] = ids
+		}
+	}
+	// A present compacted batch has committed its replacement, so the inputs
+	// it lists are retired even if their directories survived a crash. They
+	// are never registered; the first collection deletes them.
+	retiredIDs := retiredAtLoad(present, replaces)
+	retired := make(map[string]bool, len(retiredIDs))
+	for _, id := range retiredIDs {
+		retired[id] = true
+	}
+	for _, entry := range entries {
+		id, ok := strings.CutSuffix(entry.Name(), BatchSuffix)
+		if !ok || !entry.IsDir() || !present[id] || retired[id] {
 			continue
 		}
 		if err := p.registerBatch(filepath.Join(p.batchesDir, entry.Name())); err != nil {
 			return fmt.Errorf("load Parquet batch %s: %w", entry.Name(), err)
 		}
+	}
+	if len(retiredIDs) > 0 {
+		batches := make([]BatchMetadata, len(retiredIDs))
+		for i, id := range retiredIDs {
+			metadata, err := readBatchMetadata(filepath.Join(p.BatchPath(id), "metadata.json"))
+			if err != nil {
+				return fmt.Errorf("load retired Parquet batch %s: %w", id, err)
+			}
+			batches[i] = metadata
+		}
+		p.retire(batches)
 	}
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -31,7 +30,6 @@ func TestExemplarHTTPErrorMapping(t *testing.T) {
 		{"problem", query.Problems{{Path: "panel_id", Message: "missing"}}, 400, "problems"},
 		{"deadline", fmt.Errorf("wrapped: %w", context.DeadlineExceeded), 504, "Exemplars took longer than 10 seconds"},
 		{"cancel", context.Canceled, 200, ""},
-		{"read_wait", fmt.Errorf("wrapped: %w", engine.ErrParquetReadWait), 503, "exemplars unavailable"},
 		{"internal", errors.New("failure"), 500, "exemplars unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

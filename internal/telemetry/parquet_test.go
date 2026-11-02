@@ -389,9 +389,6 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("replacement succeeded despite injected sync failure")
 	}
-	if _, err := os.Stat(store.BatchPath("input")); !os.IsNotExist(err) {
-		t.Fatalf("input was restored beside live output: %v", err)
-	}
 	if _, err := os.Stat(store.BatchPath("output")); err != nil {
 		t.Fatalf("replacement output missing: %v", err)
 	}
@@ -399,47 +396,25 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 	if len(metadata) != 1 || metadata[0].ID != "output" {
 		t.Fatalf("live batches after sync failure = %#v, want output only", metadata)
 	}
-}
-
-func TestPublishReplacementUnpublishesRecoveredOutputBeforeRetiringInputs(t *testing.T) {
-	store, err := OpenParquetStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(context.Background(), &BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(context.Background(), &output, span, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	blockedRetired := filepath.Join(store.BatchesDir(), "input.retired-output")
-	if err := os.Mkdir(blockedRetired, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(blockedRetired, "block"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stage := filepath.Join(t.TempDir(), "recovery", "output")
-	err = store.PublishReplacement(stage, output, []string{"input"}, func(publish func(context.Context) error) error {
-		return publish(context.Background())
-	})
-	if err == nil {
-		t.Fatal("replacement succeeded despite blocked input retirement")
-	}
-	if _, err := os.Stat(store.BatchPath("output")); !os.IsNotExist(err) {
-		t.Fatalf("recovered output remained visible beside active input: %v", err)
+	// The output may not be durable, so its inputs are not queued for deletion.
+	if n, err := store.CollectRetired(); err != nil || n != 0 {
+		t.Fatalf("deleted %d inputs of an output that is not durable: %v", n, err)
 	}
 	if _, err := os.Stat(store.BatchPath("input")); err != nil {
-		t.Fatalf("input was not left queryable after rollback: %v", err)
+		t.Fatalf("input deleted before its replacement was durable: %v", err)
 	}
-	if _, err := os.Stat(stage); err != nil {
-		t.Fatalf("output was not preserved for the next recovery attempt: %v", err)
+	// Marker recovery retries the fsync, after which the input is deleted.
+	syncPublishedDirectory = originalSync
+	if err := store.PublishReplacement(filepath.Join(t.TempDir(), "missing-stage"), output, []string{"input"}, func(publish func(context.Context) error) error {
+		return publish(context.Background())
+	}); err != nil {
+		t.Fatal(err)
 	}
-	metadata := store.BatchMetadata()
-	if len(metadata) != 1 || metadata[0].ID != "input" {
-		t.Fatalf("live batches after rollback = %#v, want input only", metadata)
+	if n, err := store.CollectRetired(); err != nil || n != 1 {
+		t.Fatalf("collected %d inputs after recovery: %v", n, err)
+	}
+	if _, err := os.Stat(store.BatchPath("input")); !os.IsNotExist(err) {
+		t.Fatalf("input remains after recovery and collection: %v", err)
 	}
 }
 

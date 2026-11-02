@@ -15,8 +15,8 @@ import (
 )
 
 // ErrStalled reports a stall in work Fanout owns: a Parquet publication
-// holding reads out far past its budget, or an idle engine that does not
-// answer a ping. Only a restart frees it.
+// running far past its budget, or an idle engine that does not answer a ping.
+// Only a restart frees it.
 var ErrStalled = errors.New("query engine stalled")
 
 // overrunGrace is how long a read may run past its deadline before it is
@@ -34,8 +34,8 @@ const longestRead = 25 * time.Second
 // before liveness confirms the engine with a ping: three of the longest reads.
 const idleLimit = 3 * longestRead
 
-// publishStall is how long a Parquet publication may hold readers out before
-// the engine counts as stalled. The swap's renames and fsyncs do not honour
+// publishStall is how long a Parquet publication may run before the engine
+// counts as stalled; ingest commits wait for its publish gate meanwhile. The swap's renames and fsyncs do not honour
 // its context, so on slow network storage it can run well past its budget;
 // restarting mid-swap would not make the storage faster. Ten minutes is
 // longer than an NFS hard mount's default major timeout (timeo=600,
@@ -146,14 +146,14 @@ func (d *Duck) reportOverruns() {
 	}
 }
 
-// Stalled reports whether a Parquet publication has held readers out for
-// publishStall: reads then fail before the engine.
+// Stalled reports whether a Parquet publication has run for publishStall:
+// storage has stopped serving its rename or fsync.
 func (d *Duck) Stalled() bool { return d.stall() != "" }
 
 // stall names what stalls the engine, or is empty; see Stalled.
 func (d *Duck) stall() string {
 	if since := d.publishing.Load(); since != 0 && time.Since(time.Unix(0, since)) > publishStall {
-		return "a Parquet publication held reads past its bound"
+		return "a Parquet publication ran past its bound"
 	}
 	return ""
 }

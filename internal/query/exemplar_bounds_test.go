@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 )
@@ -62,13 +61,14 @@ func TestExemplarDeadlineAndCancel(t *testing.T) {
 
 func TestExemplarSafeErrors(t *testing.T) {
 	duck, _ := newTestEngine(t)
-	failure := fmt.Errorf("read '/private/telemetry/batch/logs.parquet': %w", engine.ErrParquetReadWait)
+	cause := errors.New("parquet read failed")
+	failure := fmt.Errorf("read '/private/telemetry/batch/logs.parquet': %w", cause)
 	probe := exemplarProbeEngine{Engine: duck, query: func(context.Context, string, ...any) (queryrows.Rows, error) { return nil, failure }}
 	e := NewExecutor(probe, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	_, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
 	err = PresentedError(err, ReadError)
-	if !errors.Is(err, engine.ErrParquetReadWait) || strings.Contains(err.Error(), "/private/telemetry") || err.Error() != ReadFailure {
+	if !errors.Is(err, cause) || strings.Contains(err.Error(), "/private/telemetry") || err.Error() != ReadFailure {
 		t.Fatalf("lost safe error chain: %v", err)
 	}
 }

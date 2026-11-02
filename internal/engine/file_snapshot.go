@@ -49,8 +49,12 @@ func (d *Duck) physicalSource(signal string, batches []telemetry.BatchMetadata) 
 }
 
 // snapshotSource uses a glob when pruning saves little. The filename predicate
-// admits exactly the captured IDs, including when ingest publishes a new file
-// after metadata capture. Narrow subsets keep explicit lists and footer pruning.
+// admits exactly the captured batches' files, including when ingest publishes a new file
+// or compaction renames an output in after metadata capture, or a retired
+// input is deleted. DuckDB prunes the other files by name without opening
+// them, but binds the schema from the first file listed, so the list starts
+// with the schema batch, which is never deleted while the process runs.
+// Narrow subsets keep explicit lists and footer pruning.
 func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchMetadata) string {
 	count := 0
 	for _, b := range active {
@@ -62,13 +66,14 @@ func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchM
 	if len(selected) < 64 || len(selected)*5 < count*4 {
 		return d.physicalSource(signal, selected)
 	}
-	var ids []string
+	paths := make([]string, 0, len(selected))
 	for _, b := range selected {
-		ids = append(ids, b.ID)
+		paths = append(paths, filepath.ToSlash(filepath.Join(d.repository.Parquet.BatchesDir(), b.ID+telemetry.BatchSuffix, signal+".parquet")))
 	}
 	s, _ := telemetry.LookupSignal(signal)
-	batchID := d.batchIDColumn(signal, "filename")
-	return "SELECT " + rawProjection(s) + " FROM read_parquet(" + sqlLiteral(d.repository.Parquet.Pattern(signal)) + ", union_by_name=false, hive_partitioning=false) WHERE " + batchID + " IN (" + idsSQL(ids) + ")"
+	// Compare whole names: DuckDB prunes a glob by a filename predicate only
+	// when it can evaluate it per file, which a computed batch ID defeats.
+	return "SELECT " + rawProjection(s) + " FROM read_parquet(" + parquetGlob(d.repository.Parquet.Dir(), signal) + ", union_by_name=false, hive_partitioning=false) WHERE filename IN (" + idsSQL(paths) + ")"
 }
 
 func (d *Duck) batchIDColumn(signal, filename string) string {
@@ -79,6 +84,45 @@ func (d *Duck) batchIDColumn(signal, filename string) string {
 
 func cleanSource(signal, physical string) string {
 	return cleanSelect(signal, "("+physical+")")
+}
+
+// parquetGlob lists one signal's files, schema batch first; see snapshotSource.
+func parquetGlob(parquetDir, signal string) string {
+	batches := filepath.Join(parquetDir, "batches")
+	return "[" + sqlLiteral(filepath.ToSlash(filepath.Join(batches, telemetry.SchemaBatch, signal+".parquet"))) + "," +
+		sqlLiteral(filepath.ToSlash(filepath.Join(batches, "*"+telemetry.BatchSuffix, signal+".parquet"))) + "]"
+}
+
+// bindRollupSnapshot shadows the clean signal views on tx's connection with
+// the catalog captured now, under the caller's pin. Rollup statements name the
+// bare relations, and the views' glob would also match inputs a publication
+// retired but pinned readers still use. The returned func drops the views
+// before commit; a rollback drops them with the transaction.
+func (d *Duck) bindRollupSnapshot(ctx context.Context, tx *sql.Tx) (func() error, error) {
+	if !d.catalogBound() {
+		return func() error { return nil }, nil
+	}
+	batches := d.repository.Parquet.BatchMetadata()
+	for _, s := range telemetry.Signals {
+		selected := make([]telemetry.BatchMetadata, 0, len(batches))
+		for _, b := range batches {
+			if _, n := b.Signal(s); n > 0 {
+				selected = append(selected, b)
+			}
+		}
+		physical := d.snapshotSource(s.Name, selected, batches)
+		if _, err := tx.ExecContext(ctx, "CREATE OR REPLACE TEMP VIEW "+s.Name+" AS "+cleanSource(s.Name, physical)); err != nil {
+			return nil, err
+		}
+	}
+	return func() error {
+		for _, s := range telemetry.Signals {
+			if _, err := tx.ExecContext(ctx, "DROP VIEW IF EXISTS temp.main."+s.Name); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, nil
 }
 
 // bindSnapshot rewrites table references through DuckDB's own AST. The caller

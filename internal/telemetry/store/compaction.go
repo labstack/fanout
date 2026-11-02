@@ -137,8 +137,8 @@ type compactionKey struct {
 	day        bool
 }
 
-// ParquetPublisher lets the query layer exclude readers only for the atomic
-// namespace swap; storage owns native merges and crash-safe replacement state.
+// ParquetPublisher lets the query layer wrap the atomic catalog swap; storage
+// owns native merges, crash-safe replacement state and deferred deletion.
 type ParquetPublisher interface {
 	PublishParquet(context.Context, func(context.Context) error) error
 	PublishParquetReplacement(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -43,8 +44,8 @@ type Duck struct {
 	statements statements
 	// pings counts read connections pings hold; see held.
 	pings atomic.Int64
-	// publishing is when a Parquet publication took the exclusive read
-	// gate, in Unix nanoseconds, or zero; see Stalled.
+	// publishing is when the running Parquet publication started, in Unix
+	// nanoseconds, or zero; see Stalled.
 	publishing atomic.Int64
 	// closeOnce makes Close idempotent. All handles come from one connector,
 	// and database/sql closes a connector that implements io.Closer — so a
@@ -83,15 +84,14 @@ type Duck struct {
 	// servicePending reports that the last service pass stopped short of
 	// the horizon, so a tick drains further passes.
 	servicePending bool
+	// snapshotWanted replaces the repository's retirement check in tests.
+	snapshotWanted func(telemetry.SnapshotPin) bool
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.Gate
 	cacheGate writegate.Gate
 	// Protected by writeGate; controls periodic version-history retirement.
 	versionRollupPasses   uint64
 	versionRollupFailures map[string]versionRollupFailure
-	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
-	// gate keeps a queued maintenance publish from stalling unrelated new reads.
-	parquetMu parquetReadGate
 	// maintHealthMu guards the maintenance health fields below, which the
 	// readiness probe reads while the maintenance pass writes them.
 	maintHealthMu       sync.Mutex
@@ -130,20 +130,10 @@ const (
 	parquetMaintenancePhaseBudget = 10 * time.Minute
 )
 
-// parquetDrainBudget bounds how long a publisher waits for readers already
-// inside the snapshot to leave. parquetSwapBudget bounds the exclusive window
-// that follows — the renames and fsync of at most parquetMaintenanceBatchLimit
-// directories — which must be allowed to finish rather than be abandoned with
-// every reader already excluded.
-const (
-	parquetDrainBudget = 2 * defaultWriterGrace
-	parquetSwapBudget  = 30 * time.Second
-)
-
-// parquetStatsWait bounds the gauge refresh, which is the only Parquet reader
-// that runs on a loop goroutine rather than behind a request. It is a variable
-// so the internal lease can be exercised without a five-second test.
-var parquetStatsWait = 5 * time.Second
+// parquetSwapBudget bounds one publication's catalog swap: the publish gate
+// shared with ingest commits, one rename and one fsync. Readers never wait for
+// it; it only keeps a stuck filesystem from hanging maintenance.
+const parquetSwapBudget = 30 * time.Second
 
 // WriteGate returns the gate that serializes writes to DuckDB's rebuildable
 // rollup cache.
@@ -594,21 +584,10 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	}
 }
 
-// updateParquetStats refreshes the per-signal file-count and byte-size gauges.
-//
-// The wait for the snapshot is bounded. Every other reader carries a request
-// deadline, but this one runs on the rollup and maintenance loops under the
-// process context, so an unbounded wait here would park those loops for as
-// long as a publication stayed stuck. Gauges are refreshed again next tick;
-// skipping one refresh costs nothing that waiting would not cost more.
+// updateParquetStats refreshes the per-signal file-count and byte-size gauges
+// from the catalog. It opens no Parquet file, and a batch retired meanwhile is
+// skipped, so it needs no snapshot pin.
 func (d *Duck) updateParquetStats(ctx context.Context) {
-	statsCtx, cancel := context.WithTimeout(ctx, parquetStatsWait)
-	defer cancel()
-	if err := d.lockParquetRead(statsCtx, readerStats); err != nil {
-		slog.Warn("parquet stats skipped", "err", err)
-		return
-	}
-	defer d.parquetMu.RUnlock()
 	stats, err := d.repository.Parquet.Stats()
 	if err != nil {
 		slog.Warn("parquet stats failed", "err", err)
@@ -772,6 +751,12 @@ func (d *Duck) runParquetCompactionCycle(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	compacted, err := d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetCompactionCycleBudget)
+	// Retired inputs wait only for readers that captured them, which query
+	// deadlines bound, so each cycle deletes what earlier cycles retired.
+	if _, collectErr := d.repository.CollectRetiredParquet(); collectErr != nil {
+		err = errors.Join(err, fmt.Errorf("delete retired Parquet batches: %w", collectErr))
+	}
+	metrics.ParquetRetiringBatches.Set(float64(d.repository.Parquet.RetiringBatches()))
 	result := metrics.TelemetryNoop
 	if err != nil {
 		result = metrics.TelemetryError
@@ -935,11 +920,8 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if !d.tryRollupParquetRead() {
-		result = metrics.RollupNoop
-		return 0, nil
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	horizon, published, minimum := d.publicationBounds()
 	sourceMax = published
 	// Failed attempts advance the horizon without publishing rows. Until the
@@ -965,6 +947,10 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	unbind, err := d.bindRollupSnapshot(ctx, tx)
+	if err != nil {
+		return 0, fmt.Errorf("service_rollup/snapshot: %w", err)
+	}
 	windowStart, windowEnd, _ := rollupWindow(lastWatermark, minimum, horizon)
 	if chunk := d.serviceChunk.size; chunk > 0 && windowEnd > windowStart+chunk {
 		windowEnd = windowStart + chunk
@@ -1003,6 +989,9 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 
 	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
 		return 0, err
+	}
+	if err := unbind(); err != nil {
+		return 0, fmt.Errorf("service_rollup/snapshot: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -1052,11 +1041,8 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, false, err
 	}
-	if !d.tryRollupParquetRead() {
-		result = metrics.RollupNoop
-		return 0, false, nil
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	horizon, published, minimum := d.publicationBounds()
 	sourceMax = published
 	// Failed attempts advance the horizon without publishing rows. Until the
@@ -1082,6 +1068,10 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 		return 0, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	unbind, err := d.bindRollupSnapshot(ctx, tx)
+	if err != nil {
+		return 0, false, fmt.Errorf("edge_rollup/snapshot: %w", err)
+	}
 
 	// A previous pass that ran out of sub-window budget recorded where to
 	// resume and left the ingested watermark untouched. Reuse that window
@@ -1147,10 +1137,10 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 		maxT := maxStartT.Time
 		processed := 0
 		for !subLo.After(maxT) {
-			// Release the snapshot at a resumable boundary as soon as a
-			// publisher waits. Always finish the first sub-window so a busy
+			// Release the snapshot at a resumable boundary as soon as retired
+			// files wait for it. Always finish the first sub-window so a busy
 			// compaction cycle cannot starve the rollup.
-			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.parquetMu.publisherWaiting()) {
+			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.retirementWaiting(pin)) {
 				completed = false
 				nextCursor = subLo.UnixNano()
 				break
@@ -1202,6 +1192,9 @@ FROM edge_pass_buckets`).Scan(&minStartT, &maxStartT)
 	}
 	if _, err := tx.ExecContext(ctx, "DROP VIEW edge_pass_buckets"); err != nil {
 		return 0, false, err
+	}
+	if err := unbind(); err != nil {
+		return 0, false, fmt.Errorf("edge_rollup/snapshot: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, false, err
@@ -1883,34 +1876,72 @@ func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
 	return d.DB.Conn(ctx)
 }
 
-// readConn admits a reader to the Parquet snapshot with a read-pool
-// connection. It waits for the gate without a connection, so a reader a
-// publisher holds back keeps no pool slot from readiness pings and other
-// gate-free reads. It then takes the connection and enters the gate without
-// waiting, so a reader queued for the pool holds no snapshot a publisher
-// would wait out. If a publisher slipped in between, it returns the
-// connection and waits again. The caller closes conn, then releases the gate
-// with parquetMu.RUnlock.
-func (d *Duck) readConn(ctx context.Context) (*sql.Conn, error) {
-	var waited time.Duration
-	for {
-		start := time.Now()
-		err := d.parquetMu.WaitReadable(ctx, parquetReadQuery)
-		waited += time.Since(start)
-		if err != nil {
-			metrics.RecordParquetRead(readerQuery, waited.Seconds(), false)
-			return nil, errors.Join(ErrParquetReadWait, err)
-		}
-		conn, err := d.acquireRead(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if d.parquetMu.TryRLock(parquetReadQuery) {
-			metrics.RecordParquetRead(readerQuery, waited.Seconds(), true)
-			return conn, nil
-		}
-		_ = conn.Close()
+// readConn takes a read-pool connection and then pins the Parquet catalog.
+// Neither waits on publication: a publisher swaps the catalog atomically and
+// defers deleting what it replaced until pinned readers leave. Pinning after
+// the pool wait keeps a queued reader from holding retired files. The caller
+// closes conn, then releases the pin with unpinParquet.
+func (d *Duck) readConn(ctx context.Context) (*sql.Conn, telemetry.SnapshotPin, error) {
+	conn, err := d.acquireRead(ctx)
+	if err != nil {
+		return nil, telemetry.SnapshotPin{}, err
 	}
+	return conn, d.pinParquet(), nil
+}
+
+// pinParquet admits a reader to the current catalog. Files of every batch it
+// captures afterwards stay in place until unpinParquet. A Duck without a
+// repository, as package tests build over a bare handle, has nothing to pin.
+func (d *Duck) pinParquet() telemetry.SnapshotPin {
+	if d.repository == nil || d.repository.Parquet == nil {
+		return telemetry.SnapshotPin{}
+	}
+	return d.repository.Parquet.Pin()
+}
+
+func (d *Duck) unpinParquet(pin telemetry.SnapshotPin) {
+	if d.repository != nil && d.repository.Parquet != nil {
+		d.repository.Parquet.Unpin(pin)
+	}
+}
+
+// retirementWaiting reports whether retired files wait for pin's reader.
+func (d *Duck) retirementWaiting(pin telemetry.SnapshotPin) bool {
+	if d.snapshotWanted != nil {
+		return d.snapshotWanted(pin)
+	}
+	return d.repository != nil && d.repository.Parquet != nil && d.repository.Parquet.RetirementWaiting(pin)
+}
+
+// catalogBound reports whether reads must name the captured catalog. With no
+// published or retiring batch, the glob views match only the empty schema
+// batch, which is exactly that catalog, so binding would change nothing.
+func (d *Duck) catalogBound() bool {
+	if d.repository == nil || d.repository.Parquet == nil {
+		return false
+	}
+	return len(d.repository.Parquet.BatchMetadata()) > 0 || d.repository.Parquet.RetiringBatches() > 0
+}
+
+// allTime is the read window for statements that carry none. It selects every
+// batch, so binding such a statement to the catalog keeps its result and only
+// removes the files of uncommitted outputs and retired inputs from its scan.
+var allTime = queryrows.Window{Start: time.Unix(0, math.MinInt64).UTC(), End: time.Unix(0, math.MaxInt64).UTC()}
+
+// unboundTelemetry is a cheap filter before parsing a statement that carries
+// no read window: only text naming resource_inventory can reference it, and
+// only text naming a signal can need binding to a non-empty catalog.
+func (d *Duck) unboundTelemetry(query string) bool {
+	lower := strings.ToLower(query)
+	if strings.Contains(lower, "resource_inventory") {
+		return true
+	}
+	for _, s := range telemetry.Signals {
+		if strings.Contains(lower, s.Name) {
+			return d.catalogBound()
+		}
+	}
+	return false
 }
 
 // QueryContext executes a read against immutable Parquet files and DuckDB's
@@ -1919,26 +1950,17 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	// The connection is taken explicitly and timed separately: DB.QueryContext
 	// would fold the wait for a free connection into the statement's duration,
 	// and telling queueing from execution is the whole reason this is measured.
-	conn, err := d.readConn(ctx)
+	conn, pin, err := d.readConn(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var tx *sql.Tx
 	var db snapshotSQL = conn
-	if window, ok := queryrows.ReadWindow(ctx); ok {
-		tx, err = beginRead(ctx, conn)
-		if err == nil {
-			db = tx
-			query, err = d.bindSnapshot(ctx, tx, query, window)
-		}
-		if err != nil {
-			endRead(conn, tx)
-			d.parquetMu.RUnlock()
-			return nil, err
-		}
-	} else if strings.Contains(strings.ToLower(query), "resource_inventory") {
+	window, windowed := queryrows.ReadWindow(ctx)
+	if !windowed && d.unboundTelemetry(query) {
 		// The empty validation descriptor must never become a reader. Inspect
-		// actual references (a literal or unrelated CTE is harmless).
+		// actual references (a literal or unrelated CTE is harmless). Any other
+		// telemetry relation reads the whole captured catalog.
 		compiled, compileErr := d.compileSnapshot(ctx, conn, query)
 		if compileErr == nil {
 			if _, inventory := compiled.names["resource_inventory"]; inventory {
@@ -1947,8 +1969,28 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		}
 		if compileErr != nil {
 			endRead(conn, nil)
-			d.parquetMu.RUnlock()
+			d.unpinParquet(pin)
 			return nil, compileErr
+		}
+		for _, s := range telemetry.Signals {
+			_, raw := compiled.names["telemetry."+s.Name]
+			_, clean := compiled.names[s.Name]
+			if raw || clean {
+				window, windowed = allTime, true
+				break
+			}
+		}
+	}
+	if windowed {
+		tx, err = beginRead(ctx, conn)
+		if err == nil {
+			db = tx
+			query, err = d.bindSnapshot(ctx, tx, query, window)
+		}
+		if err != nil {
+			endRead(conn, tx)
+			d.unpinParquet(pin)
+			return nil, err
 		}
 	}
 	started := time.Now()
@@ -1960,7 +2002,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
 		endRead(conn, tx)
-		d.parquetMu.RUnlock()
+		d.unpinParquet(pin)
 		return nil, err
 	}
 	release := func() {
@@ -1973,7 +2015,7 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		// one is the caller's until it says otherwise. Every call site closes
 		// on every path; this is what it costs if one stops.
 		endRead(conn, tx)
-		d.parquetMu.RUnlock()
+		d.unpinParquet(pin)
 		d.answered(ctx, rows.Err())
 	}
 	return &lockedRows{Rows: rows, unlock: release}, nil
@@ -2033,7 +2075,7 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
-	if _, ok := queryrows.ReadWindow(ctx); ok {
+	if _, ok := queryrows.ReadWindow(ctx); ok || d.unboundTelemetry(query) {
 		rows, err := d.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
@@ -2048,11 +2090,11 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 		return sql.ErrNoRows
 	}
 
-	conn, err := d.readConn(ctx)
+	conn, err := d.acquireRead(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close(); d.parquetMu.RUnlock() }()
+	defer func() { _ = conn.Close() }()
 	// This one covers the scan as well as the statement: a single row cannot
 	// be fetched separately from being read. Both are DuckDB's time rather
 	// than the pool's, which is the distinction the histogram is drawing.
@@ -2066,34 +2108,16 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
 func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error) {
-	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, telemetry.TraceTotals{}, err
-	}
-	defer d.parquetMu.RUnlock()
+	pin := d.pinParquet()
+	defer d.unpinParquet(pin)
 	return d.repository.Parquet.Trace(ctx, query)
 }
 
-// PublishParquet limits reader exclusion to the atomic directory swap.
-//
-// The drain and the swap get separate budgets. Sharing one deadline meant a
-// publisher that spent most of it waiting for readers entered the exclusive
-// window with almost nothing left, cancelled its own renames, and failed the
-// pass — having already paid the full cost of excluding every reader. The swap
-// is renames plus fsync against a bounded batch count, so it is budgeted for
-// what that work costs rather than for whatever the drain happened to leave.
+// PublishParquet runs one catalog swap. Readers are never excluded or waited
+// for: the swap is atomic under the catalog lock, and what it replaces stays
+// on disk until no pinned reader can open it. The budget only bounds the
+// swap's own publish gate, rename and fsync.
 func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
-	drainCtx, cancelDrain := context.WithTimeout(ctx, parquetDrainBudget)
-	defer cancelDrain()
-	metrics.ParquetPublishWaiters.Inc()
-	waitStarted := time.Now()
-	err := d.parquetMu.LockContext(drainCtx)
-	metrics.ParquetPublishWaiters.Dec()
-	metrics.ParquetPublishWait.Observe(time.Since(waitStarted).Seconds())
-	if err != nil {
-		metrics.ParquetPublishTimeouts.Inc()
-		return fmt.Errorf("wait for Parquet readers: %w", err)
-	}
-	defer d.parquetMu.Unlock()
 	swapStarted := time.Now()
 	d.publishing.Store(swapStarted.UnixNano())
 	defer d.publishing.Store(0)
@@ -2101,40 +2125,6 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context)
 	swapCtx, cancelSwap := context.WithTimeout(ctx, parquetSwapBudget)
 	defer cancelSwap()
 	return publish(swapCtx)
-}
-
-// Reader classes for the snapshot-wait metric. A query that waits and a rollup
-// that waits are different problems with the same symptom, and the whole point
-// of measuring here is to tell them apart.
-const (
-	readerQuery  = "query"
-	readerRollup = "rollup"
-	readerStats  = "stats"
-)
-
-// lockParquetRead records snapshot admission waits. Only ordinary queries use
-// the publisher's grace; rollups and stats wait behind queued publishers.
-func (d *Duck) lockParquetRead(ctx context.Context, reader string) error {
-	start := time.Now()
-	mode := parquetReadBackground
-	if reader == readerQuery {
-		mode = parquetReadQuery
-	}
-	if err := d.parquetMu.RLockContext(ctx, mode); err != nil {
-		metrics.RecordParquetRead(reader, time.Since(start).Seconds(), false)
-		return errors.Join(ErrParquetReadWait, err)
-	}
-	metrics.RecordParquetRead(reader, time.Since(start).Seconds(), true)
-	return nil
-}
-
-// Keep gate-first lock ordering, but never park the analytical writer gate
-// behind a publication. The owning loop retries skipped work on its cadence.
-func (d *Duck) tryRollupParquetRead() bool {
-	start := time.Now()
-	admitted := d.parquetMu.TryRLock(parquetReadBackground)
-	metrics.RecordParquetRead(readerRollup, time.Since(start).Seconds(), admitted)
-	return admitted
 }
 
 // ---- Queries for API ----

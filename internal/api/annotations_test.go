@@ -12,7 +12,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/annotations"
-	"github.com/labstack/fanout/internal/engine"
 )
 
 type annotationFake struct{}
@@ -23,7 +22,7 @@ func (annotationFake) Read(context.Context, annotations.Request) (annotations.Re
 
 func TestAnnotationErrorsWrapped(t *testing.T) {
 	original := errors.New("storage failed")
-	for _, cause := range []error{annotations.ErrRequest, context.DeadlineExceeded, engine.ErrParquetReadWait, original} {
+	for _, cause := range []error{annotations.ErrRequest, context.DeadlineExceeded, original} {
 		wrapped := fmt.Errorf("annotation query: %w", cause)
 		got := annotationError(wrapped)
 		var httpErr *echo.HTTPError
@@ -50,7 +49,6 @@ func TestAnnotationErrorMappings(t *testing.T) {
 	}{
 		{"request", annotations.ErrRequest, 400, annotations.ErrRequest.Error()},
 		{"deadline", context.DeadlineExceeded, 504, "Annotations took longer than 10 seconds"},
-		{"parquet", engine.ErrParquetReadWait, 503, "annotations unavailable"},
 		{"canceled", context.Canceled, 200, ""},
 		{"unknown", errors.New("storage failed"), 500, "annotations unavailable"},
 	} {

@@ -257,8 +257,9 @@ func TestRollupIncludesRenamedFirstAttemptBeforeAdoption(t *testing.T) {
 	if info, err := os.Stat(repo.Parquet.BatchPath(batch.ID)); err != nil || !info.IsDir() {
 		t.Fatalf("rename did not complete: %v", err)
 	}
-	if len(repo.Parquet.BatchMetadata()) != 0 {
-		t.Fatal("failed commit was registered")
+	// Readers see exactly the catalog, so the renamed attempt is in it.
+	if len(repo.Parquet.BatchMetadata()) != 1 {
+		t.Fatal("renamed attempt is missing from the catalog")
 	}
 	stamp := batch.Spans[0].IngestedAt
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "second", Logs: []telemetry.Log{{Namespace: "ns", ServiceName: "other", TimeUnixNanos: bucket.UnixNano()}}}); err != nil {
