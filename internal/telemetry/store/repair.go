@@ -40,18 +40,21 @@ func VerifyBatches(root string) ([]BatchIssue, error) {
 			names = append(names, entry.Name())
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	group, ctx := errgroup.WithContext(ctx)
-	results := make([]error, len(names))
-	var next atomic.Int64
-	for range max(1, min(runtime.GOMAXPROCS(0)/2, len(names))) {
-		verifier, err := telemetry.NewBatchVerifier(ctx, batchesDir)
-		if err != nil {
-			cancel()
-			_ = group.Wait()
+	// Every engine opens before any batch is read, so a worker's failure
+	// cannot cancel a later open and hide its own error.
+	verifiers := make([]*telemetry.BatchVerifier, max(1, min(runtime.GOMAXPROCS(0)/2, len(names))))
+	for i := range verifiers {
+		if verifiers[i], err = telemetry.NewBatchVerifier(context.Background(), batchesDir); err != nil {
+			for _, v := range verifiers[:i] {
+				_ = v.Close()
+			}
 			return nil, err
 		}
+	}
+	group, ctx := errgroup.WithContext(context.Background())
+	results := make([]error, len(names))
+	var next atomic.Int64
+	for _, verifier := range verifiers {
 		group.Go(func() error {
 			defer verifier.Close()
 			for {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -141,6 +142,33 @@ func TestSchemaMismatchCannotAuthorizeQuarantine(t *testing.T) {
 	after, err := os.ReadFile(path)
 	if err != nil || string(before) != string(after) {
 		t.Fatalf("unsupported data changed: %v", err)
+	}
+}
+
+// The first worker's failure must surface as itself, not as the cancellation
+// of verifiers that were still opening.
+func TestConcurrentVerifyReportsUnsupportedFormat(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(8))
+	root := t.TempDir()
+	repository, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a-old", "b", "c", "d", "e", "f"} {
+		if err := repository.Commit(t.Context(), Batch{ID: id, Spans: []telemetry.Span{{TraceID: id, SpanID: "span"}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository.Close()
+	if err := parquet.WriteFile(filepath.Join(root, "parquet", "batches", "a-old.batch", "spans.parquet"), []struct {
+		TraceID string `parquet:"trace_id"`
+	}{{"trace"}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 20 {
+		if _, err := VerifyBatches(root); !errors.Is(err, telemetry.ErrUnsupportedBatchFormat) {
+			t.Fatalf("verify: %v", err)
+		}
 	}
 }
 
