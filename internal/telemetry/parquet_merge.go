@@ -86,7 +86,13 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			_ = os.Remove(output)
 		}
 	}()
-	writer := parquet.NewGenericWriter[any](out, parquetWriterOptions(parquetPageSize, s.writerOptions()...)...)
+	pageSize := parquetPageSize
+	// Logs with payloads benefit from larger pages in the groups that still
+	// need merging. Numeric/list signals retain the ingest page target.
+	if s == Logs {
+		pageSize = 128 << 10
+	}
+	writer := parquet.NewGenericWriter[any](out, parquetWriterOptions(pageSize, s.writerOptions()...)...)
 	// Close on failure too: it returns the column page buffers to their pool.
 	defer func() {
 		if !ok {
@@ -215,8 +221,19 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	window := 1
 	if len(groups)*width > mergeReaderBudget {
 		window = mergeWindowRowGroups
+		if pageSize > parquetPageSize {
+			// A window retains every output group's column buffers. Scale its
+			// group count with the page target so larger log pages do not grow
+			// that memory budget, including merges smaller than a full window.
+			var rows int64
+			for _, group := range groups {
+				rows += group.NumRows()
+			}
+			window = mergeLogWindowLimit(rows, pageSize)
+		}
 	}
 	var rowGroups []*parquet.ConcurrentRowGroupWriter
+	copyable := make([]int8, len(groups)) // unknown, -1 requires rewrite, +1 copyable
 	var pending []mergeRowGroup
 	for done := false; !done; {
 		pending = pending[:0]
@@ -269,7 +286,27 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			if len(rowGroups) == len(pending) {
 				rowGroups = append(rowGroups, writer.BeginRowGroup())
 			}
-			pending = append(pending, mergeRowGroup{runs: runs, rows: count, writer: rowGroups[len(pending)]})
+			rg := mergeRowGroup{runs: runs, rows: count, writer: rowGroups[len(pending)]}
+			// A whole input row group already in output order needs neither
+			// decoding nor VARIANT dictionary rewriting. WriteRowGroup preserves
+			// its compressed chunks and indexes when the writer settings match.
+			if s == Logs && len(runs) == 1 && int64(count) == groups[runs[0].input].NumRows() {
+				input := runs[0].input
+				if copyable[input] == 0 {
+					canCopy, e := mergeGroupKeepsVariantMetadata(groups[input], variants)
+					if e != nil {
+						return e
+					}
+					copyable[input] = -1
+					if canCopy {
+						copyable[input] = 1
+					}
+				}
+				if copyable[input] > 0 {
+					rg.source = groups[input]
+				}
+			}
+			pending = append(pending, rg)
 			if len(pending) == 1 && window > 1 {
 				clear(active)
 				if mergeInputs(runs, active)*width <= mergeReaderBudget {
@@ -291,6 +328,9 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			for _, u := range batch {
 				work.Go(func() error {
 					for _, rg := range pending {
+						if rg.source != nil {
+							continue
+						}
 						writers := rg.writer.ColumnWriters()
 						var err error
 						if u.variant != nil {
@@ -321,7 +361,16 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			}
 		}
 		for _, rg := range pending {
-			if _, e := rg.writer.Commit(); e != nil {
+			if e := ctx.Err(); e != nil {
+				return e
+			}
+			var e error
+			if rg.source != nil {
+				_, e = writer.WriteRowGroup(rg.source)
+			} else {
+				_, e = rg.writer.Commit()
+			}
+			if e != nil {
 				return e
 			}
 			stats.Rows += int64(rg.rows)
@@ -341,6 +390,47 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	}
 	ok = true
 	return nil
+}
+
+func mergeLogWindowLimit(rows int64, pageSize int) int {
+	groups := min(mergeWindowRowGroups, int((rows+parquetRowGroupRows-1)/parquetRowGroupRows))
+	return max(1, groups*parquetPageSize/pageSize)
+}
+
+// Ingest dictionaries can be unsorted or churn within a group. Keep their
+// normal rewrite; only already shared, sorted, bounded dictionaries qualify
+// for copying. Inspect the dictionary pages without decoding the row values.
+func mergeGroupKeepsVariantMetadata(group parquet.RowGroup, variants []*variantMerge) (bool, error) {
+	for _, v := range variants {
+		chunk := group.ColumnChunks()[v.columns[v.metadata].column]
+		pages := chunk.Pages()
+		reader, ok := pages.(interface {
+			ReadDictionary() (parquet.Dictionary, error)
+		})
+		if !ok {
+			return false, pages.Close()
+		}
+		dictionary, err := reader.ReadDictionary()
+		if err != nil {
+			return false, errors.Join(err, pages.Close())
+		}
+		keep := false
+		if dictionary != nil && dictionary.Len() == 1 {
+			names, sorted, e := variantMetadataNames(dictionary.Index(0).ByteArray())
+			size := 0
+			for _, name := range names {
+				size += len(name)
+			}
+			keep = e == nil && sorted && len(names) <= 256 && size <= variantMetadataBytes
+		}
+		if err := pages.Close(); err != nil {
+			return false, err
+		}
+		if !keep {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // mergeReaderBudget bounds the column chunk readers a merge holds open. A
@@ -411,6 +501,7 @@ type mergeRowGroup struct {
 	runs   []mergeRun
 	rows   int
 	writer *parquet.ConcurrentRowGroupWriter
+	source parquet.RowGroup // a whole, already ordered input group
 }
 
 // maxVariantRowGroupBytes ends an output row group early once the input

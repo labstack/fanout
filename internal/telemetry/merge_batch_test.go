@@ -4,11 +4,116 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/parquet-go/parquet-go"
 )
+
+func TestLargerLogPagesKeepWindowBufferBudget(t *testing.T) {
+	for _, pageSize := range []int{128 << 10, 256 << 10} {
+		for rows := int64(1); rows <= 2_000_000; rows += 997 {
+			groups := min(mergeWindowRowGroups, int((rows+parquetRowGroupRows-1)/parquetRowGroupRows))
+			budget := max(pageSize, groups*parquetPageSize) // at least one output group
+			window := mergeLogWindowLimit(rows, pageSize)
+			if window < 1 || window*pageSize > budget {
+				t.Fatalf("%d rows, %d-byte pages: %d groups exceed %d-byte column budget", rows, pageSize, window, budget)
+			}
+		}
+	}
+}
+
+// Whole log groups selected as single runs keep their compressed chunks and
+// page indexes. A merge with overlapping input groups takes the regular path.
+func TestMergeCopiesWholeOrderedLogGroups(t *testing.T) {
+	dir := t.TempDir()
+	// Use a different body encoding in the source so an accidental re-encode
+	// cannot pass the compressed-byte comparison below.
+	dense := *Logs
+	fields := parquet.Group{}
+	for _, field := range Logs.schema.Fields() {
+		fields[field.Name()] = field
+		if field.Name() == "body" {
+			fields[field.Name()] = parquet.Compressed(field, parquetDenseCodec)
+		}
+	}
+	dense.schema = parquet.NewSchema(Logs.schema.Name(), fields)
+	var inputs []string
+	for file := range 2 {
+		rows := make([]Log, parquetRowGroupRows)
+		for i := range rows {
+			rows[i] = Log{
+				EventUnixNanos: int64(file)*3_600_000_000_000 + int64(i+1),
+				ServiceName:    fmt.Sprint(file), Body: fmt.Sprint("message ", i%19),
+				Attributes: map[string]any{"nested": map[string]any{"number": int64(i)}},
+				Resource:   map[string]any{"service.name": fmt.Sprint(file)},
+			}
+		}
+		path := filepath.Join(dir, fmt.Sprintf("input-%d.parquet", file))
+		if err := writeParquet(path, Logs, rows, parquetPageSize); err != nil {
+			t.Fatal(err)
+		}
+		// First compact the ingest dictionaries into one shared sorted blob.
+		canonical := filepath.Join(dir, fmt.Sprintf("canonical-%d.parquet", file))
+		if err := mergeParquet(context.Background(), &dense, []string{path}, canonical, &ParquetMergeStats{}); err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, canonical)
+	}
+	merge := func(name string) string {
+		out := filepath.Join(dir, name)
+		var stats ParquetMergeStats
+		if err := mergeParquet(context.Background(), Logs, inputs, out, &stats); err != nil {
+			t.Fatal(err)
+		}
+		if stats.Rows != 2*parquetRowGroupRows {
+			t.Fatalf("rows = %d", stats.Rows)
+		}
+		return out
+	}
+	out := merge("merged.parquet")
+	merged := openParquetFile(t, out)
+	if len(merged.RowGroups()) != len(inputs) {
+		t.Fatalf("row groups = %d", len(merged.RowGroups()))
+	}
+	chunkBytes := func(pf *parquet.File, group, column int) []byte {
+		meta := &pf.Metadata().RowGroups[group].Columns[column].MetaData
+		start := meta.DataPageOffset
+		if meta.DictionaryPageOffset > 0 && meta.DictionaryPageOffset < start {
+			start = meta.DictionaryPageOffset
+		}
+		b := make([]byte, meta.TotalCompressedSize)
+		if _, err := io.ReadFull(io.NewSectionReader(pf, start, int64(len(b))), b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	for i, path := range inputs {
+		source := openParquetFile(t, path)
+		for col := range source.Schema().Columns() {
+			if !bytes.Equal(chunkBytes(source, 0, col), chunkBytes(merged, i, col)) {
+				t.Fatalf("group %d column %d was re-encoded", i, col)
+			}
+		}
+	}
+	if got := len(engineRows(t, out)); got != 2*parquetRowGroupRows {
+		t.Fatalf("decoded %d rows", got)
+	}
+	first, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(merge("again.parquet"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("copying the same inputs produced different files")
+	}
+}
 
 // A merge whose inputs need more readers than mergeReaderBudget writes its
 // columns in batches over windows of row groups, reopening each reader at its
