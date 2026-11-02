@@ -129,13 +129,16 @@ func TestEdgeChildrenSpanScanIsNeverBuildSide(t *testing.T) {
 }
 
 // planCapture explains each statement before running it and keeps the plan
-// of the last one.
+// of the last raw span scan.
 type planCapture struct {
 	rollupSQL
 	plan any
 }
 
 func (p *planCapture) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if !strings.Contains(query, "FROM spans") || strings.Contains(query, "WHERE false") {
+		return p.rollupSQL.ExecContext(ctx, query, args...)
+	}
 	rows, err := p.rollupSQL.QueryContext(ctx, "EXPLAIN (FORMAT JSON) "+query, args...)
 	if err != nil {
 		return nil, err
@@ -396,4 +399,9 @@ func TestEdgeRollupKeysMatchConstantList(t *testing.T) {
 			}
 		}()
 	}
+}
+
+// Unchunked reference for differential tests of the bounded implementation.
+func serviceRollupInsertSQL(keys string) string {
+	return serviceRollupSpanSQL(keys) + serviceRollupJoinSQL
 }

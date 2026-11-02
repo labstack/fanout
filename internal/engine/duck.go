@@ -1488,15 +1488,34 @@ WHERE bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 // its own t-digest states. A semi-join against service_pass_affected reverses
 // into a build of every raw span, so the keys are bound as constants instead.
 func insertServiceRollup(ctx context.Context, tx rollupSQL, lo, hi time.Time) (sql.Result, error) {
-	keys, args, err := affectedKeys(ctx, tx,
-		`SELECT DISTINCT namespace, epoch_ns(bucket), service FROM service_pass_affected
- WHERE namespace IS NOT NULL AND bucket IS NOT NULL AND service IS NOT NULL`, nil,
-		`struct_pack(namespace := s.namespace, bucket := date_trunc('minute', s.start_time::TIMESTAMP_NS), service := s.service)`,
-		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT), service := ?::VARCHAR)`)
+	// Materialize only bounded span aggregates. Logs, metrics and the final
+	// affected-key join run once, preserving empty and NULL-key output rows.
+	_, err := tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE service_pass_spans (
+ namespace VARCHAR, bucket TIMESTAMP_NS, service VARCHAR, spans BIGINT, served_spans BIGINT,
+ p50_ms DOUBLE, p95_ms DOUBLE, error_rate DOUBLE)`)
 	if err != nil {
 		return nil, err
 	}
-	return tx.ExecContext(ctx, serviceRollupInsertSQL(keys), append(args, lo, hi, lo, hi, lo, hi)...)
+	err = forAffectedKeys(ctx, tx,
+		`SELECT DISTINCT namespace, epoch_ns(bucket), service FROM service_pass_affected
+ WHERE namespace IS NOT NULL AND bucket IS NOT NULL AND service IS NOT NULL`, nil,
+		`struct_pack(namespace := s.namespace, bucket := date_trunc('minute', s.start_time::TIMESTAMP_NS), service := s.service)`,
+		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT), service := ?::VARCHAR)`,
+		func(keys string, args []any) error {
+			_, err := tx.ExecContext(ctx, "INSERT INTO service_pass_spans "+serviceRollupSpanSQL(keys)+" SELECT * FROM span_agg", append(args, lo, hi)...)
+			return err
+		})
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, "WITH span_agg AS (SELECT * FROM service_pass_spans)"+serviceRollupJoinSQL, lo, hi, lo, hi)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE service_pass_spans"); err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // rollupSQL is a rollup pass's transaction, or a test's database.
@@ -1505,19 +1524,22 @@ type rollupSQL interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-// affectedKeys reads a pass's affected keys and returns a predicate matching
-// column against them, with every key bound as a parameter. Bound values
-// cannot end or escape the statement text. DuckDB folds the bound keys into
-// constants, and a constant IN list becomes a mark join that builds the keys
-// and only probes raw rows, whatever the raw scan's cardinality estimate.
-func affectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs []any, column, key string) (string, []any, error) {
+// affectedKeyChunkSize bounds statement preparation and constant-list planning.
+// Larger lists consume disproportionate planner memory; keep each raw scan a
+// probe of a small constant MARK join even during a large catch-up pass.
+// At 60k keys, 1k/4k/10k chunks used roughly 185/387/798 MiB
+// peak RSS for the service pass, with no consistent gain from larger chunks.
+const affectedKeyChunkSize = 1000
+
+// Read and close the cursor before issuing statements on the same transaction.
+// Keys are distinct so aggregates and child rows belong to exactly one chunk.
+func forAffectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs []any, column, key string, run func(string, []any) error) error {
 	rows, err := tx.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
-		return "", nil, err
+		return err
 	}
 	defer rows.Close()
 	width := strings.Count(key, "?")
-	var keys []string
 	var args []any
 	for rows.Next() {
 		values := make([]any, width)
@@ -1526,21 +1548,28 @@ func affectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs []a
 			dest[i] = &values[i]
 		}
 		if err := rows.Scan(dest...); err != nil {
-			return "", nil, err
+			return err
 		}
-		keys = append(keys, key)
 		args = append(args, values...)
 	}
 	if err := rows.Err(); err != nil {
-		return "", nil, err
+		return err
 	}
-	if len(keys) == 0 {
-		return "false", nil, nil
+	if err := rows.Close(); err != nil {
+		return err
 	}
-	return column + " IN (" + strings.Join(keys, ",") + ")", args, nil
+	for len(args) > 0 {
+		n := min(len(args)/width, affectedKeyChunkSize)
+		predicate := column + " IN (" + strings.TrimSuffix(strings.Repeat(key+",", n), ",") + ")"
+		if err := run(predicate, args[:n*width:n*width]); err != nil {
+			return err
+		}
+		args = args[n*width:]
+	}
+	return nil
 }
 
-func serviceRollupInsertSQL(keys string) string {
+func serviceRollupSpanSQL(keys string) string {
 	return `
 WITH span_agg AS (
   SELECT
@@ -1575,7 +1604,10 @@ WITH span_agg AS (
     AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service
-),
+)`
+}
+
+const serviceRollupJoinSQL = `,
 log_agg AS (
   SELECT
     l.namespace,
@@ -1625,7 +1657,6 @@ FROM service_pass_affected a
 LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
 LEFT JOIN metric_agg m USING (namespace, bucket, service);`
-}
 
 // edgeArrivalGap bounds recent-arrival repair behind the completed ingest
 // watermark. Older relationships are not guaranteed to be repaired.
@@ -1704,23 +1735,29 @@ WHERE EXISTS (
 // statistics. Bind the small key list as constants: a scalar subquery or
 // semi-join can itself reverse into a build of all raw children.
 func createEdgeChildren(ctx context.Context, tx rollupSQL, lo, hi time.Time) error {
-	keys, args, err := affectedKeys(ctx, tx, `SELECT DISTINCT namespace, epoch_ns(bucket) FROM edge_pass_buckets
+	const selectChildren = `SELECT child.namespace, child.trace_id, child.parent_span_id, child.service,
+        child.start_time, child.duration_ms, child.status
+ FROM spans child
+ WHERE %s
+   AND child.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND child.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND child.service IS NOT NULL AND child.service != ''`
+	// Declare the schema directly: a CTAS with WHERE false can retain empty
+	// scan statistics after inserts and cause downstream joins to discard rows.
+	if _, err := tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE edge_pass_children (
+ namespace VARCHAR, trace_id VARCHAR, parent_span_id VARCHAR, service VARCHAR,
+ start_time TIMESTAMPTZ_NS, duration_ms DOUBLE, status VARCHAR)`); err != nil {
+		return err
+	}
+	return forAffectedKeys(ctx, tx, `SELECT DISTINCT namespace, epoch_ns(bucket) FROM edge_pass_buckets
  WHERE namespace IS NOT NULL AND bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
  AND bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, []any{lo, hi},
 		`struct_pack(namespace := child.namespace, bucket := date_trunc('minute', child.start_time::TIMESTAMP_NS))`,
-		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT))`)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE edge_pass_children AS
- SELECT child.namespace, child.trace_id, child.parent_span_id, child.service,
-        child.start_time, child.duration_ms, child.status
- FROM spans child
- WHERE `+keys+`
-   AND child.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
-   AND child.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
-   AND child.service IS NOT NULL AND child.service != ''`, append(args, lo, hi)...)
-	return err
+		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT))`,
+		func(keys string, args []any) error {
+			_, err := tx.ExecContext(ctx, "INSERT INTO edge_pass_children "+fmt.Sprintf(selectChildren, keys), append(args, lo, hi)...)
+			return err
+		})
 }
 
 const edgeChildTracesSQL = edgeAffectedBucketsSQL + `,
