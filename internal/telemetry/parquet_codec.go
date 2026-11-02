@@ -20,7 +20,13 @@ import (
 // matches. Random trace and span IDs are mostly literals, so their hex text
 // would be stored at its full width; entropy-coding every literal block halves
 // it.
-var parquetCodec compress.Codec = &pageCodec{level: zstd.SpeedFastest}
+//
+// A commit encodes a page per column, and the format's wide schema has many
+// columns, so a small file's commit rebuilt encoders dropped by the last
+// garbage collection: on a 2,000-row file their history was a fifth of what
+// the commit allocated. Enough encoders for the lanes of the files committed
+// concurrently are kept outside the pool, about a megabyte each.
+var parquetCodec compress.Codec = &pageCodec{level: zstd.SpeedFastest, kept: make(chan *zstd.Encoder, 16)}
 
 // parquetDenseCodec compresses integer count lists, histogram bucket counts,
 // at zstd's default level. Their plain pages hold numbers of one or two
