@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unsafe"
 )
 
 // ---------------------------------------------------------------------------
@@ -342,6 +343,25 @@ func TestTemplateCacheMatchesNormalizeTemplate(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// A slot holds its own copy of the truncated body and template, so caching a
+// large body does not keep the whole request body alive.
+func TestTemplateCacheDoesNotPinBodies(t *testing.T) {
+	c := newTemplateCache()
+	body := strings.Repeat("no placeholders here ", 1<<16) // 1.3 MiB, template = prefix
+	c.template(body)
+	start := uintptr(unsafe.Pointer(unsafe.StringData(body)))
+	end := start + uintptr(len(body))
+	for i := range c.shards {
+		for _, slot := range c.shards[i].slots {
+			for _, s := range []string{slot.body, slot.template} {
+				if p := uintptr(unsafe.Pointer(unsafe.StringData(s))); s != "" && p >= start && p < end {
+					t.Fatalf("slot shares memory with the %d-byte request body", len(body))
+				}
+			}
+		}
+	}
 }
 
 func BenchmarkTemplate(b *testing.B) {

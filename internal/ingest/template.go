@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"regexp"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"unicode/utf8"
 )
@@ -111,8 +112,11 @@ func (c *templateCache) template(body string) string {
 	}
 	shard.mu.Unlock()
 	tmpl := safeNormalizeTemplate(body)
+	// The truncated body, and a template that matched nothing, share memory
+	// with the request's full body. Copies keep a slot at 500 bytes instead of
+	// pinning a body of up to the request limit.
 	shard.mu.Lock()
-	slot.body, slot.template = body, tmpl
+	slot.body, slot.template = strings.Clone(body), strings.Clone(tmpl)
 	shard.mu.Unlock()
 	return tmpl
 }
