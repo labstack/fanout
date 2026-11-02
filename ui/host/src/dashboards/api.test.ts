@@ -57,6 +57,16 @@ describe("dashboard api", () => {
 
   it("posts panel batches using the shared JSON request path",async()=>{
     fetchMock.mockResolvedValue(json(200,{results:[]}));await expect(queryPanels({dashboard:spec})).resolves.toEqual([]);expect(lastCall()[0]).toBe("/api/queries/run");expect(lastCall()[1].method).toBe("POST");expect(JSON.parse(String(lastCall()[1].body))).toEqual({dashboard:spec});
+    expect(new Headers(lastCall()[1].headers).get("cache-control")).toBeNull();
+  });
+  it("asks for results the server has not kept on a fresh run, streamed or not", async () => {
+    fetchMock.mockResolvedValue(json(200,{results:[]}));
+    await queryPanels({dashboard:spec}, undefined, undefined, true);
+    expect(new Headers(lastCall()[1].headers).get("cache-control")).toBe("no-cache");
+    fetchMock.mockResolvedValue(new Response(new ReadableStream({start(c){c.close();}}), {status: 200}));
+    await queryPanels({dashboard:spec}, undefined, () => {}, true);
+    expect(new Headers(lastCall()[1].headers).get("cache-control")).toBe("no-cache");
+    expect(new Headers(lastCall()[1].headers).get("accept")).toBe("application/x-ndjson");
   });
   it("streams panel results line by line when asked, even split across chunks", async () => {
     const bytes = new TextEncoder().encode('{"id":"a","status":"ok","elapsed_ms":1}\n{"id":"b","status":"err');

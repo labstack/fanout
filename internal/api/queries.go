@@ -44,13 +44,30 @@ const streamType = "application/x-ndjson"
 // streamWriteTimeout bounds writing one streamed result to the client.
 const streamWriteTimeout = 10 * time.Second
 
+// resultContext is the request's context, marked to skip stored query results
+// when the request carries Cache-Control: no-cache (RFC 9111, section
+// 5.2.1.4), as the UI's manual refresh does. Such a request may still join a
+// run that started after it arrived, and its fresh result is stored.
+func resultContext(c *echo.Context) context.Context {
+	ctx := c.Request().Context()
+	for _, value := range c.Request().Header.Values(echo.HeaderCacheControl) {
+		for directive := range strings.SplitSeq(value, ",") {
+			name, _, _ := strings.Cut(strings.TrimSpace(directive), "=")
+			if strings.EqualFold(strings.TrimSpace(name), "no-cache") {
+				return query.WithoutCachedResults(ctx)
+			}
+		}
+	}
+	return ctx
+}
+
 func (h *QueryHandler) query(c *echo.Context) error {
 	var req query.RunRequest
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
 	}
 	if !strings.Contains(c.Request().Header.Get(echo.HeaderAccept), streamType) {
-		results, err := h.engine.Run(c.Request().Context(), req)
+		results, err := h.engine.Run(resultContext(c), req)
 		if err != nil {
 			return panelError(c, err, "panels unavailable")
 		}
@@ -60,7 +77,7 @@ func (h *QueryHandler) query(c *echo.Context) error {
 	control := http.NewResponseController(response)
 	// A client that stops reading must not hold the stream open: each write
 	// has its own deadline, and a failed write cancels the panels still running.
-	ctx, cancel := context.WithCancel(c.Request().Context())
+	ctx, cancel := context.WithCancel(resultContext(c))
 	defer cancel()
 	defer func() { _ = control.SetWriteDeadline(time.Time{}) }()
 	encoder := json.NewEncoder(response)
@@ -156,8 +173,7 @@ func panelError(c *echo.Context, err error, unavailable string) error {
 	case errors.Is(err, query.ErrBusy):
 		// Every panel was turned away before any started: tell the client to
 		// come back rather than answer a page of busy panels.
-		c.Response().Header().Set("Retry-After", "2")
-		return newAPIError(http.StatusServiceUnavailable, "busy", query.BusyMessage)
+		return busyError(c)
 	case errors.Is(err, context.DeadlineExceeded):
 		return echo.NewHTTPError(http.StatusGatewayTimeout, "Panels took longer than 20 seconds. Narrow the time range or reduce the number of panels.").Wrap(err)
 	case errors.Is(err, context.Canceled):
@@ -203,11 +219,17 @@ func (h *QueryHandler) exemplars(c *echo.Context) error {
 	if err := decodeStrict(c, &req, 512<<10); err != nil {
 		return err
 	}
-	out, err := h.engine.Exemplars(c.Request().Context(), req)
+	out, err := h.engine.Exemplars(resultContext(c), req)
 	if err != nil {
 		return exemplarHTTPError(c, err)
 	}
 	return c.JSON(http.StatusOK, out)
+}
+
+// busyError answers a read the server turned away before it started.
+func busyError(c *echo.Context) error {
+	c.Response().Header().Set("Retry-After", "2")
+	return newAPIError(http.StatusServiceUnavailable, "busy", query.BusyMessage)
 }
 
 func exemplarHTTPError(c *echo.Context, err error) error {
@@ -215,6 +237,8 @@ func exemplarHTTPError(c *echo.Context, err error) error {
 		return writeErr
 	}
 	switch {
+	case errors.Is(err, query.ErrBusy):
+		return busyError(c)
 	case errors.Is(err, context.DeadlineExceeded):
 		return echo.NewHTTPError(http.StatusGatewayTimeout, "Exemplars took longer than 10 seconds").Wrap(err)
 	case errors.Is(err, context.Canceled):

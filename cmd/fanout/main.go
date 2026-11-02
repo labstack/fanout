@@ -293,7 +293,7 @@ func main() {
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := query.NewExecutor(q, cfg.RetentionDays)
 	panels.SetRollupReader(queries)
-	panels.SetCacheFreshness(cfg.QueryCacheTTL)
+	panels.SetCacheTTL(cfg.QueryCacheTTL)
 	api.RegisterQueryRoutes(e, panels)
 	api.RegisterFanQLRoutes(e, q, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))

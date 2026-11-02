@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/auth"
 	"net/http"
 	"net/http/httptest"
@@ -18,10 +19,12 @@ type fakePanels struct {
 	run     query.RunRequest
 	problem bool
 	err     error
+	bypass  bool
 }
 
-func (f *fakePanels) Run(_ context.Context, req query.RunRequest) ([]query.Result, error) {
+func (f *fakePanels) Run(ctx context.Context, req query.RunRequest) ([]query.Result, error) {
 	f.run = req
+	f.bypass = query.BypassesCache(ctx)
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -209,13 +212,18 @@ func TestPanelBatchHTTPKeepsPartialResults(t *testing.T) {
 	}
 }
 
-func (f *fakePanels) Exemplars(context.Context, query.ExemplarRequest) (query.ExemplarResponse, error) {
-	return query.ExemplarResponse{Traces: []query.Exemplar{}}, nil
+func (f *fakePanels) Exemplars(ctx context.Context, _ query.ExemplarRequest) (query.ExemplarResponse, error) {
+	f.bypass = query.BypassesCache(ctx)
+	return query.ExemplarResponse{Traces: []query.Exemplar{}}, f.err
 }
 func TestExemplarRoutePolicy(t *testing.T) {
 	rec := servePanels(t, &fakePanels{}, http.MethodPost, "/api/queries/exemplars", `{"dashboard":{"name":"Inline","panels":[]},"panel_id":"latency","from":"2026-10-01T12:00:00Z","to":"2026-10-01T12:05:00Z","dimensions":{}}`)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"traces":[]`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	rec = servePanels(t, &fakePanels{err: query.ErrBusy}, http.MethodPost, "/api/queries/exemplars", `{"dashboard":{"name":"Inline","panels":[]},"panel_id":"latency","from":"2026-10-01T12:00:00Z","to":"2026-10-01T12:05:00Z"}`)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "2" {
+		t.Fatalf("busy exemplars: %d %s", rec.Code, rec.Body)
 	}
 	policy, ok := classifyRoute(http.MethodPost, "/api/queries/exemplars")
 	if !ok || policy.capability != ReadTelemetry {
@@ -269,5 +277,70 @@ func TestPanelStreamWriteDeadline(t *testing.T) {
 	}
 	if !engine.cancelled {
 		t.Fatal("a failed write did not cancel the stream")
+	}
+}
+
+// Cache-Control: no-cache, in any case and among other directives, skips
+// stored query results on every cached route; nothing else does.
+func TestNoCacheSkipsStoredResults(t *testing.T) {
+	for _, tc := range []struct {
+		header []string
+		want   bool
+	}{
+		{nil, false},
+		{[]string{"no-cache"}, true},
+		{[]string{"max-age=0, No-Cache"}, true},
+		{[]string{"max-age=0", "no-cache"}, true},
+		{[]string{"no-store"}, false},
+		{[]string{"no-cache-please"}, false},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/queries/run", nil)
+		for _, value := range tc.header {
+			req.Header.Add("Cache-Control", value)
+		}
+		c := echo.New().NewContext(req, httptest.NewRecorder())
+		if got := query.BypassesCache(resultContext(c)); got != tc.want {
+			t.Errorf("Cache-Control %q: bypass=%v", tc.header, got)
+		}
+	}
+
+	s := newTestAuthServer(t)
+	viewer, err := s.users.CreateWithAudit("viewer@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panels := &fakePanels{}
+	traces := &traceProbe{}
+	RegisterQueryRoutes(s.e, panels)
+	RegisterTraceRoutes(s.e, traces, 7)
+	cookie := s.login(t, viewer)
+	for _, stream := range []bool{false, true} {
+		req := sessionRequest(http.MethodPost, "/api/queries/run", strings.NewReader(`{"dashboard":{"name":"x","panels":[]}}`), cookie)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Cache-Control", "no-cache")
+		if stream {
+			req.Header.Set("Accept", streamType)
+		}
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !panels.bypass {
+			t.Fatalf("stream=%v: %d bypass=%v", stream, rec.Code, panels.bypass)
+		}
+	}
+	panels.bypass = false
+	req := sessionRequest(http.MethodPost, "/api/queries/exemplars", strings.NewReader(`{"dashboard":{"name":"Inline","panels":[]},"panel_id":"latency","from":"2026-10-01T12:00:00Z","to":"2026-10-01T12:05:00Z"}`), cookie)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Cache-Control", "no-cache")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !panels.bypass {
+		t.Fatalf("exemplars: %d bypass=%v", rec.Code, panels.bypass)
+	}
+	req = sessionRequest(http.MethodGet, "/api/traces/abc?namespace=shop&from=2026-10-01T12:00:00Z&to=2026-10-01T13:00:00Z", nil, cookie)
+	req.Header.Set("Cache-Control", "no-cache")
+	rec = httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !traces.bypass {
+		t.Fatalf("trace: %d bypass=%v", rec.Code, traces.bypass)
 	}
 }

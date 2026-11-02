@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/observability"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -83,5 +84,44 @@ func TestPanelsAreRefusedAtTheQueueBound(t *testing.T) {
 	}
 	if PresentError(ErrBusy, ReadError) != BusyMessage {
 		t.Error("busy is presented as a generic read failure")
+	}
+}
+
+// Exemplars and trace detail wait in the same line as panels: past the
+// queue bound, or past the batch deadline, they are busy instead of holding
+// the engine.
+func TestExemplarsAndTracesShareAdmission(t *testing.T) {
+	e := newFixtureExecutor(t)
+	defer e.Close()
+	e.SetCacheTTL(10 * time.Second)
+	e.slots = semaphore.NewWeighted(1)
+	e.queueBound = 0
+	if err := e.slots.Acquire(t.Context(), 1); err != nil {
+		t.Fatal(err)
+	}
+	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", From: fixtureStart.Add(30 * time.Minute), To: fixtureStart.Add(31 * time.Minute), Dimensions: map[string]string{"attributes['http.route']": "/cart"}}
+	if _, err := e.Exemplars(t.Context(), req); !errors.Is(err, ErrBusy) {
+		t.Fatalf("exemplars err=%v", err)
+	}
+	reader := &fakeTraces{}
+	traces := e.CachedTraces(reader)
+	if _, err := traces.Trace(t.Context(), observability.Scope{}, "abc", "", 10); !errors.Is(err, ErrBusy) || reader.calls.Load() != 0 {
+		t.Fatalf("trace err=%v reads=%d", err, reader.calls.Load())
+	}
+	// Queued, a read waits no longer than the batch deadline.
+	e.queueBound = 1
+	e.batchTimeout = 30 * time.Millisecond
+	if _, err := traces.Trace(t.Context(), observability.Scope{}, "def", "", 10); !errors.Is(err, ErrBusy) {
+		t.Fatalf("queued trace err=%v", err)
+	}
+	if len(e.cache.entries) != 0 {
+		t.Fatal("a busy answer was stored")
+	}
+	e.slots.Release(1)
+	if out, err := e.Exemplars(t.Context(), req); err != nil || len(out.Traces) != 1 {
+		t.Fatalf("admitted exemplars=%+v err=%v", out, err)
+	}
+	if !e.slots.TryAcquire(1) {
+		t.Fatal("an exemplar run kept its slot")
 	}
 }

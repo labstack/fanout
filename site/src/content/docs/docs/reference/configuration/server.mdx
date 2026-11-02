@@ -42,7 +42,7 @@ Sets the external browser origin, MCP token audience, and trusted MCP request or
 
 ### `FANOUT_QUERY_CACHE_TTL`
 
-How long a dashboard panel, exemplar or trace detail result is served from memory without rerunning its queries. Relative windows such as "last 1h" end on the current time rounded down to this grain, so identical refreshes within one grain share a result. A result older than the grain but younger than three grains is served stale while one background refresh replaces it, so a panel may show data up to three grains old. Zero disables the cache; concurrent identical requests still share one execution.
+The oldest a dashboard panel, exemplar or trace detail result served from memory may be, measured from the end of the time window it covers (for traces and exemplars, from when their run started). A result younger than half the TTL is served as is; one younger than the TTL is served while one background run refreshes it; an older one is rerun. A request with Cache-Control: no-cache, such as a dashboard's manual refresh, always reruns. Zero disables the cache; concurrent identical requests still share one execution.
 
 ### `FANOUT_TLS_CERT_FILE`
 

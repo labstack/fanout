@@ -5,6 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"time"
@@ -15,16 +19,24 @@ import (
 )
 
 // The result cache keeps recent panel, exemplar and trace-detail results so a
-// dashboard refreshed by many viewers runs its queries once per freshness
-// grain, and joins identical requests already running instead of queueing a
-// second copy behind them. Only complete results are kept: errors, busy
-// answers and results of a cancelled run are never stored.
+// dashboard refreshed by many viewers runs its queries about once per half
+// TTL, and joins identical requests already running instead of queueing a
+// second copy behind them. Only complete results are kept: errors, busy and
+// partial answers and results of a cancelled run are never stored.
 //
-// An entry younger than the grain is served as is. One older than the grain
-// but younger than three grains is served stale while one background run
-// replaces it, like the schema cache. Anything older is a miss. With a zero
-// grain nothing is stored, but concurrent identical requests still share one
-// run.
+// No answer is older than the TTL. Every entry is stamped with the instant
+// its data window ends: a panel run's resolved now, or for traces and
+// exemplars the moment their run started. Its age is measured from that
+// stamp. Younger than half the TTL it is served as is; younger than the TTL
+// it is served stale while exactly one background run replaces it, so
+// viewers do not all miss at once; older it is a miss. A caller only joins a
+// run in flight whose stamp is younger than the TTL at its arrival. With a
+// zero TTL nothing is stored, but concurrent identical requests still share
+// one run.
+//
+// A caller marked by WithoutCachedResults (Cache-Control: no-cache) reads no
+// stored entry and joins only a run that started after it arrived; its fresh
+// result is stored for others.
 
 type cacheKey [32]byte
 
@@ -37,7 +49,7 @@ const (
 )
 
 type resultCache struct {
-	freshness  time.Duration
+	ttl        time.Duration
 	maxEntries int
 	maxBytes   int64
 
@@ -49,24 +61,31 @@ type resultCache struct {
 }
 
 type cacheEntry struct {
-	key    cacheKey
-	value  any
-	size   int64
-	stored time.Time
+	key   cacheKey
+	value any
+	size  int64
+	// stamp is where the entry's data window ends; its age counts from here.
+	stamp time.Time
 }
 
 // A cacheFlight is one run that every concurrent caller of its key awaits.
 // It outlives the caller that started it: a departing client does not cancel
-// work others wait for. Once every caller has gone the run is cancelled, so
-// nobody's abandoned work holds the engine; a background refresh has no
+// work others wait for. A run whose result will be stored keeps going after
+// every caller has gone, bounded by its own timeout, so a slow cold panel
+// still fills the cache for the next refresh instead of every refresh
+// starting over. Any other run, one with the cache disabled or one only
+// no-cache callers wait for, is cancelled once its last caller leaves, so
+// nobody's abandoned work holds the engine. A background refresh has no
 // callers and runs to completion.
 type cacheFlight struct {
-	done       chan struct{}
-	value      any
-	err        error
-	waiters    int
-	background bool
-	cancel     context.CancelFunc
+	done    chan struct{}
+	stamp   time.Time
+	value   any
+	err     error
+	waiters int
+	// detached runs outlive their callers.
+	detached bool
+	cancel   context.CancelFunc
 }
 
 // flightFunc runs one cached computation under ctx, which keeps the starting
@@ -75,36 +94,40 @@ type cacheFlight struct {
 // be stored.
 type flightFunc[T any] func(ctx context.Context) (T, int64, bool, error)
 
+// errRunPanicked is the error every caller of a run that panicked receives.
+var errRunPanicked = errors.New("query run panicked")
+
+type noCacheKey struct{}
+
+// WithoutCachedResults marks ctx as a request that must not be answered from
+// a stored result, as Cache-Control: no-cache asks. It may still join a run
+// that started after it arrived, and its result is stored for others.
+func WithoutCachedResults(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noCacheKey{}, true)
+}
+
+// BypassesCache reports whether ctx was marked by WithoutCachedResults.
+func BypassesCache(ctx context.Context) bool {
+	bypass, _ := ctx.Value(noCacheKey{}).(bool)
+	return bypass
+}
+
 func newResultCache() resultCache {
 	return resultCache{maxEntries: config.QueryCacheMaxEntries, maxBytes: config.QueryCacheMaxBytes,
 		entries: map[cacheKey]*list.Element{}, flights: map[cacheKey]*cacheFlight{}}
 }
 
-// SetCacheFreshness sets the result cache grain; zero disables storing
-// results. Call it before serving requests.
-func (e *Executor) SetCacheFreshness(d time.Duration) {
+// SetCacheTTL sets the oldest answer the result cache may serve; zero
+// disables storing results. Call it before serving requests.
+func (e *Executor) SetCacheTTL(d time.Duration) {
 	e.cache.mu.Lock()
 	defer e.cache.mu.Unlock()
-	e.cache.freshness = max(d, 0)
+	e.cache.ttl = max(d, 0)
 	if d <= 0 {
 		e.cache.lru.Init()
 		clear(e.cache.entries)
 		e.cache.setBytes(0)
 	}
-}
-
-// cacheNow is the executor's clock rounded down to the freshness grain, so
-// identical relative-window requests within one grain resolve the same
-// window and share a cache key.
-func (e *Executor) cacheNow() time.Time {
-	now := e.now()
-	e.cache.mu.Lock()
-	grain := e.cache.freshness
-	e.cache.mu.Unlock()
-	if grain > 0 {
-		now = now.Truncate(grain)
-	}
-	return now
 }
 
 // keyOf hashes the canonical JSON of v. Maps marshal with sorted keys.
@@ -117,26 +140,31 @@ func keyOf(v any) (cacheKey, error) {
 }
 
 // loadCached answers key from the cache or from one run of fn shared by every
-// concurrent caller. The returned value is shared: callers must not mutate
-// it. The outcome is one of the cache* lookup results.
-func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, fn flightFunc[T]) (T, string, error) {
+// concurrent caller. stamp is where the caller's data window ends, normally
+// its arrival; a run fn starts is stored under it. The returned value is
+// shared: callers must not mutate it. The outcome is one of the cache* lookup
+// results.
+func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, stamp time.Time, fn flightFunc[T]) (T, string, error) {
 	var zero T
 	c := &e.cache
 	run := func(ctx context.Context) (any, int64, bool, error) { return fn(ctx) }
+	bypass := BypassesCache(ctx)
 	c.mu.Lock()
-	if element := c.entries[key]; element != nil {
+	if element := c.entries[key]; element != nil && !bypass {
 		entry := element.Value.(*cacheEntry)
-		age := e.now().Sub(entry.stored)
+		age := e.now().Sub(entry.stamp)
 		switch {
-		case age < c.freshness:
+		case age < c.ttl/2:
 			c.lru.MoveToFront(element)
 			c.mu.Unlock()
 			metrics.QueryCacheRequests.WithLabelValues(cacheHit).Inc()
 			return entry.value.(T), cacheHit, nil
-		case age < 3*c.freshness:
+		case age < c.ttl:
 			c.lru.MoveToFront(element)
-			if c.flights[key] == nil {
-				e.startFlight(ctx, key, true, run)
+			// One refresh at a time, unless the run in flight would not
+			// replace this entry with anything newer.
+			if flight := c.flights[key]; flight == nil || !flight.stamp.After(entry.stamp) {
+				e.startFlight(ctx, key, stamp, true, run)
 			}
 			c.mu.Unlock()
 			metrics.QueryCacheRequests.WithLabelValues(cacheStale).Inc()
@@ -147,11 +175,13 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, fn flight
 	}
 	outcome := cacheCoalesced
 	flight := c.flights[key]
-	if flight == nil {
+	if flight == nil || !e.joinable(flight, stamp, bypass) {
 		outcome = cacheMiss
-		flight = e.startFlight(ctx, key, false, run)
+		flight = e.startFlight(ctx, key, stamp, false, run)
 	}
 	flight.waiters++
+	// A caller that will read the stored result keeps the run going.
+	flight.detached = flight.detached || c.ttl > 0 && !bypass
 	c.mu.Unlock()
 	metrics.QueryCacheRequests.WithLabelValues(outcome).Inc()
 	select {
@@ -163,7 +193,7 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, fn flight
 	case <-ctx.Done():
 		c.mu.Lock()
 		flight.waiters--
-		if flight.waiters == 0 && !flight.background {
+		if flight.waiters == 0 && !flight.detached {
 			flight.cancel()
 			if c.flights[key] == flight {
 				delete(c.flights, key)
@@ -174,12 +204,30 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, fn flight
 	}
 }
 
-// startFlight registers and starts a run for key. c.mu is held. The run keeps
-// the caller's values but not its cancellation, and ends with the executor.
-func (e *Executor) startFlight(caller context.Context, key cacheKey, background bool, fn flightFunc[any]) *cacheFlight {
+// joinable reports whether a caller arriving now, whose own window ends at
+// stamp, may take flight's answer. A no-cache caller joins only a run that
+// started after it arrived; any other only one whose answer is not already
+// older than the TTL. With a zero TTL every identical run is shared. c.mu is
+// held.
+func (e *Executor) joinable(flight *cacheFlight, stamp time.Time, bypass bool) bool {
+	switch {
+	case bypass:
+		return !flight.stamp.Before(stamp)
+	case e.cache.ttl <= 0:
+		return true
+	default:
+		return e.now().Sub(flight.stamp) < e.cache.ttl
+	}
+}
+
+// startFlight registers and starts a run for key, replacing any run in
+// flight for it, and stores its result under stamp. c.mu is held. The run
+// keeps the caller's values but not its cancellation, and ends with the
+// executor.
+func (e *Executor) startFlight(caller context.Context, key cacheKey, stamp time.Time, background bool, fn flightFunc[any]) *cacheFlight {
 	c := &e.cache
 	run, cancel := context.WithCancel(context.WithoutCancel(caller))
-	flight := &cacheFlight{done: make(chan struct{}), background: background, cancel: cancel}
+	flight := &cacheFlight{done: make(chan struct{}), stamp: stamp, detached: background, cancel: cancel}
 	c.flights[key] = flight
 	e.mu.Lock()
 	if err := e.life.Err(); err != nil {
@@ -197,7 +245,7 @@ func (e *Executor) startFlight(caller context.Context, key cacheKey, background 
 		defer cancel()
 		stop := context.AfterFunc(e.life, cancel)
 		defer stop()
-		value, size, keep, err := fn(run)
+		value, size, keep, err := runFlight(run, fn)
 		// A run cut short, by its callers leaving or the executor closing,
 		// is never kept.
 		keep = keep && err == nil && run.Err() == nil
@@ -205,8 +253,8 @@ func (e *Executor) startFlight(caller context.Context, key cacheKey, background 
 		if c.flights[key] == flight {
 			delete(c.flights, key)
 		}
-		if keep {
-			c.store(key, value, size, e.now)
+		if keep && c.ttl > 0 {
+			c.store(key, value, size, stamp, e.now())
 		}
 		flight.value, flight.err = value, err
 		c.mu.Unlock()
@@ -215,16 +263,34 @@ func (e *Executor) startFlight(caller context.Context, key cacheKey, background 
 	return flight
 }
 
-// store keeps value under key, evicting the least recently used entries past
-// either bound. c.mu is held.
-func (c *resultCache) store(key cacheKey, value any, size int64, now func() time.Time) {
-	if c.freshness <= 0 || size > c.maxBytes {
+// runFlight runs fn, turning a panic into errRunPanicked: a run has no
+// request goroutine, so nothing else would recover it, and its callers must
+// get an answer.
+func runFlight(ctx context.Context, fn flightFunc[any]) (value any, size int64, keep bool, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			slog.Error("query run panicked", "panic", v, "stack", string(debug.Stack()))
+			value, size, keep, err = nil, 0, false, fmt.Errorf("%w: %v", errRunPanicked, v)
+		}
+	}()
+	return fn(ctx)
+}
+
+// store keeps value under key, stamped where its window ends, evicting the
+// least recently used entries past either bound. c.mu is held.
+func (c *resultCache) store(key cacheKey, value any, size int64, stamp, now time.Time) {
+	// An answer already too old to serve is not kept.
+	if c.ttl <= 0 || size > c.maxBytes || now.Sub(stamp) >= c.ttl {
 		return
 	}
 	if element := c.entries[key]; element != nil {
+		// A slower, older run never replaces a newer answer.
+		if element.Value.(*cacheEntry).stamp.After(stamp) {
+			return
+		}
 		c.remove(element)
 	}
-	c.entries[key] = c.lru.PushFront(&cacheEntry{key: key, value: value, size: size, stored: now()})
+	c.entries[key] = c.lru.PushFront(&cacheEntry{key: key, value: value, size: size, stamp: stamp})
 	c.setBytes(c.bytes + size)
 	for len(c.entries) > c.maxEntries || c.bytes > c.maxBytes {
 		c.remove(c.lru.Back())
@@ -246,9 +312,8 @@ func (c *resultCache) setBytes(n int64) {
 // The spec hash covers the normalized dashboard, so every Panel and Dashboard
 // field is included; the other fields are the request's resolved inputs. An
 // absolute window is in Time; a relative one slides with the clock, and the
-// entry's age decides whether it is still fresh, so the result of the last
-// grain is served stale while the next one runs instead of every viewer
-// missing at once on each grain boundary. Panel selection does not change a
+// entry's age, from the end of its window, decides whether it may still be
+// served. Panel selection does not change a
 // panel's result and is left out. TestPanelCacheKeyCoversRequest fails when
 // RunRequest grows a field this key does not account for.
 type panelCacheKey struct {
@@ -368,10 +433,17 @@ func (c cachedTraces) Trace(ctx context.Context, scope observability.Scope, trac
 	if err != nil {
 		return c.reader.Trace(ctx, scope, traceID, service, limit)
 	}
-	out, _, err := loadCached(c.executor, ctx, key, func(run context.Context) (observability.Result[observability.TraceDetail], int64, bool, error) {
+	// A trace read has no relative window: its data is as of the run's start.
+	out, _, err := loadCached(c.executor, ctx, key, c.executor.now(), func(run context.Context) (observability.Result[observability.TraceDetail], int64, bool, error) {
+		var out observability.Result[observability.TraceDetail]
+		release, err := c.executor.admit(run)
+		if err != nil {
+			return out, 0, false, err
+		}
+		defer release()
 		run, cancel := context.WithTimeout(run, traceDetailTimeout)
 		defer cancel()
-		out, err := c.reader.Trace(run, scope, traceID, service, limit)
+		out, err = c.reader.Trace(run, scope, traceID, service, limit)
 		if err != nil {
 			return out, 0, false, err
 		}

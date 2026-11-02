@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,12 +83,16 @@ type metricStore struct {
 	t       *testing.T
 	duck    *engine.Duck
 	repo    *telemetrystore.Repository
+	mu      sync.Mutex
 	pending []telemetry.Metric
 	batches int
 }
 
 func (s *metricStore) flush() {
 	s.t.Helper()
+	// Panels read concurrently, and each read flushes.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.pending) == 0 {
 		return
 	}

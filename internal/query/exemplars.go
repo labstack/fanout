@@ -89,9 +89,9 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 
 // Exemplars answers a selection's sample traces or logs through the result
 // cache, keyed by the canonical request, so a burst of identical drill-downs
-// runs once. Relative windows end on the clock rounded to the cache grain.
+// runs once. Relative windows end now, the stamp of a cached answer.
 func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (ExemplarResponse, error) {
-	now := e.cacheNow()
+	now := e.now()
 	key, err := keyOf(struct {
 		Kind    string          `json:"kind"`
 		Request ExemplarRequest `json:"request"`
@@ -99,7 +99,12 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 	if err != nil {
 		return e.exemplars(ctx, req, now)
 	}
-	out, _, err := loadCached(e, ctx, key, func(run context.Context) (ExemplarResponse, int64, bool, error) {
+	out, _, err := loadCached(e, ctx, key, now, func(run context.Context) (ExemplarResponse, int64, bool, error) {
+		release, err := e.admit(run)
+		if err != nil {
+			return ExemplarResponse{Traces: []Exemplar{}}, 0, false, err
+		}
+		defer release()
 		out, err := e.exemplars(run, req, now)
 		size := int64(256+len(out.Traces)*256) + out.Logs.size()
 		return out, size, err == nil, err

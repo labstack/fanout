@@ -57,10 +57,12 @@ export const patchDashboard = (id: string, operations: Operation[], baseVersion:
   request<DashboardRecord>(path(id), { method: "PATCH", json: { operations, base_version: baseVersion, message } });
 /** Runs panels. With onResult the server streams one result per line as each
  *  panel finishes, so fast panels are seen before the slowest is done; the
- *  promise still resolves with every result. */
-export async function queryPanels(body: QueryBody, signal?: AbortSignal, onResult?: (result: PanelResult) => void): Promise<PanelResult[]> {
-  if (!onResult) return request<{ results: PanelResult[] }>("/api/queries/run", { method: "POST", json: body, signal }).then((r) => r.results);
-  const response = await authorizedFetch("/api/queries/run", { method: "POST", headers: { "content-type": "application/json", accept: "application/x-ndjson" }, body: JSON.stringify(body), signal });
+ *  promise still resolves with every result. `fresh` asks the server not to
+ *  answer from results it keeps in memory, for a refresh the user asked for. */
+export async function queryPanels(body: QueryBody, signal?: AbortSignal, onResult?: (result: PanelResult) => void, fresh = false): Promise<PanelResult[]> {
+  const cache: Record<string, string> = fresh ? { "cache-control": "no-cache" } : {};
+  if (!onResult) return request<{ results: PanelResult[] }>("/api/queries/run", { method: "POST", headers: cache, json: body, signal }).then((r) => r.results);
+  const response = await authorizedFetch("/api/queries/run", { method: "POST", headers: { ...cache, "content-type": "application/json", accept: "application/x-ndjson" }, body: JSON.stringify(body), signal });
   if (!response.ok) throw failure(response, await response.json().catch(() => ({})));
   const results: PanelResult[] = [];
   const lines = response.body!.pipeThrough(new TextDecoderStream()).getReader();

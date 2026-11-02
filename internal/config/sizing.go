@@ -48,11 +48,11 @@ const (
 	QueryCacheMaxBytes   = 64 << 20
 )
 
-// QueryAdmission derives the panel executor's admission from the read pool:
-// slots panels hold read connections at once, and at most queue more wait
-// for one before further panels are refused as busy. A pool of four or more
-// keeps two connections for annotations, trace detail, exemplars and
-// readiness checks, which do not queue behind dashboards.
+// QueryAdmission derives the executor's read admission from the pool:
+// slots dashboard panels, exemplar and trace-detail reads hold read
+// connections at once, and at most queue more wait for one before further
+// reads are refused as busy. A pool of four or more keeps two connections
+// for annotations and readiness checks, which do not queue behind them.
 func QueryAdmission(pool int) (slots, queue int) {
 	slots = max(1, pool)
 	if pool >= 4 {

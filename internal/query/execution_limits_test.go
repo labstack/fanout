@@ -53,7 +53,7 @@ func TestBatchDeadlineKeepsCompletedPanels(t *testing.T) {
 		t.Errorf("started panel=%+v after %s", results[1], time.Since(started))
 	}
 	assertRetryable(t, results[2], true)
-	if results[2].Status != StatusError || results[2].Reason != ReasonBusy || results[2].Error != "Not run: other queries kept the server busy for 20 seconds. Refresh to try again." {
+	if results[2].Status != StatusError || results[2].Reason != ReasonBusy || results[2].Error != "Not run: other queries kept the server busy. Refresh to try again." {
 		t.Errorf("unstarted=%+v", results[2])
 	}
 	if slow.calls.Load() != 1 {

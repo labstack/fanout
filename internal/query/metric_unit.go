@@ -37,10 +37,12 @@ func panelUnit(otel string) string {
 
 // applyMetricUnit gives a metric panel's value columns the unit its metric
 // reports. Columns with a unit of their own, such as counts and rates, and
-// expressions keep theirs; an authored panel unit wins in the renderer.
-func (e *Executor) applyMetricUnit(ctx context.Context, p *Panel, checked *Checked, scope Scope, frames ...*Frame) {
+// expressions keep theirs; an authored panel unit wins in the renderer. An
+// error means the unit could not be read and the columns were left as they
+// were.
+func (e *Executor) applyMetricUnit(ctx context.Context, p *Panel, checked *Checked, scope Scope, frames ...*Frame) error {
 	if p.Query == nil || p.Query.From != "metrics" || p.Unit != "" {
-		return
+		return nil
 	}
 	name := ""
 	for _, f := range checked.Filters[p.ID] {
@@ -53,7 +55,7 @@ func (e *Executor) applyMetricUnit(ctx context.Context, p *Panel, checked *Check
 		}
 	}
 	if name == "" {
-		return
+		return nil
 	}
 	plain := map[string]bool{}
 	for _, m := range checked.Measures[p.ID] {
@@ -70,44 +72,53 @@ func (e *Executor) applyMetricUnit(ctx context.Context, p *Panel, checked *Check
 				continue
 			}
 			if !looked {
-				unit, looked = e.metricUnit(ctx, name, scope), true
+				var err error
+				if unit, err = e.metricUnit(ctx, name, scope); err != nil {
+					return err
+				}
+				looked = true
 			}
 			frame.Columns[i].Unit = unit
 		}
 	}
+	return nil
 }
 
 // metricUnit is the panel unit for the units the metric reports in the
 // window, or "" when it reports none or units that disagree. Spellings of one
 // unit, such as {packets} and packets, agree; so do units that map to the
 // same panel unit. An empty unit reports nothing and defers to the others.
-func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) string {
+// An error means the units could not be read; nothing is remembered.
+func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) (string, error) {
 	now := e.now()
 	e.mu.Lock()
 	entry, ok := e.units[name]
 	e.mu.Unlock()
 	if ok && now.Before(entry.expires) {
-		return entry.unit
+		return entry.unit, nil
 	}
 	where, args := windowWhere(signals["metrics"], scope.Start, scope.End, "")
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
 	rows, err := e.engine.QueryContext(ctx, "SELECT DISTINCT coalesce(unit,'') FROM metrics WHERE name = ? AND "+where+" ORDER BY 1", append([]any{name}, args...)...)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	defer rows.Close()
 	var units []string
 	for rows.Next() {
 		var u string
-		if rows.Scan(&u) != nil {
-			return ""
+		if err := rows.Scan(&u); err != nil {
+			return "", err
 		}
 		units = append(units, u)
 	}
-	if rows.Err() != nil || len(units) == 0 {
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(units) == 0 {
 		// A window without points must not hide the unit from panels whose
 		// windows see one.
-		return ""
+		return "", nil
 	}
 	unit, agree := "", true
 	spelling, mapped := "", map[string]bool{}
@@ -128,7 +139,7 @@ func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) str
 		}
 	}
 	if !agree && len(mapped) > 1 {
-		return ""
+		return "", nil
 	}
 	e.mu.Lock()
 	if e.units == nil || len(e.units) >= 1000 {
@@ -136,5 +147,5 @@ func (e *Executor) metricUnit(ctx context.Context, name string, scope Scope) str
 	}
 	e.units[name] = unitEntry{unit: unit, expires: now.Add(metricUnitTTL)}
 	e.mu.Unlock()
-	return unit
+	return unit, nil
 }

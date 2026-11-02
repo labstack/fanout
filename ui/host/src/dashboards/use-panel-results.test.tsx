@@ -635,3 +635,20 @@ it("runs a busy panel once it scrolls into view, without retrying it while it st
     expect(wire.panels.mock.calls[2][0].panels).toEqual(["below"]);
   } finally { await host.dispose(); }
 });
+
+it("asks the server to skip kept results only for a refresh the user pressed", async () => {
+  const spec: DashboardSpec = {version: 1, name: "Fresh", time: {range: "1h"}, panels: ["a"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
+  wire.panels.mockImplementation((body: QueryBody) => Promise.resolve(body.panels!.map(resultFor)));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } });
+  const host = await mountVisibility(["a"], spec, false, {client});
+  const fresh = () => wire.panels.mock.calls.map(call => call[3] === true);
+  try {
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(1);});
+    await act(async () => host.current.refetch());
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(2);});
+    // A refetch the user did not ask for, as the refresh interval runs it.
+    await act(async () => { await client.refetchQueries(); });
+    await waitForHook(() => {expect(host.current.fetching).toBe(false); expect(wire.panels).toHaveBeenCalledTimes(3);});
+    expect(fresh()).toEqual([false, true, false]);
+  } finally { await host.dispose(); }
+});

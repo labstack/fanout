@@ -68,6 +68,11 @@ type Result struct {
 	// Cached marks a result served from the result cache rather than run for
 	// this request; see FANOUT_QUERY_CACHE_TTL.
 	Cached bool `json:"cached,omitempty"`
+	// partial marks a result missing part of what it would show: a sub-read
+	// such as the previous period, annotations, table trends or the metric
+	// unit failed, was skipped or ran out of the panel's time. It is
+	// answered, but never cached.
+	partial bool
 }
 
 type Executor struct {
@@ -223,10 +228,18 @@ func (e *Executor) Stream(ctx context.Context, req RunRequest, emit func(Result)
 
 func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Result)) error {
 	caller := ctx
-	// Relative windows end on the cache grain, so identical refreshes within
-	// one grain resolve the same window and share their panel results.
-	now := e.cacheNow()
+	// Relative windows end now; cached panel results are stamped with it.
+	now := e.now()
+	// Normalize fills defaults in place, and a shared run may outlive this
+	// request: neither may write to or read from the caller's panels.
 	d := req.Dashboard
+	d.Panels = slices.Clone(d.Panels)
+	for i := range d.Panels {
+		if q := d.Panels[i].Query; q != nil {
+			copied := *q
+			d.Panels[i].Query = &copied
+		}
+	}
 	Normalize(&d)
 	if len(req.Panels) > len(d.Panels) {
 		return Problems{{Path: "panels", Message: "panel selection cannot exceed the dashboard's panel count"}}
@@ -350,7 +363,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				send(i, failed(Result{ID: p.ID}, err, nil))
 				return nil
 			}
-			out, outcome, err := loadCached(e, caller, key, func(run context.Context) (panelOutcome, int64, bool, error) {
+			out, outcome, err := loadCached(e, caller, key, now, func(run context.Context) (panelOutcome, int64, bool, error) {
 				// Waiting for a turn is bounded by the batch deadline of the
 				// request that started this run; the run itself by the panel's
 				// own timeout, while anyone still waits for it.
@@ -368,9 +381,13 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 					defer e.slots.Release(1)
 					return e.runPanel(run, p, checked, t, now, vars, width, compare)
 				}()
-				return panelOutcome{Result: r}, r.size(), r.Status == StatusOK || r.Status == StatusEmpty, nil
+				return panelOutcome{Result: r}, r.size(), (r.Status == StatusOK || r.Status == StatusEmpty) && !r.partial, nil
 			})
-			if err != nil {
+			switch {
+			case errors.Is(err, errRunPanicked):
+				send(i, failed(Result{ID: p.ID}, err, caller.Err()))
+				return nil
+			case err != nil:
 				// The caller left; the shared run goes on for the others.
 				if caller.Err() == nil {
 					notRun(i, p)
@@ -418,9 +435,28 @@ func (e *Executor) acquire(ctx context.Context) error {
 
 var errQueueFull = errors.New("panel queue is full")
 
-// ErrBusy answers a request whose every panel was refused at the queue
-// bound before any started. HTTP answers it 503 with Retry-After.
-var ErrBusy = errors.New("every panel was refused: the panel queue is full")
+// admit takes a read slot for an exemplar or trace-detail run, which waits
+// in the same line as dashboard panels, so a flood of them is turned away
+// as busy instead of holding the engine. The wait is bounded by the batch
+// deadline; a full queue or a wait that outlasts it is ErrBusy.
+func (e *Executor) admit(ctx context.Context) (release func(), err error) {
+	wait, cancel := context.WithTimeout(ctx, e.batchTimeout)
+	defer cancel()
+	switch err := e.acquire(wait); {
+	case err == nil:
+		return func() { e.slots.Release(1) }, nil
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	default:
+		return nil, ErrBusy
+	}
+}
+
+// ErrBusy answers a request turned away before it started: every panel of a
+// batch, an exemplar or a trace-detail read refused at the queue bound or
+// left waiting past the batch deadline. HTTP answers it 503 with
+// Retry-After.
+var ErrBusy = errors.New("the server is busy: the read queue is full")
 
 // BusyMessage presents ErrBusy to clients.
 const BusyMessage = "The server is busy with other queries. Try again in a few seconds."
@@ -436,9 +472,11 @@ func refusedResult(p *Panel) Result {
 }
 
 // BatchDeadlineError is shared by HTTP and MCP batch callers. It means the
-// panel never started: other queries held the engine for the whole batch
-// deadline. A panel that started and ran too long reports TimeoutError.
-const BatchDeadlineError = "Not run: other queries kept the server busy for 20 seconds. Refresh to try again."
+// panel never started: other queries held the engine until a batch deadline
+// passed, its own request's or, for a request that joined an identical run
+// already waiting, the one that started that run, which may be sooner. A
+// panel that started and ran too long reports TimeoutError.
+const BatchDeadlineError = "Not run: other queries kept the server busy. Refresh to try again."
 
 // busyResult answers a panel that never started.
 func busyResult(p *Panel) Result {
@@ -590,11 +628,14 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	res.Frame, res.SQL = frame, sqlText
 	res.Ranking = frame.ranking
 	// Trend failures are recorded on the frame and preserve the main table.
-	_ = e.attachTableTrends(ctx, p, checked, scope, frame)
+	if e.attachTableTrends(ctx, p, checked, scope, frame) != nil {
+		res.partial = true
+	}
 	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline" || p.Viz == "health") {
 		res.AnnotationScope, err = e.annotationScope(ctx, p, checked.AnnotationFilters[p.ID], scope)
 		if err != nil {
 			res.AnnotationError = "Annotation scope is unavailable."
+			res.partial = true
 		}
 	}
 
@@ -630,14 +671,18 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		previous.Start, previous.End = start.Add(-shift), end.Add(-shift)
 		if pf, _, err := e.runScope(ctx, p, checked, previous); err == nil {
 			if p.Viz == "stat" && p.Query != nil {
-				pf.Totals, _ = e.totals(ctx, p, checked, previous, pf)
+				if pf.Totals, err = e.totals(ctx, p, checked, previous, pf); err != nil {
+					res.partial = true
+				}
 			}
 			res.Previous = pf
 			res.ShiftMS = shift.Milliseconds()
+		} else {
+			res.partial = true
 		}
 	}
-	if frame.Rows > 0 {
-		e.applyMetricUnit(ctx, p, checked, scope, frame, res.Previous)
+	if frame.Rows > 0 && e.applyMetricUnit(ctx, p, checked, scope, frame, res.Previous) != nil {
+		res.partial = true
 	}
 	if zero {
 		// A count of nothing is a real 0; the diagnosis says why, as a hint.
@@ -654,6 +699,12 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
 		res.Status = StatusEmpty
 		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
+	}
+	// A sub-read cut short by the panel's timeout, or by its callers leaving,
+	// left something out even where it reported no error, such as the
+	// diagnosis, which gives up quietly.
+	if ctx.Err() != nil {
+		res.partial = true
 	}
 	return res
 }

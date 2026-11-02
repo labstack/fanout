@@ -9,13 +9,14 @@ const busyGroup = 2;
  *  `busy` panels, which the server last left unrun, go after the rest in small
  *  groups, one request at a time, so each group gets the server's whole wait
  *  instead of queueing behind the same batch again. A group turned away again
- *  ends the refresh; the panels after it keep their last result. */
-export async function refreshDashboard(body: QueryBody, signal?: AbortSignal, onResult?: (result: PanelResult) => void, busy: readonly string[] = []) {
+ *  ends the refresh; the panels after it keep their last result. A `fresh`
+ *  refresh, one the user asked for, skips results the server keeps. */
+export async function refreshDashboard(body: QueryBody, signal?: AbortSignal, onResult?: (result: PanelResult) => void, busy: readonly string[] = [], fresh = false) {
   const later = busy.filter(id => body.panels?.includes(id));
   const first = body.panels?.filter(id => !later.includes(id));
-  let results = later.length && !first?.length ? [] : await queryPanels(later.length ? { ...body, panels: first } : body, signal, onResult);
+  let results = later.length && !first?.length ? [] : await queryPanels(later.length ? { ...body, panels: first } : body, signal, onResult, fresh);
   for (let i = 0; i < later.length; i += busyGroup) {
-    const group = await queryPanels({ ...body, panels: later.slice(i, i + busyGroup) }, signal, onResult);
+    const group = await queryPanels({ ...body, panels: later.slice(i, i + busyGroup) }, signal, onResult, fresh);
     results = [...results, ...group];
     if (group.some(r => r.reason === "busy")) break;
   }
