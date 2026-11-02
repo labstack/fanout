@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -39,14 +40,92 @@ func metricBucketSQL(interval time.Duration) string {
 	return fmt.Sprintf("epoch_ms(time_bucket(INTERVAL '%d seconds',time::TIMESTAMP_NS,%s))::BIGINT", int64(interval/time.Second), bucketOrigin)
 }
 
-// metricRead is the relation a builder reads. The zero value reads metrics
-// itself under the given filters. A query with several builders reads one
-// shared scan that already applied its filters, so each builder only narrows
-// it to its own window and kinds; the scan records the earliest window.
+// metricRead is the relation a builder reads. Without a scan it reads metrics
+// itself under the given filters, projecting columns. A query with several
+// builders reads one shared scan that already applied its filters and
+// projection, so each builder only narrows it to its own window and kinds;
+// the scan records the earliest window.
 type metricRead struct {
 	filters []Filter
+	columns string
 	scan    string
 	start   *time.Time
+}
+
+// metricPointColumns are the view columns every series builder reads, and
+// metricHistogramColumns the ones only histogram builders read. A query names
+// its columns rather than passing the whole view through its CTE chain: the
+// view's width costs binding and optimization at every layer, and a counter
+// or gauge never reads a histogram's lists.
+var (
+	metricPointColumns     = []string{"series_id", "time", "type", "temporality", "start_time", "value", "hist_count", "hist_sum", "ingested_unix_nano"}
+	metricHistogramColumns = []string{"hist_bounds", "hist_counts", "exp_scale", "exp_zero_count", "exp_zero_threshold",
+		"exp_positive_offset", "exp_positive_counts", "exp_negative_offset", "exp_negative_counts"}
+)
+
+// metricColumns is the projection of a metric read: point columns, the
+// columns of authored fields, and each map lookup computed once under an
+// alias. A lookup binds where the projection reads metrics, so a standard
+// key reads its dedicated column there and later stages read the alias.
+type metricColumns struct {
+	list    []string
+	columns map[string]bool
+	lookups map[string]string
+}
+
+func newMetricColumns(names ...[]string) *metricColumns {
+	c := &metricColumns{columns: map[string]bool{}, lookups: map[string]string{}}
+	for _, group := range names {
+		for _, name := range group {
+			c.column(name)
+		}
+	}
+	return c
+}
+
+func (c *metricColumns) column(name string) {
+	if !c.columns[name] {
+		c.columns[name] = true
+		c.list = append(c.list, quoteIdent(name))
+	}
+}
+
+func (c *metricColumns) lookup(sql string) string {
+	alias, ok := c.lookups[sql]
+	if !ok {
+		alias = fmt.Sprintf("_field%d", len(c.lookups))
+		c.lookups[sql] = alias
+		c.list = append(c.list, sql+" AS "+quoteIdent(alias))
+	}
+	return quoteIdent(alias)
+}
+
+// text and number render a field over the projection's output.
+func (c *metricColumns) text(f FieldRef) string {
+	if f.Key != "" {
+		return c.lookup(f.stringSQL())
+	}
+	c.column(f.Column)
+	return f.stringSQL()
+}
+
+func (c *metricColumns) number(f FieldRef) string {
+	if f.Key != "" {
+		return c.lookup(f.numberSQL())
+	}
+	c.column(f.Column)
+	return f.numberSQL()
+}
+
+// with returns the projection plus extra columns, leaving c unchanged.
+func (c *metricColumns) with(names []string) string {
+	list := slices.Clone(c.list)
+	for _, name := range names {
+		if !c.columns[name] {
+			list = append(list, quoteIdent(name))
+		}
+	}
+	return strings.Join(list, ",")
 }
 
 func (r metricRead) where(read Scope) (string, string, []any, error) {
@@ -114,13 +193,26 @@ func metricPointsCTE(source metricRead, scope Scope, kinds []string, lookback ti
 		return "", nil, err
 	}
 	where += " AND type IN (" + metricKindList(kinds) + ")"
-	text := `WITH metric_input AS (SELECT * FROM ` + from + ` WHERE ` + where + `),
+	columns := "*"
+	if source.columns != "" {
+		columns = source.columns
+	}
+	text := `WITH metric_input AS (SELECT ` + columns + ` FROM ` + from + ` WHERE ` + where + `),`
+	if slices.Contains(kinds, "histogram") {
+		// Decoding consumes the stored lists; later stages read _bounds and _counts.
+		text += `
       metric_exp_raw AS (SELECT *,` + expRawSQL + ` FROM metric_input),
       metric_exp_kept AS (SELECT *,` + expKeptSQL + ` FROM metric_exp_raw),
-      metric_decoded AS (SELECT * EXCLUDE (_eb,_ec,_ez,_ek),
+      metric_decoded AS (SELECT * EXCLUDE (_eb,_ec,_ez,_ek,` + strings.Join(metricHistogramColumns, ",") + `),
         CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_bounds WHEN type='histogram' THEN ` + expBoundsSQL + ` END AS _bounds,
         CASE WHEN type='histogram' AND exp_scale IS NULL THEN hist_counts WHEN type='histogram' THEN ` + expCountsSQL + ` END AS _counts
-        FROM metric_exp_kept),
+        FROM metric_exp_kept),`
+	} else {
+		// Other kinds have no buckets, so their reads omit the histogram columns.
+		text += `
+      metric_decoded AS (SELECT *,NULL::DOUBLE[] AS _bounds,NULL::UBIGINT[] AS _counts FROM metric_input),`
+	}
+	text += `
       -- OTLP allows a histogram without buckets: it counts toward count, sum,
       -- rate and avg, and its empty bucket list adds nothing to quantiles.
       metric_valid AS (SELECT * FROM metric_decoded WHERE
@@ -190,8 +282,10 @@ func metricSeriesCTE(source metricRead, scope Scope, kinds []string) (string, []
 	return strings.TrimSpace(text), args, nil
 }
 
+// dimSelect is projected where the read binds metrics, as the column dim.
 func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string, []any, error) {
-	cte, args, err := metricSeriesCTE(metricRead{filters: filters}, scope, []string{"histogram"})
+	columns := newMetricColumns(metricPointColumns, metricHistogramColumns).with(nil) + "," + dimSelect
+	cte, args, err := metricSeriesCTE(metricRead{filters: filters, columns: columns}, scope, []string{"histogram"})
 	if err != nil {
 		return "", nil, err
 	}
@@ -204,7 +298,7 @@ func metricHistogramRaw(dimSelect string, filters []Filter, scope Scope) (string
 	if scope.Interval > 0 {
 		timeSQL = "make_timestamp_ns(_bucket*1000000)::TIMESTAMPTZ_NS"
 	}
-	text := cte + ` SELECT * FROM (SELECT ` + timeSQL + ` AS t,` + dimSelect + `,_bucket,
+	text := cte + ` SELECT * FROM (SELECT ` + timeSQL + ` AS t,dim,_bucket,
       unnest(list_prepend(NULL::DOUBLE,_bounds)) AS lo,
       unnest(list_append(_bounds,NULL::DOUBLE)) AS hi,
       unnest(bound_increases) AS n

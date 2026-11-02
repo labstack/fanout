@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -89,6 +90,13 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 	var err error
 	var scanStart time.Time
 	scan := metricRead{scan: "metric_scan", start: &scanStart}
+	// Histograms read their bucket lists from their own scan, so the shared
+	// scan of the other kinds never carries them.
+	var histogramStart time.Time
+	histogramScan := metricRead{scan: "metric_histogram_scan", start: &histogramStart}
+	histogramBuilder := ""
+	// The scan and each direct read project only the columns the query reads.
+	read := newMetricColumns(metricPointColumns)
 	scanKinds := map[string]bool{}
 	readers := 0
 	rawUsed := false
@@ -105,7 +113,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		}
 		dims = append(dims, d)
 		dimNames = append(dimNames, fmt.Sprintf("_d%d", i))
-		dimExprs = append(dimExprs, "coalesce("+d.stringSQL()+",'')")
+		dimExprs = append(dimExprs, "coalesce("+read.text(d)+",'')")
 		columns = append(columns, Column{Name: d.alias(), Type: "string", Role: "dimension"})
 	}
 	top, fold := 0, -1
@@ -119,53 +127,70 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 	// names, but an Other bucket must never combine different metrics.
 	selectNames := top > 0 && dims[fold].Column == "name" && dims[fold].Key == ""
 
+	// Measure fields join the projection before any read is written.
+	projections, distincts := make([]string, len(measures)), make([]string, len(measures))
+	for i, m := range measures {
+		projections[i], distincts[i] = "NULL::DOUBLE", "NULL::VARCHAR"
+		if m.Field != nil && m.Func != "count_distinct" {
+			n := read.number(*m.Field)
+			projections[i] = "CASE WHEN isfinite(" + n + ") THEN " + n + " END"
+		}
+		if m.Func == "count_distinct" {
+			distincts[i] = read.text(*m.Field)
+		}
+	}
 	// Share one builder for each source and kind set. A sum's carried
 	// gauge/updown branch shares avg work; its counter branch
 	// shares the increase builder with rate, without lagging across kinds.
 	builders := map[string]string{}
 	bucketSources := []string{}
 	needRate := slices.ContainsFunc(measures, func(m Measure) bool { return m.Func == "rate" })
-	builder := func(source string, kinds []string) (string, error) {
-		key := source + ":" + strings.Join(kinds, ",")
+	builder := func(plan string, kinds []string) (string, error) {
+		key := plan + ":" + strings.Join(kinds, ",")
 		if name, ok := builders[key]; ok {
 			return name, nil
 		}
 		name := fmt.Sprintf("metric_builder_%d", len(builders))
-		readers++
-		for _, kind := range kinds {
-			scanKinds[kind] = true
+		source := scan
+		if slices.Contains(kinds, "histogram") {
+			source, histogramBuilder = histogramScan, name
+		} else {
+			readers++
+			for _, kind := range kinds {
+				scanKinds[kind] = true
+			}
 		}
 		var cte string
 		var builderArgs []any
 		var err error
-		switch source {
+		switch plan {
 		case "metric_increases":
-			cte, builderArgs, err = metricSeriesCTE(scan, scope, kinds)
+			cte, builderArgs, err = metricSeriesCTE(source, scope, kinds)
 			spread, spreadArgs := metricSpreadCTE(scope)
 			cte += spread
 			builderArgs = append(builderArgs, spreadArgs...)
 			if needRate {
 				cte += metricRateCarryCTE(scope)
-				source = "metric_rate_rows"
+				plan = "metric_rate_rows"
 			} else {
 				cte += ", metric_spread_rows AS (SELECT *,false AS _carry FROM metric_spread)"
-				source = "metric_spread_rows"
+				plan = "metric_spread_rows"
 			}
 		case "metric_gauge_rows":
-			cte, builderArgs, err = metricGaugeCTE(scan, scope, kinds)
+			cte, builderArgs, err = metricGaugeCTE(source, scope, kinds)
 		case "metric_last_points":
-			cte, builderArgs, err = metricLastCTE(scan, scope, kinds)
+			cte, builderArgs, err = metricLastCTE(source, scope, kinds)
 		default:
-			cte, builderArgs, err = metricPointsCTE(scan, scope, kinds, 0)
-			source = "metric_points"
+			cte, builderArgs, err = metricPointsCTE(source, scope, kinds, 0)
+			plan = "metric_points"
 		}
 		if err != nil {
 			return "", err
 		}
-		ctes = append(ctes, name+" AS ("+cte+" SELECT * FROM "+source+")")
+		ctes = append(ctes, name+" AS ("+cte+" SELECT * FROM "+plan+")")
 		args = append(args, builderArgs...)
 		builders[key] = name
-		if source == "metric_last_points" || source == "metric_gauge_rows" || source == "metric_rate_rows" || source == "metric_spread_rows" {
+		if plan == "metric_last_points" || plan == "metric_gauge_rows" || plan == "metric_rate_rows" || plan == "metric_spread_rows" {
 			bucketSources = append(bucketSources, name)
 		}
 		return name, nil
@@ -213,15 +238,7 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			source = combined
 		}
 
-		projection := "NULL::DOUBLE"
-		if m.Field != nil && m.Func != "count_distinct" {
-			n := m.Field.numberSQL()
-			projection = "CASE WHEN isfinite(" + n + ") THEN " + n + " END"
-		}
-		distinct := "NULL::VARCHAR"
-		if m.Func == "count_distinct" {
-			distinct = m.Field.stringSQL()
-		}
+		projection, distinct := projections[i], distincts[i]
 		sources[i] = prefix + "source"
 		visible := ""
 		if m.Func != "rate" && metricHistogramMeasure(m) && !metricHistogramQuantile(m) {
@@ -433,9 +450,9 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 			scanStart = scope.Start
 		}
 	}
-	read := scope
-	read.Start = scanStart
-	where, scanArgs, err := buildWhere(sig, filters, read)
+	scanScope := scope
+	scanScope.Start = scanStart
+	where, scanArgs, err := buildWhere(sig, filters, scanScope)
 	if err != nil {
 		return Compiled{}, err
 	}
@@ -446,7 +463,12 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 	if readers > 1 {
 		materialized = "MATERIALIZED "
 	}
-	head := []string{"metric_scan AS " + materialized + "(SELECT * FROM metrics WHERE " + where + ")"}
+	var head []string
+	if readers > 0 {
+		head = append(head, "metric_scan AS "+materialized+"(SELECT "+read.with(nil)+" FROM metrics WHERE "+where+")")
+	} else {
+		scanArgs = nil
+	}
 	if rawUsed {
 		rawWhere, rawArgs, err := buildWhere(sig, nil, scope)
 		if err != nil {
@@ -454,6 +476,23 @@ func compileMetricQuery(p *Panel, measures []Measure, filters []Filter, scope Sc
 		}
 		head = append(head, "metric_raw_window AS (SELECT *,"+bucket+" AS _bucket FROM metric_scan WHERE "+rawWhere+")")
 		scanArgs = append(scanArgs, rawArgs...)
+	}
+	if histogramBuilder != "" {
+		histogramScope := scope
+		histogramScope.Start = histogramStart
+		where, histogramArgs, err := buildWhere(sig, filters, histogramScope)
+		if err != nil {
+			return Compiled{}, err
+		}
+		// Materialize the lists once when several stages read the builder.
+		materialized := ""
+		reads := regexp.MustCompile(`\b`+histogramBuilder+`\b`).FindAllStringIndex(strings.Join(ctes, ",")+strings.Join(selects, ","), -1)
+		if len(reads) > 2 {
+			materialized = "MATERIALIZED "
+		}
+		head = append(head, "metric_histogram_scan AS "+materialized+"(SELECT "+read.with(metricHistogramColumns)+
+			" FROM metrics WHERE "+where+" AND type IN ('histogram'))")
+		scanArgs = append(scanArgs, histogramArgs...)
 	}
 	ctes = append(head, ctes...)
 	args = append(scanArgs, args...)
