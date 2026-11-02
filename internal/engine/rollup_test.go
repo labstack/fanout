@@ -20,7 +20,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -37,7 +37,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		ingested:  100,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 
@@ -62,7 +62,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		ingested:  300,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestServiceRollupLatencyExcludesDependencyWaits(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews failed: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30}}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 
@@ -108,7 +108,7 @@ func TestServiceRollupLatencyExcludesDependencyWaits(t *testing.T) {
 		start: bucket.Add(4 * time.Second), duration: 250 * time.Millisecond, ingested: 300,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -168,7 +168,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 		ingested:     100,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 		ingested:     200,
 	})
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
@@ -227,7 +227,7 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -276,7 +276,7 @@ VALUES ('ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(), 300)`); e
 		t.Fatalf("insert telemetry.metrics failed: %v", err)
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestRollupOnceMessagingEdgeCountsConsumedMessages(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -337,7 +337,7 @@ func TestRollupOnceMessagingEdgeCountsConsumedMessages(t *testing.T) {
 		})
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
@@ -372,7 +372,7 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -399,7 +399,7 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 	}
 	// Drain the parents' start-time sub-windows before publishing children,
 	// so the next ingested window contains only the children's bucket.
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 	for pass := 0; pass < 5; pass++ {
@@ -426,7 +426,7 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 			ingested:     200,
 		})
 	}
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
@@ -505,7 +505,7 @@ func TestRollupOnceChunksWideBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
@@ -565,7 +565,7 @@ WHERE namespace = ?
 		return got
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 
@@ -581,10 +581,10 @@ WHERE namespace = 'ns-new'`, nil, 0)
 		t.Fatalf("ns-new call edges after first pass = %d, want 0", got)
 	}
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("third rollupOnce failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns-new", bucket, "checkout", 1)
@@ -717,7 +717,7 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews failed: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30}}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 
@@ -726,7 +726,7 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 		operation: "POST /checkout", start: bucket.Add(5 * time.Second),
 		duration: 50 * time.Millisecond, ingested: 100,
 	})
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
@@ -743,7 +743,7 @@ func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
 	requireRowCount(t, db, `SELECT count(*) FROM rollup_state`, nil, 0)
 	d.rollupWatermarks = nil
 
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce after recreate failed: %v", err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
@@ -762,4 +762,18 @@ func tablePublicationBounds(db *sql.DB) func() (int64, int64, int64) {
 		}
 		return hi, hi, lo
 	}
+}
+
+// Mutable-table fixtures exercise analytical rollups without a Parquet
+// repository. Completed-file caches are covered by repository-backed tests.
+func tableRollupOnce(d *Duck, ctx context.Context) (int, error) {
+	if d.repository != nil {
+		return d.rollupOnce(ctx)
+	}
+	service, err := d.drainServiceRollup(ctx, d.cfg.RollupInterval/2)
+	if err != nil {
+		return int(service), err
+	}
+	edge, err := drainEdgeRollup(ctx, d.cfg.RollupInterval/2, d.refreshEdgeRollupPass)
+	return int(service + edge), err
 }

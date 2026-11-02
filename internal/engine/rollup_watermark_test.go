@@ -23,14 +23,14 @@ func TestRollupHorizonDoesNotSkipInFlightRows(t *testing.T) {
 	}
 	horizon := int64(99)
 	minimum := int64(200)
-	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return horizon, 200, minimum }}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return horizon, 200, minimum }}
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
 	insert := func(id string, stamp int64) {
 		insertRollupTestSpan(t, db, rollupTestSpan{namespace: "ns", traceID: "trace", spanID: id, parentSpanID: "parent", service: id, start: bucket, ingested: stamp})
 	}
 	insertRollupTestSpan(t, db, rollupTestSpan{namespace: "ns", traceID: "trace", spanID: "parent", service: "gateway", start: bucket, ingested: 200})
 	insert("later", 200)
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	requireRowCount(t, db, "SELECT count(*) FROM service_rollup WHERE ?", true, 0)
@@ -44,7 +44,7 @@ func TestRollupHorizonDoesNotSkipInFlightRows(t *testing.T) {
 	insert("earlier", 100)
 	minimum = 100
 	horizon = 200
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	requireServiceRollupSpans(t, db, "ns", bucket, "earlier", 1)
@@ -58,7 +58,7 @@ func TestRollupIdleHorizonExecutesNoSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return 100, 200, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 100, edgeRollupStateKey: 100}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 100, 200, 1 }, rollupWatermarks: map[string]int64{serviceRollupStateKey: 100, edgeRollupStateKey: 100}}
 	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestRollupFailedFirstAttemptDoesNotOpenEpochWindow(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err == nil {
 		t.Fatal("blocked publication succeeded")
 	}
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if d.rollupWatermarks[serviceRollupStateKey] != 0 || d.rollupWatermarks[edgeRollupStateKey] != 0 {
@@ -145,7 +145,7 @@ func TestRollupFailedFirstAttemptDoesNotOpenEpochWindow(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.rollupOnce(t.Context()); err != nil {
+	if _, err := tableRollupOnce(d, t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	requireServiceRollupSpans(t, d.DB, "ns", bucket, "first", 1)

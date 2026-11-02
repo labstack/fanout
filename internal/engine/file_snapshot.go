@@ -99,7 +99,7 @@ func parquetGlob(parquetDir, signal string) string {
 // retired but pinned readers still use. The returned func drops the views
 // before commit; a rollback drops them with the transaction.
 func (d *Duck) bindRollupSnapshot(ctx context.Context, tx *sql.Tx) (func() error, error) {
-	if !d.catalogBound() {
+	if d.repository == nil || d.repository.Parquet == nil {
 		return func() error { return nil }, nil
 	}
 	batches := d.repository.Parquet.BatchMetadata()

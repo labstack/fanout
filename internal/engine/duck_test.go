@@ -280,7 +280,7 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	mock.ExpectExec("DROP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO rollup_state").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return 200, 200, 100 }}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return 200, 200, 100 }}
 	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +568,7 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			}
 			defer db.Close()
 
-			d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: func() (int64, int64, int64) { return sourceNanos, sourceNanos, 1 }, cfg: config.Config{}}
+			d := &Duck{DB: db, writeDB: db, publicationBounds: func() (int64, int64, int64) { return sourceNanos, sourceNanos, 1 }, cfg: config.Config{}}
 			watermarkRows := func(value int64) *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
 			}

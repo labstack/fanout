@@ -28,7 +28,7 @@ func TestEdgeRollupBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db),
+		DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db),
 		cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
 	}
 	ctx := context.Background()
@@ -106,7 +106,7 @@ FROM range(?, ?) t(i), input`,
 	// rollupOnce must succeed. Before the fix, the call_edges join over 180
 	// minutes of start_time OOMed at 1GB. Each committed pass now processes
 	// one 30-minute slice, keeping the hash-build and gate hold bounded.
-	if _, err := d.rollupOnce(ctx); err != nil {
+	if _, err := tableRollupOnce(d, ctx); err != nil {
 		t.Fatalf("rollupOnce() error = %v (possible OOM or sub-window bug)", err)
 	}
 	for pass := 0; ; pass++ {
@@ -184,7 +184,7 @@ func TestSkipRollupToLatest(t *testing.T) {
 	metrics.RollupLag.Reset()
 	metrics.RollupBacklogChunks.Reset()
 	metrics.RollupEnabled.Reset()
-	n, err := d.rollupOnce(ctx)
+	n, err := tableRollupOnce(d, ctx)
 	if err != nil {
 		t.Fatalf("rollupOnce: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestSkipRollupToLatest(t *testing.T) {
 		t.Fatalf("commit live span: %v", err)
 	}
 
-	n2, err := d.rollupOnce(ctx)
+	n2, err := tableRollupOnce(d, ctx)
 	if err != nil {
 		t.Fatalf("rollupOnce (live data): %v", err)
 	}
@@ -263,7 +263,7 @@ func TestEdgeRollupBoundsSubWindowsPerPass(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews: %v", err)
 	}
-	d := &Duck{DB: db, writeDB: db, repository: emptyRepository(t), publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
+	d := &Duck{DB: db, writeDB: db, publicationBounds: tablePublicationBounds(db), cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
 	ctx := context.Background()
 
 	// One ingested instant, but start_time spread over 600 minutes: 20
