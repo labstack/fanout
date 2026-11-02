@@ -118,22 +118,25 @@ func TestAsString(t *testing.T) {
 }
 
 func TestNumber(t *testing.T) {
+	flag := uint32(metricspb.DataPointFlags_DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK)
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    *metricspb.NumberDataPoint
 		expected float64
+		invalid  bool
 	}{
-		{"double value", &metricspb.NumberDataPoint_AsDouble{AsDouble: 3.14}, 3.14},
-		{"int value", &metricspb.NumberDataPoint_AsInt{AsInt: 42}, 42.0},
-		{"nil value", nil, 0},
-		{"unknown type", "string", 0},
+		{"double value", &metricspb.NumberDataPoint{Value: &metricspb.NumberDataPoint_AsDouble{AsDouble: 3.14}}, 3.14, false},
+		{"int value", &metricspb.NumberDataPoint{Value: &metricspb.NumberDataPoint_AsInt{AsInt: 42}}, 42.0, false},
+		{"no value", &metricspb.NumberDataPoint{}, 0, true},
+		{"no recorded value", &metricspb.NumberDataPoint{Flags: flag}, 0, false},
+		{"no recorded value ignores value", &metricspb.NumberDataPoint{Flags: flag, Value: &metricspb.NumberDataPoint_AsInt{AsInt: 42}}, 0, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := number(tc.input)
-			if result != tc.expected {
-				t.Errorf("number() = %f, want %f", result, tc.expected)
+			result, err := number(tc.input)
+			if (err != nil) != tc.invalid || result != tc.expected {
+				t.Errorf("number() = %f, %v; want %f, invalid=%v", result, err, tc.expected, tc.invalid)
 			}
 		})
 	}

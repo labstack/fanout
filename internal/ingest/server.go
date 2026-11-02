@@ -322,7 +322,10 @@ func appendMetricPoints(out []telemetry.Metric, base telemetry.Metric, m *metric
 			if err != nil {
 				return out, err
 			}
-			row.Type, row.Value = "gauge", number(dp.Value)
+			row.Type = "gauge"
+			if row.Value, err = number(dp); err != nil {
+				return out, err
+			}
 			if row.Exemplars, err = exemplars(dp.Exemplars); err != nil {
 				return out, err
 			}
@@ -342,7 +345,10 @@ func appendMetricPoints(out []telemetry.Metric, base telemetry.Metric, m *metric
 			if err != nil {
 				return out, err
 			}
-			row.Type, row.Temporality, row.Value = kind, temporality, number(dp.Value)
+			row.Type, row.Temporality = kind, temporality
+			if row.Value, err = number(dp); err != nil {
+				return out, err
+			}
 			if row.Exemplars, err = exemplars(dp.Exemplars); err != nil {
 				return out, err
 			}
@@ -713,14 +719,23 @@ func asString(v *common.AnyValue) string {
 	}
 }
 
-func number(v interface{}) float64 {
-	switch x := v.(type) {
+// noRecordedValue is OTLP's DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK.
+const noRecordedValue = uint32(metricspb.DataPointFlags_DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK)
+
+// number returns a gauge or sum point's value. metrics.proto makes a point
+// without a value invalid unless it is flagged as having no recorded value;
+// such a point's value field is ignored and the flag is kept with the row.
+func number(dp *metricspb.NumberDataPoint) (float64, error) {
+	if dp.Flags&noRecordedValue != 0 {
+		return 0, nil
+	}
+	switch x := dp.Value.(type) {
 	case *metricspb.NumberDataPoint_AsDouble:
-		return x.AsDouble
+		return x.AsDouble, nil
 	case *metricspb.NumberDataPoint_AsInt:
-		return float64(x.AsInt)
+		return float64(x.AsInt), nil
 	default:
-		return 0
+		return 0, errors.New("number data point has no value and is not flagged as having no recorded value")
 	}
 }
 

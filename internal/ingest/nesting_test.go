@@ -64,8 +64,8 @@ func TestExportsBoundAttributeNestingBeforeSubmit(t *testing.T) {
 					&collectorlogs.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{{Resource: r, ScopeLogs: []*logspb.ScopeLogs{{LogRecords: []*logspb.LogRecord{{}, {Attributes: attrs}}}}}}},
 				}
 				for _, m := range []*metricspb.Metric{
-					{Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{}, {Attributes: attrs}}}}},
-					{Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, DataPoints: []*metricspb.NumberDataPoint{{}, {Attributes: attrs}}}}},
+					{Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{}}, {Attributes: attrs, Value: &metricspb.NumberDataPoint_AsInt{}}}}}},
+					{Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{}}, {Attributes: attrs, Value: &metricspb.NumberDataPoint_AsInt{}}}}}},
 					{Data: &metricspb.Metric_Histogram{Histogram: &metricspb.Histogram{AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, DataPoints: []*metricspb.HistogramDataPoint{{}, {Attributes: attrs}}}}},
 					{Data: &metricspb.Metric_ExponentialHistogram{ExponentialHistogram: &metricspb.ExponentialHistogram{AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE, DataPoints: []*metricspb.ExponentialHistogramDataPoint{{}, {Attributes: attrs}}}}},
 					{Data: &metricspb.Metric_Summary{Summary: &metricspb.Summary{DataPoints: []*metricspb.SummaryDataPoint{{}, {Attributes: attrs}}}}},
@@ -169,7 +169,7 @@ func TestHTTPRejectsExcessiveAttributeNestingWithoutRetry(t *testing.T) {
 		}{
 			{"/v1/traces", &collectortrace.ExportTraceServiceRequest{ResourceSpans: []*tracepb.ResourceSpans{{Resource: r, ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{{}, {Attributes: attrs}}}}}}}},
 			{"/v1/logs", &collectorlogs.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{{Resource: r, ScopeLogs: []*logspb.ScopeLogs{{LogRecords: []*logspb.LogRecord{{}, {Attributes: attrs}}}}}}}},
-			{"/v1/metrics", &collectormetrics.ExportMetricsServiceRequest{ResourceMetrics: []*metricspb.ResourceMetrics{{Resource: r, ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{{Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{}, {Attributes: attrs}}}}}}}}}}}},
+			{"/v1/metrics", &collectormetrics.ExportMetricsServiceRequest{ResourceMetrics: []*metricspb.ResourceMetrics{{Resource: r, ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{{Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{}}, {Attributes: attrs, Value: &metricspb.NumberDataPoint_AsInt{}}}}}}}}}}}}},
 		} {
 			t.Run(fmt.Sprintf("resource=%t/%s", resource, test.path), func(t *testing.T) {
 				fixture := newHTTPIngestFixture(t, true)

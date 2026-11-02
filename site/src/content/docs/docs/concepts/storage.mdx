@@ -76,6 +76,10 @@ unreadable control database rejects OTLP requests.
 Attribute and resource values support up to 128 nested arrays or objects.
 An export that exceeds this limit is rejected in full with OTLP
 `INVALID_ARGUMENT` (HTTP 400); accepted values retain their original types.
+Malformed metric points reject the export the same way, including a gauge or
+sum point with no value. A point flagged as having no recorded value
+(`DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK`) is accepted with its value ignored;
+it keeps that bit in `flags`, so `flags & 1 = 0` excludes such points.
 
 Span, log, and metric attributes and resource attributes use Parquet VARIANT
 columns, and the maps keep every key. Standard OpenTelemetry keys also get a

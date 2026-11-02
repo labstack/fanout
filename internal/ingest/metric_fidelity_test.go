@@ -85,7 +85,7 @@ func TestMetricIngestKeepsKindTemporalityAndStart(t *testing.T) {
 func TestMetricIngestRejectsInvalidAggregateTemporalityBeforeSubmit(t *testing.T) {
 	for _, temporality := range []metricspb.AggregationTemporality{metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED, 99} {
 		for _, metric := range []*metricspb.Metric{
-			{Name: "sum", Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{AggregationTemporality: temporality, DataPoints: []*metricspb.NumberDataPoint{{}}}}},
+			{Name: "sum", Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{AggregationTemporality: temporality, DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{AsInt: 1}}}}}},
 			{Name: "histogram", Data: &metricspb.Metric_Histogram{Histogram: &metricspb.Histogram{AggregationTemporality: temporality, DataPoints: []*metricspb.HistogramDataPoint{{}}}}},
 			{Name: "exponential_histogram", Data: &metricspb.Metric_ExponentialHistogram{ExponentialHistogram: &metricspb.ExponentialHistogram{AggregationTemporality: temporality, DataPoints: []*metricspb.ExponentialHistogramDataPoint{{}}}}},
 		} {
@@ -94,13 +94,60 @@ func TestMetricIngestRejectsInvalidAggregateTemporalityBeforeSubmit(t *testing.T
 				srv := NewServer(config.Config{DefaultNamespace: "test"}, newTestSubmitter(nil, nil, ch))
 				_, err := srv.exportMetrics(t.Context(), &collectormetrics.ExportMetricsServiceRequest{
 					ResourceMetrics: []*metricspb.ResourceMetrics{{ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{
-						{Name: "valid", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{}}}}}, metric,
+						{Name: "valid", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{AsInt: 1}}}}}}, metric,
 					}}}}},
 				})
 				if status.Code(err) != codes.InvalidArgument || len(ch) != 0 {
 					t.Fatalf("error=%v submitted=%d", err, len(ch))
 				}
 			})
+		}
+	}
+}
+
+// metrics.proto makes a number point without a value invalid unless it is
+// flagged as having no recorded value.
+func TestNumberPointWithoutValueRejectedBeforeSubmit(t *testing.T) {
+	cumulative := metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE
+	for _, metric := range []*metricspb.Metric{
+		{Name: "gauge", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{TimeUnixNano: 1}}}}},
+		{Name: "sum", Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{AggregationTemporality: cumulative, DataPoints: []*metricspb.NumberDataPoint{{TimeUnixNano: 1}}}}},
+	} {
+		t.Run(metric.Name, func(t *testing.T) {
+			ch := make(chan telemetry.Metric, 2)
+			srv := NewServer(config.Config{DefaultNamespace: "test"}, newTestSubmitter(nil, nil, ch))
+			_, err := srv.exportMetrics(t.Context(), &collectormetrics.ExportMetricsServiceRequest{
+				ResourceMetrics: []*metricspb.ResourceMetrics{{ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{
+					{Name: "valid", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{AsInt: 1}}}}}}, metric,
+				}}}}},
+			})
+			if status.Code(err) != codes.InvalidArgument || len(ch) != 0 {
+				t.Fatalf("error=%v submitted=%d", err, len(ch))
+			}
+		})
+	}
+}
+
+func TestNumberPointWithNoRecordedValueFlagAccepted(t *testing.T) {
+	flag := uint32(metricspb.DataPointFlags_DATA_POINT_FLAGS_NO_RECORDED_VALUE_MASK)
+	ch := make(chan telemetry.Metric, 2)
+	srv := NewServer(config.Config{DefaultNamespace: "test"}, newTestSubmitter(nil, nil, ch))
+	_, err := srv.exportMetrics(t.Context(), &collectormetrics.ExportMetricsServiceRequest{
+		ResourceMetrics: []*metricspb.ResourceMetrics{{ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{
+			{Name: "stale", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{
+				{TimeUnixNano: 1, Flags: flag},
+				// The flag makes a sent value meaningless.
+				{TimeUnixNano: 2, Flags: flag, Value: &metricspb.NumberDataPoint_AsDouble{AsDouble: 7}},
+			}}}},
+		}}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		got := <-ch
+		if got.Flags&flag == 0 || got.Value != 0 {
+			t.Fatalf("point=%+v", got)
 		}
 	}
 }
@@ -112,7 +159,7 @@ func TestExponentialHistogramRejectsInvalidZeroThresholdBeforeSubmit(t *testing.
 			srv := NewServer(config.Config{DefaultNamespace: "test"}, newTestSubmitter(nil, nil, ch))
 			_, err := srv.exportMetrics(t.Context(), &collectormetrics.ExportMetricsServiceRequest{
 				ResourceMetrics: []*metricspb.ResourceMetrics{{ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{
-					{Name: "valid", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{}}}}},
+					{Name: "valid", Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{DataPoints: []*metricspb.NumberDataPoint{{Value: &metricspb.NumberDataPoint_AsInt{AsInt: 1}}}}}},
 					{Name: "sizes", Data: &metricspb.Metric_ExponentialHistogram{ExponentialHistogram: &metricspb.ExponentialHistogram{
 						AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE,
 						DataPoints:             []*metricspb.ExponentialHistogramDataPoint{{ZeroThreshold: threshold, ZeroCount: 1, Count: 1}},
