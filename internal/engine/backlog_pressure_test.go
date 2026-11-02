@@ -337,6 +337,7 @@ func TestBacklogServiceFailuresIdentifyStatementAndPreserveCause(t *testing.T) {
 				mock.ExpectExec("DELETE FROM service_rollup").WillReturnError(cause)
 			} else {
 				mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+				mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
 				mock.ExpectExec("WITH span_agg").WillReturnError(cause)
 			}
 			mock.ExpectRollback()

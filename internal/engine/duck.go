@@ -44,6 +44,9 @@ type Duck struct {
 	statements statements
 	// pings counts read connections pings hold; see held.
 	pings atomic.Int64
+	// abandoned counts read connections a panic left to abandonRead that
+	// have not come back; see held.
+	abandoned atomic.Int64
 	// publishing is when the running Parquet publication started, in Unix
 	// nanoseconds, or zero; see Stalled.
 	publishing atomic.Int64
@@ -446,8 +449,23 @@ func (c *initializedConnector) Connect(ctx context.Context) (driver.Conn, error)
 	return conn, nil
 }
 
+// errReadSetupAbandoned ends a statement whose read panicked. It is not
+// progress: the engine never answered.
+var errReadSetupAbandoned = errors.New("read setup abandoned")
+
+// sqlLiteral quotes v as a SQL string constant. The native driver receives
+// statement text as a C string, so a NUL byte would end the statement inside
+// the literal; NULs are spliced in with chr(0), which DuckDB folds back into
+// one constant.
 func sqlLiteral(v string) string {
-	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
+	parts := strings.Split(v, "\x00")
+	for i, part := range parts {
+		parts[i] = "'" + strings.ReplaceAll(part, "'", "''") + "'"
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return "(" + strings.Join(parts, "||chr(0)||") + ")"
 }
 
 func (d *Duck) Close() error {
@@ -974,7 +992,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 		if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, lo, hi); err != nil {
 			return 0, fmt.Errorf("service_rollup/delete: %w", err)
 		}
-		res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, lo, hi, lo, hi, lo, hi)
+		res, err := insertServiceRollup(ctx, tx, lo, hi)
 		if err != nil {
 			return 0, fmt.Errorf("service_rollup/insert: %w", err)
 		}
@@ -1465,9 +1483,65 @@ WHERE bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 // Aggregate each bounded signal scan before the final affected-bucket joins.
 // Schema-first Parquet scans can have a zero cardinality estimate in DuckDB 2;
 // joining raw events to the affected table can then build a hash table of every
-// event. Logs and metrics aggregate before joining. Spans must semi-join first:
-// each unaffected service-minute otherwise allocates its own t-digest states.
-var serviceRollupInsertSQL = `
+// event. Logs and metrics aggregate before joining. Spans must be filtered to
+// the affected keys first: each unaffected service-minute otherwise allocates
+// its own t-digest states. A semi-join against service_pass_affected reverses
+// into a build of every raw span, so the keys are bound as constants instead.
+func insertServiceRollup(ctx context.Context, tx rollupSQL, lo, hi time.Time) (sql.Result, error) {
+	keys, args, err := affectedKeys(ctx, tx,
+		`SELECT DISTINCT namespace, epoch_ns(bucket), service FROM service_pass_affected
+ WHERE namespace IS NOT NULL AND bucket IS NOT NULL AND service IS NOT NULL`, nil,
+		`struct_pack(namespace := s.namespace, bucket := date_trunc('minute', s.start_time::TIMESTAMP_NS), service := s.service)`,
+		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT), service := ?::VARCHAR)`)
+	if err != nil {
+		return nil, err
+	}
+	return tx.ExecContext(ctx, serviceRollupInsertSQL(keys), append(args, lo, hi, lo, hi, lo, hi)...)
+}
+
+// rollupSQL is a rollup pass's transaction, or a test's database.
+type rollupSQL interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// affectedKeys reads a pass's affected keys and returns a predicate matching
+// column against them, with every key bound as a parameter. Bound values
+// cannot end or escape the statement text. DuckDB folds the bound keys into
+// constants, and a constant IN list becomes a mark join that builds the keys
+// and only probes raw rows, whatever the raw scan's cardinality estimate.
+func affectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs []any, column, key string) (string, []any, error) {
+	rows, err := tx.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	width := strings.Count(key, "?")
+	var keys []string
+	var args []any
+	for rows.Next() {
+		values := make([]any, width)
+		dest := make([]any, width)
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return "", nil, err
+		}
+		keys = append(keys, key)
+		args = append(args, values...)
+	}
+	if err := rows.Err(); err != nil {
+		return "", nil, err
+	}
+	if len(keys) == 0 {
+		return "false", nil, nil
+	}
+	return column + " IN (" + strings.Join(keys, ",") + ")", args, nil
+}
+
+func serviceRollupInsertSQL(keys string) string {
+	return `
 WITH span_agg AS (
   SELECT
     s.namespace,
@@ -1490,10 +1564,7 @@ WITH span_agg AS (
     ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
-  SEMI JOIN service_pass_affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
-   AND a.service = s.service
+  WHERE ` + keys + `
   -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
   -- start_time stats instead of scanning all history. The final join on a
   -- computed bucket alone does not prune. The range is a provable superset
@@ -1501,7 +1572,7 @@ WITH span_agg AS (
   -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
   -- old start_time widens the range (and this scan) only for the pass that
   -- ingests it, same trade-off as the edge rollup's parent bound.
-  WHERE s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service
 ),
@@ -1554,6 +1625,7 @@ FROM service_pass_affected a
 LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
 LEFT JOIN metric_agg m USING (namespace, bucket, service);`
+}
 
 // edgeArrivalGap bounds recent-arrival repair behind the completed ingest
 // watermark. Older relationships are not guaranteed to be repaired.
@@ -1629,40 +1701,25 @@ WHERE EXISTS (
 
 // Materialize the narrow affected child window before planning parent joins.
 // Schema-first Parquet scans estimate zero rows; the resulting table has real
-// statistics. Embed the small key list as a constant vector filter: a scalar
-// subquery or semi-join can itself reverse into a build of all raw children.
-func createEdgeChildren(ctx context.Context, tx *sql.Tx, lo, hi time.Time) error {
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT namespace,epoch_ns(bucket) FROM edge_pass_buckets
+// statistics. Bind the small key list as constants: a scalar subquery or
+// semi-join can itself reverse into a build of all raw children.
+func createEdgeChildren(ctx context.Context, tx rollupSQL, lo, hi time.Time) error {
+	keys, args, err := affectedKeys(ctx, tx, `SELECT DISTINCT namespace, epoch_ns(bucket) FROM edge_pass_buckets
  WHERE namespace IS NOT NULL AND bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
- AND bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, lo, hi)
+ AND bucket < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS`, []any{lo, hi},
+		`struct_pack(namespace := child.namespace, bucket := date_trunc('minute', child.start_time::TIMESTAMP_NS))`,
+		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT))`)
 	if err != nil {
 		return err
 	}
-	keys := []string{}
-	for rows.Next() {
-		var namespace string
-		var bucket int64
-		if err := rows.Scan(&namespace, &bucket); err != nil {
-			rows.Close()
-			return err
-		}
-		keys = append(keys, fmt.Sprintf("struct_pack(namespace := %s, bucket := make_timestamp_ns(%d))", sqlLiteral(namespace), bucket))
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	list := "[" + strings.Join(keys, ",") + "]::STRUCT(namespace VARCHAR,bucket TIMESTAMP_NS)[]"
 	_, err = tx.ExecContext(ctx, `CREATE OR REPLACE TEMP TABLE edge_pass_children AS
  SELECT child.namespace, child.trace_id, child.parent_span_id, child.service,
         child.start_time, child.duration_ms, child.status
  FROM spans child
- WHERE child.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ WHERE `+keys+`
+   AND child.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
    AND child.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
-   AND child.service IS NOT NULL AND child.service != ''
-   AND list_contains(`+list+`,struct_pack(namespace := child.namespace,
-       bucket := date_trunc('minute',child.start_time::TIMESTAMP_NS)))`, lo, hi)
+   AND child.service IS NOT NULL AND child.service != ''`, append(args, lo, hi)...)
 	return err
 }
 
@@ -1981,13 +2038,29 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		return nil, err
 	}
 	var tx *sql.Tx
-	// Setup owns both resources until lockedRows takes over, including on panic.
+	var rows *sql.Rows
+	var done func(error)
+	// Setup owns its resources until lockedRows takes over, including on
+	// panic: rows close before the statement is unregistered, and both before
+	// the connection and pin are released.
 	setup := true
 	defer func() {
-		if setup {
-			endRead(conn, tx)
-			d.unpinParquet(pin)
+		if !setup {
+			return
 		}
+		if rows != nil {
+			_ = rows.Close()
+		}
+		if done != nil {
+			done(errReadSetupAbandoned)
+		}
+		if r := recover(); r != nil {
+			d.unpinParquet(pin)
+			d.abandonRead(conn, tx)
+			panic(r)
+		}
+		endRead(conn, tx)
+		d.unpinParquet(pin)
 	}()
 	var db snapshotSQL = conn
 	window, windowed := queryrows.ReadWindow(ctx)
@@ -2026,8 +2099,8 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 	started := time.Now()
 	// Tracked while the engine runs the statement; rows a caller then holds
 	// are its own time.
-	done := d.begin(ctx, query)
-	rows, err := db.QueryContext(ctx, query, args...)
+	done = d.begin(ctx, query)
+	rows, err = db.QueryContext(ctx, query, args...)
 	done(err)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
@@ -2063,6 +2136,19 @@ func beginRead(ctx context.Context, conn *sql.Conn) (*sql.Tx, error) {
 		discardConn(conn)
 	}
 	return tx, err
+}
+
+// abandonRead releases a read a panic interrupted. A panic inside a
+// database/sql call leaves that connection's close lock held, so closing it
+// on the panicking goroutine would block forever instead of propagating the
+// panic. The release runs in the background and completes whenever the lock
+// is free; a connection that never comes back is not counted as held.
+func (d *Duck) abandonRead(conn *sql.Conn, tx *sql.Tx) {
+	d.abandoned.Add(1)
+	go func() {
+		defer d.abandoned.Add(-1)
+		endRead(conn, tx)
+	}()
 }
 
 // endRead rolls back tx, if any, and returns conn to the pool. A connection
@@ -2124,13 +2210,23 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	if err != nil {
 		return err
 	}
-	defer func() { _ = conn.Close() }()
+	var done func(error)
+	defer func() {
+		if r := recover(); r != nil {
+			if done != nil {
+				done(errReadSetupAbandoned)
+			}
+			d.abandonRead(conn, nil)
+			panic(r)
+		}
+		_ = conn.Close()
+	}()
 	// This one covers the scan as well as the statement: a single row cannot
 	// be fetched separately from being read. Both are DuckDB's time rather
 	// than the pool's, which is the distinction the histogram is drawing.
 	started := time.Now()
 	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
-	done := d.begin(ctx, query)
+	done = d.begin(ctx, query)
 	err = conn.QueryRowContext(ctx, query, args...).Scan(dest...)
 	done(err)
 	return err

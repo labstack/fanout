@@ -276,6 +276,7 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT epoch_ns").WillReturnRows(sqlmock.NewRows([]string{"lo", "hi"}).AddRow(0, 60_000_000_000))
 	mock.ExpectExec("DELETE FROM service_rollup").WillDelayFor(20 * time.Millisecond).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
 	mock.ExpectExec("WITH span_agg").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DROP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO rollup_state").WillReturnResult(sqlmock.NewResult(0, 1))

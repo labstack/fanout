@@ -100,7 +100,7 @@ func serviceSpanRollupMemory(t *testing.T, late bool) {
 	if !late {
 		lo = hi.Add(-time.Minute)
 	}
-	if _, err := db.Exec(serviceRollupInsertSQL, lo, hi, lo, hi, lo, hi); err != nil {
+	if _, err := insertServiceRollup(t.Context(), db, lo, hi); err != nil {
 		t.Fatal(err)
 	}
 	growth := peakRSS(t) - before

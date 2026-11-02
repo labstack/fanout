@@ -42,7 +42,7 @@ func TestServiceMetricRollupAggregatesBeforeJoiningAffectedBuckets(t *testing.T)
 		}
 	}
 	lo, hi := time.Unix(-120, 0).UTC(), time.Unix(60, 0).UTC()
-	if _, err := db.Exec(serviceRollupInsertSQL, lo, hi, lo, hi, lo, hi); err != nil {
+	if _, err := insertServiceRollup(t.Context(), db, lo, hi); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "profile.json"))
