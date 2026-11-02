@@ -25,25 +25,31 @@ import (
 // to plain pages where neighbouring rows repeat different blobs of up to
 // 4 KiB. A 125-input span merge stored 600 bytes a row of metadata.
 //
-// The merge instead assigns each row of an output row group to one of a few
-// shared dictionaries: the first, in creation order, that holds the row's
-// names or has room for its missing ones within variantMetadataBytes, the
-// bound the ingest writer applies. A reader decodes a row's whole metadata
-// (DuckDB parses every name of it), so no row's dictionary is larger than
-// ingest could write. Names are sorted, so the sorted_strings flag is set and
-// field IDs follow name order. Field IDs in every value of the group, the
-// unshredded value and each shredded field's residual, are rewritten to the
-// row's new dictionary; each object is laid out as the variant builder lays
-// it out. Shredded field names stay in the dictionary, as the shredding
-// specification requires.
+// The merge instead gives each row of an output row group a sorted dictionary
+// of exactly the names it uses, one per distinct name set, while those fit
+// the metadata column chunk's Parquet dictionary (parquetDictionaryMaxBytes).
+// A reader decodes a row's whole metadata (DuckDB parses every name of it),
+// so a row carries no name it does not use: spans of ten names from a pool of
+// three hundred read one attribute in half the time they took carrying
+// shared dictionaries of two hundred names. Names are sorted, so the
+// sorted_strings flag is set and field IDs follow name order. Field IDs in
+// every value of the group, the unshredded value and each shredded field's
+// residual, are rewritten to the row's new dictionary; each object is laid
+// out as the variant builder lays it out. Shredded field names stay in the
+// dictionary, as the shredding specification requires.
 //
-// The dictionaries of a row group form the metadata column chunk's Parquet
-// dictionary, so at most parquetDictionaryMaxBytes/variantMetadataBytes are
-// shared, and only while the row group's distinct blobs fit that dictionary.
-// Any other row carries only its own names: they are shared with too few rows
-// to be worth a dictionary, and its metadata is no larger than the names it
-// uses. Rows are buffered per output row group, which mergeParquet bounds by
-// the inputs' variant bytes (maxVariantRowGroupBytes).
+// Rows whose distinct name sets would outgrow the Parquet dictionary, such as
+// spans whose optional attributes vary from row to row, share a few larger
+// dictionaries instead: each row joins the first, in creation order, that
+// holds its names or has room for its missing ones within
+// variantMetadataBytes, the bound the ingest writer applies, so no row's
+// dictionary is larger than ingest could write. At most
+// parquetDictionaryMaxBytes/variantMetadataBytes are shared, and only while
+// the row group's distinct blobs fit the Parquet dictionary. Any other row
+// carries only its own names: they are shared with too few rows to be worth a
+// dictionary, and its metadata is no larger than the names it uses. Rows are
+// buffered per output row group, which mergeParquet bounds by the inputs'
+// variant bytes (maxVariantRowGroupBytes).
 //
 // Assignment depends only on the merged row order and the rows' names, so
 // equal inputs give byte-identical output.
@@ -82,7 +88,9 @@ type variantMerge struct {
 	data [][]byte // encoded leaves: values with interned field IDs
 	ends [][]int
 
-	dicts     []variantDict   // shared dictionaries
+	dicts     []variantDict  // the rows' name sets, or a few shared dictionaries
+	bySet     map[string]int // by name set, as its sorted IDs: its dictionary
+	setKey    []byte
 	segments  []variantDict   // rows' own names, shared by neighbours they hold
 	mark      []int32         // by name: the last segment holding it
 	dictBytes int             // about the dictionaries' encoded size
@@ -98,16 +106,16 @@ type variantMerge struct {
 	blobs     [][]byte  // the input metadata, in order of first use
 	blobKnown [][]int32 // by blob: the names of its IDs, for devolve
 	blobNames [][]string
-	rowBlob   []int8   // by row: its blob, -1 if NULL
-	spare     [][]byte // by encoded leaf: a buffer for unify and devolve
+	rowBlob   []int16  // by row: its blob, -1 if NULL
+	spare     [][]byte // by encoded leaf: a buffer for devolve
 	slices    [][]byte
 	values    []parquet.Value
 }
 
 type variantDict struct {
-	names []int32 // sorted by name once the row group is assigned
-	size  int     // name bytes
-	pos   map[int32]int
+	names []int32       // sorted by name once the row group is assigned
+	size  int           // name bytes
+	pos   map[int32]int // by name: its position; a segment's names are searched
 	blob  []byte
 }
 
@@ -116,7 +124,7 @@ type variantDict struct {
 var _ = [1]struct{}{}[variantSharedDictionaries/256-1]
 
 func newVariantMerge(schema *parquet.Schema, name string, columns []mergeColumn, inputs int) (*variantMerge, error) {
-	m := &variantMerge{metadata: -1, nameIDs: map[string]int32{}, meta: make([]parquet.Value, 256), known: make([][]int32, inputs)}
+	m := &variantMerge{metadata: -1, nameIDs: map[string]int32{}, bySet: map[string]int{}, meta: make([]parquet.Value, 256), known: make([][]int32, inputs)}
 	m.rw.m = m
 	for i, path := range schema.Columns() {
 		if path[0] != name {
@@ -164,6 +172,7 @@ func (m *variantMerge) reset() {
 	clear(m.dicts)
 	clear(m.segments)
 	m.dicts, m.segments, m.mark, m.dictBytes = m.dicts[:0], m.segments[:0], m.mark[:0], 0
+	clear(m.bySet)
 	for i := range m.known {
 		m.known[i] = m.known[i][:0]
 	}
@@ -188,7 +197,7 @@ func (m *variantMerge) write(ctx context.Context, writers []*parquet.ColumnWrite
 			done += n
 		}
 	}
-	if m.uniform && variantKeepSorted && m.blobFits() && m.unify() {
+	if m.uniform && variantKeepSorted && m.blobFits() && m.blobsExact() {
 		if err := m.emitUniform(writers); err != nil {
 			return err
 		}
@@ -312,16 +321,14 @@ func (m *variantMerge) intern(name string) int32 {
 }
 
 // Most output row groups of a merge of compacted files read rows that carry
-// a few sorted dictionaries: a compacted row group whose names fit one
-// dictionary stores just that one, so each input contributes one. When their
-// names together fit one dictionary of at most 256 names, the row group gets
-// that sorted dictionary without the rewrite (unify, emitUniform). It is the
-// dictionary re-encoding assigns when the rows use every name, and the values
-// are the same: the earlier merge laid them out canonically for a sorted
-// dictionary, and the union's IDs keep each input's name order and one-byte
-// width, so only the IDs change. Skipping the rewrite took a third of the CPU
-// time of merging compacted logs, and a sixth of compacted metrics.
-const variantKeptBlobs = 16
+// a few sorted dictionaries, one per name set of their inputs. When every
+// row's dictionary holds exactly the names the row uses, re-encoding would
+// give each row that same dictionary and lay its values out as they are, so
+// the rows are written as read (blobsExact, emitUniform). Skipping the
+// rewrite took a third of the CPU time of merging compacted logs, and a sixth
+// of compacted metrics. Rows carry at most this many distinct blobs for the
+// fast path, each compared with every new blob; blobFits bounds their bytes.
+const variantKeptBlobs = 1024
 
 // variantKeepSorted enables the fast path; tests compare it with the rewrite.
 var variantKeepSorted = true
@@ -333,7 +340,7 @@ var variantKeepSorted = true
 func (m *variantMerge) keepBlobs(meta []parquet.Value) bool {
 	base := len(m.rowBlob)
 	var last []byte
-	index := int8(-1)
+	index := int16(-1)
 	for _, v := range meta {
 		if v.IsNull() {
 			m.rowBlob = append(m.rowBlob, -1)
@@ -344,7 +351,7 @@ func (m *variantMerge) keepBlobs(meta []parquet.Value) bool {
 			index = -1
 			for i, blob := range m.blobs {
 				if bytes.Equal(b, blob) {
-					index = int8(i)
+					index = int16(i)
 					break
 				}
 			}
@@ -353,7 +360,7 @@ func (m *variantMerge) keepBlobs(meta []parquet.Value) bool {
 					m.rowBlob = m.rowBlob[:base]
 					return false
 				}
-				index = int8(len(m.blobs))
+				index = int16(len(m.blobs))
 				m.blobs = append(m.blobs, append([]byte(nil), b...))
 				if len(m.blobKnown) < len(m.blobs) {
 					m.blobKnown = append(m.blobKnown, nil)
@@ -366,33 +373,31 @@ func (m *variantMerge) keepBlobs(meta []parquet.Value) bool {
 	return true
 }
 
-// blobFits reports whether the uniform row group's blobs can be kept: sorted
-// dictionaries whose names fit the bound a merged dictionary keeps
-// (variantMetadataBytes) and that hold every shredded field the rows use, as
-// the shredding specification requires.
+// blobFits reports whether the uniform row group's blobs could be the
+// dictionaries assign gives its rows: distinct names, sorted and encoded as
+// appendMetadata encodes them, of at most 256 names each, which blobsExact
+// indexes in a bitset, and together within the Parquet dictionary.
 func (m *variantMerge) blobFits() bool {
 	m.blobNames = m.blobNames[:0]
+	total := 0
 	for _, blob := range m.blobs {
 		names, sorted, err := variantMetadataNames(blob)
 		m.blobNames = append(m.blobNames, names)
-		if err != nil || !sorted {
+		if err != nil || !sorted || len(names) > 256 {
 			return false
 		}
-		size := 0
-		for _, name := range names {
-			size += len(name)
-		}
-		if size > variantMetadataBytes {
-			return false
-		}
-		// In a uniform row group only shredded fields are interned.
-		for _, field := range m.names {
-			if _, ok := slices.BinarySearch(names, field); !ok {
+		for i := 1; i < len(names); i++ {
+			if names[i] == names[i-1] {
 				return false
 			}
 		}
+		m.out = appendVariantMetadata(m.out[:0], len(names), func(i int) string { return names[i] })
+		if !bytes.Equal(blob, m.out) {
+			return false
+		}
+		total += len(blob)
 	}
-	return true
+	return total <= parquetDictionaryMaxBytes
 }
 
 // variantMetadataNames returns a metadata blob's names and its sorted flag
@@ -423,80 +428,38 @@ func variantMetadataNames(meta []byte) ([]string, bool, error) {
 	return names, sorted, nil
 }
 
-// unify gives every row of a uniform row group one sorted dictionary of the
-// names its rows use, or reports false when they are more than 256 names or
-// more than variantMetadataBytes of them.
-func (m *variantMerge) unify() bool {
-	used := make([][4]uint64, len(m.blobs)) // by blob: the IDs its rows use
-	for _, names := range m.blobNames {
-		if len(names) > 256 {
-			return false
+// blobsExact reports whether every row's blob holds exactly the names the row
+// uses: its shredded fields and the field IDs of its encoded values. A value
+// the walk rejects is left to devolve, which reports it.
+func (m *variantMerge) blobsExact() bool {
+	for row, b := range m.rowBlob {
+		if b < 0 {
+			continue
 		}
-	}
-	for _, position := range m.encoded {
-		start := 0
-		for row, end := range m.ends[position] {
-			if end > start {
-				if err := useVariantIDs(m.data[position][start:end], &used[m.rowBlob[row]], len(m.blobNames[m.rowBlob[row]])); err != nil {
-					return false // left to devolve, which reports it
-				}
-			}
-			start = end
-		}
-	}
-	union := slices.Clone(m.names) // the shredded fields the rows use
-	for b, names := range m.blobNames {
-		for i, name := range names {
-			if used[b][i/64]&(1<<(i%64)) != 0 {
-				union = append(union, name)
-			}
-		}
-	}
-	slices.Sort(union)
-	union = slices.Compact(union)
-	size := 0
-	for _, name := range union {
-		size += len(name)
-	}
-	if len(union) > 256 || size > variantMetadataBytes {
-		return false
-	}
-	if len(m.blobs) == 1 && slices.Equal(union, m.blobNames[0]) {
-		return true
-	}
-	ids := make([][]byte, len(m.blobs)) // by blob: each used ID's union ID
-	for b, names := range m.blobNames {
-		ids[b] = make([]byte, len(names))
-		for i, name := range names {
-			if id, ok := slices.BinarySearch(union, name); ok {
-				ids[b][i] = byte(id)
-			}
-		}
-	}
-	// Remap copies, so that a value the walk rejects leaves the row group to
-	// devolve, which reports it.
-	for len(m.spare) < len(m.encoded) {
-		m.spare = append(m.spare, nil)
-	}
-	remapped := m.spare
-	for i, position := range m.encoded {
-		remapped[i] = append(remapped[i][:0], m.data[position]...)
-		start := 0
-		for row, end := range m.ends[position] {
-			if end > start {
-				if err := remapVariantIDs(remapped[i][start:end], ids[m.rowBlob[row]]); err != nil {
+		names := m.blobNames[b]
+		var used [4]uint64
+		for _, position := range m.encoded {
+			if data := m.value(position, row); data != nil {
+				if err := useVariantIDs(data, &used, len(names)); err != nil {
 					return false
 				}
 			}
-			start = end
 		}
-	}
-	for i, position := range m.encoded {
-		m.data[position], remapped[i] = remapped[i], m.data[position]
-	}
-	m.blobs = append(m.blobs[:0], appendVariantMetadata(nil, len(union), func(i int) string { return union[i] }))
-	for row, b := range m.rowBlob {
-		m.rowBlob[row] = min(b, 0)
+		// In a uniform row group only shredded fields are interned.
+		for _, field := range m.sets[row] {
+			i, ok := slices.BinarySearch(names, m.names[field])
+			if !ok {
+				return false
+			}
+			used[i/64] |= 1 << (i % 64)
+		}
+		n := 0
+		for _, word := range used {
+			n += bits.OnesCount64(word)
+		}
+		if n != len(names) {
+			return false
+		}
 	}
 	return true
 }
@@ -528,39 +491,6 @@ func useVariantIDs(data []byte, used *[4]uint64, count int) error {
 			return err
 		}
 		if err := useVariantIDs(child, used, count); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// remapVariantIDs replaces in place each object field ID of a value whose
-// IDs are one byte wide.
-func remapVariantIDs(data []byte, ids []byte) error {
-	basic := data[0] & 3
-	if basic != variantBasicObject && basic != variantBasicArray {
-		return nil
-	}
-	c, err := parseVariantContainer(data)
-	if err != nil {
-		return err
-	}
-	if basic == variantBasicObject && c.idSize != 1 {
-		return errors.New("variant object IDs are wider than one byte")
-	}
-	for i := range c.count {
-		if basic == variantBasicObject {
-			id := int(data[c.ids+i])
-			if id >= len(ids) {
-				return fmt.Errorf("variant field ID %d outside a dictionary of %d", id, len(ids))
-			}
-			data[c.ids+i] = ids[id]
-		}
-		child, err := variantChild(data, c, i)
-		if err != nil {
-			return err
-		}
-		if err := remapVariantIDs(child, ids); err != nil {
 			return err
 		}
 	}
@@ -607,7 +537,7 @@ func (m *variantMerge) emitUniform(writers []*parquet.ColumnWriter) error {
 	rows := len(m.null)
 	values := m.slices[:0]
 	fresh := make([]bool, rows)
-	var seen [variantKeptBlobs]bool
+	seen := make([]bool, len(m.blobs))
 	for row := range rows {
 		var blob []byte
 		if b := m.rowBlob[row]; b >= 0 {
@@ -645,9 +575,68 @@ func (m *variantMerge) value(position, row int) []byte {
 
 func (m *variantMerge) byName(a, b int32) int { return strings.Compare(m.names[a], m.names[b]) }
 
-// assign gives each row the first shared dictionary that holds its names or
-// has room for the missing ones, opening a new one while the row group has
-// fewer than variantSharedDictionaries.
+// assign gives each row a dictionary: the one of exactly its names while the
+// row group's name sets fit the Parquet dictionary, otherwise a shared one.
+// Every dictionary is sorted by name.
+func (m *variantMerge) assign() {
+	if !m.assignExact() {
+		m.assignShared()
+	}
+	for _, dicts := range [][]variantDict{m.dicts, m.segments} {
+		for i := range dicts {
+			d := &dicts[i]
+			slices.SortFunc(d.names, m.byName)
+			d.blob = m.appendMetadata(nil, d.names)
+		}
+	}
+	for i := range m.dicts {
+		d := &m.dicts[i]
+		d.pos = make(map[int32]int, len(d.names))
+		for j, name := range d.names {
+			d.pos[name] = j
+		}
+	}
+}
+
+// assignExact gives each row the dictionary of exactly its names, in order of
+// first use, or reports false once those dictionaries would outgrow the
+// Parquet dictionary (parquetDictionaryMaxBytes).
+func (m *variantMerge) assignExact() bool {
+	m.rowDict = m.rowDict[:0]
+	for row, null := range m.null {
+		d := -1
+		if !null {
+			names := m.sets[row]
+			key := m.setKey[:0]
+			for _, name := range names {
+				key = binary.LittleEndian.AppendUint32(key, uint32(name))
+			}
+			m.setKey = key
+			var ok bool
+			if d, ok = m.bySet[string(key)]; !ok {
+				size := 0
+				for _, name := range names {
+					size += len(m.names[name])
+				}
+				if m.dictBytes += variantMetadataSize(len(names), size); m.dictBytes > parquetDictionaryMaxBytes {
+					clear(m.dicts)
+					clear(m.bySet)
+					m.dicts, m.dictBytes = m.dicts[:0], 0
+					return false
+				}
+				d = len(m.dicts)
+				m.dicts = append(m.dicts, variantDict{names: slices.Clone(names), size: size})
+				m.bySet[string(key)] = d
+			}
+		}
+		m.rowDict = append(m.rowDict, d)
+	}
+	return true
+}
+
+// assignShared gives each row the first shared dictionary that holds its
+// names or has room for the missing ones, opening a new one while the row
+// group has fewer than variantSharedDictionaries.
 //
 // Every distinct blob is a value of the metadata column chunk's Parquet
 // dictionary. Once they would outgrow parquetDictionaryMaxBytes the writer
@@ -657,7 +646,8 @@ func (m *variantMerge) byName(a, b int32) int { return strings.Compare(m.names[a
 // holds reuses it. Measured on unique attribute names, plain pages of rows'
 // own names compressed to about 130 bytes a row, and pages repeating shared
 // 4 KiB dictionaries to about 600.
-func (m *variantMerge) assign() {
+func (m *variantMerge) assignShared() {
+	m.rowDict = m.rowDict[:0]
 	distinct := 0
 	for row, null := range m.null {
 		d := -1
@@ -673,20 +663,6 @@ func (m *variantMerge) assign() {
 			distinct += m.dictBytes - before
 		}
 		m.rowDict = append(m.rowDict, d)
-	}
-	for _, dicts := range [][]variantDict{m.dicts, m.segments} {
-		for i := range dicts {
-			d := &dicts[i]
-			slices.SortFunc(d.names, m.byName)
-			d.blob = m.appendMetadata(nil, d.names)
-		}
-	}
-	for i := range m.dicts {
-		d := &m.dicts[i]
-		d.pos = make(map[int32]int, len(d.names))
-		for j, name := range d.names {
-			d.pos[name] = j
-		}
 	}
 }
 
@@ -782,6 +758,12 @@ func (m *variantMerge) appendMetadata(dst []byte, names []int32) []byte {
 	return appendVariantMetadata(dst, len(names), func(i int) string { return m.names[names[i]] })
 }
 
+// variantMetadataSize is the encoded size of a dictionary of n names of total
+// bytes, as appendVariantMetadata encodes it.
+func variantMetadataSize(n, total int) int {
+	return 1 + (n+2)*variantWidth(max(total, n)) + total
+}
+
 // appendVariantMetadata encodes n names, sorted, of which name returns the
 // i-th.
 func appendVariantMetadata(dst []byte, n int, name func(int) string) []byte {
@@ -830,7 +812,7 @@ func (m *variantMerge) emit(writers []*parquet.ColumnWriter) error {
 		for row := range rows {
 			if data := m.value(position, row); data != nil {
 				if d := m.rowDict[row]; d >= 0 {
-					m.rw.pos, m.rw.own = m.dicts[d].pos, nil
+					m.rw.pos, m.rw.own = m.dicts[d].pos, m.dicts[d].names
 				} else {
 					m.rw.pos, m.rw.own = nil, m.segments[-2-d].names
 				}
