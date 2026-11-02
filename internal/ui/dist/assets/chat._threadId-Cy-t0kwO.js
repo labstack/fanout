@@ -1,0 +1,1 @@
+import{t as e}from"./chat-DAYb_ODh.js";var t=e;export{t as component};
