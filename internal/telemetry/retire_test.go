@@ -157,7 +157,7 @@ func TestRetiredBatchIsNotAdoptedByARetriedCommit(t *testing.T) {
 func TestRetiredAtLoadOrdersInputsBeforeTheirReplacements(t *testing.T) {
 	present := map[string]bool{"a": true, "b": true, "o1": true, "o2": true, "c": true}
 	replaces := map[string][]string{"o1": {"a", "b"}, "o2": {"o1", "c"}}
-	got := retiredAtLoad(present, replaces)
+	got := retiredAtLoad(present, replaces, nil)
 	index := map[string]int{}
 	for i, id := range got {
 		index[id] = i
@@ -171,8 +171,7 @@ func TestRetiredAtLoadOrdersInputsBeforeTheirReplacements(t *testing.T) {
 }
 
 // Retention removes batches from the catalog at once and deletes them only
-// after earlier readers leave. A crash in between republishes them, and the
-// next pass prunes them again.
+// after earlier readers leave.
 func TestRetentionDefersDeletionPastPinnedReaders(t *testing.T) {
 	dir := t.TempDir()
 	store, err := OpenParquetStore(dir)
@@ -192,12 +191,8 @@ func TestRetentionDefersDeletionPastPinnedReaders(t *testing.T) {
 	if n, err := store.CollectRetired(); err != nil || n != 0 {
 		t.Fatalf("collected %d under a pinned reader: %v", n, err)
 	}
-	crashed, err := OpenParquetStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(crashed.BatchMetadata()) != 1 {
-		t.Fatal("an uncollected pruned batch did not reappear after a crash")
+	if _, err := os.Stat(filepath.Join(store.BatchPath("expired"), "spans.parquet")); err != nil {
+		t.Fatalf("pruned batch lost its files under a pinned reader: %v", err)
 	}
 	store.Unpin(pin)
 	if n, err := store.CollectRetired(); err != nil || n != 1 {

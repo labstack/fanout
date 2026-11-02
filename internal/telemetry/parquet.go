@@ -123,6 +123,10 @@ type ParquetStore struct {
 	compactionDebt      int
 	debtChanged         chan struct{}
 	debtLimitReached    chan struct{}
+	// Guarded by mu: the replaces list of every compacted directory still in
+	// the batch namespace, and the inverse from each listed input to it.
+	replaces   map[string][]string
+	replacedBy map[string]string
 
 	// pinMu guards reader epochs and the batches retired at each epoch.
 	pinMu       sync.Mutex
@@ -259,14 +263,10 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 	metadata.Version = batchMetadataVersion
 	metadata.Spans, metadata.Logs, metadata.Metrics = len(spans), len(logs), len(metrics)
 	final := p.BatchPath(metadata.ID)
-	if existing, ok := p.batchMetadataByID(metadata.ID); ok {
-		*metadata = existing
-		return nil
-	}
 	// A retried commit of a batch already compacted away is published: its
-	// rows live in the replacement. Adopting its directory would count them twice.
-	if retired, ok := p.retiredMetadata(metadata.ID); ok {
-		*metadata = retired
+	// rows live in the replacement, whether or not its directory was deleted.
+	// Adopting or rewriting it would count them twice.
+	if p.alreadyPublished(metadata) {
 		return nil
 	}
 	if info, err := os.Stat(final); err == nil && info.IsDir() {
@@ -282,6 +282,10 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 			return err
 		}
 		defer p.unlockPublish()
+		// A replacement published while the directory was validated retires it.
+		if p.alreadyPublished(metadata) {
+			return nil
+		}
 		// The directory is already in the namespace, so the catalog includes
 		// it even if the fsync fails; see the rename below.
 		p.installBatch(adopted)
@@ -345,8 +349,7 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 		return err
 	}
 	defer p.unlockPublish()
-	if existing, ok := p.batchMetadataByID(metadata.ID); ok {
-		*metadata = existing
+	if p.alreadyPublished(metadata) {
 		complete = true
 		return os.RemoveAll(stage)
 	}
@@ -377,6 +380,18 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata *BatchMetadata,
 	p.mu.Unlock()
 	*metadata = prepared.metadata
 	return syncDirectory(p.batchesDir)
+}
+
+// alreadyPublished replaces metadata with the published batch's, when known,
+// and reports whether the batch needs no further commit. A batch named only by
+// a replaces list keeps the attempt's metadata: its rows are already counted
+// in the replacement.
+func (p *ParquetStore) alreadyPublished(metadata *BatchMetadata) bool {
+	existing, ok := p.published(metadata.ID)
+	if ok && existing.ID != "" {
+		*metadata = existing
+	}
+	return ok
 }
 
 func (p *ParquetStore) lockPublish(ctx context.Context) error {
@@ -448,6 +463,11 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 			defer p.mu.Unlock()
 			for _, input := range prepared {
 				if _, err := os.Stat(input.active); err == nil {
+					// The replacement never reached the namespace, so its
+					// replaces list no longer covers the restored input.
+					if lister, ok := p.replacedBy[input.id]; ok && lister == replacementID {
+						delete(p.replacedBy, input.id)
+					}
 					p.setBatchLocked(input.id, input.batch)
 				} else {
 					p.setBatchLocked(input.id, nil)
@@ -672,8 +692,11 @@ func indexedSpanEarlier(left, right IndexedSpan) bool {
 
 // PruneBefore removes complete batches from the catalog in one swap. Readers
 // never wait: directories stay in place until CollectRetired finds no reader
-// that could still open them. A crash before then leaves them published, and
-// the next pass prunes them again.
+// that could still open them. Each batch is durably marked pruned before the
+// swap, so a crash before deletion retires it at the next open instead of
+// republishing it. Callers serialize this with compaction, so the candidates
+// stay in the catalog until the swap; if the swap fails, marked batches stay
+// listed until the next pass prunes them.
 func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(func(context.Context) error) error) (int, error) {
 	if maxBatches <= 0 {
 		return 0, nil
@@ -701,6 +724,11 @@ func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(fu
 	}
 	if len(candidates) == 0 {
 		return 0, nil
+	}
+	for _, candidate := range candidates {
+		if err := writePruned(p.BatchPath(candidate.id)); err != nil {
+			return 0, fmt.Errorf("mark Parquet batch %s pruned: %w", candidate.id, err)
+		}
 	}
 	pruned := 0
 	err := publish(func(ctx context.Context) error {
@@ -822,6 +850,10 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 			p.setBatchLocked(id, nil)
 		}
 		p.setBatchLocked(metadata.ID, replacement)
+		// Whether or not the fsync succeeded, the output's replaces list now
+		// covers its inputs: a retried commit of one must neither adopt its
+		// directory nor write it again once it is deleted.
+		p.recordReplacesLocked(metadata.ID, inputs)
 		p.mu.Unlock()
 		if syncErr != nil {
 			return syncErr
@@ -890,24 +922,39 @@ func (p *ParquetStore) loadBatches() error {
 	}
 	present := map[string]bool{}
 	replaces := map[string][]string{}
+	pruned := map[string]bool{}
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == SchemaBatch || !strings.HasSuffix(entry.Name(), BatchSuffix) {
 			continue
 		}
 		id := strings.TrimSuffix(entry.Name(), BatchSuffix)
 		present[id] = true
-		ids, err := readReplaces(filepath.Join(p.batchesDir, entry.Name()))
+		dir := filepath.Join(p.batchesDir, entry.Name())
+		ids, err := readReplaces(dir)
 		if err != nil {
 			return fmt.Errorf("load Parquet batch %s: %w", entry.Name(), err)
 		}
 		if len(ids) > 0 {
 			replaces[id] = ids
 		}
+		marked, err := hasPruned(dir)
+		if err != nil {
+			return fmt.Errorf("load Parquet batch %s: %w", entry.Name(), err)
+		}
+		if marked {
+			pruned[id] = true
+		}
 	}
+	p.mu.Lock()
+	for id, ids := range replaces {
+		p.recordReplacesLocked(id, ids)
+	}
+	p.mu.Unlock()
 	// A present compacted batch has committed its replacement, so the inputs
-	// it lists are retired even if their directories survived a crash. They
-	// are never registered; the first collection deletes them.
-	retiredIDs := retiredAtLoad(present, replaces)
+	// it lists are retired even if their directories survived a crash; a
+	// batch marked pruned was already removed by retention. They are never
+	// registered; the first collection deletes them.
+	retiredIDs := retiredAtLoad(present, replaces, pruned)
 	retired := make(map[string]bool, len(retiredIDs))
 	for _, id := range retiredIDs {
 		retired[id] = true
