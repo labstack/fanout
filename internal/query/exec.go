@@ -63,6 +63,9 @@ type Result struct {
 	// ShiftMS is how far Previous sits behind Frame, so a client can overlay it
 	// without guessing from the first populated bucket.
 	ShiftMS int64 `json:"shift_ms,omitempty"`
+	// Cached marks a result served from the result cache rather than run for
+	// this request; see FANOUT_QUERY_CACHE_TTL.
+	Cached bool `json:"cached,omitempty"`
 }
 
 type Executor struct {
@@ -78,6 +81,7 @@ type Executor struct {
 	slots *semaphore.Weighted
 
 	memo    checkMemo
+	cache   resultCache
 	mu      sync.Mutex
 	checks  map[[32]byte]*Checked
 	schemas map[string]schemaEntry
@@ -107,7 +111,7 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 	}
 	life, stop := context.WithCancel(context.Background())
 	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: 10 * time.Second, batchTimeout: 20 * time.Second, parallel: 4,
-		slots: semaphore.NewWeighted(int64(slots)), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
+		slots: semaphore.NewWeighted(int64(slots)), cache: newResultCache(), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
 		life: life, stop: stop, discoveries: make(chan struct{}, 2), discoverWait: time.Minute, discoverRun: 25 * time.Second}
 }
 
@@ -142,26 +146,33 @@ func (e *Executor) Check(ctx context.Context, d *Dashboard) (*Checked, Problems,
 // check memoizes Check by the spec's bytes: a dashboard refreshes the same
 // spec every 30 seconds, and its filters do not need re-parsing each time.
 func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
+	checked, _, err := e.checkKeyed(ctx, d)
+	return checked, err
+}
+
+// checkKeyed is check that also returns the spec's hash, which keys its
+// cached panel results.
+func (e *Executor) checkKeyed(ctx context.Context, d *Dashboard) (*Checked, cacheKey, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, cacheKey{}, err
 	}
 	raw, err := json.Marshal(d)
 	if err != nil {
-		return nil, err
+		return nil, cacheKey{}, err
 	}
 	key := sha256.Sum256(raw)
 	e.mu.Lock()
 	cached, ok := e.checks[key]
 	e.mu.Unlock()
 	if ok {
-		return cached, nil
+		return cached, key, nil
 	}
 	checked, problems, err := e.Check(ctx, d)
 	if err != nil {
-		return nil, err
+		return nil, key, err
 	}
 	if len(problems) > 0 {
-		return nil, problems
+		return nil, key, problems
 	}
 	e.mu.Lock()
 	if len(e.checks) >= 256 {
@@ -169,7 +180,7 @@ func (e *Executor) check(ctx context.Context, d *Dashboard) (*Checked, error) {
 	}
 	e.checks[key] = checked
 	e.mu.Unlock()
-	return checked, nil
+	return checked, key, nil
 }
 
 // Run validates the dashboard and runs the requested panels concurrently. An
@@ -206,7 +217,9 @@ func (e *Executor) Stream(ctx context.Context, req RunRequest, emit func(Result)
 
 func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Result)) error {
 	caller := ctx
-	now := e.now()
+	// Relative windows end on the cache grain, so identical refreshes within
+	// one grain resolve the same window and share their panel results.
+	now := e.cacheNow()
 	d := req.Dashboard
 	Normalize(&d)
 	if len(req.Panels) > len(d.Panels) {
@@ -244,7 +257,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 		emit(i, r)
 	}
 	notRun := func(i int, p *Panel) {
-		send(i, Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Reason: ReasonBusy, Retryable: true})
+		send(i, busyResult(p))
 	}
 	batchError := func(err error) error {
 		if caller.Err() != nil {
@@ -258,7 +271,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 		}
 		return err
 	}
-	checked, err := e.check(ctx, &d)
+	checked, spec, err := e.checkKeyed(ctx, &d)
 	if err != nil {
 		return batchError(err)
 	}
@@ -286,28 +299,55 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	if req.Compare != nil {
 		compare = *req.Compare
 	}
+	deadline, _ := ctx.Deadline()
 	var group errgroup.Group
 	group.SetLimit(e.parallel)
 	for i, p := range targets {
 		group.Go(func() error {
+			width := req.Widths[p.ID]
 			if p.Viz == "text" {
-				send(i, e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare))
+				send(i, e.runPanel(caller, p, checked, t, now, vars, width, compare))
 				return nil
 			}
-			// Turns are first come, first served across every request, so a
-			// search is not starved by a dashboard that started earlier.
-			if e.slots.Acquire(ctx, 1) != nil {
+			if ctx.Err() != nil {
 				if caller.Err() == nil {
 					notRun(i, p)
 				}
 				return nil
 			}
-			// The slot is released before sending: a stream client that stops
-			// reading must not hold the engine from other requests.
-			r := func() Result {
-				defer e.slots.Release(1)
-				return e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare)
-			}()
+			key, err := keyOf(panelCacheKey{Spec: spec, Panel: p.ID, Time: t, Vars: vars, Width: width, Compare: compare})
+			if err != nil {
+				send(i, failed(Result{ID: p.ID}, err, nil))
+				return nil
+			}
+			out, outcome, err := loadCached(e, caller, key, func(run context.Context) (panelOutcome, int64, bool, error) {
+				// Waiting for a turn is bounded by the batch deadline of the
+				// request that started this run; the run itself by the panel's
+				// own timeout, while anyone still waits for it.
+				wait, cancel := context.WithDeadline(run, deadline)
+				defer cancel()
+				// Turns are first come, first served across every request, so
+				// a search is not starved by a dashboard that started earlier.
+				if e.slots.Acquire(wait, 1) != nil {
+					return panelOutcome{Result: busyResult(p), busy: true}, 0, false, nil
+				}
+				r := func() Result {
+					defer e.slots.Release(1)
+					return e.runPanel(run, p, checked, t, now, vars, width, compare)
+				}()
+				return panelOutcome{Result: r}, r.size(), r.Status == StatusOK || r.Status == StatusEmpty, nil
+			})
+			if err != nil {
+				// The caller left; the shared run goes on for the others.
+				if caller.Err() == nil {
+					notRun(i, p)
+				}
+				return nil
+			}
+			r := out.Result.clone()
+			r.Cached = outcome == cacheHit || outcome == cacheStale
+			// The result is sent after the run released its slot: a stream
+			// client that stops reading must not hold the engine from others.
 			send(i, r)
 			return nil
 		})
@@ -320,6 +360,11 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 // panel never started: other queries held the engine for the whole batch
 // deadline. A panel that started and ran too long reports TimeoutError.
 const BatchDeadlineError = "Not run: other queries kept the server busy for 20 seconds. Refresh to try again."
+
+// busyResult answers a panel that never started.
+func busyResult(p *Panel) Result {
+	return Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Reason: ReasonBusy, Retryable: true}
+}
 
 // ReasonBusy marks a result that was not run because of BatchDeadlineError.
 const ReasonBusy = "busy"

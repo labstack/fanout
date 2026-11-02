@@ -87,8 +87,32 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 	return where, args, nil
 }
 
+// Exemplars answers a selection's sample traces or logs through the result
+// cache, keyed by the canonical request, so a burst of identical drill-downs
+// runs once. Relative windows end on the clock rounded to the cache grain.
 func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (ExemplarResponse, error) {
-	now := e.now()
+	now := e.cacheNow()
+	key, err := keyOf(struct {
+		Kind    string          `json:"kind"`
+		Request ExemplarRequest `json:"request"`
+	}{"exemplars", req})
+	if err != nil {
+		return e.exemplars(ctx, req, now)
+	}
+	out, _, err := loadCached(e, ctx, key, func(run context.Context) (ExemplarResponse, int64, bool, error) {
+		out, err := e.exemplars(run, req, now)
+		size := int64(256+len(out.Traces)*256) + out.Logs.size()
+		return out, size, err == nil, err
+	})
+	if err != nil {
+		return ExemplarResponse{Traces: []Exemplar{}}, err
+	}
+	out.Logs = out.Logs.clone()
+	out.Traces = slices.Clone(out.Traces)
+	return out, nil
+}
+
+func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.Time) (ExemplarResponse, error) {
 	out := ExemplarResponse{Traces: []Exemplar{}}
 	if req.Kind != "" && req.Kind != "traces" && req.Kind != "logs" {
 		return out, Problems{{Path: "kind", Message: "kind must be traces or logs", Hint: "choose traces or logs"}}

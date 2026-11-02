@@ -41,6 +41,13 @@ const (
 	minDuckDBConns = 2
 )
 
+// The query result cache's bounds. Entries are panel, exemplar and trace
+// detail results; bytes are estimated from their contents.
+const (
+	QueryCacheMaxEntries = 1024
+	QueryCacheMaxBytes   = 64 << 20
+)
+
 // sizingSource records which values the machine chose, so the startup log can
 // distinguish a resolved value from one the operator pinned. Without that
 // distinction an adaptive default is unfalsifiable in support: nobody can say

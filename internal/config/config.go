@@ -82,6 +82,15 @@ type Config struct {
 	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
 	// require an admin browser session with operations:read.
 	PprofEnabled bool `group:"server" env:"FANOUT_PPROF_ENABLED" default:"false"`
+	// QueryCacheTTL is how long a dashboard panel, exemplar or trace
+	// detail result is served from memory without rerunning its queries.
+	// Relative windows such as "last 1h" end on the current time rounded down
+	// to this grain, so identical refreshes within one grain share a result.
+	// A result older than the grain but younger than three grains is served
+	// stale while one background refresh replaces it, so a panel may show data
+	// up to three grains old. Zero disables the cache; concurrent identical
+	// requests still share one execution.
+	QueryCacheTTL time.Duration `group:"server" env:"FANOUT_QUERY_CACHE_TTL" default:"10s"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small shared VM
 	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
@@ -269,6 +278,9 @@ func (c Config) Validate() error {
 	}
 	if c.MaintenanceInterval < time.Second {
 		return fmt.Errorf("FANOUT_MAINTENANCE_INTERVAL must be at least 1s, got %s", c.MaintenanceInterval)
+	}
+	if c.QueryCacheTTL < 0 {
+		return fmt.Errorf("FANOUT_QUERY_CACHE_TTL must be >= 0, got %s", c.QueryCacheTTL)
 	}
 	if c.DuckDBThreads < 0 {
 		return fmt.Errorf("FANOUT_DUCKDB_THREADS must be >= 0, got %d", c.DuckDBThreads)

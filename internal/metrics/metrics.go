@@ -49,6 +49,19 @@ const (
 var (
 	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Nonempty active immutable batches across spans, logs and metrics not covered at the start of the last read-cache pass"})
 
+	// QueryCacheRequests counts panel, exemplar and trace-detail lookups in the
+	// query result cache: hit (fresh), stale (served while one refresh runs),
+	// miss (ran the queries) and coalesced (joined an identical run in flight).
+	QueryCacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_query_cache_requests_total",
+		Help: "Query result cache lookups by result: hit, stale, miss or coalesced",
+	}, []string{"result"})
+
+	QueryCacheBytes = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_query_cache_bytes",
+		Help: "Estimated bytes of results held in the query result cache",
+	})
+
 	IngestBackpressureSeconds = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds the ingest writer waited for compaction debt to retire",
 	})
