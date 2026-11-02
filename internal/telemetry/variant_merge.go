@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -89,6 +90,16 @@ type variantMerge struct {
 	known     [][]int32       // by input: names of its field IDs last seen, -1 if none
 	rw        variantRewriter
 	out       []byte
+
+	// While uniform, every non-NULL row read so far carries one of blobs,
+	// and the encoded leaves hold their input values unchanged (see
+	// emitUniform).
+	uniform   bool
+	blobs     [][]byte  // the input metadata, in order of first use
+	blobKnown [][]int32 // by blob: the names of its IDs, for devolve
+	blobNames [][]string
+	rowBlob   []int8   // by row: its blob, -1 if NULL
+	spare     [][]byte // by encoded leaf: a buffer for unify and devolve
 	slices    [][]byte
 	values    []parquet.Value
 }
@@ -156,6 +167,10 @@ func (m *variantMerge) reset() {
 	for i := range m.known {
 		m.known[i] = m.known[i][:0]
 	}
+	m.uniform, m.blobs, m.rowBlob = true, m.blobs[:0], m.rowBlob[:0]
+	for i := range m.blobKnown {
+		m.blobKnown[i] = m.blobKnown[i][:0]
+	}
 }
 
 // write merges one output row group's rows of the group.
@@ -173,9 +188,20 @@ func (m *variantMerge) write(ctx context.Context, writers []*parquet.ColumnWrite
 			done += n
 		}
 	}
-	m.assign()
-	if err := m.emit(writers); err != nil {
-		return err
+	if m.uniform && variantKeepSorted && m.blobFits() && m.unify() {
+		if err := m.emitUniform(writers); err != nil {
+			return err
+		}
+	} else {
+		if m.uniform {
+			if err := m.devolve(); err != nil {
+				return err
+			}
+		}
+		m.assign()
+		if err := m.emit(writers); err != nil {
+			return err
+		}
 	}
 	for _, c := range m.columns {
 		if err := writers[c.column].Flush(); err != nil {
@@ -196,6 +222,11 @@ func (m *variantMerge) read(input, rows int, writers []*parquet.ColumnWriter) (i
 		return 0, err
 	}
 	defer clear(m.meta[:n])
+	if m.uniform && !m.keepBlobs(m.meta[:n]) {
+		if err := m.devolve(); err != nil {
+			return 0, err
+		}
+	}
 	base := len(m.null)
 	for _, v := range m.meta[:n] {
 		m.defs[m.metadata] = append(m.defs[m.metadata], int8(v.DefinitionLevel()))
@@ -223,7 +254,13 @@ func (m *variantMerge) read(input, rows int, writers []*parquet.ColumnWriter) (i
 				}
 				if !m.typed[position] {
 					m.defs[position] = append(m.defs[position], int8(v.DefinitionLevel()))
-					if present {
+					if present && m.uniform {
+						b := v.ByteArray()
+						if size, err := variantValueSize(b); err != nil || size != len(b) {
+							return errors.New("variant value size differs from its encoding")
+						}
+						m.data[position] = append(m.data[position], b...)
+					} else if present {
 						if err := m.rw.input(m.meta[row-base].ByteArray(), &m.known[input], &m.sets[row]); err != nil {
 							return err
 						}
@@ -272,6 +309,326 @@ func (m *variantMerge) intern(name string) int32 {
 	m.nameIDs[name] = id
 	m.member = append(m.member, [4]uint64{})
 	return id
+}
+
+// Most output row groups of a merge of compacted files read rows that carry
+// a few sorted dictionaries: a compacted row group whose names fit one
+// dictionary stores just that one, so each input contributes one. When their
+// names together fit one dictionary of at most 256 names, the row group gets
+// that sorted dictionary without the rewrite (unify, emitUniform). It is the
+// dictionary re-encoding assigns when the rows use every name, and the values
+// are the same: the earlier merge laid them out canonically for a sorted
+// dictionary, and the union's IDs keep each input's name order and one-byte
+// width, so only the IDs change. Skipping the rewrite took a third of the CPU
+// time of merging compacted logs, and a sixth of compacted metrics.
+const variantKeptBlobs = 16
+
+// variantKeepSorted enables the fast path; tests compare it with the rewrite.
+var variantKeepSorted = true
+
+// keepBlobs records the blob of every row of a read, or reports false when
+// that would make more than variantKeptBlobs distinct blobs. Values equal to
+// one already compared share its bytes within a page, so most rows compare
+// one pointer.
+func (m *variantMerge) keepBlobs(meta []parquet.Value) bool {
+	base := len(m.rowBlob)
+	var last []byte
+	index := int8(-1)
+	for _, v := range meta {
+		if v.IsNull() {
+			m.rowBlob = append(m.rowBlob, -1)
+			continue
+		}
+		b := v.ByteArray()
+		if len(b) == 0 || len(last) != len(b) || &b[0] != &last[0] {
+			index = -1
+			for i, blob := range m.blobs {
+				if bytes.Equal(b, blob) {
+					index = int8(i)
+					break
+				}
+			}
+			if index < 0 {
+				if len(m.blobs) == variantKeptBlobs {
+					m.rowBlob = m.rowBlob[:base]
+					return false
+				}
+				index = int8(len(m.blobs))
+				m.blobs = append(m.blobs, append([]byte(nil), b...))
+				if len(m.blobKnown) < len(m.blobs) {
+					m.blobKnown = append(m.blobKnown, nil)
+				}
+			}
+			last = b
+		}
+		m.rowBlob = append(m.rowBlob, index)
+	}
+	return true
+}
+
+// blobFits reports whether the uniform row group's blobs can be kept: sorted
+// dictionaries whose names fit the bound a merged dictionary keeps
+// (variantMetadataBytes) and that hold every shredded field the rows use, as
+// the shredding specification requires.
+func (m *variantMerge) blobFits() bool {
+	m.blobNames = m.blobNames[:0]
+	for _, blob := range m.blobs {
+		names, sorted, err := variantMetadataNames(blob)
+		m.blobNames = append(m.blobNames, names)
+		if err != nil || !sorted {
+			return false
+		}
+		size := 0
+		for _, name := range names {
+			size += len(name)
+		}
+		if size > variantMetadataBytes {
+			return false
+		}
+		// In a uniform row group only shredded fields are interned.
+		for _, field := range m.names {
+			if _, ok := slices.BinarySearch(names, field); !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// variantMetadataNames returns a metadata blob's names and its sorted flag
+// (VariantEncoding.md, Metadata encoding).
+func variantMetadataNames(meta []byte) ([]string, bool, error) {
+	if len(meta) < 1 || meta[0]&0x0F != 1 {
+		return nil, false, errors.New("variant metadata has an unsupported version")
+	}
+	width := int(meta[0]>>6) + 1
+	if len(meta) < 1+width {
+		return nil, false, errors.New("variant metadata truncated")
+	}
+	count := readVariantUint(meta[1:], width)
+	start := 1 + width + (count+1)*width
+	if count > len(meta) || start > len(meta) {
+		return nil, false, errors.New("variant metadata truncated")
+	}
+	names := make([]string, count)
+	for i := range names {
+		at := 1 + width + i*width
+		from, to := start+readVariantUint(meta[at:], width), start+readVariantUint(meta[at+width:], width)
+		if from > to || to > len(meta) {
+			return nil, false, errors.New("variant metadata offsets are invalid")
+		}
+		names[i] = string(meta[from:to])
+	}
+	sorted := meta[0]>>4&1 == 1 && slices.IsSorted(names)
+	return names, sorted, nil
+}
+
+// unify gives every row of a uniform row group one sorted dictionary of the
+// names its rows use, or reports false when they are more than 256 names or
+// more than variantMetadataBytes of them.
+func (m *variantMerge) unify() bool {
+	used := make([][4]uint64, len(m.blobs)) // by blob: the IDs its rows use
+	for _, names := range m.blobNames {
+		if len(names) > 256 {
+			return false
+		}
+	}
+	for _, position := range m.encoded {
+		start := 0
+		for row, end := range m.ends[position] {
+			if end > start {
+				if err := useVariantIDs(m.data[position][start:end], &used[m.rowBlob[row]], len(m.blobNames[m.rowBlob[row]])); err != nil {
+					return false // left to devolve, which reports it
+				}
+			}
+			start = end
+		}
+	}
+	union := slices.Clone(m.names) // the shredded fields the rows use
+	for b, names := range m.blobNames {
+		for i, name := range names {
+			if used[b][i/64]&(1<<(i%64)) != 0 {
+				union = append(union, name)
+			}
+		}
+	}
+	slices.Sort(union)
+	union = slices.Compact(union)
+	size := 0
+	for _, name := range union {
+		size += len(name)
+	}
+	if len(union) > 256 || size > variantMetadataBytes {
+		return false
+	}
+	if len(m.blobs) == 1 && slices.Equal(union, m.blobNames[0]) {
+		return true
+	}
+	ids := make([][]byte, len(m.blobs)) // by blob: each used ID's union ID
+	for b, names := range m.blobNames {
+		ids[b] = make([]byte, len(names))
+		for i, name := range names {
+			if id, ok := slices.BinarySearch(union, name); ok {
+				ids[b][i] = byte(id)
+			}
+		}
+	}
+	// Remap copies, so that a value the walk rejects leaves the row group to
+	// devolve, which reports it.
+	for len(m.spare) < len(m.encoded) {
+		m.spare = append(m.spare, nil)
+	}
+	remapped := m.spare
+	for i, position := range m.encoded {
+		remapped[i] = append(remapped[i][:0], m.data[position]...)
+		start := 0
+		for row, end := range m.ends[position] {
+			if end > start {
+				if err := remapVariantIDs(remapped[i][start:end], ids[m.rowBlob[row]]); err != nil {
+					return false
+				}
+			}
+			start = end
+		}
+	}
+	for i, position := range m.encoded {
+		m.data[position], remapped[i] = remapped[i], m.data[position]
+	}
+	m.blobs = append(m.blobs[:0], appendVariantMetadata(nil, len(union), func(i int) string { return union[i] }))
+	for row, b := range m.rowBlob {
+		m.rowBlob[row] = min(b, 0)
+	}
+	return true
+}
+
+// useVariantIDs adds the object field IDs of a value whose IDs are one byte
+// wide to used; count is its dictionary's size.
+func useVariantIDs(data []byte, used *[4]uint64, count int) error {
+	basic := data[0] & 3
+	if basic != variantBasicObject && basic != variantBasicArray {
+		return nil
+	}
+	c, err := parseVariantContainer(data)
+	if err != nil {
+		return err
+	}
+	if basic == variantBasicObject && c.idSize != 1 {
+		return errors.New("variant object IDs are wider than one byte")
+	}
+	for i := range c.count {
+		if basic == variantBasicObject {
+			id := int(data[c.ids+i])
+			if id >= count {
+				return fmt.Errorf("variant field ID %d outside a dictionary of %d", id, count)
+			}
+			used[id/64] |= 1 << (id % 64)
+		}
+		child, err := variantChild(data, c, i)
+		if err != nil {
+			return err
+		}
+		if err := useVariantIDs(child, used, count); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// remapVariantIDs replaces in place each object field ID of a value whose
+// IDs are one byte wide.
+func remapVariantIDs(data []byte, ids []byte) error {
+	basic := data[0] & 3
+	if basic != variantBasicObject && basic != variantBasicArray {
+		return nil
+	}
+	c, err := parseVariantContainer(data)
+	if err != nil {
+		return err
+	}
+	if basic == variantBasicObject && c.idSize != 1 {
+		return errors.New("variant object IDs are wider than one byte")
+	}
+	for i := range c.count {
+		if basic == variantBasicObject {
+			id := int(data[c.ids+i])
+			if id >= len(ids) {
+				return fmt.Errorf("variant field ID %d outside a dictionary of %d", id, len(ids))
+			}
+			data[c.ids+i] = ids[id]
+		}
+		child, err := variantChild(data, c, i)
+		if err != nil {
+			return err
+		}
+		if err := remapVariantIDs(child, ids); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// devolve leaves uniform mode: the rows buffered so far have their values
+// rewritten to interned names, as read rewrites a row that is not uniform.
+func (m *variantMerge) devolve() error {
+	m.uniform = false
+	for len(m.spare) < len(m.encoded) {
+		m.spare = append(m.spare, nil)
+	}
+	for i, position := range m.encoded {
+		out := m.spare[i][:0]
+		start := 0
+		for row, end := range m.ends[position] {
+			if end > start {
+				b := m.rowBlob[row]
+				if err := m.rw.input(m.blobs[b], &m.blobKnown[b], &m.sets[row]); err != nil {
+					return err
+				}
+				var err error
+				if out, err = m.rw.rewrite(out, m.data[position][start:end], false); err != nil {
+					return err
+				}
+			}
+			start = end
+			m.ends[position][row] = len(out)
+		}
+		m.data[position], m.spare[i] = out, m.data[position]
+	}
+	m.rw.meta, m.rw.known, m.rw.set = nil, nil, nil
+	for row := range m.sets {
+		slices.Sort(m.sets[row])
+		m.sets[row] = slices.Compact(m.sets[row])
+	}
+	return nil
+}
+
+// emitUniform writes a uniform row group: every row with its own blob and
+// the encoded leaves as read.
+func (m *variantMerge) emitUniform(writers []*parquet.ColumnWriter) error {
+	rows := len(m.null)
+	values := m.slices[:0]
+	fresh := make([]bool, rows)
+	var seen [variantKeptBlobs]bool
+	for row := range rows {
+		var blob []byte
+		if b := m.rowBlob[row]; b >= 0 {
+			blob, fresh[row], seen[b] = m.blobs[b], !seen[b], true
+		}
+		values = append(values, blob)
+	}
+	if err := m.put(writers, m.metadata, values, fresh); err != nil {
+		return err
+	}
+	for _, position := range m.encoded {
+		for row := range rows {
+			values[row] = m.value(position, row)
+		}
+		if err := m.put(writers, position, values, nil); err != nil {
+			return err
+		}
+	}
+	clear(values)
+	m.slices = values[:0]
+	return nil
 }
 
 // value returns a buffered encoded leaf's value of row, nil when NULL.
@@ -422,21 +779,27 @@ func (m *variantMerge) join(i int, names []int32) {
 // variant.MetadataBuilder encodes one (VariantEncoding.md, Metadata
 // encoding): version 1 with sorted_strings set.
 func (m *variantMerge) appendMetadata(dst []byte, names []int32) []byte {
+	return appendVariantMetadata(dst, len(names), func(i int) string { return m.names[names[i]] })
+}
+
+// appendVariantMetadata encodes n names, sorted, of which name returns the
+// i-th.
+func appendVariantMetadata(dst []byte, n int, name func(int) string) []byte {
 	total := 0
-	for _, name := range names {
-		total += len(m.names[name])
+	for i := range n {
+		total += len(name(i))
 	}
-	size := variantWidth(max(total, len(names)))
+	size := variantWidth(max(total, n))
 	dst = append(dst, 1|1<<4|byte(size-1)<<6)
-	dst = binary.LittleEndian.AppendUint32(dst, uint32(len(names)))[:len(dst)+size]
+	dst = binary.LittleEndian.AppendUint32(dst, uint32(n))[:len(dst)+size]
 	offset := 0
-	for _, name := range names {
+	for i := range n {
 		dst = binary.LittleEndian.AppendUint32(dst, uint32(offset))[:len(dst)+size]
-		offset += len(m.names[name])
+		offset += len(name(i))
 	}
 	dst = binary.LittleEndian.AppendUint32(dst, uint32(offset))[:len(dst)+size]
-	for _, name := range names {
-		dst = append(dst, m.names[name]...)
+	for i := range n {
+		dst = append(dst, name(i)...)
 	}
 	return dst
 }

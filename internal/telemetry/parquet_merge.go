@@ -22,7 +22,8 @@ import (
 // or wide-row conversion is needed.
 // Columns own their input cursors and output buffers; only footer publication
 // is serial. At most eight columns decode/encode at once, sharing the existing
-// compression pool and preserving the ingest writer's row-group ceiling.
+// compression pool and preserving the ingest writer's row-group ceiling, and
+// the columns' open readers are bounded (mergeReaderBudget).
 func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string, stats *ParquetMergeStats) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -39,6 +40,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	schema := s.schema
 	var spilled spills
 	var groups []parquet.RowGroup
+	var groupFiles []io.ReaderAt
 	var chunkBytes []format.RowGroup // by group: its footer metadata
 	for _, input := range inputs {
 		if err := ctx.Err(); err != nil {
@@ -53,7 +55,7 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		if e != nil {
 			return e
 		}
-		pf, e := parquet.OpenFile(f, info.Size(), parquet.ReadBufferSize(16<<10), parquet.OptimisticRead(true))
+		pf, e := parquet.OpenFile(f, info.Size(), parquet.ReadBufferSize(chunkReadBuffer), parquet.OptimisticRead(true))
 		if e != nil {
 			return e
 		}
@@ -68,6 +70,9 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 			spilled[bit] += n
 		}
 		groups = append(groups, pf.RowGroups()...)
+		for range pf.RowGroups() {
+			groupFiles = append(groupFiles, f)
+		}
 		chunkBytes = append(chunkBytes, pf.Metadata().RowGroups...)
 	}
 	out, err := os.OpenFile(output, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
@@ -126,8 +131,8 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	columns := make([]mergeColumn, len(schema.Columns()))
 	for i, path := range schema.Columns() {
 		leaf, _ := schema.Lookup(path...)
-		columns[i] = mergeColumn{column: i, repeated: leaf.MaxRepetitionLevel > 0, groups: groups,
-			readers: make([]parquet.ColumnChunkValueReader, len(groups)), remaining: make([]int64, len(groups))}
+		columns[i] = mergeColumn{column: i, repeated: leaf.MaxRepetitionLevel > 0, groups: groups, files: groupFiles, meta: chunkBytes,
+			readers: make([]parquet.ColumnChunkValueReader, len(groups)), remaining: make([]int64, len(groups)), started: make([]bool, len(groups))}
 		if columns[i].repeated {
 			columns[i].pending = make([][]parquet.Value, len(groups))
 			columns[i].buffers = make([][]parquet.Value, len(groups))
@@ -174,69 +179,153 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 		}
 	}
 	buffered := make([]int64, len(variants))
+	// Work units in schema order: a VARIANT group is one unit.
+	var units []mergeUnit
+	for i := range columns {
+		if !owned[i] {
+			units = append(units, mergeUnit{column: i, width: 1})
+			continue
+		}
+		for _, v := range variants {
+			if v.columns[0].column == i {
+				units = append(units, mergeUnit{variant: v, width: len(v.columns)})
+			}
+		}
+	}
+	active := make([]bool, len(groups))
+	// groupRowBytes is a row's share of its input's compressed bytes.
+	groupRowBytes := make([]int64, len(groups))
+	for g := range groups {
+		if rows := groups[g].NumRows(); rows > 0 {
+			groupRowBytes[g] = (chunkBytes[g].TotalCompressedSize + rows - 1) / rows
+		}
+	}
 	// Give workers a standard, concurrency-safe context even when a caller wraps
 	// Context.Err for instrumentation. Cancellation never leaves workers behind.
 	workerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	runs := make([]mergeRun, 0, parquetRowGroupRows)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		runs = runs[:0]
-		count := 0
-		clear(buffered)
-		full := false
-		for count < parquetRowGroupRows && len(keys) > 0 && !full {
-			c := keys[0]
-			if s.Traces {
-				// The span order leads with the trace hash, then start time.
-				hash, start := c.key.n[0], int64(c.key.n[1]^1<<63)
-				if start > 0 && (stats.MinSpanStartNanos == 0 || start < stats.MinSpanStartNanos) {
-					stats.MinSpanStartNanos = start
+	width := 0
+	for _, u := range units {
+		width += u.width
+	}
+	// A merge that can batch its columns writes a window of row groups per
+	// batch, so that a batch's readers are reopened once per window rather
+	// than once per row group. The window's encoded row groups are held until
+	// they are committed in order.
+	window := 1
+	if len(groups)*width > mergeReaderBudget {
+		window = mergeWindowRowGroups
+	}
+	var rowGroups []*parquet.ConcurrentRowGroupWriter
+	var pending []mergeRowGroup
+	for done := false; !done; {
+		pending = pending[:0]
+		var inputBytes int64
+		for len(pending) < window && inputBytes < mergeWindowBytes {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			var runs []mergeRun
+			if len(pending) < cap(pending) {
+				runs = pending[:len(pending)+1][len(pending)].runs[:0]
+			}
+			count := 0
+			clear(buffered)
+			full := false
+			for count < parquetRowGroupRows && len(keys) > 0 && !full {
+				c := keys[0]
+				if s.Traces {
+					// The span order leads with the trace hash, then start time.
+					hash, start := c.key.n[0], int64(c.key.n[1]^1<<63)
+					if start > 0 && (stats.MinSpanStartNanos == 0 || start < stats.MinSpanStartNanos) {
+						stats.MinSpanStartNanos = start
+					}
+					stats.MaxSpanStartNanos = max(stats.MaxSpanStartNanos, start)
+					if e := index.Append(hash); e != nil {
+						return e
+					}
 				}
-				stats.MaxSpanStartNanos = max(stats.MaxSpanStartNanos, start)
-				if e := index.Append(hash); e != nil {
+				runs = appendMergeRun(runs, c.input, 1)
+				count++
+				inputBytes += groupRowBytes[c.input]
+				for i, n := range rowBytes[c.input] {
+					buffered[i] += n
+					full = full || buffered[i] >= maxVariantRowGroupBytes
+				}
+				has, e := c.next()
+				if e != nil {
 					return e
 				}
+				if has {
+					heap.Fix(&keys, 0)
+				} else {
+					heap.Pop(&keys)
+				}
 			}
-			runs = appendMergeRun(runs, c.input, 1)
-			count++
-			for i, n := range rowBytes[c.input] {
-				buffered[i] += n
-				full = full || buffered[i] >= maxVariantRowGroupBytes
+			if count == 0 {
+				done = true
+				break
 			}
-			has, e := c.next()
-			if e != nil {
-				return e
+			if len(rowGroups) == len(pending) {
+				rowGroups = append(rowGroups, writer.BeginRowGroup())
 			}
-			if has {
-				heap.Fix(&keys, 0)
-			} else {
-				heap.Pop(&keys)
+			pending = append(pending, mergeRowGroup{runs: runs, rows: count, writer: rowGroups[len(pending)]})
+			if len(pending) == 1 && window > 1 {
+				clear(active)
+				if mergeInputs(runs, active)*width <= mergeReaderBudget {
+					break // the row group's readers fit: no batches to share
+				}
 			}
 		}
-		if count == 0 {
+		if len(pending) == 0 {
 			break
 		}
-		writers := writer.ColumnWriters()
-		var work errgroup.Group
-		work.SetLimit(min(8, runtime.GOMAXPROCS(0)))
-		for _, v := range variants {
-			work.Go(func() error { return v.write(workerCtx, writers, runs) })
+		clear(active)
+		inputs := 0
+		for _, rg := range pending {
+			inputs += mergeInputs(rg.runs, active)
 		}
-		for i := range columns {
-			if !owned[i] {
-				work.Go(func() error { return columns[i].write(workerCtx, writers[i], runs) })
+		for _, batch := range mergeBatches(units, inputs) {
+			var work errgroup.Group
+			work.SetLimit(min(8, runtime.GOMAXPROCS(0)))
+			for _, u := range batch {
+				work.Go(func() error {
+					for _, rg := range pending {
+						writers := rg.writer.ColumnWriters()
+						var err error
+						if u.variant != nil {
+							err = u.variant.write(workerCtx, writers, rg.runs)
+						} else {
+							err = columns[u.column].write(workerCtx, writers[u.column], rg.runs)
+						}
+						if err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+			}
+			if e := work.Wait(); e != nil {
+				return e
+			}
+			if len(batch) < len(units) {
+				// Batched: close this batch's readers before the next opens its
+				// own; each resumes at its row in the next window.
+				for _, u := range batch {
+					for _, c := range u.leaves(columns) {
+						if e := c.release(); e != nil {
+							return e
+						}
+					}
+				}
 			}
 		}
-		if e := work.Wait(); e != nil {
-			return e
+		for _, rg := range pending {
+			if _, e := rg.writer.Commit(); e != nil {
+				return e
+			}
+			stats.Rows += int64(rg.rows)
 		}
-		if e := writer.Flush(); e != nil {
-			return e
-		}
-		stats.Rows += int64(count)
 	}
 	spilled.footer(writer, s)
 	if err := writer.Close(); err != nil {
@@ -252,6 +341,76 @@ func mergeParquet(ctx context.Context, s *Signal, inputs []string, output string
 	}
 	ok = true
 	return nil
+}
+
+// mergeReaderBudget bounds the column chunk readers a merge holds open. A
+// reader holds its current page, decoded, and its read-ahead bytes, about 70
+// KB measured on a merge of 95 metric ingest files, which opened one reader
+// per input and leaf column: 7,500 readers and a 556 MB heap peak, most of a
+// compaction's memory under ingest. When an output row group reads more
+// inputs than the budget allows for every column, a window of row groups is
+// written in column batches, each batch's readers closed before the next
+// opens; a reader reopened for the next window seeks to its row through the
+// offset index, decoding its page again. On that merge the heap peak fell to
+// about 300 MB for 6% more CPU time. Merges of a few compacted files stay
+// within the budget and never reopen.
+var mergeReaderBudget = 1024
+
+// mergeUnit is a column, or a VARIANT group, written by one worker.
+type mergeUnit struct {
+	variant *variantMerge
+	column  int
+	width   int // leaf columns
+}
+
+func (u mergeUnit) leaves(columns []mergeColumn) []*mergeColumn {
+	if u.variant != nil {
+		return u.variant.columns
+	}
+	return []*mergeColumn{&columns[u.column]}
+}
+
+// mergeBatches splits units into consecutive batches whose readers, one per
+// input and leaf, fit mergeReaderBudget; a unit too wide for it is a batch of
+// its own.
+func mergeBatches(units []mergeUnit, inputs int) [][]mergeUnit {
+	var batches [][]mergeUnit
+	start, readers := 0, 0
+	for i, u := range units {
+		n := u.width * inputs
+		if i > start && readers+n > mergeReaderBudget {
+			batches = append(batches, units[start:i])
+			start, readers = i, 0
+		}
+		readers += n
+	}
+	return append(batches, units[start:])
+}
+
+// mergeInputs marks the inputs of runs in active and returns how many were
+// not yet marked.
+func mergeInputs(runs []mergeRun, active []bool) int {
+	n := 0
+	for _, run := range runs {
+		if !active[run.input] {
+			active[run.input] = true
+			n++
+		}
+	}
+	return n
+}
+
+// mergeWindowRowGroups and mergeWindowBytes bound the row groups a batched
+// merge writes per window, by count and by their rows' input bytes.
+var mergeWindowRowGroups = 16
+
+const mergeWindowBytes = 64 << 20
+
+// mergeRowGroup is an output row group of a window: its schedule and writer.
+type mergeRowGroup struct {
+	runs   []mergeRun
+	rows   int
+	writer *parquet.ConcurrentRowGroupWriter
 }
 
 // maxVariantRowGroupBytes ends an output row group early once the input
@@ -280,8 +439,11 @@ type mergeColumn struct {
 	column    int
 	repeated  bool
 	groups    []parquet.RowGroup
+	files     []io.ReaderAt     // by input: the file its group is read from
+	meta      []format.RowGroup // by input: its footer metadata
 	readers   []parquet.ColumnChunkValueReader
-	remaining []int64
+	remaining []int64 // by input: rows not yet written, once started
+	started   []bool  // by input: its reader has been opened
 	values    [256]parquet.Value
 	pending   [][]parquet.Value // repeated: read values not yet written, by input
 	buffers   [][]parquet.Value // repeated: the storage pending slices, by input
@@ -304,8 +466,10 @@ func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, r
 		}
 		var err error
 		if c.repeated {
-			c.open(run.input)
-			if err = c.copyRows(writer, run); err == nil {
+			if _, err = c.open(run.input); err == nil {
+				err = c.copyRows(writer, run)
+			}
+			if err == nil {
 				err = c.advance(run)
 			}
 		} else {
@@ -327,15 +491,35 @@ func (c *mergeColumn) write(ctx context.Context, writer *parquet.ColumnWriter, r
 	return writer.Flush()
 }
 
-// open starts reading an input's column chunk on its first run.
-func (c *mergeColumn) open(input int) parquet.ColumnChunkValueReader {
+// open starts reading an input's column chunk on its first run, or resumes
+// at its next row after release.
+func (c *mergeColumn) open(input int) (parquet.ColumnChunkValueReader, error) {
 	r := c.readers[input]
 	if r == nil {
-		r = parquet.NewColumnChunkValueReader(c.groups[input].ColumnChunks()[c.column])
+		r = openChunk(c.files[input], c.groups[input].ColumnChunks()[c.column], &c.meta[input].Columns[c.column].MetaData)
 		c.readers[input] = r
-		c.remaining[input] = c.groups[input].NumRows()
+		if !c.started[input] {
+			c.started[input] = true
+			c.remaining[input] = c.groups[input].NumRows()
+		} else if err := r.SeekToRow(c.groups[input].NumRows() - c.remaining[input]); err != nil {
+			return nil, err
+		}
 	}
-	return r
+	return r, nil
+}
+
+// release closes the column's open readers; open resumes each at the row
+// after the last written. Values a list column read past that row are
+// dropped and read again.
+func (c *mergeColumn) release() error {
+	err := c.close()
+	clear(c.readers)
+	if c.repeated {
+		clear(c.pending)
+		clear(c.buffers)
+		clear(c.eof)
+	}
+	return err
 }
 
 // advance accounts for a run's rows, closing the input's reader after its
@@ -356,7 +540,11 @@ func (c *mergeColumn) advance(run mergeRun) error {
 // readSome reads at most len(dst) values of an input's non-repeated leaf in
 // one read; the caller accounts for them with advance.
 func (c *mergeColumn) readSome(input int, dst []parquet.Value) (int, error) {
-	n, err := c.open(input).ReadValues(dst)
+	r, err := c.open(input)
+	if err != nil {
+		return 0, err
+	}
+	n, err := r.ReadValues(dst)
 	if n > 0 && (err == nil || err == io.EOF) {
 		return n, nil
 	}
@@ -372,7 +560,10 @@ func (c *mergeColumn) readSome(input int, dst []parquet.Value) (int, error) {
 // read passes a run's values of a non-repeated leaf, one per row, to fn in
 // order. The values borrow the reader's page and must not be retained.
 func (c *mergeColumn) read(run mergeRun, fn func([]parquet.Value) error) error {
-	r := c.open(run.input)
+	r, err := c.open(run.input)
+	if err != nil {
+		return err
+	}
 	for remaining := run.rows; remaining > 0; {
 		n, e := r.ReadValues(c.values[:min(remaining, len(c.values))])
 		if n > 0 {
