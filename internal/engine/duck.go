@@ -1462,6 +1462,10 @@ WHERE bucket >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
       AND a.service = service_rollup.service
 );`
 
+// Aggregate each bounded signal scan before the final affected-bucket joins.
+// Schema-first Parquet scans can have a zero cardinality estimate in DuckDB 2;
+// joining raw events to the affected table can then build a hash table of every
+// event. The final joins already restrict the result to the affected keys.
 var serviceRollupInsertSQL = `
 WITH span_agg AS (
   SELECT
@@ -1485,13 +1489,9 @@ WITH span_agg AS (
     ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
-  JOIN service_pass_affected a
-    ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
-   AND a.service = s.service
   -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
-  -- start_time stats instead of scanning all history (the join on a computed
-  -- date_trunc bucket alone does not prune). The range is a provable superset
+  -- start_time stats instead of scanning all history. The final join on a
+  -- computed bucket alone does not prune. The range is a provable superset
   -- of the affected buckets — every row in an affected bucket has start_time in
   -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
   -- old start_time widens the range (and this scan) only for the pass that
@@ -1507,10 +1507,6 @@ log_agg AS (
     l.service,
     COUNT(*) AS log_count
   FROM logs l
-  JOIN service_pass_affected a
-    ON a.namespace = l.namespace
-   AND a.bucket = date_trunc('minute', l.time::TIMESTAMP_NS)
-   AND a.service = l.service
   WHERE l.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND l.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY l.namespace, date_trunc('minute', l.time::TIMESTAMP_NS), l.service
@@ -1522,10 +1518,6 @@ metric_agg AS (
     m.service,
     COUNT(DISTINCT m.name) AS metric_count
   FROM metrics m
-  JOIN service_pass_affected a
-    ON a.namespace = m.namespace
-   AND a.bucket = date_trunc('minute', m.time::TIMESTAMP_NS)
-   AND a.service = m.service
   WHERE m.time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND m.time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   GROUP BY m.namespace, date_trunc('minute', m.time::TIMESTAMP_NS), m.service
