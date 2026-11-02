@@ -213,7 +213,7 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 					return nil, status.Error(codes.InvalidArgument, err.Error())
 				}
 				body := bodyString(lr.Body)
-				tmpl := safeNormalizeTemplate(body)
+				tmpl := templates.template(body)
 				row := telemetry.Log{
 					Namespace:         namespace,
 					TimeUnixNanos:     int64(lr.TimeUnixNano),
