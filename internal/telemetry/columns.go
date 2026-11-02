@@ -40,6 +40,7 @@ type Column struct {
 	List     bool         // a nullable LIST of Type elements
 	Dict     bool         // dictionary-encoded; see the encoding note below
 	Delta    bool         // DELTA_BINARY_PACKED: an integer instant or count of nanoseconds
+	Dense    bool         // compressed with parquetDenseCodec
 	Shred    []string     // VARIANT object keys also stored as typed columns
 	Expr     string       // raw-relation expression over stored columns
 	Private  bool         // part of the file layout only; no relation exposes it
@@ -344,18 +345,18 @@ var Metrics = &Signal{
 		}).dict(),
 		list("hist_counts", Uint64, func(r *Metric, b []uint64) ([]uint64, bool) {
 			return append(b, r.Counts...), r.Type == "histogram" && !r.Exponential
-		}),
+		}).dense(),
 		nullable("exp_scale", Int32, func(r *Metric) (int32, bool) { return r.Scale, r.Exponential }),
 		nullable("exp_zero_count", Uint64, func(r *Metric) (uint64, bool) { return r.ZeroCount, r.Exponential }),
 		nullable("exp_zero_threshold", Float64, func(r *Metric) (float64, bool) { return r.ZeroThreshold, r.Exponential }),
 		nullable("exp_positive_offset", Int32, func(r *Metric) (int32, bool) { return r.PositiveOffset, r.Exponential }),
 		list("exp_positive_counts", Uint64, func(r *Metric, b []uint64) ([]uint64, bool) {
 			return append(b, r.PositiveCounts...), r.Exponential
-		}),
+		}).dense(),
 		nullable("exp_negative_offset", Int32, func(r *Metric) (int32, bool) { return r.NegativeOffset, r.Exponential }),
 		list("exp_negative_counts", Uint64, func(r *Metric, b []uint64) ([]uint64, bool) {
 			return append(b, r.NegativeCounts...), r.Exponential
-		}),
+		}).dense(),
 		list("quantiles", Float64, func(r *Metric, b []float64) ([]float64, bool) {
 			return append(b, r.Quantiles...), r.Type == "summary"
 		}).parallel("quantiles").dict(),
@@ -454,6 +455,7 @@ func dedicated(scopes ...semconv.Scope) []Column {
 func (c Column) dict() Column                 { c.Dict = true; return c }
 func (c Column) parallel(group string) Column { c.Parallel = group; return c }
 func (c Column) delta() Column                { c.Delta = true; return c }
+func (c Column) dense() Column                { c.Dense = true; return c }
 func (c Column) private() Column              { c.Private, c.View = true, Field{}; return c }
 
 func (c Column) view(f Field) Column { c.View = f; return c }
@@ -501,6 +503,9 @@ func buildSchema(s *Signal) *parquet.Schema {
 			}
 			if c.Delta {
 				node = parquet.Encoded(node, &parquet.DeltaBinaryPacked)
+			}
+			if c.Dense {
+				node = parquet.Compressed(node, parquetDenseCodec)
 			}
 		}
 		switch {

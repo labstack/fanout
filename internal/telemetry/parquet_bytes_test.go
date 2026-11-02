@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,7 +112,18 @@ func TestLanesWriteTheSingleLaneBytes(t *testing.T) {
 }
 
 func writeDigestFile[R any](path string, s *Signal, rows []R) error {
-	return writeParquet(path, s, rows, parquetPageSize, parquet.Compression(&parquet.Uncompressed))
+	return writeParquet(path, s, rows, parquetPageSize, parquet.Compression(&parquet.Uncompressed), uncompressedSchema(s))
+}
+
+// uncompressedSchema is the signal's schema without the dense columns' own
+// codec (parquetDenseCodec), so that every page takes the default codec.
+func uncompressedSchema(s *Signal) *parquet.Schema {
+	plain := *s
+	plain.Columns = slices.Clone(s.Columns)
+	for i := range plain.Columns {
+		plain.Columns[i].Dense = false
+	}
+	return buildSchema(&plain)
 }
 
 // digestRows covers the writer's paths: chunks and sparse dedicated keys,

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
@@ -114,5 +115,45 @@ func TestSpanDictionaryFallsBackToPlainPastItsBound(t *testing.T) {
 	}
 	if len(routes) != len(spans) || !routes[spans[len(spans)-1].Attributes["http.route"].(string)] {
 		t.Fatalf("read back %d distinct routes, want %d", len(routes), len(spans))
+	}
+}
+
+// Histogram bucket counts of hundreds or more fill two bytes of each
+// eight-byte slot; the dense codec stores them in a third of the fastest
+// level's bytes.
+func TestDenseCodecCompressesBucketCounts(t *testing.T) {
+	// Cumulative points of 40 series, of which a few buckets grow between
+	// points, as exported histograms do; rows sort by series, then time.
+	r := rand.New(rand.NewSource(3))
+	rows := make([]Metric, 0, 20_000)
+	for series := range 40 {
+		counts := make([]uint64, 90)
+		for point := range 500 {
+			for range 10 {
+				counts[r.Intn(len(counts))] += uint64(r.Intn(40))
+			}
+			rows = append(rows, Metric{Name: "latency", Type: "histogram", Temporality: "cumulative", SeriesID: uint64(series),
+				TimeUnixNanos: int64(point + 1), Histogram: Histogram{Exponential: true, Count: 1, PositiveCounts: slices.Clone(counts)}})
+		}
+	}
+	size := func(options ...parquet.WriterOption) int64 {
+		path := filepath.Join(t.TempDir(), "metrics.parquet")
+		if err := writeParquet(path, Metrics, rows, parquetPageSize, options...); err != nil {
+			t.Fatal(err)
+		}
+		file := openParquetFile(t, path)
+		var total int64
+		for _, group := range file.Metadata().RowGroups {
+			for _, chunk := range group.Columns {
+				if chunk.MetaData.PathInSchema[0] == "exp_positive_counts" {
+					total += chunk.MetaData.TotalCompressedSize
+				}
+			}
+		}
+		return total
+	}
+	dense, fastest := size(), size(uncompressedSchema(Metrics))
+	if float64(dense) > 0.7*float64(fastest) {
+		t.Fatalf("dense counts take %d bytes, the fastest level %d", dense, fastest)
 	}
 }
