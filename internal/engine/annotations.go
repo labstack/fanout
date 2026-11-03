@@ -502,14 +502,14 @@ func drainVersionRollup(ctx context.Context, refresh func(context.Context) (int6
 }
 
 func (d *Duck) transferVersionMarker(ctx context.Context, output telemetry.BatchMetadata, inputs []string) error {
-	unlock, err := d.writeGate.LockContext(ctx, writegate.RollupVersion)
-	if err != nil {
-		return err
+	unlock := d.writeGate.TryLock(writegate.RollupVersion)
+	if unlock == nil {
+		return nil
 	}
 	defer unlock()
-	background, err := d.lockBackground(ctx)
-	if err != nil {
-		return err
+	background := d.tryLockBackground()
+	if background == nil {
+		return nil
 	}
 	defer background()
 

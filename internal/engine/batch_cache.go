@@ -472,18 +472,21 @@ func newestBatchEvent(b telemetry.BatchMetadata) int64 {
 	return newest
 }
 
-// PublishParquetReplacement derives the output cache from complete inputs before
-// the namespace swap. The pending publication set protects still-inactive
-// output contributions without holding the write gate during reader drain.
-// Readers use active IDs, so either namespace sees exactly one set of contributions. After
-// a crash, an absent output marker simply causes a rebuild from the output file.
+// PublishParquetReplacement opportunistically derives output caches from complete
+// inputs before the namespace swap. Busy writers leave the output cold instead
+// of delaying publication. The pending set protects still-inactive output
+// contributions. Readers use active IDs, so either namespace sees exactly one
+// set of contributions. An absent marker, including after a crash, causes a
+// rebuild from the output file.
 func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.BatchMetadata, inputs []string, publish func(context.Context) error) error {
 	if len(inputs) == 0 {
 		return d.PublishParquet(ctx, publish)
 	}
-	unlock, err := d.cacheGate.LockContext(ctx, writegate.ReadCache)
-	if err != nil {
-		return err
+	// Transfers only save rebuilding disposable caches from the output. Never
+	// queue the filesystem transaction behind a reader's cache/write lease.
+	unlock := d.cacheGate.TryLock(writegate.ReadCache)
+	if unlock == nil {
+		return d.PublishParquet(ctx, publish)
 	}
 	d.cachePublishMu.Lock()
 	if d.cachePublishing == nil {
@@ -503,9 +506,9 @@ func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.B
 }
 
 func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []string) error {
-	background, err := d.lockBackground(ctx)
-	if err != nil {
-		return err
+	background := d.tryLockBackground()
+	if background == nil {
+		return nil
 	}
 	defer background()
 	tx, err := d.writer().BeginTx(ctx, nil)

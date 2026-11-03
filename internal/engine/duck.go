@@ -541,6 +541,18 @@ func (d *Duck) lockBackground(ctx context.Context) (func(), error) {
 	}
 }
 
+// tryLockBackground leaves optional publication-cache transfers to the normal
+// refresh workers when a scan is already using the background SQL budget.
+func (d *Duck) tryLockBackground() func() {
+	d.backgroundOnce.Do(func() { d.backgroundSlots = make(chan struct{}, 1) })
+	select {
+	case d.backgroundSlots <- struct{}{}:
+		return func() { <-d.backgroundSlots }
+	default:
+		return nil
+	}
+}
+
 // writer returns the dedicated write handle initialized by NewDuck.
 func (d *Duck) writer() *sql.DB { return d.writeDB }
 

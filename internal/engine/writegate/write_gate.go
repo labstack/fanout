@@ -56,6 +56,23 @@ func (g *Gate) Lock(operation Operation) func() {
 	return unlock
 }
 
+// TryLock acquires an idle gate, returning nil when another writer owns it.
+// Optional cache work must not delay authoritative Parquet publication.
+func (g *Gate) TryLock(operation Operation) func() {
+	g.init()
+	select {
+	case <-g.token:
+		acquired := time.Now()
+		return func() {
+			hold := time.Since(acquired)
+			g.token <- struct{}{}
+			observe(string(operation), 0, hold.Seconds())
+		}
+	default:
+		return nil
+	}
+}
+
 // LockContext acquires the cache write gate, or returns when ctx expires.
 func (g *Gate) LockContext(ctx context.Context, operation Operation) (func(), error) {
 	g.init()
