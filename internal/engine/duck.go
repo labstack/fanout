@@ -28,9 +28,10 @@ import (
 )
 
 type Duck struct {
-	readPressure    readpressure.Signal
-	backgroundOnce  sync.Once
-	backgroundSlots chan struct{}
+	readPressure     readpressure.Signal
+	cachePassStarted bool // protected by cacheGate
+	backgroundOnce   sync.Once
+	backgroundSlots  chan struct{}
 	// fatal carries the first error after which DuckDB refuses all work until
 	// the process restarts. The query cache is rebuildable from Parquet.
 	fatal           chan error

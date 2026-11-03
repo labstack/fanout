@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/labstack/fanout/internal/readpressure"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"testing"
 	"time"
 )
@@ -11,32 +13,37 @@ import (
 func TestReadCacheYieldsBetweenCompleteBatches(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	for _, id := range []string{"one", "two"} {
-		if err := repo.Commit(t.Context(), resourceBatch(id, []int64{10}, nil)); err != nil {
+		logs := make([]telemetry.Log, readCacheRowBudget+1)
+		for i := range logs {
+			logs[i] = telemetry.Log{TimeUnixNanos: int64(i + 1), ServiceName: "api"}
+		}
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: id, Logs: logs}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	checks := 0
 	d.SetReadPressure(func() bool {
 		checks++
-		if checks == 1 {
-			var n int
-			if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&n); err != nil || n != 1 {
-				t.Errorf("previous batch not committed before yield: %d %v", n, err)
-			}
+		var n int
+		if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&n); err != nil || n != 1 {
+			t.Errorf("previous cache chunk not committed: %d %v", n, err)
 		}
 		return false
 	})
-	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if checks != 1 {
-		t.Fatalf("pressure checked %d times for two batches", checks)
+		t.Fatalf("pressure checked %d times for two chunks", checks)
 	}
 	var n int
 	if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("pass skipped batches: %d %v", n, err)
+		t.Fatalf("cache pass skipped batches: %d %v", n, err)
 	}
 }
+
 func TestAffectedKeysYieldsEveryChunk(t *testing.T) {
 	db := openTestDuck(t)
 	var signal readpressure.Signal

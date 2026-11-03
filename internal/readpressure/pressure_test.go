@@ -17,7 +17,7 @@ func TestYieldBoundAndRecovery(t *testing.T) {
 			waits++
 			return nil
 		})
-		if err != nil || waits != min(n, 4) {
+		if err != nil || waits != min(n, 1) {
 			t.Fatalf("pressure=%d waits=%d err=%v", n, waits, err)
 		}
 	}

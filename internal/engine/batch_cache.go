@@ -239,22 +239,16 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 	if err != nil {
 		return 0, false, err
 	}
-	for i, b := range pending {
-		if i > 0 {
-			if err := d.readPressure.Yield(ctx); err != nil {
-				return rows, true, err
-			}
+	// Keep the bounded multi-file SQL kernel: per-file transactions spend
+	// more time preparing statements than aggregating rows under steady ingest.
+	// Yield between these cache batches, never before the first unit of work.
+	if d.cachePassStarted {
+		if err := d.readPressure.Yield(ctx); err != nil {
+			return 0, true, err
 		}
-		n, e := d.cacheBatches(ctx, []telemetry.BatchMetadata{b}, stale, changed)
-		rows += n
-		if e != nil {
-			return rows, true, e
-		}
-		stale, changed = nil, nil
 	}
-	if len(pending) == 0 {
-		rows, err = d.cacheBatches(ctx, nil, stale, changed)
-	}
+	d.cachePassStarted = true
+	rows, err = d.cacheBatches(ctx, pending, stale, changed)
 
 	return rows, err == nil && selected < pendingCount, err
 }

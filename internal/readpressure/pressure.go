@@ -23,12 +23,12 @@ func pause(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// Four quarter-second pauses cap each chunk's delay without skipping its work.
+// One quarter-second pause gives foreground work a turn without extending a
+// chunk's delay when pressure persists. Work always resumes after the pause;
+// the delay stays below the one-second per-chunk ceiling.
 func yield(ctx context.Context, pressure func() bool, wait func(context.Context, time.Duration) error) error {
-	for i := 0; i < 4 && pressure(); i++ {
-		if err := wait(ctx, 250*time.Millisecond); err != nil {
-			return err
-		}
+	if pressure() {
+		return wait(ctx, 250*time.Millisecond)
 	}
 	return ctx.Err()
 }
