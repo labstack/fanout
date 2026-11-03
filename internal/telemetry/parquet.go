@@ -121,7 +121,6 @@ type ParquetStore struct {
 	generation0Snapshot atomic.Int64
 	generation0ByWindow map[int64]int
 	compactionDebt      int
-	debtChanged         chan struct{}
 	debtLimitReached    chan struct{}
 	// Guarded by mu: the replaces list of every compacted directory still in
 	// the batch namespace, and the inverse from each listed input to it.

@@ -68,7 +68,6 @@ func (p *ParquetStore) changeGeneration0Locked(b BatchMetadata, delta int) {
 // setBatchLocked is the sole live-catalog mutation. Replacement, restoration,
 // rollback, startup and retention all use the same inventory accounting.
 func (p *ParquetStore) setBatchLocked(id string, batch *storedBatch) {
-	debtBefore := p.compactionDebt
 	if old := p.batches[id]; old != nil {
 		p.changeGeneration0Locked(old.metadata, -1)
 	}
@@ -79,10 +78,6 @@ func (p *ParquetStore) setBatchLocked(id string, batch *storedBatch) {
 		p.changeGeneration0Locked(batch.metadata, 1)
 	}
 	p.generation0Snapshot.Store(int64(p.generation0Batches))
-	if p.compactionDebt < debtBefore && p.debtChanged != nil {
-		close(p.debtChanged)
-		p.debtChanged = nil
-	}
 	if p.compactionDebt >= CompactionDebtLimit && p.debtLimitReached != nil {
 		close(p.debtLimitReached)
 		p.debtLimitReached = nil
@@ -109,34 +104,5 @@ func (p *ParquetStore) WaitForCompactionLimit(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	}
-}
-
-// WaitForCompaction releases the catalog lock before sleeping and wakes on a
-// debt retirement or cancellation. No storage lock or query gate is held.
-func (p *ParquetStore) WaitForCompaction(ctx context.Context) (time.Duration, error) {
-	var began time.Time
-	for {
-		p.mu.Lock()
-		if p.compactionDebt < CompactionDebtLimit {
-			p.mu.Unlock()
-			if began.IsZero() {
-				return 0, ctx.Err()
-			}
-			return time.Since(began), ctx.Err()
-		}
-		if p.debtChanged == nil {
-			p.debtChanged = make(chan struct{})
-		}
-		changed := p.debtChanged
-		p.mu.Unlock()
-		if began.IsZero() {
-			began = time.Now()
-		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return time.Since(began), ctx.Err()
-		}
 	}
 }

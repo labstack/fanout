@@ -135,10 +135,6 @@ func (r *Repository) Close() error {
 	return r.Parquet.Close()
 }
 
-func (r *Repository) WaitForCompaction(ctx context.Context) (time.Duration, error) {
-	return r.Parquet.WaitForCompaction(ctx)
-}
-
 func (r *Repository) CompactionDebt() int { return r.Parquet.CompactionDebt() }
 
 // CleanupParquet removes retired inputs only while no retention or compaction

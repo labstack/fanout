@@ -37,11 +37,11 @@ type batchCommitter interface {
 }
 
 type compactionPressure interface {
-	WaitForCompaction(context.Context) (time.Duration, error)
 	CompactionDebt() int
 }
 
 type Writer struct {
+	admission      *ingestAdmission
 	inFlightBudget int
 	inFlightBytes  atomic.Int64
 	repository     batchCommitter
@@ -152,10 +152,14 @@ func (w *Writer) release(bytes int) {
 }
 
 func NewWriter(repository *Repository, batchSize int) *Writer {
-	return &Writer{
+	w := &Writer{
 		repository: repository, batchSize: batchSize, groupWindow: groupAdmissionWindow,
 		done: make(chan struct{}), stopping: make(chan struct{}), submissions: make(chan *submission, submissionQueueDepth),
 	}
+	if repository != nil {
+		w.SetAdmission(repository.CompactionDebt, nil, nil)
+	}
+	return w
 }
 
 // SetInFlightBudget caps the decoded telemetry the writer will hold across
@@ -177,6 +181,11 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	// The caller owns the reservation until enqueue succeeds. The queue and
 	// then the commit job retain it until a commit claims the request or the
 	// caller abandons it.
+	if !consumeAdmission(ctx, w, batchRows(batch)) {
+		if err := w.Admit(ctx, batchRows(batch)); err != nil {
+			return err
+		}
+	}
 	request := newSubmission(ctx, batch)
 	if err := w.reserve(request.bytes); err != nil {
 		return err
@@ -235,6 +244,20 @@ func (w *Writer) Run(ctx context.Context) error {
 		}
 	}()
 	w.compaction, _ = w.repository.(compactionPressure)
+	if w.admission != nil {
+		ticker := time.NewTicker(admissionInterval)
+		defer ticker.Stop()
+		go func() {
+			for {
+				select {
+				case <-ticker.C:
+					w.admission.update()
+				case <-w.done:
+					return
+				}
+			}
+		}()
+	}
 	jobs := make(chan commitJob, commitQueueDepth)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
@@ -270,15 +293,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 
 	for {
-		if w.compaction != nil {
-			waited, err := w.compaction.WaitForCompaction(ctx)
-			if waited > 0 {
-				metrics.IngestBackpressureSeconds.Add(waited.Seconds())
-			}
-			if err != nil {
-				return finish(true)
-			}
-		}
+
 		select {
 		case request := <-w.submissions:
 			metrics.UpdateQueueDepth("batch", len(w.submissions))

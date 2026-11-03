@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,9 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type blockedCompactionCommitter struct {
@@ -26,76 +25,16 @@ func (s *blockedCompactionCommitter) Commit(context.Context, Batch) error {
 }
 func (s *blockedCompactionCommitter) CompactionDebt() int { return 0 }
 
-func (s *blockedCompactionCommitter) WaitForCompaction(ctx context.Context) (time.Duration, error) {
-	select {
-	case s.entered <- struct{}{}:
-	default:
-	}
-	at := time.Now()
-	select {
-	case <-s.release:
-		return time.Since(at), nil
-	case <-ctx.Done():
-		return time.Since(at), ctx.Err()
-	}
-}
-func TestWriterBackpressureKeepsSubmissionsQueuedAndHonorsContexts(t *testing.T) {
-	before := testutil.ToFloat64(metrics.IngestBackpressureSeconds)
-	s := &blockedCompactionCommitter{entered: make(chan struct{}, 1), release: make(chan struct{}), committed: make(chan struct{})}
+func TestWriterRefusesQuicklyAtTheDebtLimit(t *testing.T) {
 	w := NewWriter(nil, 50000)
-	w.repository = s
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx) }()
-	<-s.entered
-	abandoned := testutil.ToFloat64(metrics.IngestAbandonedTotal)
-	submitCtx, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer stop()
-	if err := w.Submit(submitCtx, testBatch()); err != context.DeadlineExceeded {
+	w.SetAdmission(func() int { return telemetry.CompactionDebtLimit }, nil, nil)
+	err := w.Submit(t.Context(), testBatch())
+	var throttled *ErrIngestThrottled
+	if !errors.As(err, &throttled) || throttled.Reason != "debt" || throttled.RetryAfter != 2*time.Second {
 		t.Fatalf("submit=%v", err)
 	}
-	if len(w.submissions) != 1 {
-		t.Fatalf("queued=%d", len(w.submissions))
-	}
-	select {
-	case <-s.committed:
-		t.Fatal("committed while debt blocked")
-	default:
-	}
-	close(s.release)
-	// The sender gave up while queued, so its request is dropped unwritten and
-	// its retry is the only copy.
-	if err := w.Submit(t.Context(), testBatch()); err != nil {
-		t.Fatalf("retirement did not unblock writer: %v", err)
-	}
-	if got := testutil.ToFloat64(metrics.IngestAbandonedTotal) - abandoned; got != 1 {
-		t.Fatalf("abandoned=%v want 1", got)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if testutil.ToFloat64(metrics.IngestBackpressureSeconds) <= before {
-		t.Fatal("writer wait time not counted")
-	}
-}
-func TestWriterBackpressureStopsOnShutdown(t *testing.T) {
-	s := &blockedCompactionCommitter{entered: make(chan struct{}, 1), release: make(chan struct{}), committed: make(chan struct{})}
-	w := NewWriter(nil, 50000)
-	w.repository = s
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx) }()
-	<-s.entered
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("shutdown stuck behind debt")
+	if len(w.submissions) != 0 || w.inFlightBytes.Load() != 0 {
+		t.Fatal("refused request retained")
 	}
 }
 func TestCompactionPressureDrainsGenerationZeroBeforeHigherGenerations(t *testing.T) {
@@ -181,9 +120,6 @@ type pressureRecordingCommitter struct {
 	debt atomic.Int64
 }
 
-func (c *pressureRecordingCommitter) WaitForCompaction(ctx context.Context) (time.Duration, error) {
-	return 0, ctx.Err()
-}
 func (c *pressureRecordingCommitter) CompactionDebt() int { return int(c.debt.Load()) }
 
 func TestWriterAdaptsAdmissionToReclaimableDebt(t *testing.T) {
@@ -355,8 +291,6 @@ func TestWriterAbandonReleasesBudgetForRetry(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- w.Run(ctx) }()
-	<-s.entered
 	submitCtx, stop := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer stop()
 	if err := w.Submit(submitCtx, testBatch()); err != context.DeadlineExceeded {
@@ -368,7 +302,7 @@ func TestWriterAbandonReleasesBudgetForRetry(t *testing.T) {
 	retry := make(chan error, 1)
 	go func() { retry <- w.Submit(t.Context(), testBatch()) }()
 	time.Sleep(20 * time.Millisecond)
-	close(s.release)
+	go func() { done <- w.Run(ctx) }()
 	if err := <-retry; err != nil {
 		t.Fatalf("retry=%v", err)
 	}
