@@ -421,7 +421,7 @@ const failureCases = [
   {name: "unintentional abort", failure: new DOMException("Request aborted", "AbortError"), retryable: true},
   ...[408, 429, 500, 504].map(status => ({name: "HTTP " + status, failure: new ApiError("Request failed", status), retryable: true})),
   {name: "missing result", message: undefined, retryable: true},
-  {name: "server busy", message: "Not run: other queries kept the server busy for 20 seconds. Refresh to try again.", retryable: true},
+  {name: "server busy", message: "Not run: other queries kept the server busy. Refresh to try again.", retryable: true},
   {name: "query execution timeout", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: true},
   {name: "server retryable failure", message: "Transient failure with new wording", retryable: true},
   {name: "timeout explicitly not retryable", message: "The query took longer than 10 seconds. Narrow the time range or add filters.", retryable: false},
@@ -547,7 +547,7 @@ it("merges new batches after remounting a cached panel query", async () => {
 // in the same batch that starved them: they follow the rest in small groups.
 it("reruns busy panels after the rest in small groups, stopping when the server is still busy", async () => {
   const spec: DashboardSpec = {version: 1, name: "Busy", time: {range: "1h"}, panels: ["a", "b", "c", "d", "e", "f"].map(id => ({id, title: id, viz: "stat" as const, query: {from: "spans" as const, measures: ["count()"]}}))};
-  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: other queries kept the server busy for 20 seconds. Refresh to try again.", reason: "busy", retryable: true});
+  const busy = (id: string): PanelResult => ({id, status: "error", elapsed_ms: 0, error: "Not run: other queries kept the server busy. Refresh to try again.", reason: "busy", retryable: true});
   wire.panels.mockResolvedValueOnce([resultFor("a"), resultFor("b"), ...["c", "d", "e", "f"].map(busy)]);
   const host = await mountVisibility(spec.panels.map(p => p.id), spec);
   try {

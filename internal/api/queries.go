@@ -174,7 +174,7 @@ func panelError(c *echo.Context, err error, unavailable string) error {
 		// come back rather than answer a page of busy panels.
 		return busyError(c)
 	case errors.Is(err, context.DeadlineExceeded):
-		return echo.NewHTTPError(http.StatusGatewayTimeout, "Panels took longer than 20 seconds. Narrow the time range or reduce the number of panels.").Wrap(err)
+		return echo.NewHTTPError(http.StatusGatewayTimeout, query.BatchTimeoutError).Wrap(err)
 	case errors.Is(err, context.Canceled):
 		// The client is gone; there is nobody to answer.
 		return nil

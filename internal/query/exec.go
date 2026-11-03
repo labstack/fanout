@@ -28,9 +28,11 @@ type Engine interface {
 }
 
 const (
-	StatusOK    = "ok"
-	StatusEmpty = "empty"
-	StatusError = "error"
+	defaultPanelTimeout = 10 * time.Second
+	defaultBatchTimeout = 12 * time.Second
+	StatusOK            = "ok"
+	StatusEmpty         = "empty"
+	StatusError         = "error"
 )
 
 type RunRequest struct {
@@ -122,7 +124,7 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 		slots, queue = config.QueryAdmission(pool.ReadConnections())
 	}
 	life, stop := context.WithCancel(context.Background())
-	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: 10 * time.Second, batchTimeout: 20 * time.Second, parallel: 4,
+	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: defaultPanelTimeout, batchTimeout: defaultBatchTimeout, parallel: 4,
 		slots: semaphore.NewWeighted(int64(slots)), queueBound: int64(queue), cache: newResultCache(), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
 		life: life, stop: stop, discoveries: make(chan struct{}, 2), discoverWait: time.Minute, discoverRun: 25 * time.Second}
 }
@@ -503,6 +505,9 @@ func busyResult(p *Panel) Result {
 
 // ReasonBusy marks a result that was not run because of BatchDeadlineError.
 const ReasonBusy = "busy"
+
+// BatchTimeoutError describes the shared response budget.
+const BatchTimeoutError = "Panels took longer than 12 seconds. Narrow the time range or reduce the number of panels."
 
 // TimeoutError describes the executor's per-panel time limit.
 const TimeoutError = "The query took longer than 10 seconds. Narrow the time range or add filters."

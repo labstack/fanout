@@ -686,7 +686,7 @@ it("says a refresh the server turned away was skipped instead of reporting a fai
   expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("120");
  }, { interval: 5, timeout: 3000 });
  // Every panel shed busy while the cards still hold the earlier run.
- panelResponse=async()=>json({results:[{id:"requests",status:"error",reason:"busy",retryable:true,error:"Not run: other queries kept the server busy for 20 seconds. Refresh to try again.",elapsed_ms:0},{id:"latency",status:"error",reason:"busy",retryable:true,error:"Not run: other queries kept the server busy for 20 seconds. Refresh to try again.",elapsed_ms:0}]});
+ panelResponse=async()=>json({results:[{id:"requests",status:"error",reason:"busy",retryable:true,error:"Not run: other queries kept the server busy. Refresh to try again.",elapsed_ms:0},{id:"latency",status:"error",reason:"busy",retryable:true,error:"Not run: other queries kept the server busy. Refresh to try again.",elapsed_ms:0}]});
  await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Refresh now"]')!.click();});await settle(client);
  await vi.waitFor(() => expect(host.querySelector("[data-refresh-skipped]")?.textContent).toMatch(/The server was busy, so the latest refresh was skipped\. Marked panels show data from .+\./), { interval: 5, timeout: 3000 });
  expect(host.textContent).not.toContain("Panels could not be loaded");

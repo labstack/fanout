@@ -130,7 +130,7 @@ func TestPanelQueryRouteStreamsWhenAsked(t *testing.T) {
 
 func TestPanelQueryOperationalErrors(t *testing.T) {
 	rec := servePanels(t, &fakePanels{err: context.DeadlineExceeded}, http.MethodPost, "/api/queries/run", `{"dashboard":{"name":"x","panels":[]}}`)
-	if rec.Code != http.StatusGatewayTimeout || !strings.Contains(rec.Body.String(), `"code":"timeout"`) {
+	if rec.Code != http.StatusGatewayTimeout || !strings.Contains(rec.Body.String(), `"code":"timeout"`) || !strings.Contains(rec.Body.String(), query.BatchTimeoutError) {
 		t.Fatalf("deadline %d %s", rec.Code, rec.Body)
 	}
 	rec = servePanels(t, &fakePanels{err: context.Canceled}, http.MethodPost, "/api/queries/run", `{"dashboard":{"name":"x","panels":[]}}`)

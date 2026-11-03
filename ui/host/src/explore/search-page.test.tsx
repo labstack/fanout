@@ -104,7 +104,7 @@ describe("SearchPage", () => {
 
   it("words a search the server was too busy to start for this page", async () => {
     const base = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "error", reason: "busy", retryable: true, elapsed_ms: 0, error: "Not run: other queries kept the server busy for 20 seconds. Refresh to try again." }] }) : base(input, init));
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/queries/run" ? json({ results: [{ id: "search", status: "error", reason: "busy", retryable: true, elapsed_ms: 0, error: "Not run: other queries kept the server busy. Refresh to try again." }] }) : base(input, init));
     const { wait } = await render(tracesPreset);
     await wait(() => expect(document.body.textContent).toContain("Not run: other queries kept the server busy. Run the search again."));
     expect(document.body.textContent).not.toContain("Refresh to try again");

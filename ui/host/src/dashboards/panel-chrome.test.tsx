@@ -188,7 +188,7 @@ it.each([120,300])("shows a busy panel as not run yet in a %ipx body",async heig
   const observers:{callback:ResizeObserverCallback;elements:Element[]}[]=[];
   vi.stubGlobal("ResizeObserver",class { record:{callback:ResizeObserverCallback;elements:Element[]}; constructor(callback:ResizeObserverCallback){this.record={callback,elements:[]};observers.push(this.record);} observe(el:Element){this.record.elements.push(el);} disconnect(){} });
   const host=document.createElement("div");document.body.append(host);const root=createRoot(host);cleanup.push(()=>root.unmount());
-  const message="Not run: other queries kept the server busy for 20 seconds. Refresh to try again.",retry=vi.fn();
+  const message="Not run: other queries kept the server busy. Refresh to try again.",retry=vi.fn();
   await act(async()=>root.render(<MantineProvider env="test"><PanelCard panel={{...p,viz:"stat"}} title={p.title} result={{id:p.id,status:"error",elapsed_ms:0,error:message,reason:"busy",retryable:true,request_error:[p.id]}} loading={false} height={388} group="g" editing={false} agentAvailable={true} onFix={()=>{}} onRetry={retry}/></MantineProvider>));
   const body=host.querySelector<HTMLElement>('[data-panel-body]')!;
   await act(async()=>observers.find(o=>o.elements.includes(body))!.callback([{target:body,contentRect:{height,width:300}} as unknown as ResizeObserverEntry],{} as ResizeObserver));

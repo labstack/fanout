@@ -423,3 +423,14 @@ func TestValidateRechecksOnlyChangedPanels(t *testing.T) {
 		t.Fatal("an invalid edit passed on cached checks")
 	}
 }
+
+func TestDefaultExecutionBudgets(t *testing.T) {
+	e := NewExecutor(pooledEngine{pool: 4}, 30)
+	defer e.Close()
+	if e.batchTimeout != 12*time.Second || e.timeout != 10*time.Second {
+		t.Fatalf("batch=%s panel=%s", e.batchTimeout, e.timeout)
+	}
+	if !strings.Contains(BatchTimeoutError, "12 seconds") || !strings.Contains(TimeoutError, "10 seconds") {
+		t.Fatal("budget messages do not match their deadlines")
+	}
+}
