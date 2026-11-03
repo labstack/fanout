@@ -12,6 +12,7 @@ import (
 	"github.com/labstack/fanout/internal/engine/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/readpressure"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -174,6 +175,12 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 		return 0, false, err
 	}
 	defer unlock()
+	ctx = readpressure.WithSignal(ctx, &d.readPressure)
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer background()
 	pin := d.pinParquet()
 	defer d.unpinParquet(pin)
 	batches := d.repository.Parquet.BatchMetadata()
@@ -232,7 +239,21 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 	if err != nil {
 		return 0, false, err
 	}
-	rows, err = d.cacheBatches(ctx, pending, stale, changed)
+	for _, b := range pending {
+		if err := d.readPressure.Yield(ctx); err != nil {
+			return rows, true, err
+		}
+		n, e := d.cacheBatches(ctx, []telemetry.BatchMetadata{b}, stale, changed)
+		rows += n
+		if e != nil {
+			return rows, true, e
+		}
+		stale, changed = nil, nil
+	}
+	if len(pending) == 0 {
+		rows, err = d.cacheBatches(ctx, nil, stale, changed)
+	}
+
 	return rows, err == nil && selected < pendingCount, err
 }
 
@@ -486,6 +507,11 @@ func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.B
 }
 
 func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []string) error {
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return err
+	}
+	defer background()
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return err

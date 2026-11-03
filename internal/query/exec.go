@@ -136,6 +136,18 @@ func (e *Executor) Close() {
 	e.running.Wait()
 }
 
+// Pressure reports queued reads or a fully occupied admission pool.
+func (e *Executor) Pressure() bool {
+	if e.waiting.Load() > 0 {
+		return true
+	}
+	if !e.slots.TryAcquire(1) {
+		return true
+	}
+	e.slots.Release(1)
+	return false
+}
+
 // Validate normalizes d and runs every check, returning Problems or nil.
 func (e *Executor) Validate(ctx context.Context, d *Dashboard) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)

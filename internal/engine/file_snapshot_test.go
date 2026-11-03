@@ -290,7 +290,7 @@ func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	versionDone := make(chan struct{})
-	go func() { defer close(versionDone); d.runVersionRollupLoop(ctx) }()
+	go func() { defer close(versionDone); _, _ = d.RefreshVersionRollup(ctx) }()
 	go func() { defer close(done); d.runReadCacheLoop(ctx) }()
 	t.Cleanup(func() { cancel(); <-done; <-versionDone })
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new", Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {

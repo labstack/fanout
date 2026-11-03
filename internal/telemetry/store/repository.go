@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/readpressure"
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
@@ -26,6 +27,7 @@ type Batch struct {
 // Repository publishes self-contained Parquet batch directories. The
 // directory rename is the transaction and the filesystem is the catalog.
 type Repository struct {
+	readPressure        readpressure.Signal
 	releaseBacklogGauge func()
 	root                string
 	Parquet             *telemetry.ParquetStore
@@ -340,3 +342,6 @@ func normalizeBatch(batch *Batch, ingestedAt int64) {
 		}
 	}
 }
+
+// SetReadPressure connects query admission to bounded compaction yielding.
+func (r *Repository) SetReadPressure(pressure func() bool) { r.readPressure.Set(pressure) }

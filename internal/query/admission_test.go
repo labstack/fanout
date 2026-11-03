@@ -125,3 +125,26 @@ func TestExemplarsAndTracesShareAdmission(t *testing.T) {
 		t.Fatal("an exemplar run kept its slot")
 	}
 }
+
+func TestExecutorPressureTracksWaitersAndCapacity(t *testing.T) {
+	e := NewExecutor(pooledEngine{pool: 2}, 30)
+	defer e.Close()
+	if e.Pressure() {
+		t.Fatal("idle executor under pressure")
+	}
+	if !e.slots.TryAcquire(2) {
+		t.Fatal("pressure probe leaked admission")
+	}
+	if !e.Pressure() {
+		t.Fatal("full executor reported no pressure")
+	}
+	e.slots.Release(2)
+	e.waiting.Store(1)
+	if !e.Pressure() {
+		t.Fatal("queued executor reported no pressure")
+	}
+	e.waiting.Store(0)
+	if e.Pressure() {
+		t.Fatal("pressure did not clear")
+	}
+}

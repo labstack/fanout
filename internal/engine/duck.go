@@ -22,11 +22,15 @@ import (
 	"github.com/labstack/fanout/internal/engine/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/readpressure"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 type Duck struct {
+	readPressure    readpressure.Signal
+	backgroundOnce  sync.Once
+	backgroundSlots chan struct{}
 	// fatal carries the first error after which DuckDB refuses all work until
 	// the process restarts. The query cache is rebuildable from Parquet.
 	fatal           chan error
@@ -521,6 +525,21 @@ func (d *Duck) closeHandles() error {
 	return errors.Join(errs...)
 }
 
+// SetReadPressure connects foreground admission to bounded background yielding.
+func (d *Duck) SetReadPressure(pressure func() bool) { d.readPressure.Set(pressure) }
+
+// lockBackground is acquired under either write gate, before a connection.
+// It serializes background SQL without changing foreground pool admission.
+func (d *Duck) lockBackground(ctx context.Context) (func(), error) {
+	d.backgroundOnce.Do(func() { d.backgroundSlots = make(chan struct{}, 1) })
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case d.backgroundSlots <- struct{}{}:
+		return func() { <-d.backgroundSlots }, nil
+	}
+}
+
 // writer returns the dedicated write handle initialized by NewDuck.
 func (d *Duck) writer() *sql.DB { return d.writeDB }
 
@@ -577,13 +596,6 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	}()
 	defer func() { <-readCacheDone }()
 
-	versionDone := make(chan struct{})
-	go func() {
-		defer close(versionDone)
-		d.runVersionRollupLoop(ctx)
-	}()
-	defer func() { <-versionDone }()
-
 	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
 	for {
@@ -623,6 +635,12 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 
 	if n, err := d.drainServiceRollup(ctx, d.cfg.RollupInterval/2); err != nil {
 		errs = append(errs, fmt.Errorf("service rollup: %w", err))
+	} else {
+		affected += n
+	}
+
+	if n, _, err := d.DrainVersionRollup(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("version rollup: %w", err))
 	} else {
 		affected += n
 	}
@@ -698,18 +716,6 @@ func runBackgroundLoop(ctx context.Context, pass func(context.Context) (bool, er
 			delay = 100 * time.Millisecond
 		}
 	}
-}
-
-// Version history uses the analytical gate and its own cadence. Its gate wait
-// must never delay complete-file caching on the independent cache gate.
-func (d *Duck) runVersionRollupLoop(ctx context.Context) {
-	runBackgroundLoop(ctx, func(ctx context.Context) (bool, error) {
-		_, backlog, err := d.DrainVersionRollup(ctx)
-		return backlog, err
-	}, func(err error) {
-		d.noteFailure(err)
-		slog.Warn("version rollup failed", "err", err)
-	})
 }
 
 func (d *Duck) runMaintenanceLoop(ctx context.Context) {
@@ -818,6 +824,11 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			return err
 		}
 		defer unlockCache()
+		background, err := d.lockBackground(ctx)
+		if err != nil {
+			return err
+		}
+		defer background()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
 			for _, table := range []string{"service_rollup", "span_rollup", "edge_rollup"} {
@@ -936,6 +947,13 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 	// consistent and deadlock-free.
 	unlock := d.writeGate.Lock(writegate.RollupService)
 	defer unlock()
+	ctx = readpressure.WithSignal(ctx, &d.readPressure)
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer background()
+
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
@@ -1060,6 +1078,13 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.RollupEdge)
 	defer unlock()
+	ctx = readpressure.WithSignal(ctx, &d.readPressure)
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer background()
+
 	if err := ctx.Err(); err != nil {
 		return 0, false, err
 	}
@@ -1566,6 +1591,9 @@ func forAffectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs 
 		return err
 	}
 	for len(args) > 0 {
+		if err := readpressure.Yield(ctx); err != nil {
+			return err
+		}
 		n := min(len(args)/width, affectedKeyChunkSize)
 		predicate := column + " IN (" + strings.TrimSuffix(strings.Repeat(key+",", n), ",") + ")"
 		if err := run(predicate, args[:n*width:n*width]); err != nil {

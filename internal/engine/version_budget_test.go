@@ -101,7 +101,15 @@ func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	done := make(chan struct{})
-	go func() { defer close(done); d.runVersionRollupLoop(ctx) }()
+	go func() {
+		defer close(done)
+		for ctx.Err() == nil {
+			_, backlog, err := d.DrainVersionRollup(ctx)
+			if err != nil || !backlog {
+				return
+			}
+		}
+	}()
 	defer func() { cancel(); <-done }()
 	now := time.Now().UTC()
 	finding := annotations.Anomaly{Namespace: "namespace-0", Service: "service-0", Kind: "volume", From: now.Add(-time.Minute), To: now, Title: "Low volume", Severity: "warn"}

@@ -108,6 +108,14 @@ func (d *Duck) refreshVersionRollup(ctx context.Context, waitBudget time.Duratio
 		return 0, false, fmt.Errorf("version_rollup/write_gate: %w", err)
 	}
 	defer unlock()
+	background, err := d.lockBackground(waitCtx)
+	if err != nil {
+		return 0, false, err
+	}
+	defer background()
+	if err := d.readPressure.Yield(ctx); err != nil {
+		return 0, false, err
+	}
 	if err := waitCtx.Err(); err != nil {
 		return 0, false, err
 	}
@@ -384,6 +392,12 @@ func (d *Duck) RecordAnomalies(ctx context.Context, findings []annotations.Anoma
 		return fmt.Errorf("anomaly_log/write_gate: %w", err)
 	}
 	defer unlock()
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return err
+	}
+	defer background()
+
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -493,6 +507,12 @@ func (d *Duck) transferVersionMarker(ctx context.Context, output telemetry.Batch
 		return err
 	}
 	defer unlock()
+	background, err := d.lockBackground(ctx)
+	if err != nil {
+		return err
+	}
+	defer background()
+
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return err
