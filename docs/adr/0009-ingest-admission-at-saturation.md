@@ -16,7 +16,11 @@ Reject whole exports before converting protobuf items into storage rows. A
 rows-per-second token bucket adapts every 250 ms. At half the unchanged 1,024
 reclaimable-batch limit, rising debt reduces the rate by 15%; falling debt
 increases it by 10%, bounded by 1.5 times the recent 60-second peak. The entry
-rate is the accepted count over the preceding second. With no history, the
+rate uses the preceding second and the recent measured peak, so retry gaps
+cannot seed a warm store at one row per second. The band cap stops decreasing
+at one normal batch per pressure window (50,000 rows/s), or the measured entry
+rate if lower. Below that, further row cuts shrink files without reducing their
+creation frequency. The hard debt stop remains unconditional. With no history, the
 first export seeds the bucket so cold pressure cannot strand it. Rising interactive
 refusals (including queue-wait timeouts) indicate starvation for three seconds
 after the latest refusal. Panel queueing alone never reduces ingest. Starvation
@@ -43,9 +47,11 @@ so panels remain usable. The engine still retains its two separate connections
 for other readers where the pool permits. No CPU reservation is introduced.
 
 Under debt pressure group commits target 200,000 rows and a one-second window,
-with the existing 64 MiB group bound. Sparse retries keep the full bounded
-window rather than closing after an idle gap, so throttling does not multiply
-small files and their read and compaction overhead. Physical row groups
+with the existing 64 MiB group bound. Sparse retries below 50,000 total
+rows keep the full bounded window rather than closing after an idle gap, so
+throttling does not multiply small files and their read and compaction overhead.
+Once a normal-size 50,000-row batch is available, a 20 ms idle gap releases
+closed-loop exporters to send again without waiting the full second. Physical row groups
 remain 50,000 rows. Compaction continues under read pressure without algorithmic
 changes or a higher debt limit.
 

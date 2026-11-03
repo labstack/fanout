@@ -38,18 +38,18 @@ type admissionSample struct {
 	rate float64
 }
 type ingestAdmission struct {
-	mu                                sync.Mutex
-	now                               func() time.Time
-	debt                              func() int
-	interactiveBusy                   func() uint64
-	last, lastReadAdjustment, busyAt  time.Time
-	lastBusy                          uint64
-	previousDebt                      int
-	rate, tokens, burst               float64
-	readLimited                       bool
-	debtRate, readRate, readReference float64
-	reason                            string
-	samples                           []admissionSample
+	mu                                           sync.Mutex
+	now                                          func() time.Time
+	debt                                         func() int
+	interactiveBusy                              func() uint64
+	last, lastReadAdjustment, busyAt             time.Time
+	lastBusy                                     uint64
+	previousDebt                                 int
+	rate, tokens, burst                          float64
+	readLimited                                  bool
+	debtRate, debtFloor, readRate, readReference float64
+	reason                                       string
+	samples                                      []admissionSample
 }
 
 func newIngestAdmission(debt func() int, busy func() uint64) *ingestAdmission {
@@ -134,6 +134,7 @@ func (a *ingestAdmission) admit(rows int) (time.Duration, bool, string) {
 		if len(a.samples) == 0 {
 			if a.debtRate > 0 {
 				a.debtRate = max(a.debtRate, float64(rows))
+				a.debtFloor = min(a.debtRate, float64(maxGroupBatchRows)/pressureAdmissionWindow.Seconds())
 			}
 			if a.readLimited {
 				a.readReference = max(a.readReference, float64(rows))
@@ -209,14 +210,21 @@ func (a *ingestAdmission) tick(now time.Time) {
 	starving := !a.busyAt.IsZero() && now.Sub(a.busyAt) < admissionStarvationWindow
 	if debt >= admissionBandStart {
 		if a.debtRate == 0 {
-			a.debtRate = seed
+			// A retry gap can leave the last second empty. Use the measured
+			// history rather than stranding a warm store at the cold seed.
+			a.debtRate = max(seed, peak)
+			a.debtFloor = min(a.debtRate, float64(maxGroupBatchRows)/pressureAdmissionWindow.Seconds())
 		} else if debt > a.previousDebt {
 			a.debtRate *= admissionDecrease
 		} else if debt < a.previousDebt {
 			a.debtRate = min(a.debtRate*admissionIncrease, 1.5*peak)
 		}
+		// Below one normal batch per pressure window, further row cuts only
+		// shrink files: the bounded group deadline still creates one per window.
+		// Preserve useful batches; the hard debt limit remains unconditional.
+		a.debtRate = max(a.debtFloor, a.debtRate)
 	} else {
-		a.debtRate = 0
+		a.debtRate, a.debtFloor = 0, 0
 	}
 	if a.lastReadAdjustment.IsZero() || now.Sub(a.lastReadAdjustment) >= time.Second {
 		if starving {

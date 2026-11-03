@@ -310,3 +310,24 @@ func TestWriterAbandonReleasesBudgetForRetry(t *testing.T) {
 		t.Fatalf("commits=%d want 1", got)
 	}
 }
+
+func TestWriterPressureAdmissionReleasesFullBatchOnIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := &pressureRecordingCommitter{recordingCommitter: &recordingCommitter{}}
+		c.debt.Store(telemetry.CompactionDebtLimit / 2)
+		w := testWriter(c, maxGroupBatchRows)
+		w.compaction = c
+		request := newSubmission(t.Context(), Batch{Spans: make([]telemetry.Span, maxGroupBatchRows)})
+		out := make(chan commitJob, 1)
+		at := time.Now()
+		if err := w.enqueueSubmissions(t.Context(), request, out); err != nil {
+			t.Fatal(err)
+		}
+		if elapsed := time.Since(at); elapsed != 20*time.Millisecond {
+			t.Fatalf("full row group held for %v", elapsed)
+		}
+		if job := <-out; batchRows(job.batch()) != maxGroupBatchRows {
+			t.Fatal("row group lost")
+		}
+	})
+}

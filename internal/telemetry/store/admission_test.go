@@ -15,26 +15,26 @@ func TestAdmissionDebtAIMD(t *testing.T) {
 	debt := 0
 	a := newIngestAdmission(func() int { return debt }, nil)
 	a.now = func() time.Time { return now }
-	a.Admit(1000)
+	a.Admit(100000)
 	now = now.Add(time.Second)
 	a.update()
-	a.Admit(1000)
+	a.Admit(100000)
 	debt = admissionBandStart
 	now = now.Add(admissionInterval)
 	a.update()
-	if a.rate != 1000 {
+	if a.rate != 100000 {
 		t.Fatalf("entry rate=%v", a.rate)
 	}
 	debt++
 	now = now.Add(admissionInterval)
 	a.update()
-	if a.rate != 850 {
+	if a.rate != 85000 {
 		t.Fatalf("decrease=%v", a.rate)
 	}
 	debt--
 	now = now.Add(admissionInterval)
 	a.update()
-	if a.rate < 934.99 || a.rate > 935.01 {
+	if a.rate < 93499.99 || a.rate > 93500.01 {
 		t.Fatalf("recovery=%v", a.rate)
 	}
 	debt = telemetry.CompactionDebtLimit
@@ -211,7 +211,7 @@ func TestReadFloorNeverOverridesCompactionDebt(t *testing.T) {
 	debt, busy := 0, uint64(0)
 	a := newIngestAdmission(func() int { return debt }, func() uint64 { return busy })
 	a.now = func() time.Time { return now }
-	a.Admit(1000)
+	a.Admit(200000)
 	now = now.Add(admissionInterval)
 	a.update()
 	debt = admissionBandStart
@@ -221,10 +221,52 @@ func TestReadFloorNeverOverridesCompactionDebt(t *testing.T) {
 		now = now.Add(admissionInterval)
 		a.update()
 	}
-	if a.readRate < 500 {
+	if a.readRate < 100000 {
 		t.Fatalf("read floor=%v", a.readRate)
 	}
-	if a.rate >= 500 || a.rate != a.debtRate || a.reason != "debt" {
+	if a.rate >= 100000 || a.rate != a.debtRate || a.reason != "debt" {
 		t.Fatalf("debt cap=%v read cap=%v effective=%v reason=%s", a.debtRate, a.readRate, a.rate, a.reason)
+	}
+}
+
+func TestDebtCapPreservesOneNormalBatchPerPressureWindow(t *testing.T) {
+	now := time.Unix(1, 0)
+	debt := 0
+	a := newIngestAdmission(func() int { return debt }, nil)
+	a.now = func() time.Time { return now }
+	for range 4 {
+		a.Admit(50000)
+		now = now.Add(admissionInterval)
+		a.update()
+	}
+	debt = admissionBandStart
+	for range 40 {
+		debt++
+		now = now.Add(time.Second)
+		a.update()
+		a.Admit(50000)
+	}
+	if a.rate < float64(maxGroupBatchRows)/pressureAdmissionWindow.Seconds() {
+		t.Fatalf("rate=%v creates smaller files without reducing their frequency", a.rate)
+	}
+	debt = telemetry.CompactionDebtLimit
+	if _, ok := a.Admit(1); ok {
+		t.Fatal("batch floor bypassed hard debt stop")
+	}
+}
+
+func TestAdmissionBandEntryUsesHistoryAcrossRetryGap(t *testing.T) {
+	now := time.Unix(1, 0)
+	debt := 0
+	a := newIngestAdmission(func() int { return debt }, nil)
+	a.now = func() time.Time { return now }
+	a.Admit(100000)
+	now = now.Add(admissionInterval)
+	a.update()
+	now = now.Add(2 * time.Second)
+	debt = admissionBandStart
+	a.update()
+	if a.rate != 100000 {
+		t.Fatalf("retry gap seeded rate=%v, want measured 100000", a.rate)
 	}
 }

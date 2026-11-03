@@ -24,6 +24,7 @@ const (
 	// durable acknowledgement when the row target is not reached.
 	groupAdmissionWindow    = 10 * time.Millisecond
 	pressureAdmissionWindow = time.Second
+	pressureAdmissionIdle   = 20 * time.Millisecond
 	maxAdmissionRequests    = 512
 	maxGroupBatchRows       = 50_000
 	pressureGroupBatchRows  = 200_000
@@ -335,12 +336,28 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, ou
 		// Coalesce more exports before the hard debt stop is needed. Read
 		// reclaimable debt once per group; low-load acknowledgements keep
 		// their short window as soon as compaction relieves the pressure.
+		var idle <-chan time.Time
+		var idleTimer *time.Timer
+		defer func() {
+			if idleTimer != nil {
+				idleTimer.Stop()
+			}
+		}()
+		armIdle := func() {
+			// Retry gaps must not produce tiny files. Once a normal-size batch is
+			// available, release idle closed-loop senders so they can send again.
+			if pressure && rows >= maxGroupBatchRows {
+				if idleTimer == nil {
+					idleTimer = time.NewTimer(pressureAdmissionIdle)
+					idle = idleTimer.C
+				} else {
+					idleTimer.Reset(pressureAdmissionIdle)
+				}
+			}
+		}
 		if pressure {
-			// Retry backoff creates gaps between admitted exports. An idle cutoff
-			// here turns throttling into tiny files, increasing the very debt and
-			// read/compaction work this window is meant to reduce. Keep collecting
-			// until the bounded deadline or a row, byte or request limit is reached.
 			window = pressureAdmissionWindow
+			armIdle()
 		}
 		timer := time.NewTimer(window)
 		defer timer.Stop()
@@ -349,6 +366,9 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, ou
 			select {
 			case next := <-w.submissions:
 				admit(next)
+				armIdle()
+			case <-idle:
+				break admission
 			case <-timer.C:
 				break admission
 			case <-ctx.Done():
