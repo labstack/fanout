@@ -18,7 +18,7 @@ func TestReadCacheYieldsBetweenCompleteBatches(t *testing.T) {
 	checks := 0
 	d.SetReadPressure(func() bool {
 		checks++
-		if checks == 2 {
+		if checks == 1 {
 			var n int
 			if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&n); err != nil || n != 1 {
 				t.Errorf("previous batch not committed before yield: %d %v", n, err)
@@ -29,7 +29,7 @@ func TestReadCacheYieldsBetweenCompleteBatches(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if checks != 2 {
+	if checks != 1 {
 		t.Fatalf("pressure checked %d times for two batches", checks)
 	}
 	var n int
@@ -44,7 +44,7 @@ func TestAffectedKeysYieldsEveryChunk(t *testing.T) {
 	signal.Set(func() bool { checks++; return false })
 	ctx := readpressure.WithSignal(t.Context(), &signal)
 	err := forAffectedKeys(ctx, db, `SELECT i FROM range(1001) t(i)`, nil, "i", "?", func(string, []any) error { runs++; return nil })
-	if err != nil || checks != 2 || runs != 2 {
+	if err != nil || checks != 1 || runs != 2 {
 		t.Fatalf("checks=%d runs=%d err=%v", checks, runs, err)
 	}
 }

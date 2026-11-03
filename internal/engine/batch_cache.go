@@ -239,9 +239,11 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 	if err != nil {
 		return 0, false, err
 	}
-	for _, b := range pending {
-		if err := d.readPressure.Yield(ctx); err != nil {
-			return rows, true, err
+	for i, b := range pending {
+		if i > 0 {
+			if err := d.readPressure.Yield(ctx); err != nil {
+				return rows, true, err
+			}
 		}
 		n, e := d.cacheBatches(ctx, []telemetry.BatchMetadata{b}, stale, changed)
 		rows += n

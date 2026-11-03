@@ -23,13 +23,13 @@ func TestCompactionYieldsBetweenGroupsWithoutSkipping(t *testing.T) {
 	r.SetReadPressure(func() bool { checks++; return false })
 	publisher := testParquetPublisherFunc(func(ctx context.Context, publish func(context.Context) error) error {
 		publishes++
-		if checks < publishes {
+		if checks+1 < publishes {
 			t.Error("group bypassed pressure check")
 		}
 		return publish(ctx)
 	})
 	n, err := r.CompactParquetPass(t.Context(), publisher, 8, 5*time.Second)
-	if err != nil || n < 16 || publishes < 2 || checks < publishes {
+	if err != nil || n < 16 || publishes < 2 || checks+1 < publishes {
 		t.Fatalf("inputs=%d groups=%d checks=%d err=%v", n, publishes, checks, err)
 	}
 }

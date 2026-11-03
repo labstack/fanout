@@ -1590,10 +1590,14 @@ func forAffectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs 
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	first := true
 	for len(args) > 0 {
-		if err := readpressure.Yield(ctx); err != nil {
-			return err
+		if !first {
+			if err := readpressure.Yield(ctx); err != nil {
+				return err
+			}
 		}
+		first = false
 		n := min(len(args)/width, affectedKeyChunkSize)
 		predicate := column + " IN (" + strings.TrimSuffix(strings.Repeat(key+",", n), ",") + ")"
 		if err := run(predicate, args[:n*width:n*width]); err != nil {

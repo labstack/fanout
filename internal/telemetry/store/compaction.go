@@ -577,8 +577,10 @@ func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPu
 	deadline := time.Now().Add(budget)
 	total := 0
 	for {
-		if err := r.readPressure.Yield(ctx); err != nil {
-			return total, err
+		if total > 0 {
+			if err := r.readPressure.Yield(ctx); err != nil {
+				return total, err
+			}
 		}
 		count, err := r.CompactParquet(ctx, publisher, maxBatches)
 		total += count
