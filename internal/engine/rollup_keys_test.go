@@ -346,7 +346,7 @@ func TestEdgeRollupKeysMatchConstantList(t *testing.T) {
  make_timestamp_ns(((hash(i//4,3)%%7200)::BIGINT-3600)*1000000000+i%%4)::TIMESTAMPTZ_NS start_time,
  (hash(i,9)%%100)::DOUBLE duration_ms,
  CASE WHEN i%%7=0 THEN 'STATUS_CODE_ERROR' ELSE 'STATUS_CODE_OK' END status,
- 'SPAN_KIND_SERVER' kind, NULL::VARCHAR messaging_destination, NULL::VARCHAR messaging_system
+ 'SPAN_KIND_SERVER' kind, NULL::VARCHAR peer_service, NULL::VARCHAR messaging_destination, NULL::VARCHAR messaging_system
  FROM range(800) t(i)`, seed),
 			fmt.Sprintf(`CREATE OR REPLACE TEMP TABLE edge_pass_buckets AS SELECT DISTINCT namespace,date_trunc('minute',start_time::TIMESTAMP_NS)::TIMESTAMPTZ_NS bucket FROM spans WHERE hash(trace_id,%d)%%3=0`, seed),
 			"DELETE FROM edge_rollup",

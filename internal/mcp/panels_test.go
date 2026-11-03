@@ -75,13 +75,16 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := duck.RefreshReadCaches(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 		if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := duck.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',30,30,100,100,.1,30,0)`, at); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
+		if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','payment',30,100,.1,'call')`, at); err != nil {
 			t.Fatal(err)
 		}
 	}

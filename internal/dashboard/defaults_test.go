@@ -17,14 +17,14 @@ import (
 )
 
 func TestDefaultSpecPassesTheFullCheck(t *testing.T) {
-	e, _ := defaultFixture(t)
+	e, _, _ := defaultFixture(t)
 	spec := DefaultSpec()
 	if err := e.Validate(t.Context(), &spec); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func defaultFixture(t *testing.T) (*query.Executor, *telemetrystore.Repository) {
+func defaultFixture(t *testing.T) (*query.Executor, *telemetrystore.Repository, *engine.Duck) {
 	t.Helper()
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2, RollupInterval: time.Hour}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
@@ -38,7 +38,7 @@ func defaultFixture(t *testing.T) (*query.Executor, *telemetrystore.Repository) 
 	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
 	e := query.NewExecutor(d, 30)
 	e.SetRollupReader(observability.New(d, d, 30))
-	return e, repo
+	return e, repo, d
 }
 
 func runDefault(t *testing.T, e *query.Executor, start, end time.Time) map[string]query.Result {
@@ -88,7 +88,7 @@ func TestDefaultSpecKeepsExistingPanelsBeforeSystemSections(t *testing.T) {
 }
 
 func TestDefaultSystemPanelsUseExistingEmptyState(t *testing.T) {
-	e, _ := defaultFixture(t)
+	e, _, _ := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	results := runDefault(t, e, start, start.Add(time.Hour))
 	for _, id := range []string{"check_states", "check_latency", "hosts", "containers", "versions"} {
@@ -99,7 +99,7 @@ func TestDefaultSystemPanelsUseExistingEmptyState(t *testing.T) {
 }
 
 func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) {
-	e, repo := defaultFixture(t)
+	e, repo, d := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	metric := func(at time.Time, name, host string, value float64, attrs map[string]any) telemetry.Metric {
 		return telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: name, Type: "gauge", Unit: "1", Value: value, Attributes: attrs, Resource: map[string]any{"host.name": host}, TimeUnixNanos: at.UnixNano(), EventUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano()}
@@ -171,6 +171,9 @@ func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) 
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "versions", Spans: []telemetry.Span{span}, Logs: []telemetry.Log{log}, Metrics: []telemetry.Metric{v2}}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	results := runDefault(t, e, start, start.Add(2*time.Minute))
 	if !reflect.DeepEqual(defaultValues(t, results["hosts"], "host"), []any{"bad", "warn"}) || !reflect.DeepEqual(defaultValues(t, results["hosts"], "cpu_percent"), []any{75.0, 75.0}) || !reflect.DeepEqual(defaultValues(t, results["hosts"], "filesystem_percent"), []any{90.0, 80.0}) {
 		t.Fatalf("hosts: %+v", results["hosts"].Frame)
@@ -204,7 +207,7 @@ func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) 
 }
 
 func TestDefaultVersionsPreserveFirstSeenAndRuntimeSDKTuples(t *testing.T) {
-	e, repo := defaultFixture(t)
+	e, repo, _ := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Minute)
 	base := map[string]any{"service.version": "v1", "process.runtime.name": "Go", "process.runtime.version": "1.27", "telemetry.sdk.language": "go", "telemetry.sdk.version": "1.40"}
@@ -297,7 +300,7 @@ func TestDefaultVersionsPreserveFirstSeenAndRuntimeSDKTuples(t *testing.T) {
 }
 
 func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testing.T) {
-	e, repo := defaultFixture(t)
+	e, repo, _ := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for i, offset := range []time.Duration{-time.Minute, 0, time.Minute} {
 		at := start.Add(offset)
@@ -416,7 +419,7 @@ func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testin
 }
 
 func TestDefaultContainersUseScopeCPUUnitsAndReportedLimitsForStatus(t *testing.T) {
-	e, repo := defaultFixture(t)
+	e, repo, _ := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Minute)
 	const dockerScope = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver"

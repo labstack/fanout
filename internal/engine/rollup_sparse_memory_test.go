@@ -157,7 +157,7 @@ func edgeSpanRollupMemory(t *testing.T, late bool) {
     CASE WHEN i%%50=0 THEN 'SPAN_KIND_SERVER' WHEN i%%3=0 THEN 'SPAN_KIND_SERVER' WHEN i%%3=1 THEN 'SPAN_KIND_PRODUCER' ELSE 'SPAN_KIND_CONSUMER' END AS kind,
     'STATUS_CODE_OK' AS status,5.0::DOUBLE AS duration_ms,
     make_timestamp_ns(%s)::TIMESTAMPTZ_NS AS start_time,
-    'jobs' AS messaging_destination,'kafka' AS messaging_system FROM range(1000000) t(i)`, eventTime),
+    NULL::VARCHAR AS peer_service,'jobs' AS messaging_destination,'kafka' AS messaging_system FROM range(1000000) t(i)`, eventTime),
 		"COPY (SELECT * FROM span_fixture WHERE false) TO " + sqlLiteral(schema) + " (FORMAT PARQUET)",
 		"COPY span_fixture TO " + sqlLiteral(data) + " (FORMAT PARQUET)",
 		"CREATE VIEW spans AS SELECT * FROM read_parquet([" + sqlLiteral(schema) + "," + sqlLiteral(data) + "],union_by_name=false,hive_partitioning=false)",
@@ -226,8 +226,8 @@ func edgeSpanRollupMemory(t *testing.T, late bool) {
  FROM span_fixture WHERE service!='api' AND date_trunc('minute',start_time::TIMESTAMP_NS) IN (SELECT bucket FROM edge_pass_buckets)
  GROUP BY namespace,bucket,service
  ), expected AS (
- SELECT namespace,bucket,'api' caller,service callee,calls,5.0 avg_ms,0.0 error_rate,'call' edge_type FROM counts
- UNION ALL SELECT namespace,bucket,'producer','consumer',calls,0.0,0.0,'messaging' FROM counts WHERE service='consumer'
+ SELECT namespace,bucket,'api' caller,service callee,calls,5.0 avg_ms,0.0 error_rate,'call' edge_type,0.0 p50_ms,0.0 p95_ms FROM counts
+ UNION ALL SELECT namespace,bucket,'producer','consumer',calls,0.0,0.0,'messaging',0.0,0.0 FROM counts WHERE service='consumer'
  ), differences AS (
  (SELECT * FROM expected EXCEPT ALL SELECT * FROM edge_rollup)
  UNION ALL (SELECT * FROM edge_rollup EXCEPT ALL SELECT * FROM expected)

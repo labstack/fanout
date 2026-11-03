@@ -388,12 +388,12 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 		// limits the ingest horizon even when newer batches are already cached.
 		fresh := time.Now()
 		for _, b := range batches {
-			if markers[b.ID] {
+			if markers[b.ID] || window.RetainedInventory {
 				continue
 			}
 			for _, signal := range telemetry.Signals {
 				bounds, count := batchTime(b, signal.Name)
-				if count > 0 && (window.RetainedInventory || overlapping(b, signal.Name, window) && bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano()) {
+				if count > 0 && (overlapping(b, signal.Name, window) && bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano()) {
 					fresh = minTime(fresh, time.Unix(0, b.MinIngestedNanos).Add(-time.Nanosecond))
 					break
 				}

@@ -155,7 +155,7 @@ func (e *serviceGuidanceSpy) EmptyGuidance(ctx context.Context, req query.RunReq
 
 func TestServiceInputsWithResultsSkipMembership(t *testing.T) {
 	s, duck, _, from, to := serviceInputFixture(t)
-	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
+	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','broker',6,1,0,'call')`, from.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	spy := &serviceGuidanceSpy{panelExecutor: s.panels}
@@ -355,7 +355,7 @@ func TestServiceGuidanceLimitsSuggestionsAndScopesAliases(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','external',9,1,0,'call'),('other',?,'elsewhere','external',99,1,0,'call')`, from.Add(time.Minute), from.Add(time.Minute)); err != nil {
+	if _, err := duck.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','external',9,1,0,'call'),('other',?,'elsewhere','external',99,1,0,'call')`, from.Add(time.Minute), from.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	message, err := s.panels.ServiceGuidance(t.Context(), from, to, "shop", "external")

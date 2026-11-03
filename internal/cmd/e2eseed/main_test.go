@@ -487,7 +487,26 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 	}
 	t.Run("system scenarios through OTLP", func(t *testing.T) {
 		system := dashboard.DefaultSpec()
-		// Execute the system SQL panels and the existing external-peer reader.
+		// Topology reads completed edge summaries, including external peers.
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); engine.RunRollups(ctx) }()
+		defer func() { cancel(); <-done }()
+		horizon, _, _ := repo.PublicationBounds()
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			var n int64
+			if err := engine.DB.QueryRow(`SELECT coalesce(max(last_ingested_unix_nano),0) FROM rollup_state WHERE cache_key='edge_rollup_v2'`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n >= horizon {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("peer rollup did not complete")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 		system.Panels = system.Panels[8:]
 		system.Panels = append(system.Panels[:2], system.Panels[3:]...)
 		executor := query.NewExecutor(engine, 30)

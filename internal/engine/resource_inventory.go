@@ -25,6 +25,10 @@ func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, marker
 			if retained || bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano() {
 				if markers[batch.ID] {
 					interior = append(interior, batch.ID)
+				} else if retained {
+					// Retained membership checks are not dashboard aggregates:
+					// a newly published service must never be called unknown.
+					raw = append(raw, batch)
 				}
 			} else {
 				raw = append(raw, batch)

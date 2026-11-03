@@ -12,8 +12,9 @@ type Window struct {
 	Start, End         time.Time
 	Namespace, Service string
 	Kind               ReadKind
-	// RetainedInventory ignores event time only for resource_inventory. Raw
-	// relations still require the caller's explicit event-time predicates.
+	// RetainedInventory is exact retained-service membership, including uncached
+	// files. It ignores event time only for resource_inventory; raw relations
+	// still require the caller's explicit event-time predicates.
 	RetainedInventory bool
 }
 
