@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -47,6 +48,9 @@ func serviceInputFixture(t testing.TB) (*Server, *engine.Duck, *telemetrystore.R
 	// These names are valid, but have no traffic in the requested window.
 	batch.Spans = append(batch.Spans, telemetry.Span{Namespace: "shop", ServiceName: "idle", TraceID: "idle", SpanID: "idle", StartUnixNanos: from.Add(-time.Hour).UnixNano(), EndUnixNanos: from.Add(-time.Hour).UnixNano() + 1}, telemetry.Span{Namespace: "other", ServiceName: "elsewhere", TraceID: "elsewhere", SpanID: "elsewhere", StartUnixNanos: from.Add(time.Minute).UnixNano(), EndUnixNanos: from.Add(time.Minute).UnixNano() + 1})
 	if err := repo.Commit(t.Context(), batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(duck, 30)

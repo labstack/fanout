@@ -12,6 +12,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -102,6 +103,9 @@ func TestTruthTable(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "truth-table", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
+	if err := querytest.RefreshSpanRollup(d.DB); err != nil {
+		t.Fatal(err)
+	}
 	executor := query.NewExecutor(d, 30)
 	cases := []struct {
 		namespace, filter string
@@ -178,6 +182,9 @@ func TestVariablesUnderAllPerConstruct(t *testing.T) {
 		spans = append(spans, span)
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "all-constructs", Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	if err := querytest.RefreshSpanRollup(d.DB); err != nil {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(d, 30)
@@ -260,6 +267,9 @@ func TestSeverityBandsEndToEnd(t *testing.T) {
 	wantBands := []string{"WARN", "INFO", "FATAL", "INFO", "CUSTOM", "UNSPECIFIED", "INFO", "ERROR"}
 	if !reflect.DeepEqual(submitter.bands, wantBands) {
 		t.Fatalf("ingress bands %v, want %v", submitter.bands, wantBands)
+	}
+	if err := querytest.RefreshSpanRollup(d.DB); err != nil {
+		t.Fatal(err)
 	}
 	executor := query.NewExecutor(d, 30)
 	for _, tc := range []struct {
@@ -410,6 +420,9 @@ func TestWorkloadsEndToEnd(t *testing.T) {
 	if err := repo.Commit(t.Context(), batch); err != nil {
 		t.Fatal(err)
 	}
+	if err := querytest.RefreshSpanRollup(d.DB); err != nil {
+		t.Fatal(err)
+	}
 	executor := query.NewExecutor(d, 30)
 	variables := []query.Variable{{Name: "service", Kind: "query", From: "spans", Field: "service", IncludeAll: true}}
 	vars := map[string]query.Value{"service": {Values: []string{"checkout"}}}
@@ -468,6 +481,9 @@ func TestStandardKeysCompareByType(t *testing.T) {
 		spans = append(spans, semanticSpan("typed", i, map[string]any{"http.response.status_code": status}))
 	}
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "typed", Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	if err := querytest.RefreshSpanRollup(d.DB); err != nil {
 		t.Fatal(err)
 	}
 	executor := query.NewExecutor(d, 30)

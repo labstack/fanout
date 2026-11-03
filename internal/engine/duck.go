@@ -1455,7 +1455,6 @@ CREATE OR REPLACE TEMP TABLE service_pass_affected AS
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
     AND service IS NOT NULL
-    AND service != ''
   UNION
   SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM logs
@@ -1584,7 +1583,7 @@ func spanRollupInsertSQL(keys string) string {
  SELECT s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
    coalesce(s.kind, ''), coalesce(s.status, ''), count(*),
    sum(s.duration_ms), min(s.duration_ms), max(s.duration_ms),
-   histogram(CASE WHEN s.duration_ms > 0 THEN ceil(log2(s.duration_ms)*8)::INTEGER ELSE ` + fmt.Sprint(spanHistogramZero) + ` END)
+   histogram(CASE WHEN s.duration_ms > 0 THEN coalesce(try_cast(ceil(log2(s.duration_ms)*8) AS INTEGER),2147483647) ELSE ` + fmt.Sprint(spanHistogramZero) + ` END)
  FROM spans s WHERE ` + keys + `
    AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
    AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
@@ -1678,7 +1677,10 @@ SELECT
 FROM service_pass_affected a
 LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
-LEFT JOIN metric_agg m USING (namespace, bucket, service);`
+LEFT JOIN metric_agg m USING (namespace, bucket, service)
+-- Keep service health's existing nonempty-service population. Span panels also
+-- count spans whose resource omitted service.name.
+WHERE a.service != '';`
 
 // edgeArrivalGap bounds recent-arrival repair behind the completed ingest
 // watermark. Older relationships are not guaranteed to be repaired.

@@ -61,6 +61,7 @@ type Result struct {
 	ElapsedMS int64  `json:"elapsed_ms"`
 	FromMS    int64  `json:"from_ms"`
 	ToMS      int64  `json:"to_ms"`
+	FreshToMS int64  `json:"fresh_to_ms,omitempty"`
 	Better    string `json:"better,omitempty"`
 	// ShiftMS is how far Previous sits behind Frame, so a client can overlay it
 	// without guessing from the first populated bucket.
@@ -625,6 +626,25 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		interval = max(interval, time.Minute)
 	}
 	scope := Scope{Start: start, End: end, Interval: interval, Vars: vars}
+	if p.Query != nil && checked != nil && rollupPlan(p, checked.Measures[p.ID], checked.Filters[p.ID], scope) {
+		scope.Rollup = true
+		if interval > 0 {
+			interval = max(interval, time.Minute)
+			scope.Interval = interval
+		}
+		if reader, ok := e.engine.(interface {
+			RollupWatermark(context.Context) (time.Time, error)
+		}); ok {
+			fresh, err := reader.RollupWatermark(ctx)
+			if err != nil {
+				return failed(res, err, parent.Err())
+			}
+			if !fresh.IsZero() {
+				scope.FreshTo = fresh
+				res.FreshToMS = fresh.UnixMilli()
+			}
+		}
+	}
 	frame, sqlText, err := e.runScope(ctx, p, checked, scope)
 	if err != nil {
 		res.SQL = sqlText
@@ -663,7 +683,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			}
 		}
 	}
-	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil && frame.Rows > 0 {
+	if (p.Viz == "stat" || p.Viz == "gauge") && p.Query != nil && frame.Rows > 0 && frame.Totals == nil {
 		totals, err := e.totals(ctx, p, checked, scope, frame)
 		if err != nil {
 			return failed(res, err, parent.Err())
@@ -675,7 +695,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		previous := scope
 		previous.Start, previous.End = start.Add(-shift), end.Add(-shift)
 		if pf, _, err := e.runScope(ctx, p, checked, previous); err == nil {
-			if p.Viz == "stat" && p.Query != nil {
+			if p.Viz == "stat" && p.Query != nil && pf.Totals == nil {
 				if pf.Totals, err = e.totals(ctx, p, checked, previous, pf); err != nil {
 					res.partial = true
 				}
@@ -802,6 +822,9 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 			}
 		}
 		if frame != nil {
+			if compiled.HasTotals {
+				extractGroupingTotals(frame)
+			}
 			frame.bucketed = scope.Interval > 0 && len(compiled.Columns) > 0 && compiled.Columns[0].Role == "time"
 			if compiled.TrendInterval > 0 {
 				frame.Trend = &Trend{StartMS: compiled.TrendStart.UnixMilli(), StepMS: compiled.TrendInterval.Milliseconds()}

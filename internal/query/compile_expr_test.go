@@ -89,7 +89,7 @@ func TestCompileExpressionTrendsAndTotals(t *testing.T) {
 	capture := &expressionSQLCapture{Engine: duck}
 	e := NewExecutor(capture, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
-	for _, tc := range []struct{ measure, alias, fragment string }{{"count_if(status = 'STATUS_CODE_ERROR') / count() as e", "e", "FILTER (WHERE"}, {"share()", "share", "_trend_totals AS"}} {
+	for _, tc := range []struct{ measure, alias, fragment string }{{"count_if(status = 'STATUS_CODE_ERROR') / count() as e", "e", "FILTER (WHERE"}, {"share()", "share", "sum(sum(spans)) OVER"}} {
 		capture.queries = nil
 		d := exprDashboard(tc.measure)
 		p := &d.Panels[0]
@@ -107,7 +107,7 @@ func TestCompileExpressionTrendsAndTotals(t *testing.T) {
 				if !strings.Contains(sql, tc.fragment) {
 					t.Fatalf("trend: %s", sql)
 				}
-				if tc.alias == "share" && (!strings.Contains(sql, "100.0*count(*)/nullif(max(_trend_total),0)") || !strings.Contains(sql, "FROM _trend_scope JOIN _trend_totals")) {
+				if tc.alias == "share" && (!strings.Contains(sql, "100.0 * sum(spans) / sum(sum(spans)) OVER") || !strings.Contains(sql, "FROM span_rollup")) {
 					t.Fatalf("share scope changed: %s", sql)
 				}
 			}
@@ -126,7 +126,7 @@ func TestCompileExpressionTrendsAndTotals(t *testing.T) {
 	}
 	found := false
 	for _, sql := range capture.queries {
-		if strings.Contains(sql, "FILTER (WHERE") && !strings.Contains(sql, "time_bucket(") {
+		if strings.Contains(sql, "FILTER (WHERE") && strings.Contains(sql, "GROUPING SETS") {
 			found = true
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
@@ -72,6 +73,9 @@ func panelServerFixtureAt(t *testing.T, seed bool, now time.Time) *Server {
 			logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", TimeUnixNanos: n, Severity: "ERROR", Body: "timeout", TraceID: fmt.Sprintf("trace-%d", i), IngestedAt: n})
 		}
 		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "fragment-seed", Spans: spans, Logs: logs}); err != nil {
+			t.Fatal(err)
+		}
+		if err := querytest.RefreshSpanRollup(duck.DB); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := duck.DB.Exec(`INSERT INTO service_rollup VALUES ('shop',?,'checkout',30,30,100,100,.1,30,0)`, at); err != nil {

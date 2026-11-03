@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
@@ -80,6 +81,9 @@ func TestAllPanelsFixtureValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
+	if err := querytest.RefreshSpanRollup(engine.DB); err != nil {
+		t.Fatal(err)
+	}
 	if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}
@@ -447,6 +451,9 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = engine.Close() })
+	if err := querytest.RefreshSpanRollup(engine.DB); err != nil {
+		t.Fatal(err)
+	}
 	if _, problems, err := query.NewExecutor(engine, 30).Check(t.Context(), &spec); err != nil || len(problems) != 0 {
 		t.Fatalf("fixture check: %v; %v", err, problems)
 	}

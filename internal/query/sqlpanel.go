@@ -27,7 +27,15 @@ func expandMacros(sql string, interval time.Duration) (string, error) {
 	if !windowMacro.MatchString(sql) {
 		return "", errors.New("SQL panels must filter time with $__window(time_column)")
 	}
-	out := windowMacro.ReplaceAllString(sql, `$1 >= $$__from::TIMESTAMP_NS::TIMESTAMPTZ_NS AND $1 < $$__to::TIMESTAMP_NS::TIMESTAMPTZ_NS`)
+	out := windowMacro.ReplaceAllStringFunc(sql, func(macro string) string {
+		column := windowMacro.FindStringSubmatch(macro)[1]
+		// Analytical bucket columns can be TIMESTAMP_NS. Make their UTC
+		// instant explicit; raw signal clocks already carry TIMESTAMPTZ_NS.
+		if column == "bucket" || strings.HasSuffix(column, ".bucket") {
+			column += "::TIMESTAMPTZ_NS"
+		}
+		return column + " >= $__from::TIMESTAMP_NS::TIMESTAMPTZ_NS AND " + column + " < $__to::TIMESTAMP_NS::TIMESTAMPTZ_NS"
+	})
 	seconds := int64(interval / time.Second)
 	if seconds <= 0 {
 		seconds = 60
@@ -82,7 +90,7 @@ func redactSQLLogTables(ctx context.Context, parser Parser, value any, ctes map[
 				entry, _ := entry.(map[string]any)
 				name, _ := entry["key"].(string)
 				switch strings.ToLower(name) {
-				case "logs", "spans", "metrics", "service_rollup", "edge_rollup", "resource_inventory":
+				case "logs", "spans", "metrics", "service_rollup", "span_rollup", "edge_rollup", "resource_inventory":
 					return errors.New("CTE names must not shadow telemetry relations")
 				}
 				definition, _ := entry["value"].(map[string]any)

@@ -101,7 +101,12 @@ func TestServiceRollupSpanScanIsNeverBuildSide(t *testing.T) {
 			if _, err := insertServiceRollup(t.Context(), plan, lo, hi); err != nil {
 				t.Fatal(err)
 			}
-			requireProbedSpans(t, plan.plan)
+			if len(plan.plans) != 2 {
+				t.Fatalf("span scan plans=%d want 2", len(plan.plans))
+			}
+			for _, scan := range plan.plans {
+				requireProbedSpans(t, scan)
+			}
 		})
 	}
 }
@@ -132,7 +137,8 @@ func TestEdgeChildrenSpanScanIsNeverBuildSide(t *testing.T) {
 // of the last raw span scan.
 type planCapture struct {
 	rollupSQL
-	plan any
+	plan  any
+	plans []any
 }
 
 func (p *planCapture) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -154,6 +160,7 @@ func (p *planCapture) ExecContext(ctx context.Context, query string, args ...any
 	if err := json.Unmarshal([]byte(plan), &p.plan); err != nil {
 		return nil, err
 	}
+	p.plans = append(p.plans, p.plan)
 	return p.rollupSQL.ExecContext(ctx, query, args...)
 }
 
@@ -287,7 +294,7 @@ func TestServiceRollupKeysMatchSemiJoin(t *testing.T) {
 			t.Fatal(err)
 		}
 		lo, hi := time.Unix(0, 0).UTC(), time.Unix(120*60, 0).UTC()
-		if _, err := db.Exec("DELETE FROM service_rollup"); err != nil {
+		if _, err := db.Exec("DELETE FROM service_rollup; DELETE FROM span_rollup"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := insertServiceRollup(t.Context(), db, lo, hi); err != nil {

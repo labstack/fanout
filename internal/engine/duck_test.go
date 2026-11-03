@@ -276,9 +276,11 @@ func TestRollupAdmissionDoesNotCancelAdmittedWork(t *testing.T) {
 	mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT epoch_ns").WillReturnRows(sqlmock.NewRows([]string{"lo", "hi"}).AddRow(0, 60_000_000_000))
 	mock.ExpectExec("DELETE FROM service_rollup").WillDelayFor(20 * time.Millisecond).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM span_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CREATE OR REPLACE TEMP TABLE service_pass_spans").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM service_pass_affected").WillReturnRows(sqlmock.NewRows([]string{"namespace", "bucket", "service"}).AddRow("ns", int64(0), "api"))
 	mock.ExpectExec("INSERT INTO service_pass_spans").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO span_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("WITH span_agg").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DROP TABLE service_pass_spans").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DROP TABLE service_pass_affected").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -310,6 +312,7 @@ func TestRepositoryPublicationDoesNotWaitForReadersOrDuckDBWrites(t *testing.T) 
 		t.Fatal(err)
 	}
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM span_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	d := &Duck{DB: db, writeDB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
@@ -420,7 +423,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 	defer repository.Close()
 	db := openTestDuck(t)
 	defer db.Close()
-	for _, table := range []string{"service_rollup", "edge_rollup"} {
+	for _, table := range []string{"service_rollup", "span_rollup", "edge_rollup"} {
 		if _, err := db.Exec("CREATE TABLE " + table + " (bucket TIMESTAMP)"); err != nil {
 			t.Fatal(err)
 		}

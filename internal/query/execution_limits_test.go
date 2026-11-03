@@ -249,7 +249,7 @@ func TestSeriesRowCap(t *testing.T) {
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := shopDashboard()
 	d.Panels = d.Panels[:1]
-	d.Panels[0].Query.Where = nil
+	d.Panels[0].Query.Where = []string{"operation IS NOT NULL"}
 	d.Panels[0].Query.By = []string{"service"}
 	d.Panels[0].Query.Bucket = "10s"
 	results, err := e.Run(t.Context(), RunRequest{Dashboard: d})
@@ -286,8 +286,8 @@ func TestBarSkipsTotalsAndGaugeSkipsComparison(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if engine.calls != 3 {
-		t.Errorf("queries=%d want 3", engine.calls)
+	if engine.calls != 2 {
+		t.Errorf("queries=%d want 2", engine.calls)
 	}
 	for _, r := range results {
 		if r.Previous != nil || (r.ID == d.Panels[0].ID && len(r.Frame.Totals) != 0) || (r.ID == d.Panels[1].ID && len(r.Frame.Totals) == 0) {

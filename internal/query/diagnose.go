@@ -24,8 +24,13 @@ const maxDiagnosedFilters = 8
 // The diagnosis shares the panel's deadline, so after a slow query it may not
 // finish; the panel then says only what the query showed.
 func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
-	if message := e.explain(ctx, p, filters, scope); message != "" {
-		return message
+	if p.Query == nil {
+		return "The query returned no rows for this time range."
+	}
+	if scope.Rollup || e.waiting.Load() == 0 {
+		if message := e.explain(ctx, p, filters, scope); message != "" {
+			return message
+		}
 	}
 	for _, f := range filters {
 		if !scope.dropped(f) {
@@ -179,7 +184,7 @@ func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, sco
 	if err != nil {
 		return 0, err
 	}
-	rows, err := e.engine.QueryContext(ctx, "SELECT count(*) FROM "+structuredSource(sig.name)+" WHERE "+where, args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT "+diagnosisCount(scope, "")+" FROM "+diagnosisSource(sig, scope)+" WHERE "+where, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -213,7 +218,7 @@ func (e *Executor) filterCounts(ctx context.Context, sig *signal, active []Filte
 	// Positional parameters bind in textual order: the FILTER clauses precede
 	// the window predicate in the statement, so their arguments come first.
 	without = make([]int64, min(len(active), maxDiagnosedFilters))
-	selects := []string{"count(*)"}
+	selects := []string{diagnosisCount(scope, "")}
 	dest := []any{&total}
 	var args []any
 	for i := range without {
@@ -225,14 +230,14 @@ func (e *Executor) filterCounts(ctx context.Context, sig *signal, active []Filte
 			}
 		}
 		if len(others) == 0 {
-			selects = append(selects, "count(*)")
+			selects = append(selects, diagnosisCount(scope, ""))
 		} else {
-			selects = append(selects, "count(*) FILTER (WHERE "+strings.Join(others, " AND ")+")")
+			selects = append(selects, diagnosisCount(scope, " FILTER (WHERE "+strings.Join(others, " AND ")+")"))
 		}
 		dest = append(dest, &without[i])
 	}
 	args = append(args, windowArgs...)
-	rows, err := e.engine.QueryContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+structuredSource(sig.name)+" WHERE "+window, args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT "+strings.Join(selects, ", ")+" FROM "+diagnosisSource(sig, scope)+" WHERE "+window, args...)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -278,7 +283,7 @@ func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others
 	}
 	expr := ref.stringSQL()
 	query := fmt.Sprintf("WITH g AS MATERIALIZED (SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1) "+
-		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5) UNION ALL SELECT '', sum(n), 'rows' FROM g", expr, structuredSource(sig.name), where, expr)
+		"SELECT * FROM (SELECT v, n, 'seen' AS kind FROM g ORDER BY n DESC, v LIMIT 5) UNION ALL SELECT '', sum(n), 'rows' FROM g", expr, diagnosisSource(sig, scope), where, expr)
 	if literal := f.DisplayLiteral; literal != "" {
 		if _, err := strconv.ParseFloat(literal, 64); err != nil && ref.Type == TypeString && utf8.RuneCountInString(literal) >= 3 && fieldVocabularies[f.EqField].Signal != sig.name {
 			// A typo changes about one character in four of a name; numbers,
@@ -295,6 +300,9 @@ func (e *Executor) seenValues(ctx context.Context, sig *signal, f Filter, others
 			query += " UNION ALL SELECT v, n, 'literal' FROM g WHERE v = ?"
 			args = append(args, literal)
 		}
+	}
+	if scope.Rollup {
+		query = strings.ReplaceAll(query, "count(*) AS n", "sum(spans) AS n")
 	}
 	rows, err := e.engine.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -405,4 +413,17 @@ func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []
 		return fmt.Sprintf("This measure is unavailable for %s (%s). Show %s instead.", k.name, k.kind, suggestion)
 	}
 	return ""
+}
+
+func diagnosisSource(sig *signal, scope Scope) string {
+	if scope.Rollup {
+		return "span_rollup"
+	}
+	return structuredSource(sig.name)
+}
+func diagnosisCount(scope Scope, filter string) string {
+	if scope.Rollup {
+		return "coalesce(sum(spans)" + filter + ",0)::BIGINT"
+	}
+	return "count(*)" + filter
 }

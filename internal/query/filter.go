@@ -12,6 +12,7 @@ import (
 
 // Filter is one checked filter expression.
 type Filter struct {
+	Columns []string `json:"-"` // Checked column dependencies, including attribute roots.
 	// Expr is DuckDB's canonical rendering of the checked expression; it is
 	// the only text ever embedded in SQL.
 	Expr string `json:"expr"`
@@ -68,7 +69,7 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 	if !onlyWhereClause(node, sig.name) {
 		return Filter{}, errors.New("must be a single boolean expression")
 	}
-	f := Filter{Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
+	f := Filter{Columns: []string{}, Source: strings.TrimSpace(expr), InParams: map[string]bool{}}
 	uses := map[string]int{}
 	typed := SQLExpression(node["where_clause"])
 	if err := walkFilterExpr(typed, sig, vars, &f, uses); err != nil {
@@ -212,6 +213,7 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 		return walk(v.Input, v.Lower, v.Upper)
 	case "OPERATOR":
 		if v.Type == "ARRAY_EXTRACT" {
+			f.Columns = append(f.Columns, fieldText(v))
 			return checkAttributeExpr(v)
 		}
 		if !filterOperators[v.Type] {
@@ -233,6 +235,9 @@ func walkFilterExpr(v *SQLExpr, sig *signal, vars map[string]Variable, f *Filter
 	case "COLUMN_REF":
 		if len(v.Columns) != 1 {
 			return errors.New("qualified column names are not allowed in a filter")
+		}
+		if !slices.Contains(f.Columns, v.Columns[0]) {
+			f.Columns = append(f.Columns, v.Columns[0])
 		}
 		_, err := sig.field(v.Columns[0])
 		return err

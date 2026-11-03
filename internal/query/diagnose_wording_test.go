@@ -74,6 +74,7 @@ func TestDiagnosisValuesSeen(t *testing.T) {
 	}
 	commit(t, repo, spans, nil)
 	e := NewExecutor(engine, 30)
+	e.parallel = 1 // Detailed diagnosis is exercised without queued reads.
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	d := Dashboard{Name: "Seen", Time: Time{Range: "1h"}}
 	for i, where := range []string{"trace_id = 'nope'", "span_id = 'nope'", "attributes['http.route'] = '/missing'"} {

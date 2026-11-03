@@ -835,7 +835,9 @@ func TestResultCacheNeverStoresPartialResults(t *testing.T) {
 			func(r Result) bool { return r.Frame.Note == "Table trends unavailable." }},
 		{"diagnosis timeout", RunRequest{Dashboard: quiet},
 			func(e Engine) Engine {
-				return &subReadEngine{Engine: e, hold: func(text string) bool { return strings.HasPrefix(text, "SELECT count(*)") }}
+				return &subReadEngine{Engine: e, hold: func(text string) bool {
+					return strings.HasPrefix(text, "SELECT count(*)") || strings.HasPrefix(text, "SELECT coalesce(sum(spans)")
+				}}
 			},
 			func(r Result) bool { return r.Diagnosis != "" }},
 	} {

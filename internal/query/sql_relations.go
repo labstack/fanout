@@ -30,6 +30,21 @@ func SQLRelations() map[string]SQLRelationSchema {
 				{Field: num("metric_count", "count", "Metric data points"), SQLType: "BIGINT"},
 			},
 		},
+		"span_rollup": {
+			Description: "Per-minute spans by namespace, service, kind and status. Panel SQL only; filter bucket with $__window(bucket). Counts and duration aggregates merge across rows. Percentiles interpolate merged fixed-scale-3 OpenTelemetry exponential histograms and are approximate within one positive bucket (9.05%). Structured RED panels route here at minute resolution; fresh_to_ms reports the ingest horizon, usually 1–1.5 minutes behind ingestion. Window boundaries have minute precision.",
+			Columns: []SQLColumnSchema{
+				{Field: str("namespace", "OpenTelemetry service namespace"), SQLType: "VARCHAR"},
+				{Field: ts("bucket", "UTC minute bucket"), SQLType: "TIMESTAMP_NS"},
+				{Field: str("service", "Service name"), SQLType: "VARCHAR"},
+				{Field: str("kind", "Span kind"), SQLType: "VARCHAR"},
+				{Field: str("status", "Span status"), SQLType: "VARCHAR"},
+				{Field: num("spans", "count", "Span count"), SQLType: "BIGINT"},
+				{Field: num("duration_sum", "ms", "Sum of span durations"), SQLType: "DOUBLE"},
+				{Field: num("duration_min", "ms", "Minimum span duration"), SQLType: "DOUBLE"},
+				{Field: num("duration_max", "ms", "Maximum span duration"), SQLType: "DOUBLE"},
+				{Field: dict("hist", "Duration bucket counts: ceil(log2(duration_ms)*8); -2147483648 represents zero or negative durations"), SQLType: "MAP(INTEGER, UBIGINT)"},
+			},
+		},
 		"edge_rollup": {
 			Description: "Dependency analytical rollup by namespace, time bucket, caller, callee and edge type. Panel SQL only; filter bucket with $__window(bucket).",
 			Columns: []SQLColumnSchema{

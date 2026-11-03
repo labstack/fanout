@@ -649,7 +649,7 @@ func (r *keyRewriter) table(name, schema, catalog string, scope *keyScope) *keyR
 	switch strings.ToLower(name) {
 	case "resource_inventory":
 		return &keyRelation{maps: map[string]keyMapSource{"resource": {}}}
-	case "service_rollup", "edge_rollup":
+	case "service_rollup", "span_rollup", "edge_rollup":
 		return &keyRelation{maps: map[string]keyMapSource{}}
 	}
 	return &keyRelation{open: true}

@@ -18,7 +18,7 @@ func TestSchemaDiscoversColumnsAttributesAndValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	spans := schema.Signals["spans"]
-	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 3 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
+	if len(schema.Signals) != 3 || len(schema.SQLRelations) != 4 || len(schema.SQLRelations["resource_inventory"].Columns) != 6 {
 		t.Fatalf("SQL relation discovery: %+v", schema)
 	}
 	if got := schema.SQLRelations["resource_inventory"]; got.Columns[3].SQLType != "VARIANT" || got.Columns[4].SQLType != "TIMESTAMPTZ_NS" {

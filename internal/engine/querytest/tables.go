@@ -46,3 +46,13 @@ func CreateTables(db *sql.DB, createCaches func(*sql.DB) error) error {
 	}
 	return createCaches(db)
 }
+
+// RefreshSpanRollup publishes summaries for read-side fixtures that do not run
+// the background engine loop. Engine write-path tests use the real rollup pass.
+func RefreshSpanRollup(db *sql.DB) error {
+	if _, err := db.Exec(`DELETE FROM span_rollup`); err != nil {
+		return err
+	}
+	_, err := db.Exec(`INSERT INTO span_rollup SELECT namespace,date_trunc('minute',start_time::TIMESTAMP_NS),service,coalesce(kind,''),coalesce(status,''),count(*),sum(duration_ms),min(duration_ms),max(duration_ms),histogram(CASE WHEN duration_ms>0 THEN coalesce(try_cast(ceil(log2(duration_ms)*8) AS INTEGER),2147483647) ELSE -2147483648 END) FROM spans WHERE service IS NOT NULL GROUP BY ALL`)
+	return err
+}

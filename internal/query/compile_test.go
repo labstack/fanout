@@ -58,13 +58,13 @@ func TestCompileTimeseriesBindsVariables(t *testing.T) {
 
 func TestCompileGroupedSeriesFoldsIntoOther(t *testing.T) {
 	p := &Panel{ID: "rps", Viz: "timeseries", Options: &Options{Top: 3}, Query: &Spec{From: "spans", By: []string{"service"}, Bucket: "5m"}}
-	got, err := compileQuery(p, measuresOf(t, "spans", "rate()"), nil, Scope{Start: compileStart, End: compileEnd, Interval: 5 * time.Minute})
+	got, err := compileAggregateQuery(p, measuresOf(t, "spans", "rate()"), nil, Scope{Start: compileStart, End: compileEnd, Interval: 5 * time.Minute}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	bucket := `time_bucket(INTERVAL '300 seconds', "start_time"::TIMESTAMP_NS)`
-	other := `CASE WHEN coalesce("service", '') IN (SELECT d FROM top) THEN "service" ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END`
-	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + `), candidates AS (SELECT coalesce("service", '') AS d, count(*) / 3600.0 AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 3) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "service", count(*) / 300.0 AS "rate" FROM base GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 8000`
+	other := `_fold`
+	want := `WITH base AS (SELECT * FROM spans WHERE ` + spanWindow + `), candidates AS (SELECT coalesce("service", '') AS d, count(*) / 3600.0 AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 3), other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce("service", '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce("service", '')=top.d CROSS JOIN other) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "service", count(*) / 300.0 AS "rate" FROM folded GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 8000`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}
@@ -111,8 +111,8 @@ func TestCompileShareAndLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	bucket := `time_bucket(INTERVAL '60 seconds', "time"::TIMESTAMP_NS)`
-	other := `CASE WHEN coalesce("severity", '') IN (SELECT d FROM top) THEN "severity" ELSE (SELECT 'Other (' || count(*)::VARCHAR || ')' FROM candidates WHERE d NOT IN (SELECT d FROM top)) END`
-	want := `WITH base AS (SELECT * FROM (` + redactedLogSource() + `) WHERE "time" >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND "time" < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS), candidates AS (SELECT coalesce("severity", '') AS d, 100.0 * count(*) / sum(count(*)) OVER () AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 6) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "severity", 100.0 * count(*) / sum(count(*)) OVER (PARTITION BY ` + bucket + `) AS "share" FROM base GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 14000`
+	other := `_fold`
+	want := `WITH base AS (SELECT * FROM (` + redactedLogSource() + `) WHERE "time" >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND "time" < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS), candidates AS (SELECT coalesce("severity", '') AS d, 100.0 * count(*) / sum(count(*)) OVER () AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 6), other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce("severity", '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce("severity", '')=top.d CROSS JOIN other) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "severity", 100.0 * count(*) / sum(count(*)) OVER (PARTITION BY ` + bucket + `) AS "share" FROM folded GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 14000`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}

@@ -143,7 +143,11 @@ func measureRollupKeyScale(t *testing.T, n int, kind string, verify bool) {
 	if kind == "edge" {
 		width = 2
 	}
-	if p.maxArgs > width*affectedKeyChunkSize+2 || p.statements != (n+affectedKeyChunkSize-1)/affectedKeyChunkSize {
+	wantStatements := (n + affectedKeyChunkSize - 1) / affectedKeyChunkSize
+	if kind == "service" {
+		wantStatements *= 2
+	} // Service quantiles and span histogram, both bounded.
+	if p.maxArgs > width*affectedKeyChunkSize+2 || p.statements != wantStatements {
 		t.Fatalf("unbounded pass: args=%d statements=%d", p.maxArgs, p.statements)
 	}
 	var reference string

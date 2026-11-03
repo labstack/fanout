@@ -262,3 +262,21 @@ type HealthFrame struct {
 	ErrorTrendTimes []int64                    `json:"error_trend_times"`
 	ErrorTrend      []float64                  `json:"error_trend"`
 }
+
+// A grouping-set total has no time bucket. Remove it from the visible series
+// while keeping the same public columns and the full-window aggregate.
+func extractGroupingTotals(f *Frame) {
+	for row := f.Rows - 1; row >= 0; row-- {
+		if f.Values[0][row] != nil {
+			continue
+		}
+		f.Totals = make([]any, len(f.Columns))
+		for col, c := range f.Columns {
+			if c.Role == "measure" {
+				f.Totals[col] = f.Values[col][row]
+			}
+			f.Values[col] = append(f.Values[col][:row], f.Values[col][row+1:]...)
+		}
+		f.Rows--
+	}
+}

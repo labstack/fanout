@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/engine/querytest"
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -33,17 +34,25 @@ func newTestEngine(t *testing.T) (*engine.Duck, *telemetrystore.Repository) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = d.Close(); _ = repo.Close() })
+	testDucks.Store(repo, d)
+	t.Cleanup(func() { testDucks.Delete(repo); _ = d.Close(); _ = repo.Close() })
 	return d, repo
 }
 
 var batchSeq int
+var testDucks sync.Map
 
 func commit(t *testing.T, repo *telemetrystore.Repository, spans []telemetry.Span, logs []telemetry.Log) {
 	t.Helper()
 	batchSeq++
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("fixture-%d", batchSeq), Spans: spans, Logs: logs}); err != nil {
 		t.Fatal(err)
+	}
+	if value, ok := testDucks.Load(repo); ok {
+		d := value.(*engine.Duck)
+		if err := querytest.RefreshSpanRollup(d.DB); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
