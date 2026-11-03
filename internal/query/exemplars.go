@@ -218,14 +218,16 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 		where += " AND contains(lower(body),lower(?))"
 		args = append(args, p.Options.Highlight)
 	}
-	// Sample matching rows before any grouping or ordering. A LIMIT after a
-	// global trace ranking still decodes the entire selection under ingestion.
-	// At most 64 sampled rows feed root lookup; this is a sample, not a global
-	// slowest-trace ranking. Repeated spans may yield fewer than 20 traces.
-	// Bind this scan separately so file pruning uses the selected bucket, while
-	// root metadata retains the full panel window.
+	// Rank only the narrow span projection in the selected bucket. DuckDB uses
+	// a bounded TOP_N heap; the extra row detects truncation without feeding
+	// more than 64 candidates to root lookup. Logs retain their sampling order.
+	// Root metadata still uses the full panel window.
 	candidateCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: lo, End: hi})
-	probe, err := e.engine.QueryContext(candidateCtx, "SELECT namespace,trace_id FROM "+structuredSource(p.Query.From)+" WHERE "+where+" AND trace_id<>'' LIMIT 65", args...)
+	candidateSQL := "SELECT namespace,trace_id FROM " + structuredSource(p.Query.From) + " WHERE " + where + " AND trace_id<>'' LIMIT 65"
+	if p.Query.From == "spans" {
+		candidateSQL = "SELECT namespace,trace_id FROM (SELECT namespace,trace_id,duration_ms FROM spans WHERE " + where + " AND trace_id<>'' ORDER BY duration_ms DESC LIMIT 65)"
+	}
+	probe, err := e.engine.QueryContext(candidateCtx, candidateSQL, args...)
 	if err != nil {
 		return out, exemplarError(ctx, err)
 	}
@@ -262,8 +264,8 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 	// Keep the bounded keys as constants in a predicate. Joining a VALUES
 	// relation lets zero-cardinality Parquet estimates reverse the hash build
 	// into every retained span, consuming memory and CPU before returning roots.
-	// One aggregate state per sampled trace also bounds root selection memory
-	// when a sampled trace has many spans. Prefer a root, then time and span ID,
+	// One aggregate state per candidate trace also bounds root selection memory
+	// when a candidate trace has many spans. Prefer a root, then time and span ID,
 	// exactly as the trace-row path does, and retain errors from all its spans.
 	text := fmt.Sprintf(`WITH roots AS (
 SELECT s.namespace,s.trace_id,
