@@ -244,7 +244,7 @@ func TestSingleDrainRegistration(t *testing.T) {
 			return true
 		})
 		want := 0
-		if fn.Name.Name == "runVersionRollupLoop" {
+		if fn.Name.Name == "rollupOnce" {
 			want = 1
 		}
 		if count != want {
