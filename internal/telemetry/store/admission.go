@@ -128,6 +128,14 @@ func (a *ingestAdmission) admit(rows int) (time.Duration, bool, string) {
 		return 2 * time.Second, false, "debt"
 	}
 	if a.rate > 0 {
+		// An existing pressured store can start before any export has supplied a
+		// rate sample. Seed that empty history with one export so its retry can
+		// fit; subsequent exports use the measured rate and the normal bucket.
+		if len(a.samples) == 0 {
+			a.rate = max(a.rate, float64(rows))
+			a.tokens = max(a.tokens, float64(rows))
+			metrics.IngestAdmissionRate.Set(a.rate)
+		}
 		// Grow the burst for a single large export: it must eventually fit even
 		// when its row count exceeds a second of the current admission rate.
 		a.burst = max(a.burst, float64(rows))

@@ -66,6 +66,13 @@ var (
 		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds an ingest admission rate cap was active",
 	})
 
+	CompactionPassSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "fanout_compaction_pass_seconds", Help: "Duration of a compaction pass including publication", Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
+	})
+	CompactionRetiredBatches = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_compaction_retired_batches_total", Help: "Input batches retired from the live catalog by compaction publications",
+	})
+
 	IngestThrottled = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_ingest_throttled_total", Help: "Whole exports refused by admission reason: debt, reads or budget",
 	}, []string{"reason"})

@@ -174,3 +174,20 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 `Any` registers every HTTP method with the same authorization requirement.
 `GET /*` serves the single-page application for browser paths. Unknown `/api/*`
 and OTLP paths return errors.
+
+## OTLP overload responses
+
+OTLP admission counts protobuf spans, log records or metric points before
+converting them into storage rows. Under compaction debt, sustained read
+pressure, or the decoded-byte budget, the entire export is refused retryably.
+gRPC responds with `RESOURCE_EXHAUSTED` and `google.rpc.RetryInfo`; HTTP responds
+with 429 and `Retry-After` in whole seconds rounded up. The message identifies
+the pressure reason. Rate refusals request a one-to-five-second delay; the hard
+debt limit requests two seconds. Byte-budget refusals retain their existing
+retry delay. Enable exporter retries and honor these delays; clients with
+retries disabled can drop refused telemetry. An acknowledgement still means
+the accepted export was durably published.
+
+Exemplars and trace detail use a priority read lane with reserved capacity.
+Panels and interactive reads have separate bounded queues; a refused read
+retains the existing 503 busy response with `Retry-After`.

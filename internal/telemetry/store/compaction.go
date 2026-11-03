@@ -11,6 +11,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
 	"golang.org/x/sync/errgroup"
 )
@@ -575,7 +576,9 @@ func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPu
 	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
 	}
-	deadline := time.Now().Add(budget)
+	started := time.Now()
+	defer func() { metrics.CompactionPassSeconds.Observe(time.Since(started).Seconds()) }()
+	deadline := started.Add(budget)
 	total := 0
 	for {
 		count, err := r.CompactParquet(ctx, publisher, maxBatches)

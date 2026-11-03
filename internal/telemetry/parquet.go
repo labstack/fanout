@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/labstack/fanout/internal/metrics"
 	"github.com/parquet-go/parquet-go"
 	"github.com/zeebo/xxh3"
 	"golang.org/x/sync/errgroup"
@@ -854,6 +855,9 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 		// directory nor write it again once it is deleted.
 		p.recordReplacesLocked(metadata.ID, inputs)
 		p.mu.Unlock()
+		// Count catalog retirements once, even if marker cleanup or fsync is
+		// retried. Already absent inputs must not inflate retirement throughput.
+		metrics.CompactionRetiredBatches.Add(float64(len(retired)))
 		if syncErr != nil {
 			return syncErr
 		}

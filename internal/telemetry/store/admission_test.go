@@ -167,3 +167,22 @@ func TestSubmitOverBudgetIsReportedToTheCaller(t *testing.T) {
 		t.Errorf("Submit over budget = %v, want ErrIngestOverBudget", err)
 	}
 }
+
+func TestAdmissionColdPressureCanAcceptAnExport(t *testing.T) {
+	now := time.Unix(1, 0)
+	a := newIngestAdmission(func() int { return admissionBandStart }, nil, nil)
+	a.now = func() time.Time { return now }
+	a.update()
+	now = now.Add(time.Second)
+	a.update()
+	if _, ok := a.Admit(1000); !ok {
+		t.Fatal("empty history stranded first export")
+	}
+	if _, ok := a.Admit(1000); ok {
+		t.Fatal("second export bypassed bucket")
+	}
+	now = now.Add(time.Second)
+	if _, ok := a.Admit(1000); !ok {
+		t.Fatal("bucket did not refill")
+	}
+}

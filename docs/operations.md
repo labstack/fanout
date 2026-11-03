@@ -199,6 +199,21 @@ certificate verification behaviour.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
+Monitor admission and compaction together:
+
+- `fanout_ingest_throttled_total{reason}` counts refused whole exports by `debt`,
+  `reads`, or `budget`. Exporters need retries enabled.
+- `fanout_ingest_admission_rows_per_second` is the current row-rate cap; zero
+  means uncapped.
+- `fanout_ingest_backpressure_seconds_total` measures time with an admission cap
+  active. Earlier releases measured blocked-writer time; do not compare them
+  directly.
+- `fanout_compaction_backlog_batches` is total generation-0 inventory, including
+  batches excluded from reclaimable debt.
+- `fanout_compaction_pass_seconds` measures pass duration, and
+  `fanout_compaction_retired_batches_total` counts input batches retired by
+  successful publications. Compare its rate with backlog growth.
+
 Run Fanout under a supervisor that restarts it on exit: Docker or Compose with
 `restart: unless-stopped` (`--restart unless-stopped`), systemd with
 `Restart=on-failure`, or Kubernetes. Docker's `HEALTHCHECK` only marks a
