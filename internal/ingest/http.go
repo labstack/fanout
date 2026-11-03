@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -123,8 +124,14 @@ func (h *httpIngestHandler) handleExport(
 		}
 		// Shedding is throttling: OTLP/HTTP senders retry 429 after Retry-After.
 		if status.Code(err) == codes.ResourceExhausted {
-			w.Header().Set("Retry-After", strconv.Itoa(int(shedRetryDelay/time.Second)))
-			writeOTLPStatus(w, r, http.StatusTooManyRequests, codes.ResourceExhausted, "telemetry ingest is over its in-flight budget")
+			delay := shedRetryDelay
+			for _, detail := range status.Convert(err).Details() {
+				if retry, ok := detail.(*errdetails.RetryInfo); ok {
+					delay = retry.RetryDelay.AsDuration()
+				}
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(delay.Seconds())))))
+			writeOTLPStatus(w, r, http.StatusTooManyRequests, codes.ResourceExhausted, status.Convert(err).Message())
 			return
 		}
 		// Cancellation/backpressure remains retryable. Never acknowledge rows

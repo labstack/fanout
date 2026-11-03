@@ -181,3 +181,5 @@ func TestHTTPRejectsExcessiveAttributeNestingWithoutRetry(t *testing.T) {
 		}
 	}
 }
+
+func (nestingSubmitter) Admit(context.Context, int) error { return nil }

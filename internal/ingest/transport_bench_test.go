@@ -258,3 +258,5 @@ func transportCPU() float64 {
 	}
 	return float64(usage.Utime.Sec+usage.Stime.Sec) + float64(usage.Utime.Usec+usage.Stime.Usec)/1e6
 }
+
+func (*transportCountSubmitter) Admit(context.Context, int) error { return nil }

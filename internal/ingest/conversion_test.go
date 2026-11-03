@@ -252,3 +252,5 @@ func BenchmarkExportConversion(b *testing.B) {
 		})
 	}
 }
+
+func (conversionSubmitter) Admit(context.Context, int) error { return nil }

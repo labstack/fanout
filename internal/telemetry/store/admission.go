@@ -98,6 +98,7 @@ func (w *Writer) Admit(ctx context.Context, rows int) error {
 	if w.admission != nil {
 		delay, ok, reason := w.admission.admit(rows)
 		if !ok {
+			metrics.IngestThrottled.WithLabelValues(reason).Inc()
 			return &ErrIngestThrottled{RetryAfter: delay, Reason: reason}
 		}
 	}
@@ -241,5 +242,6 @@ func (a *ingestAdmission) tick(now time.Time) {
 	} else {
 		a.tokens, a.burst = 0, 0
 	}
+	metrics.IngestAdmissionRate.Set(a.rate)
 	a.previousDebt, a.last = debt, now
 }

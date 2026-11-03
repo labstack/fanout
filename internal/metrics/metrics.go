@@ -63,7 +63,14 @@ var (
 	})
 
 	IngestBackpressureSeconds = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds the ingest writer waited for compaction debt to retire",
+		Name: "fanout_ingest_backpressure_seconds_total", Help: "Total seconds an ingest admission rate cap was active",
+	})
+
+	IngestThrottled = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_ingest_throttled_total", Help: "Whole exports refused by admission reason: debt, reads or budget",
+	}, []string{"reason"})
+	IngestAdmissionRate = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_ingest_admission_rows_per_second", Help: "Current ingest admission rows per second; zero means uncapped",
 	})
 
 	// Ingest metrics
@@ -293,7 +300,7 @@ func RecordIngest(signal string, count int) {
 }
 
 // RecordIngestShed counts one refused telemetry request.
-func RecordIngestShed() { IngestShedTotal.Inc() }
+func RecordIngestShed() { IngestShedTotal.Inc(); IngestThrottled.WithLabelValues("budget").Inc() }
 
 // RecordIngestAbandoned counts one telemetry request dropped before commit.
 func RecordIngestAbandoned() { IngestAbandonedTotal.Inc() }

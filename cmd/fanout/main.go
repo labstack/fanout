@@ -159,16 +159,6 @@ func main() {
 	writer := telemetrystore.NewWriter(repository, cfg.IngestBatchSize)
 	writer.SetInFlightBudget(cfg.IngestMaxInFlightBytes)
 	writerResult := make(chan error, 1)
-	go func() {
-		err := writer.Run(ctx)
-		// Publish the result before notifying the process-wide error channel. The
-		// shutdown path waits on writerResult after Writer.Wait, so a final-commit
-		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
-		writerResult <- err
-		if err != nil {
-			errCh <- fmt.Errorf("telemetry writer: %w", err)
-		}
-	}()
 
 	go q.Watch(ctx)
 
@@ -291,6 +281,17 @@ func main() {
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := query.NewExecutor(q, cfg.RetentionDays)
+	writer.SetAdmission(repository.CompactionDebt, panels.Pressure, panels.InteractiveRefusals)
+	go func() {
+		err := writer.Run(ctx)
+		// Publish the result before notifying the process-wide error channel. The
+		// shutdown path waits on writerResult after Writer.Wait, so a final-commit
+		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
+		writerResult <- err
+		if err != nil {
+			errCh <- fmt.Errorf("telemetry writer: %w", err)
+		}
+	}()
 	q.SetReadPressure(panels.Pressure)
 	go q.RunRollups(ctx)
 	panels.SetRollupReader(queries)

@@ -5,7 +5,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -56,5 +58,58 @@ func TestHTTPShedExportIsThrottled(t *testing.T) {
 	f.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
 		t.Fatalf("status = %d Retry-After = %q, want 429 with Retry-After", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+func (shedSubmitter) Admit(context.Context, int) error { return nil }
+
+type throttledSubmitter struct {
+	submits int
+	rows    int
+}
+
+func (s *throttledSubmitter) Admit(_ context.Context, rows int) error {
+	s.rows = rows
+	return &telemetrystore.ErrIngestThrottled{RetryAfter: 1500 * time.Millisecond, Reason: "reads"}
+}
+func (s *throttledSubmitter) Submit(context.Context, telemetrystore.Batch) error {
+	s.submits++
+	return nil
+}
+
+func TestThrottledExportCarriesRetryInfo(t *testing.T) {
+	submitter := &throttledSubmitter{}
+	srv := NewServer(config.Config{}, submitter)
+	req := testTraceRequest()
+	// This sentinel would panic during conversion. Admission must happen first.
+	req.ResourceSpans[0].ScopeSpans[0].Spans[0] = nil
+	_, err := srv.exportTraces(t.Context(), req)
+	st := status.Convert(err)
+	if st.Code() != codes.ResourceExhausted || !strings.Contains(st.Message(), "reads") {
+		t.Fatal(err)
+	}
+	if len(st.Details()) != 1 || st.Details()[0].(*errdetails.RetryInfo).RetryDelay.AsDuration() != 1500*time.Millisecond {
+		t.Fatal(st.Details())
+	}
+	if submitter.submits != 0 || submitter.rows != 1 {
+		t.Fatalf("submits=%d rows=%d", submitter.submits, submitter.rows)
+	}
+}
+
+func TestHTTPThrottledExportIsThrottled(t *testing.T) {
+	f := newHTTPIngestFixture(t, true)
+	submitter := &throttledSubmitter{}
+	f.handler = NewHTTPHandler(NewServer(config.Config{}, submitter), f.store)
+	payload, err := proto.Marshal(testTraceRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", otlpProtobufContentType)
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	rec := httptest.NewRecorder()
+	f.handler.ServeHTTP(rec, req)
+	if rec.Code != 429 || rec.Header().Get("Retry-After") != "2" || submitter.submits != 0 {
+		t.Fatalf("status=%d retry=%s submits=%d", rec.Code, rec.Header().Get("Retry-After"), submitter.submits)
 	}
 }

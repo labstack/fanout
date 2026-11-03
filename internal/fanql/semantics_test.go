@@ -513,3 +513,5 @@ func TestStandardKeysCompareByType(t *testing.T) {
 		})
 	}
 }
+
+func (*semanticSubmitter) Admit(context.Context, int) error { return nil }

@@ -557,3 +557,5 @@ func TestPerformanceFixtureValidatesAndExecutes(t *testing.T) {
 		})
 	})
 }
+
+func (*fixtureSubmitter) Admit(context.Context, int) error { return nil }

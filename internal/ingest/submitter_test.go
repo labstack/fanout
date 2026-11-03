@@ -41,3 +41,5 @@ func (s *channelSubmitter) Submit(ctx context.Context, batch telemetrystore.Batc
 	}
 	return nil
 }
+
+func (*channelSubmitter) Admit(context.Context, int) error { return nil }

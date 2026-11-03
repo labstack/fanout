@@ -31,6 +31,7 @@ import (
 )
 
 type batchSubmitter interface {
+	Admit(context.Context, int) error
 	Submit(context.Context, telemetrystore.Batch) error
 }
 
@@ -77,6 +78,10 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 		for _, ss := range rs.ScopeSpans {
 			count += len(ss.Spans)
 		}
+	}
+	ctx = telemetrystore.WithIngestAdmission(ctx)
+	if err := s.submitter.Admit(ctx, count); err != nil {
+		return nil, ingestStatusError(err)
 	}
 	batch := telemetrystore.Batch{}
 	if count > 0 {
@@ -166,9 +171,15 @@ const shedRetryDelay = time.Second
 // the data is not lost, it arrives a moment later. Exporters retry it only
 // when it carries RetryInfo, so it always does.
 func ingestStatusError(err error) error {
-	if errors.Is(err, telemetrystore.ErrIngestOverBudget) {
+	delay := shedRetryDelay
+	var throttled *telemetrystore.ErrIngestThrottled
+	limited := errors.As(err, &throttled)
+	if limited {
+		delay = throttled.RetryAfter
+	}
+	if limited || errors.Is(err, telemetrystore.ErrIngestOverBudget) {
 		st, detailErr := status.New(codes.ResourceExhausted, err.Error()).
-			WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(shedRetryDelay)})
+			WithDetails(&errdetails.RetryInfo{RetryDelay: durationpb.New(delay)})
 		if detailErr != nil {
 			return status.Error(codes.ResourceExhausted, err.Error())
 		}
@@ -190,6 +201,10 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 		for _, sl := range rl.ScopeLogs {
 			count += len(sl.LogRecords)
 		}
+	}
+	ctx = telemetrystore.WithIngestAdmission(ctx)
+	if err := s.submitter.Admit(ctx, count); err != nil {
+		return nil, ingestStatusError(err)
 	}
 	batch := telemetrystore.Batch{}
 	if count > 0 {
@@ -267,6 +282,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 				}
 			}
 		}
+	}
+	ctx = telemetrystore.WithIngestAdmission(ctx)
+	if err := s.submitter.Admit(ctx, count); err != nil {
+		return nil, ingestStatusError(err)
 	}
 	batch := telemetrystore.Batch{}
 	if count > 0 {
