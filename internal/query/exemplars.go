@@ -313,21 +313,6 @@ FROM spans s JOIN candidates c ON s.namespace=c.namespace AND s.trace_id=c.trace
 WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS`
 }
 
-func checkedTraceSQL(source, where string, limit int, order, startProjection string) string {
-	// Span candidates prioritize the slowest matching span per trace. Logs are a
-	// deterministic sample by namespace and trace ID, not a global latency ranking.
-	candidateOrder := "namespace,trace_id"
-	if source == "spans" {
-		candidateOrder = "max(duration_ms) DESC,namespace,trace_id"
-	}
-	return fmt.Sprintf(`WITH candidate_probe AS (SELECT namespace,trace_id,row_number() OVER (ORDER BY %s) AS candidate_rank FROM %s WHERE %s AND trace_id<>'' GROUP BY namespace,trace_id ORDER BY candidate_rank LIMIT 1001),
-candidates AS (SELECT namespace,trace_id FROM candidate_probe WHERE candidate_rank<=1000), roots AS (%s)
-SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),coalesce(start_time,TIMESTAMP_NS '1970-01-01'),capped
-FROM (SELECT count(*)>1000 AS capped FROM candidate_probe) cap LEFT JOIN
-(SELECT trace_id,namespace,service,operation,duration_ms,status,%s AS start_time FROM roots WHERE n=1 ORDER BY %s LIMIT %d) selected ON TRUE
-ORDER BY %s`, candidateOrder, source, where, traceRootsSQL(), startProjection, order, limit, order)
-}
-
 // Bound matching trace candidates before the root window functions. Like
 // exemplars, ranking is approximate when filters exclude the root span.
 // checkedTraceRowsSQL returns the root of each candidate trace, at most limit.

@@ -250,30 +250,19 @@ func TestExemplarCandidateSampleCap(t *testing.T) {
 		spans = append(spans, telemetry.Span{Namespace: "n", TraceID: fmt.Sprintf("t%04d", i), SpanID: "root", ServiceName: "s", StartUnixNanos: n, EndUnixNanos: n + int64(i+1)*1000000, DurationMS: float64(i + 1), IngestedAt: n})
 	}
 	commit(t, repo, spans, nil)
-	e := NewExecutor(engine, 30)
+	probe := exemplarProbeEngine{Engine: engine, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
+		if strings.HasPrefix(text, "WITH roots AS") && len(args) != 130 {
+			return nil, fmt.Errorf("root probe has %d arguments, want 64 keys and two window bounds", len(args))
+		}
+		return engine.QueryContext(ctx, text, args...)
+	}}
+	e := NewExecutor(probe, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	got, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
 	if err != nil || len(got.Traces) != 20 || !got.Truncated {
 		t.Fatalf("sample: %+v %v", got, err)
 	}
-	p := Panel{Query: &Spec{From: "spans"}}
-	where, args, _ := selectionWhere(&p, nil, Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour)}, nil, nil)
-	args = append(args, fixtureStart, fixtureStart.Add(time.Hour))
-	rows, err := engine.QueryContext(t.Context(), checkedTraceSQL("spans", where, 2000, "duration_ms DESC,trace_id,namespace", "start_time::TIMESTAMP_NS"), args...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		count++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1000 {
-		t.Fatalf("candidate cap: got %d", count)
-	}
+
 }
 
 func TestExemplarTruncation(t *testing.T) {
