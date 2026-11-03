@@ -24,7 +24,6 @@ const (
 	// durable acknowledgement when the row target is not reached.
 	groupAdmissionWindow    = 10 * time.Millisecond
 	pressureAdmissionWindow = time.Second
-	pressureAdmissionIdle   = 20 * time.Millisecond
 	maxAdmissionRequests    = 512
 	maxGroupBatchRows       = 50_000
 	pressureGroupBatchRows  = 200_000
@@ -158,7 +157,7 @@ func NewWriter(repository *Repository, batchSize int) *Writer {
 		done: make(chan struct{}), stopping: make(chan struct{}), submissions: make(chan *submission, submissionQueueDepth),
 	}
 	if repository != nil {
-		w.SetAdmission(repository.CompactionDebt, nil, nil)
+		w.SetAdmission(repository.CompactionDebt, nil)
 	}
 	return w
 }
@@ -336,16 +335,12 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, ou
 		// Coalesce more exports before the hard debt stop is needed. Read
 		// reclaimable debt once per group; low-load acknowledgements keep
 		// their short window as soon as compaction relieves the pressure.
-		var idle <-chan time.Time
-		var idleTimer *time.Timer
 		if pressure {
+			// Retry backoff creates gaps between admitted exports. An idle cutoff
+			// here turns throttling into tiny files, increasing the very debt and
+			// read/compaction work this window is meant to reduce. Keep collecting
+			// until the bounded deadline or a row, byte or request limit is reached.
 			window = pressureAdmissionWindow
-			// Closed-loop exporters cannot send again until this group commits.
-			// Close an idle group promptly, while a paced stream can continue
-			// coalescing up to the pressure window and the existing bounds.
-			idleTimer = time.NewTimer(pressureAdmissionIdle)
-			defer idleTimer.Stop()
-			idle = idleTimer.C
 		}
 		timer := time.NewTimer(window)
 		defer timer.Stop()
@@ -354,11 +349,6 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, ou
 			select {
 			case next := <-w.submissions:
 				admit(next)
-				if idleTimer != nil {
-					idleTimer.Reset(pressureAdmissionIdle)
-				}
-			case <-idle:
-				break admission
 			case <-timer.C:
 				break admission
 			case <-ctx.Done():

@@ -27,7 +27,7 @@ func (s *blockedCompactionCommitter) CompactionDebt() int { return 0 }
 
 func TestWriterRefusesQuicklyAtTheDebtLimit(t *testing.T) {
 	w := NewWriter(nil, 50000)
-	w.SetAdmission(func() int { return telemetry.CompactionDebtLimit }, nil, nil)
+	w.SetAdmission(func() int { return telemetry.CompactionDebtLimit }, nil)
 	err := w.Submit(t.Context(), testBatch())
 	var throttled *ErrIngestThrottled
 	if !errors.As(err, &throttled) || throttled.Reason != "debt" || throttled.RetryAfter != 2*time.Second {
@@ -162,7 +162,7 @@ func TestWriterAdaptsAdmissionToReclaimableDebt(t *testing.T) {
 			wantLatency := [2]time.Duration{10 * time.Millisecond, 10 * time.Millisecond}
 			if debt >= telemetry.CompactionDebtLimit/2 {
 				want = 1
-				wantLatency = [2]time.Duration{35 * time.Millisecond, 20 * time.Millisecond}
+				wantLatency = [2]time.Duration{time.Second, time.Second - 15*time.Millisecond}
 			}
 			if latencies != wantLatency {
 				t.Fatalf("debt=%d acknowledgement latencies=%v want=%v", debt, latencies, wantLatency)
@@ -223,8 +223,8 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 	}
 }
 
-func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
-	for _, interval := range []time.Duration{15 * time.Millisecond, 25 * time.Millisecond} {
+func TestWriterPressureAdmissionCoalescesSparseRetriesUntilDeadline(t *testing.T) {
+	for _, interval := range []time.Duration{15 * time.Millisecond, 35 * time.Millisecond} {
 		t.Run(interval.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				c := &pressureRecordingCommitter{recordingCommitter: &recordingCommitter{}}
@@ -242,7 +242,7 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 					done <- err
 				}()
 				synctest.Wait()
-				// Keep arrivals below the idle cutoff, or let the first group idle.
+				// Sparse retries still share the full pressure window.
 				for i := 1; i <= 80; i++ {
 					time.Sleep(interval)
 					w.submissions <- request
@@ -252,12 +252,8 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 					t.Fatal(err)
 				}
 				job := <-out
-				wantRequests := 67
+				wantRequests := int(pressureAdmissionWindow/interval) + 1
 				wantElapsed := pressureAdmissionWindow
-				if interval > pressureAdmissionIdle {
-					wantRequests = 1
-					wantElapsed = pressureAdmissionIdle
-				}
 				if elapsed != wantElapsed {
 					t.Fatalf("dispatch after %v want=%v", elapsed, wantElapsed)
 				}

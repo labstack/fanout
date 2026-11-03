@@ -178,8 +178,9 @@ and OTLP paths return errors.
 ## OTLP overload responses
 
 OTLP admission counts protobuf spans, log records or metric points before
-converting them into storage rows. Under compaction debt, sustained read
-pressure, or the decoded-byte budget, the entire export is refused retryably.
+converting them into storage rows. Under compaction debt, interactive starvation
+(refusals or queue-wait timeouts), or the decoded-byte budget, the entire export
+is refused retryably. Panel queueing alone does not trigger ingest throttling.
 gRPC responds with `RESOURCE_EXHAUSTED` and `google.rpc.RetryInfo`; HTTP responds
 with 429 and `Retry-After` in whole seconds rounded up. The message identifies
 the pressure reason. Rate refusals request a one-to-five-second delay; the hard

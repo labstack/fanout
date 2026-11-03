@@ -3,16 +3,17 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/labstack/fanout/internal/telemetry"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 func TestAdmissionDebtAIMD(t *testing.T) {
 	now := time.Unix(1, 0)
 	debt := 0
-	a := newIngestAdmission(func() int { return debt }, nil, nil)
+	a := newIngestAdmission(func() int { return debt }, nil)
 	a.now = func() time.Time { return now }
 	a.Admit(1000)
 	now = now.Add(time.Second)
@@ -50,15 +51,15 @@ func TestAdmissionDebtAIMD(t *testing.T) {
 
 func TestAdmissionReadPressureAndRetryBounds(t *testing.T) {
 	now := time.Unix(1, 0)
-	pressure := false
-	a := newIngestAdmission(func() int { return 0 }, func() bool { return pressure }, nil)
+	busy := uint64(0)
+	a := newIngestAdmission(func() int { return 0 }, func() uint64 { return busy })
 	a.now = func() time.Time { return now }
 	a.Admit(1000)
 	for range 4 {
 		now = now.Add(admissionInterval)
 		a.update()
 	}
-	pressure = true
+	busy++
 	for range 16 {
 		now = now.Add(admissionInterval)
 		a.update()
@@ -73,14 +74,14 @@ func TestAdmissionReadPressureAndRetryBounds(t *testing.T) {
 	if d, ok := a.Admit(1000000); ok || d != 5*time.Second {
 		t.Fatalf("max=%v %v", d, ok)
 	}
-	for range 80 {
+	for range 320 {
+		busy++
 		now = now.Add(admissionInterval)
 		a.update()
 	}
-	if a.rate < 100 {
+	if a.rate < 500 {
 		t.Fatalf("below historical floor: %v", a.rate)
 	}
-	pressure = false
 	for range 120 {
 		now = now.Add(admissionInterval)
 		a.update()
@@ -170,7 +171,7 @@ func TestSubmitOverBudgetIsReportedToTheCaller(t *testing.T) {
 
 func TestAdmissionColdPressureCanAcceptAnExport(t *testing.T) {
 	now := time.Unix(1, 0)
-	a := newIngestAdmission(func() int { return admissionBandStart }, nil, nil)
+	a := newIngestAdmission(func() int { return admissionBandStart }, nil)
 	a.now = func() time.Time { return now }
 	a.update()
 	now = now.Add(time.Second)
@@ -181,8 +182,49 @@ func TestAdmissionColdPressureCanAcceptAnExport(t *testing.T) {
 	if _, ok := a.Admit(1000); ok {
 		t.Fatal("second export bypassed bucket")
 	}
-	now = now.Add(time.Second)
-	if _, ok := a.Admit(1000); !ok {
-		t.Fatal("bucket did not refill")
+	for range 3 {
+		now = now.Add(time.Second)
+		if _, ok := a.Admit(1000); !ok {
+			t.Fatal("cold pressure lost the request-sized rate seed")
+		}
+	}
+}
+
+func TestPanelPressureDoesNotThrottleIngest(t *testing.T) {
+	now := time.Unix(1, 0)
+	a := newIngestAdmission(func() int { return 0 }, nil)
+	a.now = func() time.Time { return now }
+	for range 160 {
+		if _, ok := a.Admit(250); !ok {
+			t.Fatal("panel queueing refused an export")
+		}
+		now = now.Add(admissionInterval)
+		a.update()
+	}
+	if a.rate != 0 {
+		t.Fatalf("panel queueing capped ingest at %v rows/s", a.rate)
+	}
+}
+
+func TestReadFloorNeverOverridesCompactionDebt(t *testing.T) {
+	now := time.Unix(1, 0)
+	debt, busy := 0, uint64(0)
+	a := newIngestAdmission(func() int { return debt }, func() uint64 { return busy })
+	a.now = func() time.Time { return now }
+	a.Admit(1000)
+	now = now.Add(admissionInterval)
+	a.update()
+	debt = admissionBandStart
+	for range 80 {
+		busy++
+		debt++
+		now = now.Add(admissionInterval)
+		a.update()
+	}
+	if a.readRate < 500 {
+		t.Fatalf("read floor=%v", a.readRate)
+	}
+	if a.rate >= 500 || a.rate != a.debtRate || a.reason != "debt" {
+		t.Fatalf("debt cap=%v read cap=%v effective=%v reason=%s", a.debtRate, a.readRate, a.rate, a.reason)
 	}
 }

@@ -17,9 +17,17 @@ rows-per-second token bucket adapts every 250 ms. At half the unchanged 1,024
 reclaimable-batch limit, rising debt reduces the rate by 15%; falling debt
 increases it by 10%, bounded by 1.5 times the recent 60-second peak. The entry
 rate is the accepted count over the preceding second. With no history, the
-first export seeds the bucket so cold pressure cannot strand it. Three seconds of sustained
-read pressure, or interactive refusals, reduces admission once per second to a
-floor of 10% of the recent peak; recovery increases it by 10% per second.
+first export seeds the bucket so cold pressure cannot strand it. Rising interactive
+refusals (including queue-wait timeouts) indicate starvation for three seconds
+after the latest refusal. Panel queueing alone never reduces ingest. Starvation
+reduces a separate read cap once per second to 50% of the measured peak before
+starvation; recovery increases it by 10% per second. Freeze that reference during
+the incident so a long incident cannot erase its own floor. Half the healthy
+rate bounds the throughput sacrificed to read feedback while leaving room for
+reads to recover. Continued starvation at that floor requires measuring read
+cost; a lower ingest rate requires compaction debt, not just read demand. Apply
+the smaller of the independent debt and read caps so the read floor cannot
+defeat debt protection.
 Below the debt band admission is uncapped unless reads require a cap.
 
 At the debt limit refuse every new export with a two-second retry delay. Other
@@ -35,7 +43,9 @@ so panels remain usable. The engine still retains its two separate connections
 for other readers where the pool permits. No CPU reservation is introduced.
 
 Under debt pressure group commits target 200,000 rows and a one-second window,
-with a 20 ms idle cutoff and the existing 64 MiB group bound. Physical row groups
+with the existing 64 MiB group bound. Sparse retries keep the full bounded
+window rather than closing after an idle gap, so throttling does not multiply
+small files and their read and compaction overhead. Physical row groups
 remain 50,000 rows. Compaction continues under read pressure without algorithmic
 changes or a higher debt limit.
 

@@ -281,7 +281,7 @@ func main() {
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := query.NewExecutor(q, cfg.RetentionDays)
-	writer.SetAdmission(repository.CompactionDebt, panels.Pressure, panels.InteractiveRefusals)
+	writer.SetAdmission(repository.CompactionDebt, panels.InteractiveRefusals)
 	go func() {
 		err := writer.Run(ctx)
 		// Publish the result before notifying the process-wide error channel. The

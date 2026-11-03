@@ -237,15 +237,17 @@ rollup's served-span minute p95 values; log-pattern detection still reads logs.
 
 Ingest admission starts adapting a rows-per-second cap at 512 batches of
 reclaimable generation-0 compaction debt. Rising debt decreases the cap by 15%
-every 250 ms; falling debt increases it by 10%. Sustained read pressure also
-reduces admission. Rejected exports receive retryable OTLP responses before row
+every 250 ms; falling debt increases it by 10%. Rising interactive refusals or
+queue-wait timeouts also reduce admission, to a floor of half the measured
+pre-starvation rate. Panel queueing alone does not reduce admission, and the
+read floor never overrides the compaction cap. Rejected exports receive retryable OTLP responses before row
 conversion: gRPC `RESOURCE_EXHAUSTED` with `RetryInfo`, or HTTP 429 with
 `Retry-After`. Senders must enable retries and honor the delay. At 1,024 batches
 of debt all new exports are refused with a two-second delay; already admitted
 exports continue draining and retain durable acknowledgement semantics.
 
 Under debt pressure, group commits target 200,000 rows over at most one second,
-closing after 20 ms without arrivals. The 64 MiB group bound and 50,000-row
+including gaps between retry arrivals. The 64 MiB group bound and 50,000-row
 Parquet row groups remain unchanged. Exemplars and trace detail have reserved
 read capacity and priority over queued panels. Their bounded queue still returns
 busy responses when interactive demand exceeds capacity.

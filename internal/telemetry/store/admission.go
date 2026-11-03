@@ -16,7 +16,7 @@ const (
 	admissionBandStart        = telemetry.CompactionDebtLimit / 2
 	admissionDecrease         = 0.85
 	admissionIncrease         = 1.10
-	admissionFloorFraction    = 0.10
+	admissionFloorFraction    = 0.50
 	admissionStarvationWindow = 3 * time.Second
 	retryAfterMin             = time.Second
 	retryAfterMax             = 5 * time.Second
@@ -38,27 +38,27 @@ type admissionSample struct {
 	rate float64
 }
 type ingestAdmission struct {
-	mu                                              sync.Mutex
-	now                                             func() time.Time
-	debt                                            func() int
-	readPressure                                    func() bool
-	interactiveBusy                                 func() uint64
-	last, pressureSince, lastReadAdjustment, busyAt time.Time
-	lastBusy                                        uint64
-	previousDebt                                    int
-	rate, tokens, burst                             float64
-	readLimited                                     bool
-	reason                                          string
-	samples                                         []admissionSample
+	mu                                sync.Mutex
+	now                               func() time.Time
+	debt                              func() int
+	interactiveBusy                   func() uint64
+	last, lastReadAdjustment, busyAt  time.Time
+	lastBusy                          uint64
+	previousDebt                      int
+	rate, tokens, burst               float64
+	readLimited                       bool
+	debtRate, readRate, readReference float64
+	reason                            string
+	samples                           []admissionSample
 }
 
-func newIngestAdmission(debt func() int, pressure func() bool, busy func() uint64) *ingestAdmission {
-	return &ingestAdmission{now: time.Now, debt: debt, readPressure: pressure, interactiveBusy: busy}
+func newIngestAdmission(debt func() int, busy func() uint64) *ingestAdmission {
+	return &ingestAdmission{now: time.Now, debt: debt, interactiveBusy: busy}
 }
 
 // SetAdmission must be called before Run or any submissions.
-func (w *Writer) SetAdmission(debt func() int, pressure func() bool, busy func() uint64) {
-	w.admission = newIngestAdmission(debt, pressure, busy)
+func (w *Writer) SetAdmission(debt func() int, busy func() uint64) {
+	w.admission = newIngestAdmission(debt, busy)
 }
 
 // WithIngestAdmission gives one export a receipt for pre-conversion admission.
@@ -132,6 +132,13 @@ func (a *ingestAdmission) admit(rows int) (time.Duration, bool, string) {
 		// rate sample. Seed that empty history with one export so its retry can
 		// fit; subsequent exports use the measured rate and the normal bucket.
 		if len(a.samples) == 0 {
+			if a.debtRate > 0 {
+				a.debtRate = max(a.debtRate, float64(rows))
+			}
+			if a.readLimited {
+				a.readReference = max(a.readReference, float64(rows))
+				a.readRate = max(a.readRate, float64(rows))
+			}
 			a.rate = max(a.rate, float64(rows))
 			a.tokens = max(a.tokens, float64(rows))
 			metrics.IngestAdmissionRate.Set(a.rate)
@@ -192,14 +199,6 @@ func (a *ingestAdmission) tick(now time.Time) {
 	if a.debt != nil {
 		debt = a.debt()
 	}
-	pressure := a.readPressure != nil && a.readPressure()
-	if pressure {
-		if a.pressureSince.IsZero() {
-			a.pressureSince = now
-		}
-	} else {
-		a.pressureSince = time.Time{}
-	}
 	if a.interactiveBusy != nil {
 		busy := a.interactiveBusy()
 		if busy > a.lastBusy {
@@ -207,39 +206,40 @@ func (a *ingestAdmission) tick(now time.Time) {
 		}
 		a.lastBusy = busy
 	}
-	starving := !a.pressureSince.IsZero() && now.Sub(a.pressureSince) >= admissionStarvationWindow || !a.busyAt.IsZero() && now.Sub(a.busyAt) < admissionStarvationWindow
+	starving := !a.busyAt.IsZero() && now.Sub(a.busyAt) < admissionStarvationWindow
 	if debt >= admissionBandStart {
-		a.reason = "debt"
-		if a.rate == 0 {
-			a.rate = seed
+		if a.debtRate == 0 {
+			a.debtRate = seed
 		} else if debt > a.previousDebt {
-			a.rate *= admissionDecrease
+			a.debtRate *= admissionDecrease
 		} else if debt < a.previousDebt {
-			a.rate = min(a.rate*admissionIncrease, 1.5*peak)
+			a.debtRate = min(a.debtRate*admissionIncrease, 1.5*peak)
 		}
-	} else if !a.readLimited {
-		a.rate = 0
+	} else {
+		a.debtRate = 0
 	}
 	if a.lastReadAdjustment.IsZero() || now.Sub(a.lastReadAdjustment) >= time.Second {
 		if starving {
-			if a.rate == 0 {
-				a.rate = seed
+			if !a.readLimited {
+				// Freeze the pre-starvation rate: a prolonged read incident must not
+				// erase its own floor as throttled samples replace healthy history.
+				a.readReference = max(peak, seed)
+				a.readRate = a.readReference
 			}
-			a.rate = max(admissionFloorFraction*peak, a.rate*admissionDecrease)
+			a.readRate = max(admissionFloorFraction*a.readReference, a.readRate*admissionDecrease)
 			a.readLimited = true
 		} else if a.readLimited {
-			a.rate = min(1.5*peak, a.rate*admissionIncrease)
-			if a.rate >= peak {
+			a.readRate *= admissionIncrease
+			if a.readRate >= a.readReference {
 				a.readLimited = false
-				if debt < admissionBandStart {
-					a.rate = 0
-				}
+				a.readRate = 0
 			}
 		}
 		a.lastReadAdjustment = now
 	}
-	if debt < admissionBandStart && a.readLimited {
-		a.reason = "reads"
+	a.rate, a.reason = a.debtRate, "debt"
+	if a.readLimited && (a.rate == 0 || a.readRate < a.rate) {
+		a.rate, a.reason = a.readRate, "reads"
 	}
 	if a.rate > 0 {
 		a.burst = max(a.burst, a.rate)
