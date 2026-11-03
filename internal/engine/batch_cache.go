@@ -105,8 +105,9 @@ func CreateCacheTables(db *sql.DB) error {
 		return err
 	}
 	if rollupVersion != rollup_schema_version {
-		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, createServiceRollupTable, createSpanRollupTable,
+		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, `DROP TABLE edge_rollup`, createEdgeRollupTable, createServiceRollupTable, createSpanRollupTable,
 			`DELETE FROM rollup_state WHERE cache_key = '` + serviceRollupStateKey + `'`,
+			`DELETE FROM rollup_state WHERE cache_key IN ('` + edgeRollupStateKey + `','` + edgeRollupSubCursorKey + `','` + edgeRollupSubWindowKey + `')`,
 			`DELETE FROM rollup_schema_version`} {
 			if _, err := tx.Exec(stmt); err != nil {
 				return err
@@ -362,6 +363,22 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 		if !ok {
 			return fmt.Errorf("resource_inventory requires a logical panel window")
 		}
+		// Markers and contributions come from the same MVCC snapshot. A hole
+		// limits the ingest horizon even when newer batches are already cached.
+		fresh := time.Now()
+		for _, b := range batches {
+			if markers[b.ID] {
+				continue
+			}
+			for _, signal := range telemetry.Signals {
+				bounds, count := batchTime(b, signal.Name)
+				if count > 0 && (window.RetainedInventory || overlapping(b, signal.Name, window) && bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano()) {
+					fresh = minTime(fresh, time.Unix(0, b.MinIngestedNanos).Add(-time.Nanosecond))
+					break
+				}
+			}
+		}
+		queryrows.RecordCoverage(ctx, fresh)
 		sources["resource_inventory"] = d.resourceInventorySource(batches, markers, window)
 	}
 	if w.Kind == queryrows.RawRead {
@@ -611,4 +628,11 @@ func (d *Duck) traceCandidateSource(ctx context.Context, db snapshotSQL, batches
 	}
 	scope := "batch_id IN (" + idsSQL(cachedIDs) + ") AND " + strings.Join(exact, " AND ")
 	return result + ` UNION ALL SELECT trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND trace_id IN (` + mixed + `) GROUP BY trace_id`, nil
+}
+
+func minTime(a, b time.Time) time.Time {
+	if b.Before(a) {
+		return b
+	}
+	return a
 }

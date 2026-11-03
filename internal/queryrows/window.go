@@ -2,6 +2,7 @@ package queryrows
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -46,3 +47,26 @@ const (
 	RawRead ReadKind = iota
 	TraceCandidateRead
 )
+
+// Coverage carries the oldest incomplete ingest horizon back from snapshot
+// binding to the panel result. Comparisons and auxiliary reads share the value.
+type Coverage struct {
+	mu    sync.Mutex
+	fresh time.Time
+}
+type coverageKey struct{}
+
+func WithCoverage(ctx context.Context) (context.Context, *Coverage) {
+	c := &Coverage{}
+	return context.WithValue(ctx, coverageKey{}, c), c
+}
+func RecordCoverage(ctx context.Context, fresh time.Time) {
+	if c, ok := ctx.Value(coverageKey{}).(*Coverage); ok {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.fresh.IsZero() || fresh.Before(c.fresh) {
+			c.fresh = fresh
+		}
+	}
+}
+func (c *Coverage) FreshTo() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.fresh }

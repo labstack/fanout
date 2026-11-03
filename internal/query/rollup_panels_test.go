@@ -19,7 +19,7 @@ func TestRollupPanelsReuseServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'checkout','payment',10,20,.1,'call')`, at)
+	_, err = engine.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'checkout','payment',10,20,.1,'call')`, at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +157,11 @@ func TestRollupPanelsApplyServiceBeforeLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.DB.Exec(`INSERT INTO edge_rollup SELECT 'shop',?,'noisy-'||i,'sink',100,100,.5,'call' FROM generate_series(1,500) AS t(i)`, at)
+	_, err = engine.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) SELECT 'shop',?,'noisy-'||i,'sink',100,100,.5,'call' FROM generate_series(1,500) AS t(i)`, at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.DB.Exec(`INSERT INTO edge_rollup VALUES ('shop',?,'quiet','sink',1,2,0,'call')`, at)
+	_, err = engine.DB.Exec(`INSERT INTO edge_rollup(namespace,bucket,caller,callee,calls,avg_ms,error_rate,edge_type) VALUES ('shop',?,'quiet','sink',1,2,0,'call')`, at)
 	if err != nil {
 		t.Fatal(err)
 	}

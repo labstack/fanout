@@ -104,10 +104,10 @@ SELECT namespace,trace_id, CASE WHEN c=0 THEN 'parent' ELSE 'child' END span_id,
  make_timestamp_ns(CASE WHEN c=0 THEN offset_ns ELSE (hash(i,%d)%%59000000000)::BIGINT END)::TIMESTAMPTZ_NS start_time,
  (hash(i,9)%%100)::DOUBLE duration_ms,
  CASE WHEN i%%7=0 THEN 'STATUS_CODE_ERROR' ELSE 'STATUS_CODE_OK' END status,
- CASE WHEN i%%5=0 THEN CASE WHEN c=0 THEN 'SPAN_KIND_PRODUCER' ELSE 'SPAN_KIND_CONSUMER' END ELSE 'SPAN_KIND_SERVER' END kind,
+ CASE WHEN i%%5=0 THEN CASE WHEN c=0 THEN 'SPAN_KIND_PRODUCER' ELSE 'SPAN_KIND_CONSUMER' END ELSE 'SPAN_KIND_SERVER' END kind, NULL::VARCHAR peer_service,
  CASE WHEN i%%5=0 THEN 'queue' END messaging_destination,CASE WHEN i%%5=0 THEN 'kafka' END messaging_system
  FROM keys CROSS JOIN range(2) t(c)
- UNION ALL SELECT namespace,trace_id,'parent','','duplicate',make_timestamp_ns(offset_ns)::TIMESTAMPTZ_NS,1,'STATUS_CODE_OK','SPAN_KIND_SERVER',NULL,NULL FROM keys WHERE i%%7=0`, seed, seed))
+ UNION ALL SELECT namespace,trace_id,'parent','','duplicate',make_timestamp_ns(offset_ns)::TIMESTAMPTZ_NS,1,'STATUS_CODE_OK','SPAN_KIND_SERVER',NULL,NULL,NULL FROM keys WHERE i%%7=0`, seed, seed))
 			exec(`CREATE OR REPLACE TEMP TABLE edge_pass_buckets AS SELECT DISTINCT namespace,make_timestamp_ns(0)::TIMESTAMPTZ_NS bucket FROM spans`)
 			// Include NULL namespaces here as well as NULL traces to exercise both
 			// membership predicates independently of the child-key prefilter.

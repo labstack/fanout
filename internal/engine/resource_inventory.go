@@ -8,8 +8,8 @@ import (
 )
 
 // Every signal partitions the captured files independently. Whole cached files
-// are exact only inside the logical window; boundary and unacknowledged files
-// must supply actual observations, rather than overlapping resource envelopes.
+// are exact only inside the logical window. Only boundary files supply raw
+// observations; missing interior contributions are disclosed as cache coverage.
 func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, markers map[string]bool, window queryrows.Window) string {
 	retained := window.RetainedInventory
 	var contributions []string
@@ -22,8 +22,10 @@ func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, marker
 			if count == 0 || !retained && !overlapping(batch, signal, window) {
 				continue
 			}
-			if markers[batch.ID] && (retained || bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano()) {
-				interior = append(interior, batch.ID)
+			if retained || bounds.Known && bounds.MinNanos >= window.Start.UnixNano() && bounds.MaxNanos < window.End.UnixNano() {
+				if markers[batch.ID] {
+					interior = append(interior, batch.ID)
+				}
 			} else {
 				raw = append(raw, batch)
 			}

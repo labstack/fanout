@@ -101,7 +101,7 @@ func TestSpanRollupSchemaReset(t *testing.T) {
 		requireRowCount(t, db, "SELECT count(*) FROM "+table+" WHERE ?", true, 0)
 	}
 	requireRowCount(t, db, `SELECT count(*) FROM rollup_state WHERE cache_key=?`, serviceRollupStateKey, 0)
-	requireRowCount(t, db, `SELECT count(*) FROM rollup_state WHERE cache_key=?`, edgeRollupStateKey, 1)
+	requireRowCount(t, db, `SELECT count(*) FROM rollup_state WHERE cache_key=?`, edgeRollupStateKey, 0)
 }
 
 func TestSpanRollupIncludesMissingService(t *testing.T) {

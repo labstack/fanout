@@ -69,6 +69,9 @@ func TestResourceInventoryExactWindowsAndTypedIdentity(t *testing.T) {
 				want = 5
 			}
 			w := queryrows.Window{Start: time.Unix(0, at), End: time.Unix(0, at+10)}
+			if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 			assertInventoryOracle(t, d, w, want)
 			if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 				t.Fatal(err)
@@ -220,11 +223,11 @@ func TestResourceInventoryLatePublicationAndReadTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(bound, "read_parquet") {
+	if strings.Contains(bound, "read_resource_inventory") {
 		t.Fatal("reader used a marker committed after its snapshot")
 	}
 	var count int
-	if err := tx.QueryRow(bound).Scan(&count); err != nil || count != 3 {
+	if err := tx.QueryRow(bound).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("pinned reader rows=%d %v", count, err)
 	}
 	for _, b := range []telemetrystore.Batch{{ID: "late-log", Logs: resourceBatch("", []int64{5}, map[string]any{"late": true}).Logs}, {ID: "late-metric", Metrics: resourceBatch("", []int64{6}, map[string]any{"late": true}).Metrics}} {
@@ -232,13 +235,13 @@ func TestResourceInventoryLatePublicationAndReadTransaction(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertInventoryOracle(t, d, w, 5)
+	assertInventoryCount(t, d, w, 3)
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	assertInventoryOracle(t, d, w, 5)
 	// Already captured membership remains unchanged after late publication.
-	if err := tx.QueryRow(bound).Scan(&count); err != nil || count != 3 {
+	if err := tx.QueryRow(bound).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("captured reader changed=%d %v", count, err)
 	}
 }
@@ -339,11 +342,19 @@ func TestResourceInventoryCompactionRetentionAndNamespaces(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			assertInventoryOracle(t, d, w, 6)
+			if complete {
+				assertInventoryOracle(t, d, w, 6)
+			} else {
+				assertInventoryCount(t, d, w, 0)
+			}
 			if n, err := repo.CompactParquet(t.Context(), d, 8); err != nil || n != 8 {
 				t.Fatalf("compaction=%d %v", n, err)
 			}
-			assertInventoryOracle(t, d, w, 6)
+			if complete {
+				assertInventoryOracle(t, d, w, 6)
+			} else {
+				assertInventoryCount(t, d, w, 0)
+			}
 			if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -533,7 +544,7 @@ func TestResourceInventoryTransferFailureLeavesOutputUnacknowledged(t *testing.T
 	assertInventoryOracle(t, d, queryrows.Window{Start: time.Unix(0, 1), End: time.Unix(0, 20)}, 3)
 }
 
-func TestResourceInventoryTransferFailureKeepsPublishedOutputRaw(t *testing.T) {
+func TestResourceInventoryTransferFailureDisclosesIncompleteCoverage(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	for i := range 8 {
 		if err := commitRestoredFixture(repo, t.Context(), resourceBatch(fmt.Sprint("part", i), []int64{int64(10 + i)}, nil)); err != nil {
@@ -558,9 +569,9 @@ func TestResourceInventoryTransferFailureKeepsPublishedOutputRaw(t *testing.T) {
 		t.Fatalf("failed output acknowledged: %v %v", markers, err)
 	}
 	w := queryrows.Window{Start: time.Unix(0, 1), End: time.Unix(0, 100)}
-	assertInventoryOracle(t, d, w, 3)
-	if !strings.Contains(d.resourceInventorySource(batches, markers, w), "read_parquet") {
-		t.Fatal("unacknowledged output did not use raw files")
+	assertInventoryCount(t, d, w, 0)
+	if strings.Contains(d.resourceInventorySource(batches, markers, w), "read_parquet") {
+		t.Fatal("unacknowledged interior output scanned raw files")
 	}
 	if _, err := d.DB.Exec(`DROP TABLE read_resource_inventory`); err != nil {
 		t.Fatal(err)
@@ -754,5 +765,51 @@ func TestResourceInventoryTransferPreservesNullAndEmptyGroups(t *testing.T) {
 	var total, nulls, empty int
 	if err := d.DB.QueryRow(`SELECT count(*),count(*) FILTER (WHERE namespace IS NULL AND service IS NULL AND resource IS NULL),count(*) FILTER (WHERE namespace='' AND service='' AND resource IS NOT NULL) FROM read_resource_inventory WHERE batch_id='out'`).Scan(&total, &nulls, &empty); err != nil || total != 3 || nulls != 1 || empty != 1 {
 		t.Fatalf("null/empty groups=%d/%d/%d %v", total, nulls, empty, err)
+	}
+}
+
+func TestResourceInventoryOmitsUncachedInteriorAndDisclosesCoverage(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Add(-time.Hour)
+	w := queryrows.Window{Start: at, End: at.Add(time.Minute)}
+	for _, b := range []telemetrystore.Batch{
+		resourceBatch("boundary", []int64{at.Add(-time.Second).UnixNano(), at.Add(time.Second).UnixNano()}, map[string]any{"id": "boundary"}),
+		resourceBatch("interior", []int64{at.Add(2 * time.Second).UnixNano()}, map[string]any{"id": "interior"}),
+	} {
+		if err := repo.Commit(t.Context(), b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, c := queryrows.WithCoverage(inventoryContext(t.Context(), w))
+	var count int
+	if err := d.QueryRowScan(ctx, []any{&count}, `SELECT count(*) FROM resource_inventory`); err != nil || count != 3 {
+		t.Fatalf("cold boundary count=%d %v", count, err)
+	}
+	var missing int64
+	for _, b := range repo.Parquet.BatchMetadata() {
+		if b.ID == "interior" {
+			missing = b.MinIngestedNanos
+		}
+	}
+	if !c.FreshTo().Equal(time.Unix(0, missing-1)) {
+		t.Fatalf("coverage=%s missing=%d", c.FreshTo(), missing)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, c = queryrows.WithCoverage(inventoryContext(t.Context(), w))
+	if err := d.QueryRowScan(ctx, []any{&count}, `SELECT count(*) FROM resource_inventory`); err != nil || count != 6 {
+		t.Fatalf("warm count=%d %v", count, err)
+	}
+	if c.FreshTo().Before(time.Unix(0, missing)) {
+		t.Fatalf("coverage did not advance: %s", c.FreshTo())
+	}
+}
+
+func assertInventoryCount(t *testing.T, d *Duck, w queryrows.Window, want int) {
+	t.Helper()
+	var count int
+	if err := d.QueryRowScan(inventoryContext(t.Context(), w), []any{&count}, `SELECT count(*) FROM resource_inventory`); err != nil || count != want {
+		t.Fatalf("inventory count=%d want=%d: %v", count, want, err)
 	}
 }

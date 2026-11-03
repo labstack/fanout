@@ -645,6 +645,12 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 			}
 		}
 	}
+	ctx, coverage := queryrows.WithCoverage(ctx)
+	defer func() {
+		if fresh := coverage.FreshTo(); !fresh.IsZero() && (res.FreshToMS == 0 || fresh.UnixMilli() < res.FreshToMS) {
+			res.FreshToMS = fresh.UnixMilli()
+		}
+	}()
 	frame, sqlText, err := e.runScope(ctx, p, checked, scope)
 	if err != nil {
 		res.SQL = sqlText

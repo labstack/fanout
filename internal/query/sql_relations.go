@@ -55,11 +55,13 @@ func SQLRelations() map[string]SQLRelationSchema {
 				{Field: num("calls", "count", "Calls between services"), SQLType: "BIGINT"},
 				{Field: num("avg_ms", "ms", "Average call duration"), SQLType: "DOUBLE"},
 				{Field: num("error_rate", "percent", "Error rate"), SQLType: "DOUBLE"},
-				{Field: str("edge_type", "Dependency edge type"), SQLType: "VARCHAR"},
+				{Field: str("edge_type", "call, messaging or peer"), SQLType: "VARCHAR"},
+				{Field: num("p50_ms", "ms", "Peer minute median duration; call-weighted across buckets"), SQLType: "DOUBLE"},
+				{Field: num("p95_ms", "ms", "Peer minute 95th percentile duration; call-weighted across buckets"), SQLType: "DOUBLE"},
 			},
 		},
 		"resource_inventory": {
-			Description: "Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window, not a historical registry.",
+			Description: "Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Boundary batches read raw observations.",
 			Columns: []SQLColumnSchema{
 				{Field: str("signal", "spans, logs or metrics; select the required signal"), SQLType: "VARCHAR"},
 				{Field: str("namespace", "Original resource namespace, preserving NULL and empty values"), SQLType: "VARCHAR"},

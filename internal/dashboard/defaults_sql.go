@@ -12,7 +12,7 @@ const reachabilitySQL = `WITH raw AS (
  keyed AS (SELECT *,to_json([namespace,url,method,host])::VARCHAR AS entity,
  coalesce(namespace,'')||' / '||coalesce(method,'method unknown')||' '||coalesce(url,'endpoint unknown')||' from '||coalesce(host,'vantage unknown') AS endpoint_from FROM raw),
  check_hosts AS (SELECT DISTINCT namespace,host FROM keyed WHERE $__window(time)),
- service_hosts AS (SELECT DISTINCT s.namespace,s.host FROM (SELECT namespace,resource['host.name']::VARCHAR AS host FROM spans WHERE $__window(start_time) AND service IS NOT NULL AND service<>'') s
+ service_hosts AS (SELECT DISTINCT s.namespace,s.host FROM (SELECT namespace,resource['host.name']::VARCHAR AS host FROM resource_inventory WHERE signal='spans' AND service IS NOT NULL AND service<>'') s
  SEMI JOIN (SELECT namespace,host FROM check_hosts WHERE host<>'') c ON s.namespace=c.namespace AND s.host=c.host),
  vantage AS (SELECT count(*)>0 AND bool_and(coalesce(host<>'',false) AND EXISTS (SELECT 1 FROM service_hosts s WHERE s.namespace=check_hosts.namespace AND s.host=check_hosts.host)) AS all_local FROM check_hosts),
  inventory AS (SELECT DISTINCT entity,endpoint_from||CASE WHEN all_local THEN ' (all checks run on service hosts; outside reachability unverified)' ELSE '' END AS endpoint_from FROM keyed CROSS JOIN vantage WHERE $__window(time)),
@@ -112,9 +112,5 @@ func containerCapacitySQL() string {
  FROM results ORDER BY (reporting<>'reporting') DESC,status DESC NULLS LAST,namespace,host,container`
 }
 
-// Project only the version tuple, and reject unversioned observations before
-// grouping. Full resource identity is unnecessary for a version's first sighting
-// and makes active, uncached batches expensive under ingest load.
-const versionObservationsSQL = `SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,start_time AS seen FROM spans WHERE $__window(start_time) AND resource['service.version']::VARCHAR<>''
- UNION ALL SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,time AS seen FROM logs WHERE $__window(time) AND resource['service.version']::VARCHAR<>''
- UNION ALL SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,time AS seen FROM metrics WHERE $__window(time) AND resource['service.version']::VARCHAR<>''`
+// Resource tuples are aggregated once per immutable batch by the read cache.
+const versionObservationsSQL = `SELECT namespace,service,resource['service.version']::VARCHAR AS version,resource['process.runtime.name']::VARCHAR AS runtime_name,resource['process.runtime.version']::VARCHAR AS runtime_version,resource['telemetry.sdk.language']::VARCHAR AS sdk_language,resource['telemetry.sdk.version']::VARCHAR AS sdk_version,first_seen AS seen FROM resource_inventory WHERE $__window(first_seen) AND resource['service.version']::VARCHAR<>''`

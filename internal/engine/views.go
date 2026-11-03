@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
   avg_ms DOUBLE,
   error_rate DOUBLE,
   edge_type TEXT DEFAULT 'call',
+  p50_ms DOUBLE DEFAULT 0,
+  p95_ms DOUBLE DEFAULT 0,
   PRIMARY KEY (namespace, bucket, caller, callee, edge_type)
 );`
 

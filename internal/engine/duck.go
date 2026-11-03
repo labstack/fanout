@@ -122,7 +122,7 @@ const (
 	// Rollup progress keys in rollup_state. readCacheVersion drops that table
 	// with the rollups, so a version change also restarts their backfill; the
 	// keys need no version of their own.
-	rollup_schema_version         = 1
+	rollup_schema_version         = 2
 	serviceRollupStateKey         = "service_rollup_v3"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
@@ -1693,7 +1693,7 @@ var createEdgePassBucketsSQL = "CREATE TEMP TABLE edge_pass_buckets AS " + edgeP
 
 var edgePassBucketsSelectSQL = fmt.Sprintf(`
 WITH incoming AS MATERIALIZED (
-  SELECT namespace, trace_id, span_id, start_time, kind,
+  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind,
          messaging_destination, messaging_system
   FROM spans
   WHERE ingested_unix_nano > $1::BIGINT
@@ -1701,7 +1701,7 @@ WITH incoming AS MATERIALIZED (
     AND start_time IS NOT NULL
 ),
 recent AS MATERIALIZED (
-  SELECT namespace, trace_id, parent_span_id, start_time, kind,
+  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind,
          messaging_destination, messaging_system
   FROM spans
   WHERE ingested_unix_nano > ($1::BIGINT - %d)
@@ -1717,6 +1717,15 @@ affected_spans AS (
     ON child.namespace = parent.namespace
    AND child.trace_id = parent.trace_id
    AND child.parent_span_id = parent.span_id
+  UNION ALL
+  -- A late child retracts its earlier client's provisional peer edge.
+  SELECT parent.namespace, parent.start_time
+  FROM recent parent
+  SEMI JOIN incoming child
+    ON parent.namespace = child.namespace
+   AND parent.trace_id = child.trace_id
+   AND parent.span_id = child.parent_span_id
+  WHERE parent.kind = 'SPAN_KIND_CLIENT'
   UNION ALL
   SELECT r.namespace, r.start_time
   FROM recent r
@@ -1992,6 +2001,29 @@ consumers AS (
   SELECT c.* FROM consumer_agg c
   SEMI JOIN affected a USING (namespace, bucket)
 ),
+peer_candidates AS MATERIALIZED (
+ SELECT s.namespace,s.trace_id,s.span_id,s.service,s.peer_service,s.duration_ms,s.status,
+ date_trunc('minute',s.start_time::TIMESTAMP_NS) AS bucket
+ FROM spans s
+ WHERE ((s.namespace,date_trunc('minute',s.start_time::TIMESTAMP_NS)) IN (SELECT (namespace,bucket) FROM affected WHERE namespace IS NOT NULL)) IS TRUE
+ AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ AND s.start_time < ((SELECT hi FROM bounds)+INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ AND s.kind='SPAN_KIND_CLIENT' AND coalesce(s.service,'')<>''
+ AND coalesce(s.peer_service,'')<>'' AND s.peer_service<>s.service
+),
+peer_children AS MATERIALIZED (
+ SELECT DISTINCT c.namespace,c.trace_id,c.parent_span_id,c.service
+ FROM spans c WHERE ((c.namespace,c.trace_id,c.parent_span_id) IN (SELECT (namespace,trace_id,span_id) FROM peer_candidates WHERE namespace IS NOT NULL AND trace_id IS NOT NULL AND span_id IS NOT NULL)) IS TRUE
+),
+peer_edges AS (
+ SELECT p.namespace,p.bucket,p.service AS caller,p.peer_service AS callee,
+ count(*) AS calls,avg(p.duration_ms) AS avg_ms,
+ avg(CASE WHEN p.status='STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate,
+ quantile_cont(p.duration_ms,.5) AS p50_ms,quantile_cont(p.duration_ms,.95) AS p95_ms
+ FROM peer_candidates p ANTI JOIN peer_children c
+ ON c.namespace=p.namespace AND c.trace_id=p.trace_id AND c.parent_span_id=p.span_id AND c.service<>p.service
+ GROUP BY p.namespace,p.bucket,p.service,p.peer_service
+),
 messaging_edges AS (
   SELECT
     p.namespace,
@@ -2019,13 +2051,15 @@ INSERT INTO edge_rollup (
   calls,
   avg_ms,
   error_rate,
-  edge_type
+  edge_type, p50_ms, p95_ms
 )
-SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type, 0.0, 0.0
 FROM call_edges
 UNION ALL
-SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
-FROM messaging_edges;`
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type, 0.0, 0.0
+FROM messaging_edges
+UNION ALL
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, 'peer', p50_ms, p95_ms FROM peer_edges;`
 
 // ---- Read query helpers ----
 
