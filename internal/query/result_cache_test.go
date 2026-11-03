@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -170,52 +171,77 @@ func TestResultCacheServesStaleWhileRevalidating(t *testing.T) {
 	}
 }
 
-// A caller does not join a run whose answer is already older than the TTL
-// at its arrival; it starts a fresh run, and the old run, finishing later,
-// does not replace the fresh answer.
-func TestResultCacheFollowersSkipOldRuns(t *testing.T) {
+// The TTL limits stored results, not sharing queued or executing work.
+func TestResultCacheCoalescesRunsPastTTL(t *testing.T) {
+	for _, started := range []bool{false, true} {
+		t.Run(fmt.Sprintf("started=%v", started), func(t *testing.T) {
+			e, _, offset := cachedExecutor(t)
+			key := cacheKey{44}
+			release := make(chan struct{})
+			defer close(release)
+			entered := make(chan struct{})
+			var calls atomic.Int64
+			fn := func(ctx context.Context) (int, int64, bool, error) {
+				if started {
+					markStarted(ctx)
+				}
+				if calls.Add(1) == 1 {
+					close(entered)
+				}
+				select {
+				case <-release:
+				case <-ctx.Done():
+				}
+				return 1, 8, true, nil
+			}
+			go func() { _, _, _ = loadCached(e, t.Context(), key, e.now(), fn) }()
+			<-entered
+			offset.Store(int64(11 * time.Second))
+			caller, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+			defer cancel()
+			_, outcome, err := loadCached(e, caller, key, e.now(), fn)
+			if outcome != cacheCoalesced || !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 1 {
+				t.Fatalf("outcome=%s err=%v calls=%d; want one shared run", outcome, err, calls.Load())
+			}
+		})
+	}
+}
+
+func TestResultCacheStaleRefreshPreservesInflightRun(t *testing.T) {
 	e, _, offset := cachedExecutor(t)
+	key := cacheKey{45}
 	start := e.now()
 	release := make(chan struct{})
-	old := make(chan int, 1)
+	defer close(release)
 	go func() {
-		v, _, _ := loadCached(e, t.Context(), cacheKey{4}, start, func(context.Context) (int, int64, bool, error) {
-			<-release
+		_, _, _ = loadCached(e, t.Context(), key, start, func(ctx context.Context) (int, int64, bool, error) {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
 			return 1, 8, true, nil
 		})
-		old <- v
 	}()
-	waitForFlight(t, e, cacheKey{4})
-	// Nine seconds in, the run's answer may still be shared.
-	offset.Store(int64(9 * time.Second))
-	joined := make(chan string, 1)
-	go func() {
-		_, outcome, _ := loadCached(e, t.Context(), cacheKey{4}, e.now(), func(context.Context) (int, int64, bool, error) {
-			return 0, 0, false, errors.New("ran again")
+	waitForFlight(t, e, key)
+	// A stored entry may be as new as the outstanding run's window.
+	e.cache.mu.Lock()
+	flight := e.cache.flights[key]
+	e.cache.store(key, 2, 8, start, start)
+	e.cache.mu.Unlock()
+	offset.Store(int64(7 * time.Second))
+	for range 3 {
+		v, outcome, err := loadCached(e, t.Context(), key, e.now(), func(context.Context) (int, int64, bool, error) {
+			return 3, 8, true, nil
 		})
-		joined <- outcome
-	}()
-	waitForWaiters(t, e, cacheKey{4}, 2)
-	// At the TTL it may not.
-	offset.Store(int64(10 * time.Second))
-	v, outcome, err := loadCached(e, t.Context(), cacheKey{4}, e.now(), func(context.Context) (int, int64, bool, error) {
-		return 2, 8, true, nil
-	})
-	if err != nil || v != 2 || outcome != cacheMiss {
-		t.Fatalf("v=%d outcome=%s err=%v", v, outcome, err)
-	}
-	close(release)
-	if v := <-old; v != 1 {
-		t.Fatalf("old run answered %d", v)
-	}
-	if outcome := <-joined; outcome != cacheCoalesced {
-		t.Fatalf("follower within the TTL: %s", outcome)
-	}
-	e.running.Wait()
-	if v, outcome, _ := loadCached(e, t.Context(), cacheKey{4}, e.now(), func(context.Context) (int, int64, bool, error) {
-		return 0, 0, false, errors.New("ran again")
-	}); v != 2 || outcome != cacheHit {
-		t.Fatalf("an older run replaced a newer answer: v=%d outcome=%s", v, outcome)
+		if err != nil || v != 2 || outcome != cacheStale {
+			t.Fatalf("v=%d outcome=%s err=%v", v, outcome, err)
+		}
+		e.cache.mu.Lock()
+		same := e.cache.flights[key] == flight
+		e.cache.mu.Unlock()
+		if !same {
+			t.Fatal("stale refresh replaced the in-flight run")
+		}
 	}
 }
 
@@ -237,6 +263,8 @@ func TestResultCacheNoCacheBypassesStoredResults(t *testing.T) {
 
 	start := e.now()
 	release := make(chan struct{})
+	releaseRun := sync.OnceFunc(func() { close(release) })
+	defer releaseRun()
 	go func() {
 		_, _, _ = loadCached(e, t.Context(), cacheKey{5}, start, func(context.Context) (int, int64, bool, error) {
 			<-release
@@ -254,14 +282,28 @@ func TestResultCacheNoCacheBypassesStoredResults(t *testing.T) {
 		earlier <- outcome
 	}()
 	waitForWaiters(t, e, cacheKey{5}, 2)
-	// Arrived after it started: it runs its own.
-	v, outcome, err := loadCached(e, bypass, cacheKey{5}, start.Add(time.Millisecond), func(context.Context) (int, int64, bool, error) {
-		return 2, 8, true, nil
-	})
-	if err != nil || v != 2 || outcome != cacheMiss {
-		t.Fatalf("v=%d outcome=%s err=%v", v, outcome, err)
+	// Arrived after it started: wait for it, then run fresh without overlap.
+	fresh := make(chan int, 1)
+	go func() {
+		v, outcome, err := loadCached(e, bypass, cacheKey{5}, start.Add(time.Millisecond), func(context.Context) (int, int64, bool, error) {
+			select {
+			case <-release:
+			default:
+				t.Error("bypass started overlapping work")
+			}
+			return 2, 8, true, nil
+		})
+		if err != nil || outcome != cacheMiss {
+			t.Errorf("outcome=%s err=%v", outcome, err)
+		}
+		fresh <- v
+	}()
+	waitForWaiters(t, e, cacheKey{5}, 3)
+	releaseRun()
+	if v := <-fresh; v != 2 {
+		t.Fatalf("bypass got old value %d", v)
 	}
-	close(release)
+
 	if outcome := <-earlier; outcome != cacheCoalesced {
 		t.Fatalf("a no-cache caller did not join a newer run: %s", outcome)
 	}
@@ -549,6 +591,40 @@ func TestResultCacheCancelsAbandonedQueuedRuns(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("an abandoned run kept its place in the queue")
+	}
+}
+
+// Cancellation does not free a key until the canceled computation exits.
+func TestResultCacheKeepsCancelledFlightUntilItExits(t *testing.T) {
+	e, _, _ := cachedExecutor(t)
+	key := cacheKey{46}
+	release := make(chan struct{})
+	defer close(release)
+	gone, leave := context.WithCancel(t.Context())
+	left := make(chan struct{})
+	cancelled := make(chan struct{})
+	go func() {
+		_, _, _ = loadCached(e, gone, key, e.now(), func(run context.Context) (int, int64, bool, error) {
+			<-run.Done()
+			close(cancelled)
+			<-release // model a computation slow to honor cancellation
+			return 0, 0, false, run.Err()
+		})
+		close(left)
+	}()
+	waitForFlight(t, e, key)
+	leave()
+	<-left
+	<-cancelled
+	caller, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	var calls atomic.Int64
+	_, outcome, err := loadCached(e, caller, key, e.now(), func(context.Context) (int, int64, bool, error) {
+		calls.Add(1)
+		return 1, 8, true, nil
+	})
+	if outcome != cacheCoalesced || !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 0 {
+		t.Fatalf("outcome=%s err=%v calls=%d; canceled flight was duplicated", outcome, err, calls.Load())
 	}
 }
 

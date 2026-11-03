@@ -23,16 +23,27 @@ LIMIT ?`
 
 // Uninstrumented peers are visible through client spans; they do not require
 // another rollup or an integration with the remote service.
-// Materialize the explicit client projection once for the peer and edge
-// aggregates, so their anti-joins do not repeat the underlying span scans.
-const topologyExternalQuery = `WITH clients AS MATERIALIZED (
- SELECT s.service AS caller,s.peer_service AS callee,s.duration_ms,
+// Exclude known services before looking for instrumented children. Materialize
+// the remaining candidates so child lookups build only their keys, rather than
+// every raw span in the window.
+const topologyExternalQuery = `WITH raw_candidates AS (
+ SELECT s.namespace,s.trace_id,s.span_id,s.service AS caller,s.peer_service AS callee,s.duration_ms,
  CASE WHEN s.status = 'STATUS_CODE_ERROR' THEN 1.0 ELSE 0.0 END AS error
  FROM spans s WHERE s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
  AND (?='' OR s.namespace=?) AND (?='' OR s.service=? OR s.peer_service=?)
- AND s.kind='SPAN_KIND_CLIENT' AND coalesce(s.peer_service,'')<>'' AND s.peer_service<>s.service
- AND NOT EXISTS (SELECT 1 FROM spans child WHERE child.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND child.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND child.namespace=s.namespace AND child.trace_id=s.trace_id AND child.parent_span_id=s.span_id AND child.service<>s.service LIMIT 1)
- AND NOT EXISTS (SELECT 1 FROM spans observed WHERE observed.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND observed.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND observed.namespace=s.namespace AND observed.service=s.peer_service)),
+ AND s.kind='SPAN_KIND_CLIENT' AND coalesce(s.peer_service,'')<>'' AND s.peer_service<>s.service),
+ observed AS MATERIALIZED (
+ SELECT DISTINCT namespace,service FROM spans
+ WHERE start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS),
+ candidates AS MATERIALIZED (SELECT c.* FROM raw_candidates c
+ WHERE NOT EXISTS (SELECT 1 FROM observed o WHERE o.namespace=c.namespace AND o.service=c.callee)),
+ children AS MATERIALIZED (
+ SELECT DISTINCT child.namespace,child.trace_id,child.parent_span_id,child.service
+ FROM spans child SEMI JOIN candidates c ON child.namespace=c.namespace AND child.trace_id=c.trace_id AND child.parent_span_id=c.span_id
+ WHERE child.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND child.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS),
+ clients AS MATERIALIZED (
+ SELECT c.caller,c.callee,c.duration_ms,c.error FROM candidates c
+ WHERE NOT EXISTS (SELECT 1 FROM children child WHERE child.namespace=c.namespace AND child.trace_id=c.trace_id AND child.parent_span_id=c.span_id AND child.service<>c.caller)),
  peers AS (SELECT callee,count(*) AS spans,avg(error) AS error_rate,quantile_cont(duration_ms,.5) AS p50,quantile_cont(duration_ms,.95) AS p95 FROM clients GROUP BY callee),
  edges AS (SELECT caller,callee,count(*) AS calls,avg(duration_ms) AS average_ms,avg(error) AS error_rate FROM clients GROUP BY caller,callee)
  SELECT e.caller,e.callee,e.calls,e.average_ms,e.error_rate,p.spans,p.error_rate,p.p50,p.p95 FROM edges e JOIN peers p USING(callee)

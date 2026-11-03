@@ -25,15 +25,14 @@ import (
 // second copy behind them. Only complete results are kept: errors, busy and
 // partial answers and results of a cancelled run are never stored.
 //
-// No answer is older than the TTL. Every entry is stamped with the instant
+// No stored answer is older than the TTL. Every entry is stamped with the instant
 // its data window ends: a panel run's resolved now, or for traces and
 // exemplars the moment their run started. Its age is measured from that
 // stamp. Younger than half the TTL it is served as is; younger than the TTL
 // it is served stale while exactly one background run replaces it, so
-// viewers do not all miss at once; older it is a miss. A caller only joins a
-// run in flight whose stamp is younger than the TTL at its arrival. With a
-// zero TTL nothing is stored, but concurrent identical requests still share
-// one run.
+// viewers do not all miss at once; older it is a miss. Concurrent identical
+// requests share one run regardless of its age. With a zero TTL nothing is
+// stored, but concurrent identical requests still share one run.
 //
 // A caller marked by WithoutCachedResults (Cache-Control: no-cache) reads no
 // stored entry and joins only a run that started after it arrived; its fresh
@@ -165,6 +164,10 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, stamp tim
 	c := &e.cache
 	run := func(ctx context.Context) (any, int64, bool, error) { return fn(ctx) }
 	bypass := BypassesCache(ctx)
+retry:
+	if err := ctx.Err(); err != nil {
+		return zero, cacheCoalesced, err
+	}
 	c.mu.Lock()
 	if element := c.entries[key]; element != nil && !bypass {
 		entry := element.Value.(*cacheEntry)
@@ -177,9 +180,8 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, stamp tim
 			return entry.value.(T), cacheHit, nil
 		case age < c.ttl:
 			c.lru.MoveToFront(element)
-			// One refresh at a time, unless the run in flight would not
-			// replace this entry with anything newer.
-			if flight := c.flights[key]; flight == nil || !flight.stamp.After(entry.stamp) {
+			// Never duplicate work already running or waiting for admission.
+			if c.flights[key] == nil {
 				e.startFlight(ctx, key, stamp, true, run)
 			}
 			c.mu.Unlock()
@@ -191,55 +193,55 @@ func loadCached[T any](e *Executor, ctx context.Context, key cacheKey, stamp tim
 	}
 	outcome := cacheCoalesced
 	flight := c.flights[key]
-	if flight == nil || !e.joinable(flight, stamp, bypass) {
+	if flight == nil {
 		outcome = cacheMiss
 		flight = e.startFlight(ctx, key, stamp, false, run)
 	}
+	// A bypass caller must wait for older work to finish before requesting
+	// a fresh run. Keep its place as a waiter without accepting that answer.
+	accept := e.joinable(flight, stamp, bypass)
 	flight.waiters++
 	// A caller that will read the stored result keeps the run going.
 	flight.detached = flight.detached || c.ttl > 0 && !bypass
 	c.mu.Unlock()
-	metrics.QueryCacheRequests.WithLabelValues(outcome).Inc()
+	if accept {
+		metrics.QueryCacheRequests.WithLabelValues(outcome).Inc()
+	}
 	select {
 	case <-flight.done:
+		if !accept {
+			goto retry
+		}
 		if flight.err != nil {
 			return zero, outcome, flight.err
 		}
 		return flight.value.(T), outcome, nil
 	case <-ctx.Done():
+		if !accept {
+			metrics.QueryCacheRequests.WithLabelValues(outcome).Inc()
+		}
 		c.mu.Lock()
 		flight.waiters--
 		if flight.waiters == 0 && (!flight.detached || !flight.started.Load() && !flight.background) {
 			flight.cancel()
-			if c.flights[key] == flight {
-				delete(c.flights, key)
-			}
+			// Retain the flight until fn exits, even if cancellation is slow.
 		}
 		c.mu.Unlock()
 		return zero, outcome, ctx.Err()
 	}
 }
 
-// joinable reports whether a caller arriving now, whose own window ends at
-// stamp, may take flight's answer. A no-cache caller joins only a run that
-// started after it arrived; any other only one whose answer is not already
-// older than the TTL. With a zero TTL every identical run is shared. c.mu is
-// held.
+// joinable reports whether a caller may take flight's answer. Non-bypass
+// callers always share in-flight work; the TTL applies only to stored results.
+// A no-cache caller accepts only a run whose window ends at or after its
+// arrival. c.mu is held.
 func (e *Executor) joinable(flight *cacheFlight, stamp time.Time, bypass bool) bool {
-	switch {
-	case bypass:
-		return !flight.stamp.Before(stamp)
-	case e.cache.ttl <= 0:
-		return true
-	default:
-		return e.now().Sub(flight.stamp) < e.cache.ttl
-	}
+	return !bypass || !flight.stamp.Before(stamp)
 }
 
-// startFlight registers and starts a run for key, replacing any run in
-// flight for it, and stores its result under stamp. c.mu is held. The run
-// keeps the caller's values but not its cancellation, and ends with the
-// executor.
+// startFlight registers the only run for key and stores its result under
+// stamp. c.mu is held and no run for key may be in flight. The run keeps the
+// caller's values but not its cancellation, and ends with the executor.
 func (e *Executor) startFlight(caller context.Context, key cacheKey, stamp time.Time, background bool, fn flightFunc[any]) *cacheFlight {
 	c := &e.cache
 	run, cancel := context.WithCancel(context.WithoutCancel(caller))
