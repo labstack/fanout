@@ -121,7 +121,7 @@ func TestStructuredFilterRuntimeFailureKeepsAuthorDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := results[0]
-	if got.Status != StatusError || !strings.Contains(got.Error, "checkout") || !strings.Contains(got.Error, "INT32") || !strings.Contains(got.Error, "service") || forbiddenPresentation.MatchString(got.Error) {
+	if got.Status != StatusError || !strings.Contains(got.Error, "Could not convert string ") || !strings.Contains(got.Error, "INT32") || !strings.Contains(got.Error, "service") || forbiddenPresentation.MatchString(got.Error) {
 		t.Fatalf("lost structured filter diagnostic: %+v", got)
 	}
 }
