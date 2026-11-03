@@ -193,8 +193,8 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 				request := newSubmission(context.Background(), Batch{Spans: []telemetry.Span{{SpanID: "first"}}})
 				switch bound {
 				case "rows":
-					request.batch.Spans = make([]telemetry.Span, maxGroupBatchRows)
-					request.rows = maxGroupBatchRows
+					request.batch.Spans = make([]telemetry.Span, pressureGroupBatchRows)
+					request.rows = pressureGroupBatchRows
 				case "requests":
 					for range maxAdmissionRequests - 1 {
 						w.submissions <- request
@@ -215,7 +215,7 @@ func TestWriterPressureAdmissionClosesAtEveryBound(t *testing.T) {
 					t.Fatalf("jobs=%d", len(out))
 				}
 				job := <-out
-				if len(job.requests) > maxAdmissionRequests || batchRows(job.batch()) > maxGroupBatchRows {
+				if len(job.requests) > maxAdmissionRequests || batchRows(job.batch()) > pressureGroupBatchRows {
 					t.Fatal("group bound exceeded")
 				}
 			})
@@ -243,7 +243,7 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 				}()
 				synctest.Wait()
 				// Keep arrivals below the idle cutoff, or let the first group idle.
-				for i := 1; i <= 16; i++ {
+				for i := 1; i <= 80; i++ {
 					time.Sleep(interval)
 					w.submissions <- request
 					synctest.Wait()
@@ -252,7 +252,7 @@ func TestWriterPressureAdmissionClosesOnIdleOrDeadline(t *testing.T) {
 					t.Fatal(err)
 				}
 				job := <-out
-				wantRequests := 17
+				wantRequests := 67
 				wantElapsed := pressureAdmissionWindow
 				if interval > pressureAdmissionIdle {
 					wantRequests = 1

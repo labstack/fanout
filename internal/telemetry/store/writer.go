@@ -23,10 +23,11 @@ const (
 	// coalesces concurrent exports without imposing a 20ms floor on every
 	// durable acknowledgement when the row target is not reached.
 	groupAdmissionWindow    = 10 * time.Millisecond
-	pressureAdmissionWindow = 250 * time.Millisecond
+	pressureAdmissionWindow = time.Second
 	pressureAdmissionIdle   = 20 * time.Millisecond
 	maxAdmissionRequests    = 512
 	maxGroupBatchRows       = 50_000
+	pressureGroupBatchRows  = 200_000
 	maxCommitWorkers        = 4
 	submissionQueueDepth    = 256
 	writerShutdownGrace     = 30 * time.Second
@@ -325,7 +326,8 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, ou
 		bytes += next.bytes
 	}
 	admit(request)
-	limit := w.batchLimit()
+	pressure := w.compaction != nil && w.compaction.CompactionDebt() >= admissionBandStart
+	limit := w.batchLimit(pressure)
 	if rows < limit && bytes < maxGroupBatchBytes {
 		window := w.groupWindow
 		if window <= 0 {
@@ -336,7 +338,7 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request *submission, ou
 		// their short window as soon as compaction relieves the pressure.
 		var idle <-chan time.Time
 		var idleTimer *time.Timer
-		if w.compaction != nil && w.compaction.CompactionDebt() >= telemetry.CompactionDebtLimit/2 {
+		if pressure {
 			window = pressureAdmissionWindow
 			// Closed-loop exporters cannot send again until this group commits.
 			// Close an idle group promptly, while a paced stream can continue
@@ -599,7 +601,10 @@ func batchRows(batch Batch) int {
 	return len(batch.Spans) + len(batch.Logs) + len(batch.Metrics)
 }
 
-func (w *Writer) batchLimit() int {
+func (w *Writer) batchLimit(pressure bool) int {
+	if pressure {
+		return pressureGroupBatchRows
+	}
 	limit := min(w.batchSize, maxGroupBatchRows)
 	if limit <= 0 {
 		return maxGroupBatchRows
