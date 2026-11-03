@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -100,8 +101,14 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 		return e.exemplars(ctx, req, now)
 	}
 	out, _, err := loadCached(e, ctx, key, now, func(run context.Context) (ExemplarResponse, int64, bool, error) {
-		release, err := e.admit(run)
+		// Leave room for execution and the response inside the 15s client bound.
+		wait, cancel := context.WithTimeout(run, 2*time.Second)
+		release, err := e.admit(wait)
+		cancel()
 		if err != nil {
+			if run.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+				err = ErrBusy
+			}
 			return ExemplarResponse{Traces: []Exemplar{}}, 0, false, err
 		}
 		defer release()
@@ -122,7 +129,7 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 	if req.Kind != "" && req.Kind != "traces" && req.Kind != "logs" {
 		return out, Problems{{Path: "kind", Message: "kind must be traces or logs", Hint: "choose traces or logs"}}
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.timeout)
+	ctx, cancel := context.WithTimeout(ctx, min(e.timeout, 10*time.Second))
 	defer cancel()
 	d := req.Dashboard
 	Normalize(&d)
@@ -211,12 +218,53 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 		where += " AND contains(lower(body),lower(?))"
 		args = append(args, p.Options.Highlight)
 	}
-	// Candidate membership is filtered; root metadata is selected within the full panel window.
-	candidateSource := structuredSource(p.Query.From)
-	text := checkedTraceSQL(candidateSource, where, 21, "duration_ms DESC,trace_id,namespace", "start_time::TIMESTAMP_NS")
-	args = append(args, start, end)
+	// Sample matching rows before any grouping or ordering. A LIMIT after a
+	// global trace ranking still decodes the entire selection under ingestion.
+	// At most 64 sampled rows feed root lookup; this is a sample, not a global
+	// slowest-trace ranking. Repeated spans may yield fewer than 20 traces.
+	// Bind this scan separately so file pruning uses the selected bucket, while
+	// root metadata retains the full panel window.
+	candidateCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: lo, End: hi})
+	probe, err := e.engine.QueryContext(candidateCtx, "SELECT namespace,trace_id FROM "+structuredSource(p.Query.From)+" WHERE "+where+" AND trace_id<>'' LIMIT 65", args...)
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	type identity struct{ namespace, trace string }
+	seen := make(map[identity]bool)
+	var candidates []string
+	var rootArgs []any
+	count := 0
+	for probe.Next() {
+		var id identity
+		if err := probe.Scan(&id.namespace, &id.trace); err != nil {
+			probe.Close()
+			return out, exemplarError(ctx, err)
+		}
+		count++
+		if count > 64 {
+			out.Truncated = true
+			break
+		}
+		if !seen[id] {
+			seen[id] = true
+			candidates = append(candidates, "(?::VARCHAR,?::VARCHAR)")
+			rootArgs = append(rootArgs, id.namespace, id.trace)
+		}
+	}
+	err = probe.Err()
+	probe.Close()
+	if err != nil {
+		return out, exemplarError(ctx, err)
+	}
+	if len(candidates) == 0 {
+		return out, nil
+	}
+	text := fmt.Sprintf(`WITH candidates(namespace,trace_id) AS (VALUES %s), roots AS (%s)
+SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),start_time::TIMESTAMP_NS,false
+FROM roots WHERE n=1 ORDER BY duration_ms DESC,trace_id,namespace LIMIT 21`, strings.Join(candidates, ","), traceRootsSQL())
+	rootArgs = append(rootArgs, start, end)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end})
-	rows, err := e.engine.QueryContext(ctx, text, args...)
+	rows, err := e.engine.QueryContext(ctx, text, rootArgs...)
 	if err != nil {
 		return out, exemplarError(ctx, err)
 	}
@@ -241,7 +289,7 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 		out.Traces = out.Traces[:20]
 		out.Truncated = true
 	}
-	// A 21st root or a 1,001st candidate proves truncation; exactly 20 does not.
+	// A 21st root or a 65th matching row proves truncation; exactly 20 does not.
 	return out, nil
 }
 func traceRootsSQL() string {

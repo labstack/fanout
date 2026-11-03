@@ -79,7 +79,7 @@ func TestExemplarDimensionBindingAndProjection(t *testing.T) {
 	called := false
 	probe := exemplarProbeEngine{Engine: engine, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
 		called = true
-		if strings.Contains(text, value) || strings.Contains(text, sqlString(value)) || !slices.Contains(args, any(value)) {
+		if strings.Contains(text, value) || strings.Contains(text, sqlString(value)) || (strings.Contains(text, "LIMIT 65") && !slices.Contains(args, any(value))) {
 			t.Fatalf("dimension not bound: %s %+v", text, args)
 		}
 		if strings.Contains(text, "s.*") {
@@ -242,7 +242,7 @@ func TestExemplarClipsMatchingSpan(t *testing.T) {
 	}
 }
 
-func TestExemplarCandidateCapAndSlowest(t *testing.T) {
+func TestExemplarCandidateSampleCap(t *testing.T) {
 	engine, repo := newTestEngine(t)
 	n := fixtureStart.UnixNano()
 	var spans []telemetry.Span
@@ -253,8 +253,8 @@ func TestExemplarCandidateCapAndSlowest(t *testing.T) {
 	e := NewExecutor(engine, 30)
 	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
 	got, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("spans")))
-	if err != nil || len(got.Traces) != 20 || !got.Truncated || got.Traces[0].DurationMS != 1005 {
-		t.Fatalf("slowest: %+v %v", got, err)
+	if err != nil || len(got.Traces) != 20 || !got.Truncated {
+		t.Fatalf("sample: %+v %v", got, err)
 	}
 	p := Panel{Query: &Spec{From: "spans"}}
 	where, args, _ := selectionWhere(&p, nil, Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour)}, nil, nil)
@@ -309,5 +309,48 @@ func TestExemplarLogCapWithoutRoots(t *testing.T) {
 	got, err := e.Exemplars(t.Context(), exemplarRequest(exemplarDashboard("logs")))
 	if err != nil || len(got.Traces) != 0 || !got.Truncated {
 		t.Fatalf("lost cap summary: %+v %v", got, err)
+	}
+}
+
+// Candidate files follow the selected bucket; root metadata may precede it.
+func TestExemplarBucketPruningAndRootWindow(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.UnixNano()
+	commit(t, repo, []telemetry.Span{
+		{Namespace: "n", TraceID: "t", SpanID: "root", ServiceName: "root", Name: "root", StartUnixNanos: n, EndUnixNanos: n + int64(time.Minute), DurationMS: 60000, IngestedAt: n},
+		{Namespace: "n", TraceID: "t", SpanID: "child", ParentSpanID: "root", ServiceName: "selected", StartUnixNanos: n + int64(30*time.Minute), EndUnixNanos: n + int64(30*time.Minute) + 1000000, DurationMS: 1, Attributes: map[string]any{"http.route": "/cart"}, IngestedAt: n},
+		{Namespace: "other", TraceID: "t", SpanID: "root", ServiceName: "wrong", StartUnixNanos: n, EndUnixNanos: n + 1000000, DurationMS: 1, IngestedAt: n},
+	}, nil)
+	calls := 0
+	lo, hi := fixtureStart.Add(30*time.Minute), fixtureStart.Add(31*time.Minute)
+	probe := exemplarProbeEngine{Engine: duck, query: func(ctx context.Context, text string, args ...any) (queryrows.Rows, error) {
+		calls++
+		window, ok := queryrows.ReadWindow(ctx)
+		wantStart, wantEnd := lo, hi
+		if calls == 2 {
+			wantStart, wantEnd = fixtureStart, fixtureStart.Add(time.Hour)
+		}
+		if !ok || !window.Start.Equal(wantStart) || !window.End.Equal(wantEnd) {
+			return nil, fmt.Errorf("scan %d window: %+v", calls, window)
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > 10*time.Second {
+			return nil, errors.New("exemplar exceeds client budget")
+		}
+		if calls == 1 && (strings.Contains(text, "GROUP BY") || strings.Contains(text, "ORDER BY") || !strings.Contains(text, "LIMIT 65")) {
+			return nil, errors.New("candidate limit follows blocking work")
+		}
+		return duck.QueryContext(ctx, text, args...)
+	}}
+	e := NewExecutor(probe, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	d := exemplarDashboard("spans")
+	d.Panels[0].Query.By = []string{"attributes['http.route']"}
+	req := exemplarRequest(d)
+	req.From, req.To = lo, hi
+	req.Dimensions = map[string]string{"attributes['http.route']": "/cart"}
+	got, err := e.Exemplars(t.Context(), req)
+	if err != nil || calls != 2 || len(got.Traces) != 1 || got.Traces[0].Namespace != "n" || got.Traces[0].Service != "root" {
+		t.Fatalf("selection lineage: %+v calls=%d err=%v", got, calls, err)
 	}
 }
