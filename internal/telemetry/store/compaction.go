@@ -569,7 +569,8 @@ func compactionBatchRows(batch telemetry.BatchMetadata) int64 {
 
 // CompactParquetPass starts complete compactions until the phase budget
 // expires. The phase budget never cancels an in-flight merge; only blocking
-// ingest debt preempts unprepared higher-generation work.
+// ingest debt preempts unprepared higher-generation work. Read pressure must not
+// delay debt retirement: growing file counts hurts both reads and ingestion.
 func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPublisher, maxBatches int, budget time.Duration) (int, error) {
 	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
@@ -577,11 +578,6 @@ func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPu
 	deadline := time.Now().Add(budget)
 	total := 0
 	for {
-		if total > 0 {
-			if err := r.readPressure.Yield(ctx); err != nil {
-				return total, err
-			}
-		}
 		count, err := r.CompactParquet(ctx, publisher, maxBatches)
 		total += count
 		if err != nil || count == 0 || !time.Now().Before(deadline) {

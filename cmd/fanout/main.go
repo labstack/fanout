@@ -292,7 +292,6 @@ func main() {
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := query.NewExecutor(q, cfg.RetentionDays)
 	q.SetReadPressure(panels.Pressure)
-	repository.SetReadPressure(panels.Pressure)
 	go q.RunRollups(ctx)
 	panels.SetRollupReader(queries)
 	panels.SetCacheTTL(cfg.QueryCacheTTL)

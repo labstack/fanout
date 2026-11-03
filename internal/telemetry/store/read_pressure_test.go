@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestCompactionYieldsBetweenGroupsWithoutSkipping(t *testing.T) {
+func TestCompactionPassCompletesMultipleGroups(t *testing.T) {
 	r, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -19,17 +19,13 @@ func TestCompactionYieldsBetweenGroupsWithoutSkipping(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	checks, publishes := 0, 0
-	r.SetReadPressure(func() bool { checks++; return false })
+	publishes := 0
 	publisher := testParquetPublisherFunc(func(ctx context.Context, publish func(context.Context) error) error {
 		publishes++
-		if checks+1 < publishes {
-			t.Error("group bypassed pressure check")
-		}
 		return publish(ctx)
 	})
 	n, err := r.CompactParquetPass(t.Context(), publisher, 8, 5*time.Second)
-	if err != nil || n < 16 || publishes < 2 || checks+1 < publishes {
-		t.Fatalf("inputs=%d groups=%d checks=%d err=%v", n, publishes, checks, err)
+	if err != nil || n < 16 || publishes < 2 {
+		t.Fatalf("inputs=%d groups=%d err=%v", n, publishes, err)
 	}
 }
