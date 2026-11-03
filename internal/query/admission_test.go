@@ -1,13 +1,13 @@
 package query
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/observability"
-	"golang.org/x/sync/semaphore"
 )
 
 type pooledEngine struct {
@@ -21,18 +21,24 @@ func (p pooledEngine) ReadConnections() int { return p.pool }
 // and readiness once the pool can spare them.
 func TestPanelSlotsReserveTwoConnections(t *testing.T) {
 	for pool, want := range map[int]int{1: 1, 2: 2, 3: 3, 4: 2, 8: 6, 16: 14} {
-		slots, queue := config.QueryAdmission(pool)
-		if slots != want || queue != 8*want {
+		slots, reserved, queue := config.QueryAdmission(pool)
+		if slots != want || queue != 8*want || reserved != min(want-1, max(1, want/6)) {
 			t.Errorf("pool %d: slots=%d queue=%d, want %d and %d", pool, slots, queue, want, 8*want)
 		}
 	}
 	e := NewExecutor(pooledEngine{pool: 8}, 30)
 	defer e.Close()
-	if !e.slots.TryAcquire(6) || e.slots.TryAcquire(1) {
-		t.Error("a pool of 8 did not admit exactly 6 panels")
+	for range 5 {
+		if err := e.admission.acquire(t.Context(), panelClass); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if e.queueBound != 48 {
-		t.Errorf("queue bound %d, want 48", e.queueBound)
+	if e.admission.tryShared() {
+		t.Error("panels took reserved slot")
+	}
+
+	if e.admission.bounds[panelClass] != 48 {
+		t.Errorf("queue bound %d, want 48", e.admission.bounds[panelClass])
 	}
 }
 
@@ -41,9 +47,10 @@ func TestPanelSlotsReserveTwoConnections(t *testing.T) {
 func TestPanelsAreRefusedAtTheQueueBound(t *testing.T) {
 	e := newFixtureExecutor(t)
 	defer e.Close()
-	e.slots = semaphore.NewWeighted(1)
-	e.queueBound = 1
-	if err := e.slots.Acquire(t.Context(), 1); err != nil {
+	e.admission = newReadAdmission(1, 0, 8)
+	e.admission.bounds[panelClass] = 1
+	e.admission.bounds[interactiveClass] = 1
+	if err := e.admission.acquire(t.Context(), panelClass); err != nil {
 		t.Fatal(err)
 	}
 	queued := make(chan []Result, 1)
@@ -52,7 +59,7 @@ func TestPanelsAreRefusedAtTheQueueBound(t *testing.T) {
 		queued <- results
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for e.waiting.Load() < 1 {
+	for e.admission.waiting() < 1 {
 		if time.Now().After(deadline) {
 			t.Fatal("the first panel never queued")
 		}
@@ -78,7 +85,7 @@ func TestPanelsAreRefusedAtTheQueueBound(t *testing.T) {
 			t.Errorf("refused panel=%+v", r)
 		}
 	}
-	e.slots.Release(1)
+	e.admission.release(panelClass)
 	if r := <-queued; len(r) != 1 || r[0].Status != StatusOK {
 		t.Fatalf("queued panel=%+v", r)
 	}
@@ -94,9 +101,10 @@ func TestExemplarsAndTracesShareAdmission(t *testing.T) {
 	e := newFixtureExecutor(t)
 	defer e.Close()
 	e.SetCacheTTL(10 * time.Second)
-	e.slots = semaphore.NewWeighted(1)
-	e.queueBound = 0
-	if err := e.slots.Acquire(t.Context(), 1); err != nil {
+	e.admission = newReadAdmission(1, 0, 8)
+	e.admission.bounds[panelClass] = 0
+	e.admission.bounds[interactiveClass] = 0
+	if err := e.admission.acquire(t.Context(), panelClass); err != nil {
 		t.Fatal(err)
 	}
 	req := ExemplarRequest{Dashboard: shopDashboard(), PanelID: "by_route", From: fixtureStart.Add(30 * time.Minute), To: fixtureStart.Add(31 * time.Minute), Dimensions: map[string]string{"attributes['http.route']": "/cart"}}
@@ -109,7 +117,8 @@ func TestExemplarsAndTracesShareAdmission(t *testing.T) {
 		t.Fatalf("trace err=%v reads=%d", err, reader.calls.Load())
 	}
 	// Queued, a read waits no longer than the batch deadline.
-	e.queueBound = 1
+	e.admission.bounds[panelClass] = 1
+	e.admission.bounds[interactiveClass] = 1
 	e.batchTimeout = 30 * time.Millisecond
 	if _, err := traces.Trace(t.Context(), observability.Scope{}, "def", "", 10); !errors.Is(err, ErrBusy) {
 		t.Fatalf("queued trace err=%v", err)
@@ -117,11 +126,11 @@ func TestExemplarsAndTracesShareAdmission(t *testing.T) {
 	if len(e.cache.entries) != 0 {
 		t.Fatal("a busy answer was stored")
 	}
-	e.slots.Release(1)
+	e.admission.release(panelClass)
 	if out, err := e.Exemplars(t.Context(), req); err != nil || len(out.Traces) != 1 {
 		t.Fatalf("admitted exemplars=%+v err=%v", out, err)
 	}
-	if !e.slots.TryAcquire(1) {
+	if !e.admission.tryShared() {
 		t.Fatal("an exemplar run kept its slot")
 	}
 }
@@ -132,19 +141,121 @@ func TestExecutorPressureTracksWaitersAndCapacity(t *testing.T) {
 	if e.Pressure() {
 		t.Fatal("idle executor under pressure")
 	}
-	if !e.slots.TryAcquire(2) {
-		t.Fatal("pressure probe leaked admission")
+	if err := e.admission.acquire(t.Context(), panelClass); err != nil {
+		t.Fatal(err)
 	}
 	if !e.Pressure() {
-		t.Fatal("full executor reported no pressure")
+		t.Fatal("full shared executor reported no pressure")
 	}
-	e.slots.Release(2)
-	e.waiting.Store(1)
-	if !e.Pressure() {
-		t.Fatal("queued executor reported no pressure")
-	}
-	e.waiting.Store(0)
+	e.admission.release(panelClass)
 	if e.Pressure() {
 		t.Fatal("pressure did not clear")
+	}
+}
+
+func TestInteractiveReadsAreAdmittedAheadOfPanels(t *testing.T) {
+	a := newReadAdmission(6, 1, 48)
+	for range 5 {
+		if err := a.acquire(t.Context(), panelClass); err != nil {
+			t.Fatal(err)
+		}
+	}
+	panels := make(chan struct{}, 48)
+	for range 48 {
+		go func() {
+			if err := a.acquire(t.Context(), panelClass); err == nil {
+				panels <- struct{}{}
+			}
+		}()
+	}
+	waitForReadWaiters(t, a, 48)
+	if err := a.acquire(t.Context(), interactiveClass); err != nil {
+		t.Fatal(err)
+	}
+	interactive := make(chan struct{})
+	go func() {
+		if err := a.acquire(t.Context(), interactiveClass); err == nil {
+			close(interactive)
+		}
+	}()
+	waitForReadWaiters(t, a, 49)
+	a.release(panelClass)
+	select {
+	case <-interactive:
+	case <-time.After(time.Second):
+		t.Fatal("interactive read queued behind panels")
+	}
+	select {
+	case <-panels:
+		t.Fatal("panel woke before interactive waiter")
+	default:
+	}
+	a.release(interactiveClass)
+	a.release(interactiveClass)
+	for range 4 {
+		a.release(panelClass)
+	}
+	for range 48 {
+		<-panels
+		a.release(panelClass)
+	}
+}
+
+func waitForReadWaiters(t *testing.T, a *readAdmission, n int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for a.waiting() != n {
+		if time.Now().After(deadline) {
+			t.Fatalf("waiters=%d want=%d", a.waiting(), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestPanelsNeverTakeTheReservedSlot(t *testing.T) {
+	a := newReadAdmission(6, 1, 0)
+	for range 5 {
+		if err := a.acquire(t.Context(), panelClass); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.acquire(t.Context(), panelClass); !errors.Is(err, errQueueFull) {
+		t.Fatal(err)
+	}
+	if err := a.acquire(t.Context(), interactiveClass); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInteractiveQueueBoundRefusesFloods(t *testing.T) {
+	a := newReadAdmission(2, 1, 16)
+	for range 2 {
+		if err := a.acquire(t.Context(), interactiveClass); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 4)
+	for range 4 {
+		go func() { done <- a.acquire(ctx, interactiveClass) }()
+	}
+	waitForReadWaiters(t, a, 4)
+	if err := a.acquire(t.Context(), interactiveClass); !errors.Is(err, errQueueFull) {
+		t.Fatal(err)
+	}
+	cancel()
+	for range 4 {
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	}
+	if a.waiting() != 0 {
+		t.Fatal("canceled waiters leaked")
+	}
+	for range 2 {
+		a.release(interactiveClass)
+	}
+	if !a.tryShared() {
+		t.Fatal("cancellation leaked capacity")
 	}
 }

@@ -49,16 +49,16 @@ const (
 )
 
 // QueryAdmission derives the executor's read admission from the pool:
-// slots dashboard panels, exemplar and trace-detail reads hold read
-// connections at once, and at most queue more wait for one before further
-// reads are refused as busy. A pool of four or more keeps two connections
+// slots reads hold connections at once. reserved slots serve interactive
+// reads only; queue is the panel queue bound (interactive waits are 2*slots).
+// A one-slot pool has no reservation so panels can still execute. A pool of four or more keeps two connections
 // for annotations and readiness checks, which do not queue behind them.
-func QueryAdmission(pool int) (slots, queue int) {
+func QueryAdmission(pool int) (slots, reserved, queue int) {
 	slots = max(1, pool)
 	if pool >= 4 {
 		slots = pool - 2
 	}
-	return slots, 8 * slots
+	return slots, min(slots-1, max(1, slots/6)), 8 * slots
 }
 
 // sizingSource records which values the machine chose, so the startup log can
@@ -152,7 +152,7 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		// logging an empty string that reads like "nothing to see here".
 		memory = "duckdb-default(80% of detected RAM)"
 	}
-	slots, queue := QueryAdmission(c.DuckDBMaxConns)
+	slots, reserved, queue := QueryAdmission(c.DuckDBMaxConns)
 	slog.Info("runtime sizing resolved",
 		"duckdb_memory", memory,
 		"duckdb_memory_auto", src.MemoryAuto,
@@ -167,6 +167,7 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		"memory_detection_incomplete", src.MemoryDetectionIncomplete,
 		"gomaxprocs", runtime.GOMAXPROCS(0),
 		"query_slots", slots,
+		"query_interactive_slots", reserved,
 		"query_reserved_connections", c.DuckDBMaxConns-slots,
 		"query_queue_bound", queue,
 		"query_cache_ttl", c.QueryCacheTTL.String(),

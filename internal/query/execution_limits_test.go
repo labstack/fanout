@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/telemetry"
-	"golang.org/x/sync/semaphore"
 )
 
 type slowBatchEngine struct {
@@ -82,7 +81,7 @@ func (e *delayedEngine) QueryContext(ctx context.Context, query string, args ...
 func TestQueuedPanelsKeepTheirWholeTimeout(t *testing.T) {
 	e := newFixtureExecutor(t)
 	e.engine = &delayedEngine{Engine: e.engine, delay: 50 * time.Millisecond}
-	e.slots = semaphore.NewWeighted(1)
+	e.admission = newReadAdmission(1, 0, 8)
 	e.timeout = 200 * time.Millisecond
 	d := Dashboard{Name: "Queue"}
 	for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
@@ -132,7 +131,7 @@ func TestStreamEmitsEachPanelWhenItFinishes(t *testing.T) {
 // would be turned away as busy.
 func TestStalledStreamFreesReadSlots(t *testing.T) {
 	e := newFixtureExecutor(t)
-	e.slots = semaphore.NewWeighted(1)
+	e.admission = newReadAdmission(1, 0, 8)
 	e.batchTimeout = 2 * time.Second
 	panel := func(id string) Panel {
 		return Panel{ID: id, Title: id, Viz: "table", Query: &Spec{From: "spans", Measures: []string{"count()"}}}

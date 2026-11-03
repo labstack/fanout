@@ -14,7 +14,6 @@ import (
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
-	"golang.org/x/sync/semaphore"
 )
 
 // cacheEngine counts reads, and can hold them until release closes or
@@ -439,13 +438,13 @@ func TestResultCacheNeverStoresErrors(t *testing.T) {
 
 func TestResultCacheNeverStoresBusyResults(t *testing.T) {
 	e, _, _ := cachedExecutor(t)
-	e.slots = semaphore.NewWeighted(1)
-	if err := e.slots.Acquire(t.Context(), 1); err != nil {
+	e.admission = newReadAdmission(1, 0, 8)
+	if err := e.admission.acquire(t.Context(), panelClass); err != nil {
 		t.Fatal(err)
 	}
 	e.batchTimeout = 30 * time.Millisecond
 	r := runOne(t, e, RunRequest{Dashboard: cacheDashboard()})
-	e.slots.Release(1)
+	e.admission.release(panelClass)
 	if r.Reason != ReasonBusy || len(e.cache.entries) != 0 {
 		t.Fatalf("result=%+v entries=%d", r, len(e.cache.entries))
 	}

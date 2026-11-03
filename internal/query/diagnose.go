@@ -27,7 +27,7 @@ func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, sco
 	if p.Query == nil {
 		return "The query returned no rows for this time range."
 	}
-	if scope.Rollup || e.waiting.Load() == 0 {
+	if scope.Rollup || e.admission.waiting() == 0 {
 		if message := e.explain(ctx, p, filters, scope); message != "" {
 			return message
 		}

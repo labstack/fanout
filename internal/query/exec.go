@@ -17,7 +17,6 @@ import (
 	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 // Engine is the query engine the executor runs on. *engine.Duck implements it;
@@ -79,19 +78,15 @@ type Result struct {
 }
 
 type Executor struct {
-	engine       Engine
-	rollups      RollupReader
-	maxWindow    time.Duration
-	now          func() time.Time
-	timeout      time.Duration
-	batchTimeout time.Duration
-	parallel     int
-	// slots admits panels to the engine's read connections in arrival order;
-	// a panel's own timeout starts once it holds one. At most queueBound
-	// panels wait for a slot; more are refused at once as busy.
-	slots      *semaphore.Weighted
-	queueBound int64
-	waiting    atomic.Int64
+	engine              Engine
+	rollups             RollupReader
+	maxWindow           time.Duration
+	now                 func() time.Time
+	timeout             time.Duration
+	batchTimeout        time.Duration
+	parallel            int
+	admission           *readAdmission
+	interactiveRefusals atomic.Uint64
 
 	memo    checkMemo
 	cache   resultCache
@@ -119,13 +114,13 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 	// A panel admitted beyond the engine's read connections would only wait
 	// for one inside the engine, with its own timeout already running. Two
 	// connections stay free for reads that do not queue behind dashboards.
-	slots, queue := 4, 32
+	slots, reserved, queue := 4, 1, 32
 	if pool, ok := engine.(interface{ ReadConnections() int }); ok {
-		slots, queue = config.QueryAdmission(pool.ReadConnections())
+		slots, reserved, queue = config.QueryAdmission(pool.ReadConnections())
 	}
 	life, stop := context.WithCancel(context.Background())
 	return &Executor{engine: engine, maxWindow: maxWindow, now: time.Now, timeout: defaultPanelTimeout, batchTimeout: defaultBatchTimeout, parallel: 4,
-		slots: semaphore.NewWeighted(int64(slots)), queueBound: int64(queue), cache: newResultCache(), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
+		admission: newReadAdmission(slots, reserved, queue), cache: newResultCache(), checks: map[[32]byte]*Checked{}, schemas: map[string]schemaEntry{},
 		life: life, stop: stop, discoveries: make(chan struct{}, 2), discoverWait: time.Minute, discoverRun: 25 * time.Second}
 }
 
@@ -140,14 +135,8 @@ func (e *Executor) Close() {
 
 // Pressure reports queued reads or a fully occupied admission pool.
 func (e *Executor) Pressure() bool {
-	if e.waiting.Load() > 0 {
-		return true
-	}
-	if !e.slots.TryAcquire(1) {
-		return true
-	}
-	e.slots.Release(1)
-	return false
+	return !e.admission.tryShared()
+
 }
 
 // Validate normalizes d and runs every check, returning Problems or nil.
@@ -386,14 +375,14 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				defer cancel()
 				// Turns are first come, first served across every request, so
 				// a search is not starved by a dashboard that started earlier.
-				switch err := e.acquire(wait); {
+				switch err := e.acquireClass(wait, panelClass); {
 				case errors.Is(err, errQueueFull):
 					return panelOutcome{Result: refusedResult(p), refused: true}, 0, false, nil
 				case err != nil:
 					return panelOutcome{Result: busyResult(p)}, 0, false, nil
 				}
 				r := func() Result {
-					defer e.slots.Release(1)
+					defer e.admission.release(panelClass)
 					return e.runPanel(run, p, checked, t, now, vars, width, compare)
 				}()
 				return panelOutcome{Result: r}, r.size(), (r.Status == StatusOK || r.Status == StatusEmpty) && !r.partial, nil
@@ -434,40 +423,33 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	return nil
 }
 
-// acquire takes a read slot, waiting in line unless queueBound panels
-// already are: past that, waiting would only end at the batch deadline.
-func (e *Executor) acquire(ctx context.Context) error {
-	if e.slots.TryAcquire(1) {
-		markStarted(ctx)
-		return nil
-	}
-	if e.waiting.Add(1) > e.queueBound {
-		e.waiting.Add(-1)
-		return errQueueFull
-	}
-	defer e.waiting.Add(-1)
-	if err := e.slots.Acquire(ctx, 1); err != nil {
+func (e *Executor) acquireClass(ctx context.Context, class readClass) error {
+	if err := e.admission.acquire(ctx, class); err != nil {
 		return err
 	}
 	markStarted(ctx)
 	return nil
 }
 
+// InteractiveRefusals counts interactive requests refused before execution.
+func (e *Executor) InteractiveRefusals() uint64 { return e.interactiveRefusals.Load() }
+
 var errQueueFull = errors.New("panel queue is full")
 
 // admit takes a read slot for an exemplar or trace-detail run, which waits
-// in the same line as dashboard panels, so a flood of them is turned away
+// in a reserved, priority lane, so a flood of them is turned away
 // as busy instead of holding the engine. The wait is bounded by the batch
 // deadline; a full queue or a wait that outlasts it is ErrBusy.
 func (e *Executor) admit(ctx context.Context) (release func(), err error) {
 	wait, cancel := context.WithTimeout(ctx, e.batchTimeout)
 	defer cancel()
-	switch err := e.acquire(wait); {
+	switch err := e.acquireClass(wait, interactiveClass); {
 	case err == nil:
-		return func() { e.slots.Release(1) }, nil
+		return func() { e.admission.release(interactiveClass) }, nil
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
 	default:
+		e.interactiveRefusals.Add(1)
 		return nil, ErrBusy
 	}
 }
