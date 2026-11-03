@@ -247,7 +247,7 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 		}
 		if !seen[id] {
 			seen[id] = true
-			candidates = append(candidates, "(?::VARCHAR,?::VARCHAR)")
+			candidates = append(candidates, "struct_pack(namespace := ?::VARCHAR, trace_id := ?::VARCHAR)")
 			rootArgs = append(rootArgs, id.namespace, id.trace)
 		}
 	}
@@ -259,9 +259,24 @@ func (e *Executor) exemplars(ctx context.Context, req ExemplarRequest, now time.
 	if len(candidates) == 0 {
 		return out, nil
 	}
-	text := fmt.Sprintf(`WITH candidates(namespace,trace_id) AS (VALUES %s), roots AS (%s)
-SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(service,''),coalesce(operation,''),coalesce(duration_ms,0),coalesce(status,''),start_time::TIMESTAMP_NS,false
-FROM roots WHERE n=1 ORDER BY duration_ms DESC,trace_id,namespace LIMIT 21`, strings.Join(candidates, ","), traceRootsSQL())
+	// Keep the bounded keys as constants in a predicate. Joining a VALUES
+	// relation lets zero-cardinality Parquet estimates reverse the hash build
+	// into every retained span, consuming memory and CPU before returning roots.
+	// One aggregate state per sampled trace also bounds root selection memory
+	// when a sampled trace has many spans. Prefer a root, then time and span ID,
+	// exactly as the trace-row path does, and retain errors from all its spans.
+	text := fmt.Sprintf(`WITH roots AS (
+SELECT s.namespace,s.trace_id,
+arg_min(struct_pack(service := s.service, operation := s.operation, duration_ms := s.duration_ms, status := s.status, start_time := s.start_time),
+struct_pack(child := coalesce(s.parent_span_id,'')<>'', start_time := s.start_time, span_id := s.span_id)) AS root,
+bool_or(s.status='STATUS_CODE_ERROR') AS has_error
+FROM spans s WHERE struct_pack(namespace := s.namespace, trace_id := s.trace_id) IN (%s)
+AND s.start_time>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+GROUP BY s.namespace,s.trace_id)
+SELECT coalesce(trace_id,''),coalesce(namespace,''),coalesce(root.service,''),coalesce(root.operation,''),coalesce(root.duration_ms,0),
+CASE WHEN has_error THEN 'STATUS_CODE_ERROR' ELSE coalesce(root.status,'') END,root.start_time::TIMESTAMP_NS,false
+FROM roots ORDER BY root.duration_ms DESC,trace_id,namespace LIMIT 21`, strings.Join(candidates, ","))
+
 	rootArgs = append(rootArgs, start, end)
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end})
 	rows, err := e.engine.QueryContext(ctx, text, rootArgs...)

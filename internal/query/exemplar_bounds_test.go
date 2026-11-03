@@ -94,8 +94,8 @@ func TestExemplarDimensionBindingAndProjection(t *testing.T) {
 			entry := entry.(map[string]any)
 			if entry["key"] == "roots" {
 				root := entry["value"].(map[string]any)["query_node"].(map[string]any)
-				if got := len(root["select_list"].([]any)); got != 8 {
-					t.Fatalf("roots selects %d columns, want 8", got)
+				if got := len(root["select_list"].([]any)); got != 4 {
+					t.Fatalf("roots selects %d columns, want 4", got)
 				}
 			}
 		}
@@ -329,6 +329,9 @@ func TestExemplarBucketPruningAndRootWindow(t *testing.T) {
 		wantStart, wantEnd := lo, hi
 		if calls == 2 {
 			wantStart, wantEnd = fixtureStart, fixtureStart.Add(time.Hour)
+			if strings.Contains(text, "JOIN candidates") || strings.Contains(text, "OVER(") || !strings.Contains(text, "struct_pack(namespace := s.namespace, trace_id := s.trace_id) IN (") {
+				return nil, errors.New("roots must probe constant trace keys before windowing")
+			}
 		}
 		if !ok || !window.Start.Equal(wantStart) || !window.End.Equal(wantEnd) {
 			return nil, fmt.Errorf("scan %d window: %+v", calls, window)
@@ -352,5 +355,34 @@ func TestExemplarBucketPruningAndRootWindow(t *testing.T) {
 	got, err := e.Exemplars(t.Context(), req)
 	if err != nil || calls != 2 || len(got.Traces) != 1 || got.Traces[0].Namespace != "n" || got.Traces[0].Service != "root" {
 		t.Fatalf("selection lineage: %+v calls=%d err=%v", got, calls, err)
+	}
+}
+
+func TestExemplarSampleKeepsRootOrderingAndTraceErrors(t *testing.T) {
+	duck, repo := newTestEngine(t)
+	n := fixtureStart.Add(time.Minute).UnixNano()
+	var spans []telemetry.Span
+	for i := range 600 {
+		status := ""
+		if i == 599 {
+			status = "STATUS_CODE_ERROR"
+		}
+		spans = append(spans, telemetry.Span{Namespace: "n", TraceID: "t", SpanID: fmt.Sprint("child-", i), ParentSpanID: "root", ServiceName: "selected", StartUnixNanos: n + int64(i), EndUnixNanos: n + int64(i) + 1000000, DurationMS: 1, StatusCode: status, IngestedAt: n})
+	}
+	rootTime := fixtureStart.Add(2 * time.Minute)
+	spans = append(spans, telemetry.Span{Namespace: "n", TraceID: "t", SpanID: "root", ServiceName: "root", Name: "late root", StartUnixNanos: rootTime.UnixNano(), EndUnixNanos: rootTime.UnixNano() + 900000000, DurationMS: 900, IngestedAt: n})
+	commit(t, repo, spans, nil)
+	e := NewExecutor(duck, 30)
+	e.now = func() time.Time { return fixtureStart.Add(time.Hour) }
+	req := exemplarRequest(exemplarDashboard("spans"))
+	req.From, req.To = fixtureStart.Add(time.Minute), fixtureStart.Add(2*time.Minute)
+	req.Dimensions = map[string]string{"service": "selected"}
+	got, err := e.Exemplars(t.Context(), req)
+	if err != nil || len(got.Traces) != 1 || !got.Truncated {
+		t.Fatalf("sample: %+v %v", got, err)
+	}
+	root := got.Traces[0]
+	if root.Service != "root" || root.Operation != "late root" || !root.Start.Equal(rootTime) || root.Status != "STATUS_CODE_ERROR" {
+		t.Fatalf("root metadata: %+v", root)
 	}
 }
