@@ -123,6 +123,9 @@ func TestExemplarsAndTracesShareAdmission(t *testing.T) {
 	if _, err := traces.Trace(t.Context(), observability.Scope{}, "def", "", 10); !errors.Is(err, ErrBusy) {
 		t.Fatalf("queued trace err=%v", err)
 	}
+	if got := e.InteractiveRefusals(); got != 3 {
+		t.Fatalf("interactive refusals=%d want 3", got)
+	}
 	if len(e.cache.entries) != 0 {
 		t.Fatal("a busy answer was stored")
 	}
@@ -257,5 +260,23 @@ func TestInteractiveQueueBoundRefusesFloods(t *testing.T) {
 	}
 	if !a.tryShared() {
 		t.Fatal("cancellation leaked capacity")
+	}
+}
+
+func TestInteractiveRefusalsIncludeTheExemplarWaitDeadline(t *testing.T) {
+	e := newFixtureExecutor(t)
+	defer e.Close()
+	e.admission = newReadAdmission(1, 0, 8)
+	if err := e.admission.acquire(t.Context(), panelClass); err != nil {
+		t.Fatal(err)
+	}
+	defer e.admission.release(panelClass)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	defer cancel()
+	if _, err := e.admit(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if e.InteractiveRefusals() != 1 {
+		t.Fatal("caller-bounded interactive wait was not counted")
 	}
 }

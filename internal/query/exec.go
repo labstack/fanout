@@ -373,8 +373,8 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				// own timeout, while anyone still waits for it.
 				wait, cancel := context.WithDeadline(run, deadline)
 				defer cancel()
-				// Turns are first come, first served across every request, so
-				// a search is not starved by a dashboard that started earlier.
+				// Panels share a bounded FIFO; interactive reads have priority
+				// and reserved capacity outside this class.
 				switch err := e.acquireClass(wait, panelClass); {
 				case errors.Is(err, errQueueFull):
 					return panelOutcome{Result: refusedResult(p), refused: true}, 0, false, nil
@@ -443,13 +443,16 @@ var errQueueFull = errors.New("panel queue is full")
 func (e *Executor) admit(ctx context.Context) (release func(), err error) {
 	wait, cancel := context.WithTimeout(ctx, e.batchTimeout)
 	defer cancel()
-	switch err := e.acquireClass(wait, interactiveClass); {
+	err = e.acquireClass(wait, interactiveClass)
+	if errors.Is(err, errQueueFull) || errors.Is(err, context.DeadlineExceeded) {
+		e.interactiveRefusals.Add(1)
+	}
+	switch {
 	case err == nil:
 		return func() { e.admission.release(interactiveClass) }, nil
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
 	default:
-		e.interactiveRefusals.Add(1)
 		return nil, ErrBusy
 	}
 }
