@@ -175,7 +175,7 @@ func TestDiagnosisBoundsReruns(t *testing.T) {
 		t.Fatalf("check: %v %v", err, problems)
 	}
 	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour), Vars: map[string]Value{"service": {Values: []string{"checkout"}}}}
-	_ = e.diagnose(t.Context(), &d.Panels[0], checked.Filters["empty"], scope)
+	_, _ = e.diagnose(t.Context(), &d.Panels[0], checked.Filters["empty"], scope)
 	// One scan counts the window and the first maxDiagnosedFilters reruns
 	// together; a value lookup for the blamed equality is the only other read.
 	if counting.queries > 2 {

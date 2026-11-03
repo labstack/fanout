@@ -43,7 +43,7 @@ func TestDiagnosisWithoutTimeStaysNeutral(t *testing.T) {
 		{Panel{Viz: "traces", Query: &Spec{From: "spans"}}, []Filter{{Expr: "service = 'x'"}}, "No traces match these filters in this time range."},
 		{Panel{Viz: "logs", Query: &Spec{From: "logs"}}, nil, "No logs match this query in this time range."},
 	} {
-		if got := e.diagnose(ctx, &tc.panel, tc.filters, scope); got != tc.want {
+		if got, _ := e.diagnose(ctx, &tc.panel, tc.filters, scope); got != tc.want {
 			t.Errorf("diagnosis %q, want %q", got, tc.want)
 		}
 	}

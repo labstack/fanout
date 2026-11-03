@@ -15,6 +15,9 @@ import (
 // validator caps queries at 16 filters; diagnosis examines only eight.
 const maxDiagnosedFilters = 8
 
+// deferDiagnosisKey carries the batch admission policy into shared cache runs.
+type deferDiagnosisKey struct{}
+
 // diagnose explains an empty structured panel. It counts the signal in the
 // window, then reruns the count with each of the first maxDiagnosedFilters
 // filters removed in turn. The filter whose removal recovers the most rows is
@@ -23,21 +26,27 @@ const maxDiagnosedFilters = 8
 //
 // The diagnosis shares the panel's deadline, so after a slow query it may not
 // finish; the panel then says only what the query showed.
-func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) string {
+func (e *Executor) diagnose(ctx context.Context, p *Panel, filters []Filter, scope Scope) (message string, complete bool) {
 	if p.Query == nil {
-		return "The query returned no rows for this time range."
+		return "The query returned no rows for this time range.", true
 	}
-	if scope.Rollup || e.admission.waiting() == 0 {
+	deferred, _ := ctx.Value(deferDiagnosisKey{}).(bool)
+	if scope.Rollup || !deferred {
 		if message := e.explain(ctx, p, filters, scope); message != "" {
-			return message
+			return message, true
 		}
 	}
+	message = fmt.Sprintf("No %s match this query in this time range.", rowNoun(p))
 	for _, f := range filters {
 		if !scope.dropped(f) {
-			return fmt.Sprintf("No %s match these filters in this time range.", rowNoun(p))
+			message = fmt.Sprintf("No %s match these filters in this time range.", rowNoun(p))
+			break
 		}
 	}
-	return fmt.Sprintf("No %s match this query in this time range.", rowNoun(p))
+	if deferred && !scope.Rollup {
+		message += " Filter diagnosis was skipped because the server is busy with other queries."
+	}
+	return message, false
 }
 
 // rowNoun names what a structured panel lists: traces on the traces viz,

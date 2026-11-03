@@ -346,6 +346,11 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	if req.Compare != nil {
 		compare = *req.Compare
 	}
+	// Decide once before scheduling this batch's panels. A sibling waiting for
+	// the same limited panel slots is normal dashboard fanout, not evidence
+	// of pre-existing pressure. Keep this policy even if the queue drains
+	// before an admitted panel finishes; diagnosis uses its existing slot.
+	deferDiagnosis := e.admission.waiting() > 0
 	deadline, _ := ctx.Deadline()
 	var group errgroup.Group
 	group.SetLimit(e.parallel)
@@ -368,6 +373,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				return nil
 			}
 			out, outcome, err := loadCached(e, caller, key, now, func(run context.Context) (panelOutcome, int64, bool, error) {
+				run = context.WithValue(run, deferDiagnosisKey{}, deferDiagnosis)
 				// Waiting for a turn is bounded by the batch deadline of the
 				// request that started this run; the run itself by the panel's
 				// own timeout, while anyone still waits for it.
@@ -719,7 +725,9 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	}
 	if zero {
 		// A count of nothing is a real 0; the diagnosis says why, as a hint.
-		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
+		var complete bool
+		res.Diagnosis, complete = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
+		res.partial = res.partial || !complete
 	} else if frame.Rows > 0 && p.Query != nil && p.Query.From != "metrics" && p.Viz != "state_timeline" && hasMeasure(frame) && !measuresHaveValue(frame) {
 		// Rows whose every measure is null have nothing to plot. A state
 		// timeline draws null buckets as unknown, so it keeps them.
@@ -731,7 +739,9 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		res.Diagnosis = fmt.Sprintf("The matching %s have no values for %s in this time range.", rowNoun(p), noun)
 	} else if frame.Rows == 0 || emptyExpressionTotal(p, checked.Measures[p.ID], frame) || (p.Query != nil && p.Query.From == "metrics" && p.Viz != "histogram" && p.Viz != "heatmap" && !measuresHaveValue(frame)) {
 		res.Status = StatusEmpty
-		res.Diagnosis = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
+		var complete bool
+		res.Diagnosis, complete = e.diagnose(ctx, p, checked.Filters[p.ID], scope)
+		res.partial = res.partial || !complete
 	}
 	// A sub-read cut short by the panel's timeout, or by its callers leaving,
 	// left something out even where it reported no error, such as the
