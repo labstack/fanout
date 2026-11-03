@@ -81,6 +81,7 @@ func CreateCacheTables(db *sql.DB) error {
 	}
 	for _, stmt := range []string{
 		createServiceRollupTable,
+		createSpanRollupTable,
 		createEdgeRollupTable,
 		createRollupStateTable,
 		createVersionRollupTable,
@@ -93,6 +94,25 @@ func CreateCacheTables(db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS rollup_schema_version (version INTEGER)`); err != nil {
+		return err
+	}
+	var rollupVersion int
+	if err := tx.QueryRow(`SELECT coalesce(max(version),0) FROM rollup_schema_version`).Scan(&rollupVersion); err != nil {
+		return err
+	}
+	if rollupVersion != rollup_schema_version {
+		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, createServiceRollupTable, createSpanRollupTable,
+			`DELETE FROM rollup_state WHERE cache_key = '` + serviceRollupStateKey + `'`,
+			`DELETE FROM rollup_schema_version`} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO rollup_schema_version VALUES (?)`, rollup_schema_version); err != nil {
 			return err
 		}
 	}

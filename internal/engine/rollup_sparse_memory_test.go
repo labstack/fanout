@@ -113,6 +113,10 @@ func serviceSpanRollupMemory(t *testing.T, late bool) {
 	if err := db.QueryRow("SELECT count(*),sum(spans),sum(served_spans),sum(p50_ms),sum(p95_ms),sum(error_rate) FROM service_rollup").Scan(&count, &spans, &served, &p50, &p95, &errorRate); err != nil {
 		t.Fatal(err)
 	}
+	var histogramSpans int
+	if err := db.QueryRow("SELECT sum(list_sum(map_values(hist))) FROM span_rollup").Scan(&histogramSpans); err != nil || histogramSpans != wantSpans {
+		t.Fatalf("histogram spans=%d want=%d: %v", histogramSpans, wantSpans, err)
+	}
 	if count != wantGroups || spans != wantSpans || served != wantSpans || p50 != float64(wantGroups*5) || p95 != float64(wantGroups*5) || errorRate != 0 {
 		t.Fatalf("rollup=%d %d %d %g %g %g", count, spans, served, p50, p95, errorRate)
 	}

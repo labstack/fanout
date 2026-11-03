@@ -26,6 +26,24 @@ CREATE TABLE IF NOT EXISTS service_rollup (
   PRIMARY KEY (namespace, bucket, service)
 );`
 
+// spanHistogramZero is outside the index range of positive finite durations.
+const spanHistogramZero = -2147483648
+
+const createSpanRollupTable = `
+CREATE TABLE IF NOT EXISTS span_rollup (
+  namespace TEXT,
+  bucket TIMESTAMP_NS,
+  service TEXT,
+  kind TEXT,
+  status TEXT,
+  spans BIGINT,
+  duration_sum DOUBLE,
+  duration_min DOUBLE,
+  duration_max DOUBLE,
+  hist MAP(INTEGER, UBIGINT),
+  PRIMARY KEY (namespace, bucket, service, kind, status)
+);`
+
 const createEdgeRollupTable = `
 CREATE TABLE IF NOT EXISTS edge_rollup (
   namespace TEXT,

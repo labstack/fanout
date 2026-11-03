@@ -122,6 +122,7 @@ const (
 	// Rollup progress keys in rollup_state. readCacheVersion drops that table
 	// with the rollups, so a version change also restarts their backfill; the
 	// keys need no version of their own.
+	rollup_schema_version         = 1
 	serviceRollupStateKey         = "service_rollup_v3"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
@@ -819,8 +820,8 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		defer unlockCache()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
-			for _, table := range []string{"service_rollup", "edge_rollup"} {
-				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
+			for _, table := range []string{"service_rollup", "span_rollup", "edge_rollup"} {
+				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < (now() - INTERVAL %d DAY)::TIMESTAMP_NS", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
 			}
@@ -991,6 +992,9 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 		lo, hi := time.Unix(0, lower.Int64).UTC(), time.Unix(0, upper.Int64).UTC()
 		if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, lo, hi); err != nil {
 			return 0, fmt.Errorf("service_rollup/delete: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, strings.ReplaceAll(strings.ReplaceAll(serviceRollupDeleteSQL, "service_rollup", "span_rollup"), "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS"), lo, hi); err != nil {
+			return 0, fmt.Errorf("span_rollup/delete: %w", err)
 		}
 		res, err := insertServiceRollup(ctx, tx, lo, hi)
 		if err != nil {
@@ -1503,6 +1507,10 @@ func insertServiceRollup(ctx context.Context, tx rollupSQL, lo, hi time.Time) (s
 		`struct_pack(namespace := ?::VARCHAR, bucket := make_timestamp_ns(?::BIGINT), service := ?::VARCHAR)`,
 		func(keys string, args []any) error {
 			_, err := tx.ExecContext(ctx, "INSERT INTO service_pass_spans "+serviceRollupSpanSQL(keys)+" SELECT * FROM span_agg", append(args, lo, hi)...)
+			if err != nil {
+				return err
+			}
+			_, err = tx.ExecContext(ctx, spanRollupInsertSQL(keys), append(args, lo, hi)...)
 			return err
 		})
 	if err != nil {
@@ -1567,6 +1575,20 @@ func forAffectedKeys(ctx context.Context, tx rollupSQL, query string, queryArgs 
 		args = args[n*width:]
 	}
 	return nil
+}
+
+// Aggregate after probing the constant affected-key list, never by hashing raw
+// spans into a join against service_pass_affected. The histogram is O(buckets).
+func spanRollupInsertSQL(keys string) string {
+	return `INSERT INTO span_rollup
+ SELECT s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
+   coalesce(s.kind, ''), coalesce(s.status, ''), count(*),
+   sum(s.duration_ms), min(s.duration_ms), max(s.duration_ms),
+   histogram(CASE WHEN s.duration_ms > 0 THEN ceil(log2(s.duration_ms)*8)::INTEGER ELSE ` + fmt.Sprint(spanHistogramZero) + ` END)
+ FROM spans s WHERE ` + keys + `
+   AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+   AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service, coalesce(s.kind, ''), coalesce(s.status, '')`
 }
 
 func serviceRollupSpanSQL(keys string) string {
@@ -2297,6 +2319,19 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context)
 }
 
 // ---- Queries for API ----
+
+// RollupWatermark is the ingest horizon shared by service_rollup and span_rollup.
+// Read persisted state instead of the writer-owned in-memory cursor.
+func (d *Duck) RollupWatermark(ctx context.Context) (time.Time, error) {
+	var stamp int64
+	if err := d.QueryRowScan(ctx, []any{&stamp}, `SELECT coalesce((SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key=?),0)`, serviceRollupStateKey); err != nil {
+		return time.Time{}, err
+	}
+	if stamp == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(0, stamp).UTC(), nil
+}
 
 // CompletedServiceRollupMinute is the exclusive end of detector input. The
 // minute containing the ingest watermark may still be incomplete.
