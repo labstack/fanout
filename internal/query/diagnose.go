@@ -426,7 +426,7 @@ func (e *Executor) metricKindDiagnosis(ctx context.Context, p *Panel, filters []
 
 func diagnosisSource(sig *signal, scope Scope) string {
 	if scope.Rollup {
-		return "span_rollup"
+		return rollupReadSource(scope.RollupSource)
 	}
 	return structuredSource(sig.name)
 }

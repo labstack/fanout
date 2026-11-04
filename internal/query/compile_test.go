@@ -110,9 +110,9 @@ func TestCompileShareAndLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bucket := `time_bucket(INTERVAL '60 seconds', "time"::TIMESTAMP_NS)`
+	bucket := `time_bucket(INTERVAL '60 seconds', "bucket"::TIMESTAMP_NS)`
 	other := `_fold`
-	want := `WITH base AS (SELECT * FROM (` + redactedLogSource() + `) WHERE "time" >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND "time" < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS), candidates AS (SELECT coalesce("severity", '') AS d, 100.0 * count(*) / sum(count(*)) OVER () AS value, count(*) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 6), other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce("severity", '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce("severity", '')=top.d CROSS JOIN other) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "severity", 100.0 * count(*) / sum(count(*)) OVER (PARTITION BY ` + bucket + `) AS "share" FROM folded GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 14000`
+	want := `WITH base AS (SELECT * FROM (SELECT *, logs AS spans FROM log_rollup) WHERE "bucket" >= ?::TIMESTAMP_NS AND "bucket" < ?::TIMESTAMP_NS), candidates AS (SELECT coalesce("severity", '') AS d, 100.0 * sum(spans) / sum(sum(spans)) OVER () AS value, sum(spans) AS n FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY value DESC NULLS LAST, n DESC, d LIMIT 6), other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce("severity", '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce("severity", '')=top.d CROSS JOIN other) SELECT epoch_ms(` + bucket + `)::BIGINT AS "_t", coalesce(` + other + `, '') AS "severity", 100.0 * sum(spans) / sum(sum(spans)) OVER (PARTITION BY ` + bucket + `) AS "share" FROM folded GROUP BY ` + bucket + `, ` + other + ` ORDER BY "_t", 2 LIMIT 14000`
 	if got.SQL != want {
 		t.Fatalf("sql\n got: %s\nwant: %s", got.SQL, want)
 	}

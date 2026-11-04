@@ -679,7 +679,7 @@ func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	markers, err := batchMarkers(t.Context(), d.DB)
-	if err != nil || len(markers) != 1 || !markers["log-only"] || written != 1 {
+	if err != nil || len(markers) != 1 || !markers["log-only"] || written != 2 {
 		t.Fatalf("all-signal budget/work: %v written=%d err=%v", markers, written, err)
 	}
 	if got := metricFamily(t, "fanout_read_cache_pending_batches").Metric[0].GetGauge().GetValue(); got != 3 {
@@ -690,7 +690,7 @@ func TestReadCacheBudgetsAllSignalsAndReportsInventoryWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	markers, err = batchMarkers(t.Context(), d.DB)
-	if err != nil || !markers["log-heavy-trace"] || markers["older-trace"] || written != 4 {
+	if err != nil || !markers["log-heavy-trace"] || markers["older-trace"] || written != 6 {
 		t.Fatalf("oversized mixed batch: %v written=%d err=%v", markers, written, err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {

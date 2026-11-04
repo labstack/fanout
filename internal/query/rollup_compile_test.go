@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/fanout/internal/engine"
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 func TestRollupPlan(t *testing.T) {
@@ -29,7 +30,13 @@ func TestRollupPlan(t *testing.T) {
 		{"operation group", "spans", "table", "count()", "operation", "", false},
 		{"distinct", "spans", "stat", "count_distinct(service)", "", "", false},
 		{"expression", "spans", "stat", "count()/2 as half", "", "", false},
-		{"logs", "logs", "stat", "count()", "", "", false},
+		{"logs", "logs", "stat", "count()", "", "", true},
+		{"log severity", "logs", "stat", "count()", "", "upper(severity) IN ('ERROR','FATAL')", true},
+		{"log body", "logs", "stat", "count()", "", "body='failure'", false},
+		{"log distinct", "logs", "stat", "count_distinct(service)", "", "", false},
+		{"endpoint", "spans", "table", "p95(duration_ms)", "attributes['http.route']", "attributes['http.route'] <> ''", true},
+		{"endpoint missing population", "spans", "table", "count()", "attributes['http.route']", "", false},
+		{"endpoint lookup", "spans", "table", "count()", "attributes['http.route']", "attributes['http.route']='/cart'", false},
 		{"traces", "spans", "traces", "count()", "", "", false},
 		{"heatmap", "spans", "heatmap", "count()", "", "", false},
 	} {
@@ -56,7 +63,7 @@ func TestRollupPlan(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if strings.Contains(c.SQL, "FROM span_rollup") != tc.want {
+				if (strings.Contains(c.SQL, "FROM span_rollup") || strings.Contains(c.SQL, "FROM log_rollup") || strings.Contains(c.SQL, "FROM endpoint_rollup")) != tc.want {
 					t.Fatal(c.SQL)
 				}
 			}
@@ -223,5 +230,86 @@ func TestSpanRollupSQLPanel(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].Status != StatusOK || results[0].Frame.Rows != 2 {
 		t.Fatalf("%+v", results)
+	}
+}
+
+func TestLogRollupFramesMatchRaw(t *testing.T) {
+	d, repo := newTestEngine(t)
+	logs := []telemetry.Log{}
+	for i := 0; i < 100; i++ {
+		severity := "INFO"
+		if i%3 == 0 {
+			severity = "ERROR"
+		}
+		logs = append(logs, telemetry.Log{Namespace: "shop", ServiceName: "checkout", Severity: severity, TimeUnixNanos: fixtureStart.Add(time.Duration(i) * time.Second).UnixNano()})
+	}
+	commit(t, repo, nil, logs)
+	for _, viz := range []string{"stat", "timeseries", "bar"} {
+		for _, measure := range []string{"count()", "rate()", "share()"} {
+			p := &Panel{Viz: viz, Query: &Spec{From: "logs", By: []string{"severity"}}}
+			scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour), Interval: time.Minute}
+			ms := measuresOf(t, "logs", measure)
+			filter, err := checkFilter(t.Context(), d, signals["logs"], nil, "upper(severity) IN ('ERROR','INFO')")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rolled, err := compileQuery(p, ms, []Filter{filter}, scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := compileAggregateQuery(p, ms, []Filter{filter}, scope, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rf, exact := readCompiledFrame(t, d, rolled, scope), readCompiledFrame(t, d, raw, scope)
+			if !reflect.DeepEqual(rf, exact) {
+				t.Fatalf("%s %s: rolled=%+v exact=%+v", viz, measure, rf, exact)
+			}
+		}
+	}
+}
+
+func TestEndpointRollupFramesMatchRaw(t *testing.T) {
+	d, repo := newTestEngine(t)
+	spans := shopSpans()
+	for i := range spans {
+		spans[i].Attributes = map[string]any{"http.route": "/cart"}
+	}
+	commit(t, repo, spans, nil)
+	p := &Panel{Viz: "table", Query: &Spec{From: "spans", By: []string{"service", "attributes['http.route']"}, Sort: "p95", Limit: 15}}
+	scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour)}
+	filter, err := checkFilter(t.Context(), d, signals["spans"], nil, "attributes['http.route'] <> ''")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := measuresOf(t, "spans", "p95(duration_ms)", "error_rate()", "rate()")
+	rolled, err := compileQuery(p, ms, []Filter{filter}, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := compileAggregateQuery(p, ms, []Filter{filter}, scope, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf, exact := readCompiledFrame(t, d, rolled, scope), readCompiledFrame(t, d, raw, scope)
+	if rf.Rows != exact.Rows || !reflect.DeepEqual(rf.Columns, exact.Columns) {
+		t.Fatalf("shape: %+v %+v", rf, exact)
+	}
+	for c := range rf.Columns {
+		for row := range rf.Rows {
+			a, b := rf.Values[c][row], exact.Values[c][row]
+			if x, ok := a.(float64); ok {
+				y := b.(float64)
+				tolerance := 1e-9
+				if rf.Columns[c].Name == "p95" {
+					tolerance = math.Abs(y) * 0.09051
+				}
+				if math.Abs(x-y) > tolerance {
+					t.Fatalf("%s: %g != %g", rf.Columns[c].Name, x, y)
+				}
+			} else if !reflect.DeepEqual(a, b) {
+				t.Fatalf("%v != %v", a, b)
+			}
+		}
 	}
 }

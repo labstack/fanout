@@ -45,6 +45,33 @@ func SQLRelations() map[string]SQLRelationSchema {
 				{Field: dict("hist", "Duration bucket counts: ceil(log2(duration_ms)*8); -2147483648 represents zero or negative durations"), SQLType: "MAP(INTEGER, UBIGINT)"},
 			},
 		},
+		"log_rollup": {
+			Description: "Per-minute log counts by namespace, service and severity. Structured count, rate and share queries route here at minute precision; fresh_to_ms shares the service ingest horizon.",
+			Columns: []SQLColumnSchema{
+				{Field: str("namespace", "Service namespace"), SQLType: "VARCHAR"},
+				{Field: ts("bucket", "UTC minute bucket"), SQLType: "TIMESTAMP_NS"},
+				{Field: str("service", "Service name"), SQLType: "VARCHAR"},
+				{Field: str("severity", "Log severity text"), SQLType: "VARCHAR"},
+				{Field: num("logs", "count", "Log events"), SQLType: "BIGINT"},
+			},
+		},
+		"endpoint_rollup": {
+			Description: "Per-minute nonempty HTTP routes by namespace, service, kind and status. Retains the 128 most frequent routes per service-minute (lexical ties); all others merge into Other routes (overflow), flagged by overflow. Named routes can be partial across minutes; route-value filters stay raw. Counts and histograms include the overflow population. Percentiles and freshness follow span_rollup.",
+			Columns: []SQLColumnSchema{
+				{Field: str("namespace", "Service namespace"), SQLType: "VARCHAR"},
+				{Field: ts("bucket", "UTC minute bucket"), SQLType: "TIMESTAMP_NS"},
+				{Field: str("service", "Service name"), SQLType: "VARCHAR"},
+				{Field: str("kind", "Span kind"), SQLType: "VARCHAR"},
+				{Field: str("status", "Span status"), SQLType: "VARCHAR"},
+				{Field: str("route", "HTTP route or overflow label"), SQLType: "VARCHAR"},
+				{Field: Field{Name: "overflow", Type: TypeBool, Description: "Combined routes beyond the minute cap"}, SQLType: "BOOLEAN"},
+				{Field: num("spans", "count", "Span count"), SQLType: "BIGINT"},
+				{Field: num("duration_sum", "ms", "Sum of span durations"), SQLType: "DOUBLE"},
+				{Field: num("duration_min", "ms", "Minimum span duration"), SQLType: "DOUBLE"},
+				{Field: num("duration_max", "ms", "Maximum span duration"), SQLType: "DOUBLE"},
+				{Field: dict("hist", "Scale-3 duration histogram, as span_rollup"), SQLType: "MAP(INTEGER, UBIGINT)"},
+			},
+		},
 		"edge_rollup": {
 			Description: "Dependency analytical rollup by namespace, time bucket, caller, callee and edge type. Panel SQL only; filter bucket with $__window(bucket).",
 			Columns: []SQLColumnSchema{
@@ -61,7 +88,7 @@ func SQLRelations() map[string]SQLRelationSchema {
 			},
 		},
 		"resource_inventory": {
-			Description: "Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Boundary batches read raw observations.",
+			Description: "Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Complete cached minutes summarize boundary files; only partial-minute observations read raw Parquet.",
 			Columns: []SQLColumnSchema{
 				{Field: str("signal", "spans, logs or metrics; select the required signal"), SQLType: "VARCHAR"},
 				{Field: str("namespace", "Original resource namespace, preserving NULL and empty values"), SQLType: "VARCHAR"},

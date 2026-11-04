@@ -355,9 +355,40 @@ Dependency analytical rollup by namespace, time bucket, caller, callee and edge 
 | `p50_ms` | `DOUBLE` | Peer minute median duration; call-weighted across buckets |
 | `p95_ms` | `DOUBLE` | Peer minute 95th percentile duration; call-weighted across buckets |
 
+### endpoint_rollup
+
+Per-minute nonempty HTTP routes by namespace, service, kind and status. Retains the 128 most frequent routes per service-minute (lexical ties); all others merge into Other routes (overflow), flagged by overflow. Named routes can be partial across minutes; route-value filters stay raw. Counts and histograms include the overflow population. Percentiles and freshness follow span_rollup.
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | Service namespace |
+| `bucket` | `TIMESTAMP_NS` | UTC minute bucket |
+| `service` | `VARCHAR` | Service name |
+| `kind` | `VARCHAR` | Span kind |
+| `status` | `VARCHAR` | Span status |
+| `route` | `VARCHAR` | HTTP route or overflow label |
+| `overflow` | `BOOLEAN` | Combined routes beyond the minute cap |
+| `spans` | `BIGINT` | Span count |
+| `duration_sum` | `DOUBLE` | Sum of span durations |
+| `duration_min` | `DOUBLE` | Minimum span duration |
+| `duration_max` | `DOUBLE` | Maximum span duration |
+| `hist` | `MAP(INTEGER, UBIGINT)` | Scale-3 duration histogram, as span_rollup |
+
+### log_rollup
+
+Per-minute log counts by namespace, service and severity. Structured count, rate and share queries route here at minute precision; fresh_to_ms shares the service ingest horizon.
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | Service namespace |
+| `bucket` | `TIMESTAMP_NS` | UTC minute bucket |
+| `service` | `VARCHAR` | Service name |
+| `severity` | `VARCHAR` | Log severity text |
+| `logs` | `BIGINT` | Log events |
+
 ### resource_inventory
 
-Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Boundary batches read raw observations.
+Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Complete cached minutes summarize boundary files; only partial-minute observations read raw Parquet.
 
 | Column | SQL type | Means |
 |---|---|---|

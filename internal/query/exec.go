@@ -15,6 +15,7 @@ import (
 	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/engine"
+	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/queryrows"
 	"golang.org/x/sync/errgroup"
 )
@@ -605,7 +606,11 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if p.Better == "" {
 		res.Better = inferBetter(p)
 	}
-	defer func() { res.ElapsedMS = time.Since(started).Milliseconds() }()
+	defer func() {
+		elapsed := time.Since(started)
+		res.ElapsedMS = elapsed.Milliseconds()
+		metrics.RecordPanelQuery(res.ID, string(res.Status), elapsed.Seconds())
+	}()
 	if p.Viz == "text" {
 		return res
 	}
@@ -636,6 +641,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	scope := Scope{Start: start, End: end, Interval: interval, Vars: vars}
 	if p.Query != nil && checked != nil && rollupPlan(p, checked.Measures[p.ID], checked.Filters[p.ID], scope) {
 		scope.Rollup = true
+		scope.RollupSource = rollupSource(p)
 		if interval > 0 {
 			interval = max(interval, time.Minute)
 			scope.Interval = interval

@@ -12,7 +12,8 @@ import (
 
 // Filter is one checked filter expression.
 type Filter struct {
-	Columns []string `json:"-"` // Checked column dependencies, including attribute roots.
+	RoutePopulation bool     `json:"-"` // Checked nonempty http.route population, safe for bounded endpoint summaries.
+	Columns         []string `json:"-"` // Checked column dependencies, including attribute roots.
 	// Expr is DuckDB's canonical rendering of the checked expression; it is
 	// the only text ever embedded in SQL.
 	Expr string `json:"expr"`
@@ -83,6 +84,7 @@ func checkFilter(ctx context.Context, parser Parser, sig *signal, vars map[strin
 			return Filter{}, fmt.Errorf("use $%s either with IN or with a comparison, not both", name)
 		}
 	}
+	f.RoutePopulation = typed != nil && typed.Class == "COMPARISON" && typed.Type == "COMPARE_NOTEQUAL" && fieldText(typed.Left) == "attributes['http.route']" && typed.Right != nil && typed.Right.LiteralKind == "STRING" && typed.Right.LiteralText == ""
 	f.EqField = equalityField(typed)
 	f.DisplayField, f.DisplayLiteral, f.DisplayParam = filterDisplay(typed)
 	f.EqLiteral, f.EqParam, f.EqValue = equalityValue(typed)

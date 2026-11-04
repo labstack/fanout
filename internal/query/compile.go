@@ -58,12 +58,13 @@ func (v *Value) UnmarshalJSON(data []byte) error {
 
 // Scope is everything a compiled query depends on besides the spec.
 type Scope struct {
-	Start, End time.Time
-	FreshTo    time.Time // Ingest horizon for minute rollups.
-	Rollup     bool
-	NoTop      bool          // Table trends select displayed tuples after aggregation.
-	Interval   time.Duration // bucket width; zero means no time grouping
-	Vars       map[string]Value
+	Start, End   time.Time
+	FreshTo      time.Time // Ingest horizon for minute rollups.
+	RollupSource string
+	Rollup       bool
+	NoTop        bool          // Table trends select displayed tuples after aggregation.
+	Interval     time.Duration // bucket width; zero means no time grouping
+	Vars         map[string]Value
 }
 
 // Column describes one frame column.
@@ -202,7 +203,7 @@ func compileAggregateQuery(p *Panel, measures []Measure, filters []Filter, scope
 		copied := *sig
 		copied.time = "bucket"
 		sig = &copied
-		source = "span_rollup"
+		source = rollupReadSource(rollupSource(p))
 	}
 	where, args, err := buildWhere(sig, filters, scope)
 	if err != nil {

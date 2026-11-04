@@ -17,7 +17,7 @@ func rollupDimension(name string) bool {
 // rollupPlan accepts only aggregates whose complete population can be represented
 // by minute summaries. Unchecked filters have unknown dependencies and stay raw.
 func rollupPlan(p *Panel, measures []Measure, filters []Filter, scope Scope) bool {
-	if p.Query == nil || p.Query.From != "spans" || len(measures) == 0 {
+	if p.Query == nil || (p.Query.From != "spans" && p.Query.From != "logs") || len(measures) == 0 {
 		return false
 	}
 	switch p.Viz {
@@ -25,6 +25,7 @@ func rollupPlan(p *Panel, measures []Measure, filters []Filter, scope Scope) boo
 	default:
 		return false
 	}
+	endpoint := endpointPlan(p, filters, scope)
 	for _, f := range filters {
 		if scope.dropped(f) {
 			continue
@@ -33,17 +34,20 @@ func rollupPlan(p *Panel, measures []Measure, filters []Filter, scope Scope) boo
 			return false
 		}
 		for _, c := range f.Columns {
-			if !rollupDimension(c) {
+			if !rollupQueryDimension(p, c) || c == "attributes['http.route']" && !endpoint {
 				return false
 			}
 		}
 	}
 	for _, by := range p.Query.By {
-		if !rollupDimension(by) {
+		if !rollupQueryDimension(p, by) || by == "attributes['http.route']" && !endpoint {
 			return false
 		}
 	}
 	for _, m := range measures {
+		if p.Query.From == "logs" && m.Func != "count" && m.Func != "rate" && m.Func != "share" {
+			return false
+		}
 		switch m.Func {
 		case "count", "rate", "error_rate", "share":
 		case "avg", "min", "max", "sum", "p50", "p75", "p90", "p95", "p99", "quantile":
@@ -122,4 +126,64 @@ func coveredSecondsSQL(scope Scope, bucket string, totals bool) string {
 		return "CASE WHEN grouping(" + bucket + ")=1 THEN " + full + " ELSE " + covered + " END"
 	}
 	return covered
+}
+
+// Endpoint routing deliberately accepts only the nonempty-route population,
+// never a value predicate: overflow combines routes and cannot answer lookups.
+func endpointPlan(p *Panel, filters []Filter, scope Scope) bool {
+	if p.Query == nil || p.Query.From != "spans" {
+		return false
+	}
+	route := false
+	for _, by := range p.Query.By {
+		if by == "attributes['http.route']" {
+			route = true
+		}
+	}
+	if !route {
+		return false
+	}
+	population := false
+	for _, f := range filters {
+		if scope.dropped(f) {
+			continue
+		}
+		population = population || f.RoutePopulation
+		for _, c := range f.Columns {
+			if c == "attributes['http.route']" && !f.RoutePopulation {
+				return false
+			}
+		}
+	}
+	return population
+}
+
+func rollupQueryDimension(p *Panel, name string) bool {
+	if p.Query.From == "logs" {
+		return name == "namespace" || name == "service" || name == "severity"
+	}
+	return rollupDimension(name) || name == "attributes['http.route']"
+}
+
+func rollupSource(p *Panel) string {
+	if p.Query.From == "logs" {
+		return "log_rollup"
+	}
+	for _, by := range p.Query.By {
+		if by == "attributes['http.route']" {
+			return "endpoint_rollup"
+		}
+	}
+	return "span_rollup"
+}
+
+func rollupReadSource(source string) string {
+	switch source {
+	case "log_rollup":
+		return "(SELECT *, logs AS spans FROM log_rollup)"
+	case "endpoint_rollup":
+		return `(SELECT *, struct_pack("http.route" := route)::VARIANT AS attributes FROM endpoint_rollup)`
+	default:
+		return "span_rollup"
+	}
 }

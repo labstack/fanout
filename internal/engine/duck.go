@@ -128,7 +128,7 @@ const (
 	// Rollup progress keys in rollup_state. readCacheVersion drops that table
 	// with the rollups, so a version change also restarts their backfill; the
 	// keys need no version of their own.
-	rollup_schema_version         = 2
+	rollup_schema_version         = 3
 	serviceRollupStateKey         = "service_rollup_v3"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
@@ -845,7 +845,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		defer background()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
-			for _, table := range []string{"service_rollup", "span_rollup", "edge_rollup"} {
+			for _, table := range []string{"service_rollup", "span_rollup", "log_rollup", "endpoint_rollup", "edge_rollup"} {
 				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < (now() - INTERVAL %d DAY)::TIMESTAMP_NS", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
@@ -1025,12 +1025,17 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 		if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, lo, hi); err != nil {
 			return 0, fmt.Errorf("service_rollup/delete: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, strings.ReplaceAll(strings.ReplaceAll(serviceRollupDeleteSQL, "service_rollup", "span_rollup"), "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS"), lo, hi); err != nil {
-			return 0, fmt.Errorf("span_rollup/delete: %w", err)
+		for _, table := range []string{"span_rollup", "log_rollup", "endpoint_rollup"} {
+			if _, err := tx.ExecContext(ctx, strings.ReplaceAll(strings.ReplaceAll(serviceRollupDeleteSQL, "service_rollup", table), "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS"), lo, hi); err != nil {
+				return 0, fmt.Errorf("%s/delete: %w", table, err)
+			}
 		}
 		res, err := insertServiceRollup(ctx, tx, lo, hi)
 		if err != nil {
 			return 0, fmt.Errorf("service_rollup/insert: %w", err)
+		}
+		if err := insertDashboardRollups(ctx, tx, lo, hi); err != nil {
+			return 0, fmt.Errorf("dashboard_rollup/insert: %w", err)
 		}
 		rows, err = res.RowsAffected()
 		if err != nil {
@@ -1501,15 +1506,13 @@ CREATE OR REPLACE TEMP TABLE service_pass_affected AS
     AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
-    AND service != ''
   UNION
   SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND time IS NOT NULL
-    AND service IS NOT NULL
-    AND service != '';`
+    AND service IS NOT NULL;`
 
 const serviceRollupDeleteSQL = `
 DELETE FROM service_rollup

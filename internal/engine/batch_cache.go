@@ -25,7 +25,7 @@ import (
 // anomaly_log is not one of them: it holds detector output that nothing can
 // rebuild, so the drop keeps it. Its table is created once; any change to its
 // schema must be a separate, explicit migration step.
-const readCacheVersion = 11
+const readCacheVersion = 13
 
 const (
 	readCacheBatchLimit = 64
@@ -82,14 +82,16 @@ func CreateCacheTables(db *sql.DB) error {
 	}
 	for _, stmt := range []string{
 		createServiceRollupTable,
-		createSpanRollupTable,
+		createSpanRollupTable, createLogRollupTable, createEndpointRollupTable,
 		createEdgeRollupTable,
 		createRollupStateTable,
 		createVersionRollupTable,
 		createVersionBatchesTable,
 		createAnomalyLogTable,
 		`CREATE TABLE IF NOT EXISTS read_edge_buckets (namespace VARCHAR, bucket TIMESTAMPTZ_NS, spans BIGINT)`,
+		`CREATE TABLE IF NOT EXISTS read_metric_names (batch_id VARCHAR,name VARCHAR)`,
 		`CREATE TABLE IF NOT EXISTS read_batches (batch_id VARCHAR PRIMARY KEY,replacement_id VARCHAR)`,
+		`CREATE TABLE IF NOT EXISTS read_resource_minutes (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,bucket TIMESTAMP_NS,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,
 		`CREATE TABLE IF NOT EXISTS read_resource_inventory (batch_id VARCHAR,signal VARCHAR,namespace VARCHAR,service VARCHAR,resource VARIANT,first_seen TIMESTAMPTZ_NS,last_seen TIMESTAMPTZ_NS)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_candidates (trace_id VARCHAR,namespace VARCHAR,service VARCHAR,min_start BIGINT,max_start BIGINT,max_end BIGINT,has_error INTEGER)`,
 		`CREATE TABLE IF NOT EXISTS read_trace_parts (batch_id VARCHAR, namespace VARCHAR, service VARCHAR, trace_id VARCHAR, min_start BIGINT, max_start BIGINT, max_end BIGINT, has_error INTEGER)`,
@@ -106,7 +108,7 @@ func CreateCacheTables(db *sql.DB) error {
 		return err
 	}
 	if rollupVersion != rollup_schema_version {
-		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, `DROP TABLE edge_rollup`, createEdgeRollupTable, createServiceRollupTable, createSpanRollupTable,
+		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, `DROP TABLE log_rollup`, `DROP TABLE endpoint_rollup`, `DROP TABLE edge_rollup`, createEdgeRollupTable, createServiceRollupTable, createSpanRollupTable, createLogRollupTable, createEndpointRollupTable,
 			`DELETE FROM rollup_state WHERE cache_key = '` + serviceRollupStateKey + `'`,
 			`DELETE FROM rollup_state WHERE cache_key IN ('` + edgeRollupStateKey + `','` + edgeRollupSubCursorKey + `','` + edgeRollupSubWindowKey + `')`,
 			`DELETE FROM rollup_schema_version`} {
@@ -278,7 +280,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 		}
 	}
 	if len(stale) > 0 {
-		for _, table := range []string{"read_resource_inventory", "read_trace_parts", "read_batches"} {
+		for _, table := range []string{"read_resource_inventory", "read_resource_minutes", "read_metric_names", "read_trace_parts", "read_batches"} {
 			if err := exec("DELETE FROM " + table + " WHERE batch_id IN (" + idsSQL(stale) + ")"); err != nil {
 				return 0, err
 			}
@@ -324,6 +326,14 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,` + sqlLiteral(s.Name) + `,namespace,service,resource,min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY batch_id,namespace,service,resource`); err != nil {
 				return 0, err
 			}
+			if err := exec(`INSERT INTO read_resource_minutes SELECT batch_id,` + sqlLiteral(s.Name) + `,namespace,service,resource,date_trunc('minute',` + clock + `::TIMESTAMP_NS),min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY ALL`); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if metrics := source("metrics"); metrics != "" {
+		if err := exec(`INSERT INTO read_metric_names SELECT DISTINCT batch_id,name FROM (` + metrics + `)`); err != nil {
+			return 0, err
 		}
 	}
 	if spans := source("spans"); spans != "" {
@@ -552,6 +562,8 @@ func (d *Duck) transferBatchCacheLocked(ctx context.Context, output string, inpu
 	where := " WHERE batch_id IN (" + idsSQL(inputs) + ")"
 	for _, stmt := range []string{
 		`INSERT INTO read_resource_inventory SELECT ` + sqlLiteral(output) + `,signal,namespace,service,resource,min(first_seen),max(last_seen) FROM read_resource_inventory` + where + ` GROUP BY signal,namespace,service,resource`,
+		`INSERT INTO read_resource_minutes SELECT ` + sqlLiteral(output) + `,signal,namespace,service,resource,bucket,min(first_seen),max(last_seen) FROM read_resource_minutes` + where + ` GROUP BY signal,namespace,service,resource,bucket`,
+		`INSERT INTO read_metric_names SELECT DISTINCT ` + sqlLiteral(output) + `,name FROM read_metric_names` + where,
 		`INSERT INTO read_trace_parts SELECT ` + sqlLiteral(output) + `,namespace,service,trace_id,min(min_start),max(max_start),max(max_end),max(has_error) FROM read_trace_parts` + where + ` GROUP BY 2,3,4`,
 		`INSERT INTO read_batches(batch_id) VALUES (` + sqlLiteral(output) + `)`,
 		`UPDATE read_batches SET replacement_id=` + sqlLiteral(output) + where,

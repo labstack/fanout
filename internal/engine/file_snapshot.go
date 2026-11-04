@@ -149,6 +149,15 @@ func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w
 				selected = append(selected, b)
 			}
 		}
+		// Only an explicit internal window may prune. Public arbitrary SQL
+		// uses allTime and always binds every captured file.
+		if signal == "metrics" && len(compiled.metricNames) > 0 && w != allTime {
+			var err error
+			selected, err = pruneMetricNames(ctx, db, selected, compiled.metricNames)
+			if err != nil {
+				return "", err
+			}
+		}
 		physical := d.snapshotSource(signal, selected, batches)
 		sources["telemetry."+signal] = physical
 		sources[signal] = cleanSource(signal, physical)
@@ -318,8 +327,9 @@ func compileRelations(ctx context.Context, db snapshotSQL, query string, sources
 }
 
 type compiledSnapshot struct {
-	query string
-	names map[string]string
+	query       string
+	names       map[string]string
+	metricNames []string
 }
 
 // compileSnapshot compiles relation aliases once with the native parser. Per-read
@@ -345,6 +355,13 @@ func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string
 		}
 		// The AST records only rewritten table references, never SQL literals.
 		compiled = compiledSnapshot{query: rewritten, names: used}
+		if _, ok := used["metrics"]; ok {
+			root, err := parseSQLTree(ctx, db, query)
+			if err != nil {
+				return compiledSnapshot{}, err
+			}
+			compiled.metricNames = singleMetricNames(root)
+		}
 		d.snapshotMu.Lock()
 		if d.snapshotQueries == nil || len(d.snapshotQueries) >= 128 {
 			d.snapshotQueries = map[string]compiledSnapshot{}

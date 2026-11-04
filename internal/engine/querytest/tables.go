@@ -54,5 +54,12 @@ func RefreshSpanRollup(db *sql.DB) error {
 		return err
 	}
 	_, err := db.Exec(`INSERT INTO span_rollup SELECT namespace,date_trunc('minute',start_time::TIMESTAMP_NS),service,coalesce(kind,''),coalesce(status,''),count(*),sum(duration_ms),min(duration_ms),max(duration_ms),histogram(CASE WHEN duration_ms>0 THEN coalesce(try_cast(ceil(log2(duration_ms)*8) AS INTEGER),2147483647) ELSE -2147483648 END) FROM spans WHERE service IS NOT NULL GROUP BY ALL`)
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`DELETE FROM log_rollup; INSERT INTO log_rollup SELECT namespace,date_trunc('minute',time::TIMESTAMP_NS),service,coalesce(severity,''),count(*) FROM logs WHERE service IS NOT NULL GROUP BY ALL`); err != nil {
+		return err
+	}
+	_, err = db.Exec(`DELETE FROM endpoint_rollup; INSERT INTO endpoint_rollup SELECT namespace,date_trunc('minute',start_time::TIMESTAMP_NS),service,coalesce(kind,''),coalesce(status,''),try_cast(attributes['http.route'] AS VARCHAR),false,count(*),sum(duration_ms),min(duration_ms),max(duration_ms),histogram(CASE WHEN duration_ms>0 THEN coalesce(try_cast(ceil(log2(duration_ms)*8) AS INTEGER),2147483647) ELSE -2147483648 END) FROM spans WHERE service IS NOT NULL AND try_cast(attributes['http.route'] AS VARCHAR)<>'' GROUP BY ALL`)
 	return err
 }

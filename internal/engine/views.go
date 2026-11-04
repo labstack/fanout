@@ -44,6 +44,24 @@ CREATE TABLE IF NOT EXISTS span_rollup (
   PRIMARY KEY (namespace, bucket, service, kind, status)
 );`
 
+// Endpoint summaries retain at most 128 routes per service-minute plus one
+// overflow group. Never key a persistent summary by arbitrary operation names.
+const endpointRouteLimit = 128
+
+const createEndpointRollupTable = `
+CREATE TABLE IF NOT EXISTS endpoint_rollup (
+ namespace TEXT, bucket TIMESTAMP_NS, service TEXT, kind TEXT, status TEXT,
+ route TEXT, overflow BOOLEAN, spans BIGINT, duration_sum DOUBLE,
+ duration_min DOUBLE, duration_max DOUBLE, hist MAP(INTEGER, UBIGINT),
+ PRIMARY KEY (namespace,bucket,service,kind,status,route,overflow)
+);`
+
+const createLogRollupTable = `
+CREATE TABLE IF NOT EXISTS log_rollup (
+ namespace TEXT, bucket TIMESTAMP_NS, service TEXT, severity TEXT,
+ logs BIGINT, PRIMARY KEY(namespace,bucket,service,severity)
+);`
+
 const createEdgeRollupTable = `
 CREATE TABLE IF NOT EXISTS edge_rollup (
   namespace TEXT,

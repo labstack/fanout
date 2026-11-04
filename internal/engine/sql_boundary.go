@@ -281,7 +281,7 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 			name, _ := node["table_name"].(string)
 			schema, _ := node["schema_name"].(string)
 			catalog, _ := node["catalog_name"].(string)
-			allowed := map[string]bool{"spans": true, "logs": true, "metrics": true, "service_rollup": true, "span_rollup": true, "edge_rollup": true}
+			allowed := map[string]bool{"spans": true, "logs": true, "metrics": true, "service_rollup": true, "span_rollup": true, "log_rollup": true, "endpoint_rollup": true, "edge_rollup": true}
 			if strings.EqualFold(name, "resource_inventory") {
 				if schema != "" && schema != "main" {
 					return fmt.Errorf("resource_inventory is available only to panel SQL in its logical window")
