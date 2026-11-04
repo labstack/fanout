@@ -14,7 +14,7 @@ type SQLColumnSchema struct {
 
 // SQLRelations is the shared catalog for discovery and generated documentation.
 func SQLRelations() map[string]SQLRelationSchema {
-	return map[string]SQLRelationSchema{
+	relations := map[string]SQLRelationSchema{
 		"service_rollup": {
 			Description: "Per-service analytical rollup by namespace and time bucket. Panel SQL only; filter bucket with $__window(bucket).",
 			Columns: []SQLColumnSchema{
@@ -99,6 +99,10 @@ func SQLRelations() map[string]SQLRelationSchema {
 			},
 		},
 	}
+	for name, relation := range receiverRelations() {
+		relations[name] = relation
+	}
+	return relations
 }
 
 func str(name, description string) Field {

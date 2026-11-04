@@ -647,7 +647,7 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 	var errs []error
 	affected := int64(0)
 
-	if n, err := d.drainServiceRollup(ctx, d.cfg.RollupInterval/2); err != nil {
+	if n, err := d.RefreshDashboardRollups(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("service rollup: %w", err))
 	} else {
 		affected += n
@@ -845,7 +845,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		defer background()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
-			for _, table := range []string{"service_rollup", "span_rollup", "log_rollup", "endpoint_rollup", "edge_rollup"} {
+			for _, table := range []string{"service_rollup", "span_rollup", "log_rollup", "endpoint_rollup", "receiver_rollup", "resource_rollup", "receiver_entity_rollup", "edge_rollup"} {
 				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < (now() - INTERVAL %d DAY)::TIMESTAMP_NS", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
@@ -918,9 +918,14 @@ func (c *rollupChunk) next(committed bool, err error) {
 	}
 }
 
-// drainServiceRollup repeats service passes within a tick budget, retrying a
-// pass that ran out of memory at the narrower window at once, so a window
-// shrunk by memory pressure still keeps up with ingest.
+// RefreshDashboardRollups advances the analytical dashboard summaries. Each pass
+// commits a complete set of affected service-minutes and its ingest horizon.
+func (d *Duck) RefreshDashboardRollups(ctx context.Context) (int64, error) {
+	return d.drainServiceRollup(ctx, d.cfg.RollupInterval/2)
+}
+
+// drainServiceRollup repeats passes within a tick budget. An admitted pass
+// finishes its transaction; memory pressure narrows the next window.
 func (d *Duck) drainServiceRollup(ctx context.Context, budget time.Duration) (int64, error) {
 	deadline := time.Now().Add(budget)
 	var total int64
@@ -1025,7 +1030,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (affected int64, err er
 		if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, lo, hi); err != nil {
 			return 0, fmt.Errorf("service_rollup/delete: %w", err)
 		}
-		for _, table := range []string{"span_rollup", "log_rollup", "endpoint_rollup"} {
+		for _, table := range []string{"span_rollup", "log_rollup", "endpoint_rollup", "receiver_rollup", "resource_rollup", "receiver_entity_rollup"} {
 			if _, err := tx.ExecContext(ctx, strings.ReplaceAll(strings.ReplaceAll(serviceRollupDeleteSQL, "service_rollup", table), "?::TIMESTAMP_NS::TIMESTAMPTZ_NS", "?::TIMESTAMP_NS"), lo, hi); err != nil {
 				return 0, fmt.Errorf("%s/delete: %w", table, err)
 			}

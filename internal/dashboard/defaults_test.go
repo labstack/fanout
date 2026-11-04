@@ -41,10 +41,13 @@ func defaultFixture(t *testing.T) (*query.Executor, *telemetrystore.Repository, 
 	return e, repo, d
 }
 
-func runDefault(t *testing.T, e *query.Executor, start, end time.Time) map[string]query.Result {
+func runDefault(t *testing.T, e *query.Executor, d *engine.Duck, start, end time.Time) map[string]query.Result {
 	t.Helper()
 	spec := DefaultSpec()
 	spec.Time = query.Time{From: &start, To: &end}
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec})
 	if err != nil {
 		t.Fatal(err)
@@ -88,9 +91,9 @@ func TestDefaultSpecKeepsExistingPanelsBeforeSystemSections(t *testing.T) {
 }
 
 func TestDefaultSystemPanelsUseExistingEmptyState(t *testing.T) {
-	e, _, _ := defaultFixture(t)
+	e, _, d := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	results := runDefault(t, e, start, start.Add(time.Hour))
+	results := runDefault(t, e, d, start, start.Add(time.Hour))
 	for _, id := range []string{"check_states", "check_latency", "hosts", "containers", "versions"} {
 		if results[id].Status != query.StatusEmpty {
 			t.Fatalf("%s: %+v", id, results[id])
@@ -174,7 +177,7 @@ func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) 
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	results := runDefault(t, e, start, start.Add(2*time.Minute))
+	results := runDefault(t, e, d, start, start.Add(2*time.Minute))
 	if !reflect.DeepEqual(defaultValues(t, results["hosts"], "host"), []any{"bad", "warn"}) || !reflect.DeepEqual(defaultValues(t, results["hosts"], "cpu_percent"), []any{75.0, 75.0}) || !reflect.DeepEqual(defaultValues(t, results["hosts"], "filesystem_percent"), []any{90.0, 80.0}) {
 		t.Fatalf("hosts: %+v", results["hosts"].Frame)
 	}
@@ -188,7 +191,7 @@ func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) 
 		t.Fatalf("versions: %+v", results["versions"].Frame)
 	}
 	for _, end := range []time.Time{start.Add(3*time.Minute - time.Nanosecond), start.Add(3 * time.Minute), start.Add(8 * time.Minute)} {
-		results = runDefault(t, e, start, end)
+		results = runDefault(t, e, d, start, end)
 		state := "reachable"
 		if !end.Before(start.Add(3 * time.Minute)) {
 			state = "no recent result"
@@ -207,7 +210,7 @@ func TestDefaultSystemPanelsShowCapacitySilenceVantageAndVersions(t *testing.T) 
 }
 
 func TestDefaultVersionsPreserveFirstSeenAndRuntimeSDKTuples(t *testing.T) {
-	e, repo, _ := defaultFixture(t)
+	e, repo, d := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Minute)
 	base := map[string]any{"service.version": "v1", "process.runtime.name": "Go", "process.runtime.version": "1.27", "telemetry.sdk.language": "go", "telemetry.sdk.version": "1.40"}
@@ -280,6 +283,9 @@ func TestDefaultVersionsPreserveFirstSeenAndRuntimeSDKTuples(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "version-tuples", Spans: spans, Logs: logs, Metrics: metrics}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	spec := DefaultSpec()
 	spec.Time = query.Time{From: &start, To: &end}
 	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec, Panels: []string{"versions"}})
@@ -300,7 +306,7 @@ func TestDefaultVersionsPreserveFirstSeenAndRuntimeSDKTuples(t *testing.T) {
 }
 
 func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testing.T) {
-	e, repo, _ := defaultFixture(t)
+	e, repo, d := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for i, offset := range []time.Duration{-time.Minute, 0, time.Minute} {
 		at := start.Add(offset)
@@ -375,6 +381,9 @@ func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testin
 		end := start.Add(offset)
 		spec := DefaultSpec()
 		spec.Time = query.Time{From: &start, To: &end}
+		if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+			t.Fatal(err)
+		}
 		results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec, Panels: []string{"hosts", "containers"}})
 		if err != nil {
 			t.Fatal(err)
@@ -419,7 +428,7 @@ func TestDefaultCapacityPreservesRetriesCountersNamespacesAndFreshness(t *testin
 }
 
 func TestDefaultContainersUseScopeCPUUnitsAndReportedLimitsForStatus(t *testing.T) {
-	e, repo, _ := defaultFixture(t)
+	e, repo, d := defaultFixture(t)
 	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	end := start.Add(2 * time.Minute)
 	const dockerScope = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver"
@@ -485,6 +494,9 @@ func TestDefaultContainersUseScopeCPUUnitsAndReportedLimitsForStatus(t *testing.
 		}
 	}
 	spec.Time = query.Time{From: &start, To: &end}
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	results, err := e.Run(t.Context(), query.RunRequest{Dashboard: spec, Panels: []string{"containers"}})
 	if err != nil {
 		t.Fatal(err)
@@ -518,5 +530,28 @@ func TestDefaultContainersUseScopeCPUUnitsAndReportedLimitsForStatus(t *testing.
 				t.Errorf("%s: got %v, want %v", column, got, want)
 			}
 		})
+	}
+}
+
+func TestDefaultCapacityKeepsSlowReportingCadence(t *testing.T) {
+	e, repo, d := defaultFixture(t)
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for i, offset := range []time.Duration{0, time.Hour} {
+		var points []telemetry.Metric
+		for _, state := range []string{"used", "free"} {
+			m := telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "system.memory.usage", Type: "gauge", TimeUnixNanos: start.Add(offset).UnixNano(), Value: 50, Resource: map[string]any{"host.name": "slow"}, Attributes: map[string]any{"state": state}}
+			m.SeriesID = telemetry.MetricSeriesID(m)
+			points = append(points, m)
+		}
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("slow-%d", i), Metrics: points}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := runDefault(t, e, d, start, start.Add(90*time.Minute))["hosts"]
+	if got := defaultValues(t, result, "reporting"); len(got) != 1 || got[0] != "reporting" {
+		t.Fatalf("slow cadence: %+v", result.Frame)
+	}
+	if got := defaultValues(t, result, "last_seen"); got[0] != start.Add(time.Hour).UnixMilli() {
+		t.Fatalf("last seen: %v", got)
 	}
 }

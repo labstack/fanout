@@ -25,7 +25,7 @@ import (
 // anomaly_log is not one of them: it holds detector output that nothing can
 // rebuild, so the drop keeps it. Its table is created once; any change to its
 // schema must be a separate, explicit migration step.
-const readCacheVersion = 14
+const readCacheVersion = 16
 
 const (
 	readCacheBatchLimit = 64
@@ -84,7 +84,7 @@ func CreateCacheTables(db *sql.DB) error {
 	}
 	for _, stmt := range []string{
 		createServiceRollupTable,
-		createSpanRollupTable, createLogRollupTable, createEndpointRollupTable,
+		createSpanRollupTable, createLogRollupTable, createEndpointRollupTable, createReceiverRollupTable, createResourceRollupTable, createReceiverEntityRollupTable,
 		createEdgeRollupTable,
 		createRollupStateTable,
 		createVersionRollupTable,
@@ -110,7 +110,7 @@ func CreateCacheTables(db *sql.DB) error {
 		return err
 	}
 	if rollupVersion != rollup_schema_version {
-		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, `DROP TABLE log_rollup`, `DROP TABLE endpoint_rollup`, `DROP TABLE edge_rollup`, createEdgeRollupTable, createServiceRollupTable, createSpanRollupTable, createLogRollupTable, createEndpointRollupTable,
+		for _, stmt := range []string{`DROP TABLE service_rollup`, `DROP TABLE span_rollup`, `DROP TABLE log_rollup`, `DROP TABLE endpoint_rollup`, `DROP TABLE edge_rollup`, `DROP TABLE receiver_rollup`, `DROP TABLE resource_rollup`, `DROP TABLE receiver_entity_rollup`, createEdgeRollupTable, createServiceRollupTable, createSpanRollupTable, createLogRollupTable, createEndpointRollupTable, createReceiverRollupTable, createResourceRollupTable, createReceiverEntityRollupTable,
 			`DELETE FROM rollup_state WHERE cache_key = '` + serviceRollupStateKey + `'`,
 			`DELETE FROM rollup_state WHERE cache_key IN ('` + edgeRollupStateKey + `','` + edgeRollupSubCursorKey + `','` + edgeRollupSubWindowKey + `')`,
 			`DELETE FROM rollup_schema_version`} {
@@ -121,6 +121,9 @@ func CreateCacheTables(db *sql.DB) error {
 		if _, err := tx.Exec(`INSERT INTO rollup_schema_version VALUES (?)`, rollup_schema_version); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(createReceiverPointsView); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

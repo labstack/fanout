@@ -386,6 +386,96 @@ Per-minute log counts by namespace, service and severity. Structured count, rate
 | `severity` | `VARCHAR` | Log severity text |
 | `logs` | `BIGINT` | Log events |
 
+### receiver_entity_rollup
+
+Per-minute reporting witnesses collapsed across CPUs, states, mounts and HTTP status classes. Readers bridge adjacent minutes for cadence; only the affected minute needs invalidation. Analytical minute summaries share the service rollup affected-key, late-arrival and retention lifecycle. fresh_to_ms reports the ingest horizon. No raw boundary reads. Window boundaries have minute precision; counter overlap within a boundary minute is proportional to covered time.
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | Service namespace |
+| `bucket` | `TIMESTAMP_NS` | UTC minute bucket; filter with $__window(bucket) |
+| `service` | `VARCHAR` | Service name |
+| `receiver` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `family` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `entity` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `host` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `container_id` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `container_name` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `endpoint_from` | `VARCHAR` | Fixed receiver entity/family dimension |
+| `first_observation` | `STRUCT(time TIMESTAMPTZ_NS, flag INTEGER)` | First or last two distinct reporting times in this minute; check flag 2 is unsupported metadata, 1 success, 0 failure |
+| `previous_observation` | `STRUCT(time TIMESTAMPTZ_NS, flag INTEGER)` | First or last two distinct reporting times in this minute; check flag 2 is unsupported metadata, 1 success, 0 failure |
+| `last_observation` | `STRUCT(time TIMESTAMPTZ_NS, flag INTEGER)` | First or last two distinct reporting times in this minute; check flag 2 is unsupported metadata, 1 success, 0 failure |
+
+### receiver_points
+
+First and last two distinct finite witnesses per receiver series-minute; httpcheck.status preserves nonfinite observations for metadata diagnosis. Raw cadence witnesses remain in receiver_rollup. Intermediate scrapes are summarized; these are not raw metric points. Analytical minute summaries share the service rollup affected-key, late-arrival and retention lifecycle. fresh_to_ms reports the ingest horizon. No raw boundary reads. Window boundaries have minute precision; counter overlap within a boundary minute is proportional to covered time.
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | Service namespace |
+| `bucket` | `TIMESTAMP_NS` | UTC minute bucket; filter with $__window(bucket) |
+| `service` | `VARCHAR` | Service name |
+| `series_id` | `VARCHAR` | Identity of the fixed receiver dimensions, independent of other OTLP labels |
+| `name` | `VARCHAR` | Metric name |
+| `type` | `VARCHAR` | Metric type |
+| `temporality` | `VARCHAR` | Metric temporality |
+| `unit` | `VARCHAR` | Metric unit |
+| `scope_name` | `VARCHAR` | Metric scope_name |
+| `resource` | `VARIANT` | host.name and container.id/name only |
+| `attributes` | `VARIANT` | state, cpu, mountpoint, device, http.url/method/status_class/status_code only |
+| `host` | `VARCHAR` | Projected receiver dimension |
+| `container_id` | `VARCHAR` | Projected receiver dimension |
+| `container_name` | `VARCHAR` | Projected receiver dimension |
+| `state` | `VARCHAR` | Projected receiver dimension |
+| `cpu` | `VARCHAR` | Projected receiver dimension |
+| `mountpoint` | `VARCHAR` | Projected receiver dimension |
+| `device` | `VARCHAR` | Projected receiver dimension |
+| `url` | `VARCHAR` | Projected receiver dimension |
+| `method` | `VARCHAR` | Projected receiver dimension |
+| `class` | `VARCHAR` | Projected receiver dimension |
+| `code` | `VARCHAR` | Projected receiver dimension |
+| `time` | `TIMESTAMPTZ_NS` | Actual witness event time |
+| `value` | `DOUBLE` | Metric value |
+| `start_time` | `TIMESTAMPTZ_NS` | Counter interval start |
+| `ingested_unix_nano` | `BIGINT` | Retry ordering |
+
+### receiver_rollup
+
+Fixed-dimension summaries for httpcheck, hostmetrics and docker_stats. Retains first and last two witnesses (all and finite) per minute plus reset-aware counter totals. Analytical minute summaries share the service rollup affected-key, late-arrival and retention lifecycle. fresh_to_ms reports the ingest horizon. No raw boundary reads. Window boundaries have minute precision; counter overlap within a boundary minute is proportional to covered time.
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | Service namespace |
+| `bucket` | `TIMESTAMP_NS` | UTC minute bucket; filter with $__window(bucket) |
+| `service` | `VARCHAR` | Service name |
+| `series_id` | `VARCHAR` | Identity of the fixed receiver dimensions, independent of other OTLP labels |
+| `name` | `VARCHAR` | Metric name |
+| `type` | `VARCHAR` | Metric type |
+| `temporality` | `VARCHAR` | Metric temporality |
+| `unit` | `VARCHAR` | Metric unit |
+| `scope_name` | `VARCHAR` | Metric scope_name |
+| `resource` | `VARIANT` | host.name and container.id/name only |
+| `attributes` | `VARIANT` | state, cpu, mountpoint, device, http.url/method/status_class/status_code only |
+| `host` | `VARCHAR` | Projected receiver dimension |
+| `container_id` | `VARCHAR` | Projected receiver dimension |
+| `container_name` | `VARCHAR` | Projected receiver dimension |
+| `state` | `VARCHAR` | Projected receiver dimension |
+| `cpu` | `VARCHAR` | Projected receiver dimension |
+| `mountpoint` | `VARCHAR` | Projected receiver dimension |
+| `device` | `VARCHAR` | Projected receiver dimension |
+| `url` | `VARCHAR` | Projected receiver dimension |
+| `method` | `VARCHAR` | Projected receiver dimension |
+| `class` | `VARCHAR` | Projected receiver dimension |
+| `code` | `VARCHAR` | Projected receiver dimension |
+| `first_point` | `STRUCT(time TIMESTAMPTZ_NS, value DOUBLE, start_time TIMESTAMPTZ_NS, ingested_unix_nano BIGINT)` | Time, value, start_time and ingested_unix_nano of the retry-deduplicated witness |
+| `last_point` | `STRUCT(time TIMESTAMPTZ_NS, value DOUBLE, start_time TIMESTAMPTZ_NS, ingested_unix_nano BIGINT)` | Time, value, start_time and ingested_unix_nano of the retry-deduplicated witness |
+| `previous_point` | `STRUCT(time TIMESTAMPTZ_NS, value DOUBLE, start_time TIMESTAMPTZ_NS, ingested_unix_nano BIGINT)` | Time, value, start_time and ingested_unix_nano of the retry-deduplicated witness |
+| `first_finite_point` | `STRUCT(time TIMESTAMPTZ_NS, value DOUBLE, start_time TIMESTAMPTZ_NS, ingested_unix_nano BIGINT)` | Time, value, start_time and ingested_unix_nano of the retry-deduplicated witness |
+| `last_finite_point` | `STRUCT(time TIMESTAMPTZ_NS, value DOUBLE, start_time TIMESTAMPTZ_NS, ingested_unix_nano BIGINT)` | Time, value, start_time and ingested_unix_nano of the retry-deduplicated witness |
+| `previous_finite_point` | `STRUCT(time TIMESTAMPTZ_NS, value DOUBLE, start_time TIMESTAMPTZ_NS, ingested_unix_nano BIGINT)` | Time, value, start_time and ingested_unix_nano of the retry-deduplicated witness |
+| `counter_increase` | `DOUBLE` | Reset-aware increase within the minute; first point bridges the prior minute |
+| `counter_seconds` | `DOUBLE` | Covered counter intervals within the minute |
+
 ### resource_inventory
 
 Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Complete cached seconds summarize boundary files; only partial-second observations read raw Parquet.
@@ -398,6 +488,20 @@ Distinct full resource identities per signal, namespace and service observed ins
 | `resource` | `VARIANT` | Complete typed resource; use resource['key'], with dotted keys written literally |
 | `first_seen` | `TIMESTAMPTZ_NS` | Earliest actual event observation inside the selected panel window |
 | `last_seen` | `TIMESTAMPTZ_NS` | Latest actual event observation inside the selected panel window |
+
+### resource_rollup
+
+Resource version/SDK/runtime and host tuples at minute precision. Filter bucket with $__window(bucket). Exact inventory remains available through resource_inventory. Analytical minute summaries share the service rollup affected-key, late-arrival and retention lifecycle. fresh_to_ms reports the ingest horizon. No raw boundary reads. Window boundaries have minute precision; counter overlap within a boundary minute is proportional to covered time.
+
+| Column | SQL type | Means |
+|---|---|---|
+| `namespace` | `VARCHAR` | Service namespace |
+| `bucket` | `TIMESTAMP_NS` | UTC minute bucket; filter with $__window(bucket) |
+| `service` | `VARCHAR` | Service name |
+| `signal` | `VARCHAR` | spans, logs or metrics |
+| `resource` | `VARIANT` | host.name, service.version, process.runtime.name/version, telemetry.sdk.language/version only |
+| `first_seen` | `TIMESTAMPTZ_NS` | First actual observation in the minute |
+| `last_seen` | `TIMESTAMPTZ_NS` | Last actual observation in the minute |
 
 ### service_rollup
 

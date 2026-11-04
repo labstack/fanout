@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/queryrows"
@@ -136,6 +137,29 @@ func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w
 	}
 	batches := d.repository.Parquet.BatchMetadata()
 	sources := map[string]string{}
+	summaries := false
+	for _, name := range []string{"receiver_rollup", "receiver_points", "resource_rollup", "receiver_entity_rollup"} {
+		if _, used := compiled.names[name]; used {
+			sources[name] = "SELECT * FROM " + name
+			summaries = true
+		}
+	}
+	if summaries {
+		var horizon sql.NullInt64
+		if err := db.QueryRowContext(ctx, "SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key=?", serviceRollupStateKey).Scan(&horizon); err != nil && err != sql.ErrNoRows {
+			return "", err
+		}
+		fresh := time.Now()
+		if horizon.Valid {
+			fresh = time.Unix(0, horizon.Int64)
+		} else {
+			// A cold cache is complete only before the oldest captured ingestion.
+			for _, batch := range batches {
+				fresh = minTime(fresh, time.Unix(0, batch.MinIngestedNanos).Add(-time.Nanosecond))
+			}
+		}
+		queryrows.RecordCoverage(ctx, fresh)
+	}
 	for _, s := range telemetry.Signals {
 		signal := s.Name
 		if _, raw := compiled.names["telemetry."+signal]; !raw {
@@ -340,7 +364,7 @@ func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string
 	d.snapshotMu.Unlock()
 	if !ok {
 		aliases := map[string]string{}
-		names := []string{"trace_candidates", "trace_tail", "resource_inventory"}
+		names := []string{"trace_candidates", "trace_tail", "resource_inventory", "receiver_rollup", "receiver_points", "resource_rollup", "receiver_entity_rollup"}
 		for _, s := range telemetry.Signals {
 			names = append(names, "telemetry."+s.Name, s.Name)
 		}
@@ -380,10 +404,11 @@ func bindCompiledSnapshot(compiled compiledSnapshot, sources map[string]string) 
 			return "", fmt.Errorf("missing snapshot relation %s", name)
 		}
 		materialization := " AS ("
-		if name == "trace_candidates" {
-			// This relation is used by both the top-one and touched-trace branches.
-			// Avoid copying every retained candidate into a temporary relation.
-			// Mixed-scope aggregates retain DuckDB's required barriers.
+		if name == "trace_candidates" || name == "receiver_rollup" || name == "receiver_points" || name == "resource_rollup" || name == "receiver_entity_rollup" {
+			// These sources can have several consumers. Inline them so their
+			// time/key predicates reach scans instead of copying every retained
+			// candidate or receiver payload into a temporary relation.
+			// Mixed-scope candidate aggregates keep their required barriers.
 			materialization = " AS NOT MATERIALIZED ("
 		}
 		definitions = append(definitions, alias+materialization+body+")")
