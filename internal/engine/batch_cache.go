@@ -29,7 +29,9 @@ const readCacheVersion = 14
 
 const (
 	readCacheBatchLimit = 64
-	readCacheRowBudget  = 64000
+	// Amortize candidate maintenance and bounded pressure pauses without
+	// allowing a pass to grow with retained history. File count stays capped.
+	readCacheRowBudget = 256000
 )
 
 // CreateCacheTables creates DuckDB's tables: the rebuildable read caches and
