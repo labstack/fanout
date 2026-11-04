@@ -128,7 +128,7 @@ const (
 	// Rollup progress keys in rollup_state. readCacheVersion drops that table
 	// with the rollups, so a version change also restarts their backfill; the
 	// keys need no version of their own.
-	rollup_schema_version         = 3
+	rollup_schema_version         = 4
 	serviceRollupStateKey         = "service_rollup_v3"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"

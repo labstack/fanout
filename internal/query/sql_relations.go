@@ -88,7 +88,7 @@ func SQLRelations() map[string]SQLRelationSchema {
 			},
 		},
 		"resource_inventory": {
-			Description: "Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Complete cached minutes summarize boundary files; only partial-minute observations read raw Parquet.",
+			Description: "Distinct full resource identities per signal, namespace and service observed inside the logical panel window [start,end). Panel SQL only; unavailable to structured query.from, variables and unscoped SQL. count(*) counts resource identities per signal, not events or instances. Resource extrema describe actual observations inside the selected window. Uncached interior batches are omitted; fresh_to_ms discloses the complete ingest horizon. Complete cached seconds summarize boundary files; only partial-second observations read raw Parquet.",
 			Columns: []SQLColumnSchema{
 				{Field: str("signal", "spans, logs or metrics; select the required signal"), SQLType: "VARCHAR"},
 				{Field: str("namespace", "Original resource namespace, preserving NULL and empty values"), SQLType: "VARCHAR"},

@@ -85,7 +85,7 @@ func TestLogRollupIncludesMissingService(t *testing.T) {
 	requireRowCount(t, d.DB, `SELECT count(*) FROM log_rollup WHERE service='' AND logs=?`, 1, 1)
 }
 
-func TestResourceMinuteBoundaryCombinesExactEdges(t *testing.T) {
+func TestResourceBoundaryCombinesExactEdges(t *testing.T) {
 	d, repo := newBatchCacheTest(t)
 	at := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
 	spans := []telemetry.Span{}
@@ -109,7 +109,29 @@ func TestResourceMinuteBoundaryCombinesExactEdges(t *testing.T) {
 		t.Fatalf("first=%d last=%d", first, last)
 	}
 	source := d.resourceInventorySource(repo.Parquet.BatchMetadata(), map[string]bool{"hour": true}, w)
-	if !strings.Contains(source, "read_resource_minutes") || !strings.Contains(source, " OR start_time >= ") {
+	if !strings.Contains(source, "read_resource_seconds") || !strings.Contains(source, " OR start_time >= ") {
 		t.Fatal(source)
+	}
+}
+
+func TestEndpointRollupUsesConvertedRouteValues(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Add(-time.Minute).UnixNano()
+	spans := []telemetry.Span{}
+	for i, value := range []any{"/cart", int64(42), true, []byte("bytes"), []any{"array"}, map[string]any{"nested": "value"}} {
+		spans = append(spans, telemetry.Span{Namespace: "ns", ServiceName: "svc", TraceID: fmt.Sprint(i), SpanID: "span", StartUnixNanos: at, Attributes: map[string]any{"http.route": value}})
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "converted-routes", Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.refreshServiceRollup(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var differences int
+	if err := d.QueryRowScan(t.Context(), []any{&differences}, `WITH expected AS (
+ SELECT attributes['http.route']::VARCHAR AS route,count(*)::HUGEINT AS spans FROM spans WHERE attributes['http.route']::VARCHAR<>'' GROUP BY 1
+ ), actual AS (SELECT route,sum(spans) AS spans FROM endpoint_rollup GROUP BY route), differences AS (
+ (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual) UNION ALL (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)) SELECT count(*) FROM differences`); err != nil || differences != 0 {
+		t.Fatalf("converted route differences=%d: %v", differences, err)
 	}
 }

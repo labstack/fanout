@@ -14,6 +14,8 @@ func logRollupInsertSQL(keys string) string {
  GROUP BY ALL`
 }
 
+// Read the canonical dedicated route column, including semconv conversion and
+// spill semantics. Its Parquet predicate also skips files without routes.
 // Rank route populations before building histograms, then fold the rest before
 // aggregation. The overflow row keeps every eligible span, including its errors
 // and duration distribution; retained routes can vary between minutes. Queries
@@ -23,10 +25,10 @@ func endpointRollupInsertSQL(keys string) string {
  WITH eligible AS MATERIALIZED (
  SELECT s.namespace,date_trunc('minute',s.start_time::TIMESTAMP_NS) bucket,s.service,
  coalesce(s.kind,'') kind,coalesce(s.status,'') status,
- try_cast(s.attributes['http.route'] AS VARCHAR) route,s.duration_ms
+ s._a_http_route route,s.duration_ms
  FROM spans s WHERE %s
  AND s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
- AND try_cast(s.attributes['http.route'] AS VARCHAR) <> ''),
+ AND s._a_http_route <> ''),
  routes AS (SELECT namespace,bucket,service,route,
  row_number() OVER (PARTITION BY namespace,bucket,service ORDER BY count(*) DESC,route) r
  FROM eligible GROUP BY namespace,bucket,service,route),

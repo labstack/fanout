@@ -41,15 +41,15 @@ func (d *Duck) resourceInventorySource(batches []telemetry.BatchMetadata, marker
 			contributions = append(contributions, `SELECT signal,namespace,service,resource,first_seen,last_seen FROM read_resource_inventory WHERE signal=`+sqlLiteral(signal)+` AND batch_id IN (`+idsSQL(interior)+`)`)
 		}
 		if len(boundary) > 0 {
-			// Complete minute contributions avoid decoding the portion of a
+			// Complete second contributions avoid decoding the portion of a
 			// large compacted file strictly inside the window. Only its two
-			// partial minutes need exact raw observation bounds.
-			lower := window.Start.Truncate(time.Minute)
+			// partial seconds need exact raw observation bounds.
+			lower := window.Start.Truncate(time.Second)
 			if lower.Before(window.Start) {
-				lower = lower.Add(time.Minute)
+				lower = lower.Add(time.Second)
 			}
-			upper := window.End.Truncate(time.Minute)
-			contributions = append(contributions, `SELECT signal,namespace,service,resource,first_seen,last_seen FROM read_resource_minutes WHERE signal=`+sqlLiteral(signal)+` AND batch_id IN (`+idsSQL(boundary)+`) AND bucket >= `+timeLiteral(lower)+`::TIMESTAMP_NS AND bucket < `+timeLiteral(upper)+`::TIMESTAMP_NS`)
+			upper := window.End.Truncate(time.Second)
+			contributions = append(contributions, `SELECT signal,namespace,service,resource,first_seen,last_seen FROM read_resource_seconds WHERE signal=`+sqlLiteral(signal)+` AND batch_id IN (`+idsSQL(boundary)+`) AND bucket >= `+timeLiteral(lower)+`::TIMESTAMP_NS AND bucket < `+timeLiteral(upper)+`::TIMESTAMP_NS`)
 			if !lower.Equal(window.Start) || !upper.Equal(window.End) {
 				selected := []telemetry.BatchMetadata{}
 				ids := map[string]bool{}
