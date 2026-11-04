@@ -44,8 +44,8 @@ AG-UI `mcp-app` activity content uses exactly `resource_uri`, `tool_name`,
 | [`create_dashboard`](#create_dashboard) | **Yes — additive** |
 | [`edit_dashboard`](#edit_dashboard) | **Yes — replaces existing state** |
 | [`get_dashboard`](#get_dashboard) | No — read-only |
-| [`get_intelligence_snapshot`](#get_intelligence_snapshot) | No — read-only |
-| [`get_observability_overview`](#get_observability_overview) | No — read-only |
+| [`get_insights`](#get_insights) | No — read-only |
+| [`get_overview`](#get_overview) | No — read-only |
 | [`get_service_dependencies`](#get_service_dependencies) | No — read-only |
 | [`get_service_performance`](#get_service_performance) | No — read-only |
 | [`get_service_topology`](#get_service_topology) | No — read-only |
@@ -95,15 +95,15 @@ Read-only.
 |---|---|---|---|
 | `id` | `string` | **yes** | Dashboard ID returned by list_dashboards or create_dashboard |
 
-## get_intelligence_snapshot
+## get_insights
 
-**Latest detected anomalies**: Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.
+**Latest detected anomalies**: Return the latest precomputed system findings: health score, anomalies, insights, recurring log patterns, summary, generation time, and evaluated timeframe.
 
 Read-only.
 
 Takes no arguments.
 
-## get_observability_overview
+## get_overview
 
 **System health overview**: Summarize service health for a bounded telemetry window. Start here for incident triage. All-empty results return no_data guidance instead of a view. State no matching data findings in the answer and prefer signals the service actually has.
 

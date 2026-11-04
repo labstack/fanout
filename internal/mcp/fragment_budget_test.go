@@ -109,7 +109,7 @@ func TestLargeTraceKeepsRootErrorsAndSlowest(t *testing.T) {
 func TestNullArgumentsRawJSONRPC(t *testing.T) {
 	s := panelServerFixture(t, true)
 	h := s.HTTPHandler()
-	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_observability_overview"} {
+	for _, name := range []string{"get_telemetry_schema", "list_dashboards", "get_overview"} {
 		t.Run(name, func(t *testing.T) {
 			request := httptest.NewRequest("POST", "/api/mcp", strings.NewReader(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"_meta":{"io.fanout/owner-id":"owner","io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"arguments":null}}`, name)))
 			request.Header.Set("Content-Type", "application/json")

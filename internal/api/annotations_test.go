@@ -62,7 +62,7 @@ func TestAnnotationErrorMappings(t *testing.T) {
 				t.Fatal(err)
 			}
 			RegisterAnnotationRoutes(s.e, annotationErrorFake{tc.err})
-			req := sessionRequest(http.MethodPost, "/api/annotations", strings.NewReader(`{"from":"2026-10-01T12:00:00Z","to":"2026-10-01T13:00:00Z"}`), s.login(t, viewer))
+			req := sessionRequest(http.MethodPost, "/api/annotations/query", strings.NewReader(`{"from":"2026-10-01T12:00:00Z","to":"2026-10-01T13:00:00Z"}`), s.login(t, viewer))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			s.e.ServeHTTP(rec, req)
@@ -86,18 +86,18 @@ func TestAnnotationRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	RegisterAnnotationRoutes(s.e, annotationFake{})
-	req := sessionRequest(http.MethodPost, "/api/annotations", strings.NewReader(`{"from":"2026-10-01T12:00:00Z","to":"2026-10-01T13:00:00Z","services":["checkout"]}`), s.login(t, viewer))
+	req := sessionRequest(http.MethodPost, "/api/annotations/query", strings.NewReader(`{"from":"2026-10-01T12:00:00Z","to":"2026-10-01T13:00:00Z","services":["checkout"]}`), s.login(t, viewer))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"deploys":[]`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
-	policy, ok := classifyRoute(http.MethodPost, "/api/annotations")
+	policy, ok := classifyRoute(http.MethodPost, "/api/annotations/query")
 	if !ok || policy.capability != ReadTelemetry {
 		t.Fatalf("policy: %+v %v", policy, ok)
 	}
-	if _, ok := classifyRoute(http.MethodGet, "/api/annotations"); ok {
+	if _, ok := classifyRoute(http.MethodGet, "/api/annotations/query"); ok {
 		t.Fatal("GET alias allowed")
 	}
 }
@@ -118,7 +118,7 @@ func TestAnnotationErrRequest400(t *testing.T) {
 		t.Fatal(err)
 	}
 	RegisterAnnotationRoutes(s.e, invalidAnnotationFake{})
-	req := sessionRequest(http.MethodPost, "/api/annotations", strings.NewReader(`{"from":"2026-10-01T13:00:00Z","to":"2026-10-01T12:00:00Z"}`), s.login(t, viewer))
+	req := sessionRequest(http.MethodPost, "/api/annotations/query", strings.NewReader(`{"from":"2026-10-01T13:00:00Z","to":"2026-10-01T12:00:00Z"}`), s.login(t, viewer))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)

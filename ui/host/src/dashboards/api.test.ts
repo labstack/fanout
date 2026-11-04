@@ -96,7 +96,7 @@ describe("dashboard api", () => {
     const signal = new AbortController().signal;
     await expect(queryAnnotations(body, signal)).resolves.toEqual(annotations);
     const [url, init] = lastCall();
-    expect(url).toBe("/api/annotations"); expect(init.method).toBe("POST");
+    expect(url).toBe("/api/annotations/query"); expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual(body); expect(init.signal).toBe(signal);
     expect(new Headers(init.headers).get("content-type")).toBe("application/json");
   });

@@ -31,7 +31,7 @@ var supportedProtocolVersions = []string{ProtocolVersion, "2025-11-25", "2025-06
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. Do not present empty results; state no matching data findings in the answer and prefer the signal a service actually has. Dashboards contain only panels that return data; text panels are exempt. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every non-text panel returns data, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
+const serverInstructions = "Start with get_overview for system health, use get_insights for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges (use this preset once for a service map; do not repeat the same map with query_telemetry), get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency, errors and slow operations across HTTP, gRPC and consumers, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. For a custom chart in chat, use query_telemetry with one v1 panel; every chart view returns a dashboard fragment rendered by the shared panel renderer. Do not present empty results; state no matching data findings in the answer and prefer the signal a service actually has. Dashboards contain only panels that return data; text panels are exempt. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every non-text panel returns data, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
 
 type Observability interface {
 	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
@@ -388,7 +388,7 @@ func (s *Server) registerTools() {
 		Annotations: readOnly,
 	}, s.dependencies)
 	fragmentTool(s, &mcp.Tool{
-		Name:        "get_observability_overview",
+		Name:        "get_overview",
 		Title:       "System health overview",
 		Description: "Summarize service health for a bounded telemetry window. Start here for incident triage.",
 		Annotations: readOnly,
@@ -424,9 +424,9 @@ func (s *Server) registerTools() {
 	}, s.logs)
 	if s.intelligence != nil {
 		mcp.AddTool(s.mcp, &mcp.Tool{
-			Name:        "get_intelligence_snapshot",
+			Name:        "get_insights",
 			Title:       "Latest detected anomalies",
-			Description: "Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.",
+			Description: "Return the latest precomputed system findings: health score, anomalies, insights, recurring log patterns, summary, generation time, and evaluated timeframe.",
 			Annotations: readOnly,
 		}, s.intelligenceSnapshot)
 	}

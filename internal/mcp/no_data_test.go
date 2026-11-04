@@ -58,7 +58,7 @@ func TestAllEmptyFragmentsReturnGuidanceWithoutViews(t *testing.T) {
 func TestEmptyStorePresetsReturnNoData(t *testing.T) {
 	s := newPanelServer(t)
 	client := connectTestClient(t, s, nil)
-	for _, name := range []string{"get_observability_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
+	for _, name := range []string{"get_overview", "get_service_topology", "get_service_performance", "inspect_trace", "search_logs"} {
 		result, err := client.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{}})
 		if err != nil || !result.IsError || result.StructuredContent != nil {
 			t.Fatalf("%s: result=%+v err=%v", name, result, err)

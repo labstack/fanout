@@ -94,7 +94,7 @@ async function evidence(observed: ReturnType<typeof observe>, start = 0): Promis
 async function assertInitial(page: Page, observed: ReturnType<typeof observe>) {
   await settled(page, observed);
   await expect.poll(() => observed.events.filter(event => event.path === "/api/queries/variables/resolve" && event.finished).length).toBe(1);
-  await expect.poll(() => observed.events.filter(event => event.path === "/api/annotations" && event.finished).length).toBeGreaterThan(0);
+  await expect.poll(() => observed.events.filter(event => event.path === "/api/annotations/query" && event.finished).length).toBeGreaterThan(0);
   const initial = await evidence(observed);
   expect([...new Set(initial.batches.flatMap(batch => batch.results.map(result => result.id)))].sort()).toEqual(panelIds);
   const theme = test.info().project.use.colorScheme!;
@@ -201,7 +201,7 @@ test("refreshes once per batch and resolves variables once per range", async ({ 
       for (let cycle = 1; cycle <= 3; cycle++) {
         const start = observed.events.length;
         await page.getByRole("button", { name: "Refresh now", exact: true }).click();
-        for (const path of ["/api/queries/run", "/api/annotations"]) {
+        for (const path of ["/api/queries/run", "/api/annotations/query"]) {
           await expect.poll(() => observed.events.slice(start).filter(event => event.path === path && event.finished).length).toBe(1);
         }
         await page.waitForFunction(allPanelsPainted, spec.panels, { polling: "raf" }).then(handle => handle.dispose());

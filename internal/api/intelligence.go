@@ -17,7 +17,7 @@ type IntelligenceSnapshots interface {
 // RegisterIntelligenceRoutes exposes the detector's latest completed snapshot.
 func RegisterIntelligenceRoutes(e *echo.Echo, snapshots IntelligenceSnapshots) {
 	h := &intelligenceHandler{snapshots: snapshots}
-	e.GET("/api/intelligence", h.latest, RequireCapability(ReadTelemetry))
+	e.GET("/api/insights", h.latest, RequireCapability(ReadTelemetry))
 }
 
 type intelligenceHandler struct {

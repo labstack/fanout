@@ -687,7 +687,7 @@ func TestStoreStartRunRepairsUnansweredToolCalls(t *testing.T) {
 	// the ask is persisted, the answer never arrives.
 	interrupted := []agtypes.Message{
 		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
-		{ID: "assistant-1", Role: agtypes.RoleAssistant, Content: "checking", ToolCalls: []agtypes.ToolCall{{ID: "call-1", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "get_observability_overview"}}}},
+		{ID: "assistant-1", Role: agtypes.RoleAssistant, Content: "checking", ToolCalls: []agtypes.ToolCall{{ID: "call-1", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "get_overview"}}}},
 	}
 	if err := store.FinishRun(ctx, "owner-1", first.ThreadID, first.RunID, interrupted, nil, false, context.Canceled); err != nil {
 		t.Fatal(err)
@@ -728,7 +728,7 @@ func TestStoreStartRunPreservesAnEmptyInterruptedToolTurn(t *testing.T) {
 	// The model asked for a tool and said nothing else before the run died.
 	interrupted := []agtypes.Message{
 		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
-		{ID: "assistant-1", Role: agtypes.RoleAssistant, ToolCalls: []agtypes.ToolCall{{ID: "call-1", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "get_observability_overview"}}}},
+		{ID: "assistant-1", Role: agtypes.RoleAssistant, ToolCalls: []agtypes.ToolCall{{ID: "call-1", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "get_overview"}}}},
 	}
 	if err := store.FinishRun(ctx, "owner-1", first.ThreadID, first.RunID, interrupted, nil, false, context.Canceled); err != nil {
 		t.Fatal(err)

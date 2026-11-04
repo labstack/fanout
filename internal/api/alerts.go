@@ -33,7 +33,7 @@ type alertHandler struct {
 // ListAlerts returns alerts with optional state/service/ruleID filters.
 func (h *alertHandler) ListAlerts(c *echo.Context) error {
 	if h.store == nil {
-		return c.JSON(200, []alert.Alert{})
+		return c.JSON(200, map[string][]alert.Alert{"alerts": {}})
 	}
 	state := c.QueryParam("state")
 	service := c.QueryParam("service")
@@ -47,7 +47,7 @@ func (h *alertHandler) ListAlerts(c *echo.Context) error {
 	if alerts == nil {
 		alerts = []alert.Alert{}
 	}
-	return c.JSON(200, alerts)
+	return c.JSON(200, map[string][]alert.Alert{"alerts": alerts})
 }
 
 // AlertSummary returns firing/pending/resolved counts.
@@ -66,7 +66,7 @@ func (h *alertHandler) AlertSummary(c *echo.Context) error {
 // ListRules returns all alert rules.
 func (h *alertHandler) ListRules(c *echo.Context) error {
 	if h.store == nil {
-		return c.JSON(200, []alert.Rule{})
+		return c.JSON(200, map[string][]alert.Rule{"rules": {}})
 	}
 	rules, err := h.store.ListRules()
 	if err != nil {
@@ -76,7 +76,7 @@ func (h *alertHandler) ListRules(c *echo.Context) error {
 	if rules == nil {
 		rules = []alert.Rule{}
 	}
-	return c.JSON(200, rules)
+	return c.JSON(200, map[string][]alert.Rule{"rules": rules})
 }
 
 // CreateRule creates a new alert rule.

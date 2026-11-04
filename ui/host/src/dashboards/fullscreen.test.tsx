@@ -103,7 +103,7 @@ it.each(["Back", "Escape then Back"])("opens shared URL state (%s) without a que
     if (path === "/api/dashboards") return Response.json({ dashboards: [{ id: "board", name: "Observed" }] });
     if (path === "/api/dashboards/board") return Response.json({ id: "board", version: 7, spec: { ...spec, time: { ...spec.time, refresh: "off" } } });
     if (path === "/api/queries/run") { queries++; return streamed(init, Response.json({ results: [result] })); }
-    if (path === "/api/annotations") return Response.json({ deploys: [], anomalies: [] });
+    if (path === "/api/annotations/query") return Response.json({ deploys: [], anomalies: [] });
     return Response.json({ options: {} });
   }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

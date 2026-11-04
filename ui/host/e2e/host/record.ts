@@ -17,7 +17,7 @@ try {
   const window = { from: time.from, to: time.to };
   const panel = { id: "custom", title: "Seeded span count", viz: "stat", query: { from: "spans", measures: ["count()"] } };
   const inputs: Record<string, { name: string; arguments: Record<string, unknown> }> = {
-    overview: { name: "get_observability_overview", arguments: window },
+    overview: { name: "get_overview", arguments: window },
     topology: { name: "get_service_topology", arguments: window },
     performance: { name: "get_service_performance", arguments: { ...window, service: "checkout" } },
     trace: { name: "inspect_trace", arguments: window },

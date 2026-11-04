@@ -96,7 +96,7 @@ beforeEach(() => {
     if (url.pathname === "/api/dashboards/d1") return json(servedRecord);
     if (url.pathname === "/api/dashboards/missing") return json({ code: "not_found", message: "dashboard not found" }, 404);
     if (url.pathname === "/api/queries/variables/resolve") return variableResponse();
-    if (url.pathname === "/api/annotations") return annotationResponse();
+    if (url.pathname === "/api/annotations/query") return annotationResponse();
     if (url.pathname === "/api/queries/run") {
       const body = JSON.parse(String(init?.body)) as { panels: string[]; dashboard: { panels: { id: string }[] } };
       queryBodies.push(body);
@@ -345,11 +345,11 @@ describe("DashboardPage", () => {
     await vi.waitFor(() => expect(marks().markLine.data).toHaveLength(1), { interval: 5, timeout: 3000 }); await vi.waitFor(() => expect(marks().markArea.data).toHaveLength(1), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(host.textContent).toContain("Annotation history is limited."), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(queryBodies).toHaveLength(1), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/annotations")).toHaveLength(1), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/annotations/query")).toHaveLength(1), { interval: 5, timeout: 3000 });
     await act(async () => { client.setQueryData(["dashboard", "d1"], { ...record, version: 5, spec: { ...spec, panels: [spec.panels[1]], annotations: { [disabled]: false } } }); });
     await settle(client);
     await vi.waitFor(() => expect(queryBodies).toHaveLength(2), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/annotations")).toHaveLength(2), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/annotations/query")).toHaveLength(2), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(marks().markLine.data).toHaveLength(disabled === "deploys" ? 0 : 1), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(marks().markArea.data).toHaveLength(disabled === "anomalies" ? 0 : 1), { interval: 5, timeout: 3000 });
   });
@@ -361,7 +361,7 @@ describe("DashboardPage", () => {
     await vi.waitFor(() => expect(host.textContent).toContain("Annotations unavailable"), { interval: 5, timeout: 3000 }); await vi.waitFor(() => expect(host.textContent).toContain("Unavailable"), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(host.textContent).toContain("120"), { interval: 5, timeout: 3000 }); await vi.waitFor(() => expect(host.textContent).not.toContain("Panels could not be loaded"), { interval: 5, timeout: 3000 });
     await vi.waitFor(() => expect(queryBodies).toHaveLength(1), { interval: 5, timeout: 3000 });
-    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/annotations")).toHaveLength(1), { interval: 5, timeout: 3000 });
+    await vi.waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/annotations/query")).toHaveLength(1), { interval: 5, timeout: 3000 });
   });
 
   it("filters via panel.click.set_variable, removes chips with replace, and pushes brush ranges", async () => {

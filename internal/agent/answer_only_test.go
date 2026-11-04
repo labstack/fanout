@@ -184,7 +184,7 @@ func TestAnswerOnlyRealToolClassificationGolden(t *testing.T) {
 	defer registry.Close()
 	expected := map[string]bool{
 		"create_dashboard": false, "edit_dashboard": false, "replace_dashboard": false, "restore_dashboard_version": false,
-		"get_observability_overview": true, "get_service_topology": true, "get_service_dependencies": true, "get_service_performance": true, "inspect_trace": true, "search_logs": true, "get_intelligence_snapshot": true, "get_telemetry_schema": true, "query_telemetry": true, "preview_panels": true, "list_dashboards": true, "get_dashboard": true, "list_dashboard_versions": true,
+		"get_overview": true, "get_service_topology": true, "get_service_dependencies": true, "get_service_performance": true, "inspect_trace": true, "search_logs": true, "get_insights": true, "get_telemetry_schema": true, "query_telemetry": true, "preview_panels": true, "list_dashboards": true, "get_dashboard": true, "list_dashboard_versions": true,
 	}
 	for _, tool := range registry.Definitions() {
 		want, ok := expected[tool.Name]

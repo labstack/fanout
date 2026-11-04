@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,9 +25,9 @@ func TestAlertingReadRoutesRequireAuthenticationAndPreserveBodies(t *testing.T) 
 	}
 	cookie := s.login(t, viewer)
 	for _, tc := range []struct{ path, body string }{
-		{"/api/alerting/alerts", "[]"},
+		{"/api/alerting/alerts", `{"alerts":[]}`},
 		{"/api/alerting/summary", `{"firing":0,"pending":0,"resolved":0}`},
-		{"/api/alerting/rules", "[]"},
+		{"/api/alerting/rules", `{"rules":[]}`},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			anonymous := httptest.NewRecorder()
@@ -157,4 +159,47 @@ func TestAlertRuleDisableResolvesFiringAlerts(t *testing.T) {
 	if a.State != "resolved" || a.ResolvedAt == "" {
 		t.Fatalf("alert = %+v, want resolved", a)
 	}
+}
+
+func TestAlertCollectionsPreserveItemsAndFilters(t *testing.T) {
+	s := newTestAuthServer(t)
+	store := alert.NewStore(s.db.DB)
+	RegisterAlertRoutes(s.e, store, nil)
+	viewer, err := s.users.CreateWithAudit("collections@example.com", "", "viewer", auth.AuditEvent{EventType: "user.created", Outcome: "success"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, viewer)
+	read := func(path, key string, want any) {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, sessionRequest(http.MethodGet, path, nil, cookie))
+		var got map[string]json.RawMessage
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, rec.Code, rec.Body)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || !reflect.DeepEqual(got[key], json.RawMessage(encoded)) {
+			t.Fatalf("%s = %s, want %s", path, rec.Body, encoded)
+		}
+	}
+	read("/api/alerting/alerts", "alerts", []alert.Alert{})
+	read("/api/alerting/rules", "rules", []alert.Rule{})
+	rule, err := store.CreateRule(alert.Rule{Name: "Errors", Enabled: true, Expression: "error_rate > 0.05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.UpsertAlert(alert.Alert{RuleID: rule.ID, Service: "checkout", State: "firing", CreatedAt: "2026-10-01T12:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read("/api/alerting/rules", "rules", []alert.Rule{rule})
+	read("/api/alerting/alerts?state=firing&service=checkout&rule_id="+rule.ID, "alerts", []alert.Alert{item})
+	read("/api/alerting/alerts?service=missing", "alerts", []alert.Alert{})
 }

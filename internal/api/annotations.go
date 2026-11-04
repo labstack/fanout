@@ -14,7 +14,7 @@ type AnnotationReader interface {
 }
 
 func RegisterAnnotationRoutes(e *echo.Echo, service AnnotationReader) {
-	e.POST("/api/annotations", func(c *echo.Context) error {
+	e.POST("/api/annotations/query", func(c *echo.Context) error {
 		var req annotations.Request
 		if err := decodeStrict(c, &req, 32<<10); err != nil {
 			return err

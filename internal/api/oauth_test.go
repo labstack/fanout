@@ -25,7 +25,7 @@ import (
 
 const testMCPResource = "https://fanout.example.com/mcp"
 
-const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_observability_overview","arguments":{}}}`
+const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_overview","arguments":{}}}`
 
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	return newOAuthTestServerWithConfig(t, config.Config{})

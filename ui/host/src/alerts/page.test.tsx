@@ -30,8 +30,8 @@ beforeEach(() => {
   onExplore.mockReset();
   fetchMock.mockImplementation(async (input, init) => {
     const url = String(input), method = init?.method ?? "GET";
-    if (url === "/api/alerting/rules" && method === "GET") return json(rules);
-    if (url === "/api/alerting/alerts") return json([{ id: "a1", rule_id: "r1", service: "checkout", state: "firing", value: 0.09, fired_at: "2026-10-30T10:00:00Z", created_at: "2026-10-30T10:00:00Z" }]);
+    if (url === "/api/alerting/rules" && method === "GET") return json({ rules });
+    if (url === "/api/alerting/alerts") return json({ alerts: [{ id: "a1", rule_id: "r1", service: "checkout", state: "firing", value: 0.09, fired_at: "2026-10-30T10:00:00Z", created_at: "2026-10-30T10:00:00Z" }] });
     if (url === "/api/alerting/rules" && method === "POST") return create();
     if (url === "/api/alerting/rules/r1" && method === "PUT") return json({ ...rule, enabled: false });
     if (url === "/api/alerting/rules/r1" && method === "DELETE") return new Response(null, { status: 204 });
@@ -92,7 +92,7 @@ describe("AlertsPage", () => {
     rules = [{ ...rule, enabled: false, expression: "service == \"p95\" && log_count > 1000" }];
     const base = fetchMock.getMockImplementation()!;
     fetchMock.mockImplementation(async (input, init) => String(input) === "/api/alerting/alerts"
-      ? json([{ id: "a2", rule_id: "r1", service: "checkout", state: "resolved", value: 0, fired_at: "2026-10-30T10:00:00Z", created_at: "2026-10-30T10:00:00Z" }, { id: "a3", rule_id: "r1", service: "cart", state: "resolved", value: 35712, fired_at: "2026-10-30T09:00:00Z", created_at: "2026-10-30T09:00:00Z" }])
+      ? json({ alerts: [{ id: "a2", rule_id: "r1", service: "checkout", state: "resolved", value: 0, fired_at: "2026-10-30T10:00:00Z", created_at: "2026-10-30T10:00:00Z" }, { id: "a3", rule_id: "r1", service: "cart", state: "resolved", value: 35712, fired_at: "2026-10-30T09:00:00Z", created_at: "2026-10-30T09:00:00Z" }] })
       : base(input, init));
     const { ui, wait } = await render();
     await wait(() => expect(ui.getByText("Disabled")).toBeTruthy());
@@ -247,7 +247,7 @@ describe("AlertsPage", () => {
   it("shows the last fired time and an unknown state when history cannot load", async () => {
     const { ui, wait } = await render();
     await wait(() => expect(ui.getAllByText(/Oct 30/).length).toBeGreaterThan(1));
-    fetchMock.mockImplementation(async (input) => String(input) === "/api/alerting/alerts" ? json({ message: "down" }, 500) : json([rule]));
+    fetchMock.mockImplementation(async (input) => String(input) === "/api/alerting/alerts" ? json({ message: "down" }, 500) : json({ rules: [rule] }));
     cleanups.splice(0).forEach(cleanup => cleanup()); document.body.innerHTML = "";
     const again = await render();
     await again.wait(() => expect(again.ui.getByText("Unknown")).toBeTruthy());

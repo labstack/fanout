@@ -105,7 +105,7 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 | `PUT` | `/api/alerting/rules/:id` | `alerts:manage` |
 | `POST` | `/api/alerting/rules/:id/test` | `alerts:manage` |
 | `GET` | `/api/alerting/summary` | `telemetry:read` |
-| `POST` | `/api/annotations` | `telemetry:read` |
+| `POST` | `/api/annotations/query` | `telemetry:read` |
 | `POST` | `/api/auth/code/send` | none |
 | `POST` | `/api/auth/code/verify` | none |
 | `POST` | `/api/auth/link/verify` | none |
@@ -132,7 +132,7 @@ Operational responses at `/healthz`, `/readyz` and `/metrics` keep their bodies.
 | `POST` | `/api/fanql/format` | `telemetry:read` |
 | `POST` | `/api/fanql/parse` | `telemetry:read` |
 | `GET` | `/api/fanql/reference` | `telemetry:read` |
-| `GET` | `/api/intelligence` | `telemetry:read` |
+| `GET` | `/api/insights` | `telemetry:read` |
 | `Any` | `/api/mcp` | `telemetry:read` |
 | `POST` | `/api/queries/exemplars` | `telemetry:read` |
 | `POST` | `/api/queries/run` | `telemetry:read` |

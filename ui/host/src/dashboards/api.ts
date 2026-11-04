@@ -90,7 +90,7 @@ export async function queryPanels(body: QueryBody, signal?: AbortSignal, onResul
 }
 export const createDashboard = (spec: DashboardSpec) => request<DashboardRecord>("/api/dashboards", { method: "POST", json: { spec } });
 export const getTelemetrySchema = (signal?: AbortSignal) => request<TelemetrySchema>("/api/telemetry/schema", { signal });
-export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations", { method: "POST", json: body, signal });
+export const queryAnnotations = (body: AnnotationBody, signal?: AbortSignal) => request<AnnotationsResponse>("/api/annotations/query", { method: "POST", json: body, signal });
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
   request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/queries/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
 

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -313,7 +314,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 	server := panelServerFixture(t, true)
 	session := connectTestClient(t, server, nil)
-	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_observability_overview") || !strings.Contains(instructions, "authenticated user") {
+	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_overview") || !strings.Contains(instructions, "authenticated user") {
 		t.Fatalf("server instructions = %q", instructions)
 	}
 
@@ -330,7 +331,7 @@ func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 		}
 	}
 	called, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "get_observability_overview",
+		Name: "get_overview",
 		Arguments: map[string]any{
 			"window": "1h",
 		},
@@ -401,5 +402,40 @@ func TestMCPAppsCapabilitiesAreRequestScoped(t *testing.T) {
 	request.Params.Meta[mcp.MetaKeyClientCapabilities] = map[string]any{}
 	if clientSupportsMCPApps(request) {
 		t.Fatal("Apps support leaked between requests")
+	}
+}
+
+func TestGetInsightsReturnsCompletePrecomputedSnapshot(t *testing.T) {
+	want := intelligence.Snapshot{GeneratedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), Timeframe: "last_15m", HealthScore: 75, Summary: "Errors increased", Insights: []intelligence.Insight{{Message: "Check checkout"}}, Patterns: []intelligence.Pattern{{Template: "failed", Count: 3}}, Anomalies: []intelligence.Anomaly{{ServiceName: "checkout"}}}
+	server := NewWithIntelligence(&fakeObservability{}, nil, nil, fakeIntelligence{snapshot: &want}, "test")
+	session := connectTestClient(t, server, nil)
+	listed, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range listed.Tools {
+		if tool.Name == "get_insights" || tool.Name == "get_overview" {
+			if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint || tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
+				t.Fatalf("annotations = %#v", tool.Annotations)
+			}
+		}
+		if tool.Name == "get_insights" && !strings.Contains(tool.Description, "latest precomputed system findings") {
+			t.Fatalf("description = %s", tool.Description)
+		}
+	}
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_insights", Arguments: map[string]any{}})
+	if err != nil || result.IsError {
+		t.Fatalf("get_insights = %#v, %v", result, err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got intelligence.Snapshot
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("snapshot = %#v, want %#v", got, want)
 	}
 }

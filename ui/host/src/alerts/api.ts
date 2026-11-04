@@ -19,8 +19,8 @@ export const rulesKey = ["alerting", "rules"] as const;
 export const alertsKey = ["alerting", "alerts"] as const;
 const rulePath = (id: string) => `/api/alerting/rules/${encodeURIComponent(id)}`;
 
-export const listRules = (signal?: AbortSignal) => request<Rule[]>("/api/alerting/rules", { signal });
-export const listAlerts = (signal?: AbortSignal) => request<Alert[]>("/api/alerting/alerts", { signal });
+export const listRules = (signal?: AbortSignal) => request<{ rules: Rule[] }>("/api/alerting/rules", { signal }).then(r => r.rules);
+export const listAlerts = (signal?: AbortSignal) => request<{ alerts: Alert[] }>("/api/alerting/alerts", { signal }).then(r => r.alerts);
 export const createRule = (rule: RuleDraft) => request<Rule>("/api/alerting/rules", { method: "POST", json: rule });
 export const replaceRule = (id: string, rule: RuleDraft) => request<Rule>(rulePath(id), { method: "PUT", json: rule });
 export const deleteRule = (id: string) => request<unknown>(rulePath(id), { method: "DELETE" });
