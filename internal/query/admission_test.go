@@ -658,19 +658,23 @@ func TestInteractiveBorrowingRetainsPanelProgressAndLendsIdleSlots(t *testing.T)
 	go func() { interactive <- a.acquire(ctx, interactiveClass) }()
 	waitForReadWaiters(t, a, 3)
 	a.release(interactiveClass)
-	a.release(interactiveClass)
-	first, second := <-panels, <-panels
-	if first == nil || second == nil {
+	first := <-panels
+	if first == nil {
 		t.Fatal("interactive borrowing stranded panels")
 	}
+	a.release(interactiveClass)
+	if err := <-interactive; err != nil {
+		t.Fatal(err)
+	}
 	select {
-	case <-interactive:
-		t.Fatal("interactive borrower took panel progress capacity")
+	case <-panels:
+		t.Fatal("sibling displaced interactive read")
 	default:
 	}
 	first()
-	if err := <-interactive; err != nil {
-		t.Fatal(err)
+	second := <-panels
+	if second == nil {
+		t.Fatal("panel did not retain progress")
 	}
 	second()
 	b.close()
@@ -680,4 +684,43 @@ func TestInteractiveBorrowingRetainsPanelProgressAndLendsIdleSlots(t *testing.T)
 	if !a.tryShared() || a.batches != 0 || a.batchActive != 0 {
 		t.Fatal("reservation leaked capacity")
 	}
+}
+
+// A running panel already supplies progress. Its sibling must not prevent a
+// queued drill-down from borrowing the next released connection.
+func TestPanelProgressDoesNotStarveInteractiveReplacement(t *testing.T) {
+	a := newReadAdmission(3, 1, 4)
+	if err := a.acquireN(t.Context(), panelClass, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.acquire(t.Context(), interactiveClass); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	interactive := make(chan error, 1)
+	panel := make(chan error, 1)
+	go func() { interactive <- a.acquire(ctx, interactiveClass) }()
+	go func() { panel <- a.acquire(ctx, panelClass) }()
+	waitForReadWaiters(t, a, 2)
+	a.release(panelClass)
+	select {
+	case err := <-interactive:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("drill-down starved behind panel progress reservation")
+	}
+	select {
+	case <-panel:
+		t.Fatal("panel displaced interactive read while another panel was running")
+	default:
+	}
+	a.release(panelClass)
+	if err := <-panel; err != nil {
+		t.Fatal(err)
+	}
+	a.release(panelClass)
+	a.releaseN(interactiveClass, 2)
 }

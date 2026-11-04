@@ -43,10 +43,10 @@ func (a *readAdmission) availableN(class readClass, n int) bool {
 		return a.active[panelClass]+n <= a.slots-a.reserved
 	}
 	// Interactive reads are scheduled first and can borrow every idle slot.
-	// Once panels need capacity, retain up to two slots for their progress.
+	// Once panels need capacity, retain one slot for their progress.
 	// Never reserve an unused sibling slot or starve a one-slot pool.
 	demand := a.active[panelClass] + len(a.queues[panelClass])
-	panels := min(2, demand, a.slots-a.reserved, a.slots-1)
+	panels := min(1, demand, a.slots-a.reserved, a.slots-1)
 	return a.active[interactiveClass]+n <= a.slots-panels
 }
 func (a *readAdmission) acquire(ctx context.Context, class readClass) error {

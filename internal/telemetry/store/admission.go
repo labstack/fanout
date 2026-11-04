@@ -20,6 +20,10 @@ const (
 	admissionStarvationWindow = 3 * time.Second
 	retryAfterMin             = time.Second
 	retryAfterMax             = 5 * time.Second
+	// Default OTLP backoff starts at 5s with 50% jitter. After a bounded
+	// rejection window, reopen read admission through the latest first retry
+	// (7.5s), with 2.5s of scheduling/transport margin.
+	readRetryWindow = 10 * time.Second
 )
 
 // ErrIngestThrottled refuses the whole export without retaining its payload.
@@ -49,6 +53,7 @@ type ingestAdmission struct {
 	readLimited                                  bool
 	debtRate, debtFloor, readRate, readReference float64
 	reason                                       string
+	readRetryAt, readRetryUntil                  time.Time
 	samples                                      []admissionSample
 }
 
@@ -127,7 +132,15 @@ func (a *ingestAdmission) admit(rows int) (time.Duration, bool, string) {
 	if debt >= telemetry.CompactionDebtLimit {
 		return 2 * time.Second, false, "debt"
 	}
-	if a.rate > 0 {
+	// Read pressure may refuse exports for at most one second. Every default
+	// OTLP first retry (2.5--7.5s) then falls in the open interval, including
+	// retries of the last refusal in that window. A percentage floor alone
+	// cannot prevent the same exporter losing repeated token-bucket races.
+	rate, reason := a.rate, a.reason
+	if !now.Before(a.readRetryAt) && now.Before(a.readRetryUntil) {
+		rate, reason = a.debtRate, "debt"
+	}
+	if rate > 0 {
 		// An existing pressured store can start before any export has supplied a
 		// rate sample. Seed that empty history with one export so its retry can
 		// fit; subsequent exports use the measured rate and the normal bucket.
@@ -148,8 +161,12 @@ func (a *ingestAdmission) admit(rows int) (time.Duration, bool, string) {
 		// when its row count exceeds a second of the current admission rate.
 		a.burst = max(a.burst, float64(rows))
 		if a.tokens < float64(rows) {
-			delay := time.Duration(math.Ceil((float64(rows) - a.tokens) / a.rate * float64(time.Second)))
-			return min(retryAfterMax, max(retryAfterMin, delay)), false, a.reason
+			delay := time.Duration(math.Ceil((float64(rows) - a.tokens) / rate * float64(time.Second)))
+			if reason == "reads" && !now.Before(a.readRetryUntil) {
+				a.readRetryAt = now.Add(retryAfterMin)
+				a.readRetryUntil = a.readRetryAt.Add(readRetryWindow)
+			}
+			return min(retryAfterMax, max(retryAfterMin, delay)), false, reason
 		}
 		a.tokens -= float64(rows)
 	}
@@ -246,7 +263,7 @@ func (a *ingestAdmission) tick(now time.Time) {
 		a.lastReadAdjustment = now
 	}
 	a.rate, a.reason = a.debtRate, "debt"
-	if a.readLimited && (a.rate == 0 || a.readRate < a.rate) {
+	if a.readLimited && (now.Before(a.readRetryAt) || !now.Before(a.readRetryUntil)) && (a.rate == 0 || a.readRate < a.rate) {
 		a.rate, a.reason = a.readRate, "reads"
 	}
 	if a.rate > 0 {

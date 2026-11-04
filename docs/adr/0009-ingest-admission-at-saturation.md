@@ -32,6 +32,20 @@ reads to recover. Continued starvation at that floor requires measuring read
 cost; a lower ingest rate requires compaction debt, not just read demand. Apply
 the smaller of the independent debt and read caps so the read floor cannot
 defeat debt protection.
+Read-driven refusals are bounded in time as well: after the first refusal,
+allow them for at most one second, then suspend the read cap for ten seconds.
+Both the [Collector exporter helper](https://github.com/open-telemetry/opentelemetry-collector/blob/v0.157.0/exporter/exporterhelper/internal/retry_sender.go)
+and Go OTLP exporters wait for the greater of the server delay and exponential
+backoff. Their default initial backoff is five seconds with 50% jitter. Every
+first retry from the entire refusal window therefore lands in the open interval,
+with 2.5 seconds of scheduling/transport margin, within telemetrygen's configured
+30-second export timeout. Reducing RetryInfo alone does not shorten that client
+backoff. A percentage rate floor alone also
+cannot prevent the same exporter losing repeated token-bucket races. The
+independent debt cap, hard debt stop and in-flight byte budget still apply during
+the open interval. This favors exporter progress over prolonged read-driven
+ingest reduction; admission priority must protect interactive latency.
+
 Below the debt band admission is uncapped unless reads require a cap.
 
 At the debt limit refuse every new export with a two-second retry delay. Other
@@ -41,8 +55,12 @@ seconds. OTLP/gRPC returns RESOURCE_EXHAUSTED with RetryInfo; OTLP/HTTP returns
 Already admitted exports drain and preserve durable acknowledgement semantics.
 
 Reserve max(1, slots/6) read slots for interactive requests, with interactive
-waiters served first on releases. Panels queue up to eight times the slot count;
-interactive requests queue up to twice it. A one-slot pool has no reservation,
+waiters served first on releases. Under contention retain only one panel
+progress slot: a running panel satisfies it, so its sibling cannot prevent an
+interactive replacement taking the next released slot. A refresh runs at most
+two siblings concurrently and holds a bounded lifetime ticket while accepted;
+idle or coalesced work holds no global slot. Panels queue within that bounded
+refresh population; interactive requests queue up to twice the slot count. A one-slot pool has no reservation,
 so panels remain usable. The engine still retains its two separate connections
 for other readers where the pool permits. No CPU reservation is introduced.
 
