@@ -382,7 +382,19 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				defer cancel()
 				// Panels share a bounded FIFO; interactive reads have priority
 				// and reserved capacity outside this class.
-				switch err := e.acquireClass(wait, panelClass); {
+				admissionStarted := time.Now()
+				admissionErr := e.acquireClass(wait, panelClass)
+				admissionStatus := "admitted"
+				switch {
+				case errors.Is(admissionErr, errQueueFull):
+					admissionStatus = "rejected"
+				case errors.Is(admissionErr, context.Canceled):
+					admissionStatus = "canceled"
+				case admissionErr != nil:
+					admissionStatus = "timeout"
+				}
+				metrics.RecordPanelAdmission(p.ID, admissionStatus, time.Since(admissionStarted).Seconds())
+				switch err := admissionErr; {
 				case errors.Is(err, errQueueFull):
 					return panelOutcome{Result: refusedResult(p), refused: true}, 0, false, nil
 				case err != nil:
