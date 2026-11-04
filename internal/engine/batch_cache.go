@@ -328,10 +328,19 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 	for _, s := range telemetry.Signals {
 		if rows := source(s.Name); rows != "" {
 			clock := s.Clock()
-			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,` + sqlLiteral(s.Name) + `,namespace,service,resource,min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY batch_id,namespace,service,resource`); err != nil {
+			// Materialize only this pass's resource-seconds once. Inventory can
+			// fold their exact extrema without decoding every raw point again.
+			// The temporary table avoids scanning retained cache contributions.
+			if err := exec(`CREATE OR REPLACE TEMP TABLE cache_new_resource_seconds AS SELECT batch_id,` + sqlLiteral(s.Name) + ` AS signal,namespace,service,resource,date_trunc('second',` + clock + `::TIMESTAMP_NS) AS bucket,min(` + clock + `) AS first_seen,max(` + clock + `) AS last_seen FROM (` + rows + `) GROUP BY ALL`); err != nil {
 				return 0, err
 			}
-			if err := exec(`INSERT INTO read_resource_seconds SELECT batch_id,` + sqlLiteral(s.Name) + `,namespace,service,resource,date_trunc('second',` + clock + `::TIMESTAMP_NS),min(` + clock + `),max(` + clock + `) FROM (` + rows + `) GROUP BY ALL`); err != nil {
+			if err := exec(`INSERT INTO read_resource_seconds SELECT * FROM cache_new_resource_seconds`); err != nil {
+				return 0, err
+			}
+			if err := exec(`INSERT INTO read_resource_inventory SELECT batch_id,signal,namespace,service,resource,min(first_seen),max(last_seen) FROM cache_new_resource_seconds GROUP BY ALL`); err != nil {
+				return 0, err
+			}
+			if err := exec(`DROP TABLE cache_new_resource_seconds`); err != nil {
 				return 0, err
 			}
 		}
