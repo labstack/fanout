@@ -54,13 +54,22 @@ func receiverRollupInsertSQL(keys string) string {
 }
 
 func resourceRollupInsertSQL(signal, clock, keys string) string {
+	// Collapse repeated raw resources before extracting the inventory identity.
+	// Regroup after projection: resources that differ only in unrelated OTLP
+	// keys still describe one inventory population. Keep the converted version
+	// column authoritative and preserve exact event-time extrema.
 	return fmt.Sprintf(`INSERT INTO resource_rollup
- WITH projected AS (SELECT namespace,date_trunc('minute',%[1]s::TIMESTAMP_NS) bucket,service,
+ WITH resources AS MATERIALIZED (
+ SELECT namespace,date_trunc('minute',%[1]s::TIMESTAMP_NS) bucket,service,resource,_r_service_version,
+ min(%[1]s) first_seen,max(%[1]s) last_seen
+ FROM %[3]s m WHERE %[4]s AND %[1]s>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND %[1]s<?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ GROUP BY namespace,bucket,service,resource,_r_service_version),
+ projected AS (SELECT namespace,bucket,service,
  struct_pack("host.name" := resource['host.name']::VARCHAR,"service.version" := _r_service_version,
  "process.runtime.name" := resource['process.runtime.name']::VARCHAR,"process.runtime.version" := resource['process.runtime.version']::VARCHAR,
- "telemetry.sdk.language" := resource['telemetry.sdk.language']::VARCHAR,"telemetry.sdk.version" := resource['telemetry.sdk.version']::VARCHAR)::VARIANT identity,%[1]s seen
- FROM %[3]s m WHERE %[4]s AND %[1]s>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND %[1]s<?::TIMESTAMP_NS::TIMESTAMPTZ_NS)
- SELECT namespace,bucket,service,%[2]s,identity,min(seen),max(seen) FROM projected GROUP BY namespace,bucket,service,identity`, clock, sqlLiteral(signal), signal, keys)
+ "telemetry.sdk.language" := resource['telemetry.sdk.language']::VARCHAR,"telemetry.sdk.version" := resource['telemetry.sdk.version']::VARCHAR)::VARIANT identity,first_seen,last_seen
+ FROM resources)
+ SELECT namespace,bucket,service,%[2]s,identity,min(first_seen),max(last_seen) FROM projected GROUP BY namespace,bucket,service,identity`, clock, sqlLiteral(signal), signal, keys)
 }
 
 // First/last witnesses preserve cadence even for nonfinite scrapes; finite

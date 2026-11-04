@@ -204,3 +204,32 @@ func TestReceiverSummariesUseConvertedResourceKeys(t *testing.T) {
 	requireRowCount(t, d.DB, "SELECT count(*) FROM resource_rollup WHERE resource['service.version'] IS NULL AND service=?", "svc", 1)
 	requireRowCount(t, d.DB, "SELECT count(*) FROM metrics WHERE resource['container.id'] IS NOT NULL AND _r_container_id IS NULL AND _r_service_version IS NULL AND service=?", "svc", 1)
 }
+
+// Unrelated resource keys may split the input aggregation but must not split
+// the projected inventory. Dedicated semconv columns remain authoritative.
+func TestResourceSummariesCollapseUnrelatedKeysAndKeepExactBounds(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+	points := []telemetry.Metric{}
+	for i := range 6 {
+		version := any(int64(42))
+		if i%2 == 0 {
+			version = "42"
+		}
+		points = append(points, telemetry.Metric{Namespace: "ns", ServiceName: "svc", Name: "custom", Type: "gauge", TimeUnixNanos: at.Add(time.Duration(i)*time.Second + time.Nanosecond).UnixNano(), Resource: map[string]any{"host.name": "host", "service.version": version, "unrelated": i}})
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "resources", Metrics: points}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	var first, last int64
+	if err := d.DB.QueryRow(`SELECT count(*),epoch_ns(min(first_seen)),epoch_ns(max(last_seen)) FROM resource_rollup WHERE signal='metrics' AND resource['service.version']::VARCHAR='42'`).Scan(&n, &first, &last); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 || first != at.Add(time.Nanosecond).UnixNano() || last != at.Add(5*time.Second+time.Nanosecond).UnixNano() {
+		t.Fatalf("rows=%d bounds=%d,%d", n, first, last)
+	}
+}
