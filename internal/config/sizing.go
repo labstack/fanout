@@ -50,7 +50,7 @@ const (
 
 // QueryAdmission derives the executor's read admission from the pool:
 // slots reads hold connections at once. reserved slots serve interactive
-// reads only; queue is the panel queue bound (interactive waits are 2*slots).
+// reads only; queue bounds dashboard batch tickets (interactive waits are 2*slots).
 // A one-slot pool has no reservation so panels can still execute. A pool of four or more keeps two connections
 // for annotations and readiness checks, which do not queue behind them.
 func QueryAdmission(pool int) (slots, reserved, queue int) {

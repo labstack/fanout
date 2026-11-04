@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
-// Hold the first panel inside its admitted read until its sibling is queued.
+// Hold the first panel inside its admitted read while its sibling waits locally.
 type diagnosisGateEngine struct {
 	Engine
 	entered chan struct{}
@@ -62,7 +62,10 @@ func TestDiagnosisDoesNotTreatSiblingPanelsAsPressure(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	waitForReadWaiters(t, e.admission, 1)
+	// A sibling waits inside the batch budget, never in the global FIFO.
+	if e.admission.waiting() != 0 {
+		t.Fatal("sibling entered the global admission queue")
+	}
 	close(gate.release)
 	for _, r := range <-done {
 		if r.partial || r.Status != StatusEmpty || !strings.Contains(r.Diagnosis, `Without operation containing "zzqxnomatch", 120 match the remaining filters.`) {

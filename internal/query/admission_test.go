@@ -280,3 +280,123 @@ func TestInteractiveRefusalsIncludeTheExemplarWaitDeadline(t *testing.T) {
 		t.Fatal("caller-bounded interactive wait was not counted")
 	}
 }
+
+// A refresh is one queue entry even when both workers are waiting. Once
+// admitted, all 15 panels can run without another trip through the bounded FIFO.
+func TestRefreshAdmissionIsAtomicAndLeavesCapacityForOtherReaders(t *testing.T) {
+	a := newReadAdmission(6, 1, 1)
+	for range 5 {
+		if err := a.acquire(t.Context(), panelClass); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := newPanelBatchAdmission(a, 2)
+	done := make(chan func(), 2)
+	for range 2 {
+		go func() {
+			release, err := b.acquire(t.Context())
+			if err != nil {
+				t.Error(err)
+				done <- nil
+				return
+			}
+			done <- release
+		}()
+	}
+	waitForReadWaiters(t, a, 1)
+	// One batch fills one queue entry, so another batch is refused as a unit.
+	other := newPanelBatchAdmission(a, 2)
+	for range 2 {
+		if _, err := other.acquire(t.Context()); !errors.Is(err, errQueueFull) {
+			t.Fatalf("other batch: %v", err)
+		}
+	}
+	other.close()
+	a.releaseN(panelClass, 2)
+	for range 2 {
+		release := <-done
+		if release == nil {
+			t.Fatal("sibling refused")
+		}
+		release()
+	}
+	if err := a.acquire(t.Context(), interactiveClass); err != nil {
+		t.Fatal(err)
+	}
+	a.release(interactiveClass)
+	for range 15 {
+		release, err := b.acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		release()
+	}
+	b.close()
+	a.releaseN(panelClass, 3)
+	if !a.tryShared() || a.batches != 0 {
+		t.Fatal("batch leaked its reservation")
+	}
+}
+
+func TestRefreshAdmissionKeepsDetachedFlightsAndReleasesCanceledWaiters(t *testing.T) {
+	a := newReadAdmission(6, 1, 1)
+	b := newPanelBatchAdmission(a, 2)
+	release, err := b.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.close()
+	if a.active[panelClass] != 2 {
+		t.Fatal("detached flight lost its slots")
+	}
+	release()
+	if a.active[panelClass] != 0 {
+		t.Fatal("detached flight leaked slots")
+	}
+	// A stale cache revalidation may start after the request closes its batch.
+	release, err = b.acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.active[panelClass] != 1 {
+		t.Fatal("late revalidation did not use single-slot admission")
+	}
+	release()
+	for range 5 {
+		if err := a.acquire(t.Context(), panelClass); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := newPanelBatchAdmission(a, 2)
+	ctx, cancel := context.WithCancel(t.Context())
+	failed := make(chan error, 1)
+	go func() { _, err := c.acquire(ctx); failed <- err }()
+	waitForReadWaiters(t, a, 1)
+	cancel()
+	if err := <-failed; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	c.close()
+	a.releaseN(panelClass, 5)
+	if !a.tryShared() || a.batches != 0 {
+		t.Fatal("canceled batch leaked slots or queue")
+	}
+}
+
+func TestRefreshPressureAccountsForItsWholeSlotBudget(t *testing.T) {
+	a := newReadAdmission(6, 1, 48)
+	if err := a.acquireN(t.Context(), panelClass, 4); err != nil {
+		t.Fatal(err)
+	}
+	if a.tryShared() {
+		t.Fatal("an unusable single-slot fragment hid dashboard pressure")
+	}
+	if err := a.acquire(t.Context(), interactiveClass); err != nil {
+		t.Fatal(err)
+	}
+	a.release(interactiveClass)
+	a.releaseN(panelClass, 4)
+	if !a.tryShared() {
+		t.Fatal("pressure did not clear")
+	}
+}

@@ -80,6 +80,7 @@ type Result struct {
 
 type Executor struct {
 	engine              Engine
+	sqlPanels           map[string]sqlPanelPlan
 	rollups             RollupReader
 	maxWindow           time.Duration
 	now                 func() time.Time
@@ -354,6 +355,8 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	deferDiagnosis := e.admission.waiting() > 0
 	deadline, _ := ctx.Deadline()
 	var group errgroup.Group
+	batch := newPanelBatchAdmission(e.admission, min(e.parallel, 2, len(targets)))
+	defer batch.close()
 	group.SetLimit(e.parallel)
 	for i, p := range targets {
 		group.Go(func() error {
@@ -383,7 +386,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 				// Panels share a bounded FIFO; interactive reads have priority
 				// and reserved capacity outside this class.
 				admissionStarted := time.Now()
-				admissionErr := e.acquireClass(wait, panelClass)
+				release, admissionErr := batch.acquire(wait)
 				admissionStatus := "admitted"
 				switch {
 				case errors.Is(admissionErr, errQueueFull):
@@ -401,7 +404,7 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 					return panelOutcome{Result: busyResult(p)}, 0, false, nil
 				}
 				r := func() Result {
-					defer e.admission.release(panelClass)
+					defer release()
 					return e.runPanel(run, p, checked, t, now, vars, width, compare)
 				}()
 				return panelOutcome{Result: r}, r.size(), (r.Status == StatusOK || r.Status == StatusEmpty) && !r.partial, nil
@@ -871,20 +874,12 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		}
 		return frame, compiled.SQL, err
 	}
-	expanded, err := expandMacros(p.SQL, scope.Interval)
+	plan, err := e.sqlPanel(ctx, p.SQL, scope.Interval)
 	if err != nil {
 		return nil, "", err
 	}
-	canonical, err := canonicalSQL(ctx, e.engine, expanded)
-	if err != nil {
-		return nil, "", err
-	}
-	node, err := e.engine.ParseSQL(ctx, canonical)
-	if err != nil {
-		return nil, "", err
-	}
-	patterns := engine.PatternParams(node)
-	query, describe, args, err := bindParams(canonical, func(name string) ([]any, bool, error) {
+	patterns := plan.patterns
+	query, _, args, err := bindParams(plan.canonical, func(name string) ([]any, bool, error) {
 		switch name {
 		case "__from":
 			return []any{scope.Start.UTC()}, false, nil
@@ -906,15 +901,11 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 	if err != nil {
 		return nil, "", err
 	}
-	prepared, serialized, err := e.engine.PrepareTelemetrySQL(ctx, query, describe, sqlPanelRows+1)
+	rows, err := e.engine.QueryContext(ctx, plan.prepared, args...)
 	if err != nil {
 		return nil, query, err
 	}
-	rows, err := e.engine.QueryContext(ctx, prepared, args...)
-	if err != nil {
-		return nil, query, err
-	}
-	frame, err := scanDynamicFrame(rows, serialized, sqlPanelRows)
+	frame, err := scanDynamicFrame(rows, plan.serialized, sqlPanelRows)
 	if err == nil && p.Viz == "state_timeline" {
 		if frame.Rows > 0 {
 			err = validateTimelineColumns(frame.Columns)
