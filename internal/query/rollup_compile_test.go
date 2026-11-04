@@ -313,3 +313,73 @@ func TestEndpointRollupFramesMatchRaw(t *testing.T) {
 		}
 	}
 }
+
+func TestHistogramPlanPreservesMultipleQuantilesTotalsAndFoldedGroups(t *testing.T) {
+	d, repo := newTestEngine(t)
+	var spans []telemetry.Span
+	for i := range 8 {
+		for _, s := range shopSpans() {
+			s.ServiceName = string(rune('a' + i))
+			s.DurationMS += float64(i * 1000)
+			spans = append(spans, s)
+		}
+	}
+	commit(t, repo, spans, nil)
+	for _, viz := range []string{"stat", "timeseries"} {
+		p := &Panel{Viz: viz, Query: &Spec{From: "spans"}}
+		if viz == "timeseries" {
+			p.Query.By = []string{"service"}
+		}
+		scope := Scope{Start: fixtureStart, End: fixtureStart.Add(time.Hour), Interval: 5 * time.Minute}
+		ms := measuresOf(t, "spans", "p95(duration_ms)", "p50(duration_ms)", "count()", "avg(duration_ms)")
+		rolled, err := compileQuery(p, ms, nil, scope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(rolled.SQL, "list_transform(list(hist)") {
+			t.Fatal("correlated map-list plan returned")
+		}
+		raw, err := compileAggregateQuery(p, ms, nil, scope, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A histogram estimates a weighted rank. With gaps between samples,
+		// quantile_cont interpolates a different value; compare its median to
+		// the exact discrete rank when checking the one-bucket error bound.
+		raw.SQL = strings.ReplaceAll(raw.SQL, `quantile_cont("duration_ms", 0.5)`, `quantile_disc("duration_ms", 0.5)`)
+
+		got, want := readCompiledFrame(t, d, rolled, scope), readCompiledFrame(t, d, raw, scope)
+		if got.Rows != want.Rows || !reflect.DeepEqual(got.Columns, want.Columns) {
+			t.Fatalf("%s shapes differ: %+v %+v", viz, got, want)
+		}
+		compare := func(c int, a, b any) {
+			t.Helper()
+			x, ok := a.(float64)
+			if !ok {
+				if !reflect.DeepEqual(a, b) {
+					t.Fatalf("%s %s: %v != %v", viz, got.Columns[c].Name, a, b)
+				}
+				return
+			}
+			y := b.(float64)
+			tolerance := 1e-9
+			if got.Columns[c].Name == "p95" || got.Columns[c].Name == "p50" {
+				tolerance = math.Abs(y) * .09051
+			}
+			if math.Abs(x-y) > tolerance {
+				t.Fatalf("%s %s: %g != %g", viz, got.Columns[c].Name, x, y)
+			}
+		}
+		for c := range got.Columns {
+			for row := range got.Rows {
+				compare(c, got.Values[c][row], want.Values[c][row])
+			}
+		}
+		if len(got.Totals) != len(want.Totals) {
+			t.Fatal("totals differ")
+		}
+		for c := range got.Totals {
+			compare(c, got.Totals[c], want.Totals[c])
+		}
+	}
+}

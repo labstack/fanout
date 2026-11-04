@@ -253,12 +253,17 @@ func compileAggregateQuery(p *Panel, measures []Measure, filters []Filter, scope
 		partition = "PARTITION BY " + bucket
 	}
 	hasTotals := bucket != "" && (p.Viz == "stat" || p.Viz == "gauge")
+	quantiles := map[int]Measure{}
 	for _, m := range measures {
 		expr := measureExprSQL(m, sig, seconds, partition)
 		if rolled {
 			expr = rollupMeasureSQL(m, coveredSecondsSQL(scope, bucket, hasTotals), partition)
 		} else if hasTotals {
 			expr = strings.ReplaceAll(expr, "count(*) / "+sqlFloat(seconds), "count(*) / (CASE WHEN grouping("+bucket+")=1 THEN "+sqlFloat(scope.End.Sub(scope.Start).Seconds())+" ELSE "+sqlFloat(seconds)+" END)")
+		}
+		if rolled && histogramMeasure(m) {
+			quantiles[len(selects)] = m
+			expr = "NULL::DOUBLE"
 		}
 		selects = append(selects, expr+" AS "+quoteIdent(m.Alias))
 		unit := m.Unit
@@ -292,7 +297,13 @@ func compileAggregateQuery(p *Panel, measures []Measure, filters []Filter, scope
 		if rolled {
 			value, samples, extra = rollupRankingSQL(extra, first, scope.End.Sub(scope.Start).Seconds())
 		}
-		fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
+		if rolled && histogramMeasure(first) {
+			dimension := "coalesce(" + dims[foldDimension].stringSQL() + ", '')"
+			histogramAggregate(&b, "candidates", "base", []string{dimension + " AS d", "NULL::DOUBLE AS value", samples + " AS n"}, []string{"d", "value", "n"}, []string{dimension}, false, map[int]Measure{1: first})
+			fmt.Fprintf(&b, ", top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", order, top)
+		} else {
+			fmt.Fprintf(&b, ", candidates AS (SELECT coalesce(%s, '') AS d, %s AS value, %s AS n%s FROM base GROUP BY 1), top AS (SELECT d FROM candidates ORDER BY %s LIMIT %d)", dims[foldDimension].stringSQL(), value, samples, extra, order, top)
+		}
 		dim := dims[foldDimension].stringSQL()
 		fmt.Fprintf(&b, ", other AS (SELECT 'Other (' || count(*)::VARCHAR || ')' AS _other FROM candidates ANTI JOIN top USING(d)), folded AS (SELECT base.*, CASE WHEN top.d IS NOT NULL THEN coalesce(%s, '') ELSE other._other END AS _fold FROM base LEFT JOIN top ON coalesce(%s, '')=top.d CROSS JOIN other)", dim, dim)
 	}
@@ -301,12 +312,27 @@ func compileAggregateQuery(p *Panel, measures []Measure, filters []Filter, scope
 	if top > 0 {
 		from = "folded"
 	}
-	b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM " + from)
-	if len(groups) > 0 {
-		if hasTotals {
-			b.WriteString(" GROUP BY GROUPING SETS ((" + strings.Join(groups, ", ") + "), (" + strings.Join(groups[1:], ", ") + "))")
-		} else {
-			b.WriteString(" GROUP BY " + strings.Join(groups, ", "))
+	if len(quantiles) > 0 {
+		aliases := make([]string, len(columns))
+		projected := make([]string, len(columns))
+		for i, c := range columns {
+			aliases[i] = c.Name
+			if c.Role == "time" {
+				aliases[i] = "_t"
+			}
+			projected[i] = quoteIdent(aliases[i])
+		}
+		from = histogramAggregate(&b, "__panel_hist", from, selects, aliases, groups, hasTotals, quantiles)
+		rankOffset = b.Len() + len(" SELECT ") + len(strings.Join(projected, ", "))
+		b.WriteString(" SELECT " + strings.Join(projected, ", ") + " FROM " + from)
+	} else {
+		b.WriteString(" SELECT " + strings.Join(selects, ", ") + " FROM " + from)
+		if len(groups) > 0 {
+			if hasTotals {
+				b.WriteString(" GROUP BY GROUPING SETS ((" + strings.Join(groups, ", ") + "), (" + strings.Join(groups[1:], ", ") + "))")
+			} else {
+				b.WriteString(" GROUP BY " + strings.Join(groups, ", "))
+			}
 		}
 	}
 	order := orderAndLimit(p, measures, bucket != "", len(dims))
