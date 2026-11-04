@@ -77,7 +77,9 @@ func capacityCTE(containers bool) string {
  inventory AS (SELECT namespace,entity,any_value(host) host,any_value(container_id) container_id,arg_max(container_name,last_observation.time) container,max(last_observation.time) observed
  FROM minutes WHERE $__window(bucket) GROUP BY namespace,entity),
  witness_family AS (SELECT namespace,entity,min(priority) AS priority FROM minutes GROUP BY namespace,entity),
- witness AS (SELECT DISTINCT k.namespace,k.entity,t.time FROM minutes k JOIN witness_family f USING(namespace,entity,priority),
+ witness_minutes AS (SELECT k.* FROM minutes k JOIN witness_family f USING(namespace,entity,priority)
+ QUALIFY dense_rank() OVER (PARTITION BY namespace,entity ORDER BY bucket DESC)<=2),
+ witness AS (SELECT DISTINCT namespace,entity,t.time FROM witness_minutes,
  unnest([first_observation.time,previous_observation.time,last_observation.time]) t(time)
  WHERE t.time>=make_timestamp_ns(epoch_ns($__from::TIMESTAMP_NS)-600000000000)::TIMESTAMPTZ_NS AND t.time<$__to::TIMESTAMP_NS::TIMESTAMPTZ_NS),
  cadence AS (SELECT namespace,entity,max(time) AS last_seen,epoch_ns(max(time)::TIMESTAMP_NS)::HUGEINT-epoch_ns(arg_max(time,time,2)[2]::TIMESTAMP_NS)::HUGEINT AS interval_ns FROM witness GROUP BY namespace,entity),
@@ -99,20 +101,21 @@ const reportingSQL = `CASE WHEN i.host IS NULL OR i.host='' /* identity */ THEN 
 
 func hostCapacitySQL() string {
 	return capacityCTE(false) + `,
- cpu_minutes AS (SELECT namespace,host,series_id,state,temporality,first_finite_point,last_finite_point,counter_increase,counter_seconds,last_value(last_finite_point IGNORE NULLS) OVER (PARTITION BY series_id ORDER BY bucket ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS previous
- FROM receiver_rollup WHERE name='system.cpu.time' AND type='counter' AND temporality IN ('delta','cumulative')
+ cpu_minutes AS (SELECT namespace,host,series_id,state,temporality,
+ first_finite_point.time AS first_time,first_finite_point.value AS first_value,first_finite_point.start_time AS first_start,
+ last_finite_point.time AS last_time,counter_increase,counter_seconds,
+ lag(last_finite_point.time) OVER w AS previous_time,lag(last_finite_point.value) OVER w AS previous_value,lag(last_finite_point.start_time) OVER w AS previous_start
+ FROM receiver_rollup WHERE name='system.cpu.time' AND type='counter' AND temporality IN ('delta','cumulative') AND last_finite_point IS NOT NULL
  AND bucket>=time_bucket(INTERVAL '1 minute',make_timestamp_ns(epoch_ns($__from::TIMESTAMP_NS)-600000000000))
- AND bucket<$__to::TIMESTAMP_NS),
+ AND bucket<$__to::TIMESTAMP_NS WINDOW w AS (PARTITION BY series_id ORDER BY bucket)),
  cpu_delta AS (
- SELECT namespace,host AS entity,series_id,state AS state,
- last_finite_point.time AS time,counter_increase AS increase,first_finite_point.time AS elapsed_from,counter_seconds AS summary_seconds
+ SELECT namespace,host AS entity,series_id,state,last_time AS time,counter_increase AS increase,first_time AS elapsed_from,counter_seconds AS summary_seconds
  FROM cpu_minutes WHERE counter_seconds>0 AND isfinite(counter_increase)
  UNION ALL
- SELECT namespace,host AS entity,series_id,state AS state,
- first_finite_point.time AS time,
- CASE WHEN temporality='delta' OR first_finite_point.value<previous.value OR (first_finite_point.start_time IS NOT NULL AND previous.start_time IS NOT NULL AND first_finite_point.start_time<>previous.start_time) THEN first_finite_point.value ELSE first_finite_point.value-previous.value END AS increase,
- CASE WHEN temporality='delta' AND first_finite_point.start_time<first_finite_point.time THEN first_finite_point.start_time ELSE previous.time END AS elapsed_from,NULL::DOUBLE AS summary_seconds
- FROM cpu_minutes WHERE isfinite(first_finite_point.value) AND (temporality='delta' OR isfinite(previous.value))),
+ SELECT namespace,host AS entity,series_id,state,first_time AS time,
+ CASE WHEN temporality='delta' OR first_value<previous_value OR (first_start IS NOT NULL AND previous_start IS NOT NULL AND first_start<>previous_start) THEN first_value ELSE first_value-previous_value END AS increase,
+ CASE WHEN temporality='delta' AND first_start<first_time THEN first_start ELSE previous_time END AS elapsed_from,NULL::DOUBLE AS summary_seconds
+ FROM cpu_minutes WHERE isfinite(first_value) AND (temporality='delta' OR isfinite(previous_value))),
  cpu_overlap AS (SELECT *, coalesce(summary_seconds,(epoch_ns(time::TIMESTAMP_NS)::HUGEINT-epoch_ns(elapsed_from::TIMESTAMP_NS)::HUGEINT)::DOUBLE/1e9) AS elapsed_s,
  greatest(0,(epoch_ns(least(time,$__to::TIMESTAMP_NS::TIMESTAMPTZ_NS)::TIMESTAMP_NS)::HUGEINT-epoch_ns(greatest(elapsed_from,$__from::TIMESTAMP_NS::TIMESTAMPTZ_NS)::TIMESTAMP_NS)::HUGEINT)::DOUBLE/1e9)
  * CASE WHEN summary_seconds IS NULL THEN 1 ELSE summary_seconds/nullif((epoch_ns(time::TIMESTAMP_NS)::HUGEINT-epoch_ns(elapsed_from::TIMESTAMP_NS)::HUGEINT)::DOUBLE/1e9,0) END AS overlap_s FROM cpu_delta WHERE elapsed_from<time),

@@ -555,3 +555,33 @@ func TestDefaultCapacityKeepsSlowReportingCadence(t *testing.T) {
 		t.Fatalf("last seen: %v", got)
 	}
 }
+
+func TestDefaultCPUBridgesNonfiniteMinutes(t *testing.T) {
+	e, repo, d := defaultFixture(t)
+	start := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for minute := range 3 {
+		var points []telemetry.Metric
+		for _, state := range []string{"idle", "user"} {
+			value := 100.0
+			if minute == 1 {
+				value = math.NaN()
+			}
+			if minute == 2 {
+				value = 160
+				if state == "user" {
+					value = 280
+				}
+			}
+			m := telemetry.Metric{Namespace: "test", ServiceName: "svc", Name: "system.cpu.time", Type: "counter", Temporality: "cumulative", Unit: "s", TimeUnixNanos: start.Add(time.Duration(minute) * time.Minute).UnixNano(), Value: value, Resource: map[string]any{"host.name": "host"}, Attributes: map[string]any{"cpu": "0", "state": state}}
+			m.SeriesID = telemetry.MetricSeriesID(m)
+			points = append(points, m)
+		}
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("cpu-gap-%d", minute), Metrics: points}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := runDefault(t, e, d, start, start.Add(150*time.Second))["hosts"]
+	if got := defaultValues(t, result, "cpu_percent"); len(got) != 1 || got[0] != 75.0 {
+		t.Fatalf("CPU lost its finite predecessor: %+v", result.Frame)
+	}
+}
