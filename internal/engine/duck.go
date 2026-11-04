@@ -38,6 +38,7 @@ type Duck struct {
 	fatalOnce       sync.Once
 	cachePublishMu  sync.Mutex
 	cachePublishing map[string]bool
+	cacheTransfers  []*batchCacheTransfer
 	snapshotMu      sync.Mutex
 	snapshotQueries map[string]compiledSnapshot
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
@@ -1163,7 +1164,7 @@ func (d *Duck) refreshEdgeRollupPass(ctx context.Context) (int64, bool, error) {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM read_edge_buckets"); err != nil {
 			return 0, false, err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO read_edge_buckets "+edgePassBucketsSelectSQL, windowStart, windowEnd); err != nil {
+		if _, err := insertEdgeBuckets(ctx, tx, windowStart, windowEnd); err != nil {
 			return 0, false, err
 		}
 	}
@@ -1738,20 +1739,26 @@ var createEdgePassBucketsSQL = "CREATE TEMP TABLE edge_pass_buckets AS " + edgeP
 
 var edgePassBucketsSelectSQL = fmt.Sprintf(`
 WITH incoming AS MATERIALIZED (
-  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind,
-         messaging_destination, messaging_system
+  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind
   FROM spans
   WHERE ingested_unix_nano > $1::BIGINT
     AND ingested_unix_nano <= $2::BIGINT
     AND start_time IS NOT NULL
 ),
 recent AS MATERIALIZED (
-  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind,
-         messaging_destination, messaging_system
+  SELECT namespace, trace_id, span_id, parent_span_id, start_time, kind
   FROM spans
-  WHERE ingested_unix_nano > ($1::BIGINT - %d)
+  WHERE ingested_unix_nano > ($1::BIGINT - %[1]d)
     AND ingested_unix_nano <= $1::BIGINT
     AND start_time IS NOT NULL
+),
+-- Decode messaging attributes only for messaging spans. Materializing them in
+-- the relationship CTEs decodes VARIANT values for every client/server span.
+incoming_messages AS MATERIALIZED (
+`+edgeIncomingMessagesSQL+`
+),
+recent_messages AS MATERIALIZED (
+`+edgeRecentMessagesSQL+`
 ),
 affected_spans AS (
   SELECT namespace, start_time FROM incoming
@@ -1773,8 +1780,8 @@ affected_spans AS (
   WHERE parent.kind = 'SPAN_KIND_CLIENT'
   UNION ALL
   SELECT r.namespace, r.start_time
-  FROM recent r
-  SEMI JOIN incoming i
+  FROM recent_messages r
+  SEMI JOIN incoming_messages i
     ON r.namespace = i.namespace
    AND date_trunc('minute', r.start_time::TIMESTAMP_NS) = date_trunc('minute', i.start_time::TIMESTAMP_NS)
    AND r.messaging_destination = i.messaging_destination
@@ -1892,7 +1899,22 @@ func insertEdgeRollup(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (sql.Re
 	if _, err := prepareEdgeParents(ctx, tx, lo, hi); err != nil {
 		return nil, err
 	}
-	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, lo, hi)
+	havePeers, err := prepareEdgePeerCandidates(ctx, tx, lo, hi)
+	if err != nil {
+		return nil, err
+	}
+	statement := edgeRollupPreparedInsertSQL
+	if !havePeers {
+		statement = edgeRollupNoPeersInsertSQL
+	}
+	var haveMessaging bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM spans WHERE kind IN ('SPAN_KIND_PRODUCER','SPAN_KIND_CONSUMER') AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND service IS NOT NULL AND service != '')`, lo, hi).Scan(&haveMessaging); err != nil {
+		return nil, err
+	}
+	if !haveMessaging {
+		statement = withoutEdgeMessaging(statement)
+	}
+	res, err := tx.ExecContext(ctx, statement, lo, hi)
 	if err != nil {
 		return nil, err
 	}
@@ -1900,6 +1922,9 @@ func insertEdgeRollup(ctx context.Context, tx *sql.Tx, lo, hi time.Time) (sql.Re
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_children"); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, "DROP TABLE edge_pass_peer_candidates"); err != nil {
 		return nil, err
 	}
 	return res, nil
@@ -2005,38 +2030,10 @@ call_edges AS (
 -- each producer service publishing to it (a message consumed once appears on
 -- every producer's edge).
 producer_agg AS (
-  SELECT DISTINCT
-    s.namespace,
-    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
-    s.service,
-    s.messaging_destination AS destination,
-    s.messaging_system AS msg_system
-  FROM spans s
-  WHERE s.kind = 'SPAN_KIND_PRODUCER'
-    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.service IS NOT NULL
-    AND s.service != ''
-    AND s.messaging_destination IS NOT NULL
+` + edgeProducerAggSQL + `
 ),
 consumer_agg AS (
-  SELECT
-    s.namespace,
-    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
-    s.service,
-    s.messaging_destination AS destination,
-    s.messaging_system AS msg_system,
-    COUNT(*) AS calls
-  FROM spans s
-  WHERE s.kind = 'SPAN_KIND_CONSUMER'
-    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-    AND s.service IS NOT NULL
-    AND s.service != ''
-    AND s.messaging_destination IS NOT NULL
-  GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
-    s.messaging_destination,
-    s.messaging_system
+` + edgeConsumerAggSQL + `
 ),
 producers AS (
   SELECT p.* FROM producer_agg p
@@ -2047,18 +2044,10 @@ consumers AS (
   SEMI JOIN affected a USING (namespace, bucket)
 ),
 peer_candidates AS MATERIALIZED (
- SELECT s.namespace,s.trace_id,s.span_id,s.service,s.peer_service,s.duration_ms,s.status,
- date_trunc('minute',s.start_time::TIMESTAMP_NS) AS bucket
- FROM spans s
- WHERE ((s.namespace,date_trunc('minute',s.start_time::TIMESTAMP_NS)) IN (SELECT (namespace,bucket) FROM affected WHERE namespace IS NOT NULL)) IS TRUE
- AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
- AND s.start_time < ((SELECT hi FROM bounds)+INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
- AND s.kind='SPAN_KIND_CLIENT' AND coalesce(s.service,'')<>''
- AND coalesce(s.peer_service,'')<>'' AND s.peer_service<>s.service
+` + edgePeerCandidatesSQL + `
 ),
 peer_children AS MATERIALIZED (
- SELECT DISTINCT c.namespace,c.trace_id,c.parent_span_id,c.service
- FROM spans c WHERE ((c.namespace,c.trace_id,c.parent_span_id) IN (SELECT (namespace,trace_id,span_id) FROM peer_candidates WHERE namespace IS NOT NULL AND trace_id IS NOT NULL AND span_id IS NOT NULL)) IS TRUE
+` + edgePeerChildrenSQL + `
 ),
 peer_edges AS (
  SELECT p.namespace,p.bucket,p.service AS caller,p.peer_service AS callee,

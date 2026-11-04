@@ -183,6 +183,9 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 	defer background()
 	pin := d.pinParquet()
 	defer d.unpinParquet(pin)
+	if err := d.applyCacheTransfers(ctx); err != nil {
+		return 0, true, err
+	}
 	batches := d.repository.Parquet.BatchMetadata()
 	markers, err := batchMarkers(ctx, d.writer())
 	if err != nil {
@@ -195,9 +198,7 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 	stale := []string{}
 	for id := range markers {
 		if !active[id] {
-			d.cachePublishMu.Lock()
-			publishing := d.cachePublishing[id]
-			d.cachePublishMu.Unlock()
+			publishing := d.pendingCacheTransfer(id, false)
 			if !publishing {
 				stale = append(stale, id)
 			}
@@ -214,7 +215,7 @@ func (d *Duck) refreshReadCaches(ctx context.Context) (rows int64, backlog bool,
 	pending := []telemetry.BatchMetadata{}
 	pendingRows, selected := 0, 0
 	for i := len(batches) - 1; i >= 0; i-- {
-		if !markers[batches[i].ID] {
+		if !markers[batches[i].ID] && !d.pendingCacheTransfer(batches[i].ID, true) {
 			rows := batches[i].Spans + batches[i].Logs + batches[i].Metrics
 			// A complete file is indivisible. Admit one oversized file to make
 			// progress, otherwise bound new work by rows as well as file count.
@@ -472,21 +473,31 @@ func newestBatchEvent(b telemetry.BatchMetadata) int64 {
 	return newest
 }
 
-// PublishParquetReplacement opportunistically derives output caches from complete
-// inputs before the namespace swap. Busy writers leave the output cold instead
-// of delaying publication. The pending set protects still-inactive output
-// contributions. Readers use active IDs, so either namespace sees exactly one
-// set of contributions. An absent marker, including after a crash, causes a
-// rebuild from the output file.
+// PublishParquetReplacement reuses complete input caches when the SQL leases
+// are idle. Busy leases defer the transfer to the refresh worker, without
+// delaying the catalog swap or decoding the output again.
 func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.BatchMetadata, inputs []string, publish func(context.Context) error) error {
 	if len(inputs) == 0 {
 		return d.PublishParquet(ctx, publish)
 	}
-	// Transfers only save rebuilding disposable caches from the output. Never
-	// queue the filesystem transaction behind a reader's cache/write lease.
+	transfer := &batchCacheTransfer{output: output.ID, inputs: append([]string(nil), inputs...)}
+	d.cachePublishMu.Lock()
+	d.cacheTransfers = append(d.cacheTransfers, transfer)
+	d.cachePublishMu.Unlock()
+	swap := func() error {
+		err := d.PublishParquet(ctx, publish)
+		d.cachePublishMu.Lock()
+		if err == nil {
+			transfer.published = true
+		} else {
+			d.removeCacheTransfer(transfer)
+		}
+		d.cachePublishMu.Unlock()
+		return err
+	}
 	unlock := d.cacheGate.TryLock(writegate.ReadCache)
 	if unlock == nil {
-		return d.PublishParquet(ctx, publish)
+		return swap()
 	}
 	d.cachePublishMu.Lock()
 	if d.cachePublishing == nil {
@@ -496,13 +507,16 @@ func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.B
 	d.cachePublishMu.Unlock()
 	defer func() { d.cachePublishMu.Lock(); delete(d.cachePublishing, output.ID); d.cachePublishMu.Unlock() }()
 	if err := d.transferBatchCache(ctx, output.ID, inputs); err != nil {
+		d.cachePublishMu.Lock()
+		d.removeCacheTransfer(transfer)
+		d.cachePublishMu.Unlock()
 		slog.Warn("compaction cache transfer failed; output will be cached from Parquet", "err", err)
 	}
 	unlock()
 	if err := d.transferVersionMarker(ctx, output, inputs); err != nil {
 		slog.Warn("compaction version marker transfer failed; output will be read", "err", err)
 	}
-	return d.PublishParquet(ctx, publish)
+	return swap()
 }
 
 func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []string) error {
@@ -511,6 +525,11 @@ func (d *Duck) transferBatchCache(ctx context.Context, output string, inputs []s
 		return nil
 	}
 	defer background()
+	return d.transferBatchCacheLocked(ctx, output, inputs)
+}
+
+// Caller holds cacheGate and the background SQL lease.
+func (d *Duck) transferBatchCacheLocked(ctx context.Context, output string, inputs []string) error {
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return err
