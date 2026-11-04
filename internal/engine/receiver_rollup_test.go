@@ -188,3 +188,19 @@ func TestReceiverEntityMinutesCollapseCPUsAndRepairCheckState(t *testing.T) {
 		t.Fatalf("late previous=%d last=%d flag=%d", previous, last, flag)
 	}
 }
+
+func TestReceiverSummariesUseConvertedResourceKeys(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Truncate(time.Minute).Add(-time.Hour)
+	m := telemetry.Metric{Namespace: "ns", ServiceName: "svc", Name: "container.memory.usage.total", Type: "gauge", TimeUnixNanos: at.UnixNano(), Value: 1, Resource: map[string]any{"host.name": "host", "container.id": []any{"unsupported"}, "service.version": []any{"unsupported"}}}
+	m.SeriesID = telemetry.MetricSeriesID(m)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "converted", Metrics: []telemetry.Metric{m}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RefreshDashboardRollups(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	requireRowCount(t, d.DB, "SELECT count(*) FROM receiver_rollup WHERE container_id IS NULL AND resource['container.id'] IS NULL AND service=?", "svc", 1)
+	requireRowCount(t, d.DB, "SELECT count(*) FROM resource_rollup WHERE resource['service.version'] IS NULL AND service=?", "svc", 1)
+	requireRowCount(t, d.DB, "SELECT count(*) FROM metrics WHERE resource['container.id'] IS NOT NULL AND _r_container_id IS NULL AND _r_service_version IS NULL AND service=?", "svc", 1)
+}

@@ -27,10 +27,10 @@ func receiverRollupInsertSQL(keys string) string {
 	return fmt.Sprintf(`INSERT INTO receiver_rollup
  WITH projected AS (
  SELECT namespace,date_trunc('minute',time::TIMESTAMP_NS) bucket,service,name,type,temporality,unit,scope_name,
- struct_pack("host.name" := resource['host.name']::VARCHAR,"container.id" := resource['container.id']::VARCHAR,"container.name" := resource['container.name']::VARCHAR)::VARIANT resource,
+ struct_pack("host.name" := resource['host.name']::VARCHAR,"container.id" := _r_container_id,"container.name" := resource['container.name']::VARCHAR)::VARIANT resource,
  struct_pack(state := attributes['state']::VARCHAR,cpu := attributes['cpu']::VARCHAR,mountpoint := attributes['mountpoint']::VARCHAR,device := attributes['device']::VARCHAR,
  "http.url" := attributes['http.url']::VARCHAR,"http.method" := attributes['http.method']::VARCHAR,"http.status_class" := attributes['http.status_class']::VARCHAR,"http.status_code" := attributes['http.status_code']::VARCHAR)::VARIANT attributes,
- resource['host.name']::VARCHAR host,resource['container.id']::VARCHAR container_id,resource['container.name']::VARCHAR container_name,
+ resource['host.name']::VARCHAR host,_r_container_id container_id,resource['container.name']::VARCHAR container_name,
  attributes['state']::VARCHAR state,attributes['cpu']::VARCHAR cpu,attributes['mountpoint']::VARCHAR mountpoint,attributes['device']::VARCHAR device,
  attributes['http.url']::VARCHAR url,attributes['http.method']::VARCHAR method,attributes['http.status_class']::VARCHAR class,attributes['http.status_code']::VARCHAR code,
  time,value,start_time,ingested_unix_nano
@@ -56,7 +56,7 @@ func receiverRollupInsertSQL(keys string) string {
 func resourceRollupInsertSQL(signal, clock, keys string) string {
 	return fmt.Sprintf(`INSERT INTO resource_rollup
  WITH projected AS (SELECT namespace,date_trunc('minute',%[1]s::TIMESTAMP_NS) bucket,service,
- struct_pack("host.name" := resource['host.name']::VARCHAR,"service.version" := resource['service.version']::VARCHAR,
+ struct_pack("host.name" := resource['host.name']::VARCHAR,"service.version" := _r_service_version,
  "process.runtime.name" := resource['process.runtime.name']::VARCHAR,"process.runtime.version" := resource['process.runtime.version']::VARCHAR,
  "telemetry.sdk.language" := resource['telemetry.sdk.language']::VARCHAR,"telemetry.sdk.version" := resource['telemetry.sdk.version']::VARCHAR)::VARIANT identity,%[1]s seen
  FROM %[3]s m WHERE %[4]s AND %[1]s>=?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND %[1]s<?::TIMESTAMP_NS::TIMESTAMPTZ_NS)
