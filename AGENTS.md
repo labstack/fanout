@@ -1,5 +1,25 @@
 # Agent instructions
 
+## Naming conventions
+
+These principles apply across code, configuration, schemas, APIs, tools, and
+user-facing terminology. The interface-specific rules below still apply.
+
+- Choose the shortest name that clearly and accurately expresses the concept
+  or behavior in its intended context. Consider the enclosing namespace and
+  how callers encounter the name. Omit qualifiers that repeat established
+  context; retain those needed to distinguish meaning, scope, or behavior.
+- Use consistent domain terminology for equivalent concepts and distinct terms
+  for meaningful differences. Name actions by what they do and values by what
+  they represent. Preserve distinctions in timing, units, lifecycle, and mutation
+  semantics when they affect correct use.
+- Follow the language and interface's casing and structural conventions.
+  Preserve terminology and names required by external contracts and protocols.
+  Internal and external names may differ where their contexts differ.
+- Rename existing interfaces when the improvement in clarity or accuracy
+  justifies the change. Apply the contract-change requirements below when
+  changing published names.
+
 ## Configuration conventions
 
 - Configuration is environment-only. `internal/config/config.go` is the
