@@ -72,6 +72,14 @@ func TestResolveDuckDBMaxConnsScalesButIsBounded(t *testing.T) {
 	}
 }
 
+func TestResolveDuckDBMaxConnsKeepsInteractiveAndPanelSlots(t *testing.T) {
+	pool := resolveDuckDBMaxConns(8)
+	slots, _, _ := QueryAdmission(pool)
+	if pool != 12 || slots != 10 {
+		t.Fatalf("eight CPUs: pool=%d slots=%d, want twelve connections and ten admitted reads", pool, slots)
+	}
+}
+
 func TestParseCgroupMemoryLimitTreatsMaxAsUnlimited(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "memory.max")

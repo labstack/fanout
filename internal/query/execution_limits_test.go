@@ -27,7 +27,7 @@ func (e *slowBatchEngine) QueryContext(ctx context.Context, _ string, _ ...any) 
 	return nil, ctx.Err()
 }
 
-func TestBatchDeadlineKeepsCompletedPanels(t *testing.T) {
+func TestAdmittedRefreshRunsEveryPanelOutsideQueueDeadline(t *testing.T) {
 	e := newFixtureExecutor(t)
 	slow := &slowBatchEngine{Engine: e.engine}
 	e.engine = slow
@@ -46,17 +46,18 @@ func TestBatchDeadlineKeepsCompletedPanels(t *testing.T) {
 	if results[0].Status != StatusOK {
 		t.Fatalf("completed=%+v", results[0])
 	}
-	// A panel that started before the batch deadline keeps its own timeout
-	// and reports it, rather than being cut off at the batch deadline.
-	if time.Since(started) < e.timeout || results[1].Error != TimeoutError {
-		t.Errorf("started panel=%+v after %s", results[1], time.Since(started))
+	// Admission covers the refresh. Later siblings keep their own execution
+	// timeout even after the queue deadline, and are never refused as busy.
+	if time.Since(started) < 2*e.timeout {
+		t.Errorf("refresh finished before both panels ran: %s", time.Since(started))
 	}
-	assertRetryable(t, results[2], true)
-	if results[2].Status != StatusError || results[2].Reason != ReasonBusy || results[2].Error != "Not run: other queries kept the server busy. Refresh to try again." {
-		t.Errorf("unstarted=%+v", results[2])
+	for _, r := range results[1:] {
+		if r.Error != TimeoutError || r.Reason == ReasonBusy {
+			t.Errorf("admitted panel=%+v", r)
+		}
 	}
-	if slow.calls.Load() != 1 {
-		t.Errorf("started %d slow panels, want only one", slow.calls.Load())
+	if slow.calls.Load() != 2 {
+		t.Errorf("started %d slow panels, want both", slow.calls.Load())
 	}
 }
 

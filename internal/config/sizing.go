@@ -33,8 +33,8 @@ const (
 	// leaving its own default in place.
 	minDetectableMemory = 512 << 20
 
-	// maxAutoDuckDBConns bounds the pool. Past the point where connections
-	// exceed available parallelism they add contention rather than concurrency.
+	// maxAutoDuckDBConns bounds the pool, including the two connections outside
+	// read admission for annotations and readiness checks.
 	maxAutoDuckDBConns = 16
 
 	// minDuckDBConns keeps one long scan from serializing all other reads.
@@ -58,7 +58,18 @@ func QueryAdmission(pool int) (slots, reserved, queue int) {
 	if pool >= 4 {
 		slots = pool - 2
 	}
-	return slots, min(slots-1, max(1, slots/6)), 8 * slots
+	reserved = min(slots-1, max(1, slots/6))
+	// Measured refresh work: 15 panels at 150 ms is 2.25 slot-seconds.
+	// Five refreshes per guaranteed panel slot fit the 12-second horizon.
+	// Interactive reads may borrow the rest, so count only the two slots
+	// retained for pending panels under contention.
+	// Subtract running refreshes from the lifetime population. Individual
+	// panel slots let an odd remaining slot serve another refresh.
+	shared := slots - reserved
+	batchSlots := min(2, shared)
+	running := max(1, shared/batchSlots)
+	queue = max(1, 5*batchSlots-running)
+	return slots, reserved, queue
 }
 
 // sizingSource records which values the machine chose, so the startup log can
@@ -278,9 +289,12 @@ func parseByteSize(value string) (uint64, bool) {
 	return uint64(amount * scale), true
 }
 
-// resolveDuckDBMaxConns sizes the connection pool from available parallelism.
+// resolveDuckDBMaxConns leaves one interactive slot per CPU, two panel progress
+// slots, and two connections for reads outside admission. DuckDB's worker count
+// stays at the CPU budget; a connection need not consume a worker while waiting
+// on I/O. The short panel work must not reduce interactive concurrency.
 func resolveDuckDBMaxConns(cores int) int {
-	conns := cores
+	conns := cores + 4
 	if conns < minDuckDBConns {
 		conns = minDuckDBConns
 	}

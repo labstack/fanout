@@ -438,15 +438,15 @@ func TestResultCacheNeverStoresErrors(t *testing.T) {
 
 func TestResultCacheNeverStoresBusyResults(t *testing.T) {
 	e, _, _ := cachedExecutor(t)
-	e.admission = newReadAdmission(1, 0, 8)
+	e.admission = newReadAdmission(1, 0, 0)
 	if err := e.admission.acquire(t.Context(), panelClass); err != nil {
 		t.Fatal(err)
 	}
 	e.batchTimeout = 30 * time.Millisecond
-	r := runOne(t, e, RunRequest{Dashboard: cacheDashboard()})
+	results, err := e.Run(t.Context(), RunRequest{Dashboard: cacheDashboard()})
 	e.admission.release(panelClass)
-	if r.Reason != ReasonBusy || len(e.cache.entries) != 0 {
-		t.Fatalf("result=%+v entries=%d", r, len(e.cache.entries))
+	if !errors.Is(err, ErrBusy) || len(results) != 0 || len(e.cache.entries) != 0 {
+		t.Fatalf("results=%+v err=%v entries=%d", results, err, len(e.cache.entries))
 	}
 }
 

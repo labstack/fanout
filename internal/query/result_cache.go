@@ -231,6 +231,89 @@ retry:
 	}
 }
 
+type panelCacheLookup struct {
+	key cacheKey
+	id  string
+}
+
+// availablePanels pins a whole refresh's existing answers or flights. It adds
+// no execution work, so neither cache hits nor coalesced waiters need a ticket
+// in an already full queue. Missing even one panel makes this path ineligible.
+func (e *Executor) availablePanels(ctx context.Context, lookups []panelCacheLookup, stamp time.Time) ([]Result, bool, error) {
+	c := &e.cache
+	c.mu.Lock()
+	now := e.now()
+	values := make([]panelOutcome, len(lookups))
+	flights := make([]*cacheFlight, len(lookups))
+	outcomes := make([]string, len(lookups))
+	bypass := BypassesCache(ctx)
+	for i, lookup := range lookups {
+		if element := c.entries[lookup.key]; element != nil && !bypass {
+			entry := element.Value.(*cacheEntry)
+			if c.ttl > 0 && now.Sub(entry.stamp) < c.ttl {
+				var ok bool
+				values[i], ok = entry.value.(panelOutcome)
+				if !ok {
+					c.mu.Unlock()
+					return nil, false, nil
+				}
+				outcomes[i] = cacheHit
+				if now.Sub(entry.stamp) >= c.ttl/2 {
+					outcomes[i] = cacheStale
+				}
+				continue
+			}
+		}
+		flight := c.flights[lookup.key]
+		if flight == nil || !e.joinable(flight, stamp, bypass) {
+			c.mu.Unlock()
+			return nil, false, nil
+		}
+		flights[i], outcomes[i] = flight, cacheCoalesced
+	}
+	for i, lookup := range lookups {
+		if flight := flights[i]; flight != nil {
+			flight.waiters++
+			flight.detached = flight.detached || c.ttl > 0 && !bypass
+		} else {
+			c.lru.MoveToFront(c.entries[lookup.key])
+		}
+	}
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for _, flight := range flights {
+			if flight == nil {
+				continue
+			}
+			flight.waiters--
+			if flight.waiters == 0 && (!flight.detached || !flight.started.Load() && !flight.background) {
+				flight.cancel()
+			}
+		}
+	}()
+	results := make([]Result, len(values))
+	for i, lookup := range lookups {
+		metrics.QueryCacheRequests.WithLabelValues(outcomes[i]).Inc()
+		if flight := flights[i]; flight != nil {
+			select {
+			case <-flight.done:
+				if flight.err != nil {
+					results[i] = failed(Result{ID: lookup.id}, flight.err, ctx.Err())
+					continue
+				}
+				values[i] = flight.value.(panelOutcome)
+			case <-ctx.Done():
+				return nil, true, ctx.Err()
+			}
+		}
+		results[i] = values[i].Result.clone()
+		results[i].Cached = outcomes[i] == cacheHit || outcomes[i] == cacheStale
+	}
+	return results, true, nil
+}
+
 // joinable reports whether a caller may take flight's answer. Non-bypass
 // callers always share in-flight work; the TTL applies only to stored results.
 // A no-cache caller accepts only a run whose window ends at or after its
@@ -243,6 +326,10 @@ func (e *Executor) joinable(flight *cacheFlight, stamp time.Time, bypass bool) b
 // stamp. c.mu is held and no run for key may be in flight. The run keeps the
 // caller's values but not its cancellation, and ends with the executor.
 func (e *Executor) startFlight(caller context.Context, key cacheKey, stamp time.Time, background bool, fn flightFunc[any]) *cacheFlight {
+	releaseBatch := func() {}
+	if batch, ok := caller.Value(panelBatchKey{}).(*panelBatchAdmission); ok {
+		releaseBatch = batch.retainFlight()
+	}
 	c := &e.cache
 	run, cancel := context.WithCancel(context.WithoutCancel(caller))
 	flight := &cacheFlight{done: make(chan struct{}), stamp: stamp, detached: background, background: background, cancel: cancel}
@@ -254,6 +341,7 @@ func (e *Executor) startFlight(caller context.Context, key cacheKey, stamp time.
 		cancel()
 		delete(c.flights, key)
 		flight.err = err
+		releaseBatch()
 		close(flight.done)
 		return flight
 	}
@@ -261,6 +349,7 @@ func (e *Executor) startFlight(caller context.Context, key cacheKey, stamp time.
 	e.mu.Unlock()
 	go func() {
 		defer e.running.Done()
+		defer releaseBatch()
 		defer cancel()
 		stop := context.AfterFunc(e.life, cancel)
 		defer stop()
@@ -344,11 +433,9 @@ type panelCacheKey struct {
 	Compare bool             `json:"compare"`
 }
 
-// panelOutcome is a shared panel run. refused marks a panel turned away at
-// the queue bound.
+// panelOutcome is a shared panel run.
 type panelOutcome struct {
 	Result
-	refused bool
 }
 
 // clone returns r with frames the caller may mutate: limitBatchFrames

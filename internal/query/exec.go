@@ -116,7 +116,7 @@ func NewExecutor(engine Engine, retentionDays int) *Executor {
 	// A panel admitted beyond the engine's read connections would only wait
 	// for one inside the engine, with its own timeout already running. Two
 	// connections stay free for reads that do not queue behind dashboards.
-	slots, reserved, queue := 4, 1, 32
+	slots, reserved, queue := config.QueryAdmission(6)
 	if pool, ok := engine.(interface{ ReadConnections() int }); ok {
 		slots, reserved, queue = config.QueryAdmission(pool.ReadConnections())
 	}
@@ -269,54 +269,16 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 			targets = append(targets, &d.Panels[index])
 		}
 	}
-	// The batch deadline bounds checking the spec, resolving variables and
-	// waiting for a turn on the engine. A panel that starts in time keeps its
-	// whole own timeout: time spent queued behind other requests is not
-	// charged to it.
+	// The batch deadline bounds preparation and admission of the whole refresh.
+	// Once admitted, every sibling keeps its full execution timeout.
 	ctx, cancel := context.WithTimeout(ctx, e.batchTimeout)
 	defer cancel()
-	// Panels refused at the queue bound are held back until anything else
-	// is sent: a request turned away whole is answered as ErrBusy instead.
-	type held struct {
-		i int
-		r Result
-	}
-	var mu sync.Mutex
-	var refused []held
-	sent := false
-	send := func(i int, r Result) {
-		mu.Lock()
-		defer mu.Unlock()
-		if !sent {
-			sent = true
-			for _, h := range refused {
-				emit(h.i, h.r)
-			}
-			refused = nil
-		}
-		emit(i, r)
-	}
-	refuse := func(i int, r Result) {
-		mu.Lock()
-		defer mu.Unlock()
-		if sent {
-			emit(i, r)
-			return
-		}
-		refused = append(refused, held{i, r})
-	}
-	notRun := func(i int, p *Panel) {
-		send(i, busyResult(p))
-	}
 	batchError := func(err error) error {
 		if caller.Err() != nil {
 			return caller.Err()
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			for i, p := range targets {
-				notRun(i, p)
-			}
-			return nil
+			return ErrBusy
 		}
 		return err
 	}
@@ -353,94 +315,129 @@ func (e *Executor) run(ctx context.Context, req RunRequest, emit func(int, Resul
 	// of pre-existing pressure. Keep this policy even if the queue drains
 	// before an admitted panel finishes; diagnosis uses its existing slot.
 	deferDiagnosis := e.admission.waiting() > 0
-	deadline, _ := ctx.Deadline()
 	var group errgroup.Group
 	batch := newPanelBatchAdmission(e.admission, min(e.parallel, 2, len(targets)))
-	defer batch.close()
-	group.SetLimit(e.parallel)
-	for i, p := range targets {
-		group.Go(func() error {
-			width := req.Widths[p.ID]
-			if p.Viz == "text" {
-				send(i, e.runPanel(caller, p, checked, t, now, vars, width, compare))
-				return nil
-			}
-			if ctx.Err() != nil {
-				if caller.Err() == nil {
-					notRun(i, p)
-				}
-				return nil
-			}
-			key, err := keyOf(panelCacheKey{Spec: spec, Panel: p.ID, Time: t, Vars: vars, Width: width, Compare: compare})
-			if err != nil {
-				send(i, failed(Result{ID: p.ID}, err, nil))
-				return nil
-			}
-			out, outcome, err := loadCached(e, caller, key, now, func(run context.Context) (panelOutcome, int64, bool, error) {
-				run = context.WithValue(run, deferDiagnosisKey{}, deferDiagnosis)
-				// Waiting for a turn is bounded by the batch deadline of the
-				// request that started this run; the run itself by the panel's
-				// own timeout, while anyone still waits for it.
-				wait, cancel := context.WithDeadline(run, deadline)
-				defer cancel()
-				// Panels share a bounded FIFO; interactive reads have priority
-				// and reserved capacity outside this class.
-				admissionStarted := time.Now()
-				release, admissionErr := batch.acquire(wait)
-				admissionStatus := "admitted"
-				switch {
-				case errors.Is(admissionErr, errQueueFull):
-					admissionStatus = "rejected"
-				case errors.Is(admissionErr, context.Canceled):
-					admissionStatus = "canceled"
-				case admissionErr != nil:
-					admissionStatus = "timeout"
-				}
-				metrics.RecordPanelAdmission(p.ID, admissionStatus, time.Since(admissionStarted).Seconds())
-				switch err := admissionErr; {
-				case errors.Is(err, errQueueFull):
-					return panelOutcome{Result: refusedResult(p), refused: true}, 0, false, nil
-				case err != nil:
-					return panelOutcome{Result: busyResult(p)}, 0, false, nil
-				}
-				r := func() Result {
-					defer release()
-					return e.runPanel(run, p, checked, t, now, vars, width, compare)
-				}()
-				return panelOutcome{Result: r}, r.size(), (r.Status == StatusOK || r.Status == StatusEmpty) && !r.partial, nil
-			})
-			switch {
-			case errors.Is(err, errRunPanicked):
-				send(i, failed(Result{ID: p.ID}, err, caller.Err()))
-				return nil
-			case err != nil:
-				// The caller left; the shared run goes on for the others.
-				if caller.Err() == nil {
-					notRun(i, p)
-				}
-				return nil
-			}
-			r := out.Result.clone()
-			r.Cached = outcome == cacheHit || outcome == cacheStale
-			// The result is sent after the run released its slot: a stream
-			// client that stops reading must not hold the engine from others.
-			if out.refused {
-				refuse(i, r)
-			} else {
-				send(i, r)
-			}
-			return nil
-		})
+	if len(targets) == 0 {
+		return nil
 	}
-	_ = group.Wait()
-	if err := caller.Err(); err != nil {
+	if err := batch.admit(ctx); err != nil {
+		batch.close()
+		if errors.Is(err, errQueueFull) {
+			// An entirely cached/text refresh needs no execution ticket. Pin all
+			// answers together so an eviction cannot create a partial refusal.
+			var lookups []panelCacheLookup
+			for _, p := range targets {
+				if p.Viz == "text" {
+					continue
+				}
+				key, keyErr := keyOf(panelCacheKey{Spec: spec, Panel: p.ID, Time: t, Vars: vars, Width: req.Widths[p.ID], Compare: compare})
+				if keyErr != nil {
+					return ErrBusy
+				}
+				lookups = append(lookups, panelCacheLookup{key: key, id: p.ID})
+			}
+			if results, available, snapshotErr := e.availablePanels(caller, lookups, now); available {
+				if snapshotErr != nil {
+					return snapshotErr
+				}
+				next := 0
+				for i, p := range targets {
+					if err := caller.Err(); err != nil {
+						return err
+					}
+					if p.Viz == "text" {
+						emit(i, e.runPanel(caller, p, checked, t, now, vars, req.Widths[p.ID], compare))
+						continue
+					}
+					emit(i, results[next])
+					next++
+				}
+				return nil
+			}
+		}
+		if errors.Is(err, errQueueFull) || errors.Is(err, context.DeadlineExceeded) {
+			return ErrBusy
+		}
 		return err
 	}
-	if len(refused) == len(targets) && len(refused) > 0 {
-		return ErrBusy
+	// Workers finish and release the lease independently of a stalled stream.
+	// The bounded buffer has one result per selected panel.
+	type completedPanel struct {
+		i int
+		r Result
 	}
-	for _, h := range refused {
-		emit(h.i, h.r)
+	completed := make(chan completedPanel, len(targets))
+	send := func(i int, r Result) { completed <- completedPanel{i, r} }
+	go func() {
+		defer close(completed)
+		defer batch.close()
+		// Register every selected panel's flight promptly. Execution is bounded
+		// by the lease, while other refreshes can coalesce the complete batch.
+		for i, p := range targets {
+			group.Go(func() error {
+				width := req.Widths[p.ID]
+				if p.Viz == "text" {
+					send(i, e.runPanel(caller, p, checked, t, now, vars, width, compare))
+					return nil
+				}
+				if caller.Err() != nil {
+					return nil
+				}
+				key, err := keyOf(panelCacheKey{Spec: spec, Panel: p.ID, Time: t, Vars: vars, Width: width, Compare: compare})
+				if err != nil {
+					send(i, failed(Result{ID: p.ID}, err, nil))
+					return nil
+				}
+				out, outcome, err := loadCached(e, context.WithValue(caller, panelBatchKey{}, batch), key, now, func(run context.Context) (panelOutcome, int64, bool, error) {
+					run = context.WithValue(run, deferDiagnosisKey{}, deferDiagnosis)
+					// The refresh already owns its lease; siblings wait locally.
+					admissionStarted := time.Now()
+					release, admissionErr := batch.acquire(run)
+					admissionStatus := "admitted"
+					switch {
+					case errors.Is(admissionErr, errQueueFull):
+						admissionStatus = "rejected"
+					case errors.Is(admissionErr, context.Canceled):
+						admissionStatus = "canceled"
+					case admissionErr != nil:
+						admissionStatus = "timeout"
+					}
+					metrics.RecordPanelAdmission(p.ID, admissionStatus, time.Since(admissionStarted).Seconds())
+					if admissionErr != nil {
+						return panelOutcome{}, 0, false, admissionErr
+					}
+					r := func() Result {
+						defer release()
+						return e.runPanel(run, p, checked, t, now, vars, width, compare)
+					}()
+					return panelOutcome{Result: r}, r.size(), (r.Status == StatusOK || r.Status == StatusEmpty) && !r.partial, nil
+				})
+				switch {
+				case errors.Is(err, errRunPanicked):
+					send(i, failed(Result{ID: p.ID}, err, caller.Err()))
+					return nil
+				case err != nil:
+					// The caller left; the shared run goes on for the others.
+					if caller.Err() == nil {
+						send(i, failed(Result{ID: p.ID}, err, caller.Err()))
+					}
+					return nil
+				}
+				r := out.Result.clone()
+				r.Cached = outcome == cacheHit || outcome == cacheStale
+				// The result is sent after the run released its slot: a stream
+				// client that stops reading must not hold the engine from others.
+				send(i, r)
+				return nil
+			})
+		}
+		_ = group.Wait()
+	}()
+	for r := range completed {
+		emit(r.i, r.r)
+	}
+	if err := caller.Err(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -488,27 +485,12 @@ var ErrBusy = errors.New("the server is busy: the read queue is full")
 // BusyMessage presents ErrBusy to clients.
 const BusyMessage = "The server is busy with other queries. Try again in a few seconds."
 
-// QueueFullError is a panel refused at the queue bound; like
-// BatchDeadlineError it never started and is retryable.
-const QueueFullError = "Not run: the server is busy with other queries. Refresh to try again."
-
-func refusedResult(p *Panel) Result {
-	r := busyResult(p)
-	r.Error = QueueFullError
-	return r
-}
-
 // BatchDeadlineError is shared by HTTP and MCP batch callers. It means the
 // panel never started: other queries held the engine until a batch deadline
 // passed, its own request's or, for a request that joined an identical run
 // already waiting, the one that started that run, which may be sooner. A
 // panel that started and ran too long reports TimeoutError.
 const BatchDeadlineError = "Not run: other queries kept the server busy. Refresh to try again."
-
-// busyResult answers a panel that never started.
-func busyResult(p *Panel) Result {
-	return Result{ID: p.ID, Status: StatusError, Error: BatchDeadlineError, Reason: ReasonBusy, Retryable: true}
-}
 
 // ReasonBusy marks a result that was not run because of BatchDeadlineError.
 const ReasonBusy = "busy"
