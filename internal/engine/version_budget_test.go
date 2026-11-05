@@ -52,6 +52,11 @@ func TestVersionPendingBudgetsAndSingleRetries(t *testing.T) {
 }
 
 func TestVersionMixedBacklogDrainsAndAllowsAnomalyPersistence(t *testing.T) {
+	if raceDetector {
+		// The pass sizes follow a wall-clock budget, and writing 4.95m rows
+		// under race instrumentation takes minutes; the plain test run covers it.
+		t.Skip("time-budget sizing test does not apply under -race")
+	}
 	// Exercise the budget on the same eight-thread host shape as its sizing
 	// measurement, rather than the two-thread/256MB small annotation fixture.
 	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", DuckDBThreads: 8, DuckDBMaxConns: 8, RetentionDays: 30}
