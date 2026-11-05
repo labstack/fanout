@@ -1,0 +1,34 @@
+name: Privacy
+
+# This repository is public. Private AI session links and local workstation
+# paths stay out of tracked files, commit messages and pull request text.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  private-links:
+    name: Private links
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check for private session links and local paths
+        env:
+          PR_TEXT: ${{ github.event.pull_request.title }}${{ '\n' }}${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            bash scripts/check-private-links.sh "$BASE" "$HEAD"
+          else
+            bash scripts/check-private-links.sh
+          fi
